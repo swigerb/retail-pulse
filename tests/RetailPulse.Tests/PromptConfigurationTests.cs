@@ -1,5 +1,6 @@
 using FluentAssertions;
 using RetailPulse.Api.Models;
+using RetailPulse.Contracts;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -79,15 +80,11 @@ public class PromptConfigurationTests
     [Fact]
     public void ActualPromptsYaml_LoadsWithoutErrors()
     {
-        // Find the prompts.yaml relative to the test project
         var projectDir = FindProjectRoot();
         var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
 
         if (!File.Exists(promptsPath))
-        {
-            // Skip if file not found (CI environments may not have it)
             return;
-        }
 
         var yaml = File.ReadAllText(promptsPath);
         var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
@@ -95,15 +92,100 @@ public class PromptConfigurationTests
         config.Should().NotBeNull();
         config.Agents.Should().NotBeEmpty();
 
-        // Verify the retail-pulse agent exists with expected structure
         config.Agents.Should().ContainKey("retail-pulse");
         var agent = config.Agents["retail-pulse"];
-        agent.Name.Should().NotBeNullOrEmpty();
+        agent.Name.Should().Be("Retail Pulse Agent");
         agent.Model.Should().NotBeNullOrEmpty();
         agent.SystemPrompt.Should().NotBeNullOrEmpty();
         agent.Tools.Should().NotBeEmpty();
         agent.Tools.Should().Contain("GetDepletionStats");
         agent.Tools.Should().Contain("GetFieldSentiment");
+    }
+
+    [Fact]
+    public void ActualPromptsYaml_ContainsTenantPlaceholders()
+    {
+        var projectDir = FindProjectRoot();
+        var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
+
+        if (!File.Exists(promptsPath))
+            return;
+
+        var yaml = File.ReadAllText(promptsPath);
+        var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
+        var agent = config.Agents["retail-pulse"];
+
+        // Prompt should contain tenant placeholders before resolution
+        agent.SystemPrompt.Should().Contain("{tenant.company}");
+        agent.SystemPrompt.Should().Contain("{tenant.industry}");
+        agent.SystemPrompt.Should().Contain("{tenant.brands}");
+        agent.SystemPrompt.Should().Contain("{tenant.regions}");
+    }
+
+    [Fact]
+    public void TenantPlaceholders_ResolveCorrectly()
+    {
+        var projectDir = FindProjectRoot();
+        var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
+        var tenantPath = Path.Combine(projectDir, "tenant.yaml");
+
+        if (!File.Exists(promptsPath) || !File.Exists(tenantPath))
+            return;
+
+        var yaml = File.ReadAllText(promptsPath);
+        var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
+        var agent = config.Agents["retail-pulse"];
+
+        // Load tenant config
+        var tenantYaml = File.ReadAllText(tenantPath);
+        var tenantDeserializer = new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .Build();
+        var tenant = tenantDeserializer.Deserialize<TenantConfiguration>(tenantYaml);
+
+        // Resolve placeholders
+        var resolved = agent.SystemPrompt
+            .Replace("{tenant.company}", tenant.Company)
+            .Replace("{tenant.industry}", tenant.Industry)
+            .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+            .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+            .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+            .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+            .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+
+        // Resolved prompt should contain tenant values
+        resolved.Should().Contain("Apex Brands");
+        resolved.Should().Contain("Spirits & Beverages");
+        resolved.Should().Contain("Sierra Gold Tequila");
+        resolved.Should().Contain("Northeast");
+
+        // No Bacardi/Patrón references should remain
+        resolved.Should().NotContain("Bacardi");
+        resolved.Should().NotContain("Patrón");
+        resolved.Should().NotContain("Patron");
+        resolved.Should().NotContain("Grey Goose");
+        resolved.Should().NotContain("Cazadores");
+
+        // No unresolved placeholders should remain
+        resolved.Should().NotContain("{tenant.");
+    }
+
+    [Fact]
+    public void PromptsYaml_NoBacardiReferences()
+    {
+        var projectDir = FindProjectRoot();
+        var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
+
+        if (!File.Exists(promptsPath))
+            return;
+
+        var rawYaml = File.ReadAllText(promptsPath);
+
+        rawYaml.Should().NotContain("Bacardi");
+        rawYaml.Should().NotContain("Patrón");
+        rawYaml.Should().NotContain("Grey Goose");
+        rawYaml.Should().NotContain("Cazadores");
+        rawYaml.Should().NotContain("Angel's Envy");
     }
 
     private static string FindProjectRoot()

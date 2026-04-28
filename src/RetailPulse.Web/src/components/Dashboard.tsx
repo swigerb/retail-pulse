@@ -3,7 +3,7 @@ import { Button, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
-import { PatronLogo } from './PatronLogo';
+import { BrandLogo } from './BrandLogo';
 
 const useStyles = makeStyles({
   dashboard: {
@@ -20,7 +20,7 @@ const useStyles = makeStyles({
     padding: '0 28px',
     height: '64px',
     backgroundColor: '#0D0D0D',
-    borderBottom: '2px solid #C8A951',
+    borderBottom: '2px solid var(--brand-accent)',
   },
   headerBrand: {
     display: 'flex',
@@ -68,7 +68,7 @@ export function Dashboard() {
     <div className={styles.dashboard}>
       <header className={styles.header}>
         <div className={styles.headerBrand}>
-          <PatronLogo size={36} />
+          <BrandLogo size={36} />
           <span className={styles.headerTagline}>Brand Intelligence Platform</span>
         </div>
         <div className={styles.headerActions}>
@@ -103,7 +103,7 @@ export function Dashboard() {
           style={{
             width: '420px',
             backgroundColor: '#0D0D0D',
-            borderLeft: '1px solid rgba(200, 169, 81, 0.2)',
+            borderLeft: '1px solid rgba(232, 168, 56, 0.15)',
           }}
         >
           <DrawerHeader>

@@ -5,7 +5,7 @@
   "id": "${{BOT_ID}}",
   "packageName": "com.RetailPulse.teamsbot",
   "developer": {
-    "name": "Patron Pulse",
+    "name": "Retail Pulse",
     "websiteUrl": "https://RetailPulse.example.com",
     "privacyUrl": "https://RetailPulse.example.com/privacy",
     "termsOfUseUrl": "https://RetailPulse.example.com/terms"
@@ -15,12 +15,12 @@
     "outline": "outline.png"
   },
   "name": {
-    "short": "Patron Pulse",
-    "full": "Patron Pulse - Observability & Telemetry Assistant"
+    "short": "Retail Pulse",
+    "full": "Retail Pulse - AI-Powered Brand Analytics"
   },
   "description": {
-    "short": "AI assistant for observability and telemetry insights",
-    "full": "Patron Pulse is a Custom Engine Agent that provides intelligent insights into your system's observability data, telemetry, and performance metrics. Ask questions about traces, spans, and operational health."
+    "short": "AI-powered brand analytics for retail & consumer goods",
+    "full": "Retail Pulse is a Custom Engine Agent that provides intelligent insights into brand performance, retail analytics, and market trends. Ask questions about brand metrics, depletion data, and operational health."
   },
   "accentColor": "#FFFFFF",
   "bots": [
@@ -43,7 +43,7 @@
           "commands": [
             {
               "title": "Help",
-              "description": "Get help using Patron Pulse"
+              "description": "Get help using Retail Pulse"
             },
             {
               "title": "Status",
