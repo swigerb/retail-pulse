@@ -1,0 +1,41 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.vs/
+.vs/
+*.DotSettings.user
+publish/
+
+# Node / React
+node_modules/
+dist/
+.vite/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# External reference repos (clone separately)
+ai-gateway-dev-portal/
+
+# Secrets — never commit
+appsettings.*.local.json
+**/appsettings.json
+**/appsettings.Development.json
+!**/appsettings.example.json
+
+# Squad: ignore runtime state (logs, inbox, sessions)
+.squad/orchestration-log/
+.squad/log/
+.squad/decisions/inbox/
+.squad/sessions/
+# Squad: SubSquad activation file (local to this machine)
+.squad-workstream

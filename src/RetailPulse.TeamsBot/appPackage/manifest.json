@@ -1,0 +1,68 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.25/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.25",
+  "version": "1.0.0",
+  "id": "${{BOT_ID}}",
+  "packageName": "com.RetailPulse.teamsbot",
+  "developer": {
+    "name": "Patron Pulse",
+    "websiteUrl": "https://RetailPulse.example.com",
+    "privacyUrl": "https://RetailPulse.example.com/privacy",
+    "termsOfUseUrl": "https://RetailPulse.example.com/terms"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "Patron Pulse",
+    "full": "Patron Pulse - Observability & Telemetry Assistant"
+  },
+  "description": {
+    "short": "AI assistant for observability and telemetry insights",
+    "full": "Patron Pulse is a Custom Engine Agent that provides intelligent insights into your system's observability data, telemetry, and performance metrics. Ask questions about traces, spans, and operational health."
+  },
+  "accentColor": "#FFFFFF",
+  "bots": [
+    {
+      "botId": "${{BOT_ID}}",
+      "scopes": [
+        "personal",
+        "team",
+        "groupchat"
+      ],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": [
+            "personal",
+            "team",
+            "groupchat"
+          ],
+          "commands": [
+            {
+              "title": "Help",
+              "description": "Get help using Patron Pulse"
+            },
+            {
+              "title": "Status",
+              "description": "Check system status and health"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "${{VALID_DOMAIN}}"
+  ],
+  "webApplicationInfo": {
+    "id": "${{AAD_APP_CLIENT_ID}}",
+    "resource": "api://${{BOT_DOMAIN}}/${{AAD_APP_CLIENT_ID}}"
+  }
+}

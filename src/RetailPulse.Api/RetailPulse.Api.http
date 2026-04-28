@@ -1,0 +1,6 @@
+@RetailPulse.Api_HostAddress = http://localhost:5077
+
+GET {{RetailPulse.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

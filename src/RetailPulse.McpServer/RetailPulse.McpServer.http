@@ -1,0 +1,6 @@
+@RetailPulse.McpServer_HostAddress = http://localhost:5083
+
+GET {{RetailPulse.McpServer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

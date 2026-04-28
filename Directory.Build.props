@@ -1,0 +1,6 @@
+<Project>
+  <ItemGroup>
+    <!-- Pin transitive packages to patched versions (CVE fixes) -->
+    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.4" />
+  </ItemGroup>
+</Project>
