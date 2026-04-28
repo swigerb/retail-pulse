@@ -12,9 +12,11 @@
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.2" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+    <PackageReference Include="YamlDotNet" Version="17.0.1" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\RetailPulse.Contracts\RetailPulse.Contracts.csproj" />
     <ProjectReference Include="..\RetailPulse.ServiceDefaults\RetailPulse.ServiceDefaults.csproj" />
   </ItemGroup>
 

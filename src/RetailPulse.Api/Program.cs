@@ -3,12 +3,18 @@ using RetailPulse.Api.Agents;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
+using RetailPulse.Api.Services;
 using RetailPulse.Api.Tools;
+using RetailPulse.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Aspire ServiceDefaults (OTel, health checks, service discovery)
 builder.AddServiceDefaults();
+
+// Load tenant configuration
+var tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
+builder.Services.AddSingleton<ITenantProvider>(new FileTenantProvider(tenantConfigPath));
 
 // Add our custom ActivitySource to the OTel pipeline
 builder.Services.AddOpenTelemetry()
