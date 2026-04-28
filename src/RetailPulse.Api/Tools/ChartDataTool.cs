@@ -13,7 +13,7 @@ public class ChartDataTool
         _logger = logger;
     }
 
-    [Description("Create a chart visualization by providing structured chart data. Call this tool when you want to display a chart to the user. Provide the chart specification as a JSON string matching the ChartSpec schema. Supported chart types: line, bar, groupedBar, pie, donut, horizontalBar, stackedBar, gauge, table. Example: {\"type\":\"bar\",\"title\":\"Monthly Sales\",\"xAxisTitle\":\"Month\",\"yAxisTitle\":\"Cases\",\"data\":[{\"legend\":\"Patron Silver\",\"color\":\"#8B4513\",\"values\":[{\"x\":\"Jan\",\"y\":1200},{\"x\":\"Feb\",\"y\":1450}]}]}")]
+    [Description("Create a chart visualization by providing structured chart data. Call this tool when you want to display a chart to the user. Provide the chart specification as a JSON string matching the ChartSpec schema. Supported chart types: line, bar, groupedBar, pie, donut, horizontalBar, stackedBar, gauge, table. Example: {\"type\":\"bar\",\"title\":\"Monthly Sales\",\"xAxisTitle\":\"Month\",\"yAxisTitle\":\"Cases\",\"data\":[{\"legend\":\"Sierra Gold Tequila\",\"color\":\"#1B4D7A\",\"values\":[{\"x\":\"Jan\",\"y\":1200},{\"x\":\"Feb\",\"y\":1450}]}]}")]
     public Task<string> CreateChart(
         [Description("JSON string matching the ChartSpec schema with type, title, axis titles, and data series")] string chartSpecJson)
     {

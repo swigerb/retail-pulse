@@ -1,12 +1,12 @@
 {
   "openapi": "3.0.1",
   "info": {
-    "title": "Patron Pulse Inference API",
-    "description": "Azure OpenAI chat completions proxied through Azure API Management's AI Gateway for the Bacardi brand intelligence platform.\n\n## Overview\nThis API powers the Patron Pulse analytics agent, providing tool-augmented chat completions with function calling for depletion analysis, field sentiment, and shipment pipeline analytics across the Bacardi portfolio.\n\n## Key Features\n- **AI Gateway Protection** — Token rate limiting (10,000 TPM), circuit breaker, and metric emission\n- **Managed Identity Auth** — APIM authenticates to Azure AI Foundry via system-assigned managed identity\n- **Tool Calling** — Supports OpenAI function calling for brand analytics tools (GetDepletionStats, GetFieldSentiment, GetShipmentStats, AnalyzeShipments)\n- **Full Observability** — Every request is metered and traced via APIM AI Gateway policies\n\n## Authentication\nUse the `api-key` header with your APIM subscription key. APIM handles backend authentication to Azure AI Foundry.\n\n## Rate Limits\n- 10,000 tokens per minute per subscription\n- Circuit breaker trips on HTTP 429 for 1 minute\n\n## Supported Brands\nPatron Silver, Patron Reposado, Patron Anejo, Bacardi Superior, Grey Goose, Angel's Envy Bourbon, Dewar's 12",
+    "title": "Retail Pulse Inference API",
+    "description": "Azure OpenAI chat completions proxied through Azure API Management's AI Gateway for the Retail Pulse brand intelligence platform.\n\n## Overview\nThis API powers the Retail Pulse analytics agent, providing tool-augmented chat completions with function calling for depletion analysis, field sentiment, and shipment pipeline analytics across the tenant brand portfolio.\n\n## Key Features\n- **AI Gateway Protection** — Token rate limiting (10,000 TPM), circuit breaker, and metric emission\n- **Managed Identity Auth** — APIM authenticates to Azure AI Foundry via system-assigned managed identity\n- **Tool Calling** — Supports OpenAI function calling for brand analytics tools (GetDepletionStats, GetFieldSentiment, GetShipmentStats, AnalyzeShipments)\n- **Full Observability** — Every request is metered and traced via APIM AI Gateway policies\n\n## Authentication\nUse the `api-key` header with your APIM subscription key. APIM handles backend authentication to Azure AI Foundry.\n\n## Rate Limits\n- 10,000 tokens per minute per subscription\n- Circuit breaker trips on HTTP 429 for 1 minute\n\n## Supported Brands\nTenant-configured brands (defined in tenant.yaml)",
     "version": "2025-03-01-preview",
     "contact": {
-      "name": "Bacardi Global IT",
-      "email": "api-support@bacardi.com"
+      "name": "Retail Pulse",
+      "email": "support@retail-pulse.example.com"
     }
   },
   "servers": [
@@ -19,7 +19,7 @@
       "post": {
         "operationId": "createChatCompletion",
         "summary": "Create Chat Completion",
-        "description": "Creates a chat completion for the given conversation messages using the specified model deployment. Supports function/tool calling for Bacardi brand analytics tools including GetDepletionStats, GetFieldSentiment, GetShipmentStats, and AnalyzeShipments. The agent uses these tools to analyze brand performance across the three-tier distribution system.",
+        "description": "Creates a chat completion for the given conversation messages using the specified model deployment. Supports function/tool calling for brand analytics tools including GetDepletionStats, GetFieldSentiment, GetShipmentStats, and AnalyzeShipments. The agent uses these tools to analyze brand performance across the three-tier distribution system.",
         "tags": ["Chat Completions"],
         "parameters": [
           {

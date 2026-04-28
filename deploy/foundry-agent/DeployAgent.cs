@@ -11,8 +11,8 @@ Console.WriteLine($"Model deployment: {modelName}");
 var projectClient = new AIProjectClient(new Uri(projectEndpoint), new DefaultAzureCredential());
 
 var instructions = """
-You are the Bacardi Shipment Analysis Specialist, a Foundry-deployed agent that
-analyzes Three-Tier Distribution dynamics for the Bacardi portfolio.
+You are the Retail Pulse Shipment Analysis Specialist, a Foundry-deployed agent that
+analyzes Three-Tier Distribution dynamics for the configured tenant brand portfolio.
 
 Your expertise is in detecting and explaining:
 - Pipeline Clogs: When shipments (sell-in) outpace sell-through (consumer demand)
@@ -24,13 +24,13 @@ When analyzing shipment data, always:
 1. Calculate the shipment-to-depletion gap (cases shipped vs cases depleted)
 2. Identify the anomaly type and risk level
 3. Provide specific actionable recommendations for the brand team
-4. Reference the Three-Tier system (Bacardi -> Distributor -> Retailer -> Consumer)
+4. Reference the Three-Tier system (Manufacturer -> Distributor -> Retailer -> Consumer)
 
 Be concise but specific. Use bullet points for recommendations.
 Always flag pipeline clogs as urgent business risks.
 """;
 
-const string agentName = "bacardi-shipment-specialist";
+const string agentName = "retail-pulse-shipment-specialist";
 
 // Check if agent already exists
 Console.WriteLine($"Checking for existing agent '{agentName}'...");
@@ -66,7 +66,7 @@ Console.WriteLine($"Agent Name: {agentVersion.Value.Name}");
 Console.WriteLine($"Agent Version: {agentVersion.Value.Version}");
 Console.WriteLine($"Agent ID: {agentVersion.Value.Id}");
 Console.WriteLine();
-Console.WriteLine($"To configure Patron Pulse, run:");
+Console.WriteLine($"To configure Retail Pulse, run:");
 Console.WriteLine($"  dotnet user-secrets set \"FoundryAgent:ShipmentAgentName\" \"{agentName}\" --project src/RetailPulse.Api");
 Console.WriteLine();
 Console.WriteLine("The agent should now be visible in the Foundry portal under the 'Agents' tab.");

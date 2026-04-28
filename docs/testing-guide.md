@@ -1,4 +1,4 @@
-# Patrón Pulse Testing Guide
+# Retail Pulse Testing Guide
 
 This guide covers how to run tests and manually verify the Teams bot integration and chart visualization features.
 
@@ -108,7 +108,7 @@ For testing in the actual Teams client:
 1. Open Teams and navigate to your bot
 2. Send a simple message: "Hello"
 3. **Expected**: 
-   - Receive a chat response card with the Patrón Pulse branding (🥃)
+   - Receive a chat response card with the Retail Pulse branding (🥃)
    - Reply text is displayed
    - "View Telemetry" button is visible but telemetry section is collapsed by default
 
@@ -144,7 +144,7 @@ For testing in the actual Teams client:
 #### ✅ Welcome Card on Member Join
 1. Add the bot to a new Teams chat or channel (or rejoin if testing)
 2. **Expected**:
-   - Welcome card appears with "👋 Welcome to Patrón Pulse, [Your Name]!"
+   - Welcome card appears with "👋 Welcome to Retail Pulse, [Your Name]!"
    - Branding (🥃) is prominent
    - Suggested actions are displayed:
      - "Show shipment status — Track SH-2025-042"

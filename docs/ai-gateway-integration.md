@@ -2,7 +2,7 @@
 
 ## Overview
 
-Patron Pulse routes all LLM calls through Azure API Management (APIM) configured as an **AI Gateway**. This provides:
+Retail Pulse routes all LLM calls through Azure API Management (APIM) configured as an **AI Gateway**. This provides:
 
 - **Token metering and cost attribution** per request
 - **Rate limiting and quota management** (tokens per minute)
@@ -10,15 +10,15 @@ Patron Pulse routes all LLM calls through Azure API Management (APIM) configured
 - **Circuit breaker** protection against 429 throttling
 - **Managed identity authentication** — no AI model keys in application code
 
-The AI Gateway pattern places APIM between the Patron Pulse API and Azure AI Foundry, giving operators visibility and control over every LLM interaction.
+The AI Gateway pattern places APIM between the Retail Pulse API and Azure AI Foundry, giving operators visibility and control over every LLM interaction.
 
 ## Architecture
 
-![Patron Pulse AI Gateway Architecture](retail-pulse-ai-gateway.png)
+![Retail Pulse AI Gateway Architecture](retail-pulse-ai-gateway.png)
 
 ### AI Gateway Request Pipeline
 
-![Patron Pulse AI Gateway Request Pipeline](retail-pulse-ai-gateway-request-pipeline.png)
+![Retail Pulse AI Gateway Request Pipeline](retail-pulse-ai-gateway-request-pipeline.png)
 
 ## Deployment
 
@@ -238,7 +238,7 @@ cd deploy/apim-ai-gateway
 
 This creates the inference API, backend, policies, **both diagnostic resources** (Application Insights + Azure Monitor with `largeLanguageModel`), and the subscription.
 
-### 3. Configure Patron Pulse
+### 3. Configure Retail Pulse
 
 If you used `-SetUserSecrets`, this is done automatically. Otherwise:
 
@@ -319,9 +319,9 @@ If the AI Gateway Dev Portal shows no data, verify each layer:
 
 ## Demo Flow
 
-When presenting Patron Pulse with the AI Gateway integration:
+When presenting Retail Pulse with the AI Gateway integration:
 
-1. **Show Patron Pulse dashboard** — demonstrate the agent working with real-time telemetry via SignalR.
+1. **Show Retail Pulse dashboard** — demonstrate the agent working with real-time telemetry via SignalR.
 2. **Switch to AI Gateway Dev Portal** — show the same requests from APIM's perspective.
 3. **Highlight key metrics:**
    - Token counts (prompt + completion) per request

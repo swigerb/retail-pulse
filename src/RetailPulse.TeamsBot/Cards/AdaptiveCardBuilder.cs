@@ -58,7 +58,7 @@ public class AdaptiveCardBuilder
                                     new
                                     {
                                         type = "TextBlock",
-                                        text = "Patrón Pulse",
+                                        text = "Retail Pulse",
                                         weight = "bolder",
                                         size = "large",
                                         color = "accent"

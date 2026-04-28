@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Patron Pulse – APIM AI Gateway Infrastructure
+// Retail Pulse – APIM AI Gateway Infrastructure
 // Deploys an inference API on an EXISTING APIM instance backed by Azure AI Foundry.
 // ---------------------------------------------------------------------------
 
@@ -16,7 +16,7 @@ param aiServicesResourceGroup string = 'rg-dev-swedencentral-aoai'
 param inferenceApiPath string = 'inference'
 
 @description('Display name for the APIM subscription')
-param subscriptionDisplayName string = 'Patron Pulse Demo'
+param subscriptionDisplayName string = 'Retail Pulse Demo'
 
 @description('Tokens per minute limit')
 param tokensPerMinute int = 10000
@@ -59,7 +59,7 @@ resource backend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' =
   parent: apim
   name: 'retail-pulse-foundry'
   properties: {
-    title: 'Patron Pulse AI Foundry Backend'
+    title: 'Retail Pulse AI Foundry Backend'
     protocol: 'http'
     url: '${aiServices.properties.endpoint}openai'
     credentials: {
@@ -96,7 +96,7 @@ resource api 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
   parent: apim
   name: 'retail-pulse-inference-api'
   properties: {
-    displayName: 'Patron Pulse Inference API'
+    displayName: 'Retail Pulse Inference API'
     path: '${inferenceApiPath}/openai'
     protocols: [ 'https' ]
     subscriptionRequired: true

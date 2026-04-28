@@ -22,21 +22,21 @@ $headers = @{
     "Content-Type" = "application/json"
 }
 
-# Diverse Bacardi-themed prompts to generate varied token counts and response types
+# Diverse retail-themed prompts to generate varied token counts and response types
 $prompts = @(
     # Short queries (low tokens)
-    @{ role = "user"; content = "What is Patron Silver tequila?" }
-    @{ role = "user"; content = "List the top 3 Bacardi rum brands." }
+    @{ role = "user"; content = "What is Sierra Gold Tequila?" }
+    @{ role = "user"; content = "List the top 3 premium tequila brands." }
     @{ role = "user"; content = "What's the difference between reposado and anejo?" }
 
     # Medium queries (moderate tokens)
-    @{ role = "user"; content = "Analyze the market position of Patron Silver in the premium tequila segment. Include key competitors and pricing strategy." }
+    @{ role = "user"; content = "Analyze the market position of Sierra Gold Tequila in the premium spirits segment. Include key competitors and pricing strategy." }
     @{ role = "user"; content = "Describe the distribution challenges for premium spirits in the Florida market, focusing on on-premise vs off-premise channels." }
-    @{ role = "user"; content = "What are the key consumer trends in the tequila category for 2025? How should Bacardi position Angel's Envy bourbon against competitors?" }
+    @{ role = "user"; content = "What are the key consumer trends in the tequila category for 2025? How should brands position premium bourbon against competitors?" }
 
     # Long/complex queries (higher tokens)
-    @{ role = "user"; content = "You are a brand analytics expert for Bacardi. Provide a comprehensive quarterly review of Patron Silver performance in the Southeast US region. Cover: 1) Year-over-year depletion trends, 2) Competitive landscape vs Casamigos, Don Julio, and Clase Azul, 3) On-premise velocity in key metros (Miami, Atlanta, Charlotte), 4) Distributor sentiment and inventory levels, 5) Recommended promotional strategies for Q3." }
-    @{ role = "user"; content = "Create a detailed SWOT analysis for the Bacardi portfolio in North America, covering Patron (tequila), Bacardi (rum), Grey Goose (vodka), Bombay Sapphire (gin), and Angel's Envy (bourbon). For each brand, assess market share trajectory, consumer perception shifts, and competitive threats." }
+    @{ role = "user"; content = "You are a brand analytics expert. Provide a comprehensive quarterly review of Sierra Gold Tequila performance across configured regions. Cover: 1) Year-over-year depletion trends, 2) Competitive landscape vs key competitors, 3) On-premise velocity in key metros, 4) Distributor sentiment and inventory levels, 5) Recommended promotional strategies for Q3." }
+    @{ role = "user"; content = "Create a detailed SWOT analysis for the tenant brand portfolio. For each brand, assess market share trajectory, consumer perception shifts, and competitive threats." }
 
     # Analytics queries
     @{ role = "user"; content = "What KPIs should a spirits brand manager track for depletion analysis?" }
@@ -44,14 +44,14 @@ $prompts = @(
     @{ role = "user"; content = "How do seasonal trends affect tequila sales in different US regions?" }
 
     # Edge cases for variety
-    @{ role = "user"; content = "Compare Grey Goose vs Belvedere vodka market performance." }
+    @{ role = "user"; content = "Compare Summit Vodka vs competitor vodka market performance." }
     @{ role = "user"; content = "What is the typical margin structure for premium spirits at a bar?" }
-    @{ role = "user"; content = "Summarize recent trends in celebrity-backed tequila brands and their impact on Patron's market share." }
+    @{ role = "user"; content = "Summarize recent trends in emerging competitor brands and their market impact." }
 )
 
 $systemMessage = @{
     role    = "system"
-    content = "You are Patron Pulse, an AI analytics assistant for Bacardi. You provide insights on brand performance, market trends, and distribution analytics for Bacardi's portfolio of spirits brands."
+    content = "You are Retail Pulse, an AI analytics assistant for retail and CPG brands. You provide insights on brand performance, market trends, and distribution analytics."
 }
 
 # Different max_completion_tokens values for variety
@@ -62,7 +62,7 @@ $completed = 0
 $succeeded = 0
 $failed = 0
 
-Write-Host "`n🥃 Patron Pulse Traffic Generator" -ForegroundColor Cyan
+Write-Host "`n🥃 Retail Pulse Traffic Generator" -ForegroundColor Cyan
 Write-Host "=================================" -ForegroundColor Cyan
 Write-Host "Endpoint: $endpoint"
 Write-Host "Total requests to send: $totalRequests"

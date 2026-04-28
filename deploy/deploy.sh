@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Patron Pulse — One-click local setup and launch
+# Retail Pulse — One-click local setup and launch
 #
 # Usage:
 #   ./deploy/deploy.sh                              # Restore, install, and build
@@ -36,7 +36,7 @@ done
 
 echo ""
 echo "========================================"
-echo "  Patron Pulse — Local Setup"
+echo "  Retail Pulse — Local Setup"
 echo "========================================"
 echo ""
 
@@ -142,7 +142,7 @@ if [[ "$START_ALL" == true ]]; then
 
     echo ""
     echo "========================================"
-    echo "  Patron Pulse is running!"
+    echo "  Retail Pulse is running!"
     echo "========================================"
     echo ""
     echo "  Dashboard:        http://localhost:5173"
