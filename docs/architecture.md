@@ -1,12 +1,12 @@
-# Patron Pulse — Architecture
+# Retail Pulse — Architecture
 
-> Technical architecture for the Patron Pulse agentic analytics platform
+> Technical architecture for the Retail Pulse agentic analytics platform
 
 ---
 
 ## Component Diagram
 
-![Patron Pulse Architecture](retail-pulse-component-diagram.png)
+![Retail Pulse Architecture](retail-pulse-component-diagram.png)
 
 ---
 
@@ -14,11 +14,11 @@
 
 ### Request Flow: User Question → Answer
 
-![Patron Pulse Request Flow](retail-pulse-request-flow.jpg)
+![Retail Pulse Request Flow](retail-pulse-request-flow.jpg)
 
 ### Telemetry Flow: Agent → Dashboard
 
-![Patron Pulse Telemetry Flow](retail-pulse-telemetry-flow.jpg)
+![Retail Pulse Telemetry Flow](retail-pulse-telemetry-flow.jpg)
 
 ---
 
@@ -67,7 +67,7 @@
 
 ## Observability Architecture
 
-![Patron Pulse Observability Architecture](retail-pulse-observability-architecture.png)
+![Retail Pulse Observability Architecture](retail-pulse-observability-architecture.png)
 
 ### Span Hierarchy Example
 
@@ -113,7 +113,7 @@ HTTP POST /api/chat (ASP.NET Core)
 
 ## APIM AI Gateway Pattern
 
-Patron Pulse uses Azure API Management as an AI Gateway following the [Azure-Samples/AI-Gateway](https://github.com/Azure-Samples/AI-Gateway) pattern.
+Retail Pulse uses Azure API Management as an AI Gateway following the [Azure-Samples/AI-Gateway](https://github.com/Azure-Samples/AI-Gateway) pattern.
 
 ### Request Flow
 

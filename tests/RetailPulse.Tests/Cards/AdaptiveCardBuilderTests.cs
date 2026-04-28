@@ -93,12 +93,12 @@ public class AdaptiveCardBuilderTests
                 {
                     new ChartSeries
                     {
-                        Legend = "Patrón Silver",
-                        Color = "#8B4513",
+                        Legend = "Sierra Gold Tequila",
+                        Color = "#1B4D7A",
                         Values = new List<ChartDataPoint>
                         {
-                            new ChartDataPoint { X = "Florida", Y = 1200 },
-                            new ChartDataPoint { X = "Texas", Y = 950 }
+                            new ChartDataPoint { X = "Northeast", Y = 1200 },
+                            new ChartDataPoint { X = "Southeast", Y = 950 }
                         }
                     }
                 }

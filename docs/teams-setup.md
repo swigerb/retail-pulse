@@ -1,6 +1,6 @@
 # Microsoft Teams Integration Setup Guide
 
-This guide walks you through deploying Patron Pulse as a Microsoft Teams bot with SSO authentication, Adaptive Card responses, and chart visualizations.
+This guide walks you through deploying Retail Pulse as a Microsoft Teams bot with SSO authentication, Adaptive Card responses, and chart visualizations.
 
 ---
 
@@ -59,7 +59,7 @@ You can also use PowerShell:
 ```powershell
 $body = @{
     type = "message"
-    text = "How is Patrón Silver performing?"
+    text = "How is Sierra Gold Tequila performing in the Northeast?"
     from = @{ id = "test-user"; name = "Test User" }
     conversation = @{ id = "test-conv-1" }
     channelId = "test"
@@ -101,7 +101,7 @@ The Teams bot requires an Entra ID (Azure AD) app registration for authenticatio
 1. Navigate to [Azure Portal → Entra ID → App Registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
 2. Click **New registration**
 3. Configure:
-   - **Name:** `Patron Pulse Teams Bot`
+   - **Name:** `Retail Pulse Teams Bot`
    - **Supported account types:** `Accounts in this organizational directory only (Single tenant)`
    - **Redirect URI:** Leave blank for now (we'll add it later)
 4. Click **Register**
@@ -140,10 +140,10 @@ The Teams bot requires an Entra ID (Azure AD) app registration for authenticatio
 6. Configure the scope:
    - **Scope name:** `access_as_user`
    - **Who can consent:** `Admins and users`
-   - **Admin consent display name:** `Access Patron Pulse as the user`
-   - **Admin consent description:** `Allows the bot to access Patron Pulse on behalf of the signed-in user`
-   - **User consent display name:** `Access Patron Pulse as you`
-   - **User consent description:** `Allows the bot to access Patron Pulse on your behalf`
+   - **Admin consent display name:** `Access Retail Pulse as the user`
+   - **Admin consent description:** `Allows the bot to access Retail Pulse on behalf of the signed-in user`
+   - **User consent display name:** `Access Retail Pulse as you`
+   - **User consent description:** `Allows the bot to access Retail Pulse on your behalf`
    - **State:** `Enabled`
 7. Click **Add scope**
 
@@ -246,7 +246,7 @@ Edit `src/RetailPulse.TeamsBot/appPackage/manifest.json`:
   "id": "{AAD_APP_CLIENT_ID}",
   "packageName": "com.RetailPulse.teamsbot",
   "developer": {
-    "name": "Patron Pulse",
+    "name": "Retail Pulse",
     "websiteUrl": "https://RetailPulse.example.com",
     "privacyUrl": "https://RetailPulse.example.com/privacy",
     "termsOfUseUrl": "https://RetailPulse.example.com/terms"
@@ -297,7 +297,7 @@ This creates `RetailPulse.zip` containing:
 2. Go to **Teams apps** → **Manage apps**
 3. Click **Upload new app**
 4. Upload `RetailPulse.zip`
-5. Once uploaded, search for "Patron Pulse" in the app list
+5. Once uploaded, search for "Retail Pulse" in the app list
 6. Set the app availability:
    - **Allowed for users:** Select specific users, groups, or entire organization
 7. Click **Save**
@@ -374,9 +374,9 @@ This starts:
 ## Step 8: Test the Bot in Teams
 
 1. Open **Microsoft Teams**
-2. Click **Apps** → Search for **Patron Pulse**
+2. Click **Apps** → Search for **Retail Pulse**
 3. Click **Add** to start a chat
-4. Send a test message: **"How is Patrón Silver performing in Florida?"**
+4. Send a test message: **"How is Sierra Gold Tequila performing in the Northeast in Florida?"**
 5. The bot should respond with an **Adaptive Card** containing:
    - AI-generated response
    - Collapsible telemetry summary

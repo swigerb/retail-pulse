@@ -1,12 +1,12 @@
 # Chart Rendering Architecture
 
-How Patron Pulse generates and displays data visualizations.
+How Retail Pulse generates and displays data visualizations.
 
 ---
 
 ## Flow
 
-1. **User asks a question** — e.g., "Show me depletion trends for Patrón Silver"
+1. **User asks a question** — e.g., "Show me depletion trends for Sierra Gold Tequila"
 2. **RetailPulseAgent** fetches data via MCP tools (`GetDepletionStats`, `GetShipmentStats`, etc.)
 3. **Agent calls `CreateChart`** — produces a `ChartSpec` JSON describing the chart
 4. **Web UI** renders charts with [Recharts](https://recharts.org/) (`ChartRenderer.tsx`)
@@ -33,7 +33,7 @@ public record ChartSpec
 public record ChartSeries
 {
     public required string Legend { get; init; }
-    public string? Color { get; init; }       // hex, e.g. "#8B4513"
+    public string? Color { get; init; }       // hex, e.g. "#1B4D7A"
     public List<ChartDataPoint> Values { get; init; } = [];
 }
 
@@ -62,14 +62,14 @@ public record ChartDataPoint
 
 ---
 
-## Bacardi Brand Colors
+## Default Chart Colors
 
 Default palette applied when no explicit `Color` is set on a series:
 
 | Swatch | Hex | Name |
 |--------|-----|------|
-| 🟫 | `#8B4513` | Saddle Brown |
-| 🟡 | `#DAA520` | Goldenrod |
+| 🔵 | `#1B4D7A` | Primary Blue |
+| 🟡 | `#E8A838` | Accent Gold |
 | 🔵 | `#4682B4` | Steel Blue |
 | 🟢 | `#2E8B57` | Sea Green |
 | 🟤 | `#CD853F` | Peru |
@@ -77,7 +77,7 @@ Default palette applied when no explicit `Color` is set on a series:
 | 🩵 | `#5F9EA0` | Cadet Blue |
 | 🧡 | `#D2691E` | Chocolate |
 
-Background: `#111111` · Accent gold: `#C8A951` · Text: `#F5F5F0`
+Background: `#111111` · Accent: `#E8A838` · Text: `#F5F5F0`
 
 ---
 
@@ -90,7 +90,7 @@ The Foundry shipment-analysis agent is **disabled by default** and controlled vi
   "FoundryAgent": {
     "Enabled": true,
     "ProjectEndpoint": "https://...",
-    "ShipmentAgentName": "Bacardi Shipment Specialist",
+    "ShipmentAgentName": "Retail Pulse Shipment Specialist",
     "ShipmentAgentId": "<agent-id>"
   }
 }

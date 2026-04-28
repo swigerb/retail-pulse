@@ -14,8 +14,8 @@ resource a2aApi 'Microsoft.ApiManagement/service/apis@2025-03-01-preview' = {
   parent: apim
   name: 'retail-pulse-a2a-agent'
   properties: {
-    displayName: 'Patron Pulse Analytics Agent (A2A)'
-    description: 'Agent-to-agent interface for Patron Pulse brand analytics. Accepts natural language queries about Bacardi brand performance.'
+    displayName: 'Retail Pulse Analytics Agent (A2A)'
+    description: 'Agent-to-agent interface for Retail Pulse brand analytics. Accepts natural language queries about brand performance.'
     path: 'retail-pulse-a2a'
     protocols: ['https']
     type: 'a2a'
@@ -27,8 +27,8 @@ resource a2aApi 'Microsoft.ApiManagement/service/apis@2025-03-01-preview' = {
     }
     agent: {
       id: 'retail-pulse-analytics'
-      name: 'Patron Pulse Analytics Agent'
-      description: 'AI-powered brand analytics agent for Bacardi portfolio. Provides depletion analysis, field sentiment, and market insights.'
+      name: 'Retail Pulse Analytics Agent'
+      description: 'AI-powered brand analytics agent for tenant brand portfolio. Provides depletion analysis, field sentiment, and market insights.'
       version: '1.0.0'
     }
     a2aProperties: {

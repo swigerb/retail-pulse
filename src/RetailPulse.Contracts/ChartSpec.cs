@@ -15,7 +15,7 @@ public record ChartSpec
 public record ChartSeries
 {
     public required string Legend { get; init; } // series name / legend label
-    public string? Color { get; init; } // hex color, e.g. "#8B4513"
+    public string? Color { get; init; } // hex color, e.g. "#1B4D7A"
     public List<ChartDataPoint> Values { get; init; } = [];
 }
 

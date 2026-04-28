@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    One-click local setup and launch for Patron Pulse.
+    One-click local setup and launch for Retail Pulse.
 
 .DESCRIPTION
     Restores NuGet packages, installs npm dependencies, builds the .NET solution,
@@ -44,7 +44,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Patron Pulse — Local Setup" -ForegroundColor Cyan
+Write-Host "  Retail Pulse — Local Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -160,7 +160,7 @@ if ($StartAll) {
 
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "  Patron Pulse is running!" -ForegroundColor Green
+    Write-Host "  Retail Pulse is running!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Dashboard:       http://localhost:5173" -ForegroundColor White

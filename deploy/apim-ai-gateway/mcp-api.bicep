@@ -13,7 +13,7 @@ resource mcpBackend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview
   parent: apim
   name: 'retail-pulse-mcp'
   properties: {
-    title: 'Patron Pulse MCP Server'
+    title: 'Retail Pulse MCP Server'
     protocol: 'http'
     url: mcpServerUrl
   }
@@ -25,8 +25,8 @@ resource mcpApi 'Microsoft.ApiManagement/service/apis@2025-03-01-preview' = {
   parent: apim
   name: 'retail-pulse-mcp-server'
   properties: {
-    displayName: 'Patron Pulse MCP Server'
-    description: 'Bacardi Depletion Database - MCP tools for brand analytics (GetDepletionStats, GetFieldSentiment)'
+    displayName: 'Retail Pulse MCP Server'
+    description: 'Retail Pulse MCP tools for brand analytics (GetDepletionStats, GetFieldSentiment)'
     path: 'retail-pulse-mcp'
     protocols: ['https']
     type: 'mcp'

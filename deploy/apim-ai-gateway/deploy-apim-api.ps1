@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Deploys the Patron Pulse APIM AI Gateway infrastructure.
+    Deploys the Retail Pulse APIM AI Gateway infrastructure.
 
 .DESCRIPTION
     Deploys Bicep template that creates an inference API on an existing APIM instance

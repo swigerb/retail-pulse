@@ -14,7 +14,7 @@ public class FieldSentimentTool
 
     [Description("Get field sentiment and distributor feedback for a company brand in a specific region. Returns qualitative market intelligence from distributors and retailers.")]
     public async Task<string> GetFieldSentiment(
-        [Description("The brand name, e.g. 'Patron Silver', 'Angel's Envy'")] string brand,
+        [Description("The brand name, e.g. 'Sierra Gold Tequila', 'Ridgeline Bourbon'")] string brand,
         [Description("The region, e.g. 'Florida', 'Texas', 'California'")] string region)
     {
         try

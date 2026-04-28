@@ -1,8 +1,8 @@
-# Patron Pulse — Demo Walkthrough
+# Retail Pulse — Demo Walkthrough
 
-> A pro-code agentic demo showcasing AI-powered brand analytics for Bacardi
+> A pro-code agentic demo showcasing AI-powered brand analytics for retail & CPG brands
 
-This guide walks you through presenting Patron Pulse to stakeholders. Total demo time: **~10 minutes**.
+This guide walks you through presenting Retail Pulse to stakeholders. Total demo time: **~10 minutes**.
 
 ---
 
@@ -73,16 +73,16 @@ Before the first demo run, deploy the APIM AI Gateway:
 
 ### Act 1: "The Question" (~2 min)
 
-**Setup:** Open the Patron Pulse dashboard at `http://localhost:5173`. The audience sees a clean chat interface with suggested queries.
+**Setup:** Open the Retail Pulse dashboard at `http://localhost:5173`. The audience sees a clean chat interface with suggested queries.
 
 **Narration:**
 
-> *"Imagine you're a Bacardi brand manager. You just walked out of a quarterly review and need quick answers about how Patrón is performing in a key market. Instead of pulling up spreadsheets or waiting for an analyst, you just ask."*
+> *"Imagine you're a brand manager at Apex Brands. You just walked out of a quarterly review and need quick answers about how Sierra Gold Tequila is performing in a key market. Instead of pulling up spreadsheets or waiting for an analyst, you just ask."*
 
 **Action:** Click or type the first suggested query:
 
 ```
-How is Patrón Silver performing in Florida?
+How is Sierra Gold Tequila performing in Northeast?
 ```
 
 **What happens (explain as it unfolds):**
@@ -90,7 +90,7 @@ How is Patrón Silver performing in Florida?
 1. The **telemetry panel** on the right lights up in real-time
 2. Watch the span timeline populate:
    - 🧠 `thought` — The agent is reasoning about your question
-   - 🔧 `tool_call` — It decides to call `GetDepletionStats` for Patrón Silver in Florida
+   - 🔧 `tool_call` — It decides to call `GetDepletionStats` for Sierra Gold Tequila in Northeast
    - 📊 `tool_result` — Data comes back: +2.1% depletion growth, -4.0% velocity change, 8.5 weeks of supply
    - 🔧 `tool_call` — It also calls `GetFieldSentiment` for rep feedback
    - 📊 `tool_result` — Sentiment data returns with distributor observations
@@ -104,7 +104,7 @@ How is Patrón Silver performing in Florida?
 - Depletion growth of +2.1% but velocity declining at -4.0%
 - 8.5 weeks of supply — flagged as "Overstocked"
 - Distributor sentiment about consumer shift toward competitors at the $45 price point
-- Miami on-premise velocity remains high, but suburban retail is lagging
+- major metro on-premise velocity remains high, but suburban retail is lagging
 
 > **Pro tip:** Click the chevron (▸) on the "Real-Time Telemetry" header to collapse the telemetry panel when you want to focus on the conversation, then expand it again when you want to show the enterprise observability story.
 
@@ -116,12 +116,12 @@ How is Patrón Silver performing in Florida?
 
 **Narration:**
 
-> *"Now here's where it gets interesting. In the spirits industry, the Three-Tier system — manufacturer, distributor, retailer — creates hidden tensions. Let's ask the agent to analyze the shipment pipeline."*
+> *"Now here's where it gets interesting. in distribution, the Three-Tier system — manufacturer, distributor, retailer — creates hidden tensions. Let's ask the agent to analyze the shipment pipeline."*
 
 **Action:** Type:
 
 ```
-Analyze the shipment pipeline for Patron Silver in Florida
+Analyze the shipment pipeline for Sierra Gold Tequila in Northeast
 ```
 
 **What happens (explain as it unfolds):**
@@ -138,7 +138,7 @@ Analyze the shipment pipeline for Patron Silver in Florida
 
 **The "Wow" Data Point:**
 
-> *"Look at what the agent found: Shipments are UP 5.2%, but Sell-Through is DOWN 3.0%. That's a 2,600 case gap sitting in distributor warehouses in Jacksonville and Tampa. This is a Pipeline Clog — Bacardi is pushing more product into the channel than consumers are buying. And it gets worse: the agent correlated this with field sentiment showing Patrón Silver's $59 price point is losing ground to Casamigos at $52."*
+> *"Look at what the agent found: Shipments are UP 5.2%, but Sell-Through is DOWN 3.0%. That's a 2,600 case gap sitting in distributor warehouses in key distributor markets. This is a Pipeline Clog — The company is pushing more product into the channel than consumers are buying. And it gets worse: the agent correlated this with field sentiment showing Sierra Gold Tequila's $59 price point is losing ground to competitors at $52."*
 
 **Key talking points:**
 
@@ -157,25 +157,25 @@ Analyze the shipment pipeline for Patron Silver in Florida
 **Action:** Type:
 
 ```
-Compare Angel's Envy performance across New York and Illinois
+Compare Ridgeline Bourbon performance across Midwest and West Coast
 ```
 
 **What to highlight:**
 
-1. **Two tool calls** appear in the telemetry — `GetDepletionStats` called once for New York, once for Illinois
+1. **Two tool calls** appear in the telemetry — `GetDepletionStats` called once for Midwest, once for West Coast
 2. **Two sentiment calls** — `GetFieldSentiment` for each region
 3. The agent **compares** the data side-by-side in its response
 4. Point out the span count badge on the message: *"📊 6+ spans recorded"*
 
 **Expected data points:**
-- **New York:** +12.3% depletion growth, +8.7% velocity — "Growth Leader" with allocation concerns
-- **Illinois:** +9.1% depletion, +7.4% velocity — Chicago's cocktail renaissance driving demand
+- **Midwest:** +12.3% depletion growth, +8.7% velocity — "Growth Leader" with allocation concerns
+- **West Coast:** +9.1% depletion, +7.4% velocity — Chicago's cocktail renaissance driving demand
 - Agent should note both are "Growth Leader" status and recommend supply chain attention
 
 **Follow-up query** (if time allows):
 
 ```
-What's the field sentiment for Grey Goose in California?
+What's the field sentiment for Summit Vodka in Southwest?
 ```
 
 This demonstrates the agent handling different brands and a different tool (`GetFieldSentiment` focus).
@@ -237,7 +237,7 @@ This demonstrates the agent handling different brands and a different tool (`Get
 
 ### Why MCP (Model Context Protocol)?
 
-> *"MCP is the emerging standard for how AI agents access tools and data. By exposing our data through MCP, any agent — not just ours — can plug in. Today it's simulated data; tomorrow, swap the MCP server to call real Bacardi APIs, SAP, or Snowflake. The agent code doesn't change."*
+> *"MCP is the emerging standard for how AI agents access tools and data. By exposing our data through MCP, any agent — not just ours — can plug in. Today it's simulated data; tomorrow, swap the MCP server to call real business APIs, SAP, or Snowflake. The agent code doesn't change."*
 
 ### Why AI Gateway (Azure API Management)?
 
@@ -249,7 +249,7 @@ This demonstrates the agent handling different brands and a different tool (`Get
 
 ### "Can this connect to real data?"
 
-> Absolutely. The MCP server is a standard protocol — swap the simulated data methods in `BacardiSimulatedData.cs` with calls to real APIs, databases, or data warehouses. The agent and frontend don't change at all. That's the power of the MCP abstraction.
+> Absolutely. The MCP server is a standard protocol — swap the simulated data methods in `SimulatedMetricsData.cs` with calls to real APIs, databases, or data warehouses. The agent and frontend don't change at all. That's the power of the MCP abstraction.
 
 ### "How does this scale?"
 
@@ -278,28 +278,28 @@ This demonstrates the agent handling different brands and a different tool (`Get
 ### Brands
 | Brand | Category |
 |-------|----------|
-| Patrón Silver | Tequila |
-| Patrón Reposado | Tequila |
-| Patrón Añejo | Tequila |
-| Angel's Envy | Bourbon |
-| Bacardi Superior | Rum |
-| Bacardi Gold | Rum |
-| Grey Goose | Vodka |
-| Bombay Sapphire | Gin |
-| Cazadores | Tequila |
-| Dewar's | Scotch |
-| St-Germain | Liqueur |
+| Sierra Gold Tequila | Tequila |
+| Sierra Silver Tequila | Tequila |
+| Ridgeline Bourbon | Tequila |
+| Ridgeline Bourbon | Bourbon |
+| Tradewind Rum White | Rum |
+| Tradewind Rum Gold | Rum |
+| Summit Vodka | Vodka |
+| Compass Gin | Gin |
+| Compass Gin | Tequila |
+| Crestline Mezcal | Scotch |
+| Apex RTD | Liqueur |
 
 ### Regions
-Florida, Texas, California, New York, Illinois, Georgia, National
+Northeast, Southeast, Southwest, Midwest, West Coast, Pacific Northwest, all regions
 
 ### Impressive Queries to Have Ready
 
-1. **Pipeline Clog (the "wow"):** *"Analyze the shipment pipeline for Patron Silver in Florida"*
-2. **Three-Tier tension:** *"Show me the Three-Tier distribution tension for Patron Silver nationally"*
+1. **Pipeline Clog (the "wow"):** *"Analyze the shipment pipeline for Sierra Gold Tequila in Northeast"*
+2. **Three-Tier tension:** *"Show me the Three-Tier distribution tension for Sierra Gold Tequila nationally"*
 3. **Growth story:** *"Which brands are growth leaders nationally?"*
-4. **Supply constraint:** *"What's the supply situation for Angel's Envy in New York?"*
-5. **Multi-tool synthesis:** *"Compare depletion trends and field sentiment for Grey Goose across California and Texas"*
+4. **Supply constraint:** *"What's the supply situation for Ridgeline Bourbon in Midwest?"*
+5. **Multi-tool synthesis:** *"Compare depletion trends and field sentiment for Summit Vodka across Southwest and Southeast"*
 6. **Anomaly detection:** *"Are there any brands with shipment-to-depletion gaps I should worry about?"*
 
 ---
