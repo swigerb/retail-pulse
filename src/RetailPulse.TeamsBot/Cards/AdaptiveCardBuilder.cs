@@ -422,10 +422,10 @@ public class AdaptiveCardBuilder
     public Attachment BuildWelcomeCard(bool isReset, UserContext? userContext)
     {
         var userName = userContext?.DisplayName ?? "there";
-        var title = isReset ? "✨ Chat Reset" : $"👋 Welcome to Patrón Pulse, {userName}!";
+        var title = isReset ? "✨ Chat Reset" : $"👋 Welcome to Retail Pulse, {userName}!";
         var intro = isReset
             ? "Your conversation has been reset. Start a new chat below!"
-            : "I'm your Bacardi supply chain assistant, powered by AI. Ask me about shipments, inventory, trends, or request visualizations!";
+            : "I'm your AI-powered brand analytics assistant. Ask me about brand performance, market trends, or request visualizations!";
 
         var card = new
         {
@@ -1035,8 +1035,8 @@ public class AdaptiveCardBuilder
         {
             var mapped = hexColor.ToUpperInvariant() switch
             {
-                "#8B4513" => "categoricalRed",
-                "#DAA520" => "categoricalMarigold",
+                "#1B4D7A" => "categoricalBlue",
+                "#E8A838" => "categoricalMarigold",
                 "#4682B4" => "categoricalBlue",
                 "#2E8B57" => "categoricalTeal",
                 "#CD853F" => "categoricalPeach",

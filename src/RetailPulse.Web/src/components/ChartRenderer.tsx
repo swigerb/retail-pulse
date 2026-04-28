@@ -8,7 +8,7 @@ import {
 import { Card, makeStyles } from '@fluentui/react-components';
 import type { ChartSpec, ChartSeries } from '../types';
 
-const BRAND_COLORS = ['#8B4513', '#DAA520', '#4682B4', '#2E8B57', '#CD853F', '#B8860B', '#5F9EA0', '#D2691E'];
+const BRAND_COLORS = ['#1B4D7A', '#E8A838', '#4682B4', '#2E8B57', '#2A6BA0', '#F0BC5C', '#5F9EA0', '#D2691E'];
 
 const useStyles = makeStyles({
   chartCard: {
@@ -19,7 +19,7 @@ const useStyles = makeStyles({
     borderRadius: '12px',
   },
   chartTitle: {
-    color: '#C8A951',
+    color: '#E8A838',
     fontSize: '15px',
     fontWeight: '600',
     marginBottom: '16px',
@@ -37,7 +37,7 @@ const useStyles = makeStyles({
     textAlign: 'left',
     padding: '8px 12px',
     borderBottom: '1px solid rgba(255,255,255,0.15)',
-    color: '#C8A951',
+    color: '#E8A838',
     fontWeight: '600',
   },
   td: {
@@ -53,8 +53,8 @@ const useStyles = makeStyles({
 });
 
 const tooltipStyle = {
-  contentStyle: { backgroundColor: '#1A1A1A', border: '1px solid rgba(200,169,81,0.3)', borderRadius: 8, color: '#F5F5F0', fontSize: 13 },
-  labelStyle: { color: '#C8A951' },
+  contentStyle: { backgroundColor: '#1A1A1A', border: '1px solid rgba(232,168,56,0.3)', borderRadius: 8, color: '#F5F5F0', fontSize: 13 },
+  labelStyle: { color: '#E8A838' },
   itemStyle: { color: '#F5F5F0' },
 };
 
@@ -168,7 +168,7 @@ function RenderGauge({ spec }: { spec: ChartSpec }) {
     <div className={styles.gaugeContainer}>
       <svg width={220} height={130} viewBox="0 0 220 130">
         <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={16} strokeLinecap="round" />
-        <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="#C8A951" strokeWidth={16} strokeLinecap="round"
+        <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="#E8A838" strokeWidth={16} strokeLinecap="round"
           strokeDasharray={`${(angle / 180) * 283} 283`} />
         <text x="110" y="100" textAnchor="middle" fill="#F5F5F0" fontSize="28" fontWeight="bold">{value}%</text>
         <text x="110" y="122" textAnchor="middle" fill="#A0A0A0" fontSize="12">{label}</text>

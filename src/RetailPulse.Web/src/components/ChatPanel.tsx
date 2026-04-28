@@ -12,7 +12,7 @@ import {
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChartSpec } from '../types';
 import { sendMessage } from '../services/api';
-import { PatronLogo } from './PatronLogo';
+import { BrandLogo } from './BrandLogo';
 import { ChartRenderer } from './ChartRenderer';
 
 interface ChatMessage {
@@ -46,15 +46,15 @@ const useSpanStyles = makeStyles({
     alignItems: 'center',
     gap: '6px',
     fontSize: '11px',
-    color: '#C8A951',
-    backgroundColor: 'rgba(200, 169, 81, 0.12)',
+    color: '#E8A838',
+    backgroundColor: 'rgba(232, 168, 56, 0.12)',
     padding: '5px 12px',
     borderRadius: '20px',
-    border: '1px solid rgba(200, 169, 81, 0.25)',
+    border: '1px solid rgba(232, 168, 56, 0.25)',
     cursor: 'pointer',
     transition: 'background 0.2s ease',
     ':hover': {
-      backgroundColor: 'rgba(200, 169, 81, 0.2)',
+      backgroundColor: 'rgba(232, 168, 56, 0.2)',
     },
   },
   chevron: {
@@ -224,16 +224,15 @@ const useChatStyles = makeStyles({
     },
   },
   suggestedHighlight: {
-    border: '1px solid rgba(200, 169, 81, 0.2)',
-    background: 'rgba(200, 169, 81, 0.12)',
-    color: '#D4B96A',
+    border: '1px solid rgba(232, 168, 56, 0.2)',
+    background: 'rgba(232, 168, 56, 0.12)',
+    color: '#F0BC5C',
     gridColumn: '1 / -1',
     fontSize: '14px',
     padding: '16px 20px',
   },
   suggestedStar: {
-    color: '#C8A951',
-    marginRight: '6px',
+    color: '#E8A838',
   },
   message: {
     display: 'flex',
@@ -352,8 +351,8 @@ export function ChatPanel(_props: Props) {
   };
 
   const suggestedQueries = [
-    { text: "Analyze the shipment pipeline for Patron Silver in Florida", highlight: true },
-    { text: "How is Patrón Silver performing in Florida?" },
+    { text: "Analyze the shipment pipeline for a top brand in Florida", highlight: true },
+    { text: "How are our premium brands performing in Florida?" },
     { text: "Compare Angel's Envy performance across New York and Illinois" },
     { text: "What's the field sentiment for Grey Goose in California?" },
     { text: "Which brands are growth leaders nationally?" },
@@ -365,9 +364,9 @@ export function ChatPanel(_props: Props) {
       <div className={styles.messages}>
         {messages.length === 0 && (
           <div className={styles.welcome}>
-            <div className={styles.welcomeLogo}><PatronLogo size={56} /></div>
+            <div className={styles.welcomeLogo}><BrandLogo size={56} /></div>
             <Text className={styles.welcomeText}>
-              Ask me about brand performance, depletion trends, or field sentiment across the Bacardi portfolio.
+              Ask me about brand performance, depletion trends, or field sentiment across your portfolio.
             </Text>
             <div className={styles.suggestedQueries}>
               {suggestedQueries.map((q, i) => (
@@ -393,10 +392,10 @@ export function ChatPanel(_props: Props) {
             <Avatar
               size={36}
               color={msg.role === 'user' ? 'colorful' : 'gold'}
-              name={msg.role === 'user' ? 'User' : 'Patron Pulse'}
-              icon={msg.role === 'user' ? undefined : { children: 'P' }}
+              name={msg.role === 'user' ? 'User' : 'Retail Pulse'}
+              icon={msg.role === 'user' ? undefined : { children: 'R' }}
               style={{
-                backgroundColor: msg.role === 'assistant' ? '#C8A951' : undefined,
+                backgroundColor: msg.role === 'assistant' ? '#1B4D7A' : undefined,
                 color: msg.role === 'assistant' ? '#0D0D0D' : undefined,
               }}
             />
@@ -428,9 +427,9 @@ export function ChatPanel(_props: Props) {
             <Avatar
               size={36}
               color="gold"
-              name="Patron Pulse"
-              icon={{ children: 'P' }}
-              style={{ backgroundColor: '#C8A951', color: '#0D0D0D' }}
+              name="Retail Pulse"
+              icon={{ children: 'R' }}
+              style={{ backgroundColor: '#1B4D7A', color: '#fff' }}
             />
             <div className={styles.messageContent}>
               <div className={styles.loadingContainer}>
@@ -459,7 +458,7 @@ export function ChatPanel(_props: Props) {
           onClick={handleSend}
           disabled={loading || !input.trim()}
           style={{
-            background: 'linear-gradient(135deg, #C8A951 0%, #B89A3F 100%)',
+            background: 'linear-gradient(135deg, #1B4D7A 0%, #E8A838 100%)',
             color: '#080808',
           }}
         >

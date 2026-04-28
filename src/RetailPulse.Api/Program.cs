@@ -14,7 +14,8 @@ builder.AddServiceDefaults();
 
 // Load tenant configuration
 var tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
-builder.Services.AddSingleton<ITenantProvider>(new FileTenantProvider(tenantConfigPath));
+var tenantProvider = new FileTenantProvider(tenantConfigPath);
+builder.Services.AddSingleton<ITenantProvider>(tenantProvider);
 
 // Add our custom ActivitySource to the OTel pipeline
 builder.Services.AddOpenTelemetry()
@@ -35,10 +36,20 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Load prompts from YAML
+// Load prompts from YAML and resolve tenant placeholders
 var promptsPath = Path.Combine(builder.Environment.ContentRootPath, "prompts.yaml");
 var promptConfig = RetailPulseAgent.LoadPrompts(promptsPath);
 var agentDef = promptConfig.Agents["retail-pulse"];
+
+var tenant = tenantProvider.GetTenant();
+agentDef.SystemPrompt = agentDef.SystemPrompt
+    .Replace("{tenant.company}", tenant.Company)
+    .Replace("{tenant.industry}", tenant.Industry)
+    .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+    .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+    .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+    .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+    .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
 
 // Register HttpClient for MCP server communication
 builder.Services.AddHttpClient("McpServer", client =>
@@ -162,7 +173,7 @@ app.MapPost("/api/chat", async (ChatRequest request, RetailPulseAgent agent, Can
 // Health/info endpoint
 app.MapGet("/api/info", () => Results.Ok(new
 {
-    Name = "Patron Pulse API",
+    Name = "Retail Pulse API",
     Version = "1.0.0",
     Agent = agentDef.Name,
     Tools = agentDef.Tools

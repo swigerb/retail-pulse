@@ -55,7 +55,7 @@ const useStyles = makeStyles({
   statValue: {
     fontSize: '20px',
     fontWeight: '700',
-    color: '#C8A951',
+    color: '#E8A838',
   },
   statLabel: {
     fontSize: '10px',
