@@ -19,7 +19,7 @@ Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI t
 
 ## Architecture
 
-![Retail Pulse Architecture](docs/architecture-diagram.jpg)
+![Retail Pulse Architecture](docs/architecture-diagram.png)
 
 ### Components
 
