@@ -98,10 +98,10 @@ if (foundryEnabled)
     var foundryProjectEndpoint = builder.Configuration["FoundryAgent:ProjectEndpoint"]
         ?? "https://bs-dev-swedencentral-aoai.services.ai.azure.com/api/projects/bs-dev-swedencentral-aoai-project";
 
-    builder.Services.AddAzureAgent<IBacardiShipmentAgent>(options =>
+    builder.Services.AddAzureAgent<IDistributionAnalysisAgent>(options =>
     {
         options.FriendlyName = builder.Configuration["FoundryAgent:ShipmentAgentName"]
-            ?? "Bacardi Shipment Specialist";
+            ?? "Distribution Analysis Specialist";
         options.ProjectEndpoint = foundryProjectEndpoint;
         options.DirectAgentId = builder.Configuration["FoundryAgent:ShipmentAgentId"];
     });

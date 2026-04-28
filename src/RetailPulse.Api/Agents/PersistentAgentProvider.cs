@@ -11,7 +11,7 @@ public sealed class AgentResolutionOptions
 {
     /// <summary>
     /// Human-readable agent name used for discovery
-    /// (e.g., "Bacardi Shipment Specialist").
+    /// (e.g., "Distribution Analysis Specialist").
     /// </summary>
     public required string FriendlyName { get; set; }
 
