@@ -1,0 +1,169 @@
+###############################################################################
+# RetailPulse Teams Bot — Local Test Requests
+#
+# Usage:
+#   - VS Code: Install "REST Client" extension (humao.rest-client), then
+#     click "Send Request" above each block.
+#   - JetBrains: Open this file and click the green ▶ gutter icons.
+#
+# Before you start:
+#   1. Launch the Aspire host:  dotnet run --project src/RetailPulse.AppHost
+#   2. Open the Aspire dashboard (https://localhost:17222 by default).
+#   3. Find the "teamsbot" resource row and copy its HTTP endpoint.
+#   4. Update @baseUrl below with that port.
+#
+# No Azure Bot / App Registration is needed — the bot deserializes Activity
+# JSON directly (no CloudAdapter auth validation).
+###############################################################################
+
+@baseUrl = http://localhost:5300
+
+###############################################################################
+# 1. Health Check — verify the bot process is running
+###############################################################################
+
+GET {{baseUrl}}/health
+
+###############################################################################
+# 2. Send a Message — ask about product performance
+###############################################################################
+
+POST {{baseUrl}}/api/messages
+Content-Type: application/json
+
+{
+  "type": "message",
+  "id": "test-msg-001",
+  "timestamp": "{{$datetime iso8601}}",
+  "channelId": "test",
+  "from": {
+    "id": "user-local-1",
+    "name": "Local Tester"
+  },
+  "conversation": {
+    "id": "conv-local-1"
+  },
+  "recipient": {
+    "id": "bot-1",
+    "name": "RetailPulse Bot"
+  },
+  "serviceUrl": "http://localhost:3978",
+  "text": "How is Patrón Silver performing in Florida?"
+}
+
+###############################################################################
+# 3. Welcome Trigger — conversationUpdate with membersAdded
+###############################################################################
+
+POST {{baseUrl}}/api/messages
+Content-Type: application/json
+
+{
+  "type": "conversationUpdate",
+  "id": "test-welcome-001",
+  "timestamp": "{{$datetime iso8601}}",
+  "channelId": "test",
+  "from": {
+    "id": "user-local-1",
+    "name": "Local Tester"
+  },
+  "conversation": {
+    "id": "conv-local-2"
+  },
+  "recipient": {
+    "id": "bot-1",
+    "name": "RetailPulse Bot"
+  },
+  "serviceUrl": "http://localhost:3978",
+  "membersAdded": [
+    {
+      "id": "user-local-1",
+      "name": "Local Tester"
+    }
+  ]
+}
+
+###############################################################################
+# 4. Card Action — simulate an Adaptive Card Action.Submit
+###############################################################################
+
+POST {{baseUrl}}/api/messages
+Content-Type: application/json
+
+{
+  "type": "message",
+  "id": "test-action-001",
+  "timestamp": "{{$datetime iso8601}}",
+  "channelId": "test",
+  "from": {
+    "id": "user-local-1",
+    "name": "Local Tester"
+  },
+  "conversation": {
+    "id": "conv-local-1"
+  },
+  "recipient": {
+    "id": "bot-1",
+    "name": "RetailPulse Bot"
+  },
+  "serviceUrl": "http://localhost:3978",
+  "text": "",
+  "value": {
+    "action": "detailed_telemetry",
+    "sessionId": "test-session-1"
+  }
+}
+
+###############################################################################
+# 5. Reset Command — clear the conversation session
+###############################################################################
+
+POST {{baseUrl}}/api/messages
+Content-Type: application/json
+
+{
+  "type": "message",
+  "id": "test-reset-001",
+  "timestamp": "{{$datetime iso8601}}",
+  "channelId": "test",
+  "from": {
+    "id": "user-local-1",
+    "name": "Local Tester"
+  },
+  "conversation": {
+    "id": "conv-local-1"
+  },
+  "recipient": {
+    "id": "bot-1",
+    "name": "RetailPulse Bot"
+  },
+  "serviceUrl": "http://localhost:3978",
+  "text": "new chat"
+}
+
+###############################################################################
+# 6. Quick Smoke Test — minimal "Help" message
+###############################################################################
+
+POST {{baseUrl}}/api/messages
+Content-Type: application/json
+
+{
+  "type": "message",
+  "id": "test-help-001",
+  "timestamp": "{{$datetime iso8601}}",
+  "channelId": "test",
+  "from": {
+    "id": "user-local-1",
+    "name": "Local Tester"
+  },
+  "conversation": {
+    "id": "conv-local-3"
+  },
+  "recipient": {
+    "id": "bot-1",
+    "name": "RetailPulse Bot"
+  },
+  "serviceUrl": "http://localhost:3978",
+  "text": "Help"
+}

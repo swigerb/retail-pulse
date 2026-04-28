@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>d8cb27f3-32de-41bd-bfad-48g7be5d4e0g</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.Authentication.Msal" Version="1.4.83" />
+    <PackageReference Include="Microsoft.Agents.Builder" Version="1.4.83" />
+    <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.4.83" />
+    <PackageReference Include="Microsoft.Agents.Storage" Version="1.4.83" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RetailPulse.Contracts\RetailPulse.Contracts.csproj" />
+    <ProjectReference Include="..\RetailPulse.ServiceDefaults\RetailPulse.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appPackage\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

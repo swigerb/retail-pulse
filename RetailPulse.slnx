@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RetailPulse.Api/RetailPulse.Api.csproj" />
+    <Project Path="src/RetailPulse.AppHost/RetailPulse.AppHost.csproj" />
+    <Project Path="src/RetailPulse.Contracts/RetailPulse.Contracts.csproj" />
+    <Project Path="src/RetailPulse.McpServer/RetailPulse.McpServer.csproj" />
+    <Project Path="src/RetailPulse.ServiceDefaults/RetailPulse.ServiceDefaults.csproj" />
+    <Project Path="src/RetailPulse.TeamsBot/RetailPulse.TeamsBot.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RetailPulse.Tests/RetailPulse.Tests.csproj" />
+  </Folder>
+</Solution>

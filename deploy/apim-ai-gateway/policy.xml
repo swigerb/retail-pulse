@@ -1,0 +1,24 @@
+<policies>
+    <inbound>
+        <base />
+        <set-backend-service backend-id="{backend-id}" />
+        <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+        <azure-openai-token-limit counter-key="@(context.Subscription.Id)"
+            tokens-per-minute="10000" estimate-prompt-tokens="true"
+            tokens-consumed-header-name="x-tokens-consumed" />
+        <azure-openai-emit-token-metric namespace="RetailPulse">
+            <dimension name="API ID" value="@(context.Api.Id)" />
+            <dimension name="Operation ID" value="@(context.Operation.Id)" />
+            <dimension name="Subscription ID" value="@(context.Subscription.Id)" />
+        </azure-openai-emit-token-metric>
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>
