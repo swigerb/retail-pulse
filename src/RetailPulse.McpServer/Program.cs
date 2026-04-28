@@ -1,8 +1,14 @@
+using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
+using RetailPulse.McpServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
+
+// Load tenant configuration
+var tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
+builder.Services.AddSingleton<ITenantProvider>(new FileTenantProvider(tenantConfigPath));
 
 builder.Services.AddMcpServer()
     .WithHttpTransport()

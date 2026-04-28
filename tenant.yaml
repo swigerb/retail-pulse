@@ -1,0 +1,58 @@
+company: "Apex Brands"
+industry: "Spirits & Beverages"
+description: "Apex Brands is a premium spirits company with a diverse portfolio spanning tequila, vodka, bourbon, rum, and gin. Operating across North America with a Three-Tier distribution model."
+brands:
+  - name: "Sierra Gold Tequila"
+    category: "Tequila"
+    variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
+    priceSegment: "Premium"
+  - name: "Sierra Silver Tequila"
+    category: "Tequila"
+    variants: ["Blanco", "Cristalino"]
+    priceSegment: "Ultra-Premium"
+  - name: "Summit Vodka"
+    category: "Vodka"
+    variants: ["Original", "Citrus", "Pepper", "Vanilla"]
+    priceSegment: "Premium"
+  - name: "Ridgeline Bourbon"
+    category: "Bourbon"
+    variants: ["Small Batch", "Single Barrel", "Cask Strength"]
+    priceSegment: "Premium"
+  - name: "Tradewind Rum"
+    category: "Rum"
+    variants: ["White", "Gold", "Aged", "Spiced"]
+    priceSegment: "Standard"
+  - name: "Compass Gin"
+    category: "Gin"
+    variants: ["London Dry", "Botanical", "Navy Strength"]
+    priceSegment: "Premium"
+  - name: "Apex RTD"
+    category: "Ready-to-Drink"
+    variants: ["Margarita", "Mojito", "Paloma", "Espresso Martini"]
+    priceSegment: "Standard"
+  - name: "Crestline Mezcal"
+    category: "Mezcal"
+    variants: ["Joven", "Reposado"]
+    priceSegment: "Ultra-Premium"
+regions:
+  - "Northeast"
+  - "Southeast"
+  - "Midwest"
+  - "Southwest"
+  - "West Coast"
+  - "Pacific Northwest"
+channels:
+  - "On-Premise"
+  - "Off-Premise"
+  - "E-Commerce"
+theme:
+  primaryColor: "#1B4D7A"
+  accentColor: "#E8A838"
+  logoPath: "assets/apex-logo.png"
+  fontFamily: "Inter, system-ui, sans-serif"
+distribution:
+  model: "Three-Tier"
+  distributorTypes:
+    - "Distributor"
+    - "Wholesaler"
+    - "Retailer"
