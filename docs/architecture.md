@@ -14,11 +14,11 @@
 
 ### Request Flow: User Question → Answer
 
-![Retail Pulse Request Flow](retail-pulse-request-flow.jpg)
+![Retail Pulse Request Flow](retail-pulse-request-flow.png)
 
 ### Telemetry Flow: Agent → Dashboard
 
-![Retail Pulse Telemetry Flow](retail-pulse-telemetry-flow.jpg)
+![Retail Pulse Telemetry Flow](retail-pulse-telemetry-flow.png)
 
 ---
 
