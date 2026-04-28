@@ -19,13 +19,13 @@ namespace RetailPulse.Api.Tools;
 /// </summary>
 public class FoundryShipmentAgent
 {
-    private readonly IAgentProvider<IBacardiShipmentAgent> _provider;
+    private readonly IAgentProvider<IDistributionAnalysisAgent> _provider;
     private readonly ShipmentStatsTool _shipmentTool;
     private readonly IHubContext<TelemetryHub> _hubContext;
     private readonly ILogger<FoundryShipmentAgent> _logger;
 
     public FoundryShipmentAgent(
-        IAgentProvider<IBacardiShipmentAgent> provider,
+        IAgentProvider<IDistributionAnalysisAgent> provider,
         ShipmentStatsTool shipmentTool,
         IHubContext<TelemetryHub> hubContext,
         ILogger<FoundryShipmentAgent> logger)
@@ -38,8 +38,8 @@ public class FoundryShipmentAgent
 
     [Description("Delegate shipment and Three-Tier distribution analysis to the Foundry Shipment Specialist agent. This agent analyzes pipeline dynamics, detects anomalies like pipeline clogs (shipments up but sell-through down), and provides actionable recommendations. Use this when the user asks about shipments, pipeline health, sell-in vs sell-through, or Three-Tier distribution issues.")]
     public async Task<string> AnalyzeShipments(
-        [Description("The brand to analyze, e.g. 'Patron Silver', 'Grey Goose'")] string brand,
-        [Description("The region to analyze, e.g. 'Florida', 'Texas', 'National'")] string region,
+        [Description("The brand to analyze, e.g. 'brand name'")] string brand,
+        [Description("The region to analyze, e.g. 'Northeast', 'West Coast', 'National'")] string region,
         [Description("The time period, e.g. 'YTD', 'Q1'")] string period = "YTD")
     {
         var collector = new TelemetryCollector(_hubContext);
@@ -47,7 +47,7 @@ public class FoundryShipmentAgent
         var agentsClient = _provider.GetAgentsClient();
 
         using var delegationActivity = AgentTelemetry.Source.StartActivity("agent.delegation", ActivityKind.Client);
-        delegationActivity?.SetTag("agent.source", "Patron Pulse Agent");
+        delegationActivity?.SetTag("agent.source", "Retail Pulse Agent");
         delegationActivity?.SetTag("agent.target", "Foundry Shipment Specialist");
         delegationActivity?.SetTag("agent.target_name", agentInfo.FriendlyName);
         delegationActivity?.SetTag("agent.target_id", agentInfo.Id);

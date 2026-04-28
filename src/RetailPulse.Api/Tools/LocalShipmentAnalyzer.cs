@@ -16,8 +16,8 @@ public class LocalShipmentAnalyzer
 
     [Description("Analyze shipment and Three-Tier distribution data for a brand. Fetches shipment statistics and returns detailed data for analysis including pipeline dynamics, anomaly detection (e.g., pipeline clogs where shipments outpace consumer demand), and sell-in vs sell-through correlation. Use this when the user asks about shipments, pipeline health, or Three-Tier distribution issues.")]
     public async Task<string> AnalyzeShipments(
-        [Description("The brand to analyze, e.g. 'Patron Silver', 'Grey Goose'")] string brand,
-        [Description("The region to analyze, e.g. 'Florida', 'Texas', 'National'")] string region,
+        [Description("The brand to analyze, e.g. 'brand name'")] string brand,
+        [Description("The region to analyze, e.g. 'Northeast', 'West Coast', 'National'")] string region,
         [Description("The time period, e.g. 'YTD', 'Q1'")] string period = "YTD")
     {
         _logger.LogInformation("Local shipment analysis for {Brand} in {Region} ({Period})", brand, region, period);

@@ -8,11 +8,12 @@ namespace RetailPulse.McpServer.Tools;
 public static class GetFieldSentimentTool
 {
     [McpServerTool(Name = "GetFieldSentiment")]
-    [Description("Get field sentiment and distributor feedback for a Bacardi brand in a region")]
+    [Description("Get field sentiment and distributor feedback for a company brand in a region")]
     public static object GetFieldSentiment(
+        SimulatedMetricsData data,
         [Description("Brand name")] string brand,
         [Description("Region")] string region)
     {
-        return BacardiSimulatedData.GetFieldSentiment(brand, region);
+        return data.GetFieldSentiment(brand, region);
     }
 }

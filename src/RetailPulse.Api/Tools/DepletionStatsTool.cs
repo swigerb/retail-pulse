@@ -12,9 +12,9 @@ public class DepletionStatsTool
         _httpClient = httpClient;
     }
 
-    [Description("Get depletion statistics for a Bacardi brand in a specific region and time period. Returns sales velocity, year-over-year trends, inventory levels, and stock status.")]
+    [Description("Get depletion statistics for a company brand in a specific region and time period. Returns sales velocity, year-over-year trends, inventory levels, and stock status.")]
     public async Task<string> GetDepletionStats(
-        [Description("The brand name, e.g. 'Patron Silver', 'Bacardi Superior', 'Grey Goose'")] string brand,
+        [Description("The brand name, e.g. 'brand name'")] string brand,
         [Description("The region, e.g. 'Florida', 'Texas', 'California', 'National'")] string region,
         [Description("The time period, e.g. 'YTD', 'Q1', 'Q2', 'Last12Months'")] string period)
     {

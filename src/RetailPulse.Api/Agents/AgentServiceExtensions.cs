@@ -15,9 +15,9 @@ public static class AgentServiceExtensions
     /// <para>
     /// Usage:
     /// <code>
-    /// builder.Services.AddAzureAgent&lt;IBacardiShipmentAgent&gt;(opts =&gt;
+    /// builder.Services.AddAzureAgent&lt;IDistributionAnalysisAgent&gt;(opts =&gt;
     /// {
-    ///     opts.FriendlyName = "Bacardi Shipment Specialist";
+    ///     opts.FriendlyName = "Distribution Analysis Specialist";
     ///     opts.ProjectEndpoint = "https://...";
     /// });
     /// </code>

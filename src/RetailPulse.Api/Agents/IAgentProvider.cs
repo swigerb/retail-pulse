@@ -12,7 +12,7 @@ public sealed record AgentInfo(string Id, string FriendlyName, string Runtime);
 /// Provides typed, DI-friendly access to a Foundry-hosted agent.
 /// The generic type parameter <typeparamref name="TAgent"/> is a marker interface
 /// that uniquely identifies which agent this provider resolves (e.g.,
-/// <see cref="IBacardiShipmentAgent"/>).
+/// <see cref="IDistributionAnalysisAgent"/>).
 ///
 /// Resolution is lazy and cached — the first call to any method triggers
 /// a name-based lookup via PersistentAgentsClient, and the resolved
