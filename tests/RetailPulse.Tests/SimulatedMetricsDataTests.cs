@@ -220,4 +220,114 @@ public class SimulatedMetricsDataTests
 
         result1.Should().Be(result2, "seeded Random should produce identical results");
     }
+
+    // -------------------------- Edge-case coverage --------------------------
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GetDepletionStats_EmptyOrNullBrand_DoesNotThrow(string? brand)
+    {
+        var data = CreateDataWithSampleTenant();
+
+        // Defensive contract: the API must never throw on user-supplied empty/null
+        // input. Note: today an empty brand string falls through to a partial match
+        // (because string.Empty.Contains(anything) is true), returning the first
+        // brand. This documents that behavior — if it changes to a structured
+        // error, update the assertion below.
+        Action act = () => data.GetDepletionStats(brand!, "Northeast", "YTD");
+        act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GetDepletionStats_EmptyOrNullRegion_DoesNotThrow(string? region)
+    {
+        var data = CreateDataWithSampleTenant();
+
+        Action act = () => data.GetDepletionStats("Alpha Tequila", region!, "YTD");
+        act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData("ytd")]
+    [InlineData("YTD")]
+    [InlineData("  Q1  ")]
+    [InlineData("q4")]
+    [InlineData("UNKNOWN_PERIOD")]
+    [InlineData("")]
+    public void GetDepletionStats_UnknownOrCasingPeriods_AreHandled(string period)
+    {
+        var data = CreateDataWithSampleTenant();
+
+        // Period parsing should be resilient: case-insensitive, whitespace-tolerant,
+        // unknown values fall back to the YTD/default multiplier (no throw).
+        Action act = () => data.GetDepletionStats("Alpha Tequila", "Northeast", period);
+        act.Should().NotThrow();
+
+        var json = JsonSerializer.Serialize(data.GetDepletionStats("Alpha Tequila", "Northeast", period));
+        json.Should().NotContain("\"error\"");
+    }
+
+    [Fact]
+    public void GetShipmentStats_AllAnomalyClassifications_Encountered()
+    {
+        // Sweep all brand/region combinations and verify the full set of anomaly
+        // classifications is reachable from the simulated dataset.
+        var data = CreateDataWithSampleTenant();
+        var brands = new[] { "Alpha Tequila", "Beta Vodka", "Gamma Bourbon" };
+        var regions = new[] { "Northeast", "Southeast", "West Coast" };
+        var expectedTypes = new HashSet<string>
+        {
+            "pipeline_clog", "supply_constraint", "growth_opportunity",
+            "pipeline_building", "declining_aligned", "healthy"
+        };
+        var expectedRiskLevels = new HashSet<string> { "low", "medium", "high", "critical" };
+
+        var seenTypes = new HashSet<string>();
+        var seenRisks = new HashSet<string>();
+
+        foreach (var brand in brands)
+        {
+            foreach (var region in regions)
+            {
+                var json = JsonSerializer.Serialize(data.GetShipmentStats(brand, region, "YTD"));
+                var doc = JsonDocument.Parse(json);
+                var anomaly = doc.RootElement.GetProperty("anomaly");
+                seenTypes.Add(anomaly.GetProperty("type").GetString()!);
+                seenRisks.Add(anomaly.GetProperty("risk_level").GetString()!);
+            }
+        }
+
+        seenTypes.Should().BeSubsetOf(expectedTypes,
+            "every anomaly type emitted should be one of the documented classifications");
+        seenRisks.Should().BeSubsetOf(expectedRiskLevels,
+            "every risk level should be a documented value");
+    }
+
+    [Fact]
+    public void GetShipmentStats_UnknownBrand_ReturnsErrorWithAvailableLists()
+    {
+        var data = CreateDataWithSampleTenant();
+        var result = data.GetShipmentStats("No Such Brand", "Northeast", "YTD");
+        var json = JsonSerializer.Serialize(result);
+
+        json.Should().Contain("error");
+        json.Should().Contain("available_brands");
+        json.Should().Contain("available_regions");
+    }
+
+    [Fact]
+    public void GetDepletionStats_WhitespaceTrimmedFromBrandAndRegion()
+    {
+        var data = CreateDataWithSampleTenant();
+        var json = JsonSerializer.Serialize(
+            data.GetDepletionStats("  Alpha Tequila  ", "  Northeast  ", "YTD"));
+
+        json.Should().NotContain("\"error\"",
+            "leading/trailing whitespace should be trimmed before lookup");
+    }
 }

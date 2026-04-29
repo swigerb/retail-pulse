@@ -83,8 +83,8 @@ public class PromptConfigurationTests
         var projectDir = FindProjectRoot();
         var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
 
-        if (!File.Exists(promptsPath))
-            return;
+        File.Exists(promptsPath).Should().BeTrue(
+            $"prompts.yaml must exist at {promptsPath} — silent skip would mask a missing config file");
 
         var yaml = File.ReadAllText(promptsPath);
         var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
@@ -108,8 +108,8 @@ public class PromptConfigurationTests
         var projectDir = FindProjectRoot();
         var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
 
-        if (!File.Exists(promptsPath))
-            return;
+        File.Exists(promptsPath).Should().BeTrue(
+            $"prompts.yaml must exist at {promptsPath}");
 
         var yaml = File.ReadAllText(promptsPath);
         var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
@@ -129,29 +129,21 @@ public class PromptConfigurationTests
         var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
         var tenantPath = Path.Combine(projectDir, "tenant.yaml");
 
-        if (!File.Exists(promptsPath) || !File.Exists(tenantPath))
-            return;
+        File.Exists(promptsPath).Should().BeTrue($"prompts.yaml must exist at {promptsPath}");
+        File.Exists(tenantPath).Should().BeTrue($"tenant.yaml must exist at {tenantPath}");
 
         var yaml = File.ReadAllText(promptsPath);
         var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
         var agent = config.Agents["retail-pulse"];
 
-        // Load tenant config
-        var tenantYaml = File.ReadAllText(tenantPath);
-        var tenantDeserializer = new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build();
-        var tenant = tenantDeserializer.Deserialize<TenantConfiguration>(tenantYaml);
+        // Load tenant config via the production provider so we exercise the actual
+        // deserialization path (CamelCase naming, defaults, etc).
+        var tenant = new RetailPulse.Contracts.FileTenantProvider(tenantPath).GetTenant();
 
-        // Resolve placeholders
-        var resolved = agent.SystemPrompt
-            .Replace("{tenant.company}", tenant.Company)
-            .Replace("{tenant.industry}", tenant.Industry)
-            .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-            .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-            .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-            .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-            .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+        // Resolve placeholders. Note: the resolution logic mirrors Program.cs —
+        // ideally this should be extracted into a reusable helper in source code
+        // so tests don't reimplement it. Tracked separately.
+        var resolved = ResolveTenantPlaceholders(agent.SystemPrompt, tenant);
 
         // Resolved prompt should contain tenant values
         resolved.Should().Contain("Apex Brands");
@@ -176,8 +168,8 @@ public class PromptConfigurationTests
         var projectDir = FindProjectRoot();
         var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
 
-        if (!File.Exists(promptsPath))
-            return;
+        File.Exists(promptsPath).Should().BeTrue(
+            $"prompts.yaml must exist at {promptsPath}");
 
         var rawYaml = File.ReadAllText(promptsPath);
 
@@ -186,6 +178,23 @@ public class PromptConfigurationTests
         rawYaml.Should().NotContain("Grey Goose");
         rawYaml.Should().NotContain("Cazadores");
         rawYaml.Should().NotContain("Angel's Envy");
+    }
+
+    /// <summary>
+    /// Mirrors the placeholder resolution chain in <c>Program.cs</c>. Kept private
+    /// so when the production logic moves to a helper class, this test can swap
+    /// to call it directly.
+    /// </summary>
+    private static string ResolveTenantPlaceholders(string template, TenantConfiguration tenant)
+    {
+        return template
+            .Replace("{tenant.company}", tenant.Company)
+            .Replace("{tenant.industry}", tenant.Industry)
+            .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+            .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+            .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+            .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+            .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
     }
 
     private static string FindProjectRoot()
