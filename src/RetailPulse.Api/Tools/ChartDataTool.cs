@@ -6,6 +6,11 @@ namespace RetailPulse.Api.Tools;
 
 public class ChartDataTool
 {
+    private static readonly JsonSerializerOptions InputOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly ILogger<ChartDataTool> _logger;
 
     public ChartDataTool(ILogger<ChartDataTool> logger)
@@ -13,13 +18,13 @@ public class ChartDataTool
         _logger = logger;
     }
 
-    [Description("Create a chart visualization by providing structured chart data. Call this tool when you want to display a chart to the user. Provide the chart specification as a JSON string matching the ChartSpec schema. Supported chart types: line, bar, groupedBar, pie, donut, horizontalBar, stackedBar, gauge, table. Example: {\"type\":\"bar\",\"title\":\"Monthly Sales\",\"xAxisTitle\":\"Month\",\"yAxisTitle\":\"Cases\",\"data\":[{\"legend\":\"Sierra Gold Tequila\",\"color\":\"#1B4D7A\",\"values\":[{\"x\":\"Jan\",\"y\":1200},{\"x\":\"Feb\",\"y\":1450}]}]}")]
+    [Description("Create a chart visualization by providing structured chart data. Provide JSON matching ChartSpec schema. Types: line, bar, groupedBar, pie, donut, horizontalBar, stackedBar, gauge, table.")]
     public Task<string> CreateChart(
-        [Description("JSON string matching the ChartSpec schema with type, title, axis titles, and data series")] string chartSpecJson)
+        [Description("JSON string matching the ChartSpec schema")] string chartSpecJson)
     {
         try
         {
-            var spec = JsonSerializer.Deserialize<ChartSpec>(chartSpecJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var spec = JsonSerializer.Deserialize<ChartSpec>(chartSpecJson, InputOptions);
             if (spec == null)
             {
                 return Task.FromResult(JsonSerializer.Serialize(new { error = "Invalid chart specification" }));
@@ -31,7 +36,7 @@ public class ChartDataTool
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "Invalid chart spec JSON: {Json}", chartSpecJson);
+            _logger.LogWarning(ex, "Invalid chart spec JSON");
             return Task.FromResult(JsonSerializer.Serialize(new { error = "Invalid JSON format", message = ex.Message }));
         }
     }

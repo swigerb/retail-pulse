@@ -2,8 +2,8 @@ using Microsoft.Agents.Builder;
 using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Builder.State;
 using Microsoft.Agents.Core.Models;
+using RetailPulse.Contracts;
 using RetailPulse.TeamsBot.Cards;
-using RetailPulse.TeamsBot.Models;
 using RetailPulse.TeamsBot.Services;
 using RetailPulse.TeamsBot.Auth;
 using System.Text.Json;
@@ -18,6 +18,7 @@ public class RetailPulseAgent : AgentApplication
     private readonly AdaptiveCardBuilder _cardBuilder;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<RetailPulseAgent> _logger;
+    private readonly int _telemetryWaitMs;
 
     public RetailPulseAgent(
         AgentApplicationOptions options,
@@ -26,6 +27,7 @@ public class RetailPulseAgent : AgentApplication
         SessionManager sessionManager,
         AdaptiveCardBuilder cardBuilder,
         IServiceProvider serviceProvider,
+        IConfiguration configuration,
         ILogger<RetailPulseAgent> logger) : base(options)
     {
         _httpClientFactory = httpClientFactory;
@@ -34,6 +36,7 @@ public class RetailPulseAgent : AgentApplication
         _cardBuilder = cardBuilder;
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _telemetryWaitMs = Math.Max(0, configuration.GetValue<int?>("TeamsBot:TelemetryWaitMs") ?? 500);
 
         // Register route handlers
         OnConversationUpdate(ConversationUpdateEvents.MembersAdded, HandleMembersAddedAsync);
@@ -92,8 +95,7 @@ public class RetailPulseAgent : AgentApplication
         // Get or create session for this conversation
         var sessionId = _sessionManager.GetOrCreateSessionId(conversationId);
 
-        // Start collecting telemetry spans
-        _telemetryClient.StartCollecting(sessionId);
+        await _telemetryClient.StartCollectingAsync(sessionId, cancellationToken);
 
         try
         {
@@ -106,7 +108,7 @@ public class RetailPulseAgent : AgentApplication
             if (chatResponse == null)
                 throw new InvalidOperationException("Received null response from API");
 
-            await _telemetryClient.WaitForSpansAsync(500, cancellationToken);
+            await _telemetryClient.WaitForSpansAsync(_telemetryWaitMs, cancellationToken);
             var signalRSpans = _telemetryClient.GetSpans(sessionId, clearAfterRead: true);
             var allSpans = signalRSpans.Any() ? signalRSpans : chatResponse.Spans;
             _sessionManager.StoreSpans(sessionId, allSpans);
@@ -117,7 +119,9 @@ public class RetailPulseAgent : AgentApplication
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing message for session {SessionId}", sessionId);
-            var errorCard = _cardBuilder.BuildErrorCard(ex.Message);
+            // Don't surface raw exception text to end users — could leak internal
+            // endpoints, prompts, or stack traces. Show a generic message.
+            var errorCard = _cardBuilder.BuildErrorCard("Something went wrong while processing your request. Please try again in a moment.");
             await turnContext.SendActivityAsync(MessageFactory.Attachment(errorCard), cancellationToken);
         }
     }
@@ -164,6 +168,9 @@ public class RetailPulseAgent : AgentApplication
                     break;
 
                 case "retry":
+                    // Retry is no longer offered as a card action — error cards now
+                    // ask users to retype their question instead. Kept here as a
+                    // no-op so old cards still in conversation history don't error.
                     break;
 
                 default:

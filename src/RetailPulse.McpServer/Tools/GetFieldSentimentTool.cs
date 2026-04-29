@@ -14,6 +14,11 @@ public static class GetFieldSentimentTool
         [Description("Brand name")] string brand,
         [Description("Region")] string region)
     {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required." };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required." };
+
         return data.GetFieldSentiment(brand, region);
     }
 }

@@ -1,6 +1,5 @@
 using Microsoft.Agents.Core.Models;
 using RetailPulse.Contracts;
-using RetailPulse.TeamsBot.Models;
 
 namespace RetailPulse.TeamsBot.Cards;
 
@@ -9,12 +8,6 @@ namespace RetailPulse.TeamsBot.Cards;
 /// </summary>
 public class AdaptiveCardBuilder
 {
-    private readonly IConfiguration _configuration;
-
-    public AdaptiveCardBuilder(IConfiguration configuration)
-    {
-        _configuration = configuration;
-    }
 
     /// <summary>
     /// Builds a chat response card with AI reply, optional charts, and collapsible telemetry
@@ -598,77 +591,6 @@ public class AdaptiveCardBuilder
                     spacing = "small",
                     isSubtle = true
                 }
-            },
-            actions = new object[]
-            {
-                new
-                {
-                    type = "Action.Submit",
-                    title = "🔄 Try Again",
-                    data = new
-                    {
-                        action = "retry"
-                    }
-                }
-            }
-        };
-
-        return new Attachment
-        {
-            ContentType = "application/vnd.microsoft.card.adaptive",
-            Content = card
-        };
-    }
-
-    /// <summary>
-    /// Builds a simple typing indicator card (optional)
-    /// </summary>
-    public Attachment BuildTypingCard()
-    {
-        var card = new
-        {
-            type = "AdaptiveCard",
-            version = "1.8",
-            schema = "http://adaptivecards.io/schemas/adaptive-card.json",
-            body = new object[]
-            {
-                new
-                {
-                    type = "ColumnSet",
-                    columns = new object[]
-                    {
-                        new
-                        {
-                            type = "Column",
-                            width = "auto",
-                            items = new object[]
-                            {
-                                new
-                                {
-                                    type = "TextBlock",
-                                    text = "🥃",
-                                    size = "medium"
-                                }
-                            }
-                        },
-                        new
-                        {
-                            type = "Column",
-                            width = "stretch",
-                            verticalContentAlignment = "center",
-                            items = new object[]
-                            {
-                                new
-                                {
-                                    type = "TextBlock",
-                                    text = "Thinking...",
-                                    isSubtle = true,
-                                    size = "small"
-                                }
-                            }
-                        }
-                    }
-                }
             }
         };
 
@@ -875,7 +797,12 @@ public class AdaptiveCardBuilder
                                 new
                                 {
                                     type = "Column",
-                                    width = $"{widthPercent}px",
+                                    // Adaptive Cards Column.width accepts "auto", "stretch",
+                                    // "<n>px", or a bare number (used as a relative weight).
+                                    // widthPercent is a 0–100 number, so emit it as a weight
+                                    // (e.g. width = "37") rather than "37px" — pixel widths
+                                    // here would render an off-screen waterfall on most clients.
+                                    width = widthPercent.ToString(System.Globalization.CultureInfo.InvariantCulture),
                                     items = new object[]
                                     {
                                         new
@@ -1054,34 +981,5 @@ public class AdaptiveCardBuilder
             "categoricalPeach", "categoricalLavender", "categoricalSteel", "categoricalPumpkin"
         };
         return defaultColors[index % defaultColors.Length];
-    }
-
-    /// <summary>
-    /// Gets the API base URL from configuration
-    /// </summary>
-    private string GetApiBaseUrl()
-    {
-        // Try Aspire service discovery first
-        var apiUrl = _configuration["services:api:https:0"]
-            ?? _configuration["services:api:http:0"]
-            ?? "http://localhost:5000";
-
-        return apiUrl.TrimEnd('/');
-    }
-
-    /// <summary>
-    /// Resolves relative image URLs to absolute URLs
-    /// </summary>
-    private string ResolveImageUrl(string url, string baseUrl)
-    {
-        if (Uri.TryCreate(url, UriKind.Absolute, out _))
-        {
-            // Already absolute
-            return url;
-        }
-
-        // Relative URL - resolve against API base
-        var cleanUrl = url.TrimStart('/');
-        return $"{baseUrl}/{cleanUrl}";
     }
 }

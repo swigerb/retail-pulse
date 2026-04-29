@@ -32,18 +32,27 @@ builder.Services.AddHttpClient("RetailPulseApi", client =>
 // SignalR client for telemetry hub via Aspire service discovery
 builder.Services.AddSingleton(sp =>
 {
-    // Get API endpoint via service discovery
-    var apiUrl = builder.Configuration["services:api:https:0"] 
-        ?? builder.Configuration["services:api:http:0"] 
-        ?? "http://localhost:5000";
-    
+    // Prefer Aspire service discovery; in non-Aspire/non-Development the API
+    // URL must be explicitly configured via TeamsBot:ApiBaseUrl.
+    var apiUrl = builder.Configuration["services:api:https:0"]
+        ?? builder.Configuration["services:api:http:0"]
+        ?? builder.Configuration["TeamsBot:ApiBaseUrl"]
+        ?? (builder.Environment.IsDevelopment() ? "http://localhost:5000" : null);
+
+    if (string.IsNullOrWhiteSpace(apiUrl))
+    {
+        throw new InvalidOperationException(
+            "TeamsBot could not resolve the RetailPulse API base URL. " +
+            "Configure 'TeamsBot:ApiBaseUrl' or run under Aspire (which sets 'services:api:https:0').");
+    }
+
     var telemetryUrl = $"{apiUrl.TrimEnd('/')}/hubs/telemetry";
-    
+
     var connection = new HubConnectionBuilder()
         .WithUrl(telemetryUrl)
         .WithAutomaticReconnect()
         .Build();
-        
+
     return connection;
 });
 

@@ -1,4 +1,5 @@
 using Microsoft.Agents.Core.Models;
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text.Json;
 
@@ -6,32 +7,63 @@ namespace RetailPulse.TeamsBot.Auth;
 
 public class TeamsSsoHandler
 {
-    private readonly IConfiguration _configuration;
     private readonly ILogger<TeamsSsoHandler> _logger;
 
-    public TeamsSsoHandler(
-        IConfiguration configuration,
-        ILogger<TeamsSsoHandler> logger)
+    public TeamsSsoHandler(ILogger<TeamsSsoHandler> logger)
     {
-        _configuration = configuration;
         _logger = logger;
     }
 
-    public async Task<UserIdentity?> ExtractUserIdentityAsync(IActivity activity)
+    /// <summary>
+    /// Extracts a Teams SSO identity from the inbound activity. Synchronous
+    /// today (no I/O), but kept Task-returning so callers can adopt OBO/OIDC
+    /// token validation later without a signature change.
+    /// </summary>
+    public Task<UserIdentity?> ExtractUserIdentityAsync(IActivity activity)
     {
         try
         {
             // Extract SSO token from Teams activity
             var token = GetSsoTokenFromActivity(activity);
-            
+
             if (string.IsNullOrEmpty(token))
             {
                 _logger.LogWarning("No SSO token found in activity");
-                return null;
+                return Task.FromResult<UserIdentity?>(null);
             }
 
-            // Validate and parse the token
+            // SECURITY (demo-grade validation):
+            //
+            // ValidateToken below enforces token structure, lifetime, and that
+            // the value is a real JWT — sufficient to keep an unsigned blob or
+            // an expired token out of our identity pipeline.
+            //
+            // Production deployments MUST also validate signature, issuer, and
+            // audience against Microsoft Entra OIDC metadata (e.g.,
+            // https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration)
+            // and configure ValidateIssuerSigningKey = true with an
+            // IssuerSigningKeyResolver that fetches Microsoft's signing keys.
             var handler = new JwtSecurityTokenHandler();
+            var validationParams = new TokenValidationParameters
+            {
+                ValidateLifetime = true,
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ValidateIssuerSigningKey = false,
+                SignatureValidator = (string t, TokenValidationParameters _) => new JwtSecurityToken(t),
+                ClockSkew = TimeSpan.FromMinutes(5)
+            };
+
+            try
+            {
+                handler.ValidateToken(token, validationParams, out var validatedToken);
+            }
+            catch (SecurityTokenException stex)
+            {
+                _logger.LogWarning(stex, "SSO token failed validation");
+                return Task.FromResult<UserIdentity?>(null);
+            }
+
             var jwtToken = handler.ReadJwtToken(token);
 
             // Extract claims
@@ -43,42 +75,31 @@ public class TeamsSsoHandler
             if (string.IsNullOrEmpty(oid))
             {
                 _logger.LogWarning("No object ID found in token");
-                return null;
+                return Task.FromResult<UserIdentity?>(null);
             }
 
             _logger.LogInformation("Successfully extracted user identity: {Name} ({Email})", name, email);
 
-            return new UserIdentity
+            return Task.FromResult<UserIdentity?>(new UserIdentity
             {
                 ObjectId = oid,
                 DisplayName = name ?? "Unknown User",
                 Email = email ?? string.Empty,
-                TenantId = tenantId ?? string.Empty,
-                Token = token
-            };
+                TenantId = tenantId ?? string.Empty
+            });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to extract user identity from activity");
-            return null;
+            return Task.FromResult<UserIdentity?>(null);
         }
     }
 
     private string? GetSsoTokenFromActivity(IActivity activity)
     {
-        // Teams SSO token is typically in activity.Value or activity.ChannelData
-        
-        // Try to get from ChannelData
-        if (activity.ChannelData != null)
-        {
-            var channelData = activity.ChannelData.ToString();
-            if (!string.IsNullOrEmpty(channelData))
-            {
-                _logger.LogDebug("ChannelData: {ChannelData}", channelData);
-            }
-        }
-
-        // Try to get from Activity.Value (for invoke activities)
+        // Teams SSO token is typically in activity.Value (for invoke activities).
+        // We deliberately do NOT log activity.ChannelData — it contains tenant
+        // metadata, conversation routing data, and occasionally bearer tokens.
         if (activity.Value != null)
         {
             var valueJson = activity.Value.ToString();
@@ -101,18 +122,9 @@ public class TeamsSsoHandler
             }
         }
 
-        // For message activities, check From.Properties for aadObjectId
-        if (activity.From?.Properties != null)
-        {
-            foreach (var prop in activity.From.Properties)
-            {
-                if (prop.Key == "aadObjectId")
-                {
-                    _logger.LogDebug("Found aadObjectId in From.Properties: {AadObjectId}", prop.Value);
-                }
-            }
-        }
-
+        // Note: For message activities we used to log From.Properties
+        // ("aadObjectId"). That property can include user identifiers we don't
+        // want in plaintext logs, so we no longer emit it.
         return null;
     }
 }
@@ -123,5 +135,4 @@ public class UserIdentity
     public required string DisplayName { get; init; }
     public required string Email { get; init; }
     public required string TenantId { get; init; }
-    public required string Token { get; init; }
 }

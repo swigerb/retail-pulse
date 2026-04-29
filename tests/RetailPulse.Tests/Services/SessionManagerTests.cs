@@ -1,5 +1,5 @@
 using FluentAssertions;
-using RetailPulse.TeamsBot.Models;
+using RetailPulse.Contracts;
 using RetailPulse.TeamsBot.Services;
 
 namespace RetailPulse.Tests.Services;
