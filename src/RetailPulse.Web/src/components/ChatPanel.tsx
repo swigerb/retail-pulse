@@ -12,6 +12,7 @@ import {
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChartSpec } from '../types';
 import { sendMessage } from '../services/api';
+import { joinTelemetrySession } from '../services/telemetryHub';
 import { BrandLogo } from './BrandLogo';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
@@ -373,6 +374,9 @@ export function ChatPanel() {
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
         setSessionId(response.sessionId);
+        if (response.sessionId) {
+          joinTelemetrySession(response.sessionId);
+        }
         setMessages(prev => [
           ...prev,
           { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts },

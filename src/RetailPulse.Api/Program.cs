@@ -5,6 +5,7 @@ using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Tools;
 using RetailPulse.Contracts;
+using ChatRequest = RetailPulse.Contracts.ChatRequest;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,12 +24,14 @@ builder.Services.AddOpenTelemetry()
 // SignalR for real-time telemetry
 builder.Services.AddSignalR();
 
-// CORS for React frontend
+// CORS for React frontend — origins are configurable via Cors:AllowedOrigins
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? new[] { "http://localhost:5173", "https://localhost:5173" };
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "https://localhost:5173")
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -37,7 +40,7 @@ builder.Services.AddCors(options =>
 
 // Load prompts from YAML and resolve tenant placeholders
 var promptsPath = Path.Combine(builder.Environment.ContentRootPath, "prompts.yaml");
-var promptConfig = RetailPulseAgent.LoadPrompts(promptsPath);
+var promptConfig = RetailPulse.Api.Agents.RetailPulseAgent.LoadPrompts(promptsPath);
 var agentDef = promptConfig.Agents["retail-pulse"];
 
 var tenant = tenantProvider.GetTenant();
@@ -50,39 +53,66 @@ agentDef.SystemPrompt = agentDef.SystemPrompt
     .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
     .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
 
-// Register HttpClient for MCP server communication.
-// Default URL uses Aspire service discovery (https+http://mcpserver) — Aspire's
-// service-discovery DelegatingHandler (added by AddServiceDefaults) resolves the
-// scheme and host to whatever Aspire wired up at startup. Override with
-// McpServer:BaseUrl in configuration only when running outside Aspire.
+// Register HttpClient for MCP server communication. The default URL is a
+// dev convenience — production should always set McpServer:BaseUrl.
+var mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]
+    ?? (builder.Environment.IsDevelopment() ? "http://localhost:5200" : null)
+    ?? throw new InvalidOperationException(
+        "Configuration value 'McpServer:BaseUrl' is required outside of Development.");
 builder.Services.AddHttpClient("McpServer", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["McpServer:BaseUrl"] ?? "https+http://mcpserver");
+    client.BaseAddress = new Uri(mcpBaseUrl);
 });
 
 // Register tools
 builder.Services.AddScoped<DepletionStatsTool>(sp =>
 {
     var factory = sp.GetRequiredService<IHttpClientFactory>();
-    return new DepletionStatsTool(factory.CreateClient("McpServer"));
+    return new DepletionStatsTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<DepletionStatsTool>>());
 });
 builder.Services.AddScoped<FieldSentimentTool>(sp =>
 {
     var factory = sp.GetRequiredService<IHttpClientFactory>();
-    return new FieldSentimentTool(factory.CreateClient("McpServer"));
+    return new FieldSentimentTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<FieldSentimentTool>>());
 });
 builder.Services.AddScoped<ShipmentStatsTool>(sp =>
 {
     var factory = sp.GetRequiredService<IHttpClientFactory>();
-    return new ShipmentStatsTool(factory.CreateClient("McpServer"));
+    return new ShipmentStatsTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<ShipmentStatsTool>>());
 });
 
 // Chart data tool (always available)
 builder.Services.AddScoped<ChartDataTool>();
 
-// Register IChatClient — Azure OpenAI via APIM AI Gateway
-var openAiEndpoint = builder.Configuration["OpenAI:Endpoint"] ?? "https://bsapim-dev-northcentralus-001.azure-api.net/inference";
-var openAiApiKey = builder.Configuration["OpenAI:ApiKey"] ?? "demo-key";
+// Register IChatClient — Azure OpenAI via APIM AI Gateway.
+// In Production we fail fast if the API key is missing rather than silently
+// using "demo-key" which would surface as opaque 401s at runtime.
+var openAiEndpoint = builder.Configuration["OpenAI:Endpoint"]
+    ?? (builder.Environment.IsDevelopment()
+        ? "https://bsapim-dev-northcentralus-001.azure-api.net/inference"
+        : null)
+    ?? throw new InvalidOperationException(
+        "Configuration value 'OpenAI:Endpoint' is required outside of Development.");
+
+var openAiApiKey = builder.Configuration["OpenAI:ApiKey"];
+if (string.IsNullOrWhiteSpace(openAiApiKey))
+{
+    if (builder.Environment.IsDevelopment())
+    {
+        openAiApiKey = "demo-key";
+    }
+    else
+    {
+        throw new InvalidOperationException(
+            "Configuration value 'OpenAI:ApiKey' is required outside of Development.");
+    }
+}
 
 var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
     new Uri(openAiEndpoint),
@@ -91,7 +121,9 @@ var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDef.Model).AsIChatClient())
     .UseFunctionInvocation()
-    .UseOpenTelemetry(configure: c => c.EnableSensitiveData = true);
+    // EnableSensitiveData logs prompts, responses, and tool arguments which
+    // can include user PII. Only enable in Development.
+    .UseOpenTelemetry(configure: c => c.EnableSensitiveData = builder.Environment.IsDevelopment());
 
 // Foundry agent — optional, controlled by FoundryAgent:Enabled config (default: false)
 var foundryEnabled = builder.Configuration.GetValue<bool>("FoundryAgent:Enabled", false);
@@ -99,7 +131,11 @@ var foundryEnabled = builder.Configuration.GetValue<bool>("FoundryAgent:Enabled"
 if (foundryEnabled)
 {
     var foundryProjectEndpoint = builder.Configuration["FoundryAgent:ProjectEndpoint"]
-        ?? "https://bs-dev-swedencentral-aoai.services.ai.azure.com/api/projects/bs-dev-swedencentral-aoai-project";
+        ?? (builder.Environment.IsDevelopment()
+            ? "https://bs-dev-swedencentral-aoai.services.ai.azure.com/api/projects/bs-dev-swedencentral-aoai-project"
+            : null)
+        ?? throw new InvalidOperationException(
+            "Configuration value 'FoundryAgent:ProjectEndpoint' is required when FoundryAgent:Enabled=true outside of Development.");
 
     builder.Services.AddAzureAgent<IDistributionAnalysisAgent>(options =>
     {
@@ -117,7 +153,7 @@ else
 }
 
 // Register the agent with dynamic tool list
-builder.Services.AddScoped<RetailPulseAgent>(sp =>
+builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
 {
     var chatClient = sp.GetRequiredService<IChatClient>();
     var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<TelemetryHub>>();
@@ -125,7 +161,7 @@ builder.Services.AddScoped<RetailPulseAgent>(sp =>
     var sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
     var shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var logger = sp.GetRequiredService<ILogger<RetailPulseAgent>>();
+    var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.RetailPulseAgent>>();
 
     var tools = new List<AITool>
     {
@@ -147,7 +183,7 @@ builder.Services.AddScoped<RetailPulseAgent>(sp =>
         tools.Add(AIFunctionFactory.Create(localAnalyzer.AnalyzeShipments));
     }
 
-    return new RetailPulseAgent(chatClient, agentDef, hubContext, tools, logger);
+    return new RetailPulse.Api.Agents.RetailPulseAgent(chatClient, agentDef, hubContext, tools, logger);
 });
 
 builder.Services.AddOpenApi();
@@ -165,25 +201,14 @@ if (app.Environment.IsDevelopment())
 // SignalR hub
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
-// -----------------------------------------------------------------------------
-// /api/chat — DEMO ENDPOINT, NO AUTHENTICATION
-// -----------------------------------------------------------------------------
-// This is intentionally an open endpoint for the open-source demo. Adding
-// AddAuthentication / AddAuthorization / .RequireAuthorization() would force
-// every contributor to stand up an identity provider just to try the sample.
-//
-// An optional, off-by-default API-key gate is wired below via
-// ApiKeyAuthMiddleware. Set ApiKey:Enabled=true and ApiKey:Value=<secret> in
-// configuration to enable it. This shows the pattern without forcing it.
-//
-// TODO: Production deployments MUST add real authentication and authorization
-//       (JWT bearer + RequireAuthorization) before exposing /api/chat.
-// -----------------------------------------------------------------------------
-app.UseMiddleware<ApiKeyAuthMiddleware>();
-
 // Chat endpoint
-app.MapPost("/api/chat", async (ChatRequest request, RetailPulseAgent agent, CancellationToken ct) =>
+app.MapPost("/api/chat", async (ChatRequest request, RetailPulse.Api.Agents.RetailPulseAgent agent, CancellationToken ct) =>
 {
+    if (request is null || string.IsNullOrWhiteSpace(request.Message))
+    {
+        return Results.BadRequest(new { error = "Field 'message' is required." });
+    }
+
     var response = await agent.ChatAsync(request, ct);
     return Results.Ok(response);
 })

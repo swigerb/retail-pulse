@@ -1,9 +1,6 @@
 using FluentAssertions;
-using Microsoft.Extensions.Configuration;
-using Moq;
-using RetailPulse.Contracts;
 using RetailPulse.TeamsBot.Cards;
-using RetailPulse.TeamsBot.Models;
+using RetailPulse.Contracts;
 using System.Text.Json;
 
 namespace RetailPulse.Tests.Cards;
@@ -11,13 +8,10 @@ namespace RetailPulse.Tests.Cards;
 public class AdaptiveCardBuilderTests
 {
     private readonly AdaptiveCardBuilder _builder;
-    private readonly Mock<IConfiguration> _mockConfiguration;
 
     public AdaptiveCardBuilderTests()
     {
-        _mockConfiguration = new Mock<IConfiguration>();
-        _mockConfiguration.Setup(x => x["services:api:https:0"]).Returns("https://localhost:5001");
-        _builder = new AdaptiveCardBuilder(_mockConfiguration.Object);
+        _builder = new AdaptiveCardBuilder();
     }
 
     [Fact]
@@ -239,7 +233,6 @@ public class AdaptiveCardBuilderTests
         var cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Error");
         cardJson.Should().Contain(errorMessage);
-        cardJson.Should().Contain("Try Again");
     }
 
     [Fact]
@@ -314,18 +307,6 @@ public class AdaptiveCardBuilderTests
         var cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Slowest Span");
         cardJson.Should().Contain("Slowest");
-    }
-
-    [Fact]
-    public void BuildTypingCard_CreatesValidCard()
-    {
-        // Act
-        var attachment = _builder.BuildTypingCard();
-        
-        // Assert
-        attachment.Should().NotBeNull();
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
-        cardJson.Should().Contain("Thinking");
     }
 
     [Fact]
