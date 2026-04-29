@@ -22,7 +22,9 @@ export function connectTelemetryHub(
   });
 
   connection.on('Connected', (msg: string) => {
-    console.log('Telemetry:', msg);
+    if (import.meta.env.DEV) {
+      console.log('Telemetry:', msg);
+    }
   });
 
   connection.onreconnected(() => onConnected?.());
@@ -31,7 +33,9 @@ export function connectTelemetryHub(
   connection.start()
     .then(() => onConnected?.())
     .catch(err => {
-      console.error('SignalR connection error:', err);
+      if (import.meta.env.DEV) {
+        console.error('SignalR connection error:', err);
+      }
       onDisconnected?.();
     });
 

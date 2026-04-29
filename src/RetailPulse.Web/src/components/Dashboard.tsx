@@ -5,12 +5,21 @@ import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { BrandLogo } from './BrandLogo';
 
+const DRAWER_WIDTH_PX = 420;
+const DRAWER_BREAKPOINT_PX = 768;
+
+const drawerStyle: React.CSSProperties = {
+  width: `min(${DRAWER_WIDTH_PX}px, 100vw)`,
+  backgroundColor: 'var(--color-bg-elevated)',
+  borderLeft: '1px solid var(--brand-accent-border-faint)',
+};
+
 const useStyles = makeStyles({
   dashboard: {
     display: 'flex',
     flexDirection: 'column',
     height: '100vh',
-    backgroundColor: '#080808',
+    backgroundColor: 'var(--color-bg)',
     overflow: 'hidden',
   },
   header: {
@@ -19,8 +28,11 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     padding: '0 28px',
     height: '64px',
-    backgroundColor: '#0D0D0D',
+    backgroundColor: 'var(--color-bg-elevated)',
     borderBottom: '2px solid var(--brand-accent)',
+    '@media (max-width: 600px)': {
+      padding: '0 12px',
+    },
   },
   headerBrand: {
     display: 'flex',
@@ -30,9 +42,12 @@ const useStyles = makeStyles({
   headerTagline: {
     fontFamily: "'Algerian', 'Playfair Display', serif",
     fontSize: '13px',
-    color: '#A0A0A0',
+    color: 'var(--color-text-muted)',
     letterSpacing: '0.5px',
     textTransform: 'uppercase',
+    '@media (max-width: 600px)': {
+      display: 'none',
+    },
   },
   headerActions: {
     display: 'flex',
@@ -51,7 +66,10 @@ const useStyles = makeStyles({
     transition: 'margin-right 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
   },
   chatContainerOpen: {
-    marginRight: '420px',
+    marginRight: `${DRAWER_WIDTH_PX}px`,
+    [`@media (max-width: ${DRAWER_BREAKPOINT_PX}px)`]: {
+      marginRight: '0',
+    },
   },
 });
 
@@ -83,6 +101,8 @@ export function Dashboard() {
             appearance={telemetryOpen ? 'primary' : 'subtle'}
             icon={telemetryOpen ? <Dismiss24Regular /> : <DataUsage24Regular />}
             onClick={() => setTelemetryOpen(prev => !prev)}
+            aria-expanded={telemetryOpen}
+            aria-controls="telemetry-drawer"
           >
             {telemetryOpen ? 'Close' : 'Telemetry'}
           </Button>
@@ -95,16 +115,13 @@ export function Dashboard() {
         </div>
 
         <Drawer
+          id="telemetry-drawer"
           type="overlay"
           position="end"
           size="medium"
           open={telemetryOpen}
           onOpenChange={(_, { open }) => setTelemetryOpen(open)}
-          style={{
-            width: '420px',
-            backgroundColor: '#0D0D0D',
-            borderLeft: '1px solid rgba(232, 168, 56, 0.15)',
-          }}
+          style={drawerStyle}
         >
           <DrawerHeader>
             <DrawerHeaderTitle
@@ -113,6 +130,7 @@ export function Dashboard() {
                   appearance="subtle"
                   icon={<Dismiss24Regular />}
                   onClick={() => setTelemetryOpen(false)}
+                  aria-label="Close telemetry panel"
                 />
               }
             >

@@ -10,8 +10,19 @@ export interface ChatResponse {
   charts?: ChartSpec[];
 }
 
+export type ChartType =
+  | 'line'
+  | 'bar'
+  | 'groupedBar'
+  | 'stackedBar'
+  | 'horizontalBar'
+  | 'pie'
+  | 'donut'
+  | 'gauge'
+  | 'table';
+
 export interface ChartSpec {
-  type: string;
+  type: ChartType;
   title: string;
   xAxisTitle?: string;
   yAxisTitle?: string;
