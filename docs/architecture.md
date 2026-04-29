@@ -162,6 +162,36 @@ POST https://bsapim-dev-northcentralus-001.azure-api.net/inference/openai/deploy
 | Rate limiting | APIM token-per-minute and request-per-second policies |
 | Content safety | APIM content filtering policies (Azure AI Content Safety) |
 
+> **`/api/chat` auth note:** The chat endpoint is intentionally open in the
+> demo so contributors can run the sample without standing up an identity
+> provider. An off-by-default API-key gate is wired in
+> `Middleware/ApiKeyAuthMiddleware.cs` (`ApiKey:Enabled`, `ApiKey:Value`) to
+> demonstrate the pattern. Production deployments must replace this with
+> JWT bearer authentication and `.RequireAuthorization()` policies.
+
+---
+
+## Resilience Patterns
+
+### Tool Errors: Fallback With Logging
+
+Every MCP-backed tool (`DepletionStatsTool`, `ShipmentStatsTool`,
+`FieldSentimentTool`) and the optional `FoundryShipmentAgent` follow the
+**same fallback-with-logging contract**:
+
+1. **Try the upstream call** (MCP server, Foundry agent, etc.).
+2. **On failure, log the exception** with the tool name, parameters, and
+   correlation IDs via `ILogger`. This surfaces in App Insights and the
+   Aspire dashboard so operators see the outage instead of having it
+   swallowed.
+3. **Return a typed, empty/neutral payload** (e.g., zero-value stats with
+   an `error` field) so the LLM can keep reasoning and tell the user that
+   "shipment data is currently unavailable" rather than crashing the turn.
+
+This pattern is intentional — the agent loop is more useful degraded than
+broken. It is **not** a license to silently swallow exceptions: any new
+tool added to the agent must log first, then fall back.
+
 ---
 
 ## Deployment Topology

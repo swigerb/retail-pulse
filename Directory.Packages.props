@@ -1,0 +1,56 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Aspire -->
+    <PackageVersion Include="Aspire.Hosting.NodeJs" Version="9.5.2" />
+
+    <!-- Azure / AI -->
+    <PackageVersion Include="Azure.AI.Agents.Persistent" Version="1.1.0" />
+    <PackageVersion Include="Azure.AI.OpenAI" Version="2.1.0" />
+    <PackageVersion Include="Azure.AI.Projects" Version="2.0.0" />
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
+    <PackageVersion Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.4.0" />
+
+    <!-- Microsoft Agents Framework -->
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.2.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Abstractions" Version="1.2.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.2.0" />
+    <PackageVersion Include="Microsoft.Agents.Authentication.Msal" Version="1.4.83" />
+    <PackageVersion Include="Microsoft.Agents.Builder" Version="1.4.83" />
+    <PackageVersion Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.4.83" />
+    <PackageVersion Include="Microsoft.Agents.Storage" Version="1.4.83" />
+
+    <!-- ASP.NET Core / Extensions -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.Bcl.Memory" Version="10.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.5.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.1.0" />
+    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.1.0" />
+
+    <!-- MCP -->
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.2.0" />
+
+    <!-- OpenTelemetry -->
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.15.2" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
+
+    <!-- Serialization -->
+    <PackageVersion Include="YamlDotNet" Version="17.0.1" />
+
+    <!-- Test -->
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="FluentAssertions" Version="8.9.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="Moq" Version="4.20.72" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+</Project>
