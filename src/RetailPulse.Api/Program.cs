@@ -3,7 +3,6 @@ using RetailPulse.Api.Agents;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
-using RetailPulse.Api.Services;
 using RetailPulse.Api.Tools;
 using RetailPulse.Contracts;
 
@@ -51,10 +50,14 @@ agentDef.SystemPrompt = agentDef.SystemPrompt
     .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
     .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
 
-// Register HttpClient for MCP server communication
+// Register HttpClient for MCP server communication.
+// Default URL uses Aspire service discovery (https+http://mcpserver) — Aspire's
+// service-discovery DelegatingHandler (added by AddServiceDefaults) resolves the
+// scheme and host to whatever Aspire wired up at startup. Override with
+// McpServer:BaseUrl in configuration only when running outside Aspire.
 builder.Services.AddHttpClient("McpServer", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["McpServer:BaseUrl"] ?? "http://localhost:5200");
+    client.BaseAddress = new Uri(builder.Configuration["McpServer:BaseUrl"] ?? "https+http://mcpserver");
 });
 
 // Register tools
@@ -161,6 +164,22 @@ if (app.Environment.IsDevelopment())
 
 // SignalR hub
 app.MapHub<TelemetryHub>("/hubs/telemetry");
+
+// -----------------------------------------------------------------------------
+// /api/chat — DEMO ENDPOINT, NO AUTHENTICATION
+// -----------------------------------------------------------------------------
+// This is intentionally an open endpoint for the open-source demo. Adding
+// AddAuthentication / AddAuthorization / .RequireAuthorization() would force
+// every contributor to stand up an identity provider just to try the sample.
+//
+// An optional, off-by-default API-key gate is wired below via
+// ApiKeyAuthMiddleware. Set ApiKey:Enabled=true and ApiKey:Value=<secret> in
+// configuration to enable it. This shows the pattern without forcing it.
+//
+// TODO: Production deployments MUST add real authentication and authorization
+//       (JWT bearer + RequireAuthorization) before exposing /api/chat.
+// -----------------------------------------------------------------------------
+app.UseMiddleware<ApiKeyAuthMiddleware>();
 
 // Chat endpoint
 app.MapPost("/api/chat", async (ChatRequest request, RetailPulseAgent agent, CancellationToken ct) =>
