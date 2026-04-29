@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Text, Badge, makeStyles } from '@fluentui/react-components';
 import type { AgentSpan } from '../types';
 
@@ -38,7 +39,7 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     padding: '48px 16px',
     textAlign: 'center',
-    color: '#666666',
+    color: 'var(--color-text-subtle)',
   },
   emptyText: {
     fontSize: '14px',
@@ -46,17 +47,18 @@ const useStyles = makeStyles({
   },
   emptyHint: {
     fontSize: '12px',
-    color: '#666666',
+    color: 'var(--color-text-subtle)',
     opacity: '0.6',
   },
   item: {
-    background: '#1A1A1A',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
+    background: 'var(--color-surface)',
+    border: '1px solid var(--color-border)',
     borderRadius: '6px',
     padding: '10px 12px',
     transition: 'background 0.2s ease',
+    borderLeftWidth: '3px',
     ':hover': {
-      background: '#242424',
+      background: 'var(--color-surface-hover)',
     },
   },
   header: {
@@ -72,7 +74,7 @@ const useStyles = makeStyles({
   name: {
     fontSize: '13px',
     fontWeight: '600',
-    color: '#F5F5F0',
+    color: 'var(--color-text)',
     flex: '1',
     minWidth: '0',
     overflow: 'hidden',
@@ -90,14 +92,14 @@ const useStyles = makeStyles({
   },
   duration: {
     fontSize: '11px',
-    color: '#A0A0A0',
+    color: 'var(--color-text-muted)',
     background: 'rgba(255, 255, 255, 0.04)',
     padding: '1px 6px',
     borderRadius: '4px',
   },
   detail: {
     fontSize: '12px',
-    color: '#A0A0A0',
+    color: 'var(--color-text-muted)',
     lineHeight: '1.4',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -107,13 +109,21 @@ const useStyles = makeStyles({
   },
   time: {
     fontSize: '10px',
-    color: '#666666',
+    color: 'var(--color-text-subtle)',
     marginTop: '4px',
   },
 });
 
 export function SpanTimeline({ spans }: Props) {
   const styles = useStyles();
+  const itemStyles = useMemo(
+    () => spans.map((span) => ({ borderLeftColor: spanColors[span.type] || '#666' })),
+    [spans],
+  );
+  const badgeStyles = useMemo(
+    () => spans.map((span) => ({ color: spanColors[span.type] })),
+    [spans],
+  );
 
   return (
     <div className={styles.timeline}>
@@ -127,7 +137,7 @@ export function SpanTimeline({ spans }: Props) {
         <div
           key={i}
           className={styles.item}
-          style={{ borderLeftColor: spanColors[span.type] || '#666', borderLeftWidth: '3px' }}
+          style={itemStyles[i]}
         >
           <div className={styles.header}>
             <span className={styles.icon}>{spanIcons[span.type] || '⚡'}</span>
@@ -135,7 +145,7 @@ export function SpanTimeline({ spans }: Props) {
             <Badge
               className={styles.type}
               appearance="filled"
-              style={{ color: spanColors[span.type] }}
+              style={badgeStyles[i]}
             >
               {span.type}
             </Badge>
