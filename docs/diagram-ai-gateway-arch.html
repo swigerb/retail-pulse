@@ -151,17 +151,21 @@
   <text x="780" y="119" class="albl">Backend</text>
   <text x="780" y="143" class="asub">MI auth</text>
 
-  <!-- Telemetry: elbow paths from APIM bottom (y=305) to each telem box (top=340) -->
-  <!-- To T1 (center=125): elbow left from APIM -->
-  <path d="M 370,305 L 370,322 L 125,322 L 125,338" class="adash" marker-end="url(#aD)"/>
-  <!-- To T2 (center=373): straight down -->
-  <path d="M 530,305 L 530,322 L 373,322 L 373,338" class="adash" marker-end="url(#aD)"/>
-  <!-- To T3 (center=621): straight down -->
-  <path d="M 650,305 L 650,322 L 621,322 L 621,338" class="adash" marker-end="url(#aD)"/>
+  <!-- Telemetry: tree fan-out from APIM center-bottom to T1/T2/T3 -->
+  <!-- Trunk: APIM center bottom down to bus bar -->
+  <line x1="530" y1="303" x2="530" y2="320" class="adash"/>
+  <!-- Bus bar: horizontal line connecting all three drops -->
+  <line x1="125" y1="320" x2="621" y2="320" class="adash"/>
+  <!-- Drop to T1 -->
+  <line x1="125" y1="320" x2="125" y2="338" class="adash" marker-end="url(#aD)"/>
+  <!-- Drop to T2 -->
+  <line x1="373" y1="320" x2="373" y2="338" class="adash" marker-end="url(#aD)"/>
+  <!-- Drop to T3 -->
+  <line x1="621" y1="320" x2="621" y2="338" class="adash" marker-end="url(#aD)"/>
 
-  <!-- T3 -> Dev Portal -->
-  <line x1="736" y1="399" x2="760" y2="399" class="adash" marker-end="url(#aDR)"/>
-  <text x="740" y="393" class="asub">queries</text>
+  <!-- T3 -> Dev Portal (queries arrow) -->
+  <line x1="738" y1="399" x2="760" y2="399" class="adash" marker-end="url(#aDR)"/>
+  <text x="738" y="389" class="asub">queries</text>
 </svg>
 
 <!-- CLIENT -->
