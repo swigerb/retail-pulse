@@ -63,9 +63,9 @@ const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
     label: 'General Retail',
     emoji: '📊',
     prompts: [
-      'Compare retail foot traffic trends across all regions this quarter',
-      'Which retail categories are growing fastest year-over-year?',
-      'Show me the top-performing retail brands by revenue this month',
+      'Compare depletion trends across all regions for this quarter',
+      'Which brands are growing fastest year-over-year across the portfolio?',
+      'Show me field sentiment for our top 3 brands in the Southeast',
     ],
   },
   {
@@ -73,9 +73,9 @@ const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
     label: 'Grocery',
     emoji: '🛒',
     prompts: [
-      'What are the top-selling categories at grocery chains in the Southeast?',
-      'Compare organic vs conventional produce sales trends nationally',
-      'How are grocery delivery and pickup orders trending this quarter?',
+      'How are FreshMart depletions trending in the Northeast this quarter?',
+      'Compare Harvest Table vs FreshMart sell-through rates by region',
+      'What is the field sentiment for Harvest Table Meal Kits in the Midwest?',
     ],
   },
   {
@@ -83,9 +83,9 @@ const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
     label: 'Quick-Serve Restaurants',
     emoji: '🍔',
     prompts: [
-      'How is drive-through traffic trending for quick-serve restaurants in Texas?',
-      'Compare breakfast vs lunch daypart performance for QSR chains',
-      'What are the top-selling menu categories at fast-food restaurants this quarter?',
+      'How is Apex Grill performing in the Southwest this quarter?',
+      'Compare Coastline Tacos vs Apex Grill depletions across all regions',
+      'What is the field sentiment for Coastline Tacos in the West Coast?',
     ],
   },
   {
@@ -93,9 +93,9 @@ const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
     label: 'Home Improvement',
     emoji: '🏠',
     prompts: [
-      'Compare seasonal sales performance for home improvement retailers like Lowe\'s and Home Depot in the Midwest',
-      'What are the trending project categories at home improvement stores this spring?',
-      'How does weather impact home improvement retail foot traffic by region?',
+      'Show me Pinnacle Hardware depletion stats in the Midwest for Q1',
+      'How is Summit Outdoor performing in the Southeast vs West Coast?',
+      'What is the field sentiment for Pinnacle Hardware Power Tools in the Southwest?',
     ],
   },
   {
@@ -103,9 +103,9 @@ const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
     label: 'Office Supply',
     emoji: '📎',
     prompts: [
-      'What\'s the back-to-school demand forecast for office supply retailers like Office Depot?',
-      'How are office furniture and workspace supply sales trending post-pandemic?',
-      'Compare print vs digital supply sales at office retailers by region',
+      'How are ClearDesk depletions trending in the Northeast this quarter?',
+      'Compare ClearDesk Technology vs Paper Products sell-through by region',
+      'What is the field sentiment for ClearDesk in the Southeast?',
     ],
   },
   {
@@ -113,9 +113,9 @@ const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
     label: 'Furniture',
     emoji: '🛋️',
     prompts: [
-      'Analyze furniture delivery lead times and customer satisfaction for retailers like Rooms to Go and Ashley Furniture',
-      'What are the top-selling furniture categories by region this quarter?',
-      'How do seasonal promotions impact furniture store foot traffic and conversion?',
+      'Show me Urban Living depletion trends across all regions this quarter',
+      'Compare Foundry Home vs Urban Living performance in the West Coast',
+      'What is the field sentiment for Urban Living in the Pacific Northwest?',
     ],
   },
 ];
