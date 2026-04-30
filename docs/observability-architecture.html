@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Observability Architecture</title>
+<style>* { margin:0; padding:0; box-sizing:border-box; } body { background:#fff; }</style>
+</head>
+<body>
+<svg viewBox="0 0 1240 600" xmlns="http://www.w3.org/2000/svg" style="width:1240px;height:600px;display:block;">
+  <defs>
+    <marker id="ah" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#2563EB"/>
+    </marker>
+    <marker id="ah-grn" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#16a34a"/>
+    </marker>
+    <marker id="ah-amb" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#d97706"/>
+    </marker>
+    <marker id="ah-red" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#dc2626"/>
+    </marker>
+    <filter id="ds" x="-2%" y="-2%" width="104%" height="108%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1240" height="600" fill="#fff"/>
+
+  <!-- Title -->
+  <text x="620" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a" font-family="Segoe UI, sans-serif">Observability Architecture</text>
+  <text x="620" y="52" text-anchor="middle" font-size="11" fill="#64748b" font-family="Segoe UI, sans-serif">Three-layer telemetry: real-time spans, distributed tracing, and structured logging</text>
+
+  <!-- ============================================ -->
+  <!-- SOURCE COLUMN                                -->
+  <!-- ============================================ -->
+  <rect x="30" y="72" width="250" height="460" rx="12" fill="#F0F9FF" stroke="#2563EB" stroke-width="1.5" filter="url(#ds)"/>
+  <text x="155" y="98" text-anchor="middle" font-size="13" font-weight="700" fill="#1e40af" font-family="Segoe UI, sans-serif">Telemetry Sources</text>
+  <text x="155" y="116" text-anchor="middle" font-size="9" fill="#94a3b8" font-family="Segoe UI, sans-serif">All services instrumented via ServiceDefaults</text>
+
+  <rect x="50" y="130" width="210" height="50" rx="8" fill="#DBEAFE" stroke="#3B82F6" stroke-width="1"/>
+  <text x="155" y="152" text-anchor="middle" font-size="10" font-weight="600" fill="#1e40af" font-family="Segoe UI, sans-serif">RetailPulse.Api :5100</text>
+  <text x="155" y="168" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Agent + Tools + SignalR</text>
+
+  <rect x="50" y="192" width="210" height="50" rx="8" fill="#FFEDD5" stroke="#EA580C" stroke-width="1"/>
+  <text x="155" y="214" text-anchor="middle" font-size="10" font-weight="600" fill="#9A3412" font-family="Segoe UI, sans-serif">RetailPulse.McpServer :5200</text>
+  <text x="155" y="230" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif" text-anchor="middle">MCP Tools + Data</text>
+
+  <rect x="50" y="254" width="210" height="50" rx="8" fill="#F5F3FF" stroke="#7C3AED" stroke-width="1"/>
+  <text x="155" y="276" text-anchor="middle" font-size="10" font-weight="600" fill="#6D28D9" font-family="Segoe UI, sans-serif">RetailPulse.TeamsBot :5300</text>
+  <text x="155" y="292" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Bot Framework + Cards</text>
+
+  <rect x="50" y="316" width="210" height="50" rx="8" fill="#EFF6FF" stroke="#2563EB" stroke-width="1"/>
+  <text x="155" y="338" text-anchor="middle" font-size="10" font-weight="600" fill="#1e40af" font-family="Segoe UI, sans-serif">RetailPulse.Web :5173</text>
+  <text x="155" y="354" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">React Frontend</text>
+
+  <!-- Custom instrumentation -->
+  <rect x="50" y="382" width="210" height="68" rx="8" fill="#DBEAFE" stroke="#3B82F6" stroke-width="1.5"/>
+  <text x="155" y="404" text-anchor="middle" font-size="10" font-weight="600" fill="#1e40af" font-family="Segoe UI, sans-serif">🔬 Custom Instrumentation</text>
+  <text x="155" y="422" text-anchor="middle" font-size="9" fill="#475569" font-family="Consolas, monospace">AgentTelemetry</text>
+  <text x="155" y="438" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">ActivitySource("RetailPulse.Agent")</text>
+
+  <rect x="50" y="460" width="210" height="50" rx="8" fill="#DCFCE7" stroke="#16a34a" stroke-width="1"/>
+  <text x="155" y="482" text-anchor="middle" font-size="10" font-weight="600" fill="#166534" font-family="Segoe UI, sans-serif">📋 TelemetryCollector</text>
+  <text x="155" y="498" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">RecordSpanAsync → SignalR</text>
+
+  <!-- ============================================ -->
+  <!-- LAYER 1: REAL-TIME SIGNALR                   -->
+  <!-- ============================================ -->
+  <rect x="320" y="72" width="900" height="108" rx="12" fill="#DCFCE7" stroke="#16a34a" stroke-width="1.5" filter="url(#ds)"/>
+  <text x="340" y="96" font-size="12" font-weight="700" fill="#166534" font-family="Segoe UI, sans-serif">Layer 1: Real-Time SignalR Streaming</text>
+  <text x="688" y="96" font-size="9" fill="#94a3b8" font-family="Segoe UI, sans-serif">In-process, per-session, immediate</text>
+
+  <rect x="340" y="108" width="170" height="56" rx="8" fill="#BBF7D0" stroke="#16a34a" stroke-width="0.8"/>
+  <text x="425" y="130" text-anchor="middle" font-size="10" font-weight="600" fill="#166534" font-family="Segoe UI, sans-serif">📡 TelemetryHub</text>
+  <text x="425" y="148" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Group(sessionId) scoping</text>
+  <text x="425" y="160" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">WebSocket transport</text>
+
+  <path d="M 510 136 L 536 136" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#ah-grn)"/>
+
+  <rect x="540" y="108" width="170" height="56" rx="8" fill="#BBF7D0" stroke="#16a34a" stroke-width="0.8"/>
+  <text x="625" y="130" text-anchor="middle" font-size="10" font-weight="600" fill="#166534" font-family="Segoe UI, sans-serif">🌐 SpanTimeline</text>
+  <text x="625" y="148" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Visual trace rendering</text>
+  <text x="625" y="160" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Icons · Duration · Detail</text>
+
+  <rect x="740" y="108" width="200" height="56" rx="8" fill="#BBF7D0" stroke="#16a34a" stroke-width="0.8"/>
+  <text x="840" y="128" text-anchor="middle" font-size="10" font-weight="600" fill="#166534" font-family="Segoe UI, sans-serif">Key Properties</text>
+  <text x="840" y="146" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Last 500 spans retained</text>
+  <text x="840" y="160" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Session-scoped for security</text>
+
+  <rect x="970" y="108" width="230" height="56" rx="8" fill="#BBF7D0" stroke="#16a34a" stroke-width="0.8"/>
+  <text x="1085" y="128" text-anchor="middle" font-size="10" font-weight="600" fill="#166534" font-family="Segoe UI, sans-serif">Use Case</text>
+  <text x="1085" y="146" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Dev/demo: watch agent "think"</text>
+  <text x="1085" y="160" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Latency debugging in real-time</text>
+
+  <!-- ============================================ -->
+  <!-- LAYER 2: DISTRIBUTED TRACING                 -->
+  <!-- ============================================ -->
+  <rect x="320" y="196" width="900" height="138" rx="12" fill="#FFFBEB" stroke="#D97706" stroke-width="1.5" filter="url(#ds)"/>
+  <text x="340" y="222" font-size="12" font-weight="700" fill="#92400E" font-family="Segoe UI, sans-serif">Layer 2: Distributed Tracing (OpenTelemetry)</text>
+  <text x="720" y="222" font-size="9" fill="#94a3b8" font-family="Segoe UI, sans-serif">Cross-service, correlated, persistent</text>
+
+  <rect x="340" y="236" width="170" height="82" rx="8" fill="#FEF3C7" stroke="#D97706" stroke-width="0.8"/>
+  <text x="425" y="256" text-anchor="middle" font-size="10" font-weight="600" fill="#92400E" font-family="Segoe UI, sans-serif">📏 Instrumentation</text>
+  <text x="425" y="274" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">ASP.NET Core auto</text>
+  <text x="425" y="288" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">HttpClient auto</text>
+  <text x="425" y="302" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">RetailPulse.Agent custom</text>
+  <text x="425" y="314" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Runtime metrics</text>
+
+  <path d="M 510 276 L 536 276" fill="none" stroke="#d97706" stroke-width="2" marker-end="url(#ah-amb)"/>
+
+  <rect x="540" y="236" width="170" height="82" rx="8" fill="#FEF3C7" stroke="#D97706" stroke-width="0.8"/>
+  <text x="625" y="256" text-anchor="middle" font-size="10" font-weight="600" fill="#92400E" font-family="Segoe UI, sans-serif">📤 Exporters</text>
+  <text x="625" y="276" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">OTLP → Aspire Dashboard</text>
+  <text x="625" y="292" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Azure Monitor SDK</text>
+  <text x="625" y="306" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">→ App Insights (prod)</text>
+
+  <path d="M 710 276 L 736 276" fill="none" stroke="#d97706" stroke-width="2" marker-end="url(#ah-amb)"/>
+
+  <rect x="740" y="236" width="200" height="92" rx="8" fill="#FEF3C7" stroke="#D97706" stroke-width="0.8"/>
+  <text x="840" y="256" text-anchor="middle" font-size="10" font-weight="600" fill="#92400E" font-family="Segoe UI, sans-serif">🔍 Trace Tags</text>
+  <text x="840" y="274" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Consolas, monospace">agent.name</text>
+  <text x="840" y="289" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Consolas, monospace">tool.name, tool.arguments</text>
+  <text x="840" y="304" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Consolas, monospace">agent.duration_ms</text>
+  <text x="840" y="319" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Consolas, monospace">tool.result_length</text>
+
+  <rect x="970" y="236" width="230" height="92" rx="8" fill="#FEF3C7" stroke="#D97706" stroke-width="0.8"/>
+  <text x="1085" y="256" text-anchor="middle" font-size="10" font-weight="600" fill="#92400E" font-family="Segoe UI, sans-serif">Use Case</text>
+  <text x="1085" y="274" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Production diagnostics</text>
+  <text x="1085" y="290" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Cross-service correlation</text>
+  <text x="1085" y="306" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Latency analysis</text>
+  <text x="1085" y="322" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Token usage monitoring</text>
+
+  <!-- ============================================ -->
+  <!-- LAYER 3: STRUCTURED LOGGING                  -->
+  <!-- ============================================ -->
+  <rect x="320" y="350" width="900" height="108" rx="12" fill="#FEF2F2" stroke="#dc2626" stroke-width="1.5" filter="url(#ds)"/>
+  <text x="340" y="376" font-size="12" font-weight="700" fill="#991B1B" font-family="Segoe UI, sans-serif">Layer 3: Structured Logging</text>
+  <text x="605" y="376" font-size="9" fill="#94a3b8" font-family="Segoe UI, sans-serif">Warnings, errors, and operational events</text>
+
+  <rect x="340" y="390" width="170" height="52" rx="8" fill="#FECACA" stroke="#dc2626" stroke-width="0.8"/>
+  <text x="425" y="412" text-anchor="middle" font-size="10" font-weight="600" fill="#991B1B" font-family="Segoe UI, sans-serif">📝 ILogger&lt;T&gt;</text>
+  <text x="425" y="430" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Scoped, structured messages</text>
+
+  <path d="M 510 416 L 536 416" fill="none" stroke="#dc2626" stroke-width="2" marker-end="url(#ah-red)"/>
+
+  <rect x="540" y="390" width="170" height="52" rx="8" fill="#FECACA" stroke="#dc2626" stroke-width="0.8"/>
+  <text x="625" y="412" text-anchor="middle" font-size="10" font-weight="600" fill="#991B1B" font-family="Segoe UI, sans-serif">📤 OTel Logging</text>
+  <text x="625" y="430" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Same exporters as traces</text>
+
+  <rect x="740" y="390" width="200" height="62" rx="8" fill="#FECACA" stroke="#dc2626" stroke-width="0.8"/>
+  <text x="840" y="410" text-anchor="middle" font-size="10" font-weight="600" fill="#991B1B" font-family="Segoe UI, sans-serif">Key Patterns</text>
+  <text x="840" y="428" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Fallback-with-logging on tool errors</text>
+  <text x="840" y="444" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Health check noise filtered out</text>
+
+  <rect x="970" y="390" width="230" height="62" rx="8" fill="#FECACA" stroke="#dc2626" stroke-width="0.8"/>
+  <text x="1085" y="410" text-anchor="middle" font-size="10" font-weight="600" fill="#991B1B" font-family="Segoe UI, sans-serif">Use Case</text>
+  <text x="1085" y="428" text-anchor="middle" font-size="8.5" fill="#475569" font-family="Segoe UI, sans-serif">Error investigation</text>
+  <text x="1085" y="444" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-family="Segoe UI, sans-serif">Tool failure auditing</text>
+
+  <!-- ============================================ -->
+  <!-- ARROWS from sources to layers                -->
+  <!-- ============================================ -->
+  <path d="M 260 485 L 300 485 L 300 136 L 338 136" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#ah-grn)"/>
+  <path d="M 260 220 L 300 220 L 300 276 L 338 276" fill="none" stroke="#d97706" stroke-width="2" marker-end="url(#ah-amb)"/>
+  <path d="M 260 155 L 290 155 L 290 416 L 338 416" fill="none" stroke="#dc2626" stroke-width="1.5" marker-end="url(#ah-red)"/>
+
+  <!-- ====== LEGEND ====== -->
+  <rect x="320" y="540" width="900" height="26" rx="6" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1"/>
+  <line x1="342" y1="553" x2="370" y2="553" stroke="#16a34a" stroke-width="2"/>
+  <text x="376" y="557" font-size="9" fill="#475569" font-family="Segoe UI, sans-serif">Layer 1: Real-time spans</text>
+  <line x1="550" y1="553" x2="578" y2="553" stroke="#d97706" stroke-width="2"/>
+  <text x="584" y="557" font-size="9" fill="#475569" font-family="Segoe UI, sans-serif">Layer 2: Distributed tracing</text>
+  <line x1="780" y1="553" x2="808" y2="553" stroke="#dc2626" stroke-width="2"/>
+  <text x="814" y="557" font-size="9" fill="#475569" font-family="Segoe UI, sans-serif">Layer 3: Structured logging</text>
+
+  <text x="1190" y="580" text-anchor="end" font-size="8" fill="#cbd5e1" font-family="Segoe UI, sans-serif">github.com/swigerb/retail-pulse</text>
+</svg>
+</body>
+</html>
