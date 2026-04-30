@@ -5,405 +5,239 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    width: 1500px;
-    height: 920px;
+    width: 1100px;
+    height: 580px;
     background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 100%);
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    padding: 30px;
+    overflow: hidden;
   }
   .title {
     text-align: center;
-    font-size: 26px;
+    font-size: 22px;
     font-weight: 700;
     color: #1a1a2e;
-    margin-bottom: 24px;
+    padding: 14px 0 10px;
   }
   .canvas {
     position: relative;
-    width: 1440px;
-    height: 840px;
+    width: 1060px;
+    height: 510px;
+    margin: 0 auto;
   }
-
-  /* Boxes */
   .box {
     position: absolute;
     border-radius: 10px;
-    padding: 14px 16px;
+    padding: 12px 14px;
     font-size: 13px;
-    line-height: 1.45;
+    line-height: 1.4;
   }
-  .box .box-title {
+  .box-title {
     font-weight: 700;
-    font-size: 14px;
-    margin-bottom: 6px;
+    font-size: 13px;
+    margin-bottom: 4px;
     display: flex;
     align-items: center;
     gap: 6px;
   }
-  .box .box-subtitle {
-    font-size: 11.5px;
-    color: #555;
-    margin-bottom: 6px;
-  }
-  .box ul { list-style: none; padding: 0; }
-  .box ul li {
-    padding: 2px 0;
-    font-size: 12.5px;
-    color: #333;
-  }
-  .box ul li::before {
-    content: "\2022";
-    color: #666;
-    margin-right: 6px;
-  }
+  .box-subtitle { font-size: 10.5px; color: #555; margin-bottom: 4px; }
+  ul.items { list-style: none; padding: 0; margin: 0; }
+  ul.items li { padding: 1.5px 0; font-size: 11.5px; color: #333; }
+  ul.items li::before { content: "\2022"; color: #888; margin-right: 5px; }
   .icon {
-    display: inline-block;
-    width: 22px;
-    height: 22px;
-    border-radius: 4px;
-    text-align: center;
-    line-height: 22px;
-    font-size: 11px;
-    font-weight: 700;
-    color: #fff;
-    flex-shrink: 0;
+    display: inline-block; width: 22px; height: 22px; border-radius: 4px;
+    text-align: center; line-height: 22px; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0;
   }
+  code { font-family: 'Cascadia Code','Consolas',monospace; font-size: 10.5px; }
 
-  /* Client box */
-  .client {
-    left: 0; top: 80px;
-    width: 220px;
-    background: #e3f2fd;
-    border: 2px solid #90caf9;
-  }
+  /* CLIENT */
+  .client { left: 0; top: 75px; width: 185px; background: #e3f2fd; border: 2px solid #90caf9; }
   .client .icon { background: #1976d2; }
-  .client code { font-size: 11px; color: #1565c0; background: #bbdefb; padding: 1px 4px; border-radius: 3px; }
+  .client code { color: #1565c0; background: #bbdefb; padding: 1px 4px; border-radius: 3px; }
 
-  /* APIM box */
-  .apim-outer {
-    left: 300px; top: 30px;
-    width: 540px;
-    height: 420px;
-    background: #1a237e;
-    border: 2px solid #283593;
-    color: #fff;
-    padding: 0;
-    overflow: visible;
+  /* APIM */
+  .apim {
+    left: 290px; top: 0; width: 480px;
+    background: #303f9f; border: 2px solid #3949ab; color: #fff; padding: 0;
+    border-radius: 10px; overflow: visible;
   }
-  .apim-header {
-    background: #283593;
-    padding: 12px 16px;
-    border-radius: 8px 8px 0 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 700;
-    font-size: 15px;
+  .apim-hdr {
+    background: #283593; padding: 10px 14px; border-radius: 8px 8px 0 0;
+    display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: #fff;
   }
-  .apim-header .icon { background: #42a5f5; }
-  .apim-label {
-    text-align: center;
-    font-size: 13px;
-    font-weight: 600;
-    color: #90caf9;
-    padding: 6px 0 8px;
+  .apim-hdr .icon { background: #42a5f5; }
+  .apim-pill {
+    background: #5c6bc0; padding: 2px 10px; border-radius: 12px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
   }
+  .apim-sub { text-align: center; font-size: 11.5px; font-weight: 600; color: #9fa8da; padding: 4px 0 6px; }
   .apim-inner {
-    margin: 0 14px 14px;
-    background: rgba(255,255,255,0.08);
-    border-radius: 8px;
-    padding: 12px 14px;
+    margin: 0 12px 12px; background: rgba(255,255,255,0.10); border-radius: 8px; padding: 10px 12px;
   }
-  .apim-inner .section-title {
-    font-weight: 700;
-    font-size: 13px;
-    color: #e3f2fd;
-    margin-bottom: 6px;
-    margin-top: 8px;
-  }
-  .apim-inner .section-title:first-child { margin-top: 0; }
+  .apim-inner .sec-title { font-weight: 700; font-size: 12px; color: #e8eaf6; margin: 6px 0 3px; }
+  .apim-inner .sec-title:first-child { margin-top: 0; }
   .apim-inner ul { list-style: none; padding: 0; }
-  .apim-inner ul li {
-    padding: 2px 0;
-    font-size: 12px;
-    color: #bbdefb;
-  }
-  .apim-inner ul li::before {
-    content: "\2022";
-    color: #64b5f6;
-    margin-right: 6px;
-  }
-  .apim-inner ul li code {
-    font-family: 'Cascadia Code', 'Consolas', monospace;
-    font-size: 11px;
-    background: rgba(255,255,255,0.12);
-    padding: 1px 5px;
-    border-radius: 3px;
-    color: #fff;
-  }
+  .apim-inner ul li { padding: 1px 0; font-size: 11px; color: #c5cae9; }
+  .apim-inner ul li::before { content: "\2022"; color: #7986cb; margin-right: 5px; }
+  .apim-inner code { background: rgba(255,255,255,0.13); padding: 1px 5px; border-radius: 3px; color: #fff; }
 
-  /* Azure AI Foundry */
-  .foundry {
-    left: 940px; top: 80px;
-    width: 240px;
-    background: #e8f5e9;
-    border: 2px solid #81c784;
-  }
+  /* FOUNDRY */
+  .foundry { left: 870px; top: 75px; width: 190px; background: #e8f5e9; border: 2px solid #81c784; }
   .foundry .icon { background: #388e3c; }
   .foundry .model-box {
-    margin-top: 8px;
-    background: #c8e6c9;
-    border: 1px solid #a5d6a7;
-    border-radius: 6px;
-    padding: 8px 10px;
-    text-align: center;
-    font-size: 12px;
-    color: #2e7d32;
-    font-weight: 600;
+    margin-top: 6px; background: #c8e6c9; border: 1px solid #a5d6a7; border-radius: 6px;
+    padding: 6px 8px; text-align: center; font-size: 11.5px; color: #2e7d32; font-weight: 600;
   }
 
-  /* Telemetry destinations */
-  .telemetry-row {
-    position: absolute;
-    left: 0; top: 510px;
-    width: 1440px;
-    display: flex;
-    gap: 20px;
-    justify-content: flex-start;
-    padding-left: 10px;
+  /* TELEMETRY BOXES */
+  .tbox {
+    position: absolute; width: 230px; border-radius: 10px; padding: 10px 12px; font-size: 12px;
   }
-  .telem-box {
-    width: 310px;
-    border-radius: 10px;
-    padding: 12px 14px;
-    font-size: 12px;
+  .tbox .box-title { font-size: 12px; }
+  .tbox .badge {
+    display: inline-block; padding: 2px 7px; border-radius: 10px;
+    font-size: 9px; font-weight: 700; margin-bottom: 3px; color: #fff;
   }
-  .telem-box .box-title { font-size: 13px; }
-  .telem-box .layer-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 10px;
-    font-weight: 700;
-    margin-bottom: 6px;
-  }
-  .telem-1 {
-    background: #fce4ec;
-    border: 2px solid #f48fb1;
-  }
-  .telem-1 .layer-badge { background: #f48fb1; color: #fff; }
-  .telem-1 .icon { background: #e91e63; }
+  .tbox ul { list-style: none; padding: 0; }
+  .tbox ul li { padding: 1px 0; font-size: 10.5px; color: #333; }
+  .tbox ul li::before { content: "\2022"; color: #888; margin-right: 5px; }
 
-  .telem-2 {
-    background: #fff3e0;
-    border: 2px solid #ffb74d;
-  }
-  .telem-2 .layer-badge { background: #ffb74d; color: #fff; }
-  .telem-2 .icon { background: #f57c00; }
+  .t1 { left: 10px; top: 340px; background: #fce4ec; border: 2px solid #f48fb1; }
+  .t1 .badge { background: #ec407a; } .t1 .icon { background: #e91e63; }
+  .t2 { left: 258px; top: 340px; background: #fff3e0; border: 2px solid #ffb74d; }
+  .t2 .badge { background: #ffa726; } .t2 .icon { background: #f57c00; }
+  .t3 { left: 506px; top: 340px; background: #e8eaf6; border: 2px solid #9fa8da; }
+  .t3 .badge { background: #7986cb; } .t3 .icon { background: #3f51b5; }
 
-  .telem-3 {
-    background: #e8eaf6;
-    border: 2px solid #9fa8da;
-  }
-  .telem-3 .layer-badge { background: #7986cb; color: #fff; }
-  .telem-3 .icon { background: #3f51b5; }
-
-  /* Dev Portal */
+  /* DEV PORTAL */
   .devportal {
-    position: absolute;
-    left: 1010px; top: 510px;
-    width: 280px;
-    background: #fff8e1;
-    border: 2px solid #ffca28;
-    border-radius: 10px;
-    padding: 12px 14px;
+    position: absolute; left: 762px; top: 340px; width: 290px;
+    background: #fff8e1; border: 2px solid #ffca28; border-radius: 10px; padding: 10px 12px;
   }
   .devportal .icon { background: #f9a825; }
+  .devportal .box-title { font-size: 12px; }
+  .devportal ul { list-style: none; padding: 0; }
+  .devportal ul li { padding: 1px 0; font-size: 10.5px; color: #333; }
+  .devportal ul li::before { content: "\2022"; color: #888; margin-right: 5px; }
 
-  /* SVG arrows */
-  svg.arrows {
-    position: absolute;
-    top: 0; left: 0;
-    width: 1340px;
-    height: 720px;
-    pointer-events: none;
-  }
-  .arrow-line {
-    stroke: #546e7a;
-    stroke-width: 2;
-    fill: none;
-  }
-  .arrow-head {
-    fill: #546e7a;
-  }
-  .arrow-label {
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 11px;
-    fill: #37474f;
-    font-weight: 600;
-  }
-  .arrow-label-small {
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 10px;
-    fill: #546e7a;
-  }
+  /* SVG */
+  svg.arrows { position: absolute; top: 0; left: 0; width: 1060px; height: 510px; pointer-events: none; }
+  .aline { stroke: #546e7a; stroke-width: 2; fill: none; }
+  .adash { stroke: #90a4ae; stroke-width: 1.5; fill: none; stroke-dasharray: 5,3; }
+  .ahead { fill: #546e7a; }
+  .ahead-d { fill: #90a4ae; }
+  .albl { font-family: 'Segoe UI', sans-serif; font-size: 11px; fill: #37474f; font-weight: 600; }
+  .asub { font-family: 'Segoe UI', sans-serif; font-size: 10px; fill: #607d8b; }
 </style>
 </head>
 <body>
-  <div class="title">Retail Pulse: AI Gateway Integration Architecture</div>
-  <div class="canvas">
+<div class="title">Retail Pulse - AI Gateway Integration Architecture</div>
+<div class="canvas">
 
-    <!-- SVG Arrows -->
-    <svg class="arrows">
-      <defs>
-        <marker id="arrowR" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-          <polygon points="0 0, 10 3.5, 0 7" class="arrow-head"/>
-        </marker>
-        <marker id="arrowD" markerWidth="7" markerHeight="10" refX="3.5" refY="9" orient="auto">
-          <polygon points="0 0, 7 0, 3.5 10" class="arrow-head"/>
-        </marker>
-        <marker id="arrowL" markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto">
-          <polygon points="10 0, 0 3.5, 10 7" class="arrow-head"/>
-        </marker>
-      </defs>
+<svg class="arrows">
+  <defs>
+    <marker id="aR" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" class="ahead"/></marker>
+    <marker id="aD" markerWidth="6" markerHeight="8" refX="3" refY="7" orient="auto"><polygon points="0 0,6 0,3 8" class="ahead-d"/></marker>
+    <marker id="aDR" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" class="ahead-d"/></marker>
+  </defs>
 
-      <!-- Client -> APIM -->
-      <line x1="220" y1="170" x2="298" y2="170" class="arrow-line" marker-end="url(#arrowR)"/>
-      <text x="228" y="160" class="arrow-label">LLM Calls</text>
-      <text x="228" y="195" class="arrow-label-small">api-key header</text>
-      <text x="228" y="207" class="arrow-label-small">(subscription key)</text>
+  <!-- Client -> APIM -->
+  <line x1="185" y1="145" x2="288" y2="145" class="aline" marker-end="url(#aR)"/>
+  <text x="194" y="137" class="albl">LLM Calls</text>
+  <text x="194" y="161" class="asub">api-key header</text>
+  <text x="194" y="172" class="asub">(subscription key)</text>
 
-      <!-- APIM -> Foundry -->
-      <line x1="840" y1="170" x2="938" y2="170" class="arrow-line" marker-end="url(#arrowR)"/>
-      <text x="850" y="160" class="arrow-label">Backend Call</text>
-      <text x="848" y="200" class="arrow-label-small">managed identity</text>
-      <text x="848" y="212" class="arrow-label-small">authentication</text>
+  <!-- APIM -> Foundry -->
+  <line x1="770" y1="145" x2="868" y2="145" class="aline" marker-end="url(#aR)"/>
+  <text x="780" y="137" class="albl">Backend</text>
+  <text x="780" y="161" class="asub">MI auth</text>
 
-      <!-- APIM -> Telemetry Layer 1 (Diag Settings) -->
-      <line x1="170" y1="452" x2="170" y2="508" class="arrow-line" marker-end="url(#arrowD)"/>
+  <!-- Telemetry: elbow paths from APIM bottom to each telem box -->
+  <!-- To T1 (center=125): route left from APIM -->
+  <path d="M 370,295 L 370,315 L 125,315 L 125,338" class="adash" marker-end="url(#aD)"/>
+  <!-- To T2 (center=373): nearly straight down -->
+  <path d="M 373,295 L 373,338" class="adash" marker-end="url(#aD)"/>
+  <!-- To T3 (center=621): straight down -->
+  <path d="M 621,295 L 621,338" class="adash" marker-end="url(#aD)"/>
 
-      <!-- APIM -> Telemetry Layer 2 (App Insights) -->
-      <line x1="500" y1="452" x2="500" y2="508" class="arrow-line" marker-end="url(#arrowD)"/>
+  <!-- T3 -> Dev Portal -->
+  <line x1="736" y1="410" x2="760" y2="410" class="adash" marker-end="url(#aDR)"/>
+  <text x="738" y="402" class="asub">queries</text>
+</svg>
 
-      <!-- APIM -> Telemetry Layer 3 (LLM Logs) -->
-      <line x1="700" y1="452" x2="700" y2="508" class="arrow-line" marker-end="url(#arrowD)"/>
+<!-- CLIENT -->
+<div class="box client">
+  <div class="box-title"><span class="icon">API</span> Retail Pulse API</div>
+  <div class="box-subtitle">src/RetailPulse.Api/Program.cs</div>
+  <ul class="items">
+    <li><code>AzureOpenAIClient</code></li>
+    <li><code>ApiKeyCredential</code></li>
+    <li>Points at APIM endpoint</li>
+  </ul>
+</div>
 
-      <!-- Telemetry -> Dev Portal -->
-      <path d="M 990 580 Q 1000 580 1008 580" class="arrow-line" marker-end="url(#arrowR)" stroke-dasharray="5,3"/>
-      <text x="960" y="570" class="arrow-label-small">queries</text>
-    </svg>
-
-    <!-- Client Application -->
-    <div class="box client">
-      <div class="box-title">
-        <span class="icon">API</span>
-        Retail Pulse API
-      </div>
-      <div class="box-subtitle">src/RetailPulse.Api/Program.cs</div>
-      <ul>
-        <li><code>AzureOpenAIClient</code></li>
-        <li><code>ApiKeyCredential</code></li>
-        <li>Points at APIM endpoint</li>
-      </ul>
-    </div>
-
-    <!-- APIM Outer -->
-    <div class="box apim-outer">
-      <div class="apim-header">
-        <span class="icon">APIM</span>
-        Azure API Management (APIM)
-      </div>
-      <div class="apim-label">Configured as AI Gateway</div>
-      <div class="apim-inner">
-        <div class="section-title">Inbound Policies</div>
-        <ul>
-          <li><code>set-backend-service</code> - route to AI Foundry</li>
-          <li><code>authentication-managed-identity</code> - MI auth</li>
-          <li><code>azure-openai-token-limit</code> - 10K TPM rate limit</li>
-          <li><code>azure-openai-emit-token-metric</code> - token metrics</li>
-        </ul>
-        <div class="section-title">Backend Protection</div>
-        <ul>
-          <li>Circuit breaker - trips on 429s for 1 min</li>
-        </ul>
-        <div class="section-title">API-Level Diagnostics</div>
-        <ul>
-          <li><code>applicationinsights</code> - token metrics to customMetrics</li>
-          <li><code>azuremonitor</code> + <code>largeLanguageModel</code> - LLM logs</li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Azure AI Foundry -->
-    <div class="box foundry">
-      <div class="box-title">
-        <span class="icon">AI</span>
-        Azure AI Foundry
-      </div>
-      <div class="box-subtitle">OpenAI Endpoint</div>
-      <div class="model-box">
-        Model Deployment<br>
-        <strong>gpt-5.4-mini</strong>
-      </div>
-    </div>
-
-    <!-- Telemetry Row -->
-    <div class="telemetry-row">
-      <!-- Layer 1 -->
-      <div class="telem-box telem-1">
-        <div class="layer-badge">Layer 1: Instance Diagnostics</div>
-        <div class="box-title">
-          <span class="icon">DX</span>
-          Diagnostic Settings
-        </div>
-        <ul>
-          <li>GatewayLogs → performance, availability</li>
-          <li>GatewayLlmLogs category enabled</li>
-          <li>Sends to Log Analytics workspace</li>
-        </ul>
-      </div>
-      <!-- Layer 2 -->
-      <div class="telem-box telem-2">
-        <div class="layer-badge">Layer 2: App Insights Diagnostic</div>
-        <div class="box-title">
-          <span class="icon">AI</span>
-          Application Insights
-        </div>
-        <ul>
-          <li>Token usage → customMetrics</li>
-          <li>100% sampling, verbosity: information</li>
-          <li>Enables token analytics in portal</li>
-        </ul>
-      </div>
-      <!-- Layer 3 -->
-      <div class="telem-box telem-3">
-        <div class="layer-badge">Layer 3: Azure Monitor + LLM</div>
-        <div class="box-title">
-          <span class="icon">LM</span>
-          largeLanguageModel Diagnostic
-        </div>
-        <ul>
-          <li>Parses LLM request/response bodies</li>
-          <li>Populates ApiManagementGatewayLlmLog</li>
-          <li>Critical for AI Gateway Dev Portal</li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Dev Portal -->
-    <div class="devportal">
-      <div class="box-title">
-        <span class="icon">DP</span>
-        AI Gateway Dev Portal
-      </div>
-      <ul>
-        <li>Token analytics and trends</li>
-        <li>Request history with latency</li>
-        <li>Cost breakdowns per consumer</li>
-        <li>Availability and error rates</li>
-      </ul>
-    </div>
-
+<!-- APIM -->
+<div class="box apim">
+  <div class="apim-hdr">
+    <span class="icon">GW</span>
+    <span class="apim-pill">APIM</span>
+    Azure API Management
   </div>
+  <div class="apim-sub">Configured as AI Gateway</div>
+  <div class="apim-inner">
+    <div class="sec-title">Inbound Policies</div>
+    <ul>
+      <li><code>set-backend-service</code> - route to AI Foundry</li>
+      <li><code>authentication-managed-identity</code> - MI auth</li>
+      <li><code>azure-openai-token-limit</code> - 10K TPM rate limit</li>
+      <li><code>azure-openai-emit-token-metric</code> - token metrics</li>
+    </ul>
+    <div class="sec-title">Backend Protection</div>
+    <ul>
+      <li>Circuit breaker - trips on 429s for 1 min</li>
+    </ul>
+    <div class="sec-title">API-Level Diagnostics</div>
+    <ul>
+      <li><code>applicationinsights</code> - token metrics to customMetrics</li>
+      <li><code>azuremonitor</code> + <code>largeLanguageModel</code> - LLM logs</li>
+    </ul>
+  </div>
+</div>
+
+<!-- FOUNDRY -->
+<div class="box foundry">
+  <div class="box-title"><span class="icon">AI</span> Azure AI Foundry</div>
+  <div class="box-subtitle">OpenAI Endpoint</div>
+  <div class="model-box">Model: <strong>gpt-5.4-mini</strong></div>
+</div>
+
+<!-- TELEMETRY -->
+<div class="tbox t1">
+  <div class="badge">Layer 1: Instance Diagnostics</div>
+  <div class="box-title"><span class="icon">DX</span> Diagnostic Settings</div>
+  <ul><li>GatewayLogs - perf, availability</li><li>GatewayLlmLogs category enabled</li><li>Sends to Log Analytics workspace</li></ul>
+</div>
+<div class="tbox t2">
+  <div class="badge">Layer 2: App Insights Diagnostic</div>
+  <div class="box-title"><span class="icon">AI</span> Application Insights</div>
+  <ul><li>Token usage - customMetrics</li><li>100% sampling, verbosity: info</li><li>Enables token analytics in portal</li></ul>
+</div>
+<div class="tbox t3">
+  <div class="badge">Layer 3: Azure Monitor + LLM</div>
+  <div class="box-title"><span class="icon">LM</span> LLM Diagnostic</div>
+  <ul><li>Parses LLM request/response bodies</li><li>Populates GatewayLlmLog table</li><li>Powers AI Gateway Dev Portal</li></ul>
+</div>
+
+<!-- DEV PORTAL -->
+<div class="devportal">
+  <div class="box-title"><span class="icon">DP</span> AI Gateway Dev Portal</div>
+  <ul>
+    <li>Token analytics and trends</li>
+    <li>Request history with latency</li>
+    <li>Cost breakdowns per consumer</li>
+    <li>Availability and error rates</li>
+  </ul>
+</div>
+
+</div>
 </body>
 </html>

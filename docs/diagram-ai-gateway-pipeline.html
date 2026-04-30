@@ -65,7 +65,7 @@
     width: 26px;
     height: 26px;
     border-radius: 50%;
-    background: #1a237e;
+    background: #283593;
     color: #fff;
     font-weight: 700;
     font-size: 13px;
@@ -88,9 +88,9 @@
     left: 280px; top: 0;
     width: 680px;
     height: 860px;
-    background: #1a237e;
+    background: #303f9f;
     border-radius: 12px;
-    border: 2px solid #283593;
+    border: 2px solid #3949ab;
     overflow: visible;
   }
   .pipeline-header {
@@ -105,9 +105,18 @@
     gap: 8px;
   }
   .pipeline-header .icon { background: #42a5f5; }
+  .apim-pill {
+    background: #5c6bc0;
+    padding: 3px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #e8eaf6;
+    letter-spacing: 0.5px;
+  }
   .pipeline-label {
     text-align: center;
-    color: #90caf9;
+    color: #9fa8da;
     font-size: 13px;
     font-weight: 600;
     padding: 6px 0;
@@ -116,14 +125,14 @@
   /* Pipeline sections */
   .pipe-section {
     margin: 6px 14px;
-    background: rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.10);
     border-radius: 8px;
     padding: 10px 14px;
   }
   .pipe-section-title {
     font-weight: 700;
     font-size: 13px;
-    color: #90caf9;
+    color: #9fa8da;
     margin-bottom: 8px;
     display: flex;
     align-items: center;
@@ -131,7 +140,7 @@
   }
   .pipe-section-title .direction {
     font-size: 10px;
-    background: #42a5f5;
+    background: #5c6bc0;
     color: #fff;
     padding: 2px 8px;
     border-radius: 10px;
@@ -151,13 +160,13 @@
     font-family: 'Cascadia Code', 'Consolas', monospace;
     font-size: 12px;
     color: #fff;
-    background: rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.14);
     padding: 2px 8px;
     border-radius: 4px;
   }
   .policy-desc {
     font-size: 11.5px;
-    color: #b0bec5;
+    color: #cfd8dc;
     margin-top: 2px;
   }
 
@@ -235,8 +244,8 @@
     fill: none;
   }
   .arrow-dashed {
-    stroke: #546e7a;
-    stroke-width: 2;
+    stroke: #78909c;
+    stroke-width: 1.5;
     fill: none;
     stroke-dasharray: 6,3;
   }
@@ -292,14 +301,15 @@
         </marker>
       </defs>
 
-      <!-- Client -> APIM -->
-      <line x1="200" y1="130" x2="278" y2="130" class="arrow-line" marker-end="url(#arrowR)"/>
-      <text x="210" y="120" class="arrow-label">Request</text>
-      <text x="205" y="155" class="arrow-label-small">api-key header</text>
+      <!-- Client -> APIM (request) -->
+      <line x1="200" y1="110" x2="278" y2="110" class="arrow-line" marker-end="url(#arrowR)"/>
+      <text x="210" y="102" class="arrow-label">Request</text>
+      <text x="208" y="128" class="arrow-label-small">api-key header</text>
 
       <!-- Response Client <- APIM -->
-      <line x1="278" y1="195" x2="200" y2="195" class="response-line" marker-end="url(#arrowLG)"/>
-      <text x="205" y="215" class="response-label">Response + usage</text>
+      <line x1="278" y1="150" x2="200" y2="150" class="response-line" marker-end="url(#arrowLG)"/>
+      <text x="208" y="168" class="response-label">Response</text>
+      <text x="218" y="180" style="font-family:'Segoe UI',sans-serif;font-size:9px;fill:#66bb6a">+ usage</text>
 
       <!-- APIM -> App Insights (emit-token-metric) -->
       <line x1="960" y1="120" x2="1038" y2="120" class="arrow-dashed" marker-end="url(#arrowR)"/>
@@ -338,10 +348,11 @@
     <!-- Pipeline -->
     <div class="pipeline">
       <div class="pipeline-header">
-        <span class="icon">APIM</span>
-        Azure API Management - AI Gateway Request Pipeline
+        <span class="icon">GW</span>
+        <span class="apim-pill">APIM</span>
+        Azure API Management
       </div>
-      <div class="pipeline-label">Processing order: top to bottom</div>
+      <div class="pipeline-label">AI Gateway Request Pipeline - Processing order: top to bottom</div>
 
       <!-- Inbound -->
       <div class="pipe-section">
@@ -410,14 +421,14 @@
         <div class="policy-step">
           <span class="step">7</span>
           <div>
-            <span class="policy-name">applicationinsights</span> <span style="font-size:10px;color:#90caf9">(Layer 2)</span>
+            <span class="policy-name">applicationinsights</span> <span style="font-size:10px;color:#9fa8da">(Layer 2)</span>
             <div class="policy-desc">API-level diagnostic sends token metrics to App Insights. Sampling: 100%, verbosity: information</div>
           </div>
         </div>
         <div class="policy-step">
           <span class="step">8</span>
           <div>
-            <span class="policy-name">azuremonitor</span> + <span class="policy-name">largeLanguageModel</span> <span style="font-size:10px;color:#90caf9">(Layer 3)</span>
+            <span class="policy-name">azuremonitor</span> + <span class="policy-name">largeLanguageModel</span> <span style="font-size:10px;color:#9fa8da">(Layer 3)</span>
             <div class="policy-desc">Parses LLM request/response bodies. Extracts token counts, model name, prompt/completion content. Populates ApiManagementGatewayLlmLog table.</div>
           </div>
         </div>
@@ -432,7 +443,7 @@
         <div class="policy-step">
           <span class="step">9</span>
           <div>
-            <span style="font-size:12px;color:#e8f5e9;font-weight:600">GatewayLogs + GatewayLlmLogs</span> <span style="font-size:10px;color:#90caf9">(Layer 1)</span>
+            <span style="font-size:12px;color:#e8f5e9;font-weight:600">GatewayLogs + GatewayLlmLogs</span> <span style="font-size:10px;color:#9fa8da">(Layer 1)</span>
             <div class="policy-desc">Instance-level diagnostic settings send all gateway and LLM logs to Log Analytics workspace. GatewayLlmLogs category must be explicitly enabled.</div>
           </div>
         </div>
