@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1400px;
+    height: 940px;
+    background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 100%);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    padding: 30px;
+  }
+  .title {
+    text-align: center;
+    font-size: 26px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 24px;
+  }
+  .canvas {
+    position: relative;
+    width: 1340px;
+    height: 860px;
+  }
+
+  .box {
+    position: absolute;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .box .box-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .box .box-subtitle {
+    font-size: 11px;
+    color: #555;
+    margin-bottom: 4px;
+  }
+  .icon {
+    display: inline-block;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    text-align: center;
+    line-height: 22px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  /* Step badge */
+  .step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #1a237e;
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  /* Client */
+  .client {
+    left: 0; top: 60px;
+    width: 200px;
+    background: #e3f2fd;
+    border: 2px solid #90caf9;
+  }
+  .client .icon { background: #1976d2; }
+  .client code { font-size: 11px; color: #1565c0; background: #bbdefb; padding: 1px 4px; border-radius: 3px; }
+
+  /* Pipeline container */
+  .pipeline {
+    position: absolute;
+    left: 280px; top: 0;
+    width: 680px;
+    height: 860px;
+    background: #1a237e;
+    border-radius: 12px;
+    border: 2px solid #283593;
+    overflow: visible;
+  }
+  .pipeline-header {
+    background: #283593;
+    border-radius: 10px 10px 0 0;
+    padding: 12px 16px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pipeline-header .icon { background: #42a5f5; }
+  .pipeline-label {
+    text-align: center;
+    color: #90caf9;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 0;
+  }
+
+  /* Pipeline sections */
+  .pipe-section {
+    margin: 6px 14px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .pipe-section-title {
+    font-weight: 700;
+    font-size: 13px;
+    color: #90caf9;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pipe-section-title .direction {
+    font-size: 10px;
+    background: #42a5f5;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  /* Policy steps */
+  .policy-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .policy-step:last-child { border-bottom: none; }
+  .policy-name {
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px;
+    color: #fff;
+    background: rgba(255,255,255,0.12);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .policy-desc {
+    font-size: 11.5px;
+    color: #b0bec5;
+    margin-top: 2px;
+  }
+
+  /* Destinations */
+  .dest {
+    width: 260px;
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .dest ul { list-style: none; padding: 0; }
+  .dest ul li { padding: 2px 0; font-size: 11.5px; color: #333; }
+  .dest ul li::before { content: "\2022"; color: #666; margin-right: 6px; }
+
+  /* App Insights */
+  .appinsights {
+    position: absolute;
+    left: 1040px; top: 60px;
+    background: #fce4ec;
+    border: 2px solid #f48fb1;
+  }
+  .appinsights .icon { background: #e91e63; }
+
+  /* Azure Monitor / LLM Logs */
+  .azuremonitor {
+    position: absolute;
+    left: 1040px; top: 300px;
+    background: #e8eaf6;
+    border: 2px solid #9fa8da;
+  }
+  .azuremonitor .icon { background: #3f51b5; }
+
+  /* Log Analytics */
+  .loganalytics {
+    position: absolute;
+    left: 1040px; top: 550px;
+    background: #fff3e0;
+    border: 2px solid #ffb74d;
+  }
+  .loganalytics .icon { background: #f57c00; }
+
+  /* Azure AI Foundry */
+  .foundry {
+    position: absolute;
+    left: 1040px; top: 750px;
+    width: 260px;
+    background: #e8f5e9;
+    border: 2px solid #81c784;
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .foundry .icon { background: #388e3c; }
+  .foundry .model-box {
+    margin-top: 6px;
+    background: #c8e6c9;
+    border: 1px solid #a5d6a7;
+    border-radius: 6px;
+    padding: 6px 8px;
+    text-align: center;
+    font-size: 12px;
+    color: #2e7d32;
+    font-weight: 600;
+  }
+
+  /* SVG */
+  svg.arrows {
+    position: absolute;
+    top: 0; left: 0;
+    width: 1340px;
+    height: 860px;
+    pointer-events: none;
+  }
+  .arrow-line {
+    stroke: #546e7a;
+    stroke-width: 2;
+    fill: none;
+  }
+  .arrow-dashed {
+    stroke: #546e7a;
+    stroke-width: 2;
+    fill: none;
+    stroke-dasharray: 6,3;
+  }
+  .arrow-head { fill: #546e7a; }
+  .arrow-label {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 11px;
+    fill: #37474f;
+    font-weight: 600;
+  }
+  .arrow-label-small {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 10px;
+    fill: #546e7a;
+  }
+
+  /* Response flow arrow */
+  .response-line {
+    stroke: #66bb6a;
+    stroke-width: 2;
+    fill: none;
+    stroke-dasharray: 6,3;
+  }
+  .response-head { fill: #66bb6a; }
+  .response-label {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 10px;
+    fill: #388e3c;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+  <div class="title">AI Gateway Request Pipeline</div>
+  <div class="canvas">
+
+    <svg class="arrows">
+      <defs>
+        <marker id="arrowR" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+          <polygon points="0 0, 10 3.5, 0 7" class="arrow-head"/>
+        </marker>
+        <marker id="arrowD" markerWidth="7" markerHeight="10" refX="3.5" refY="9" orient="auto">
+          <polygon points="0 0, 7 0, 3.5 10" class="arrow-head"/>
+        </marker>
+        <marker id="arrowRG" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+          <polygon points="0 0, 10 3.5, 0 7" class="response-head"/>
+        </marker>
+        <marker id="arrowL" markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto">
+          <polygon points="10 0, 0 3.5, 10 7" class="arrow-head"/>
+        </marker>
+        <marker id="arrowLG" markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto">
+          <polygon points="10 0, 0 3.5, 10 7" class="response-head"/>
+        </marker>
+      </defs>
+
+      <!-- Client -> APIM -->
+      <line x1="200" y1="130" x2="278" y2="130" class="arrow-line" marker-end="url(#arrowR)"/>
+      <text x="210" y="120" class="arrow-label">Request</text>
+      <text x="205" y="155" class="arrow-label-small">api-key header</text>
+
+      <!-- Response Client <- APIM -->
+      <line x1="278" y1="195" x2="200" y2="195" class="response-line" marker-end="url(#arrowLG)"/>
+      <text x="205" y="215" class="response-label">Response + usage</text>
+
+      <!-- APIM -> App Insights (emit-token-metric) -->
+      <line x1="960" y1="120" x2="1038" y2="120" class="arrow-dashed" marker-end="url(#arrowR)"/>
+      <text x="970" y="110" class="arrow-label-small">token</text>
+      <text x="970" y="140" class="arrow-label-small">metrics</text>
+
+      <!-- APIM -> Azure Monitor (LLM diagnostic) -->
+      <line x1="960" y1="380" x2="1038" y2="380" class="arrow-dashed" marker-end="url(#arrowR)"/>
+      <text x="970" y="370" class="arrow-label-small">LLM body</text>
+      <text x="970" y="400" class="arrow-label-small">parsing</text>
+
+      <!-- APIM -> Log Analytics (instance diag) -->
+      <line x1="960" y1="610" x2="1038" y2="610" class="arrow-dashed" marker-end="url(#arrowR)"/>
+      <text x="970" y="600" class="arrow-label-small">gateway</text>
+      <text x="970" y="625" class="arrow-label-small">logs</text>
+
+      <!-- APIM -> Foundry (backend call) -->
+      <line x1="960" y1="800" x2="1038" y2="800" class="arrow-line" marker-end="url(#arrowR)"/>
+      <text x="970" y="790" class="arrow-label">Backend</text>
+      <text x="970" y="818" class="arrow-label-small">MI auth token</text>
+    </svg>
+
+    <!-- Client -->
+    <div class="box client">
+      <div class="box-title">
+        <span class="icon">C#</span>
+        Retail Pulse API
+      </div>
+      <div class="box-subtitle">AzureOpenAIClient</div>
+      <ul style="list-style:none;padding:0">
+        <li style="font-size:12px;color:#333"><code>ApiKeyCredential</code></li>
+        <li style="font-size:11px;color:#555;padding-top:4px">Sends APIM subscription<br>key as api-key header</li>
+      </ul>
+    </div>
+
+    <!-- Pipeline -->
+    <div class="pipeline">
+      <div class="pipeline-header">
+        <span class="icon">APIM</span>
+        Azure API Management - AI Gateway Request Pipeline
+      </div>
+      <div class="pipeline-label">Processing order: top to bottom</div>
+
+      <!-- Inbound -->
+      <div class="pipe-section">
+        <div class="pipe-section-title">
+          Inbound Policies
+          <span class="direction">REQUEST</span>
+        </div>
+        <div class="policy-step">
+          <span class="step">1</span>
+          <div>
+            <span class="policy-name">set-backend-service</span>
+            <div class="policy-desc">Routes request to Azure AI Foundry backend URL</div>
+          </div>
+        </div>
+        <div class="policy-step">
+          <span class="step">2</span>
+          <div>
+            <span class="policy-name">authentication-managed-identity</span>
+            <div class="policy-desc">Replaces client api-key with APIM's managed identity token for backend auth</div>
+          </div>
+        </div>
+        <div class="policy-step">
+          <span class="step">3</span>
+          <div>
+            <span class="policy-name">azure-openai-token-limit</span>
+            <div class="policy-desc">Enforces 10,000 tokens-per-minute rate limit per subscription. Returns 429 if exceeded.</div>
+          </div>
+        </div>
+        <div class="policy-step">
+          <span class="step">4</span>
+          <div>
+            <span class="policy-name">azure-openai-emit-token-metric</span>
+            <div class="policy-desc">Emits prompt/completion token counts to Application Insights customMetrics</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Backend -->
+      <div class="pipe-section">
+        <div class="pipe-section-title">
+          Backend
+          <span class="direction">FORWARD</span>
+        </div>
+        <div class="policy-step">
+          <span class="step">5</span>
+          <div>
+            <span class="policy-name">Circuit Breaker</span>
+            <div class="policy-desc">Configured on backend entity. Trips on 429 responses, opens circuit for 1 minute to prevent cascading failures.</div>
+          </div>
+        </div>
+        <div class="policy-step">
+          <span class="step">6</span>
+          <div>
+            <span style="font-size:12px;color:#e8f5e9;font-weight:600">Forward to Azure AI Foundry</span>
+            <div class="policy-desc">POST /openai/deployments/gpt-5.4-mini/chat/completions - authenticated via managed identity</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Diagnostics (on response) -->
+      <div class="pipe-section">
+        <div class="pipe-section-title">
+          API-Level Diagnostics
+          <span class="direction">RESPONSE</span>
+        </div>
+        <div class="policy-step">
+          <span class="step">7</span>
+          <div>
+            <span class="policy-name">applicationinsights</span> <span style="font-size:10px;color:#90caf9">(Layer 2)</span>
+            <div class="policy-desc">API-level diagnostic sends token metrics to App Insights. Sampling: 100%, verbosity: information</div>
+          </div>
+        </div>
+        <div class="policy-step">
+          <span class="step">8</span>
+          <div>
+            <span class="policy-name">azuremonitor</span> + <span class="policy-name">largeLanguageModel</span> <span style="font-size:10px;color:#90caf9">(Layer 3)</span>
+            <div class="policy-desc">Parses LLM request/response bodies. Extracts token counts, model name, prompt/completion content. Populates ApiManagementGatewayLlmLog table.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Instance Diagnostics -->
+      <div class="pipe-section">
+        <div class="pipe-section-title">
+          Instance-Level Diagnostic Settings
+          <span class="direction">ALWAYS</span>
+        </div>
+        <div class="policy-step">
+          <span class="step">9</span>
+          <div>
+            <span style="font-size:12px;color:#e8f5e9;font-weight:600">GatewayLogs + GatewayLlmLogs</span> <span style="font-size:10px;color:#90caf9">(Layer 1)</span>
+            <div class="policy-desc">Instance-level diagnostic settings send all gateway and LLM logs to Log Analytics workspace. GatewayLlmLogs category must be explicitly enabled.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- App Insights -->
+    <div class="box dest appinsights" style="width:260px">
+      <div class="box-title">
+        <span class="icon" style="background:#e91e63">AI</span>
+        Application Insights
+      </div>
+      <ul>
+        <li>customMetrics table</li>
+        <li>Token usage (prompt + completion)</li>
+        <li>Per-subscription token trends</li>
+        <li>Powers "Tokens" dashboard</li>
+      </ul>
+    </div>
+
+    <!-- Azure Monitor LLM -->
+    <div class="box dest azuremonitor" style="width:260px">
+      <div class="box-title">
+        <span class="icon" style="background:#3f51b5">LM</span>
+        Log Analytics (LLM)
+      </div>
+      <div class="box-subtitle">ApiManagementGatewayLlmLog</div>
+      <ul>
+        <li>Model, tokens, prompt content</li>
+        <li>LLM-specific request data</li>
+        <li>Powers "Requests" dashboard</li>
+        <li>Primary AI Gateway Dev Portal source</li>
+      </ul>
+    </div>
+
+    <!-- Log Analytics -->
+    <div class="box dest loganalytics" style="width:260px">
+      <div class="box-title">
+        <span class="icon" style="background:#f57c00">LA</span>
+        Log Analytics (Gateway)
+      </div>
+      <div class="box-subtitle">ApiManagementGatewayLogs</div>
+      <ul>
+        <li>HTTP status codes, latency, IPs</li>
+        <li>Performance percentiles</li>
+        <li>Powers "Performance" dashboard</li>
+        <li>Powers "Availability" dashboard</li>
+      </ul>
+    </div>
+
+    <!-- Azure AI Foundry -->
+    <div class="foundry">
+      <div class="box-title" style="font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px">
+        <span class="icon" style="background:#388e3c">AI</span>
+        Azure AI Foundry
+      </div>
+      <div class="model-box">gpt-5.4-mini</div>
+    </div>
+
+  </div>
+</body>
+</html>
