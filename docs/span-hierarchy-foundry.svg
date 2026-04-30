@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 797" width="800" height="797" style="background:#ffffff;font-family:'Cascadia Code','Fira Code',monospace">
+<defs>
+  <filter id="shadow" x="-2%" y="-2%" width="104%" height="108%">
+    <feDropShadow dx="1" dy="1" stdDeviation="1.5" flood-opacity="0.1"/>
+  </filter>
+</defs>
+<text x="30" y="38" font-size="20" font-weight="bold" font-family="Segoe UI,sans-serif" fill="#1e1e1e">Span Hierarchy - With Foundry Shipment Agent</text>
+<path d="M 42 95 L 42 122 L 62 122" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 74 137 L 74 164 L 94 164" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 74 137 L 74 206 L 94 206" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 74 137 L 74 248 L 94 248" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 106 263 L 106 290 L 126 290" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 138 305 L 138 332 L 158 332" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 106 263 L 106 374 L 126 374" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 106 263 L 106 416 L 126 416" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 138 431 L 138 458 L 158 458" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 106 263 L 106 500 L 126 500" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 74 137 L 74 542 L 94 542" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 106 557 L 106 584 L 126 584" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 74 137 L 74 626 L 94 626" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 74 137 L 74 668 L 94 668" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<path d="M 74 137 L 74 710 L 94 710" fill="none" stroke="#adb5bd" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+<rect x="30" y="65" width="174.5" height="30" rx="5" ry="5" fill="#CFE4FA" stroke="#0078D4" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="46" y="84" font-size="12" fill="#1e1e1e">HTTP POST /api/chat</text>
+<rect x="62" y="107" width="227.0" height="30" rx="5" ry="5" fill="#DFF6DD" stroke="#107C10" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="78" y="126" font-size="12" fill="#1e1e1e">RetailPulseAgent.ChatAsync</text>
+<rect x="94" y="149" width="219.5" height="30" rx="5" ry="5" fill="#99e9f2" stroke="#0c8599" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="110" y="168" font-size="12" fill="#1e1e1e">thought (agent reasoning)</text>
+<rect x="94" y="191" width="302.0" height="30" rx="5" ry="5" fill="#E8DAEF" stroke="#5C2D91" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="110" y="210" font-size="12" fill="#1e1e1e">IChatClient.CompleteAsync (LLM call)</text>
+<rect x="94" y="233" width="317.0" height="30" rx="5" ry="5" fill="#FDE7E9" stroke="#D13438" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="110" y="252" font-size="12" fill="#1e1e1e">agent_delegation: FoundryShipmentAgent</text>
+<rect x="126" y="275" width="234.5" height="30" rx="5" ry="5" fill="#FFF4CE" stroke="#F7630C" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="142" y="294" font-size="12" fill="#1e1e1e">tool_call: GetShipmentStats</text>
+<rect x="158" y="317" width="242.0" height="30" rx="5" ry="5" fill="#CFE4FA" stroke="#0078D4" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="174" y="336" font-size="12" fill="#1e1e1e">HTTP GET /api/shipment-stats</text>
+<rect x="126" y="359" width="249.5" height="30" rx="5" ry="5" fill="#fff3bf" stroke="#e67700" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="142" y="378" font-size="12" fill="#1e1e1e">tool_result: GetShipmentStats</text>
+<rect x="126" y="401" width="332.0" height="30" rx="5" ry="5" fill="#FDE7E9" stroke="#D13438" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="142" y="420" font-size="12" fill="#1e1e1e">agent_call: FoundryShipmentAgent.Analyze</text>
+<rect x="158" y="443" width="324.5" height="30" rx="5" ry="5" fill="#E8DAEF" stroke="#5C2D91" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="174" y="462" font-size="12" fill="#1e1e1e">IChatClient.CompleteAsync (Foundry LLM)</text>
+<rect x="126" y="485" width="332.0" height="30" rx="5" ry="5" fill="#99e9f2" stroke="#0c8599" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="142" y="504" font-size="12" fill="#1e1e1e">agent_response: pipeline analysis result</text>
+<rect x="94" y="527" width="242.0" height="30" rx="5" ry="5" fill="#FFF4CE" stroke="#F7630C" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="110" y="546" font-size="12" fill="#1e1e1e">tool_call: GetDepletionStats</text>
+<rect x="126" y="569" width="249.5" height="30" rx="5" ry="5" fill="#CFE4FA" stroke="#0078D4" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="142" y="588" font-size="12" fill="#1e1e1e">HTTP GET /api/depletion-stats</text>
+<rect x="94" y="611" width="257.0" height="30" rx="5" ry="5" fill="#fff3bf" stroke="#e67700" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="110" y="630" font-size="12" fill="#1e1e1e">tool_result: GetDepletionStats</text>
+<rect x="94" y="653" width="309.5" height="30" rx="5" ry="5" fill="#E8DAEF" stroke="#5C2D91" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="110" y="672" font-size="12" fill="#1e1e1e">IChatClient.CompleteAsync (synthesis)</text>
+<rect x="94" y="695" width="204.5" height="30" rx="5" ry="5" fill="#99e9f2" stroke="#0c8599" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="110" y="714" font-size="12" fill="#1e1e1e">response (final answer)</text>
+<rect x="30" y="757" width="14" height="14" rx="2" fill="#CFE4FA" stroke="#0078D4" stroke-width="1"/>
+<text x="48" y="768" font-size="11" font-family="Segoe UI,sans-serif" fill="#495057">HTTP</text>
+<rect x="96" y="757" width="14" height="14" rx="2" fill="#DFF6DD" stroke="#107C10" stroke-width="1"/>
+<text x="114" y="768" font-size="11" font-family="Segoe UI,sans-serif" fill="#495057">Agent</text>
+<rect x="169" y="757" width="14" height="14" rx="2" fill="#E8DAEF" stroke="#5C2D91" stroke-width="1"/>
+<text x="187" y="768" font-size="11" font-family="Segoe UI,sans-serif" fill="#495057">LLM Call</text>
+<rect x="263" y="757" width="14" height="14" rx="2" fill="#FFF4CE" stroke="#F7630C" stroke-width="1"/>
+<text x="281" y="768" font-size="11" font-family="Segoe UI,sans-serif" fill="#495057">Tool Call</text>
+<rect x="364" y="757" width="14" height="14" rx="2" fill="#fff3bf" stroke="#e67700" stroke-width="1"/>
+<text x="382" y="768" font-size="11" font-family="Segoe UI,sans-serif" fill="#495057">Tool Result</text>
+<rect x="479" y="757" width="14" height="14" rx="2" fill="#99e9f2" stroke="#0c8599" stroke-width="1"/>
+<text x="497" y="768" font-size="11" font-family="Segoe UI,sans-serif" fill="#495057">Thought / Response</text>
+<rect x="643" y="757" width="14" height="14" rx="2" fill="#FDE7E9" stroke="#D13438" stroke-width="1"/>
+<text x="661" y="768" font-size="11" font-family="Segoe UI,sans-serif" fill="#495057">Delegation</text>
+</svg>
