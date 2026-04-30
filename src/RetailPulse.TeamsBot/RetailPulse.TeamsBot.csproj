@@ -8,11 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Agents.Authentication.Msal" Version="1.4.83" />
-    <PackageReference Include="Microsoft.Agents.Builder" Version="1.4.83" />
-    <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.4.83" />
-    <PackageReference Include="Microsoft.Agents.Storage" Version="1.4.83" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.6" />
+    <PackageReference Include="Microsoft.Agents.Authentication.Msal" />
+    <PackageReference Include="Microsoft.Agents.Builder" />
+    <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" />
+    <PackageReference Include="Microsoft.Agents.Storage" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
   </ItemGroup>
 
   <ItemGroup>

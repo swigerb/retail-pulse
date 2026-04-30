@@ -1,6 +1,7 @@
 <Project>
-  <ItemGroup>
-    <!-- Pin transitive packages to patched versions (CVE fixes) -->
-    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.4" />
-  </ItemGroup>
+  <!--
+    Package versions are managed centrally in Directory.Packages.props.
+    Transitive pinning (e.g., Microsoft.Bcl.Memory for CVE fixes) is enabled
+    via CentralPackageTransitivePinningEnabled in that file.
+  -->
 </Project>

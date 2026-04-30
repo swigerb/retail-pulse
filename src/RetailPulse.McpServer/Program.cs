@@ -1,6 +1,5 @@
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
-using RetailPulse.McpServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 

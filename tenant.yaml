@@ -1,39 +1,61 @@
-company: "Apex Brands"
-industry: "Spirits & Beverages"
-description: "Apex Brands is a premium spirits company with a diverse portfolio spanning tequila, vodka, bourbon, rum, and gin. Operating across North America with a Three-Tier distribution model."
+company: "Apex Retail Group"
+industry: "Multi-Category Retail"
+description: "Apex Retail Group is a diversified retail conglomerate with brands spanning spirits, grocery, quick-serve restaurants, home improvement, office supply, and furniture. Operating across North America with a Three-Tier distribution model."
 brands:
+  # Spirits & Beverages
   - name: "Sierra Gold Tequila"
-    category: "Tequila"
+    category: "Spirits"
     variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
     priceSegment: "Premium"
-  - name: "Sierra Silver Tequila"
-    category: "Tequila"
-    variants: ["Blanco", "Cristalino"]
-    priceSegment: "Ultra-Premium"
-  - name: "Summit Vodka"
-    category: "Vodka"
-    variants: ["Original", "Citrus", "Pepper", "Vanilla"]
-    priceSegment: "Premium"
   - name: "Ridgeline Bourbon"
-    category: "Bourbon"
+    category: "Spirits"
     variants: ["Small Batch", "Single Barrel", "Cask Strength"]
     priceSegment: "Premium"
-  - name: "Tradewind Rum"
-    category: "Rum"
-    variants: ["White", "Gold", "Aged", "Spiced"]
-    priceSegment: "Standard"
-  - name: "Compass Gin"
-    category: "Gin"
-    variants: ["London Dry", "Botanical", "Navy Strength"]
+  - name: "Summit Vodka"
+    category: "Spirits"
+    variants: ["Original", "Citrus", "Pepper"]
     priceSegment: "Premium"
-  - name: "Apex RTD"
-    category: "Ready-to-Drink"
-    variants: ["Margarita", "Mojito", "Paloma", "Espresso Martini"]
+  # Grocery
+  - name: "FreshMart"
+    category: "Grocery"
+    variants: ["Organic Produce", "Bakery", "Deli", "Frozen"]
     priceSegment: "Standard"
-  - name: "Crestline Mezcal"
-    category: "Mezcal"
-    variants: ["Joven", "Reposado"]
-    priceSegment: "Ultra-Premium"
+  - name: "Harvest Table"
+    category: "Grocery"
+    variants: ["Fresh Meals", "Meal Kits", "Prepared Foods"]
+    priceSegment: "Premium"
+  # Quick-Serve Restaurants
+  - name: "Apex Grill"
+    category: "Quick-Serve Restaurant"
+    variants: ["Burgers", "Chicken", "Breakfast", "Beverages"]
+    priceSegment: "Standard"
+  - name: "Coastline Tacos"
+    category: "Quick-Serve Restaurant"
+    variants: ["Tacos", "Burritos", "Bowls", "Sides"]
+    priceSegment: "Standard"
+  # Home Improvement
+  - name: "Pinnacle Hardware"
+    category: "Home Improvement"
+    variants: ["Lumber", "Power Tools", "Paint", "Plumbing"]
+    priceSegment: "Standard"
+  - name: "Summit Outdoor"
+    category: "Home Improvement"
+    variants: ["Patio Furniture", "Grills", "Garden", "Landscaping"]
+    priceSegment: "Premium"
+  # Office Supply
+  - name: "ClearDesk"
+    category: "Office Supply"
+    variants: ["Paper Products", "Ink & Toner", "Technology", "Furniture"]
+    priceSegment: "Standard"
+  # Furniture
+  - name: "Urban Living"
+    category: "Furniture"
+    variants: ["Living Room", "Bedroom", "Dining", "Outdoor"]
+    priceSegment: "Premium"
+  - name: "Foundry Home"
+    category: "Furniture"
+    variants: ["Sofas", "Mattresses", "Desks", "Storage"]
+    priceSegment: "Standard"
 regions:
   - "Northeast"
   - "Southeast"

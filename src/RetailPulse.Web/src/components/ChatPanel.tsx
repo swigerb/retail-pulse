@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   Input,
@@ -12,18 +12,16 @@ import {
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChartSpec } from '../types';
 import { sendMessage } from '../services/api';
+import { joinTelemetrySession } from '../services/telemetryHub';
 import { BrandLogo } from './BrandLogo';
-import { ChartRenderer } from './ChartRenderer';
+
+const ChartRenderer = lazy(() => import('./ChartRenderer'));
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   spans?: AgentSpan[];
   charts?: ChartSpec[];
-}
-
-interface Props {
-  // Spans are displayed per-message via SpansSummary; no need to lift them up
 }
 
 const SPAN_ICONS: Record<string, string> = {
@@ -36,6 +34,92 @@ const SPAN_ICONS: Record<string, string> = {
   agent_response: '✅',
 };
 
+// Stable inline-style constants — hoisted so they don't re-allocate per render.
+const FLEX_ONE_STYLE: React.CSSProperties = { flex: 1 };
+const ASSISTANT_AVATAR_STYLE: React.CSSProperties = {
+  backgroundColor: 'var(--brand-primary)',
+  color: 'var(--color-bg-elevated)',
+};
+const ASSISTANT_LOADING_AVATAR_STYLE: React.CSSProperties = {
+  backgroundColor: 'var(--brand-primary)',
+  color: '#fff',
+};
+const SEND_BUTTON_STYLE: React.CSSProperties = {
+  background: 'linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-accent) 100%)',
+  color: '#ffffff',
+};
+const ASSISTANT_AVATAR_ICON = { children: 'R' } as const;
+
+interface PromptCategory {
+  id: string;
+  label: string;
+  emoji: string;
+  prompts: string[];
+}
+
+const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
+  {
+    id: 'general',
+    label: 'General Retail',
+    emoji: '📊',
+    prompts: [
+      'Compare depletion trends across all regions for this quarter',
+      'Which brands are growing fastest year-over-year across the portfolio?',
+      'Show me field sentiment for our top 3 brands in the Southeast',
+    ],
+  },
+  {
+    id: 'grocery',
+    label: 'Grocery',
+    emoji: '🛒',
+    prompts: [
+      'How are FreshMart depletions trending in the Northeast this quarter?',
+      'Compare Harvest Table vs FreshMart sell-through rates by region',
+      'What is the field sentiment for Harvest Table Meal Kits in the Midwest?',
+    ],
+  },
+  {
+    id: 'qsr',
+    label: 'Quick-Serve Restaurants',
+    emoji: '🍔',
+    prompts: [
+      'How is Apex Grill performing in the Southwest this quarter?',
+      'Compare Coastline Tacos vs Apex Grill depletions across all regions',
+      'What is the field sentiment for Coastline Tacos in the West Coast?',
+    ],
+  },
+  {
+    id: 'home-improvement',
+    label: 'Home Improvement',
+    emoji: '🏠',
+    prompts: [
+      'Show me Pinnacle Hardware depletion stats in the Midwest for Q1',
+      'How is Summit Outdoor performing in the Southeast vs West Coast?',
+      'What is the field sentiment for Pinnacle Hardware Power Tools in the Southwest?',
+    ],
+  },
+  {
+    id: 'office-supply',
+    label: 'Office Supply',
+    emoji: '📎',
+    prompts: [
+      'How are ClearDesk depletions trending in the Northeast this quarter?',
+      'Compare ClearDesk Technology vs Paper Products sell-through by region',
+      'What is the field sentiment for ClearDesk in the Southeast?',
+    ],
+  },
+  {
+    id: 'furniture',
+    label: 'Furniture',
+    emoji: '🛋️',
+    prompts: [
+      'Show me Urban Living depletion trends across all regions this quarter',
+      'Compare Foundry Home vs Urban Living performance in the West Coast',
+      'What is the field sentiment for Urban Living in the Pacific Northwest?',
+    ],
+  },
+];
+
 const useSpanStyles = makeStyles({
   summary: {
     marginTop: '6px',
@@ -46,15 +130,15 @@ const useSpanStyles = makeStyles({
     alignItems: 'center',
     gap: '6px',
     fontSize: '11px',
-    color: '#E8A838',
-    backgroundColor: 'rgba(232, 168, 56, 0.12)',
+    color: 'var(--brand-accent)',
+    backgroundColor: 'var(--brand-accent-soft)',
     padding: '5px 12px',
     borderRadius: '20px',
-    border: '1px solid rgba(232, 168, 56, 0.25)',
+    border: '1px solid var(--brand-accent-border)',
     cursor: 'pointer',
     transition: 'background 0.2s ease',
     ':hover': {
-      backgroundColor: 'rgba(232, 168, 56, 0.2)',
+      backgroundColor: 'var(--brand-accent-soft-hover)',
     },
   },
   chevron: {
@@ -66,8 +150,8 @@ const useSpanStyles = makeStyles({
   },
   detail: {
     marginTop: '6px',
-    backgroundColor: '#1A1A1A',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'var(--color-surface)',
+    border: '1px solid var(--color-border)',
     borderRadius: '8px',
     padding: '8px',
     fontSize: '12px',
@@ -80,7 +164,7 @@ const useSpanStyles = makeStyles({
     borderRadius: '4px',
     flexWrap: 'wrap',
     ':hover': {
-      backgroundColor: '#242424',
+      backgroundColor: 'var(--color-surface-hover)',
     },
   },
   spanIcon: {
@@ -88,19 +172,19 @@ const useSpanStyles = makeStyles({
   },
   spanName: {
     fontWeight: '500',
-    color: '#F5F5F0',
+    color: 'var(--color-text)',
     flex: '1',
     minWidth: '0',
   },
   spanDuration: {
     fontFamily: "'Courier New', monospace",
     fontSize: '11px',
-    color: '#A0A0A0',
+    color: 'var(--color-text-muted)',
     flexShrink: '0',
   },
   spanDetail: {
     fontSize: '11px',
-    color: '#666666',
+    color: 'var(--color-text-subtle)',
     flexBasis: '100%',
     paddingLeft: '24px',
     marginTop: '2px',
@@ -123,7 +207,12 @@ function SpansSummary({ spans }: { spans: AgentSpan[] }) {
 
   return (
     <div className={styles.summary}>
-      <button className={styles.toggle} onClick={() => setExpanded(!expanded)}>
+      <button
+        className={styles.toggle}
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Collapse span details' : 'Expand span details'}
+      >
         <span className={styles.spanIcon}>📊</span>
         <span>{summary}</span>
         <span className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ''}`}>
@@ -136,7 +225,7 @@ function SpansSummary({ spans }: { spans: AgentSpan[] }) {
             <div key={i} className={styles.spanRow}>
               <span className={styles.spanIcon}>{SPAN_ICONS[span.type] ?? '📌'}</span>
               <span className={styles.spanName}>{span.name}</span>
-              <span className={styles.spanDuration}>{span.durationMs}ms</span>
+              <span className={styles.spanDuration}>{span.durationMs > 0 ? `${span.durationMs}ms` : '—'}</span>
               {span.detail && <span className={styles.spanDetail}>{span.detail}</span>}
             </div>
           ))}
@@ -151,7 +240,7 @@ const useChatStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    backgroundColor: '#080808',
+    backgroundColor: 'var(--color-bg)',
   },
   messages: {
     flex: '1',
@@ -168,11 +257,14 @@ const useChatStyles = makeStyles({
       background: 'transparent',
     },
     '::-webkit-scrollbar-thumb': {
-      background: 'rgba(200, 169, 81, 0.2)',
+      background: 'var(--color-scrollbar)',
       borderRadius: '3px',
     },
     '::-webkit-scrollbar-thumb:hover': {
-      background: 'rgba(200, 169, 81, 0.35)',
+      background: 'var(--color-scrollbar-hover)',
+    },
+    '@media (max-width: 600px)': {
+      padding: '16px',
     },
   },
   welcome: {
@@ -188,21 +280,60 @@ const useChatStyles = makeStyles({
     marginBottom: '24px',
   },
   welcomeText: {
-    color: '#A0A0A0',
+    color: 'var(--color-text-muted)',
     fontSize: '15px',
     marginBottom: '32px',
   },
   suggestedQueries: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '10px',
-    maxWidth: '640px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    maxWidth: '720px',
     width: '100%',
   },
+  categoryChips: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  categoryChip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-surface)',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '500',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      background: 'var(--brand-accent-soft)',
+      border: '1px solid var(--brand-accent-border)',
+      color: 'var(--brand-accent-light)',
+    },
+  },
+  categoryChipActive: {
+    background: 'var(--brand-accent-soft)',
+    border: '1px solid var(--brand-accent)',
+    color: 'var(--brand-accent)',
+    fontWeight: '600',
+  },
+  promptGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '10px',
+    '@media (max-width: 640px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
   suggestedQuery: {
-    background: '#1A1A1A',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    color: '#A0A0A0',
+    background: 'var(--color-surface)',
+    border: '1px solid var(--color-border)',
+    color: 'var(--color-text-muted)',
     padding: '14px 18px',
     borderRadius: '8px',
     cursor: 'pointer',
@@ -211,9 +342,9 @@ const useChatStyles = makeStyles({
     transition: 'all 0.2s ease',
     lineHeight: '1.4',
     ':hover': {
-      background: '#242424',
-      border: '1px solid rgba(200, 169, 81, 0.2)',
-      color: '#D4B96A',
+      background: 'var(--color-surface-hover)',
+      border: '1px solid var(--brand-accent-soft-hover)',
+      color: 'var(--brand-accent-light)',
       transform: 'translateY(-1px)',
       boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4)',
     },
@@ -222,17 +353,6 @@ const useChatStyles = makeStyles({
       cursor: 'not-allowed',
       transform: 'none',
     },
-  },
-  suggestedHighlight: {
-    border: '1px solid rgba(232, 168, 56, 0.2)',
-    background: 'rgba(232, 168, 56, 0.12)',
-    color: '#F0BC5C',
-    gridColumn: '1 / -1',
-    fontSize: '14px',
-    padding: '16px 20px',
-  },
-  suggestedStar: {
-    color: '#E8A838',
   },
   message: {
     display: 'flex',
@@ -260,104 +380,129 @@ const useChatStyles = makeStyles({
     wordBreak: 'break-word',
   },
   userCard: {
-    background: 'linear-gradient(135deg, #242424 0%, #1A1A1A 100%)',
-    border: '1px solid rgba(200, 169, 81, 0.2)',
-    color: '#F5F5F0',
+    background: 'linear-gradient(135deg, var(--color-surface-hover) 0%, var(--color-surface) 100%)',
+    border: '1px solid var(--brand-accent-soft-hover)',
+    color: 'var(--color-text)',
     borderBottomRightRadius: '4px',
     whiteSpace: 'pre-wrap',
   },
   assistantCard: {
-    background: '#1A1A1A',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    color: '#F5F5F0',
+    background: 'var(--color-surface)',
+    border: '1px solid var(--color-border)',
+    color: 'var(--color-text)',
     borderBottomLeftRadius: '4px',
   },
   inputArea: {
     display: 'flex',
     gap: '10px',
     padding: '16px 24px',
-    backgroundColor: '#0D0D0D',
-    borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'var(--color-bg-elevated)',
+    borderTop: '1px solid var(--color-border)',
+    '@media (max-width: 600px)': {
+      padding: '12px 16px',
+    },
   },
   loadingContainer: {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
     padding: '12px 16px',
-    background: '#1A1A1A',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
+    background: 'var(--color-surface)',
+    border: '1px solid var(--color-border)',
     borderRadius: '12px',
-    color: '#A0A0A0',
+    color: 'var(--color-text-muted)',
     fontSize: '14px',
   },
 });
 
-export function ChatPanel(_props: Props) {
+export function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState<string | undefined>();
+  const [sessionId] = useState<string>(() => crypto.randomUUID().replace(/-/g, ''));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
+
+  // Track mounted state and abort in-flight requests on unmount so async work
+  // doesn't call setState on a torn-down component (e.g. when Dashboard
+  // increments chatKey to start a "New Chat").
+  const isMountedRef = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    // Pre-join the SignalR session group so real-time telemetry works from the first message
+    joinTelemetrySession(sessionId);
+    return () => {
+      isMountedRef.current = false;
+      abortControllerRef.current?.abort();
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
+  const sendChatMessage = useCallback(
+    async (message: string) => {
+      const trimmed = message.trim();
+      if (!trimmed) return;
 
+      // Cancel any prior in-flight request before starting a new one.
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      setMessages(prev => [...prev, { role: 'user', content: trimmed }]);
+      setLoading(true);
+
+      try {
+        const response = await sendMessage(
+          { message: trimmed, sessionId },
+          { signal: controller.signal },
+        );
+        if (!isMountedRef.current || controller.signal.aborted) return;
+        setMessages(prev => [
+          ...prev,
+          { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts },
+        ]);
+      } catch (err) {
+        if (!isMountedRef.current || controller.signal.aborted) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setMessages(prev => [
+          ...prev,
+          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}` },
+        ]);
+      } finally {
+        if (isMountedRef.current && abortControllerRef.current === controller) {
+          setLoading(false);
+          abortControllerRef.current = null;
+        }
+      }
+    },
+    [sessionId],
+  );
+
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || loading) return;
     const userMessage = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
-    setLoading(true);
+    await sendChatMessage(userMessage);
+  }, [input, loading, sendChatMessage]);
 
-    try {
-      const response = await sendMessage({ message: userMessage, sessionId });
-      setSessionId(response.sessionId);
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts }
-      ]);
-    } catch (err) {
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}` }
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleSuggestedClick = useCallback(
+    async (query: string) => {
+      if (loading) return;
+      await sendChatMessage(query);
+    },
+    [loading, sendChatMessage],
+  );
 
-  const handleSuggestedClick = async (query: string) => {
-    if (loading) return;
-    setMessages(prev => [...prev, { role: 'user', content: query }]);
-    setLoading(true);
-    try {
-      const response = await sendMessage({ message: query, sessionId });
-      setSessionId(response.sessionId);
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts }
-      ]);
-    } catch (err) {
-      setMessages(prev => [
-        ...prev,
-        { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}` }
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
-  const suggestedQueries = [
-    { text: "Analyze the shipment pipeline for a top brand in Florida", highlight: true },
-    { text: "How are our premium brands performing in Florida?" },
-    { text: "Compare Angel's Envy performance across New York and Illinois" },
-    { text: "What's the field sentiment for Grey Goose in California?" },
-    { text: "Which brands are growth leaders nationally?" },
-    { text: "Give me a national overview of Cazadores" },
-  ];
+  const visiblePrompts = selectedCategory
+    ? PROMPT_CATEGORIES.filter(c => c.id === selectedCategory)
+    : PROMPT_CATEGORIES;
 
   return (
     <div className={styles.panel}>
@@ -366,20 +511,40 @@ export function ChatPanel(_props: Props) {
           <div className={styles.welcome}>
             <div className={styles.welcomeLogo}><BrandLogo size={56} /></div>
             <Text className={styles.welcomeText}>
-              Ask me about brand performance, depletion trends, or field sentiment across your portfolio.
+              Ask me about sales performance, inventory trends, or customer insights across your retail portfolio.
             </Text>
             <div className={styles.suggestedQueries}>
-              {suggestedQueries.map((q, i) => (
+              <div className={styles.categoryChips}>
                 <button
-                  key={i}
-                  className={`${styles.suggestedQuery} ${q.highlight ? styles.suggestedHighlight : ''}`}
-                  onClick={() => handleSuggestedClick(q.text)}
-                  disabled={loading}
+                  className={`${styles.categoryChip} ${selectedCategory === null ? styles.categoryChipActive : ''}`}
+                  onClick={() => setSelectedCategory(null)}
                 >
-                  {q.highlight && <span className={styles.suggestedStar}>★</span>}
-                  {q.text}
+                  🏪 All
                 </button>
-              ))}
+                {PROMPT_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.id}
+                    className={`${styles.categoryChip} ${selectedCategory === cat.id ? styles.categoryChipActive : ''}`}
+                    onClick={() => setSelectedCategory(cat.id)}
+                  >
+                    {cat.emoji} {cat.label}
+                  </button>
+                ))}
+              </div>
+              <div className={styles.promptGrid}>
+                {visiblePrompts.map((cat) =>
+                  (selectedCategory ? cat.prompts : cat.prompts.slice(0, 1)).map((prompt, i) => (
+                    <button
+                      key={`${cat.id}-${i}`}
+                      className={styles.suggestedQuery}
+                      onClick={() => handleSuggestedClick(prompt)}
+                      disabled={loading}
+                    >
+                      <span>{cat.emoji}</span> {prompt}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -391,13 +556,10 @@ export function ChatPanel(_props: Props) {
           >
             <Avatar
               size={36}
-              color={msg.role === 'user' ? 'colorful' : 'gold'}
+              color={msg.role === 'user' ? 'colorful' : 'brand'}
               name={msg.role === 'user' ? 'User' : 'Retail Pulse'}
-              icon={msg.role === 'user' ? undefined : { children: 'R' }}
-              style={{
-                backgroundColor: msg.role === 'assistant' ? '#1B4D7A' : undefined,
-                color: msg.role === 'assistant' ? '#0D0D0D' : undefined,
-              }}
+              icon={msg.role === 'user' ? undefined : ASSISTANT_AVATAR_ICON}
+              style={msg.role === 'assistant' ? ASSISTANT_AVATAR_STYLE : undefined}
             />
             <div className={styles.messageContent}>
               <Card
@@ -416,7 +578,9 @@ export function ChatPanel(_props: Props) {
                 <SpansSummary spans={msg.spans} />
               )}
               {msg.charts && msg.charts.length > 0 && (
-                <ChartRenderer charts={msg.charts} />
+                <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
+                  <ChartRenderer charts={msg.charts} />
+                </Suspense>
               )}
             </div>
           </div>
@@ -426,10 +590,10 @@ export function ChatPanel(_props: Props) {
           <div className={`${styles.message} ${styles.messageAssistant}`}>
             <Avatar
               size={36}
-              color="gold"
+              color="brand"
               name="Retail Pulse"
-              icon={{ children: 'R' }}
-              style={{ backgroundColor: '#1B4D7A', color: '#fff' }}
+              icon={ASSISTANT_AVATAR_ICON}
+              style={ASSISTANT_LOADING_AVATAR_STYLE}
             />
             <div className={styles.messageContent}>
               <div className={styles.loadingContainer}>
@@ -444,23 +608,25 @@ export function ChatPanel(_props: Props) {
       </div>
 
       <div className={styles.inputArea}>
+        <label htmlFor="chat-input" className="visually-hidden">
+          Ask about retail performance
+        </label>
         <Input
+          id="chat-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Ask about brand performance..."
+          placeholder="Ask about retail performance..."
           disabled={loading}
-          style={{ flex: 1 }}
+          style={FLEX_ONE_STYLE}
         />
         <Button
           appearance="primary"
           icon={<Send24Regular />}
           onClick={handleSend}
           disabled={loading || !input.trim()}
-          style={{
-            background: 'linear-gradient(135deg, #1B4D7A 0%, #E8A838 100%)',
-            color: '#080808',
-          }}
+          aria-label="Send message"
+          style={SEND_BUTTON_STYLE}
         >
           Send
         </Button>

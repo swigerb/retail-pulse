@@ -1,4 +1,4 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.2.3">
+<Project Sdk="Aspire.AppHost.Sdk/13.2.4">
 
   <ItemGroup>
     <ProjectReference Include="..\RetailPulse.Api\RetailPulse.Api.csproj" />
@@ -7,7 +7,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.NodeJs" Version="9.5.2" />
+    <PackageReference Include="Aspire.Hosting.NodeJs" />
   </ItemGroup>
 
   <PropertyGroup>

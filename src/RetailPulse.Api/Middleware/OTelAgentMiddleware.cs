@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using RetailPulse.Api.Hubs;
-using RetailPulse.Api.Models;
+using RetailPulse.Contracts;
 
 namespace RetailPulse.Api.Middleware;
 
@@ -41,24 +41,37 @@ public static class AgentTelemetry
     }
 }
 
+/// <summary>
+/// Collects spans for a single chat session and pushes them to SignalR
+/// clients that have joined the matching session group. Spans are NOT
+/// broadcast to all clients (security: telemetry can contain prompt text
+/// and tool arguments).
+/// </summary>
 public class TelemetryCollector
 {
     private readonly IHubContext<TelemetryHub> _hubContext;
+    private readonly string? _sessionId;
     private readonly List<AgentSpan> _spans = new();
 
-    public TelemetryCollector(IHubContext<TelemetryHub> hubContext)
+    public TelemetryCollector(IHubContext<TelemetryHub> hubContext, string? sessionId = null)
     {
         _hubContext = hubContext;
+        _sessionId = sessionId;
     }
 
     public IReadOnlyList<AgentSpan> Spans => _spans;
 
     public async Task RecordSpanAsync(string name, string type, string detail, double durationMs)
     {
-        var span = new AgentSpan(name, type, detail, durationMs, DateTimeOffset.UtcNow);
+        var span = new AgentSpan(name, type, detail, durationMs, DateTimeOffset.UtcNow, _sessionId);
         _spans.Add(span);
 
-        // Push to connected clients in real-time
-        await _hubContext.Clients.All.SendAsync("SpanReceived", span);
+        // Push to clients that joined this session group. If no session is
+        // associated with this collector (legacy callers / tests) fall back
+        // to the caller-only channel rather than broadcasting to everyone.
+        if (!string.IsNullOrEmpty(_sessionId))
+        {
+            await _hubContext.Clients.Group(_sessionId).SendAsync("SpanReceived", span);
+        }
     }
 }

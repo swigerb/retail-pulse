@@ -1,12 +1,15 @@
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import { Dashboard } from './components/Dashboard';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 
 function App() {
   return (
-    <FluentProvider theme={teamsDarkTheme}>
-      <Dashboard />
-    </FluentProvider>
+    <ErrorBoundary>
+      <FluentProvider theme={teamsDarkTheme}>
+        <Dashboard />
+      </FluentProvider>
+    </ErrorBoundary>
   );
 }
 

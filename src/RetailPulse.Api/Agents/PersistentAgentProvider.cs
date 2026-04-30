@@ -1,6 +1,4 @@
 using Azure.AI.Agents.Persistent;
-using Azure.AI.Projects;
-using Azure.Identity;
 
 namespace RetailPulse.Api.Agents;
 

@@ -1,18 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;800;900&display=swap');
-
-@font-face {
-  font-family: 'Algerian';
-  src: local('Algerian');
-  font-weight: normal;
-  font-style: normal;
-}
+/* Clean sans-serif typography — no custom font imports needed */
 
 :root {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #F5F5F0;
-  background-color: #0D0D0D;
+  color: var(--color-text, #F5F5F0);
+  background-color: var(--color-bg-elevated, #0D0D0D);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;

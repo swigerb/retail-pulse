@@ -21,6 +21,11 @@ public class SimulatedMetricsData
 
     public object GetDepletionStats(string brand, string region, string period)
     {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+
         var key = (brand.Trim(), region.Trim());
 
         if (!_depletionData.TryGetValue(key, out var record))
@@ -66,6 +71,11 @@ public class SimulatedMetricsData
 
     public object GetShipmentStats(string brand, string region, string period)
     {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+
         var key = (brand.Trim(), region.Trim());
 
         if (!_shipmentData.TryGetValue(key, out var record))
@@ -121,6 +131,11 @@ public class SimulatedMetricsData
 
     public object GetFieldSentiment(string brand, string region)
     {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+
         var key = (brand.Trim(), region.Trim());
 
         if (!_sentimentData.TryGetValue(key, out var sentimentRecord))
@@ -154,10 +169,8 @@ public class SimulatedMetricsData
     private Dictionary<(string Brand, string Region), DepletionRecord> GenerateDepletionData()
     {
         var data = new Dictionary<(string Brand, string Region), DepletionRecord>(StringTupleComparer.Instance);
-        var rng = new Random(42); // seeded for consistency
 
         var statuses = new[] { "On Track", "Growth Leader", "Declining", "Overstocked" };
-        var statusWeights = new[] { 0.40, 0.25, 0.20, 0.15 }; // cumulative: 0.40, 0.65, 0.85, 1.0
 
         foreach (var brand in _tenant.Brands)
         {
@@ -178,7 +191,7 @@ public class SimulatedMetricsData
                 var inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - depletionGrowth * 0.3 + regionRng.NextDouble() * 3.0), 1);
 
                 // Status based on metrics
-                var status = DetermineDepletionStatus(depletionGrowth, sellThroughGrowth, inventoryWeeks, regionRng);
+                var status = DetermineDepletionStatus(depletionGrowth, sellThroughGrowth, inventoryWeeks);
 
                 var summary = GenerateDepletionSummary(brand, region, depletionGrowth, sellThroughGrowth, inventoryWeeks, status, regionRng);
 
@@ -223,9 +236,9 @@ public class SimulatedMetricsData
                 var casesShipped = baseCases + (int)(baseCases * shipmentGrowth / 100.0);
                 var casesDepleted = baseCases + (int)(baseCases * depletionGrowth / 100.0);
 
-                var (anomalyType, riskLevel) = DetermineAnomalyType(shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks, regionRng);
+                var (anomalyType, riskLevel) = DetermineAnomalyType(shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks);
 
-                var analysis = GenerateShipmentAnalysis(brand, region, shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks, casesShipped, casesDepleted, anomalyType, riskLevel, regionRng);
+                var analysis = GenerateShipmentAnalysis(brand, region, shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks, casesShipped, casesDepleted, anomalyType);
 
                 data[(brand.Name, region)] = new ShipmentRecord(
                     FormatPercentage(shipmentGrowth),
@@ -291,7 +304,7 @@ public class SimulatedMetricsData
         return Math.Round(categoryBoost + segmentBoost, 1);
     }
 
-    private static string DetermineDepletionStatus(double depletionGrowth, double sellThroughGrowth, double inventoryWeeks, Random rng)
+    private static string DetermineDepletionStatus(double depletionGrowth, double sellThroughGrowth, double inventoryWeeks)
     {
         if (inventoryWeeks > 8.5 && sellThroughGrowth < 0) return "Overstocked";
         if (depletionGrowth > 6.0 && sellThroughGrowth > 4.0) return "Growth Leader";
@@ -300,7 +313,7 @@ public class SimulatedMetricsData
     }
 
     private static (string AnomalyType, string RiskLevel) DetermineAnomalyType(
-        double shipmentGrowth, double sellThroughGrowth, double depletionGrowth, double inventoryWeeks, Random rng)
+        double shipmentGrowth, double sellThroughGrowth, double depletionGrowth, double inventoryWeeks)
     {
         var gap = shipmentGrowth - sellThroughGrowth;
 
@@ -327,7 +340,6 @@ public class SimulatedMetricsData
     private string GenerateDepletionSummary(BrandConfig brand, string region,
         double depletionGrowth, double sellThroughGrowth, double inventoryWeeks, string status, Random rng)
     {
-        var company = _tenant.Company;
         var variants = brand.Variants.Count > 0 ? brand.Variants[rng.Next(brand.Variants.Count)] : "core";
 
         return status switch
@@ -353,7 +365,7 @@ public class SimulatedMetricsData
     private string GenerateShipmentAnalysis(BrandConfig brand, string region,
         double shipmentGrowth, double sellThroughGrowth, double depletionGrowth,
         double inventoryWeeks, int casesShipped, int casesDepleted,
-        string anomalyType, string riskLevel, Random rng)
+        string anomalyType)
     {
         var gap = casesShipped - casesDepleted;
         var model = _tenant.Distribution?.Model ?? "Three-Tier";
@@ -387,7 +399,6 @@ public class SimulatedMetricsData
 
     private string GenerateFieldSentiment(BrandConfig brand, string region, double baseTrend, Random rng)
     {
-        var company = _tenant.Company;
         var variantList = string.Join(", ", brand.Variants.Take(3));
         var channel = _tenant.Channels.Count > 0 ? _tenant.Channels[rng.Next(_tenant.Channels.Count)] : "retail";
 
@@ -500,5 +511,7 @@ internal sealed class StringTupleComparer : IEqualityComparer<(string Brand, str
         string.Equals(x.Brand, y.Brand, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(x.Region, y.Region, StringComparison.OrdinalIgnoreCase);
     public int GetHashCode((string Brand, string Region) obj) =>
-        HashCode.Combine(obj.Brand.ToUpperInvariant(), obj.Region.ToUpperInvariant());
+        HashCode.Combine(
+            StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Brand),
+            StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Region));
 }

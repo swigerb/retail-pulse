@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   ResponsiveContainer,
   LineChart, Line,
@@ -8,18 +9,21 @@ import {
 import { Card, makeStyles } from '@fluentui/react-components';
 import type { ChartSpec, ChartSeries } from '../types';
 
-const BRAND_COLORS = ['#1B4D7A', '#E8A838', '#4682B4', '#2E8B57', '#2A6BA0', '#F0BC5C', '#5F9EA0', '#D2691E'];
+const BRAND_COLORS = ['#1565C0', '#42A5F5', '#4682B4', '#2E8B57', '#1E88E5', '#64B5F6', '#5F9EA0', '#0D47A1'];
+
+const AXIS_TICK_STYLE = { fill: '#A0A0A0', fontSize: 12 } as const;
+const LEGEND_WRAPPER_STYLE = { color: '#A0A0A0', fontSize: 12 } as const;
 
 const useStyles = makeStyles({
   chartCard: {
     marginTop: '12px',
     padding: '20px',
-    backgroundColor: '#111111',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'var(--color-surface-alt)',
+    border: '1px solid var(--color-border)',
     borderRadius: '12px',
   },
   chartTitle: {
-    color: '#E8A838',
+    color: 'var(--brand-accent)',
     fontSize: '15px',
     fontWeight: '600',
     marginBottom: '16px',
@@ -31,18 +35,18 @@ const useStyles = makeStyles({
     width: '100%',
     borderCollapse: 'collapse',
     fontSize: '13px',
-    color: '#F5F5F0',
+    color: 'var(--color-text)',
   },
   th: {
     textAlign: 'left',
     padding: '8px 12px',
-    borderBottom: '1px solid rgba(255,255,255,0.15)',
-    color: '#E8A838',
+    borderBottom: '1px solid var(--color-border-strong)',
+    color: 'var(--brand-accent)',
     fontWeight: '600',
   },
   td: {
     padding: '6px 12px',
-    borderBottom: '1px solid rgba(255,255,255,0.06)',
+    borderBottom: '1px solid var(--color-border-faint)',
   },
   gaugeContainer: {
     display: 'flex',
@@ -53,8 +57,8 @@ const useStyles = makeStyles({
 });
 
 const tooltipStyle = {
-  contentStyle: { backgroundColor: '#1A1A1A', border: '1px solid rgba(232,168,56,0.3)', borderRadius: 8, color: '#F5F5F0', fontSize: 13 },
-  labelStyle: { color: '#E8A838' },
+  contentStyle: { backgroundColor: '#1A1A1A', border: '1px solid rgba(66,165,245,0.3)', borderRadius: 8, color: '#F5F5F0', fontSize: 13 },
+  labelStyle: { color: '#42A5F5' },
   itemStyle: { color: '#F5F5F0' },
 };
 
@@ -74,15 +78,15 @@ function seriesColor(s: ChartSeries, i: number) {
 }
 
 function RenderLineChart({ spec }: { spec: ChartSpec }) {
-  const rows = toRowData(spec.data);
+  const rows = useMemo(() => toRowData(spec.data), [spec.data]);
   return (
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={rows}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-        <XAxis dataKey="x" tick={{ fill: '#A0A0A0', fontSize: 12 }} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: -5 } : undefined} />
-        <YAxis tick={{ fill: '#A0A0A0', fontSize: 12 }} label={spec.yAxisTitle ? { value: spec.yAxisTitle, fill: '#A0A0A0', angle: -90, position: 'insideLeft' } : undefined} />
+        <XAxis dataKey="x" tick={AXIS_TICK_STYLE} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: -5 } : undefined} />
+        <YAxis tick={AXIS_TICK_STYLE} label={spec.yAxisTitle ? { value: spec.yAxisTitle, fill: '#A0A0A0', angle: -90, position: 'insideLeft' } : undefined} />
         <Tooltip {...tooltipStyle} />
-        {spec.data.length > 1 && <Legend wrapperStyle={{ color: '#A0A0A0', fontSize: 12 }} />}
+        {spec.data.length > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
         {spec.data.map((s, i) => (
           <Line key={s.legend} type="monotone" dataKey={s.legend} stroke={seriesColor(s, i)} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
         ))}
@@ -92,15 +96,15 @@ function RenderLineChart({ spec }: { spec: ChartSpec }) {
 }
 
 function RenderBarChart({ spec, stacked }: { spec: ChartSpec; stacked?: boolean }) {
-  const rows = toRowData(spec.data);
+  const rows = useMemo(() => toRowData(spec.data), [spec.data]);
   return (
     <ResponsiveContainer width="100%" height={300}>
       <BarChart data={rows}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-        <XAxis dataKey="x" tick={{ fill: '#A0A0A0', fontSize: 12 }} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: -5 } : undefined} />
-        <YAxis tick={{ fill: '#A0A0A0', fontSize: 12 }} label={spec.yAxisTitle ? { value: spec.yAxisTitle, fill: '#A0A0A0', angle: -90, position: 'insideLeft' } : undefined} />
+        <XAxis dataKey="x" tick={AXIS_TICK_STYLE} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: -5 } : undefined} />
+        <YAxis tick={AXIS_TICK_STYLE} label={spec.yAxisTitle ? { value: spec.yAxisTitle, fill: '#A0A0A0', angle: -90, position: 'insideLeft' } : undefined} />
         <Tooltip {...tooltipStyle} />
-        {spec.data.length > 1 && <Legend wrapperStyle={{ color: '#A0A0A0', fontSize: 12 }} />}
+        {spec.data.length > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
         {spec.data.map((s, i) => (
           <Bar key={s.legend} dataKey={s.legend} fill={seriesColor(s, i)} stackId={stacked ? 'stack' : undefined} />
         ))}
@@ -110,15 +114,15 @@ function RenderBarChart({ spec, stacked }: { spec: ChartSpec; stacked?: boolean 
 }
 
 function RenderHorizontalBarChart({ spec }: { spec: ChartSpec }) {
-  const rows = toRowData(spec.data);
+  const rows = useMemo(() => toRowData(spec.data), [spec.data]);
   return (
     <ResponsiveContainer width="100%" height={Math.max(300, rows.length * 40)}>
       <BarChart data={rows} layout="vertical">
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-        <XAxis type="number" tick={{ fill: '#A0A0A0', fontSize: 12 }} />
-        <YAxis type="category" dataKey="x" tick={{ fill: '#A0A0A0', fontSize: 12 }} width={120} />
+        <XAxis type="number" tick={AXIS_TICK_STYLE} />
+        <YAxis type="category" dataKey="x" tick={AXIS_TICK_STYLE} width={120} />
         <Tooltip {...tooltipStyle} />
-        {spec.data.length > 1 && <Legend wrapperStyle={{ color: '#A0A0A0', fontSize: 12 }} />}
+        {spec.data.length > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
         {spec.data.map((s, i) => (
           <Bar key={s.legend} dataKey={s.legend} fill={seriesColor(s, i)} />
         ))}
@@ -128,11 +132,14 @@ function RenderHorizontalBarChart({ spec }: { spec: ChartSpec }) {
 }
 
 function RenderPieChart({ spec, donut }: { spec: ChartSpec; donut?: boolean }) {
-  const entries = spec.data[0]?.values.map((v, i) => ({
-    name: v.x,
-    value: v.y,
-    fill: spec.data[0].color || BRAND_COLORS[i % BRAND_COLORS.length],
-  })) ?? [];
+  const entries = useMemo(
+    () => spec.data[0]?.values.map((v, i) => ({
+      name: v.x,
+      value: v.y,
+      fill: spec.data[0]?.color || BRAND_COLORS[i % BRAND_COLORS.length],
+    })) ?? [],
+    [spec.data],
+  );
   return (
     <ResponsiveContainer width="100%" height={300}>
       <PieChart>
@@ -152,7 +159,7 @@ function RenderPieChart({ spec, donut }: { spec: ChartSpec; donut?: boolean }) {
           ))}
         </Pie>
         <Tooltip {...tooltipStyle} />
-        <Legend wrapperStyle={{ color: '#A0A0A0', fontSize: 12 }} />
+        <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />
       </PieChart>
     </ResponsiveContainer>
   );
@@ -164,11 +171,19 @@ function RenderGauge({ spec }: { spec: ChartSpec }) {
   const label = spec.data[0]?.values[0]?.x ?? '';
   const pct = Math.min(100, Math.max(0, value));
   const angle = (pct / 100) * 180;
+  const accessibleLabel = `${spec.title}${label ? ` — ${label}` : ''}: ${value} percent`;
   return (
     <div className={styles.gaugeContainer}>
-      <svg width={220} height={130} viewBox="0 0 220 130">
+      <svg
+        width={220}
+        height={130}
+        viewBox="0 0 220 130"
+        role="img"
+        aria-label={accessibleLabel}
+      >
+        <title>{accessibleLabel}</title>
         <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={16} strokeLinecap="round" />
-        <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="#E8A838" strokeWidth={16} strokeLinecap="round"
+        <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="#42A5F5" strokeWidth={16} strokeLinecap="round"
           strokeDasharray={`${(angle / 180) * 283} 283`} />
         <text x="110" y="100" textAnchor="middle" fill="#F5F5F0" fontSize="28" fontWeight="bold">{value}%</text>
         <text x="110" y="122" textAnchor="middle" fill="#A0A0A0" fontSize="12">{label}</text>
@@ -179,14 +194,20 @@ function RenderGauge({ spec }: { spec: ChartSpec }) {
 
 function RenderTable({ spec }: { spec: ChartSpec }) {
   const styles = useStyles();
-  const headers = spec.data.map(s => s.legend);
-  const xValues = [...new Set(spec.data.flatMap(s => s.values.map(v => v.x)))];
-  const lookup = new Map<string, Map<string, number>>();
-  for (const s of spec.data) {
-    const m = new Map<string, number>();
-    for (const v of s.values) m.set(v.x, v.y);
-    lookup.set(s.legend, m);
-  }
+  const headers = useMemo(() => spec.data.map(s => s.legend), [spec.data]);
+  const xValues = useMemo(
+    () => [...new Set(spec.data.flatMap(s => s.values.map(v => v.x)))],
+    [spec.data],
+  );
+  const lookup = useMemo(() => {
+    const m = new Map<string, Map<string, number>>();
+    for (const s of spec.data) {
+      const inner = new Map<string, number>();
+      for (const v of s.values) inner.set(v.x, v.y);
+      m.set(s.legend, inner);
+    }
+    return m;
+  }, [spec.data]);
   return (
     <div className={styles.tableWrapper}>
       <table className={styles.table}>
@@ -251,7 +272,7 @@ function SingleChart({ spec }: { spec: ChartSpec }) {
   );
 }
 
-export function ChartRenderer({ charts }: { charts: ChartSpec[] }) {
+export default function ChartRenderer({ charts }: { charts: ChartSpec[] }) {
   return (
     <>
       {charts.map((spec, i) => (
