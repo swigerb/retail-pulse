@@ -168,29 +168,8 @@ tool added to the agent must log first, then fall back.
 
 ### Local Development
 
-```
-dotnet run --project src/RetailPulse.AppHost
-  └── Launches:
-      ├── RetailPulse.Api (:5100)
-      ├── RetailPulse.McpServer (:5200)
-      ├── RetailPulse.Web (:5173)
-      └── Aspire Dashboard (dynamic port)
-```
+![Local Development Topology](deployment-local.png)
 
 ### Azure Production (Target)
 
-```
-Azure Container Apps Environment
-├── RetailPulse.Api (Container App)
-├── RetailPulse.McpServer (Container App)
-├── RetailPulse.Web (Static Web App or Container App)
-│
-├── Azure API Management (AI Gateway)
-│   └── OpenAI backend with policies
-│
-├── Azure Monitor / Application Insights
-│   └── OTLP exporter target
-│
-└── Azure Key Vault
-    └── OpenAI keys, connection strings
-```
+![Azure Production Topology](deployment-azure.png)
