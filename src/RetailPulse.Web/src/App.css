@@ -5,10 +5,10 @@
 
 :root {
   /* Brand palette */
-  --brand-primary: #1B4D7A;
-  --brand-primary-light: #2A6BA0;
-  --brand-accent: #E8A838;
-  --brand-accent-light: #F0BC5C;
+  --brand-primary: #1565C0;
+  --brand-primary-light: #1E88E5;
+  --brand-accent: #42A5F5;
+  --brand-accent-light: #64B5F6;
   --brand-deep-black: #080808;
 
   /* Semantic surface tokens */
@@ -29,14 +29,14 @@
   --color-border-faint: rgba(255, 255, 255, 0.06);
 
   /* Accent transparency tokens */
-  --brand-accent-soft: rgba(232, 168, 56, 0.12);
-  --brand-accent-soft-hover: rgba(232, 168, 56, 0.2);
-  --brand-accent-border: rgba(232, 168, 56, 0.25);
-  --brand-accent-border-faint: rgba(232, 168, 56, 0.15);
+  --brand-accent-soft: rgba(66, 165, 245, 0.12);
+  --brand-accent-soft-hover: rgba(66, 165, 245, 0.2);
+  --brand-accent-border: rgba(66, 165, 245, 0.25);
+  --brand-accent-border-faint: rgba(66, 165, 245, 0.15);
 
   /* Scrollbar tokens */
-  --color-scrollbar: rgba(232, 168, 56, 0.2);
-  --color-scrollbar-hover: rgba(232, 168, 56, 0.35);
+  --color-scrollbar: rgba(66, 165, 245, 0.2);
+  --color-scrollbar-hover: rgba(66, 165, 245, 0.35);
 }
 
 * {
@@ -211,10 +211,10 @@ body {
 }
 
 .brand-name {
-  font-family: 'Algerian', 'Playfair Display', serif;
-  font-weight: 400;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-weight: 600;
   font-size: 22px;
   color: var(--color-text);
-  letter-spacing: 3px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
 }

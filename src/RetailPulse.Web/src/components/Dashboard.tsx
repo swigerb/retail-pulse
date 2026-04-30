@@ -40,7 +40,7 @@ const useStyles = makeStyles({
     gap: '16px',
   },
   headerTagline: {
-    fontFamily: "'Algerian', 'Playfair Display', serif",
+    fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
     fontSize: '13px',
     color: 'var(--color-text-muted)',
     letterSpacing: '0.5px',
@@ -140,7 +140,6 @@ export function Dashboard() {
           <DrawerBody>
             <TelemetryPanel
               resetKey={chatKey}
-              onClose={() => setTelemetryOpen(false)}
             />
           </DrawerBody>
         </Drawer>

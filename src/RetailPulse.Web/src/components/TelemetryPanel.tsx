@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button, Text, Badge, makeStyles } from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
 import type { AgentSpan } from '../types';
 import { SpanTimeline } from './SpanTimeline';
 import { connectTelemetryHub, disconnectTelemetryHub } from '../services/telemetryHub';
 
 interface Props {
   resetKey?: number;
-  onClose?: () => void;
 }
 
 const MAX_RETAINED_SPANS = 500;
@@ -19,24 +17,6 @@ const useStyles = makeStyles({
     height: '100%',
     backgroundColor: 'var(--color-bg-elevated)',
     overflow: 'hidden',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '16px 20px',
-    borderBottom: '1px solid var(--color-border)',
-    flexShrink: '0',
-  },
-  headerTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    color: 'var(--color-text)',
-  },
-  headerActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
   },
   stats: {
     display: 'flex',
@@ -86,7 +66,7 @@ const useStyles = makeStyles({
   },
 });
 
-export function TelemetryPanel({ resetKey, onClose }: Props) {
+export function TelemetryPanel({ resetKey }: Props) {
   const [connected, setConnected] = useState(false);
   const [liveSpans, setLiveSpans] = useState<AgentSpan[]>([]);
   const prevResetKey = useRef(resetKey);
@@ -122,27 +102,16 @@ export function TelemetryPanel({ resetKey, onClose }: Props) {
 
   return (
     <div className={styles.panel}>
-      <div className={styles.header}>
-        <Text className={styles.headerTitle}>📡 Real-Time Telemetry</Text>
-        <div className={styles.headerActions}>
+      <div className={styles.stats}>
+        <div className={styles.stat}>
           <Badge
             appearance="filled"
             color={connected ? 'success' : 'danger'}
           >
             {connected ? '🟢 Live' : '🔴 Disconnected'}
           </Badge>
-          {onClose && (
-            <Button
-              appearance="subtle"
-              icon={<Dismiss24Regular />}
-              onClick={onClose}
-              aria-label="Close telemetry panel"
-            />
-          )}
+          <Text className={styles.statLabel}>Status</Text>
         </div>
-      </div>
-
-      <div className={styles.stats}>
         <div className={styles.stat}>
           <Text className={styles.statValue}>{liveSpans.length}</Text>
           <Text className={styles.statLabel}>Spans</Text>

@@ -46,7 +46,7 @@ export class ErrorBoundary extends Component<Props, State> {
             gap: '16px',
           }}
         >
-          <h1 style={{ color: 'var(--brand-accent, #E8A838)', margin: 0 }}>
+          <h1 style={{ color: 'var(--brand-accent, #42A5F5)', margin: 0 }}>
             Something went wrong
           </h1>
           <p style={{ color: 'var(--color-text-muted, #A0A0A0)', maxWidth: 480 }}>
@@ -73,9 +73,9 @@ export class ErrorBoundary extends Component<Props, State> {
             style={{
               padding: '8px 20px',
               borderRadius: 6,
-              border: '1px solid var(--brand-accent, #E8A838)',
+              border: '1px solid var(--brand-accent, #42A5F5)',
               background: 'transparent',
-              color: 'var(--brand-accent, #E8A838)',
+              color: 'var(--brand-accent, #42A5F5)',
               cursor: 'pointer',
               fontSize: 14,
             }}

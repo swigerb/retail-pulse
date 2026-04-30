@@ -1,12 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;800;900&display=swap');
-/* index.html includes <link rel="preconnect" ...> hints for fonts.googleapis.com / fonts.gstatic.com to speed this up. */
-
-@font-face {
-  font-family: 'Algerian';
-  src: local('Algerian');
-  font-weight: normal;
-  font-style: normal;
-}
+/* Clean sans-serif typography — no custom font imports needed */
 
 :root {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
