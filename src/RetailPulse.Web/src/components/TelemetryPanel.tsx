@@ -1,46 +1,28 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button, Text, Badge, makeStyles } from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
 import type { AgentSpan } from '../types';
 import { SpanTimeline } from './SpanTimeline';
 import { connectTelemetryHub, disconnectTelemetryHub } from '../services/telemetryHub';
 
 interface Props {
   resetKey?: number;
-  onClose?: () => void;
 }
+
+const MAX_RETAINED_SPANS = 500;
 
 const useStyles = makeStyles({
   panel: {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    backgroundColor: '#0D0D0D',
+    backgroundColor: 'var(--color-bg-elevated)',
     overflow: 'hidden',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '16px 20px',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-    flexShrink: '0',
-  },
-  headerTitle: {
-    fontSize: '16px',
-    fontWeight: '600',
-    color: '#F5F5F0',
-  },
-  headerActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
   },
   stats: {
     display: 'flex',
     gap: '1px',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'var(--color-border)',
+    borderBottom: '1px solid var(--color-border)',
     flexShrink: '0',
   },
   stat: {
@@ -49,17 +31,17 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     alignItems: 'center',
     padding: '14px 8px',
-    backgroundColor: '#0D0D0D',
+    backgroundColor: 'var(--color-bg-elevated)',
     gap: '2px',
   },
   statValue: {
     fontSize: '20px',
     fontWeight: '700',
-    color: '#E8A838',
+    color: 'var(--brand-accent)',
   },
   statLabel: {
     fontSize: '10px',
-    color: '#666666',
+    color: 'var(--color-text-subtle)',
     textTransform: 'uppercase',
     letterSpacing: '1px',
   },
@@ -74,7 +56,7 @@ const useStyles = makeStyles({
       background: 'transparent',
     },
     '::-webkit-scrollbar-thumb': {
-      background: 'rgba(255, 255, 255, 0.1)',
+      background: 'var(--color-border)',
       borderRadius: '2px',
     },
   },
@@ -84,7 +66,7 @@ const useStyles = makeStyles({
   },
 });
 
-export function TelemetryPanel({ resetKey, onClose }: Props) {
+export function TelemetryPanel({ resetKey }: Props) {
   const [connected, setConnected] = useState(false);
   const [liveSpans, setLiveSpans] = useState<AgentSpan[]>([]);
   const prevResetKey = useRef(resetKey);
@@ -92,7 +74,13 @@ export function TelemetryPanel({ resetKey, onClose }: Props) {
 
   useEffect(() => {
     connectTelemetryHub(
-      (span) => setLiveSpans(prev => [...prev, span]),
+      (span) => setLiveSpans(prev => {
+        const next = [...prev, span];
+        if (next.length > MAX_RETAINED_SPANS) {
+          return next.slice(next.length - MAX_RETAINED_SPANS);
+        }
+        return next;
+      }),
       () => setConnected(true),
       () => setConnected(false),
     );
@@ -114,26 +102,16 @@ export function TelemetryPanel({ resetKey, onClose }: Props) {
 
   return (
     <div className={styles.panel}>
-      <div className={styles.header}>
-        <Text className={styles.headerTitle}>📡 Real-Time Telemetry</Text>
-        <div className={styles.headerActions}>
+      <div className={styles.stats}>
+        <div className={styles.stat}>
           <Badge
             appearance="filled"
             color={connected ? 'success' : 'danger'}
           >
             {connected ? '🟢 Live' : '🔴 Disconnected'}
           </Badge>
-          {onClose && (
-            <Button
-              appearance="subtle"
-              icon={<Dismiss24Regular />}
-              onClick={onClose}
-            />
-          )}
+          <Text className={styles.statLabel}>Status</Text>
         </div>
-      </div>
-
-      <div className={styles.stats}>
         <div className={styles.stat}>
           <Text className={styles.statValue}>{liveSpans.length}</Text>
           <Text className={styles.statLabel}>Spans</Text>

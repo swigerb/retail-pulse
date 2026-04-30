@@ -6,6 +6,9 @@ using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Tools;
 using RetailPulse.Contracts;
+using ChatRequest = RetailPulse.Contracts.ChatRequest;
+using ChatResponse = RetailPulse.Contracts.ChatResponse;
+using AgentSpan = RetailPulse.Contracts.AgentSpan;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -33,10 +36,10 @@ public class RetailPulseAgent
         _logger = logger;
     }
 
-    public async Task<Models.ChatResponse> ChatAsync(ChatRequest request, CancellationToken ct = default)
+    public async Task<ChatResponse> ChatAsync(ChatRequest request, CancellationToken ct = default)
     {
-        var collector = new TelemetryCollector(_hubContext);
         var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+        var collector = new TelemetryCollector(_hubContext, sessionId);
 
         // Build chat options with tools
         var chatOptions = new ChatOptions
@@ -116,7 +119,7 @@ public class RetailPulseAgent
         _logger.LogInformation("Agent responded in {DurationMs}ms with {SpanCount} spans and {ChartCount} charts",
             sw.ElapsedMilliseconds, collector.Spans.Count, charts.Count);
 
-        return new Models.ChatResponse(reply, sessionId, collector.Spans.ToList(), charts.Any() ? charts : null);
+        return new ChatResponse(reply, sessionId, collector.Spans.ToList(), charts.Any() ? charts : null);
     }
 
     private static List<ChartSpec> ExtractChartSpecs(Microsoft.Extensions.AI.ChatResponse chatResponse)

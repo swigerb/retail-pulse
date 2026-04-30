@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 using Moq;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
-using RetailPulse.Api.Models;
+using RetailPulse.Contracts;
 
 namespace RetailPulse.Tests;
 
@@ -14,10 +14,8 @@ public class TelemetryCollectorTests
     public TelemetryCollectorTests()
     {
         var mockHubContext = new Mock<IHubContext<TelemetryHub>>();
-        var mockClients = new Mock<IHubClients>();
-        var mockClientProxy = new Mock<IClientProxy>();
-        mockClients.Setup(c => c.All).Returns(mockClientProxy.Object);
-        mockHubContext.Setup(h => h.Clients).Returns(mockClients.Object);
+        // No sessionId is supplied — collector should accumulate spans
+        // locally without pushing to any SignalR group.
         _collector = new TelemetryCollector(mockHubContext.Object);
     }
 
@@ -60,19 +58,37 @@ public class TelemetryCollectorTests
     }
 
     [Fact]
-    public async Task RecordSpanAsync_PushesToSignalRClients()
+    public async Task RecordSpanAsync_WithSessionId_PushesToSignalRGroup()
+    {
+        const string sessionId = "session-123";
+        var mockHubContext = new Mock<IHubContext<TelemetryHub>>();
+        var mockClients = new Mock<IHubClients>();
+        var mockGroupProxy = new Mock<IClientProxy>();
+        mockClients.Setup(c => c.Group(sessionId)).Returns(mockGroupProxy.Object);
+        mockHubContext.Setup(h => h.Clients).Returns(mockClients.Object);
+
+        var collector = new TelemetryCollector(mockHubContext.Object, sessionId);
+        await collector.RecordSpanAsync("test", "thought", "detail", 5.0);
+
+        mockGroupProxy.Verify(
+            x => x.SendCoreAsync("SpanReceived", It.IsAny<object?[]>(), default),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RecordSpanAsync_WithoutSessionId_DoesNotPushToSignalR()
     {
         var mockHubContext = new Mock<IHubContext<TelemetryHub>>();
         var mockClients = new Mock<IHubClients>();
-        var mockClientProxy = new Mock<IClientProxy>();
-        mockClients.Setup(c => c.All).Returns(mockClientProxy.Object);
+        var mockGroupProxy = new Mock<IClientProxy>();
+        mockClients.Setup(c => c.Group(It.IsAny<string>())).Returns(mockGroupProxy.Object);
         mockHubContext.Setup(h => h.Clients).Returns(mockClients.Object);
 
         var collector = new TelemetryCollector(mockHubContext.Object);
         await collector.RecordSpanAsync("test", "thought", "detail", 5.0);
 
-        mockClientProxy.Verify(
-            x => x.SendCoreAsync("SpanReceived", It.IsAny<object?[]>(), default),
-            Times.Once);
+        mockGroupProxy.Verify(
+            x => x.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), default),
+            Times.Never);
     }
 }

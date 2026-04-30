@@ -52,9 +52,9 @@ git clone https://github.com/swigerb/retail-pulse.git
 cd retail-pulse
 ```
 
-### 2. Configure tenant.yaml (or use the included Apex Brands sample)
+### 2. Configure tenant.yaml (or use the included Apex Retail Group sample)
 
-The repo ships with a sample `tenant.yaml` for **Apex Brands**, a fictional spirits company. To customize for your own brand, see the [Tenant Configuration Guide](docs/tenant-configuration.md).
+The repo ships with a sample `tenant.yaml` for **Apex Retail Group**, a fictional multi-category retail conglomerate with 12 brands across 6 categories. To customize for your own brand, see the [Tenant Configuration Guide](docs/tenant-configuration.md).
 
 ### 3. Set up Azure OpenAI credentials
 
@@ -81,11 +81,30 @@ dotnet run --project src/RetailPulse.AppHost
 
 Navigate to [http://localhost:5173](http://localhost:5173) and start asking questions!
 
-**Try these queries (using the Apex Brands sample tenant):**
+**Try these queries (using the Apex Retail Group sample tenant):**
+
+**🥃 Spirits:**
 - *"How is Sierra Gold Tequila performing in the Northeast?"*
-- *"Analyze the shipment pipeline for Summit Vodka in the Southeast"*
-- *"Compare Ridgeline Bourbon performance across Midwest and West Coast"*
-- *"What's the field sentiment for Compass Gin in the Southwest?"*
+- *"Analyze the shipment pipeline for Ridgeline Bourbon in the Midwest"*
+
+**🛒 Grocery:**
+- *"How are FreshMart depletions trending in the Northeast this quarter?"*
+- *"Compare Harvest Table vs FreshMart sell-through rates by region"*
+
+**🍔 Quick-Serve Restaurants:**
+- *"How is Apex Grill performing in the Southwest this quarter?"*
+- *"Compare Coastline Tacos vs Apex Grill depletions across all regions"*
+
+**🏠 Home Improvement:**
+- *"Show me Pinnacle Hardware depletion stats in the Midwest for Q1"*
+- *"How is Summit Outdoor performing in the Southeast vs West Coast?"*
+
+**📎 Office Supply:**
+- *"How are ClearDesk depletions trending in the Northeast this quarter?"*
+
+**🛋️ Furniture:**
+- *"Show me Urban Living depletion trends across all regions this quarter"*
+- *"Compare Foundry Home vs Urban Living performance in the West Coast"*
 
 ### One-click setup
 
@@ -104,22 +123,46 @@ Navigate to [http://localhost:5173](http://localhost:5173) and start asking ques
 Retail Pulse reads `tenant.yaml` at the repo root to configure the entire platform:
 
 ```yaml
-company: "Apex Brands"
-industry: "Spirits & Beverages"
+company: "Apex Retail Group"
+industry: "Multi-Category Retail"
 brands:
   - name: "Sierra Gold Tequila"
-    category: "Tequila"
-    variants: ["Blanco", "Reposado", "Añejo"]
+    category: "Spirits"
+    variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
     priceSegment: "Premium"
+  - name: "FreshMart"
+    category: "Grocery"
+    variants: ["Organic Produce", "Bakery", "Deli", "Frozen"]
+    priceSegment: "Standard"
+  - name: "Apex Grill"
+    category: "Quick-Serve Restaurant"
+    variants: ["Burgers", "Chicken", "Breakfast", "Beverages"]
+    priceSegment: "Standard"
+  # ... 12 brands across 6 categories
 regions:
   - "Northeast"
   - "Southeast"
+  - "Midwest"
+  - "Southwest"
+  - "West Coast"
+  - "Pacific Northwest"
 theme:
   primaryColor: "#1B4D7A"
   accentColor: "#E8A838"
 ```
 
-The included **Apex Brands** sample tenant demonstrates a spirits company with 8 brands, 6 regions, and a custom theme. See the [Tenant Configuration Guide](docs/tenant-configuration.md) for full schema reference and examples for different industries.
+The included **Apex Retail Group** sample tenant demonstrates a multi-category retail conglomerate with **12 brands** across **6 categories**:
+
+| Category | Brands |
+|----------|--------|
+| 🥃 Spirits | Sierra Gold Tequila, Ridgeline Bourbon, Summit Vodka |
+| 🛒 Grocery | FreshMart, Harvest Table |
+| 🍔 Quick-Serve Restaurants | Apex Grill, Coastline Tacos |
+| 🏠 Home Improvement | Pinnacle Hardware, Summit Outdoor |
+| 📎 Office Supply | ClearDesk |
+| 🛋️ Furniture | Urban Living, Foundry Home |
+
+All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwest, West Coast, and Pacific Northwest. See the [Tenant Configuration Guide](docs/tenant-configuration.md) for full schema reference and examples for different industries.
 
 ---
 

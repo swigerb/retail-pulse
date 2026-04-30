@@ -15,6 +15,13 @@ public static class GetShipmentStatsTool
         [Description("Region (e.g. 'Northeast', 'West Coast', 'National')")] string region,
         [Description("Period (e.g. 'YTD', 'Q1', 'Q2')")] string period = "YTD")
     {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required." };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required." };
+        if (string.IsNullOrWhiteSpace(period))
+            period = "YTD";
+
         return data.GetShipmentStats(brand, region, period);
     }
 }

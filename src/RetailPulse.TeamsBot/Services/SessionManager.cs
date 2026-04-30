@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using RetailPulse.TeamsBot.Models;
+using RetailPulse.Contracts;
 
 namespace RetailPulse.TeamsBot.Services;
 
