@@ -73,41 +73,11 @@
 
 **Default (Foundry disabled):**
 
-```
-HTTP POST /api/chat (ASP.NET Core)
-└── RetailPulseAgent.ChatAsync
-    ├── thought (agent reasoning)
-    ├── IChatClient.CompleteAsync (LLM call)
-    ├── tool_call: GetShipmentStats
-    │   └── HTTP GET /api/shipment-stats (HttpClient → MCP Server)
-    ├── tool_result: GetShipmentStats
-    ├── tool_call: GetDepletionStats
-    │   └── HTTP GET /api/depletion-stats (HttpClient → MCP Server)
-    ├── tool_result: GetDepletionStats
-    ├── IChatClient.CompleteAsync (synthesis call)
-    └── response (final answer)
-```
+![Span Hierarchy - Default](span-hierarchy-default.png)
 
 **With Foundry Shipment Agent enabled (`FoundryAgent:Enabled: true`):**
 
-```
-HTTP POST /api/chat (ASP.NET Core)
-└── RetailPulseAgent.ChatAsync
-    ├── thought (agent reasoning)
-    ├── IChatClient.CompleteAsync (LLM call)
-    ├── agent_delegation: FoundryShipmentAgent
-    │   ├── tool_call: GetShipmentStats
-    │   │   └── HTTP GET /api/shipment-stats (HttpClient → MCP Server)
-    │   ├── tool_result: GetShipmentStats
-    │   ├── agent_call: FoundryShipmentAgent.Analyze
-    │   │   └── IChatClient.CompleteAsync (Foundry LLM call)
-    │   └── agent_response: pipeline analysis result
-    ├── tool_call: GetDepletionStats
-    │   └── HTTP GET /api/depletion-stats (HttpClient → MCP Server)
-    ├── tool_result: GetDepletionStats
-    ├── IChatClient.CompleteAsync (synthesis call)
-    └── response (final answer)
-```
+![Span Hierarchy - With Foundry Shipment Agent](span-hierarchy-foundry.png)
 
 ---
 
