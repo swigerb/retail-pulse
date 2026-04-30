@@ -46,16 +46,78 @@ const ASSISTANT_LOADING_AVATAR_STYLE: React.CSSProperties = {
 };
 const SEND_BUTTON_STYLE: React.CSSProperties = {
   background: 'linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-accent) 100%)',
-  color: 'var(--brand-deep-black)',
+  color: '#ffffff',
 };
 const ASSISTANT_AVATAR_ICON = { children: 'R' } as const;
-const SUGGESTED_QUERIES: ReadonlyArray<{ text: string; highlight?: boolean }> = [
-  { text: 'Analyze the shipment pipeline for a top brand in Florida', highlight: true },
-  { text: 'How are our premium brands performing in Florida?' },
-  { text: "Compare Angel's Envy performance across New York and Illinois" },
-  { text: "What's the field sentiment for Grey Goose in California?" },
-  { text: 'Which brands are growth leaders nationally?' },
-  { text: 'Give me a national overview of Cazadores' },
+
+interface PromptCategory {
+  id: string;
+  label: string;
+  emoji: string;
+  prompts: string[];
+}
+
+const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
+  {
+    id: 'general',
+    label: 'General Retail',
+    emoji: '📊',
+    prompts: [
+      'Compare retail foot traffic trends across all regions this quarter',
+      'Which retail categories are growing fastest year-over-year?',
+      'Show me the top-performing retail brands by revenue this month',
+    ],
+  },
+  {
+    id: 'grocery',
+    label: 'Grocery',
+    emoji: '🛒',
+    prompts: [
+      'What are the top-selling categories at grocery chains in the Southeast?',
+      'Compare organic vs conventional produce sales trends nationally',
+      'How are grocery delivery and pickup orders trending this quarter?',
+    ],
+  },
+  {
+    id: 'qsr',
+    label: 'Quick-Serve Restaurants',
+    emoji: '🍔',
+    prompts: [
+      'How is drive-through traffic trending for quick-serve restaurants in Texas?',
+      'Compare breakfast vs lunch daypart performance for QSR chains',
+      'What are the top-selling menu categories at fast-food restaurants this quarter?',
+    ],
+  },
+  {
+    id: 'home-improvement',
+    label: 'Home Improvement',
+    emoji: '🏠',
+    prompts: [
+      'Compare seasonal sales performance for home improvement retailers like Lowe\'s and Home Depot in the Midwest',
+      'What are the trending project categories at home improvement stores this spring?',
+      'How does weather impact home improvement retail foot traffic by region?',
+    ],
+  },
+  {
+    id: 'office-supply',
+    label: 'Office Supply',
+    emoji: '📎',
+    prompts: [
+      'What\'s the back-to-school demand forecast for office supply retailers like Office Depot?',
+      'How are office furniture and workspace supply sales trending post-pandemic?',
+      'Compare print vs digital supply sales at office retailers by region',
+    ],
+  },
+  {
+    id: 'furniture',
+    label: 'Furniture',
+    emoji: '🛋️',
+    prompts: [
+      'Analyze furniture delivery lead times and customer satisfaction for retailers like Rooms to Go and Ashley Furniture',
+      'What are the top-selling furniture categories by region this quarter?',
+      'How do seasonal promotions impact furniture store foot traffic and conversion?',
+    ],
+  },
 ];
 
 const useSpanStyles = makeStyles({
@@ -163,7 +225,7 @@ function SpansSummary({ spans }: { spans: AgentSpan[] }) {
             <div key={i} className={styles.spanRow}>
               <span className={styles.spanIcon}>{SPAN_ICONS[span.type] ?? '📌'}</span>
               <span className={styles.spanName}>{span.name}</span>
-              <span className={styles.spanDuration}>{span.durationMs}ms</span>
+              <span className={styles.spanDuration}>{span.durationMs > 0 ? `${span.durationMs}ms` : '—'}</span>
               {span.detail && <span className={styles.spanDetail}>{span.detail}</span>}
             </div>
           ))}
@@ -223,11 +285,47 @@ const useChatStyles = makeStyles({
     marginBottom: '32px',
   },
   suggestedQueries: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    maxWidth: '720px',
+    width: '100%',
+  },
+  categoryChips: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  categoryChip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-surface)',
+    color: 'var(--color-text-muted)',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '500',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      background: 'var(--brand-accent-soft)',
+      border: '1px solid var(--brand-accent-border)',
+      color: 'var(--brand-accent-light)',
+    },
+  },
+  categoryChipActive: {
+    background: 'var(--brand-accent-soft)',
+    border: '1px solid var(--brand-accent)',
+    color: 'var(--brand-accent)',
+    fontWeight: '600',
+  },
+  promptGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     gap: '10px',
-    maxWidth: '640px',
-    width: '100%',
     '@media (max-width: 640px)': {
       gridTemplateColumns: '1fr',
     },
@@ -255,17 +353,6 @@ const useChatStyles = makeStyles({
       cursor: 'not-allowed',
       transform: 'none',
     },
-  },
-  suggestedHighlight: {
-    border: '1px solid var(--brand-accent-soft-hover)',
-    background: 'var(--brand-accent-soft)',
-    color: 'var(--brand-accent-light)',
-    gridColumn: '1 / -1',
-    fontSize: '14px',
-    padding: '16px 20px',
-  },
-  suggestedStar: {
-    color: 'var(--brand-accent)',
   },
   message: {
     display: 'flex',
@@ -332,7 +419,7 @@ export function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState<string | undefined>();
+  const [sessionId] = useState<string>(() => crypto.randomUUID().replace(/-/g, ''));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
 
@@ -344,11 +431,13 @@ export function ChatPanel() {
 
   useEffect(() => {
     isMountedRef.current = true;
+    // Pre-join the SignalR session group so real-time telemetry works from the first message
+    joinTelemetrySession(sessionId);
     return () => {
       isMountedRef.current = false;
       abortControllerRef.current?.abort();
     };
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -373,10 +462,6 @@ export function ChatPanel() {
           { signal: controller.signal },
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
-        setSessionId(response.sessionId);
-        if (response.sessionId) {
-          joinTelemetrySession(response.sessionId);
-        }
         setMessages(prev => [
           ...prev,
           { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts },
@@ -413,6 +498,12 @@ export function ChatPanel() {
     [loading, sendChatMessage],
   );
 
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
+  const visiblePrompts = selectedCategory
+    ? PROMPT_CATEGORIES.filter(c => c.id === selectedCategory)
+    : PROMPT_CATEGORIES;
+
   return (
     <div className={styles.panel}>
       <div className={styles.messages}>
@@ -420,20 +511,40 @@ export function ChatPanel() {
           <div className={styles.welcome}>
             <div className={styles.welcomeLogo}><BrandLogo size={56} /></div>
             <Text className={styles.welcomeText}>
-              Ask me about brand performance, depletion trends, or field sentiment across your portfolio.
+              Ask me about sales performance, inventory trends, or customer insights across your retail portfolio.
             </Text>
             <div className={styles.suggestedQueries}>
-              {SUGGESTED_QUERIES.map((q, i) => (
+              <div className={styles.categoryChips}>
                 <button
-                  key={i}
-                  className={`${styles.suggestedQuery} ${q.highlight ? styles.suggestedHighlight : ''}`}
-                  onClick={() => handleSuggestedClick(q.text)}
-                  disabled={loading}
+                  className={`${styles.categoryChip} ${selectedCategory === null ? styles.categoryChipActive : ''}`}
+                  onClick={() => setSelectedCategory(null)}
                 >
-                  {q.highlight && <span className={styles.suggestedStar}>★</span>}
-                  {q.text}
+                  🏪 All
                 </button>
-              ))}
+                {PROMPT_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.id}
+                    className={`${styles.categoryChip} ${selectedCategory === cat.id ? styles.categoryChipActive : ''}`}
+                    onClick={() => setSelectedCategory(cat.id)}
+                  >
+                    {cat.emoji} {cat.label}
+                  </button>
+                ))}
+              </div>
+              <div className={styles.promptGrid}>
+                {visiblePrompts.map((cat) =>
+                  (selectedCategory ? cat.prompts : cat.prompts.slice(0, 1)).map((prompt, i) => (
+                    <button
+                      key={`${cat.id}-${i}`}
+                      className={styles.suggestedQuery}
+                      onClick={() => handleSuggestedClick(prompt)}
+                      disabled={loading}
+                    >
+                      <span>{cat.emoji}</span> {prompt}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -445,7 +556,7 @@ export function ChatPanel() {
           >
             <Avatar
               size={36}
-              color={msg.role === 'user' ? 'colorful' : 'gold'}
+              color={msg.role === 'user' ? 'colorful' : 'brand'}
               name={msg.role === 'user' ? 'User' : 'Retail Pulse'}
               icon={msg.role === 'user' ? undefined : ASSISTANT_AVATAR_ICON}
               style={msg.role === 'assistant' ? ASSISTANT_AVATAR_STYLE : undefined}
@@ -479,7 +590,7 @@ export function ChatPanel() {
           <div className={`${styles.message} ${styles.messageAssistant}`}>
             <Avatar
               size={36}
-              color="gold"
+              color="brand"
               name="Retail Pulse"
               icon={ASSISTANT_AVATAR_ICON}
               style={ASSISTANT_LOADING_AVATAR_STYLE}
@@ -498,14 +609,14 @@ export function ChatPanel() {
 
       <div className={styles.inputArea}>
         <label htmlFor="chat-input" className="visually-hidden">
-          Ask about brand performance
+          Ask about retail performance
         </label>
         <Input
           id="chat-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Ask about brand performance..."
+          placeholder="Ask about retail performance..."
           disabled={loading}
           style={FLEX_ONE_STYLE}
         />

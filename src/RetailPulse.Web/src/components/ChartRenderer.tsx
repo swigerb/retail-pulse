@@ -9,7 +9,7 @@ import {
 import { Card, makeStyles } from '@fluentui/react-components';
 import type { ChartSpec, ChartSeries } from '../types';
 
-const BRAND_COLORS = ['#1B4D7A', '#E8A838', '#4682B4', '#2E8B57', '#2A6BA0', '#F0BC5C', '#5F9EA0', '#D2691E'];
+const BRAND_COLORS = ['#1565C0', '#42A5F5', '#4682B4', '#2E8B57', '#1E88E5', '#64B5F6', '#5F9EA0', '#0D47A1'];
 
 const AXIS_TICK_STYLE = { fill: '#A0A0A0', fontSize: 12 } as const;
 const LEGEND_WRAPPER_STYLE = { color: '#A0A0A0', fontSize: 12 } as const;
@@ -57,8 +57,8 @@ const useStyles = makeStyles({
 });
 
 const tooltipStyle = {
-  contentStyle: { backgroundColor: '#1A1A1A', border: '1px solid rgba(232,168,56,0.3)', borderRadius: 8, color: '#F5F5F0', fontSize: 13 },
-  labelStyle: { color: '#E8A838' },
+  contentStyle: { backgroundColor: '#1A1A1A', border: '1px solid rgba(66,165,245,0.3)', borderRadius: 8, color: '#F5F5F0', fontSize: 13 },
+  labelStyle: { color: '#42A5F5' },
   itemStyle: { color: '#F5F5F0' },
 };
 
@@ -183,7 +183,7 @@ function RenderGauge({ spec }: { spec: ChartSpec }) {
       >
         <title>{accessibleLabel}</title>
         <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={16} strokeLinecap="round" />
-        <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="#E8A838" strokeWidth={16} strokeLinecap="round"
+        <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="#42A5F5" strokeWidth={16} strokeLinecap="round"
           strokeDasharray={`${(angle / 180) * 283} 283`} />
         <text x="110" y="100" textAnchor="middle" fill="#F5F5F0" fontSize="28" fontWeight="bold">{value}%</text>
         <text x="110" y="122" textAnchor="middle" fill="#A0A0A0" fontSize="12">{label}</text>
