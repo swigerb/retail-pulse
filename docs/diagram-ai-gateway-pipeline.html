@@ -6,7 +6,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     width: 1400px;
-    height: 940px;
+    height: 1010px;
     background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 100%);
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     padding: 30px;
@@ -21,7 +21,7 @@
   .canvas {
     position: relative;
     width: 1340px;
-    height: 860px;
+    height: 930px;
   }
 
   .box {
@@ -87,7 +87,7 @@
     position: absolute;
     left: 280px; top: 0;
     width: 680px;
-    height: 860px;
+    height: 850px;
     background: #303f9f;
     border-radius: 12px;
     border: 2px solid #3949ab;
@@ -180,43 +180,43 @@
   .dest ul li { padding: 2px 0; font-size: 11.5px; color: #333; }
   .dest ul li::before { content: "\2022"; color: #666; margin-right: 6px; }
 
-  /* App Insights */
+  /* App Insights — aligns with Step 4 (emit-token-metric) in Inbound */
   .appinsights {
     position: absolute;
-    left: 1040px; top: 60px;
+    left: 1040px; top: 230px;
     background: #fce4ec;
     border: 2px solid #f48fb1;
   }
   .appinsights .icon { background: #e91e63; }
 
-  /* Azure Monitor / LLM Logs */
-  .azuremonitor {
-    position: absolute;
-    left: 1040px; top: 300px;
-    background: #e8eaf6;
-    border: 2px solid #9fa8da;
-  }
-  .azuremonitor .icon { background: #3f51b5; }
-
-  /* Log Analytics */
-  .loganalytics {
-    position: absolute;
-    left: 1040px; top: 550px;
-    background: #fff3e0;
-    border: 2px solid #ffb74d;
-  }
-  .loganalytics .icon { background: #f57c00; }
-
-  /* Azure AI Foundry */
+  /* Azure AI Foundry — aligns with Step 6 (Forward) in Backend */
   .foundry {
     position: absolute;
-    left: 1040px; top: 750px;
+    left: 1040px; top: 405px;
     width: 260px;
     background: #e8f5e9;
     border: 2px solid #81c784;
     border-radius: 10px;
     padding: 12px 14px;
   }
+
+  /* Azure Monitor / LLM Logs — aligns with Step 8 (azuremonitor) in API-Level Diagnostics */
+  .azuremonitor {
+    position: absolute;
+    left: 1040px; top: 515px;
+    background: #e8eaf6;
+    border: 2px solid #9fa8da;
+  }
+  .azuremonitor .icon { background: #3f51b5; }
+
+  /* Log Analytics — aligns with Step 9 (GatewayLogs) in Instance-Level */
+  .loganalytics {
+    position: absolute;
+    left: 1040px; top: 690px;
+    background: #fff3e0;
+    border: 2px solid #ffb74d;
+  }
+  .loganalytics .icon { background: #f57c00; }
   .foundry .icon { background: #388e3c; }
   .foundry .model-box {
     margin-top: 6px;
@@ -235,7 +235,7 @@
     position: absolute;
     top: 0; left: 0;
     width: 1340px;
-    height: 860px;
+    height: 930px;
     pointer-events: none;
   }
   .arrow-line {
@@ -302,34 +302,34 @@
       </defs>
 
       <!-- Client -> APIM (request) -->
-      <line x1="200" y1="110" x2="278" y2="110" class="arrow-line" marker-end="url(#arrowR)"/>
-      <text x="210" y="102" class="arrow-label">Request</text>
-      <text x="208" y="128" class="arrow-label-small">api-key header</text>
+      <line x1="200" y1="117" x2="278" y2="117" class="arrow-line" marker-end="url(#arrowR)"/>
+      <text x="210" y="109" class="arrow-label">Request</text>
+      <text x="208" y="133" class="arrow-label-small">api-key header</text>
 
       <!-- Response Client <- APIM -->
-      <line x1="278" y1="150" x2="200" y2="150" class="response-line" marker-end="url(#arrowLG)"/>
-      <text x="208" y="168" class="response-label">Response</text>
-      <text x="218" y="180" style="font-family:'Segoe UI',sans-serif;font-size:9px;fill:#66bb6a">+ usage</text>
+      <line x1="278" y1="140" x2="200" y2="140" class="response-line" marker-end="url(#arrowLG)"/>
+      <text x="208" y="158" class="response-label">Response</text>
+      <text x="218" y="170" style="font-family:'Segoe UI',sans-serif;font-size:9px;fill:#66bb6a">+ usage</text>
 
-      <!-- APIM -> App Insights (emit-token-metric) -->
-      <line x1="960" y1="120" x2="1038" y2="120" class="arrow-dashed" marker-end="url(#arrowR)"/>
-      <text x="970" y="110" class="arrow-label-small">token</text>
-      <text x="970" y="140" class="arrow-label-small">metrics</text>
+      <!-- APIM -> App Insights (Step 4: emit-token-metric) -->
+      <line x1="960" y1="298" x2="1038" y2="300" class="arrow-dashed" marker-end="url(#arrowR)"/>
+      <text x="970" y="288" class="arrow-label-small">token</text>
+      <text x="970" y="318" class="arrow-label-small">metrics</text>
 
-      <!-- APIM -> Azure Monitor (LLM diagnostic) -->
-      <line x1="960" y1="380" x2="1038" y2="380" class="arrow-dashed" marker-end="url(#arrowR)"/>
-      <text x="970" y="370" class="arrow-label-small">LLM body</text>
-      <text x="970" y="400" class="arrow-label-small">parsing</text>
+      <!-- APIM -> Foundry (Step 6: forward to backend) -->
+      <line x1="960" y1="451" x2="1038" y2="448" class="arrow-line" marker-end="url(#arrowR)"/>
+      <text x="970" y="441" class="arrow-label">Backend</text>
+      <text x="970" y="469" class="arrow-label-small">MI auth token</text>
 
-      <!-- APIM -> Log Analytics (instance diag) -->
-      <line x1="960" y1="610" x2="1038" y2="610" class="arrow-dashed" marker-end="url(#arrowR)"/>
-      <text x="970" y="600" class="arrow-label-small">gateway</text>
-      <text x="970" y="625" class="arrow-label-small">logs</text>
+      <!-- APIM -> Azure Monitor LLM (Step 8: azuremonitor + largeLanguageModel) -->
+      <line x1="960" y1="612" x2="1038" y2="597" class="arrow-dashed" marker-end="url(#arrowR)"/>
+      <text x="970" y="602" class="arrow-label-small">LLM body</text>
+      <text x="970" y="630" class="arrow-label-small">parsing</text>
 
-      <!-- APIM -> Foundry (backend call) -->
-      <line x1="960" y1="800" x2="1038" y2="800" class="arrow-line" marker-end="url(#arrowR)"/>
-      <text x="970" y="790" class="arrow-label">Backend</text>
-      <text x="970" y="818" class="arrow-label-small">MI auth token</text>
+      <!-- APIM -> Log Analytics (Step 9: instance-level GatewayLogs) -->
+      <line x1="960" y1="730" x2="1038" y2="760" class="arrow-dashed" marker-end="url(#arrowR)"/>
+      <text x="970" y="720" class="arrow-label-small">gateway</text>
+      <text x="970" y="748" class="arrow-label-small">logs</text>
     </svg>
 
     <!-- Client -->
@@ -464,6 +464,15 @@
       </ul>
     </div>
 
+    <!-- Azure AI Foundry -->
+    <div class="foundry">
+      <div class="box-title" style="font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px">
+        <span class="icon" style="background:#388e3c">AI</span>
+        Azure AI Foundry
+      </div>
+      <div class="model-box">gpt-5.4-mini</div>
+    </div>
+
     <!-- Azure Monitor LLM -->
     <div class="box dest azuremonitor" style="width:260px">
       <div class="box-title">
@@ -492,15 +501,6 @@
         <li>Powers "Performance" dashboard</li>
         <li>Powers "Availability" dashboard</li>
       </ul>
-    </div>
-
-    <!-- Azure AI Foundry -->
-    <div class="foundry">
-      <div class="box-title" style="font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px">
-        <span class="icon" style="background:#388e3c">AI</span>
-        Azure AI Foundry
-      </div>
-      <div class="model-box">gpt-5.4-mini</div>
     </div>
 
   </div>

@@ -141,27 +141,27 @@
   </defs>
 
   <!-- Client -> APIM -->
-  <line x1="185" y1="145" x2="288" y2="145" class="aline" marker-end="url(#aR)"/>
-  <text x="194" y="137" class="albl">LLM Calls</text>
-  <text x="194" y="161" class="asub">api-key header</text>
-  <text x="194" y="172" class="asub">(subscription key)</text>
+  <line x1="185" y1="141" x2="288" y2="141" class="aline" marker-end="url(#aR)"/>
+  <text x="194" y="133" class="albl">LLM Calls</text>
+  <text x="194" y="157" class="asub">api-key header</text>
+  <text x="194" y="168" class="asub">(subscription key)</text>
 
   <!-- APIM -> Foundry -->
-  <line x1="770" y1="145" x2="868" y2="145" class="aline" marker-end="url(#aR)"/>
-  <text x="780" y="137" class="albl">Backend</text>
-  <text x="780" y="161" class="asub">MI auth</text>
+  <line x1="770" y1="127" x2="868" y2="127" class="aline" marker-end="url(#aR)"/>
+  <text x="780" y="119" class="albl">Backend</text>
+  <text x="780" y="143" class="asub">MI auth</text>
 
-  <!-- Telemetry: elbow paths from APIM bottom to each telem box -->
-  <!-- To T1 (center=125): route left from APIM -->
-  <path d="M 370,295 L 370,315 L 125,315 L 125,338" class="adash" marker-end="url(#aD)"/>
-  <!-- To T2 (center=373): nearly straight down -->
-  <path d="M 373,295 L 373,338" class="adash" marker-end="url(#aD)"/>
+  <!-- Telemetry: elbow paths from APIM bottom (y=305) to each telem box (top=340) -->
+  <!-- To T1 (center=125): elbow left from APIM -->
+  <path d="M 370,305 L 370,322 L 125,322 L 125,338" class="adash" marker-end="url(#aD)"/>
+  <!-- To T2 (center=373): straight down -->
+  <path d="M 530,305 L 530,322 L 373,322 L 373,338" class="adash" marker-end="url(#aD)"/>
   <!-- To T3 (center=621): straight down -->
-  <path d="M 621,295 L 621,338" class="adash" marker-end="url(#aD)"/>
+  <path d="M 650,305 L 650,322 L 621,322 L 621,338" class="adash" marker-end="url(#aD)"/>
 
   <!-- T3 -> Dev Portal -->
-  <line x1="736" y1="410" x2="760" y2="410" class="adash" marker-end="url(#aDR)"/>
-  <text x="738" y="402" class="asub">queries</text>
+  <line x1="736" y1="399" x2="760" y2="399" class="adash" marker-end="url(#aDR)"/>
+  <text x="740" y="393" class="asub">queries</text>
 </svg>
 
 <!-- CLIENT -->
