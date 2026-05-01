@@ -1,0 +1,22 @@
+{
+  "universe_usage_history": [
+    {
+      "universe": "Retail Icons",
+      "assigned_at": "2026-04-30",
+      "reason": "Retail & consumer goods themed team for a retail demo platform"
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "initial-retail-pulse": {
+      "assignment_id": "initial-retail-pulse",
+      "date": "2026-04-30",
+      "universe": "Retail Icons",
+      "assignments": {
+        "Kroger": "Lead",
+        "Chick": "Frontend Dev",
+        "Costco": "Backend Dev",
+        "Target": "Tester"
+      }
+    }
+  }
+}

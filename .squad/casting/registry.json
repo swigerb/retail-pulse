@@ -1,0 +1,36 @@
+{
+  "agents": {
+    "kroger": {
+      "persistent_name": "Kroger",
+      "universe": "Retail Icons",
+      "role": "Lead",
+      "created_at": "2026-04-30",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "chick": {
+      "persistent_name": "Chick",
+      "universe": "Retail Icons",
+      "role": "Frontend Dev",
+      "created_at": "2026-04-30",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "costco": {
+      "persistent_name": "Costco",
+      "universe": "Retail Icons",
+      "role": "Backend Dev",
+      "created_at": "2026-04-30",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "target": {
+      "persistent_name": "Target",
+      "universe": "Retail Icons",
+      "role": "Tester",
+      "created_at": "2026-04-30",
+      "legacy_named": false,
+      "status": "active"
+    }
+  }
+}
