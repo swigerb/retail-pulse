@@ -15,22 +15,23 @@ Retail Pulse is fully tenant-configurable. Define your company, brands, regions,
 
 ```yaml
 # Required — your company name
-company: "Apex Brands"
+company: "Apex Retail Group"
 
 # Required — industry vertical
-industry: "Spirits & Beverages"
+industry: "Multi-Category Retail"
 
 # Optional — description used in AI agent prompts
-description: "Apex Brands is a premium spirits company with a diverse portfolio..."
+description: "Apex Retail Group is a diversified retail conglomerate with brands spanning spirits, grocery, quick-serve restaurants, home improvement, office supply, and furniture."
 
 # Required — list of brands
 brands:
   - name: "Sierra Gold Tequila"       # Display name
-    category: "Tequila"               # Product category
+    category: "Spirits"               # Product category
     variants:                          # Product variants/SKUs
       - "Blanco"
       - "Reposado"
       - "Añejo"
+      - "Extra Añejo"
     priceSegment: "Premium"            # Pricing tier
 
 # Required — geographic regions
@@ -117,30 +118,74 @@ The React frontend reads theme values and applies them via CSS custom properties
 
 ## Industry Examples
 
-### Spirits & Beverages (included sample)
+### Multi-Category Retail (included sample)
 
 ```yaml
-company: "Apex Brands"
-industry: "Spirits & Beverages"
+company: "Apex Retail Group"
+industry: "Multi-Category Retail"
+description: "Apex Retail Group is a diversified retail conglomerate with brands spanning spirits, grocery, quick-serve restaurants, home improvement, office supply, and furniture."
 brands:
+  # Spirits & Beverages
   - name: "Sierra Gold Tequila"
-    category: "Tequila"
+    category: "Spirits"
     variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
     priceSegment: "Premium"
+  - name: "Ridgeline Bourbon"
+    category: "Spirits"
+    variants: ["Small Batch", "Single Barrel", "Cask Strength"]
+    priceSegment: "Premium"
   - name: "Summit Vodka"
-    category: "Vodka"
+    category: "Spirits"
     variants: ["Original", "Citrus", "Pepper"]
     priceSegment: "Premium"
-  - name: "Ridgeline Bourbon"
-    category: "Bourbon"
-    variants: ["Small Batch", "Single Barrel"]
+  # Grocery
+  - name: "FreshMart"
+    category: "Grocery"
+    variants: ["Organic Produce", "Bakery", "Deli", "Frozen"]
+    priceSegment: "Standard"
+  - name: "Harvest Table"
+    category: "Grocery"
+    variants: ["Fresh Meals", "Meal Kits", "Prepared Foods"]
     priceSegment: "Premium"
+  # Quick-Serve Restaurants
+  - name: "Apex Grill"
+    category: "Quick-Serve Restaurant"
+    variants: ["Burgers", "Chicken", "Breakfast", "Beverages"]
+    priceSegment: "Standard"
+  - name: "Coastline Tacos"
+    category: "Quick-Serve Restaurant"
+    variants: ["Tacos", "Burritos", "Bowls", "Sides"]
+    priceSegment: "Standard"
+  # Home Improvement
+  - name: "Pinnacle Hardware"
+    category: "Home Improvement"
+    variants: ["Lumber", "Power Tools", "Paint", "Plumbing"]
+    priceSegment: "Standard"
+  - name: "Summit Outdoor"
+    category: "Home Improvement"
+    variants: ["Patio Furniture", "Grills", "Garden", "Landscaping"]
+    priceSegment: "Premium"
+  # Office Supply
+  - name: "ClearDesk"
+    category: "Office Supply"
+    variants: ["Paper Products", "Ink & Toner", "Technology", "Furniture"]
+    priceSegment: "Standard"
+  # Furniture
+  - name: "Urban Living"
+    category: "Furniture"
+    variants: ["Living Room", "Bedroom", "Dining", "Outdoor"]
+    priceSegment: "Premium"
+  - name: "Foundry Home"
+    category: "Furniture"
+    variants: ["Sofas", "Mattresses", "Desks", "Storage"]
+    priceSegment: "Standard"
 regions:
   - "Northeast"
   - "Southeast"
   - "Midwest"
   - "Southwest"
   - "West Coast"
+  - "Pacific Northwest"
 channels:
   - "On-Premise"
   - "Off-Premise"
