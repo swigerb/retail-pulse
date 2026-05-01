@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle } from '@fluentui/react-components';
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { BrandLogo } from './BrandLogo';
+import type { AgentSpan } from '../types';
+import { connectTelemetryHub, disconnectTelemetryHub } from '../services/telemetryHub';
 
 const DRAWER_WIDTH_PX = 420;
 const DRAWER_BREAKPOINT_PX = 768;
@@ -73,14 +75,36 @@ const useStyles = makeStyles({
   },
 });
 
+const MAX_RETAINED_SPANS = 500;
+
 export function Dashboard() {
   const [telemetryOpen, setTelemetryOpen] = useState(false);
   const [chatKey, setChatKey] = useState(0);
+  const [connected, setConnected] = useState(false);
+  const [liveSpans, setLiveSpans] = useState<AgentSpan[]>([]);
   const styles = useStyles();
+
+  // SignalR connection lives at Dashboard level so spans persist across drawer open/close
+  useEffect(() => {
+    connectTelemetryHub(
+      (span) => setLiveSpans(prev => {
+        const next = [...prev, span];
+        return next.length > MAX_RETAINED_SPANS
+          ? next.slice(next.length - MAX_RETAINED_SPANS)
+          : next;
+      }),
+      () => setConnected(true),
+      () => setConnected(false),
+    );
+    return () => { disconnectTelemetryHub(); };
+  }, []);
 
   const handleNewChat = () => {
     setChatKey(prev => prev + 1);
+    setLiveSpans([]);
   };
+
+  const handleClearSpans = useCallback(() => setLiveSpans([]), []);
 
   return (
     <div className={styles.dashboard}>
@@ -139,7 +163,9 @@ export function Dashboard() {
           </DrawerHeader>
           <DrawerBody>
             <TelemetryPanel
-              resetKey={chatKey}
+              connected={connected}
+              liveSpans={liveSpans}
+              onClear={handleClearSpans}
             />
           </DrawerBody>
         </Drawer>

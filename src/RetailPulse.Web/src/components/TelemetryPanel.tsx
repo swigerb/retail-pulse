@@ -1,16 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
 import { Button, Text, Badge, makeStyles } from '@fluentui/react-components';
 import type { AgentSpan } from '../types';
 import { SpanTimeline } from './SpanTimeline';
-import { connectTelemetryHub, disconnectTelemetryHub } from '../services/telemetryHub';
 
 interface Props {
-  resetKey?: number;
+  connected: boolean;
+  liveSpans: AgentSpan[];
+  onClear: () => void;
 }
 
-const MAX_RETAINED_SPANS = 500;
-
-const useStyles = makeStyles({
+const useStyles= makeStyles({
   panel: {
     display: 'flex',
     flexDirection: 'column',
@@ -66,35 +64,8 @@ const useStyles = makeStyles({
   },
 });
 
-export function TelemetryPanel({ resetKey }: Props) {
-  const [connected, setConnected] = useState(false);
-  const [liveSpans, setLiveSpans] = useState<AgentSpan[]>([]);
-  const prevResetKey = useRef(resetKey);
+export function TelemetryPanel({ connected, liveSpans, onClear }: Props) {
   const styles = useStyles();
-
-  useEffect(() => {
-    connectTelemetryHub(
-      (span) => setLiveSpans(prev => {
-        const next = [...prev, span];
-        if (next.length > MAX_RETAINED_SPANS) {
-          return next.slice(next.length - MAX_RETAINED_SPANS);
-        }
-        return next;
-      }),
-      () => setConnected(true),
-      () => setConnected(false),
-    );
-
-    return () => { disconnectTelemetryHub(); };
-  }, []);
-
-  // Clear spans when a new chat starts
-  useEffect(() => {
-    if (prevResetKey.current !== resetKey) {
-      setLiveSpans([]);
-      prevResetKey.current = resetKey;
-    }
-  }, [resetKey]);
 
   const totalDuration = liveSpans.reduce((sum, s) => sum + s.durationMs, 0);
   const toolCalls = liveSpans.filter(s => s.type === 'tool_call').length;
@@ -140,7 +111,7 @@ export function TelemetryPanel({ resetKey }: Props) {
         <Button
           appearance="subtle"
           className={styles.clearButton}
-          onClick={() => setLiveSpans([])}
+          onClick={onClear}
         >
           Clear
         </Button>
