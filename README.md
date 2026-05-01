@@ -106,6 +106,16 @@ Navigate to [http://localhost:5173](http://localhost:5173) and start asking ques
 - *"Show me Urban Living depletion trends across all regions this quarter"*
 - *"Compare Foundry Home vs Urban Living performance in the West Coast"*
 
+**📈 Chart Rendering (test all chart types):**
+- *"Create a line chart showing Sierra Gold Tequila depletion trends across all regions"* → line chart
+- *"Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast"* → bar chart
+- *"Create a pie chart showing market share breakdown for our grocery brands nationally"* → pie chart
+- *"Show a grouped bar chart comparing FreshMart and Harvest Table across all regions"* → grouped bar
+- *"Create a donut chart of Apex Grill's variant mix in the Southwest"* → donut chart
+- *"Show a horizontal bar chart ranking all brands by depletion growth rate"* → horizontal bar
+- *"Create a table showing depletion stats for all home improvement brands by region"* → table
+- *"Show a gauge chart for Pinnacle Hardware's inventory health in the Midwest"* → gauge
+
 ### One-click setup
 
 ```powershell

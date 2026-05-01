@@ -118,6 +118,21 @@ const PROMPT_CATEGORIES: ReadonlyArray<PromptCategory> = [
       'What is the field sentiment for Urban Living in the Pacific Northwest?',
     ],
   },
+  {
+    id: 'charts',
+    label: 'Charts',
+    emoji: '📈',
+    prompts: [
+      'Create a line chart showing Sierra Gold Tequila depletion trends across all regions',
+      'Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast',
+      'Create a pie chart showing market share breakdown for our grocery brands nationally',
+      'Show a grouped bar chart comparing FreshMart and Harvest Table across all regions',
+      'Create a donut chart of Apex Grill variant mix in the Southwest',
+      'Show a horizontal bar chart ranking all brands by depletion growth rate',
+      'Create a table showing depletion stats for all home improvement brands by region',
+      'Show a gauge chart for Pinnacle Hardware inventory health in the Midwest',
+    ],
+  },
 ];
 
 const useSpanStyles = makeStyles({
