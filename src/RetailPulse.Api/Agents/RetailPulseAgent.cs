@@ -128,35 +128,32 @@ public class RetailPulseAgent
 
         foreach (var msg in chatResponse.Messages)
         {
-            if (msg.Role == ChatRole.Assistant)
+            foreach (var content in msg.Contents)
             {
-                foreach (var content in msg.Contents)
+                if (content is FunctionResultContent toolResult)
                 {
-                    if (content is FunctionResultContent toolResult)
+                    var resultText = toolResult.Result?.ToString();
+                    if (!string.IsNullOrEmpty(resultText))
                     {
-                        var resultText = toolResult.Result?.ToString();
-                        if (!string.IsNullOrEmpty(resultText))
+                        try
                         {
-                            try
+                            using var doc = System.Text.Json.JsonDocument.Parse(resultText);
+                            if (doc.RootElement.TryGetProperty("status", out var status) &&
+                                status.GetString() == "success" &&
+                                doc.RootElement.TryGetProperty("chart", out var chartElement))
                             {
-                                using var doc = System.Text.Json.JsonDocument.Parse(resultText);
-                                if (doc.RootElement.TryGetProperty("status", out var status) &&
-                                    status.GetString() == "success" &&
-                                    doc.RootElement.TryGetProperty("chart", out var chartElement))
+                                var chart = System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(
+                                    chartElement.GetRawText(),
+                                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                                if (chart != null)
                                 {
-                                    var chart = System.Text.Json.JsonSerializer.Deserialize<ChartSpec>(
-                                        chartElement.GetRawText(),
-                                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                                    if (chart != null)
-                                    {
-                                        charts.Add(chart);
-                                    }
+                                    charts.Add(chart);
                                 }
                             }
-                            catch
-                            {
-                                // Not a chart result
-                            }
+                        }
+                        catch
+                        {
+                            // Not a chart result
                         }
                     }
                 }
