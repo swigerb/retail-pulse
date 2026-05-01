@@ -99,14 +99,14 @@ function RenderBarChart({ spec, stacked }: { spec: ChartSpec; stacked?: boolean 
   const rows = useMemo(() => toRowData(spec.data), [spec.data]);
   return (
     <ResponsiveContainer width="100%" height={300}>
-      <BarChart data={rows}>
+      <BarChart data={rows} barCategoryGap="20%" barGap={4}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
         <XAxis dataKey="x" tick={AXIS_TICK_STYLE} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: -5 } : undefined} />
         <YAxis tick={AXIS_TICK_STYLE} label={spec.yAxisTitle ? { value: spec.yAxisTitle, fill: '#A0A0A0', angle: -90, position: 'insideLeft' } : undefined} />
         <Tooltip {...tooltipStyle} />
         {spec.data.length > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
         {spec.data.map((s, i) => (
-          <Bar key={s.legend} dataKey={s.legend} fill={seriesColor(s, i)} stackId={stacked ? 'stack' : undefined} />
+          <Bar key={s.legend} dataKey={s.legend} fill={seriesColor(s, i)} stackId={stacked ? 'stack' : undefined} maxBarSize={80} radius={[4, 4, 0, 0]} />
         ))}
       </BarChart>
     </ResponsiveContainer>
@@ -117,14 +117,14 @@ function RenderHorizontalBarChart({ spec }: { spec: ChartSpec }) {
   const rows = useMemo(() => toRowData(spec.data), [spec.data]);
   return (
     <ResponsiveContainer width="100%" height={Math.max(300, rows.length * 40)}>
-      <BarChart data={rows} layout="vertical">
+      <BarChart data={rows} layout="vertical" barCategoryGap="20%" barGap={4}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
         <XAxis type="number" tick={AXIS_TICK_STYLE} />
         <YAxis type="category" dataKey="x" tick={AXIS_TICK_STYLE} width={120} />
         <Tooltip {...tooltipStyle} />
         {spec.data.length > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
         {spec.data.map((s, i) => (
-          <Bar key={s.legend} dataKey={s.legend} fill={seriesColor(s, i)} />
+          <Bar key={s.legend} dataKey={s.legend} fill={seriesColor(s, i)} maxBarSize={40} radius={[0, 4, 4, 0]} />
         ))}
       </BarChart>
     </ResponsiveContainer>
