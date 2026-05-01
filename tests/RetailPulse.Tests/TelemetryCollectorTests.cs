@@ -24,11 +24,12 @@ public class TelemetryCollectorTests
     {
         await _collector.RecordSpanAsync("test-span", "thought", "thinking...", 42.5);
 
-        _collector.Spans.Should().HaveCount(1);
-        _collector.Spans[0].Name.Should().Be("test-span");
-        _collector.Spans[0].Type.Should().Be("thought");
-        _collector.Spans[0].Detail.Should().Be("thinking...");
-        _collector.Spans[0].DurationMs.Should().Be(42.5);
+        var spans = _collector.Spans.ToList();
+        spans.Should().HaveCount(1);
+        spans[0].Name.Should().Be("test-span");
+        spans[0].Type.Should().Be("thought");
+        spans[0].Detail.Should().Be("thinking...");
+        spans[0].DurationMs.Should().Be(42.5);
     }
 
     [Fact]
@@ -38,7 +39,7 @@ public class TelemetryCollectorTests
         await _collector.RecordSpanAsync("agent.response", "response", "Hello!", 100.0);
         var after = DateTimeOffset.UtcNow;
 
-        var span = _collector.Spans[0];
+        var span = _collector.Spans.First();
         span.Should().BeOfType<AgentSpan>();
         span.Timestamp.Should().BeOnOrAfter(before);
         span.Timestamp.Should().BeOnOrBefore(after);
@@ -51,10 +52,11 @@ public class TelemetryCollectorTests
         await _collector.RecordSpanAsync("span-2", "tool_call", "second", 20.0);
         await _collector.RecordSpanAsync("span-3", "response", "third", 30.0);
 
-        _collector.Spans.Should().HaveCount(3);
-        _collector.Spans[0].Name.Should().Be("span-1");
-        _collector.Spans[1].Name.Should().Be("span-2");
-        _collector.Spans[2].Name.Should().Be("span-3");
+        var spans = _collector.Spans.ToList();
+        spans.Should().HaveCount(3);
+        spans[0].Name.Should().Be("span-1");
+        spans[1].Name.Should().Be("span-2");
+        spans[2].Name.Should().Be("span-3");
     }
 
     [Fact]
