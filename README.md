@@ -9,9 +9,9 @@
 
 ## Overview
 
-Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI to analyze depletion trends, shipment dynamics, and field sentiment for retail & CPG brands. A **multi-agent system** powered by the Microsoft AI Framework (MAF) and Model Context Protocol (MCP) reasons over natural-language questions, delegates to specialist agents, and calls MCP tools to fetch data — streaming every step back to the browser with full distributed tracing.
+Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI to analyze depletion trends, shipment dynamics, and field sentiment for retail & CPG brands. A **multi-agent system** powered by the Microsoft AI Framework (MAF) and Model Context Protocol (MCP) reasons over natural-language questions, delegates to specialist agents, and calls MCP tools to fetch data, streaming every step back to the browser with full distributed tracing.
 
-**Key differentiator:** Retail Pulse is **tenant-configurable**. Define your company, brands, regions, and theme in a single `tenant.yaml` file and the entire platform adapts — no code changes required.
+**Key differentiator:** Retail Pulse is **tenant-configurable**. Define your company, brands, regions, and theme in a single `tenant.yaml` file and the entire platform adapts. No code changes required.
 
 **Built with:** .NET Aspire, Microsoft AI Framework (MAF), Model Context Protocol (MCP), React + Vite, Azure Bot Framework, Azure API Management (AI Gateway).
 
@@ -21,19 +21,30 @@ Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI t
 
 ![Retail Pulse Architecture](docs/architecture-diagram.png)
 
-### Components
+### Solution Architecture (6 projects + frontend)
 
-| Component | Description |
-|-----------|-------------|
-| **Aspire AppHost** | Orchestrates all services with a single `dotnet run` |
-| **API + MAF Agents** | AI agent with tool calling, multi-agent delegation |
-| **MCP Server** | Standardized data tools (depletions, shipments, sentiment) |
-| **React Dashboard** | Interactive chat UI with real-time telemetry |
-| **Teams Bot** | Adaptive Card responses with chart visualizations |
+| Project | Purpose |
+|---------|---------|
+| **RetailPulse.AppHost** | Aspire orchestrator - wires McpServer → Api → TeamsBot → Frontend |
+| **RetailPulse.Api** | Minimal API + AI agent (Azure OpenAI via APIM), SignalR telemetry hub |
+| **RetailPulse.McpServer** | MCP tool host - simulated depletions, shipments, sentiment |
+| **RetailPulse.Contracts** | Shared DTOs + tenant config model |
+| **RetailPulse.ServiceDefaults** | OTel, health checks, resilience defaults |
+| **RetailPulse.TeamsBot** | Microsoft Agents SDK - calls API, renders adaptive cards |
+| **RetailPulse.Web** | React/Vite/TypeScript dashboard - Fluent UI, Recharts, SignalR |
+
+### Key Patterns
+
+- **Tenant config** (`tenant.yaml`) drives everything - prompts, simulated data, UI branding. Loaded by `FileTenantProvider`, injected into system prompts.
+- **AI Gateway** - APIM fronts Azure OpenAI/Foundry with token limiting, metrics, managed identity auth. Deployed via Bicep.
+- **Real-time telemetry** - SignalR hub broadcasts agent spans to the frontend. Dashboard shows live tool calls, agent thoughts, and timing.
+- **MCP tools** - simulated retail metrics (depletions, shipments, field sentiment) shaped by tenant brands/regions.
+- **Foundry delegation** - can hand off to persistent Azure AI Foundry agents for deeper analysis.
+- **Frontend** - single-page dashboard with ChatPanel, suggested retail prompts (grocery, QSR, home improvement, office supply, furniture), chart rendering, and span timeline.
 
 ### Three-Tier Distribution Model
 
-Retail Pulse is designed for industries using a Three-Tier distribution model (manufacturer → distributor → retailer). The AI agent can detect **pipeline clogs** — where shipments and sell-through diverge — and correlate them with field sentiment data.
+Retail Pulse is designed for industries using a Three-Tier distribution model (manufacturer → distributor → retailer). The AI agent can detect **pipeline clogs** - where shipments and sell-through diverge - and correlate them with field sentiment data.
 
 ---
 
@@ -230,10 +241,10 @@ See [Teams Setup Guide](docs/teams-setup.md) for step-by-step instructions.
 
 ### Charts & Visualizations
 
-Charts are rendered **client-side** — the LLM emits structured `ChartSpec` JSON and each client renders natively:
+Charts are rendered **client-side**. The LLM emits structured `ChartSpec` JSON and each client renders natively:
 
-- **Web UI** — Interactive [Recharts](https://recharts.org/) SVG charts
-- **Teams** — Native Adaptive Card chart elements
+- **Web UI** - Interactive [Recharts](https://recharts.org/) SVG charts
+- **Teams** - Native Adaptive Card chart elements
 
 **9 chart types:** line, bar, grouped bar, stacked bar, horizontal bar, pie, donut, gauge, and table. See [Chart Rendering Guide](docs/chart-rendering.md).
 
@@ -243,7 +254,7 @@ Route all LLM calls through Azure API Management for token metering, rate limiti
 
 ### Foundry Shipment Agent (Optional)
 
-Deploy a specialist agent to Azure AI Foundry for Three-Tier Distribution pipeline analysis. Disabled by default — the app runs fully without it using a local analyzer. See [Architecture](docs/architecture.md).
+Deploy a specialist agent to Azure AI Foundry for Three-Tier Distribution pipeline analysis. Disabled by default - the app runs fully without it using a local analyzer. See [Architecture](docs/architecture.md).
 
 ---
 
@@ -276,6 +287,18 @@ See the [complete demo script](docs/demo-walkthrough.md) for a step-by-step pres
 
 ---
 
+## Tests
+
+Single xUnit project covering agent telemetry, chart/tool behavior, prompt config, tenant validation, simulated metrics, session management, and Teams card builders.
+
+```bash
+dotnet test
+```
+
+See [Testing Guide](docs/testing-guide.md) for manual testing options and test scenarios.
+
+---
+
 ## Contributing
 
 1. Fork the repository
@@ -288,6 +311,6 @@ See the [complete demo script](docs/demo-walkthrough.md) for a step-by-step pres
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT - see [LICENSE](LICENSE) for details.
 
 This project is for demonstration purposes. All simulated data is fictional and does not represent actual business data.
