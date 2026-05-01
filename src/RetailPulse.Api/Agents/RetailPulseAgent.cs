@@ -74,30 +74,27 @@ public class RetailPulseAgent
         // because MAF handles the loop internally and individual timings are lost)
         foreach (var msg in response.Messages)
         {
-            if (msg.Role == ChatRole.Assistant)
+            foreach (var content in msg.Contents)
             {
-                foreach (var content in msg.Contents)
+                if (content is FunctionCallContent toolCall)
                 {
-                    if (content is FunctionCallContent toolCall)
-                    {
-                        using var toolActivity = AgentTelemetry.StartToolCall(
-                            toolCall.Name,
-                            System.Text.Json.JsonSerializer.Serialize(toolCall.Arguments));
-                        await collector.RecordSpanAsync(
-                            toolCall.Name, "tool_call",
-                            $"Calling {toolCall.Name} with {System.Text.Json.JsonSerializer.Serialize(toolCall.Arguments)}",
-                            0);
-                    }
-                    else if (content is FunctionResultContent toolResult)
-                    {
-                        using var resultActivity = AgentTelemetry.StartToolResult(
-                            toolResult.CallId ?? "unknown",
-                            toolResult.Result?.ToString()?.Length ?? 0);
-                        await collector.RecordSpanAsync(
-                            toolResult.CallId ?? "unknown", "tool_result",
-                            toolResult.Result?.ToString()?[..Math.Min(200, toolResult.Result?.ToString()?.Length ?? 0)] ?? "",
-                            0);
-                    }
+                    using var toolActivity = AgentTelemetry.StartToolCall(
+                        toolCall.Name,
+                        System.Text.Json.JsonSerializer.Serialize(toolCall.Arguments));
+                    await collector.RecordSpanAsync(
+                        toolCall.Name, "tool_call",
+                        $"Calling {toolCall.Name} with {System.Text.Json.JsonSerializer.Serialize(toolCall.Arguments)}",
+                        0);
+                }
+                else if (content is FunctionResultContent toolResult)
+                {
+                    using var resultActivity = AgentTelemetry.StartToolResult(
+                        toolResult.CallId ?? "unknown",
+                        toolResult.Result?.ToString()?.Length ?? 0);
+                    await collector.RecordSpanAsync(
+                        toolResult.CallId ?? "unknown", "tool_result",
+                        toolResult.Result?.ToString()?[..Math.Min(200, toolResult.Result?.ToString()?.Length ?? 0)] ?? "",
+                        0);
                 }
             }
         }

@@ -22,7 +22,11 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing.AddSource("RetailPulse.Agent"));
 
 // SignalR for real-time telemetry
-builder.Services.AddSignalR();
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    });
 
 // CORS for React frontend — origins are configurable via Cors:AllowedOrigins
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
