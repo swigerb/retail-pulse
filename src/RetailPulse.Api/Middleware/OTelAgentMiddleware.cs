@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using RetailPulse.Api.Hubs;
@@ -51,7 +52,7 @@ public class TelemetryCollector
 {
     private readonly IHubContext<TelemetryHub> _hubContext;
     private readonly string? _sessionId;
-    private readonly List<AgentSpan> _spans = new();
+    private readonly ConcurrentQueue<AgentSpan> _spans = new();
 
     public TelemetryCollector(IHubContext<TelemetryHub> hubContext, string? sessionId = null)
     {
@@ -59,16 +60,13 @@ public class TelemetryCollector
         _sessionId = sessionId;
     }
 
-    public IReadOnlyList<AgentSpan> Spans => _spans;
+    public IReadOnlyCollection<AgentSpan> Spans => _spans;
 
     public async Task RecordSpanAsync(string name, string type, string detail, double durationMs)
     {
         var span = new AgentSpan(name, type, detail, durationMs, DateTimeOffset.UtcNow, _sessionId);
-        _spans.Add(span);
+        _spans.Enqueue(span);
 
-        // Push to clients that joined this session group. If no session is
-        // associated with this collector (legacy callers / tests) fall back
-        // to the caller-only channel rather than broadcasting to everyone.
         if (!string.IsNullOrEmpty(_sessionId))
         {
             await _hubContext.Clients.Group(_sessionId).SendAsync("SpanReceived", span);
