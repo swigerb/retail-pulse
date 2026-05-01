@@ -90,7 +90,7 @@
 
   /* TELEMETRY BOXES */
   .tbox {
-    position: absolute; width: 230px; border-radius: 10px; padding: 10px 12px; font-size: 12px;
+    position: absolute; width: 205px; border-radius: 10px; padding: 10px 12px; font-size: 12px;
   }
   .tbox .box-title { font-size: 12px; }
   .tbox .badge {
@@ -103,14 +103,14 @@
 
   .t1 { left: 10px; top: 340px; background: #fce4ec; border: 2px solid #f48fb1; }
   .t1 .badge { background: #ec407a; } .t1 .icon { background: #e91e63; }
-  .t2 { left: 258px; top: 340px; background: #fff3e0; border: 2px solid #ffb74d; }
+  .t2 { left: 225px; top: 340px; background: #fff3e0; border: 2px solid #ffb74d; }
   .t2 .badge { background: #ffa726; } .t2 .icon { background: #f57c00; }
-  .t3 { left: 506px; top: 340px; background: #e8eaf6; border: 2px solid #9fa8da; }
+  .t3 { left: 440px; top: 340px; background: #e8eaf6; border: 2px solid #9fa8da; }
   .t3 .badge { background: #7986cb; } .t3 .icon { background: #3f51b5; }
 
   /* DEV PORTAL */
   .devportal {
-    position: absolute; left: 762px; top: 340px; width: 290px;
+    position: absolute; left: 730px; top: 340px; width: 290px;
     background: #fff8e1; border: 2px solid #ffca28; border-radius: 10px; padding: 10px 12px;
   }
   .devportal .icon { background: #f9a825; }
@@ -153,23 +153,23 @@
 
   <!-- Telemetry: tree fan-out from APIM center-bottom to T1/T2/T3 -->
   <!-- Trunk: APIM center bottom down to bus bar -->
-  <line x1="530" y1="303" x2="530" y2="320" class="adash"/>
+  <line x1="530" y1="303" x2="530" y2="318" class="adash" stroke-width="2"/>
   <!-- Bus bar: horizontal line connecting all three drops -->
-  <line x1="125" y1="320" x2="621" y2="320" class="adash"/>
-  <!-- Drop to T1 (line + explicit triangle) -->
-  <line x1="125" y1="320" x2="125" y2="332" class="adash"/>
-  <polygon points="118,332 132,332 125,342" fill="#546e7a"/>
-  <!-- Drop to T2 (line + explicit triangle) -->
-  <line x1="373" y1="320" x2="373" y2="332" class="adash"/>
-  <polygon points="366,332 380,332 373,342" fill="#546e7a"/>
-  <!-- Drop to T3 (line + explicit triangle) -->
-  <line x1="621" y1="320" x2="621" y2="332" class="adash"/>
-  <polygon points="614,332 628,332 621,342" fill="#546e7a"/>
+  <line x1="112" y1="318" x2="542" y2="318" class="adash" stroke-width="2"/>
+  <!-- Drop to T1 (line + large explicit triangle) -->
+  <line x1="112" y1="318" x2="112" y2="328" class="adash" stroke-width="2"/>
+  <polygon points="102,328 122,328 112,342" fill="#546e7a"/>
+  <!-- Drop to T2 (line + large explicit triangle) -->
+  <line x1="327" y1="318" x2="327" y2="328" class="adash" stroke-width="2"/>
+  <polygon points="317,328 337,328 327,342" fill="#546e7a"/>
+  <!-- Drop to T3 (line + large explicit triangle) -->
+  <line x1="542" y1="318" x2="542" y2="328" class="adash" stroke-width="2"/>
+  <polygon points="532,328 552,328 542,342" fill="#546e7a"/>
 
   <!-- T3 -> Dev Portal (queries arrow) -->
-  <line x1="738" y1="399" x2="756" y2="399" class="adash"/>
-  <polygon points="756,394 766,399 756,404" fill="#546e7a"/>
-  <text x="738" y="388" class="albl">queries</text>
+  <line x1="647" y1="399" x2="720" y2="399" class="adash" stroke-width="2"/>
+  <polygon points="720,393 732,399 720,405" fill="#546e7a"/>
+  <text x="660" y="390" class="albl">queries</text>
 </svg>
 
 <!-- CLIENT -->
