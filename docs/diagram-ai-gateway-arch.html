@@ -6,7 +6,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     width: 1100px;
-    height: 530px;
+    height: 540px;
     background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 100%);
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     overflow: hidden;
@@ -21,7 +21,7 @@
   .canvas {
     position: relative;
     width: 1060px;
-    height: 500px;
+    height: 510px;
     margin: 0 auto;
   }
   .box {
@@ -91,6 +91,7 @@
   /* TELEMETRY BOXES */
   .tbox {
     position: absolute; width: 205px; border-radius: 10px; padding: 10px 12px; font-size: 12px;
+    min-height: 135px;
   }
   .tbox .box-title { font-size: 12px; }
   .tbox .badge {
@@ -112,6 +113,7 @@
   .devportal {
     position: absolute; left: 730px; top: 340px; width: 290px;
     background: #fff8e1; border: 2px solid #ffca28; border-radius: 10px; padding: 10px 12px;
+    min-height: 135px;
   }
   .devportal .icon { background: #f9a825; }
   .devportal .box-title { font-size: 12px; }
@@ -120,7 +122,7 @@
   .devportal ul li::before { content: "\2022"; color: #888; margin-right: 5px; }
 
   /* SVG */
-  svg.arrows { position: absolute; top: 0; left: 0; width: 1060px; height: 500px; pointer-events: none; }
+  svg.arrows { position: absolute; top: 0; left: 0; width: 1060px; height: 510px; pointer-events: none; }
   .aline { stroke: #546e7a; stroke-width: 2; fill: none; }
   .adash { stroke: #90a4ae; stroke-width: 1.5; fill: none; stroke-dasharray: 5,3; }
   .ahead { fill: #546e7a; }
