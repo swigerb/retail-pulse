@@ -60,37 +60,37 @@ public class TelemetryCollectorTests
     }
 
     [Fact]
-    public async Task RecordSpanAsync_WithSessionId_PushesToSignalRGroup()
+    public async Task RecordSpanAsync_WithSessionId_BroadcastsToAllClients()
     {
         const string sessionId = "session-123";
         var mockHubContext = new Mock<IHubContext<TelemetryHub>>();
         var mockClients = new Mock<IHubClients>();
-        var mockGroupProxy = new Mock<IClientProxy>();
-        mockClients.Setup(c => c.Group(sessionId)).Returns(mockGroupProxy.Object);
+        var mockAllProxy = new Mock<IClientProxy>();
+        mockClients.Setup(c => c.All).Returns(mockAllProxy.Object);
         mockHubContext.Setup(h => h.Clients).Returns(mockClients.Object);
 
         var collector = new TelemetryCollector(mockHubContext.Object, sessionId);
         await collector.RecordSpanAsync("test", "thought", "detail", 5.0);
 
-        mockGroupProxy.Verify(
+        mockAllProxy.Verify(
             x => x.SendCoreAsync("SpanReceived", It.IsAny<object?[]>(), default),
             Times.Once);
     }
 
     [Fact]
-    public async Task RecordSpanAsync_WithoutSessionId_DoesNotPushToSignalR()
+    public async Task RecordSpanAsync_WithoutSessionId_StillBroadcasts()
     {
         var mockHubContext = new Mock<IHubContext<TelemetryHub>>();
         var mockClients = new Mock<IHubClients>();
-        var mockGroupProxy = new Mock<IClientProxy>();
-        mockClients.Setup(c => c.Group(It.IsAny<string>())).Returns(mockGroupProxy.Object);
+        var mockAllProxy = new Mock<IClientProxy>();
+        mockClients.Setup(c => c.All).Returns(mockAllProxy.Object);
         mockHubContext.Setup(h => h.Clients).Returns(mockClients.Object);
 
         var collector = new TelemetryCollector(mockHubContext.Object);
         await collector.RecordSpanAsync("test", "thought", "detail", 5.0);
 
-        mockGroupProxy.Verify(
-            x => x.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), default),
-            Times.Never);
+        mockAllProxy.Verify(
+            x => x.SendCoreAsync("SpanReceived", It.IsAny<object?[]>(), default),
+            Times.Once);
     }
 }
