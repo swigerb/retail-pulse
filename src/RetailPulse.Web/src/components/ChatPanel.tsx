@@ -637,7 +637,7 @@ export function ChatPanel() {
         />
         <Button
           appearance="primary"
-          icon={<Send24Regular />}
+          icon={<Send24Regular style={{ color: '#ffffff' }} />}
           onClick={handleSend}
           disabled={loading || !input.trim()}
           aria-label="Send message"
