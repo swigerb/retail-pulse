@@ -109,11 +109,12 @@ export function TelemetryPanel({ connected, liveSpans, onClear }: Props) {
 
       {liveSpans.length > 0 && (
         <Button
-          appearance="subtle"
+          appearance="outline"
           className={styles.clearButton}
           onClick={onClear}
+          icon={<span>🗑️</span>}
         >
-          Clear
+          Clear Telemetry
         </Button>
       )}
     </div>
