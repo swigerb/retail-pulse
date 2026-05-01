@@ -70,8 +70,21 @@ public class RetailPulseAgent
             $"Processing: {request.Message[..Math.Min(100, request.Message.Length)]}",
             thoughtDurationMs);
 
-        // Record tool calls from response (informational sub-spans — durationMs: 0
-        // because MAF handles the loop internally and individual timings are lost)
+        // Record tool calls and results from response. Build a CallId → ToolName
+        // lookup so tool_result spans show human-readable names instead of opaque IDs.
+        var callIdToName = new Dictionary<string, string>();
+        foreach (var msg in response.Messages)
+        {
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionCallContent fc && fc.CallId != null)
+                    callIdToName[fc.CallId] = fc.Name;
+            }
+        }
+
+        var toolCount = callIdToName.Count;
+        var perToolMs = toolCount > 0 ? thoughtDurationMs / toolCount : 0;
+
         foreach (var msg in response.Messages)
         {
             foreach (var content in msg.Contents)
@@ -84,16 +97,18 @@ public class RetailPulseAgent
                     await collector.RecordSpanAsync(
                         toolCall.Name, "tool_call",
                         $"Calling {toolCall.Name} with {System.Text.Json.JsonSerializer.Serialize(toolCall.Arguments)}",
-                        0);
+                        perToolMs);
                 }
                 else if (content is FunctionResultContent toolResult)
                 {
+                    var toolName = callIdToName.GetValueOrDefault(toolResult.CallId ?? "", toolResult.CallId ?? "unknown");
+                    var resultText = toolResult.Result?.ToString() ?? "";
                     using var resultActivity = AgentTelemetry.StartToolResult(
-                        toolResult.CallId ?? "unknown",
-                        toolResult.Result?.ToString()?.Length ?? 0);
+                        toolName,
+                        resultText.Length);
                     await collector.RecordSpanAsync(
-                        toolResult.CallId ?? "unknown", "tool_result",
-                        toolResult.Result?.ToString()?[..Math.Min(200, toolResult.Result?.ToString()?.Length ?? 0)] ?? "",
+                        toolName, "tool_result",
+                        resultText[..Math.Min(200, resultText.Length)],
                         0);
                 }
             }
