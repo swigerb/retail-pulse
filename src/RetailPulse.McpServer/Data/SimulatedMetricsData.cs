@@ -26,6 +26,13 @@ public class SimulatedMetricsData
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
 
+        // "National" aggregates all regions into a single rollup
+        if (region.Trim().Equals("National", StringComparison.OrdinalIgnoreCase) ||
+            region.Trim().Equals("All", StringComparison.OrdinalIgnoreCase))
+        {
+            return GetNationalDepletionStats(brand.Trim(), period);
+        }
+
         var key = (brand.Trim(), region.Trim());
 
         if (!_depletionData.TryGetValue(key, out var record))
@@ -437,13 +444,57 @@ public class SimulatedMetricsData
         return string.Join(" ", sentences);
     }
 
+    private object GetNationalDepletionStats(string brand, string? period)
+    {
+        var normalizedBrand = NormalizeDiacritics(brand);
+        var regionalData = _depletionData
+            .Where(kv => NormalizeDiacritics(kv.Key.Brand).Contains(normalizedBrand, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (regionalData.Count == 0)
+            return new { error = $"No data found for brand '{brand}'.", available_brands = GetAvailableBrands() };
+
+        var periodMultiplier = period?.Trim().ToUpperInvariant() switch
+        {
+            "Q1" => 0.85, "Q2" => 1.05, "Q3" => 0.95, "Q4" => 1.15, _ => 1.0
+        };
+
+        var avgDepletions = regionalData.Average(kv => ParsePercentage(kv.Value.DepletionsYoY));
+        var avgSellThrough = regionalData.Average(kv => ParsePercentage(kv.Value.SellThroughYoY));
+        var avgInventory = regionalData.Average(kv => kv.Value.InventoryWeeks);
+
+        return new
+        {
+            brand = regionalData.First().Key.Brand,
+            region = "National",
+            period = period ?? "YTD",
+            regions_aggregated = regionalData.Count,
+            metrics = new
+            {
+                depletions_yoy = FormatPercentage(Math.Round(avgDepletions * periodMultiplier, 1)),
+                sell_through_yoy = FormatPercentage(Math.Round(avgSellThrough * periodMultiplier, 1)),
+                inventory_weeks_on_hand = Math.Round(avgInventory * (2.0 - periodMultiplier), 1),
+                status = avgDepletions > 0 ? "Growing" : avgDepletions > -2 ? "Stable" : "Declining"
+            },
+            regional_breakdown = regionalData.Select(kv => new
+            {
+                region = kv.Key.Region,
+                depletions_yoy = AdjustPercentage(kv.Value.DepletionsYoY, periodMultiplier),
+                status = kv.Value.Status
+            }).ToArray()
+        };
+    }
+
+    private static double ParsePercentage(string pct) =>
+        double.TryParse(pct.TrimEnd('%').TrimStart('+'), out var val) ? val : 0;
+
     // ── Utility Methods ──────────────────────────────────────────────────
 
     private string[] GetAvailableBrands() =>
         _tenant.Brands.Select(b => b.Name).ToArray();
 
     private string[] GetAvailableRegions() =>
-        _tenant.Regions.ToArray();
+        [.. _tenant.Regions, "National"];
 
     private static string FormatPercentage(double value) =>
         (value >= 0 ? "+" : "") + value.ToString("F1") + "%";

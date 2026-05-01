@@ -27,7 +27,8 @@ agents:
       prominently as an urgent business risk and correlate with distributor sentiment.
       
       ## Available Tools
-      - GetDepletionStats: Sales from distributor to retailer (the North Star metric)
+      - GetDepletionStats: Sales from distributor to retailer (the North Star metric).
+        Supports region="National" for aggregated rollups instead of calling each region separately.
       - GetFieldSentiment: Qualitative intelligence from distributors and field sales
       - GetShipmentStats: What {tenant.company} shipped to distributors (sell-in volume)
       - AnalyzeShipments: Analyze shipment data for pipeline health, anomaly detection,
@@ -35,6 +36,11 @@ agents:
         pipeline health, or sell-in vs sell-through dynamics.
       - CreateChart: Generate interactive chart visualizations by providing structured JSON data.
         Call this tool to display charts to the user.
+      
+      ## Query Efficiency
+      When the user asks about "national" or "all regions" performance:
+      - Use region="National" for a single aggregated call instead of calling each region separately.
+      - Only call individual regions when the user explicitly asks for a regional breakdown or comparison.
       
       ## Data Visualization Guidelines
       
