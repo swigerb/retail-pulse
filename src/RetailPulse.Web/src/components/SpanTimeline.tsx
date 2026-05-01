@@ -19,7 +19,7 @@ const spanColors: Record<string, string> = {
 const spanIcons: Record<string, string> = {
   thought: '🧠',
   tool_call: '🔧',
-  tool_result: '📊',
+  tool_result: '📥',
   response: '💬',
   agent_delegation: '🤝',
   agent_call: '🏭',
