@@ -97,16 +97,20 @@ function RenderLineChart({ spec }: { spec: ChartSpec }) {
 
 function RenderBarChart({ spec, stacked }: { spec: ChartSpec; stacked?: boolean }) {
   const rows = useMemo(() => toRowData(spec.data), [spec.data]);
+  const seriesCount = spec.data.length;
+  const categoryCount = rows.length;
+  // Scale bar width down as series or categories increase
+  const maxBar = Math.min(80, Math.floor(800 / (categoryCount * Math.max(seriesCount, 1))));
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <BarChart data={rows} barCategoryGap="20%" barGap={4}>
+    <ResponsiveContainer width="100%" height={320}>
+      <BarChart data={rows} barCategoryGap="25%" barGap={2}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
         <XAxis dataKey="x" tick={AXIS_TICK_STYLE} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: -5 } : undefined} />
         <YAxis tick={AXIS_TICK_STYLE} label={spec.yAxisTitle ? { value: spec.yAxisTitle, fill: '#A0A0A0', angle: -90, position: 'insideLeft' } : undefined} />
         <Tooltip {...tooltipStyle} />
-        {spec.data.length > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
+        {seriesCount > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
         {spec.data.map((s, i) => (
-          <Bar key={s.legend} dataKey={s.legend} fill={seriesColor(s, i)} stackId={stacked ? 'stack' : undefined} maxBarSize={80} radius={[4, 4, 0, 0]} />
+          <Bar key={s.legend} dataKey={s.legend} fill={seriesColor(s, i)} stackId={stacked ? 'stack' : undefined} maxBarSize={maxBar} radius={[3, 3, 0, 0]} />
         ))}
       </BarChart>
     </ResponsiveContainer>
