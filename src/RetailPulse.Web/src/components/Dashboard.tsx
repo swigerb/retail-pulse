@@ -120,7 +120,7 @@ export function Dashboard() {
           position="end"
           size="medium"
           open={telemetryOpen}
-          onOpenChange={(_, { open }) => setTelemetryOpen(open)}
+          modalType="non-modal"
           style={drawerStyle}
         >
           <DrawerHeader>
