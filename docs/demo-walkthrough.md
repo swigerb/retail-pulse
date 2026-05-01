@@ -77,7 +77,7 @@ Before the first demo run, deploy the APIM AI Gateway:
 
 **Narration:**
 
-> *"Imagine you're a brand manager at Apex Brands. You just walked out of a quarterly review and need quick answers about how Sierra Gold Tequila is performing in a key market. Instead of pulling up spreadsheets or waiting for an analyst, you just ask."*
+> *"Imagine you're a category manager at Apex Retail Group. You oversee a portfolio spanning spirits, grocery, QSR, home improvement, and more. You just walked out of a quarterly review and need quick answers about how one of your brands is performing in a key market. Instead of pulling up spreadsheets or waiting for an analyst, you just ask."*
 
 **Action:** Click or type the first suggested query:
 
@@ -276,22 +276,23 @@ This demonstrates the agent handling different brands and a different tool (`Get
 ## Brands & Regions Available for Demo
 
 ### Brands
-| Brand | Category |
-|-------|----------|
-| Sierra Gold Tequila | Tequila |
-| Sierra Silver Tequila | Tequila |
-| Ridgeline Bourbon | Tequila |
-| Ridgeline Bourbon | Bourbon |
-| Tradewind Rum White | Rum |
-| Tradewind Rum Gold | Rum |
-| Summit Vodka | Vodka |
-| Compass Gin | Gin |
-| Compass Gin | Tequila |
-| Crestline Mezcal | Scotch |
-| Apex RTD | Liqueur |
+| Brand | Category | Variants |
+|-------|----------|----------|
+| Sierra Gold Tequila | Spirits | Blanco, Reposado, Añejo, Extra Añejo |
+| Ridgeline Bourbon | Spirits | Small Batch, Single Barrel, Cask Strength |
+| Summit Vodka | Spirits | Original, Citrus, Pepper |
+| FreshMart | Grocery | Organic Produce, Bakery, Deli, Frozen |
+| Harvest Table | Grocery | Fresh Meals, Meal Kits, Prepared Foods |
+| Apex Grill | Quick-Serve Restaurant | Burgers, Chicken, Breakfast, Beverages |
+| Coastline Tacos | Quick-Serve Restaurant | Tacos, Burritos, Bowls, Sides |
+| Pinnacle Hardware | Home Improvement | Lumber, Power Tools, Paint, Plumbing |
+| Summit Outdoor | Home Improvement | Patio Furniture, Grills, Garden, Landscaping |
+| ClearDesk | Office Supply | Paper Products, Ink & Toner, Technology, Furniture |
+| Urban Living | Furniture | Living Room, Bedroom, Dining, Outdoor |
+| Foundry Home | Furniture | Sofas, Mattresses, Desks, Storage |
 
 ### Regions
-Northeast, Southeast, Southwest, Midwest, West Coast, Pacific Northwest, all regions
+Northeast, Southeast, Midwest, Southwest, West Coast, Pacific Northwest
 
 ### Impressive Queries to Have Ready
 
@@ -301,6 +302,10 @@ Northeast, Southeast, Southwest, Midwest, West Coast, Pacific Northwest, all reg
 4. **Supply constraint:** *"What's the supply situation for Ridgeline Bourbon in Midwest?"*
 5. **Multi-tool synthesis:** *"Compare depletion trends and field sentiment for Summit Vodka across Southwest and Southeast"*
 6. **Anomaly detection:** *"Are there any brands with shipment-to-depletion gaps I should worry about?"*
+7. **QSR cross-region:** *"How is Apex Grill performing across Southeast and Southwest?"*
+8. **Grocery category:** *"Compare FreshMart and Harvest Table depletion trends in the Northeast"*
+9. **Home improvement:** *"What's the field sentiment for Pinnacle Hardware in the Midwest?"*
+10. **Furniture pipeline:** *"Analyze the shipment pipeline for Urban Living in West Coast"*
 
 ---
 
@@ -313,6 +318,6 @@ Northeast, Southeast, Southwest, Midwest, West Coast, Pacific Northwest, all reg
 | Aspire Dashboard not loading | The dashboard URL is dynamic; check the terminal for `Login to the dashboard at...` |
 | SignalR connection fails | Verify the API is running; check browser console for WebSocket errors |
 | Telemetry shows "Disconnected" | This is expected before the first query. Send a message and it will connect. |
-| MCP tools return empty data | Diacritics are handled automatically — "Patron" matches "Patrón". Check brand/region spelling. |
-| MCP tools return no data | Diacritics are handled automatically — "Patron" matches "Patrón". Check brand/region spelling. |
+| MCP tools return empty data | Diacritics are handled automatically - "Anejo" matches "Añejo". Check brand/region spelling against tenant.yaml. |
+| MCP tools return no data | Verify brand name matches tenant.yaml exactly. Check region spelling. |
 | No data in App Insights | Allow 2-5 minutes for telemetry to appear. Check the connection string in AppHost.cs. |
