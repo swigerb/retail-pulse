@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Input,
   Button,
@@ -596,7 +597,7 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
               >
                 {msg.role === 'assistant' ? (
                   <div className="markdown-body">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                   </div>
                 ) : (
                   <div>{msg.content}</div>
