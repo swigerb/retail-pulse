@@ -118,7 +118,7 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
   name: 'policy'
   properties: {
     format: 'rawxml'
-    value: replace(loadTextContent('policy.xml'), '{backend-id}', backend.name)
+    value: replace(replace(loadTextContent('policy.xml'), '{backend-id}', backend.name), '{tokens-per-minute}', string(tokensPerMinute))
   }
 }
 
