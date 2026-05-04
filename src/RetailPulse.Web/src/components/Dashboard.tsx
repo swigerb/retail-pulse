@@ -89,6 +89,7 @@ export function Dashboard() {
   const [chatKey, setChatKey] = useState(0);
   const [connected, setConnected] = useState(false);
   const [liveSpans, setLiveSpans] = useState<AgentSpan[]>([]);
+  const [totalDurationMs, setTotalDurationMs] = useState<number | undefined>();
   const styles = useStyles();
 
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close
@@ -109,9 +110,17 @@ export function Dashboard() {
   const handleNewChat = () => {
     setChatKey(prev => prev + 1);
     setLiveSpans([]);
+    setTotalDurationMs(undefined);
   };
 
-  const handleClearSpans = useCallback(() => setLiveSpans([]), []);
+  const handleClearSpans = useCallback(() => {
+    setLiveSpans([]);
+    setTotalDurationMs(undefined);
+  }, []);
+
+  const handleResponseReceived = useCallback((response: { totalDurationMs?: number }) => {
+    setTotalDurationMs(response.totalDurationMs);
+  }, []);
 
   return (
     <div className={styles.dashboard}>
@@ -142,7 +151,7 @@ export function Dashboard() {
 
       <main className={styles.main}>
         <div className={`${styles.chatContainer} ${telemetryOpen ? styles.chatContainerOpen : ''}`}>
-          <ChatPanel key={chatKey} />
+          <ChatPanel key={chatKey} onResponseReceived={handleResponseReceived} />
         </div>
 
         <Drawer
@@ -172,6 +181,7 @@ export function Dashboard() {
             <TelemetryPanel
               connected={connected}
               liveSpans={liveSpans}
+              totalDurationMs={totalDurationMs}
               onClear={handleClearSpans}
             />
           </DrawerBody>

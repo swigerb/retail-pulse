@@ -17,6 +17,7 @@ describe('api.sendMessage', () => {
       reply: 'hello',
       sessionId: 's-1',
       spans: [],
+      totalDurationMs: 1234,
     };
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(payload), {
@@ -29,6 +30,7 @@ describe('api.sendMessage', () => {
 
     expect(result.reply).toBe('hello');
     expect(result.sessionId).toBe('s-1');
+    expect(result.totalDurationMs).toBe(1234);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/chat',
       expect.objectContaining({

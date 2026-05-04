@@ -14,6 +14,7 @@ export interface ChatResponse {
   sessionId: string;
   spans: AgentSpan[];
   charts?: ChartSpec[];
+  totalDurationMs?: number;
 }
 
 export type ChartType =

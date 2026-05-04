@@ -23,7 +23,8 @@ public record ChatResponse(
     string Reply,
     string SessionId,
     List<AgentSpan> Spans,
-    List<ChartSpec>? Charts = null
+    List<ChartSpec>? Charts = null,
+    long? TotalDurationMs = null
 );
 
 /// <summary>

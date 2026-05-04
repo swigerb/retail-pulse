@@ -11,6 +11,7 @@ import {
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChatHistoryMessage, ChartSpec } from '../types';
+import type { SendMessageOptions } from '../services/api';
 import { sendMessage } from '../services/api';
 import { joinTelemetrySession } from '../services/telemetryHub';
 import { BrandLogo } from './BrandLogo';
@@ -22,6 +23,10 @@ interface ChatMessage {
   content: string;
   spans?: AgentSpan[];
   charts?: ChartSpec[];
+}
+
+interface ChatPanelProps {
+  onResponseReceived?: (response: { totalDurationMs?: number }) => void;
 }
 
 const SPAN_ICONS: Record<string, string> = {
@@ -430,7 +435,7 @@ const useChatStyles = makeStyles({
   },
 });
 
-export function ChatPanel() {
+export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -469,6 +474,7 @@ export function ChatPanel() {
       abortControllerRef.current = controller;
 
       setMessages(prev => [...prev, { role: 'user', content: trimmed }]);
+      onResponseReceived?.({ totalDurationMs: undefined });
       setLoading(true);
 
       try {
@@ -476,11 +482,13 @@ export function ChatPanel() {
           .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.content.startsWith('Error:')))
           .map(m => ({ role: m.role, content: m.content }));
 
+        const options: SendMessageOptions = { signal: controller.signal };
         const response = await sendMessage(
           { message: trimmed, sessionId, history },
-          { signal: controller.signal },
+          options,
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
+        onResponseReceived?.({ totalDurationMs: response.totalDurationMs });
         setMessages(prev => [
           ...prev,
           { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts },
@@ -499,7 +507,7 @@ export function ChatPanel() {
         }
       }
     },
-    [messages, sessionId],
+    [messages, onResponseReceived, sessionId],
   );
 
   const handleSend = useCallback(async () => {
