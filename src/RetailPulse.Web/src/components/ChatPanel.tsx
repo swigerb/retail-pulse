@@ -23,6 +23,7 @@ interface ChatMessage {
   content: string;
   spans?: AgentSpan[];
   charts?: ChartSpec[];
+  totalDurationMs?: number;
 }
 
 interface ChatPanelProps {
@@ -211,10 +212,10 @@ const useSpanStyles = makeStyles({
   },
 });
 
-function SpansSummary({ spans }: { spans: AgentSpan[] }) {
+function SpansSummary({ spans, totalDurationMs }: { spans: AgentSpan[]; totalDurationMs?: number }) {
   const [expanded, setExpanded] = useState(false);
   const styles = useSpanStyles();
-  const totalMs = spans.reduce((sum, s) => sum + s.durationMs, 0);
+  const totalMs = totalDurationMs ?? spans.reduce((sum, s) => sum + s.durationMs, 0);
   const toolCalls = spans.filter(s => s.type === 'tool_call');
   const agentCalls = spans.filter(s => s.type === 'agent_call' || s.type === 'agent_delegation');
 
@@ -491,7 +492,7 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
         onResponseReceived?.({ totalDurationMs: response.totalDurationMs });
         setMessages(prev => [
           ...prev,
-          { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts },
+          { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts, totalDurationMs: response.totalDurationMs },
         ]);
       } catch (err) {
         if (!isMountedRef.current || controller.signal.aborted) return;
@@ -602,7 +603,7 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
                 )}
               </Card>
               {msg.spans && msg.spans.length > 0 && (
-                <SpansSummary spans={msg.spans} />
+                <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} />
               )}
               {msg.charts && msg.charts.length > 0 && (
                 <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
