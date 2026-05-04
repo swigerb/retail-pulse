@@ -138,14 +138,26 @@ function RenderHorizontalBarChart({ spec }: { spec: ChartSpec }) {
 }
 
 function RenderPieChart({ spec, donut }: { spec: ChartSpec; donut?: boolean }) {
-  const entries = useMemo(
-    () => spec.data[0]?.values.map((v, i) => ({
+  // Handle two LLM data shapes:
+  // A) One series, multiple values (all slices in data[0].values)
+  // B) Multiple series, one value each (each slice is its own series)
+  const entries = useMemo(() => {
+    const first = spec.data[0];
+    if (!first) return [];
+    const isMultiSeries = spec.data.length > 1 && spec.data.every(s => s.values.length === 1);
+    if (isMultiSeries) {
+      return spec.data.map((s, i) => ({
+        name: s.legend || s.values[0].x,
+        value: s.values[0].y,
+        fill: BRAND_COLORS[i % BRAND_COLORS.length],
+      }));
+    }
+    return first.values.map((v, i) => ({
       name: v.x,
       value: v.y,
       fill: BRAND_COLORS[i % BRAND_COLORS.length],
-    })) ?? [],
-    [spec.data],
-  );
+    }));
+  }, [spec.data]);
   return (
     <ResponsiveContainer width="100%" height={300}>
       <PieChart>
