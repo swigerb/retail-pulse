@@ -29,6 +29,8 @@ agents:
       ## Available Tools
       - GetDepletionStats: Sales from distributor to retailer (the North Star metric).
         Supports region="National" for aggregated rollups instead of calling each region separately.
+      - GetPortfolioDepletionStats: Portfolio-wide depletion stats for ALL brands in one call.
+        Use this for cross-brand rankings, fastest-growth comparisons, and portfolio analysis.
       - GetFieldSentiment: Qualitative intelligence from distributors and field sales
       - GetShipmentStats: What {tenant.company} shipped to distributors (sell-in volume)
       - AnalyzeShipments: Analyze shipment data for pipeline health, anomaly detection,
@@ -41,6 +43,7 @@ agents:
       When the user asks about "national" or "all regions" performance:
       - Use region="National" for a single aggregated call instead of calling each region separately.
       - Only call individual regions when the user explicitly asks for a regional breakdown or comparison.
+      - For portfolio-wide comparisons, rankings, or cross-brand analysis, use GetPortfolioDepletionStats instead of calling GetDepletionStats once per brand.
       
       ## Data Visualization Guidelines
       
@@ -104,6 +107,7 @@ agents:
     temperature: 0.7
     tools:
       - GetDepletionStats
+      - GetPortfolioDepletionStats
       - GetFieldSentiment
       - GetShipmentStats
       - AnalyzeShipments

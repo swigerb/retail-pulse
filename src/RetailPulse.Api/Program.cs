@@ -76,6 +76,13 @@ builder.Services.AddScoped<DepletionStatsTool>(sp =>
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<DepletionStatsTool>>());
 });
+builder.Services.AddScoped<PortfolioDepletionStatsTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new PortfolioDepletionStatsTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<PortfolioDepletionStatsTool>>());
+});
 builder.Services.AddScoped<FieldSentimentTool>(sp =>
 {
     var factory = sp.GetRequiredService<IHttpClientFactory>();
@@ -162,6 +169,7 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
     var chatClient = sp.GetRequiredService<IChatClient>();
     var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<TelemetryHub>>();
     var depletionTool = sp.GetRequiredService<DepletionStatsTool>();
+    var portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
     var sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
     var shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
@@ -170,6 +178,7 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
     var tools = new List<AITool>
     {
         AIFunctionFactory.Create(depletionTool.GetDepletionStats),
+        AIFunctionFactory.Create(portfolioTool.GetPortfolioDepletionStats),
         AIFunctionFactory.Create(sentimentTool.GetFieldSentiment),
         AIFunctionFactory.Create(shipmentTool.GetShipmentStats),
         AIFunctionFactory.Create(chartTool.CreateChart)

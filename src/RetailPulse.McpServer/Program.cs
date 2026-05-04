@@ -39,6 +39,13 @@ app.MapGet("/api/depletion-stats", (string brand, string region, string period, 
 })
 .WithName("GetDepletionStats");
 
+app.MapGet("/api/portfolio-depletion-stats", (string region, SimulatedMetricsData data, string period = "YTD") =>
+{
+    var result = data.GetPortfolioDepletionStats(region, period);
+    return Results.Ok(result);
+})
+.WithName("GetPortfolioDepletionStats");
+
 app.MapGet("/api/field-sentiment", (string brand, string region, SimulatedMetricsData data) =>
 {
     var result = data.GetFieldSentiment(brand, region);
