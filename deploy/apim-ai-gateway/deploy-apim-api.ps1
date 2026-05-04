@@ -9,12 +9,16 @@
 .PARAMETER ResourceGroup
     Target resource group for the APIM instance. Default: rg-bstest-dev-northcentralus-001
 
+.PARAMETER Subscription
+    Azure subscription name or ID. Default: ME-MngEnvMCAP680856-brswig-1
+
 .PARAMETER SetUserSecrets
     If specified, stores the APIM subscription key as a .NET user secret for RetailPulse.Api.
 #>
 [CmdletBinding()]
 param(
     [string]$ResourceGroup = 'rg-bstest-dev-northcentralus-001',
+    [string]$Subscription = 'ME-MngEnvMCAP680856-brswig-1',
     [switch]$SetUserSecrets
 )
 
@@ -43,6 +47,7 @@ $deploymentName = "retail-pulse-ai-gateway-$(Get-Date -Format 'yyyyMMdd-HHmmss')
 
 $result = az deployment group create `
     --resource-group $ResourceGroup `
+    --subscription $Subscription `
     --name $deploymentName `
     --template-file "$scriptDir\main.bicep" `
     --parameters "$scriptDir\params.json" `
