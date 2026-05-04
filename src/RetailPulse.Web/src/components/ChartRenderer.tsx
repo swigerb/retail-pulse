@@ -142,7 +142,7 @@ function RenderPieChart({ spec, donut }: { spec: ChartSpec; donut?: boolean }) {
     () => spec.data[0]?.values.map((v, i) => ({
       name: v.x,
       value: v.y,
-      fill: spec.data[0]?.color || BRAND_COLORS[i % BRAND_COLORS.length],
+      fill: BRAND_COLORS[i % BRAND_COLORS.length],
     })) ?? [],
     [spec.data],
   );
