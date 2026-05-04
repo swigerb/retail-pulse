@@ -12,7 +12,9 @@ import type { ChartSpec, ChartSeries } from '../types';
 const BRAND_COLORS = ['#1565C0', '#42A5F5', '#4682B4', '#2E8B57', '#1E88E5', '#64B5F6', '#5F9EA0', '#0D47A1'];
 
 const AXIS_TICK_STYLE = { fill: '#A0A0A0', fontSize: 12 } as const;
-const LEGEND_WRAPPER_STYLE = { color: '#A0A0A0', fontSize: 12 } as const;
+const X_AXIS_TITLE_OFFSET = 0;
+const CHART_BOTTOM_MARGIN = 24;
+const LEGEND_WRAPPER_STYLE = { color: '#A0A0A0', fontSize: 12, paddingTop: 12 } as const;
 
 const useStyles = makeStyles({
   chartCard: {
@@ -81,9 +83,9 @@ function RenderLineChart({ spec }: { spec: ChartSpec }) {
   const rows = useMemo(() => toRowData(spec.data), [spec.data]);
   return (
     <ResponsiveContainer width="100%" height={300}>
-      <LineChart data={rows}>
+      <LineChart data={rows} margin={{ bottom: CHART_BOTTOM_MARGIN }}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-        <XAxis dataKey="x" tick={AXIS_TICK_STYLE} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: -5 } : undefined} />
+        <XAxis dataKey="x" tick={AXIS_TICK_STYLE} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: X_AXIS_TITLE_OFFSET } : undefined} />
         <YAxis tick={AXIS_TICK_STYLE} label={spec.yAxisTitle ? { value: spec.yAxisTitle, fill: '#A0A0A0', angle: -90, position: 'insideLeft' } : undefined} />
         <Tooltip {...tooltipStyle} />
         {spec.data.length > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
@@ -103,9 +105,9 @@ function RenderBarChart({ spec, stacked }: { spec: ChartSpec; stacked?: boolean 
   const maxBar = Math.min(80, Math.floor(800 / (categoryCount * Math.max(seriesCount, 1))));
   return (
     <ResponsiveContainer width="100%" height={320}>
-      <BarChart data={rows} barCategoryGap="25%" barGap={2}>
+      <BarChart data={rows} barCategoryGap="25%" barGap={2} margin={{ bottom: CHART_BOTTOM_MARGIN }}>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-        <XAxis dataKey="x" tick={AXIS_TICK_STYLE} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: -5 } : undefined} />
+        <XAxis dataKey="x" tick={AXIS_TICK_STYLE} label={spec.xAxisTitle ? { value: spec.xAxisTitle, fill: '#A0A0A0', position: 'insideBottom', offset: X_AXIS_TITLE_OFFSET } : undefined} />
         <YAxis tick={AXIS_TICK_STYLE} label={spec.yAxisTitle ? { value: spec.yAxisTitle, fill: '#A0A0A0', angle: -90, position: 'insideLeft' } : undefined} />
         <Tooltip {...tooltipStyle} />
         {seriesCount > 1 && <Legend wrapperStyle={LEGEND_WRAPPER_STYLE} />}
