@@ -1,3 +1,4 @@
+using System.ClientModel;
 using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -77,8 +78,51 @@ public class RetailPulseAgent
         var sw = Stopwatch.StartNew();
         using var thoughtActivity = AgentTelemetry.StartAgentThought(_agentDef.Name, request.Message);
 
+        Microsoft.Extensions.AI.ChatResponse response;
+
         // Call the model (MAF handles tool calling loop)
-        var response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
+        try
+        {
+            response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
+        }
+        catch (ClientResultException ex) when (ex.Status == 429)
+        {
+            var failureDurationMs = sw.ElapsedMilliseconds;
+            thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
+            thoughtActivity?.SetTag("error.status_code", ex.Status);
+
+            _logger.LogWarning(ex,
+                "Agent request was rate-limited by the AI service after {DurationMs}ms. Status: {Status}. Message: {Message}",
+                failureDurationMs,
+                ex.Status,
+                ex.Message);
+
+            return new ChatResponse(
+                "⏳ The AI service is temporarily rate-limited. Please wait a moment and try again. (APIM token limit: 10,000 TPM)",
+                sessionId,
+                [],
+                null,
+                failureDurationMs);
+        }
+        catch (Exception ex)
+        {
+            var failureDurationMs = sw.ElapsedMilliseconds;
+            thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
+            thoughtActivity?.SetTag("error.type", ex.GetType().FullName);
+
+            _logger.LogError(ex,
+                "Agent request failed after {DurationMs}ms for session {SessionId}",
+                failureDurationMs,
+                sessionId);
+
+            return new ChatResponse(
+                "⚠️ Something went wrong while contacting the AI service. Please try again in a moment.",
+                sessionId,
+                [],
+                null,
+                failureDurationMs);
+        }
+
         var thoughtDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", thoughtDurationMs);
 

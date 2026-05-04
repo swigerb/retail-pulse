@@ -215,15 +215,30 @@ if (app.Environment.IsDevelopment())
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
 // Chat endpoint
-app.MapPost("/api/chat", async (ChatRequest request, RetailPulse.Api.Agents.RetailPulseAgent agent, CancellationToken ct) =>
+app.MapPost("/api/chat", async (ChatRequest request, RetailPulse.Api.Agents.RetailPulseAgent agent, ILogger<Program> logger, CancellationToken ct) =>
 {
     if (request is null || string.IsNullOrWhiteSpace(request.Message))
     {
         return Results.BadRequest(new { error = "Field 'message' is required." });
     }
 
-    var response = await agent.ChatAsync(request, ct);
-    return Results.Ok(response);
+    try
+    {
+        var response = await agent.ChatAsync(request, ct);
+        return Results.Ok(response);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Unhandled error from chat agent for session {SessionId}", request.SessionId);
+
+        return Results.Json(
+            new
+            {
+                error = "The AI service is temporarily unavailable. Please try again shortly.",
+                code = "service_unavailable"
+            },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
 })
 .WithName("Chat");
 

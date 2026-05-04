@@ -7,6 +7,8 @@ using RetailPulse.Api.Agents;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
+using System.ClientModel;
+using System.ClientModel.Primitives;
 
 namespace RetailPulse.Tests;
 
@@ -72,6 +74,54 @@ public class RetailPulseAgentTests
         capturedMessages[1].Text.Should().Be("history-3");
         capturedMessages[20].Text.Should().Be("history-22");
         capturedMessages[21].Text.Should().Be("current");
+    }
+
+    [Fact]
+    public async Task ChatAsync_WhenRateLimited_ReturnsFriendlyResponse()
+    {
+        var chatClient = new Mock<IChatClient>();
+        chatClient
+            .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ClientResultException("Too Many Requests", CreatePipelineResponse(429), null));
+
+        var agent = CreateAgent(chatClient.Object);
+
+        var response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-429"));
+
+        response.Reply.Should().Be("⏳ The AI service is temporarily rate-limited. Please wait a moment and try again. (APIM token limit: 10,000 TPM)");
+        response.SessionId.Should().Be("session-429");
+        response.Spans.Should().BeEmpty();
+        response.Charts.Should().BeNull();
+        response.TotalDurationMs.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ChatAsync_WhenUnexpectedExceptionOccurs_ReturnsFriendlyResponse()
+    {
+        var chatClient = new Mock<IChatClient>();
+        chatClient
+            .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("boom"));
+
+        var agent = CreateAgent(chatClient.Object);
+
+        var response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-error"));
+
+        response.Reply.Should().Be("⚠️ Something went wrong while contacting the AI service. Please try again in a moment.");
+        response.SessionId.Should().Be("session-error");
+        response.Spans.Should().BeEmpty();
+        response.Charts.Should().BeNull();
+        response.TotalDurationMs.Should().NotBeNull();
+    }
+
+    private static PipelineResponse CreatePipelineResponse(int status)
+    {
+        var response = new Mock<PipelineResponse>();
+        response.SetupGet(x => x.Status).Returns(status);
+        response.SetupGet(x => x.ReasonPhrase).Returns("Too Many Requests");
+        response.SetupProperty(x => x.ContentStream, new MemoryStream());
+        response.Setup(x => x.Dispose());
+        return response.Object;
     }
 
     private static RetailPulseAgent CreateAgent(IChatClient chatClient)
