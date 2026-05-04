@@ -55,6 +55,13 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
+    transition: 'margin-right 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  headerActionsOpen: {
+    marginRight: `${DRAWER_WIDTH_PX}px`,
+    [`@media (max-width: ${DRAWER_BREAKPOINT_PX}px)`]: {
+      marginRight: '0',
+    },
   },
   main: {
     display: 'flex',
@@ -113,7 +120,7 @@ export function Dashboard() {
           <BrandLogo size={36} />
           <span className={styles.headerTagline}>Brand Intelligence Platform</span>
         </div>
-        <div className={styles.headerActions}>
+        <div className={`${styles.headerActions} ${telemetryOpen ? styles.headerActionsOpen : ''}`}>
           <Button
             appearance="subtle"
             icon={<Add24Regular />}
