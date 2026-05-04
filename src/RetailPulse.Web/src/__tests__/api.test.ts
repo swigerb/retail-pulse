@@ -49,9 +49,23 @@ describe('api.sendMessage', () => {
       }
     ) as unknown as typeof fetch;
 
-    await sendMessage({ message: 'ping', sessionId: 'abc' });
+    await sendMessage({
+      message: 'ping',
+      sessionId: 'abc',
+      history: [
+        { role: 'user', content: 'previous question' },
+        { role: 'assistant', content: 'previous answer' },
+      ],
+    });
 
-    expect(captured?.body).toBe(JSON.stringify({ message: 'ping', sessionId: 'abc' }));
+    expect(captured?.body).toBe(JSON.stringify({
+      message: 'ping',
+      sessionId: 'abc',
+      history: [
+        { role: 'user', content: 'previous question' },
+        { role: 'assistant', content: 'previous answer' },
+      ],
+    }));
   });
 
   it('throws an Error containing the status when response is non-2xx', async () => {
