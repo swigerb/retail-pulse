@@ -20,6 +20,44 @@
 
 ![Retail Pulse Telemetry Flow](retail-pulse-telemetry-flow.png)
 
+### Data Flow: Agent Analyzing Data
+
+When a user asks a question like *"Compare depletion trends across all regions"*, the agent orchestrates a multi-step data flow across four services. Here is the complete lifecycle:
+
+```
+Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
+  → Azure OpenAI (via APIM AI Gateway) → model selects tools
+  → MAF tool-calling loop → API proxy tools → MCP Server
+  → SimulatedMetricsData (in-memory) → results back up the chain
+```
+
+#### Step-by-Step Flow
+
+| Step | Component | What Happens |
+|------|-----------|-------------|
+| **1. User sends message** | `ChatPanel.tsx` | Frontend sends `POST /api/chat` with `{ message, sessionId, history }`. Conversation history (up to 10 turns) is included for context continuity. |
+| **2. Agent builds prompt** | `RetailPulseAgent.cs` | Assembles a message array: system prompt (from `prompts.yaml`) + conversation history + current user message. Starts a `Stopwatch` to measure wall-clock duration. |
+| **3. Model inference** | Azure OpenAI via APIM | The `IChatClient` (backed by `AzureOpenAIClient`) sends the messages to APIM. APIM applies token limiting (10k TPM), emits metrics, and forwards to Azure OpenAI using managed identity. Model: `gpt-5.4-mini`. |
+| **4. Tool selection** | Azure OpenAI | The model examines the user's question and the available tool schemas, then decides which tools to call and with what parameters. For a portfolio-wide question, it may call `GetPortfolioDepletionStats`; for a single brand, `GetDepletionStats`. |
+| **5. Tool execution loop** | MAF (`UseFunctionInvocation`) | Microsoft.Extensions.AI middleware intercepts each tool call. It invokes the registered `AITool` implementation, captures the result, and sends it back to the model. The model may call additional tools or generate its final response. Tools execute sequentially within a single turn. |
+| **6. API proxy call** | e.g., `DepletionStatsTool.cs` | Each tool is an HTTP proxy. It calls the MCP Server's REST endpoint (e.g., `GET /api/depletion-stats?brand=X&region=Y&period=Z`). If the MCP Server is unreachable, the tool returns hardcoded fallback data and logs a warning. |
+| **7. Data generation** | `SimulatedMetricsData.cs` | The MCP Server's singleton data service generates the response. Data is computed from `tenant.yaml` configuration (12 brands, 6 regions, 3 channels) using deterministic algorithms with quarterly multipliers. |
+| **8. Response assembly** | `RetailPulseAgent.cs` | After the model produces its final text response, the agent packages it with telemetry spans, chart data (if any), and `TotalDurationMs` (from the `Stopwatch`). |
+| **9. Frontend rendering** | `ChatPanel.tsx` | The response is displayed as formatted markdown. Charts render via `ChartRenderer` (Recharts). Telemetry spans stream to `TelemetryPanel` via SignalR for real-time display. |
+
+#### Where the Data Resides
+
+| Data | Location | Persistence |
+|------|----------|-------------|
+| **Depletion metrics** (sales velocity, YoY trends, inventory) | `SimulatedMetricsData._depletionData` — in-memory dictionary keyed by `(Brand, Region)` | Per-process. Regenerated identically on restart (deterministic from `tenant.yaml`). |
+| **Shipment data** (distribution, fill rates) | `SimulatedMetricsData._shipmentData` — in-memory dictionary | Same as above. |
+| **Field sentiment** (rep feedback, scores) | `SimulatedMetricsData._sentimentData` — in-memory dictionary | Same as above. |
+| **Tenant configuration** (brands, regions, channels) | `tenant.yaml` at repo root → loaded by `FileTenantProvider` | On disk. Single source of truth for the business domain. |
+| **Conversation history** | Frontend state (`ChatPanel.tsx`) → sent with each request | Browser session only. Not persisted server-side. |
+| **Telemetry spans** | Frontend state (`Dashboard.tsx`) via SignalR | Browser session only. Resets on "Clear Telemetry" or "+ New Chat". |
+
+> **Key insight:** There is no database. The entire analytics dataset is generated in-memory by `SimulatedMetricsData` based on `tenant.yaml`. The intelligence comes from the LLM interpreting and synthesizing the simulated metrics — not from the data itself. This is by design for a demo platform; swapping to real data sources requires only replacing the MCP Server tool implementations.
+
 ---
 
 ## Technology Choices & Rationale
