@@ -5,6 +5,7 @@ import { SpanTimeline } from './SpanTimeline';
 interface Props {
   connected: boolean;
   liveSpans: AgentSpan[];
+  totalDurationMs?: number;
   onClear: () => void;
 }
 
@@ -64,10 +65,10 @@ const useStyles= makeStyles({
   },
 });
 
-export function TelemetryPanel({ connected, liveSpans, onClear }: Props) {
+export function TelemetryPanel({ connected, liveSpans, totalDurationMs, onClear }: Props) {
   const styles = useStyles();
 
-  const totalDuration = liveSpans.reduce((sum, s) => sum + s.durationMs, 0);
+  const totalDuration = totalDurationMs ?? liveSpans.reduce((sum, s) => sum + s.durationMs, 0);
   const toolCalls = liveSpans.filter(s => s.type === 'tool_call').length;
   const agentCalls = liveSpans.filter(s => s.type === 'agent_delegation' || s.type === 'agent_call').length;
 

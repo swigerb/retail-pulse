@@ -145,10 +145,18 @@ public class RetailPulseAgent
             reply[..Math.Min(200, reply.Length)],
             responseDurationMs);
 
-        _logger.LogInformation("Agent responded in {DurationMs}ms with {SpanCount} spans and {ChartCount} charts",
-            sw.ElapsedMilliseconds, collector.Spans.Count, charts.Count);
+        var totalDurationMs = sw.ElapsedMilliseconds;
 
-        return new ChatResponse(reply, sessionId, collector.Spans.ToList(), charts.Any() ? charts : null);
+        _logger.LogInformation("Agent responded in {DurationMs}ms with {SpanCount} spans and {ChartCount} charts",
+            totalDurationMs, collector.Spans.Count, charts.Count);
+
+        return new ChatResponse(
+            reply,
+            sessionId,
+            collector.Spans.ToList(),
+            charts.Any() ? charts : null,
+            totalDurationMs);
+
     }
 
     private static List<ChartSpec> ExtractChartSpecs(Microsoft.Extensions.AI.ChatResponse chatResponse)
