@@ -119,7 +119,7 @@ export function Dashboard() {
   }, []);
 
   const handleResponseReceived = useCallback((response: { totalDurationMs?: number }) => {
-    setTotalDurationMs(response.totalDurationMs);
+    setTotalDurationMs(prev => (prev ?? 0) + (response.totalDurationMs ?? 0));
   }, []);
 
   return (
