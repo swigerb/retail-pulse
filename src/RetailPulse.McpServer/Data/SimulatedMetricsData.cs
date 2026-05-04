@@ -76,6 +76,29 @@ public class SimulatedMetricsData
         };
     }
 
+    public object GetPortfolioDepletionStats(string region, string period)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+
+        var normalizedRegion = region.Trim();
+        var normalizedPeriod = string.IsNullOrWhiteSpace(period) ? "YTD" : period.Trim();
+
+        var results = new List<object>();
+        foreach (var brand in _tenant.Brands)
+        {
+            results.Add(GetDepletionStats(brand.Name, normalizedRegion, normalizedPeriod));
+        }
+
+        return new
+        {
+            brands = results,
+            region = normalizedRegion,
+            period = normalizedPeriod,
+            brandCount = results.Count
+        };
+    }
+
     public object GetShipmentStats(string brand, string region, string period)
     {
         if (string.IsNullOrWhiteSpace(brand))

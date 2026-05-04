@@ -159,6 +159,38 @@ public class SimulatedMetricsDataTests
         json.Should().NotContain("\"error\"");
     }
 
+    [Fact]
+    public void GetPortfolioDepletionStats_ReturnsAllBrandsForRegion()
+    {
+        var data = CreateDataWithSampleTenant();
+        var result = data.GetPortfolioDepletionStats("Northeast", "YTD");
+        var json = JsonSerializer.Serialize(result);
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        root.GetProperty("region").GetString().Should().Be("Northeast");
+        root.GetProperty("period").GetString().Should().Be("YTD");
+        root.GetProperty("brandCount").GetInt32().Should().Be(3);
+
+        var brands = root.GetProperty("brands");
+        brands.GetArrayLength().Should().Be(3);
+        brands.EnumerateArray().Select(b => b.GetProperty("brand").GetString()).Should()
+            .BeEquivalentTo(new[] { "Alpha Tequila", "Beta Vodka", "Gamma Bourbon" });
+    }
+
+    [Fact]
+    public void GetPortfolioDepletionStats_National_ReturnsAggregatedBrandResults()
+    {
+        var data = CreateDataWithSampleTenant();
+        var result = data.GetPortfolioDepletionStats("National", "Q1");
+        var json = JsonSerializer.Serialize(result);
+        var doc = JsonDocument.Parse(json);
+        var brands = doc.RootElement.GetProperty("brands");
+
+        brands.GetArrayLength().Should().Be(3);
+        brands.EnumerateArray().All(b => b.GetProperty("region").GetString() == "National").Should().BeTrue();
+    }
+
     [Theory]
     [InlineData("Alpha Tequila", "Northeast")]
     [InlineData("Beta Vodka", "West Coast")]

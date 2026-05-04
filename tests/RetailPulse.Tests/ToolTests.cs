@@ -90,6 +90,78 @@ public class ToolTests
             .Should().Contain("MCP server not reachable");
     }
 
+    // -------------------------- PortfolioDepletionStatsTool --------------------------
+
+    [Fact]
+    public async Task PortfolioDepletionStatsTool_WhenServerReachable_ReturnsData()
+    {
+        var expectedResponse = JsonSerializer.Serialize(new
+        {
+            region = "National",
+            period = "YTD",
+            brandCount = 2,
+            brands = new object[]
+            {
+                new { brand = "Sierra Gold Tequila", metrics = new { depletions_yoy = "+4.2%" } },
+                new { brand = "Summit Vodka", metrics = new { depletions_yoy = "-1.3%" } }
+            }
+        });
+
+        var httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
+        var tool = new PortfolioDepletionStatsTool(httpClient);
+
+        var result = await tool.GetPortfolioDepletionStats("National", "YTD");
+
+        var doc = JsonDocument.Parse(result);
+        var root = doc.RootElement;
+        root.GetProperty("region").GetString().Should().Be("National");
+        root.GetProperty("brandCount").GetInt32().Should().Be(2);
+        root.GetProperty("brands").GetArrayLength().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task PortfolioDepletionStatsTool_WhenServerUnreachable_ReturnsFallback()
+    {
+        var httpClient = CreateFailingHttpClient();
+        var tool = new PortfolioDepletionStatsTool(httpClient);
+
+        var result = await tool.GetPortfolioDepletionStats("West Coast", "Q2");
+
+        var doc = JsonDocument.Parse(result);
+        var root = doc.RootElement;
+        root.GetProperty("region").GetString().Should().Be("West Coast");
+        root.GetProperty("period").GetString().Should().Be("Q2");
+        root.GetProperty("brandCount").GetInt32().Should().Be(0);
+        root.GetProperty("source").GetString().Should().Be("fallback");
+        root.GetProperty("error").GetString().Should().Contain("MCP server not reachable");
+    }
+
+    [Fact]
+    public async Task PortfolioDepletionStatsTool_DefaultPeriod_IsYTD()
+    {
+        Uri? capturedUri = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("{}")
+            });
+
+        var client = new HttpClient(handler.Object) { BaseAddress = new Uri("http://localhost:5000") };
+        var tool = new PortfolioDepletionStatsTool(client);
+
+        await tool.GetPortfolioDepletionStats("Northeast");
+
+        capturedUri.Should().NotBeNull();
+        capturedUri!.Query.Should().Contain("period=YTD");
+    }
+
     // -------------------------- FieldSentimentTool --------------------------
 
     [Fact]

@@ -99,6 +99,7 @@ public class PromptConfigurationTests
         agent.SystemPrompt.Should().NotBeNullOrEmpty();
         agent.Tools.Should().NotBeEmpty();
         agent.Tools.Should().Contain("GetDepletionStats");
+        agent.Tools.Should().Contain("GetPortfolioDepletionStats");
         agent.Tools.Should().Contain("GetFieldSentiment");
     }
 
