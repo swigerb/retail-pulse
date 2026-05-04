@@ -10,7 +10,7 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
-import type { AgentSpan, ChartSpec } from '../types';
+import type { AgentSpan, ChatHistoryMessage, ChartSpec } from '../types';
 import { sendMessage } from '../services/api';
 import { joinTelemetrySession } from '../services/telemetryHub';
 import { BrandLogo } from './BrandLogo';
@@ -472,8 +472,12 @@ export function ChatPanel() {
       setLoading(true);
 
       try {
+        const history: ChatHistoryMessage[] = messages
+          .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.content.startsWith('Error:')))
+          .map(m => ({ role: m.role, content: m.content }));
+
         const response = await sendMessage(
-          { message: trimmed, sessionId },
+          { message: trimmed, sessionId, history },
           { signal: controller.signal },
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
@@ -495,7 +499,7 @@ export function ChatPanel() {
         }
       }
     },
-    [sessionId],
+    [messages, sessionId],
   );
 
   const handleSend = useCallback(async () => {

@@ -1,13 +1,19 @@
 namespace RetailPulse.Contracts;
 
 /// <summary>
+/// Prior conversation message included with a chat request.
+/// </summary>
+public record ChatHistoryMessage(string Role, string Content);
+
+/// <summary>
 /// Request model for the RetailPulse chat endpoint.
 /// Shared between the Api and TeamsBot projects (P1 — eliminates duplicate DTOs).
 /// </summary>
 public record ChatRequest(
     string Message,
     string? SessionId = null,
-    UserContext? User = null
+    UserContext? User = null,
+    List<ChatHistoryMessage>? History = null
 );
 
 /// <summary>

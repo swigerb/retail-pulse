@@ -50,9 +50,26 @@ public class RetailPulseAgent
 
         var messages = new List<ChatMessage>
         {
-            new(ChatRole.System, _agentDef.SystemPrompt),
-            new(ChatRole.User, request.Message)
+            new(ChatRole.System, _agentDef.SystemPrompt)
         };
+
+        if (request.History is { Count: > 0 })
+        {
+            const int maxTurns = 10;
+            var historyMessages = request.History.Count > maxTurns * 2
+                ? request.History.Skip(request.History.Count - (maxTurns * 2)).ToList()
+                : request.History;
+
+            foreach (var historyMessage in historyMessages)
+            {
+                var role = string.Equals(historyMessage.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                    ? ChatRole.Assistant
+                    : ChatRole.User;
+                messages.Add(new ChatMessage(role, historyMessage.Content));
+            }
+        }
+
+        messages.Add(new(ChatRole.User, request.Message));
 
         // Agent thought span — captures the entire GetResponseAsync() call
         // (thinking + tool calls + model response), since MAF handles the

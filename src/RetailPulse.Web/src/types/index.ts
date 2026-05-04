@@ -1,6 +1,12 @@
+export interface ChatHistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface ChatRequest {
   message: string;
   sessionId?: string;
+  history?: ChatHistoryMessage[];
 }
 
 export interface ChatResponse {
