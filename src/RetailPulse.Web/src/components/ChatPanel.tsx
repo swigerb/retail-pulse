@@ -548,7 +548,7 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
             <Text className={styles.welcomeText}>Welcome to Retail Pulse.</Text>
             <img
               className={styles.welcomeHeroLogo}
-              src="/retail-pulse-logo.jpg"
+              src="/retail-pulse-logo-on-black.jpg"
               alt="Retail Pulse logo"
             />
             <Text className={styles.welcomeText}>
