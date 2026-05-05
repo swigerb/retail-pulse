@@ -304,7 +304,13 @@ const useChatStyles = makeStyles({
   welcomeText: {
     color: 'var(--color-text-muted)',
     fontSize: '15px',
-    marginBottom: '32px',
+    marginBottom: '16px',
+  },
+  welcomeHeroLogo: {
+    width: 'min(100%, 320px)',
+    height: 'auto',
+    display: 'block',
+    margin: '0 auto 24px',
   },
   suggestedQueries: {
     display: 'flex',
@@ -539,6 +545,12 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
         {messages.length === 0 && (
           <div className={styles.welcome}>
             <div className={styles.welcomeLogo}><BrandLogo size={56} /></div>
+            <Text className={styles.welcomeText}>Welcome to Retail Pulse.</Text>
+            <img
+              className={styles.welcomeHeroLogo}
+              src="/retail-pulse-logo.jpg"
+              alt="Retail Pulse logo"
+            />
             <Text className={styles.welcomeText}>
               Ask me about sales performance, inventory trends, or customer insights across your retail portfolio.
             </Text>
