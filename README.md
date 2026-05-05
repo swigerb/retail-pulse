@@ -1,4 +1,8 @@
-# 📊 Retail Pulse
+<div align="center">
+  <img src="docs/retail-pulse-logo.jpg" alt="Retail Pulse Logo" width="400" />
+</div>
+
+# Retail Pulse
 
 > AI-powered brand analytics for retail & consumer goods
 
