@@ -28,3 +28,4 @@
 - 2026-05-05T13:21:37.378-04:00 — Official brand assets should be mirrored in `docs\` for README usage and `src\RetailPulse.Web\public\` for runtime usage so docs and UI stay visually aligned.
 - 2026-05-05T13:21:37.378-04:00 — `src\RetailPulse.Web\src\components\BrandLogo.tsx` now renders the shipped `/retail-pulse-logo.jpg` asset directly, so future brand updates should replace the public image rather than rebuilding a synthetic wordmark in JSX.
 - 2026-05-05T15:50:04.362-04:00 — Keep `src\RetailPulse.Web\src\components\BrandLogo.tsx` as the compact RP gradient mark for general UI chrome, and reserve the full `/retail-pulse-logo.jpg` asset for the ChatPanel welcome state hero treatment.
+- 2026-05-05T16:40:32.229-04:00 — `src\RetailPulse.Web\src\components\ChatPanel.tsx` welcome hero can swap to alternate shipped assets in `src\RetailPulse.Web\public\`; keep legacy logos alongside new variants instead of replacing existing files when the UI needs both.
