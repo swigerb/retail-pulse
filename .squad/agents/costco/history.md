@@ -25,6 +25,19 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - Impact: Wall-clock accuracy improved from ~130.9s misreport to correct ~65.5s
 - Validation: Backend build + frontend build + 12 tests pass
 
+## Session Work — 2026-05-07 Prompt Enforcement Session
+
+### Fix: Tool Enforcement in System Prompt (Commit a21cb48)
+- Issue: gpt-5.4-mini responded to data/visualization requests with text-only answers, skipping GetPortfolioDepletionStats and CreateChart tools entirely
+- Root Cause: System prompt in `prompts.yaml` described tools but never mandated their use for data questions
+- Decision: Added "Critical: Always Use Tools for Data Requests" section to `prompts.yaml`, placed BEFORE visualization guidelines so model encounters mandate early
+- Changes: 
+  - Concept-to-tool mapping table (market share → GetPortfolioDepletionStats, trends → GetDepletionStats, etc.)
+  - Visualization selection rules (proportional breakdown → pie chart, trends → line chart, etc.)
+  - "Always Chart Available Data" guidance for estimated breakdowns
+- Impact: Model now reliably invokes data tools first, then CreateChart for visualizations
+- Validation: All 174 backend + 12 frontend tests pass
+
 ## Learnings
 
 - 2026-05-04T10:32:17.680-04:00 — The telemetry drawer in `src\RetailPulse.Web\src\components\TelemetryPanel.tsx` should use a response-level wall-clock total, not a sum of span durations, because the backend `thought` span in `src\RetailPulse.Api\Agents\RetailPulseAgent.cs` already includes tool time.
@@ -32,3 +45,4 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - 2026-05-04T10:32:17.680-04:00 — Shared chat contract changes for telemetry belong in `src\RetailPulse.Contracts\ChatModels.cs`, with matching frontend shape updates in `src\RetailPulse.Web\src\types\index.ts`.
 - 2026-05-04T14:53:22Z — Telemetry accuracy achieved via response-level TotalDurationMs with fallback to span summation for backward compatibility.
 - 2026-05-07T15:11:15.222-04:00 — Added "Critical: Always Use Tools for Data Requests" section to `src\RetailPulse.Api\prompts.yaml` to fix gpt-5.4-mini skipping tool calls on data/visualization requests. Includes concept-to-tool mapping table (market share → GetPortfolioDepletionStats, trends → GetDepletionStats, etc.) and visualization selection guidance. Root cause was the system prompt described tools but never mandated their use for data questions.
+- 2026-05-07T19:19:53Z — Prompt engineering for tool enforcement is more effective than model re-selection; mandate section in system prompt places enforcement early in context window for reliable tool invocation on data/visualization requests.
