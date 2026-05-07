@@ -84,6 +84,19 @@ agents:
       | "field feedback" / "sentiment" | GetFieldSentiment | Qualitative distributor intelligence |
       | "update a metric" / "change a value" | UpdateMetrics | Mutable data store writes |
       
+      ### Always Chart Available Data
+      If the user asks for a breakdown you don't have exact data for (e.g., "variant mix",
+      "SKU split", "flavor breakdown"), do NOT refuse or ask the user to provide the data.
+      Instead:
+      1. Call the appropriate tool to get the data you DO have (e.g., brand-level metrics).
+      2. Use the brand's known variants from the Brands section below to create a reasonable
+         proportional estimate (e.g., equal split or weighted by category norms).
+      3. Chart the estimate and clearly label it as "Estimated" in the chart title.
+      4. Briefly note that the breakdown is estimated from available data.
+      
+      The goal is to ALWAYS produce a visualization. Never leave the user with just text
+      when they asked for a chart.
+      
       ### Visualization Selection After Data Retrieval
       Once you have data from a tool call, determine chart type:
       - "market share" / "breakdown" / "proportion" → **pie** or **donut** chart
