@@ -125,7 +125,98 @@ public class RetailPulseAgentTests
         return response.Object;
     }
 
+    [Fact]
+    public void BuildTokenUsage_WithMatchingModel_CalculatesCost()
+    {
+        var agent = CreateAgentWithModel("gpt-5.4-mini", new Dictionary<string, string?>
+        {
+            ["TokenPricing:gpt-5.4-mini:InputPerMillion"] = "0.25",
+            ["TokenPricing:gpt-5.4-mini:OutputPerMillion"] = "2.00",
+        });
+
+        var usage = agent.BuildTokenUsage(5000, 2000, 7000);
+
+        usage.InputTokens.Should().Be(5000);
+        usage.OutputTokens.Should().Be(2000);
+        usage.TotalTokens.Should().Be(7000);
+        // Input: 5000 * 0.25 / 1M = 0.00125, Output: 2000 * 2.00 / 1M = 0.004
+        usage.EstimatedCostUsd.Should().Be(0.00525m);
+    }
+
+    [Fact]
+    public void BuildTokenUsage_WithUnknownModel_ReturnsNullCost()
+    {
+        var agent = CreateAgentWithModel("unknown-model", new Dictionary<string, string?>
+        {
+            ["TokenPricing:gpt-4o:InputPerMillion"] = "2.50",
+            ["TokenPricing:gpt-4o:OutputPerMillion"] = "10.00",
+        });
+
+        var usage = agent.BuildTokenUsage(1000, 500, 1500);
+
+        usage.EstimatedCostUsd.Should().BeNull();
+    }
+
+    [Fact]
+    public void BuildTokenUsage_WithZeroTokens_ReturnsZeroCost()
+    {
+        var agent = CreateAgentWithModel("gpt-4o", new Dictionary<string, string?>
+        {
+            ["TokenPricing:gpt-4o:InputPerMillion"] = "2.50",
+            ["TokenPricing:gpt-4o:OutputPerMillion"] = "10.00",
+        });
+
+        var usage = agent.BuildTokenUsage(0, 0, 0);
+
+        usage.EstimatedCostUsd.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task ChatAsync_WithTokenUsage_ReturnsCostInResponse()
+    {
+        var chatClient = new Mock<IChatClient>();
+        var chatResponse = new Microsoft.Extensions.AI.ChatResponse(
+            new ChatMessage(ChatRole.Assistant, "done"))
+        {
+            Usage = new UsageDetails
+            {
+                InputTokenCount = 10000,
+                OutputTokenCount = 5000,
+                TotalTokenCount = 15000,
+            }
+        };
+        chatClient
+            .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(chatResponse);
+
+        var agent = CreateAgentWithModel("gpt-5.4-mini", new Dictionary<string, string?>
+        {
+            ["TokenPricing:gpt-5.4-mini:InputPerMillion"] = "0.25",
+            ["TokenPricing:gpt-5.4-mini:OutputPerMillion"] = "2.00",
+        }, chatClient.Object);
+
+        var response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "cost-test"));
+
+        response.TokenUsage.Should().NotBeNull();
+        response.TokenUsage!.InputTokens.Should().Be(10000);
+        response.TokenUsage!.OutputTokens.Should().Be(5000);
+        // Input: 10000 * 0.25 / 1M = 0.0025, Output: 5000 * 2.00 / 1M = 0.01
+        response.TokenUsage!.EstimatedCostUsd.Should().Be(0.0125m);
+    }
+
     private static RetailPulseAgent CreateAgent(IChatClient chatClient)
+    {
+        return CreateAgentWithModel("gpt-4o", new Dictionary<string, string?>
+        {
+            ["TokenPricing:gpt-4o:InputPerMillion"] = "2.50",
+            ["TokenPricing:gpt-4o:OutputPerMillion"] = "10.00",
+        }, chatClient);
+    }
+
+    private static RetailPulseAgent CreateAgentWithModel(
+        string model,
+        Dictionary<string, string?> pricingConfig,
+        IChatClient? chatClient = null)
     {
         var hubContext = new Mock<IHubContext<TelemetryHub>>();
         var clients = new Mock<IHubClients>();
@@ -134,16 +225,12 @@ public class RetailPulseAgentTests
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["TokenPricing:gpt-4o:InputPerMillion"] = "2.50",
-                ["TokenPricing:gpt-4o:OutputPerMillion"] = "10.00",
-            })
+            .AddInMemoryCollection(pricingConfig)
             .Build();
 
         return new RetailPulseAgent(
-            chatClient,
-            new AgentDefinition { Name = "Retail Pulse", SystemPrompt = "System prompt" },
+            chatClient ?? Mock.Of<IChatClient>(),
+            new AgentDefinition { Name = "Retail Pulse", Model = model, SystemPrompt = "System prompt" },
             hubContext.Object,
             [],
             Mock.Of<ILogger<RetailPulseAgent>>(),
