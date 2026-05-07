@@ -36,6 +36,8 @@ agents:
       - AnalyzeShipments: Analyze shipment data for pipeline health, anomaly detection,
         and Three-Tier distribution analysis. USE THIS when the user asks about shipments,
         pipeline health, or sell-in vs sell-through dynamics.
+      - GetVariantMix: Get variant mix percentages and YoY depletion for each SKU/variant of a brand.
+        Supports region="National" for a national average across all regions.
       - CreateChart: Generate interactive chart visualizations by providing structured JSON data.
         Call this tool to display charts to the user.
       - UpdateMetrics: Update metric values for a specific brand and region when new information
@@ -80,17 +82,19 @@ agents:
       | "national performance" | GetDepletionStats with region="National" | Aggregated national rollup |
       | "trend" / "over time" / "trajectory" | GetDepletionStats per brand | Time-series data for trend lines |
       | "single brand deep-dive" | GetDepletionStats | Focused single-brand metrics |
+      | "variant mix" / "product breakdown" / "SKU split" / "flavor breakdown" | GetVariantMix | Returns actual variant percentages and YoY depletion per SKU |
       | "pipeline health" / "shipments" | AnalyzeShipments | Three-Tier distribution analysis |
       | "field feedback" / "sentiment" | GetFieldSentiment | Qualitative distributor intelligence |
       | "update a metric" / "change a value" | UpdateMetrics | Mutable data store writes |
       
       ### Always Chart Available Data
-      If the user asks for a breakdown you don't have exact data for (e.g., "variant mix",
-      "SKU split", "flavor breakdown"), do NOT refuse or ask the user to provide the data.
+      If the user asks for a variant breakdown, FIRST call GetVariantMix. If GetVariantMix
+      returns data, chart it directly — do NOT estimate or label it as "Estimated".
+      
+      For other breakdowns you don't have exact data for (e.g., channel split), do NOT refuse.
       Instead:
-      1. Call the appropriate tool to get the data you DO have (e.g., brand-level metrics).
-      2. Use the brand's known variants from the Brands section below to create a reasonable
-         proportional estimate (e.g., equal split or weighted by category norms).
+      1. Call the appropriate tool to get the data you DO have.
+      2. Use brand context to create a reasonable proportional estimate.
       3. Chart the estimate and clearly label it as "Estimated" in the chart title.
       4. Briefly note that the breakdown is estimated from available data.
       
@@ -170,5 +174,6 @@ agents:
       - GetFieldSentiment
       - GetShipmentStats
       - AnalyzeShipments
+      - GetVariantMix
       - CreateChart
       - UpdateMetrics

@@ -80,6 +80,15 @@ public class RetailPulseDb
                 PRIMARY KEY (Brand, Region)
             );
 
+            CREATE TABLE IF NOT EXISTS VariantMix (
+                Brand TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Variant TEXT NOT NULL COLLATE NOCASE,
+                MixPercent REAL NOT NULL,
+                DepletionsYoY REAL NOT NULL,
+                PRIMARY KEY (Brand, Region, Variant)
+            );
+
             CREATE TABLE IF NOT EXISTS SeedMetadata (
                 Key TEXT PRIMARY KEY,
                 Value TEXT NOT NULL
@@ -109,12 +118,13 @@ public class RetailPulseDb
         using var tx = conn.BeginTransaction();
 
         using var clearCmd = conn.CreateCommand();
-        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM SeedMetadata;";
+        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM SeedMetadata;";
         clearCmd.ExecuteNonQuery();
 
         SeedDepletions(conn);
         SeedShipments(conn);
         SeedSentiment(conn);
+        SeedVariantMix(conn);
 
         // Store hash
         using var hashCmd = conn.CreateCommand();
@@ -269,6 +279,49 @@ public class RetailPulseDb
                 pRegion.Value = region;
                 pSentiment.Value = sentiment;
                 cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
+    private void SeedVariantMix(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO VariantMix (Brand, Region, Variant, MixPercent, DepletionsYoY)
+            VALUES (@brand, @region, @variant, @mix, @dep)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pVariant = cmd.Parameters.Add("@variant", SqliteType.Text);
+        var pMix = cmd.Parameters.Add("@mix", SqliteType.Real);
+        var pDep = cmd.Parameters.Add("@dep", SqliteType.Real);
+
+        foreach (var brand in _tenant.Brands)
+        {
+            if (brand.Variants.Count == 0) continue;
+
+            foreach (var region in _tenant.Regions)
+            {
+                var seed = GetStableHash($"variant|{brand.Name}|{region}");
+                var rng = new Random(seed);
+
+                // Generate weights in [0.5, 2.0], normalize to 100% mix
+                var weights = brand.Variants.Select(_ => 0.5 + rng.NextDouble() * 1.5).ToArray();
+                var total = weights.Sum();
+
+                for (int i = 0; i < brand.Variants.Count; i++)
+                {
+                    var mixPct = Math.Round(weights[i] / total * 100.0, 1);
+                    var depYoY = Math.Round((rng.NextDouble() - 0.5) * 10.0, 1); // ±5%
+
+                    pBrand.Value = brand.Name;
+                    pRegion.Value = region;
+                    pVariant.Value = brand.Variants[i];
+                    pMix.Value = mixPct;
+                    pDep.Value = depYoY;
+                    cmd.ExecuteNonQuery();
+                }
             }
         }
     }
@@ -449,6 +502,87 @@ public class RetailPulseDb
             reporting_period = "Current YTD",
             sentiment = reader.GetString(2)
         };
+    }
+
+    public object GetVariantMix(string brand, string region)
+    {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
+
+        var normalizedRegion = string.IsNullOrWhiteSpace(region) ? "National" : region.Trim();
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        if (normalizedRegion.Equals("National", StringComparison.OrdinalIgnoreCase) ||
+            normalizedRegion.Equals("All", StringComparison.OrdinalIgnoreCase))
+        {
+            return GetNationalVariantMix(brand.Trim(), conn);
+        }
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT Brand, Region, Variant, MixPercent, DepletionsYoY
+            FROM VariantMix
+            WHERE Brand LIKE @brand AND Region LIKE @region
+            ORDER BY MixPercent DESC
+            """;
+        cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        cmd.Parameters.AddWithValue("@region", $"%{normalizedRegion}%");
+
+        var variants = new List<object>();
+        string actualBrand = brand, actualRegion = normalizedRegion;
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            actualBrand = reader.GetString(0);
+            actualRegion = reader.GetString(1);
+            variants.Add(new
+            {
+                variant = reader.GetString(2),
+                mix_percent = reader.GetDouble(3),
+                depletions_yoy = FormatPercentage(reader.GetDouble(4))
+            });
+        }
+
+        if (variants.Count == 0)
+            return new { error = $"No variant data for brand '{brand}' in region '{normalizedRegion}'.", available_brands = GetAvailableBrands(), available_regions = GetAvailableRegions() };
+
+        return new { brand = actualBrand, region = actualRegion, variants, total_variants = variants.Count };
+    }
+
+    private object GetNationalVariantMix(string brand, SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT Brand, Variant, AVG(MixPercent) as AvgMix, AVG(DepletionsYoY) as AvgDep
+            FROM VariantMix
+            WHERE Brand LIKE @brand
+            GROUP BY Brand, Variant
+            ORDER BY AvgMix DESC
+            """;
+        cmd.Parameters.AddWithValue("@brand", $"%{brand}%");
+
+        var variants = new List<object>();
+        string actualBrand = brand;
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            actualBrand = reader.GetString(0);
+            variants.Add(new
+            {
+                variant = reader.GetString(1),
+                mix_percent = Math.Round(reader.GetDouble(2), 1),
+                depletions_yoy = FormatPercentage(Math.Round(reader.GetDouble(3), 1))
+            });
+        }
+
+        if (variants.Count == 0)
+            return new { error = $"No variant data found for brand '{brand}'.", available_brands = GetAvailableBrands() };
+
+        return new { brand = actualBrand, region = "National", variants, total_variants = variants.Count };
     }
 
     // ── Update Methods (for AI-driven mutations) ─────────────────────────
