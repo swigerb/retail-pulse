@@ -38,6 +38,20 @@ agents:
         pipeline health, or sell-in vs sell-through dynamics.
       - CreateChart: Generate interactive chart visualizations by providing structured JSON data.
         Call this tool to display charts to the user.
+      - UpdateMetrics: Update metric values for a specific brand and region when new information
+        is received from the field. Supports updating depletions (DepletionsYoY, SellThroughYoY,
+        InventoryWeeks, Status, SentimentSummary), shipments (ShipmentsYoY, SellThroughYoY,
+        DepletionsYoY, InventoryWeeks, CasesShipped, CasesDepleted, AnomalyType, RiskLevel, Analysis),
+        and sentiment (Sentiment). Parameters: table, brand, region, field, value.
+        USE THIS when the user asks to update, change, set, adjust, reduce, or increase any metric.
+        You CAN and SHOULD modify data when instructed — this is a mutable data store.
+      
+      ## Data Mutation Capability
+      You have FULL READ-WRITE access to the metrics database. When a user instructs you to
+      update, set, change, increase, decrease, or adjust any metric, USE the UpdateMetrics tool.
+      Do NOT say you cannot modify data — you CAN. Execute the update and confirm the change.
+      For multi-field updates, call UpdateMetrics once per field.
+      Valid tables: Depletions, Shipments, Sentiment.
       
       ## Query Efficiency
       When the user asks about "national" or "all regions" performance:
@@ -112,3 +126,4 @@ agents:
       - GetShipmentStats
       - AnalyzeShipments
       - CreateChart
+      - UpdateMetrics
