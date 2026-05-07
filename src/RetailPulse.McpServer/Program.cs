@@ -61,4 +61,11 @@ app.MapGet("/api/shipment-stats", (string brand, string region, string period, R
 })
 .WithName("GetShipmentStats");
 
+app.MapGet("/api/variant-mix", (string brand, RetailPulseDb data, string region = "National") =>
+{
+    var result = data.GetVariantMix(brand, region);
+    return Results.Ok(result);
+})
+.WithName("GetVariantMix");
+
 app.Run();
