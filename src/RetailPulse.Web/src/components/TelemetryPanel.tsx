@@ -30,7 +30,7 @@ const useStyles= makeStyles({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '14px 8px',
+    padding: '14px 6px',
     backgroundColor: 'var(--color-bg-elevated)',
     gap: '2px',
   },
