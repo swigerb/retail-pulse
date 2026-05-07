@@ -147,8 +147,8 @@ public class PromptConfigurationTests
         var resolved = ResolveTenantPlaceholders(agent.SystemPrompt, tenant);
 
         // Resolved prompt should contain tenant values
-        resolved.Should().Contain("Apex Brands");
-        resolved.Should().Contain("Spirits & Beverages");
+        resolved.Should().Contain("Apex Retail Group");
+        resolved.Should().Contain("Multi-Category Retail");
         resolved.Should().Contain("Sierra Gold Tequila");
         resolved.Should().Contain("Northeast");
 

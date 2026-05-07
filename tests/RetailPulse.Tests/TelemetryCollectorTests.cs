@@ -14,8 +14,10 @@ public class TelemetryCollectorTests
     public TelemetryCollectorTests()
     {
         var mockHubContext = new Mock<IHubContext<TelemetryHub>>();
-        // No sessionId is supplied — collector should accumulate spans
-        // locally without pushing to any SignalR group.
+        var mockClients = new Mock<IHubClients>();
+        var mockAllProxy = new Mock<IClientProxy>();
+        mockClients.Setup(c => c.All).Returns(mockAllProxy.Object);
+        mockHubContext.Setup(h => h.Clients).Returns(mockClients.Object);
         _collector = new TelemetryCollector(mockHubContext.Object);
     }
 
