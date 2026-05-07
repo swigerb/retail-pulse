@@ -7,7 +7,7 @@ import { BrandLogo } from './BrandLogo';
 import type { AgentSpan, TokenUsage } from '../types';
 import { connectTelemetryHub, disconnectTelemetryHub } from '../services/telemetryHub';
 
-const DRAWER_WIDTH_PX = 420;
+const DRAWER_WIDTH_PX = 560;
 const DRAWER_BREAKPOINT_PX = 768;
 
 const drawerStyle: React.CSSProperties = {
