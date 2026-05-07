@@ -23,6 +23,11 @@ dist/
 .DS_Store
 Thumbs.db
 
+# SQLite database files
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
 # External reference repos (clone separately)
 ai-gateway-dev-portal/
 

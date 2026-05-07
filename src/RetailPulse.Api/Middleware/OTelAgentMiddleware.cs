@@ -62,9 +62,9 @@ public class TelemetryCollector
 
     public IReadOnlyCollection<AgentSpan> Spans => _spans;
 
-    public async Task RecordSpanAsync(string name, string type, string detail, double durationMs)
+    public async Task RecordSpanAsync(string name, string type, string detail, double durationMs, int? inputTokens = null, int? outputTokens = null)
     {
-        var span = new AgentSpan(name, type, detail, durationMs, DateTimeOffset.UtcNow, _sessionId);
+        var span = new AgentSpan(name, type, detail, durationMs, DateTimeOffset.UtcNow, _sessionId, inputTokens, outputTokens);
         _spans.Enqueue(span);
 
         // Broadcast to all connected clients. For multi-tenant production

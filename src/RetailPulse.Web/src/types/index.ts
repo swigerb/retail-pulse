@@ -15,6 +15,14 @@ export interface ChatResponse {
   spans: AgentSpan[];
   charts?: ChartSpec[];
   totalDurationMs?: number;
+  tokenUsage?: TokenUsage;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd?: number;
 }
 
 export type ChartType =
@@ -53,4 +61,6 @@ export interface AgentSpan {
   detail: string;
   durationMs: number;
   timestamp: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }

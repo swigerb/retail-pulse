@@ -196,7 +196,9 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
         tools.Add(AIFunctionFactory.Create(localAnalyzer.AnalyzeShipments));
     }
 
-    return new RetailPulse.Api.Agents.RetailPulseAgent(chatClient, agentDef, hubContext, tools, logger);
+    var configuration = sp.GetRequiredService<IConfiguration>();
+
+    return new RetailPulse.Api.Agents.RetailPulseAgent(chatClient, agentDef, hubContext, tools, logger, configuration);
 });
 
 builder.Services.AddOpenApi();

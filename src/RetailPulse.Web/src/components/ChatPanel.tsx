@@ -11,7 +11,7 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
-import type { AgentSpan, ChatHistoryMessage, ChartSpec } from '../types';
+import type { AgentSpan, ChatHistoryMessage, ChartSpec, TokenUsage } from '../types';
 import type { SendMessageOptions } from '../services/api';
 import { sendMessage } from '../services/api';
 import { joinTelemetrySession } from '../services/telemetryHub';
@@ -25,10 +25,11 @@ interface ChatMessage {
   spans?: AgentSpan[];
   charts?: ChartSpec[];
   totalDurationMs?: number;
+  tokenUsage?: TokenUsage;
 }
 
 interface ChatPanelProps {
-  onResponseReceived?: (response: { totalDurationMs?: number }) => void;
+  onResponseReceived?: (response: { totalDurationMs?: number; tokenUsage?: TokenUsage }) => void;
 }
 
 const SPAN_ICONS: Record<string, string> = {
@@ -213,7 +214,7 @@ const useSpanStyles = makeStyles({
   },
 });
 
-function SpansSummary({ spans, totalDurationMs }: { spans: AgentSpan[]; totalDurationMs?: number }) {
+function SpansSummary({ spans, totalDurationMs, tokenUsage }: { spans: AgentSpan[]; totalDurationMs?: number; tokenUsage?: TokenUsage }) {
   const [expanded, setExpanded] = useState(false);
   const styles = useSpanStyles();
   const totalMs = totalDurationMs ?? spans.reduce((sum, s) => sum + s.durationMs, 0);
@@ -221,10 +222,12 @@ function SpansSummary({ spans, totalDurationMs }: { spans: AgentSpan[]; totalDur
   const agentCalls = spans.filter(s => s.type === 'agent_call' || s.type === 'agent_delegation');
 
   const summary = [
-    `${spans.length} spans`,
-    toolCalls.length > 0 ? `${toolCalls.length} tool call${toolCalls.length > 1 ? 's' : ''}` : '',
+    `📊 ${spans.length} spans`,
+    toolCalls.length > 0 ? `🔧 ${toolCalls.length} tool call${toolCalls.length > 1 ? 's' : ''}` : '',
     agentCalls.length > 0 ? `${agentCalls.length} agent call${agentCalls.length > 1 ? 's' : ''}` : '',
-    `${(totalMs / 1000).toFixed(1)}s total`,
+    `⏱️ ${(totalMs / 1000).toFixed(1)}s total`,
+    tokenUsage ? `🪙 ${tokenUsage.totalTokens.toLocaleString()} tokens` : '',
+    tokenUsage?.estimatedCostUsd != null ? `💲~$${tokenUsage.estimatedCostUsd.toFixed(4)}` : '',
   ].filter(Boolean).join(' · ');
 
   return (
@@ -235,7 +238,6 @@ function SpansSummary({ spans, totalDurationMs }: { spans: AgentSpan[]; totalDur
         aria-expanded={expanded}
         aria-label={expanded ? 'Collapse span details' : 'Expand span details'}
       >
-        <span className={styles.spanIcon}>📊</span>
         <span>{summary}</span>
         <span className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ''}`}>
           <ChevronRight16Regular />
@@ -496,10 +498,10 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
           options,
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
-        onResponseReceived?.({ totalDurationMs: response.totalDurationMs });
+        onResponseReceived?.({ totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage });
         setMessages(prev => [
           ...prev,
-          { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts, totalDurationMs: response.totalDurationMs },
+          { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage },
         ]);
       } catch (err) {
         if (!isMountedRef.current || controller.signal.aborted) return;
@@ -616,7 +618,7 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
                 )}
               </Card>
               {msg.spans && msg.spans.length > 0 && (
-                <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} />
+                <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} tokenUsage={msg.tokenUsage} />
               )}
               {msg.charts && msg.charts.length > 0 && (
                 <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>

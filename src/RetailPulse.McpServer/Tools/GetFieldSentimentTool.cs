@@ -10,7 +10,7 @@ public static class GetFieldSentimentTool
     [McpServerTool(Name = "GetFieldSentiment")]
     [Description("Get field sentiment and distributor feedback for a company brand in a region")]
     public static object GetFieldSentiment(
-        SimulatedMetricsData data,
+        RetailPulseDb data,
         [Description("Brand name")] string brand,
         [Description("Region")] string region)
     {

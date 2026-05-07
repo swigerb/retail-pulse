@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle } from '@fluentui/react-components';
+import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle } from '@fluentui/react-components';
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { BrandLogo } from './BrandLogo';
-import type { AgentSpan } from '../types';
+import type { AgentSpan, TokenUsage } from '../types';
 import { connectTelemetryHub, disconnectTelemetryHub } from '../services/telemetryHub';
 
 const DRAWER_WIDTH_PX = 420;
@@ -90,6 +90,7 @@ export function Dashboard() {
   const [connected, setConnected] = useState(false);
   const [liveSpans, setLiveSpans] = useState<AgentSpan[]>([]);
   const [totalDurationMs, setTotalDurationMs] = useState<number | undefined>();
+  const [totalTokenUsage, setTotalTokenUsage] = useState<TokenUsage | undefined>();
   const styles = useStyles();
 
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close
@@ -111,15 +112,28 @@ export function Dashboard() {
     setChatKey(prev => prev + 1);
     setLiveSpans([]);
     setTotalDurationMs(undefined);
+    setTotalTokenUsage(undefined);
   };
 
   const handleClearSpans = useCallback(() => {
     setLiveSpans([]);
     setTotalDurationMs(undefined);
+    setTotalTokenUsage(undefined);
   }, []);
 
-  const handleResponseReceived = useCallback((response: { totalDurationMs?: number }) => {
+  const handleResponseReceived = useCallback((response: { totalDurationMs?: number; tokenUsage?: TokenUsage }) => {
     setTotalDurationMs(prev => (prev ?? 0) + (response.totalDurationMs ?? 0));
+    if (response.tokenUsage) {
+      setTotalTokenUsage(prev => {
+        if (!prev) return response.tokenUsage;
+        return {
+          inputTokens: prev.inputTokens + response.tokenUsage!.inputTokens,
+          outputTokens: prev.outputTokens + response.tokenUsage!.outputTokens,
+          totalTokens: prev.totalTokens + response.tokenUsage!.totalTokens,
+          estimatedCostUsd: (prev.estimatedCostUsd ?? 0) + (response.tokenUsage!.estimatedCostUsd ?? 0),
+        };
+      });
+    }
   }, []);
 
   return (
@@ -174,7 +188,14 @@ export function Dashboard() {
                 />
               }
             >
-              📡 Real-Time Telemetry
+              📡 Real-Time Telemetry{' '}
+              <Badge
+                appearance="filled"
+                color={connected ? 'success' : 'danger'}
+                style={{ marginLeft: 8, verticalAlign: 'middle' }}
+              >
+                {connected ? '🟢 Live' : '🔴 Off'}
+              </Badge>
             </DrawerHeaderTitle>
           </DrawerHeader>
           <DrawerBody>
@@ -182,6 +203,7 @@ export function Dashboard() {
               connected={connected}
               liveSpans={liveSpans}
               totalDurationMs={totalDurationMs}
+              totalTokenUsage={totalTokenUsage}
               onClear={handleClearSpans}
             />
           </DrawerBody>

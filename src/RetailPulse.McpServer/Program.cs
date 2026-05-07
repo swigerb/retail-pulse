@@ -9,9 +9,10 @@ builder.AddServiceDefaults();
 var tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
 builder.Services.AddSingleton<ITenantProvider>(new FileTenantProvider(tenantConfigPath));
 
-// Register tenant-driven simulated data as a singleton
-builder.Services.AddSingleton<SimulatedMetricsData>(sp =>
-    new SimulatedMetricsData(sp.GetRequiredService<ITenantProvider>()));
+// Register SQLite-backed data store (seeds from tenant.yaml on first run)
+var dbPath = Path.Combine(builder.Environment.ContentRootPath, "data", "retailpulse.db");
+builder.Services.AddSingleton<RetailPulseDb>(sp =>
+    new RetailPulseDb(sp.GetRequiredService<ITenantProvider>(), dbPath, tenantConfigPath));
 
 builder.Services.AddMcpServer()
     .WithHttpTransport()
@@ -32,28 +33,28 @@ if (app.Environment.IsDevelopment())
 app.MapMcp();
 
 // REST endpoints for direct HTTP access
-app.MapGet("/api/depletion-stats", (string brand, string region, string period, SimulatedMetricsData data) =>
+app.MapGet("/api/depletion-stats", (string brand, string region, string period, RetailPulseDb data) =>
 {
     var result = data.GetDepletionStats(brand, region, period);
     return Results.Ok(result);
 })
 .WithName("GetDepletionStats");
 
-app.MapGet("/api/portfolio-depletion-stats", (string region, SimulatedMetricsData data, string period = "YTD") =>
+app.MapGet("/api/portfolio-depletion-stats", (string region, RetailPulseDb data, string period = "YTD") =>
 {
     var result = data.GetPortfolioDepletionStats(region, period);
     return Results.Ok(result);
 })
 .WithName("GetPortfolioDepletionStats");
 
-app.MapGet("/api/field-sentiment", (string brand, string region, SimulatedMetricsData data) =>
+app.MapGet("/api/field-sentiment", (string brand, string region, RetailPulseDb data) =>
 {
     var result = data.GetFieldSentiment(brand, region);
     return Results.Ok(result);
 })
 .WithName("GetFieldSentiment");
 
-app.MapGet("/api/shipment-stats", (string brand, string region, string period, SimulatedMetricsData data) =>
+app.MapGet("/api/shipment-stats", (string brand, string region, string period, RetailPulseDb data) =>
 {
     var result = data.GetShipmentStats(brand, region, period);
     return Results.Ok(result);
