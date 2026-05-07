@@ -135,6 +135,10 @@ public class RetailPulseDb
         tx.Commit();
     }
 
+    // Bump this version whenever the schema or seeding logic changes
+    // to force a re-seed even if tenant.yaml hasn't changed.
+    private const int SchemaVersion = 2;
+
     private string ComputeTenantHash()
     {
         if (!File.Exists(_tenantConfigPath))
@@ -142,7 +146,7 @@ public class RetailPulseDb
 
         var bytes = File.ReadAllBytes(_tenantConfigPath);
         var hash = SHA256.HashData(bytes);
-        return Convert.ToHexStringLower(hash);
+        return $"v{SchemaVersion}:{Convert.ToHexStringLower(hash)}";
     }
 
     private void SeedDepletions(SqliteConnection conn)
