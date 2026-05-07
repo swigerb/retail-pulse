@@ -117,12 +117,10 @@ export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, on
           <Text className={styles.statValue}>{formatDuration(totalDuration)}</Text>
           <Text className={styles.statLabel}>Total Duration</Text>
         </div>
-        {totalCost > 0 && (
-          <div className={styles.stat}>
-            <Text className={styles.statValue}>{formatCost(totalCost)}</Text>
-            <Text className={styles.statLabel}>Total Cost</Text>
-          </div>
-        )}
+        <div className={styles.stat}>
+          <Text className={styles.statValue}>{formatCost(totalCost)}</Text>
+          <Text className={styles.statLabel}>Total Cost</Text>
+        </div>
       </div>
 
       <div className={styles.spans}>
