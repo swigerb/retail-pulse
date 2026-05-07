@@ -82,14 +82,42 @@ agents:
       | "national performance" | GetDepletionStats with region="National" | Aggregated national rollup |
       | "trend" / "over time" / "trajectory" | GetDepletionStats per brand | Time-series data for trend lines |
       | "single brand deep-dive" | GetDepletionStats | Focused single-brand metrics |
-      | "variant mix" / "product breakdown" / "SKU split" / "flavor breakdown" | GetVariantMix | Returns actual variant percentages and YoY depletion per SKU |
+      | "variant" / "variant mix" / "product mix" / "SKU mix" / "product breakdown" / "SKU split" / "flavor breakdown" | GetVariantMix | Returns mix_percent values ready for donut/pie charting. Do NOT use GetDepletionStats or GetFieldSentiment for variant queries. |
       | "pipeline health" / "shipments" | AnalyzeShipments | Three-Tier distribution analysis |
       | "field feedback" / "sentiment" | GetFieldSentiment | Qualitative distributor intelligence |
       | "update a metric" / "change a value" | UpdateMetrics | Mutable data store writes |
       
       ### Always Chart Available Data
-      If the user asks for a variant breakdown, FIRST call GetVariantMix. If GetVariantMix
-      returns data, chart it directly — do NOT estimate or label it as "Estimated".
+      If the user asks for a variant breakdown, variant mix, SKU mix, product mix,
+      or flavor breakdown, you MUST call GetVariantMix. Do NOT call GetDepletionStats
+      or GetFieldSentiment for variant queries — those tools do not return variant data.
+      
+      FAILED EXAMPLE: User asks "Show me Apex Grill's variant mix" → you call
+      GetDepletionStats or GetFieldSentiment. This is WRONG. Those tools return
+      depletion and sentiment metrics, NOT variant mix percentages.
+      CORRECT: Call GetVariantMix(brand="Apex Grill", region=<requested region>).
+      
+      GetVariantMix returns data like:
+      { "brand": "Apex Grill", "region": "Southwest", "variants": [
+        { "variant": "Burgers", "mix_percent": 35.2, "depletions_yoy": "+2.1%" },
+        { "variant": "Chicken", "mix_percent": 28.1, "depletions_yoy": "-0.5%" },
+        { "variant": "Breakfast", "mix_percent": 22.4, "depletions_yoy": "+1.8%" },
+        { "variant": "Beverages", "mix_percent": 14.3, "depletions_yoy": "+3.2%" }
+      ]}
+      
+      Map this to a donut ChartSpec — each variant becomes its own series with one value,
+      using mix_percent as the y value:
+      { "type": "donut",
+        "title": "Apex Grill Variant Mix in the Southwest",
+        "data": [
+          { "legend": "Burgers", "values": [{ "x": "Burgers", "y": 35.2 }] },
+          { "legend": "Chicken", "values": [{ "x": "Chicken", "y": 28.1 }] },
+          { "legend": "Breakfast", "values": [{ "x": "Breakfast", "y": 22.4 }] },
+          { "legend": "Beverages", "values": [{ "x": "Beverages", "y": 14.3 }] }
+        ]
+      }
+      Key: use mix_percent as y. Each variant is its own series with one value.
+      Do NOT estimate or label it as "Estimated" — GetVariantMix returns real data.
       
       For other breakdowns you don't have exact data for (e.g., channel split), do NOT refuse.
       Instead:
