@@ -273,7 +273,7 @@ theme:
 
 1. **Prompts** — `prompts.yaml` uses `{{tenant.*}}` template placeholders. The AI agent's system prompt is automatically populated with your company name, brands, and regions.
 
-2. **Simulated Data** — `SimulatedMetricsData` generates realistic data based on the brands and regions defined in `tenant.yaml`.
+2. **Data Seeding** — `RetailPulseDb` seeds a SQLite database with realistic metrics based on the brands and regions defined in `tenant.yaml`. Data is re-seeded automatically when `tenant.yaml` changes.
 
 3. **React UI** — CSS custom properties are set from `theme` values. The dashboard header, sidebar, and charts all reflect your brand colors.
 
