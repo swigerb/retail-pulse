@@ -152,6 +152,11 @@ export function SpanTimeline({ spans }: Props) {
             {span.durationMs > 0 && (
               <span className={styles.duration}>{span.durationMs.toFixed(0)}ms</span>
             )}
+            {(span.inputTokens || span.outputTokens) && (
+              <span className={styles.duration} title={`In: ${span.inputTokens ?? 0} / Out: ${span.outputTokens ?? 0}`}>
+                🪙 {((span.inputTokens ?? 0) + (span.outputTokens ?? 0)).toLocaleString()}
+              </span>
+            )}
           </div>
           <Text className={styles.detail}>{span.detail}</Text>
           <Text className={styles.time}>

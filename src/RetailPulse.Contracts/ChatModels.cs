@@ -24,7 +24,8 @@ public record ChatResponse(
     string SessionId,
     List<AgentSpan> Spans,
     List<ChartSpec>? Charts = null,
-    long? TotalDurationMs = null
+    long? TotalDurationMs = null,
+    TokenUsage? TokenUsage = null
 );
 
 /// <summary>
@@ -37,7 +38,19 @@ public record AgentSpan(
     string Detail,
     double DurationMs,
     DateTimeOffset Timestamp,
-    string? SessionId = null
+    string? SessionId = null,
+    int? InputTokens = null,
+    int? OutputTokens = null
+);
+
+/// <summary>
+/// Aggregated token usage for a single chat turn, including estimated cost.
+/// </summary>
+public record TokenUsage(
+    int InputTokens,
+    int OutputTokens,
+    int TotalTokens,
+    decimal? EstimatedCostUsd = null
 );
 
 /// <summary>

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Agents;
@@ -132,11 +133,20 @@ public class RetailPulseAgentTests
         clients.Setup(c => c.All).Returns(allProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["TokenPricing:gpt-4o:InputPerMillion"] = "2.50",
+                ["TokenPricing:gpt-4o:OutputPerMillion"] = "10.00",
+            })
+            .Build();
+
         return new RetailPulseAgent(
             chatClient,
             new AgentDefinition { Name = "Retail Pulse", SystemPrompt = "System prompt" },
             hubContext.Object,
             [],
-            Mock.Of<ILogger<RetailPulseAgent>>());
+            Mock.Of<ILogger<RetailPulseAgent>>(),
+            configuration);
     }
 }

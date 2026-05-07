@@ -1,11 +1,12 @@
-import { Button, Text, Badge, makeStyles } from '@fluentui/react-components';
-import type { AgentSpan } from '../types';
+import { Button, Text, makeStyles } from '@fluentui/react-components';
+import type { AgentSpan, TokenUsage } from '../types';
 import { SpanTimeline } from './SpanTimeline';
 
 interface Props {
-  connected: boolean;
+  connected?: boolean;
   liveSpans: AgentSpan[];
   totalDurationMs?: number;
+  totalTokenUsage?: TokenUsage;
   onClear: () => void;
 }
 
@@ -65,24 +66,26 @@ const useStyles= makeStyles({
   },
 });
 
-export function TelemetryPanel({ connected, liveSpans, totalDurationMs, onClear }: Props) {
+export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, onClear }: Props) {
   const styles = useStyles();
 
   const totalDuration = totalDurationMs ?? liveSpans.reduce((sum, s) => sum + s.durationMs, 0);
   const toolCalls = liveSpans.filter(s => s.type === 'tool_call').length;
   const agentCalls = liveSpans.filter(s => s.type === 'agent_delegation' || s.type === 'agent_call').length;
+  const totalTokens = totalTokenUsage?.totalTokens ?? 0;
+
+  const formatTokens = (count: number) => {
+    if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+    if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+    return count.toString();
+  };
 
   return (
     <div className={styles.panel}>
       <div className={styles.stats}>
         <div className={styles.stat}>
-          <Badge
-            appearance="filled"
-            color={connected ? 'success' : 'danger'}
-          >
-            {connected ? '🟢 Live' : '🔴 Disconnected'}
-          </Badge>
-          <Text className={styles.statLabel}>Status</Text>
+          <Text className={styles.statValue}>{formatTokens(totalTokens)}</Text>
+          <Text className={styles.statLabel}>Total Tokens</Text>
         </div>
         <div className={styles.stat}>
           <Text className={styles.statValue}>{liveSpans.length}</Text>

@@ -2,6 +2,7 @@ using System.ClientModel;
 using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
@@ -22,19 +23,22 @@ public class RetailPulseAgent
     private readonly IHubContext<TelemetryHub> _hubContext;
     private readonly IEnumerable<AITool> _tools;
     private readonly ILogger<RetailPulseAgent> _logger;
+    private readonly IConfiguration _configuration;
 
     public RetailPulseAgent(
         IChatClient chatClient,
         AgentDefinition agentDef,
         IHubContext<TelemetryHub> hubContext,
         IEnumerable<AITool> tools,
-        ILogger<RetailPulseAgent> logger)
+        ILogger<RetailPulseAgent> logger,
+        IConfiguration configuration)
     {
         _chatClient = chatClient;
         _agentDef = agentDef;
         _hubContext = hubContext;
         _tools = tools;
         _logger = logger;
+        _configuration = configuration;
     }
 
     public async Task<ChatResponse> ChatAsync(ChatRequest request, CancellationToken ct = default)
@@ -126,10 +130,17 @@ public class RetailPulseAgent
         var thoughtDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", thoughtDurationMs);
 
+        // Extract token usage from the MAF response
+        var inputTokens = (int)(response.Usage?.InputTokenCount ?? 0);
+        var outputTokens = (int)(response.Usage?.OutputTokenCount ?? 0);
+        var totalTokens = (int)(response.Usage?.TotalTokenCount ?? (inputTokens + outputTokens));
+
         await collector.RecordSpanAsync(
             _agentDef.Name, "thought",
             $"Processing: {request.Message[..Math.Min(100, request.Message.Length)]}",
-            thoughtDurationMs);
+            thoughtDurationMs,
+            inputTokens > 0 ? (int?)inputTokens : null,
+            outputTokens > 0 ? (int?)outputTokens : null);
 
         // Record tool calls and results from response. Build a CallId → ToolName
         // lookup so tool_result spans show human-readable names instead of opaque IDs.
@@ -191,15 +202,19 @@ public class RetailPulseAgent
 
         var totalDurationMs = sw.ElapsedMilliseconds;
 
-        _logger.LogInformation("Agent responded in {DurationMs}ms with {SpanCount} spans and {ChartCount} charts",
-            totalDurationMs, collector.Spans.Count, charts.Count);
+        // Compute estimated cost from static rate table
+        var tokenUsage = BuildTokenUsage(inputTokens, outputTokens, totalTokens);
+
+        _logger.LogInformation("Agent responded in {DurationMs}ms with {SpanCount} spans, {ChartCount} charts, {TokenCount} tokens",
+            totalDurationMs, collector.Spans.Count, charts.Count, totalTokens);
 
         return new ChatResponse(
             reply,
             sessionId,
             collector.Spans.ToList(),
             charts.Any() ? charts : null,
-            totalDurationMs);
+            totalDurationMs,
+            tokenUsage);
 
     }
 
@@ -242,6 +257,22 @@ public class RetailPulseAgent
         }
 
         return charts;
+    }
+
+    private TokenUsage BuildTokenUsage(int inputTokens, int outputTokens, int totalTokens)
+    {
+        decimal? cost = null;
+        var modelName = _agentDef.Model;
+        var pricingSection = _configuration.GetSection($"TokenPricing:{modelName}");
+
+        if (pricingSection.Exists())
+        {
+            var inputRate = pricingSection.GetValue<decimal>("InputPerMillion");
+            var outputRate = pricingSection.GetValue<decimal>("OutputPerMillion");
+            cost = (inputTokens * inputRate / 1_000_000m) + (outputTokens * outputRate / 1_000_000m);
+        }
+
+        return new TokenUsage(inputTokens, outputTokens, totalTokens, cost);
     }
 
     public static PromptConfiguration LoadPrompts(string yamlPath)
