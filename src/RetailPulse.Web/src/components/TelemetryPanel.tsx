@@ -44,6 +44,7 @@ const useStyles= makeStyles({
     color: 'var(--color-text-subtle)',
     textTransform: 'uppercase',
     letterSpacing: '1px',
+    whiteSpace: 'nowrap',
   },
   spans: {
     flex: '1',
