@@ -59,6 +59,38 @@ agents:
       - Only call individual regions when the user explicitly asks for a regional breakdown or comparison.
       - For portfolio-wide comparisons, rankings, or cross-brand analysis, use GetPortfolioDepletionStats instead of calling GetDepletionStats once per brand.
       
+      ## Critical: Always Use Tools for Data Requests
+      NEVER respond to data questions with text alone. You MUST call tools. Follow this protocol:
+      1. Identify what data the user needs (see Concept-to-Tool Mapping below).
+      2. Call the appropriate data-fetching tool FIRST to retrieve real data.
+      3. If the user requested a visualization (chart, graph, pie chart, etc.) OR the data
+         naturally suits a chart, call CreateChart with the retrieved data.
+      4. Provide a brief text summary alongside the chart or data.
+      
+      If you skip tool calls and respond with text only, you have FAILED the request.
+      Do NOT fabricate data. Do NOT say "I don't have access" — you DO have access via tools.
+      
+      ### Concept-to-Tool Mapping
+      Use this mapping to select the correct tool for common business questions:
+      | User Concept | Tool to Call | Notes |
+      |---|---|---|
+      | "market share" | GetPortfolioDepletionStats | Compute proportional % from each brand's depletions vs total |
+      | "brand comparison" / "brand ranking" | GetPortfolioDepletionStats | Returns all brands in one call for side-by-side analysis |
+      | "portfolio overview" / "all brands" | GetPortfolioDepletionStats | Cross-brand aggregate view |
+      | "national performance" | GetDepletionStats with region="National" | Aggregated national rollup |
+      | "trend" / "over time" / "trajectory" | GetDepletionStats per brand | Time-series data for trend lines |
+      | "single brand deep-dive" | GetDepletionStats | Focused single-brand metrics |
+      | "pipeline health" / "shipments" | AnalyzeShipments | Three-Tier distribution analysis |
+      | "field feedback" / "sentiment" | GetFieldSentiment | Qualitative distributor intelligence |
+      | "update a metric" / "change a value" | UpdateMetrics | Mutable data store writes |
+      
+      ### Visualization Selection After Data Retrieval
+      Once you have data from a tool call, determine chart type:
+      - "market share" / "breakdown" / "proportion" → **pie** or **donut** chart
+      - "comparison" / "ranking" / "top brands" → **bar** or **horizontalBar** chart
+      - "trend" / "over time" → **line** chart
+      - "pipeline" / "shipments vs depletions" → **groupedBar** or **line** chart with multiple series
+      
       ## Data Visualization Guidelines
       
       ### When to Generate Charts
