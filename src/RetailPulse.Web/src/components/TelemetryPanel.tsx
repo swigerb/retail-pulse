@@ -73,11 +73,23 @@ export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, on
   const toolCalls = liveSpans.filter(s => s.type === 'tool_call').length;
   const agentCalls = liveSpans.filter(s => s.type === 'agent_delegation' || s.type === 'agent_call').length;
   const totalTokens = totalTokenUsage?.totalTokens ?? 0;
+  const totalCost = totalTokenUsage?.estimatedCostUsd ?? 0;
+
+  const formatDuration = (ms: number) => {
+    if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+    return `${ms.toFixed(0)}ms`;
+  };
 
   const formatTokens = (count: number) => {
     if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
     if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
     return count.toString();
+  };
+
+  const formatCost = (usd: number) => {
+    if (usd < 0.01) return `$${usd.toFixed(4)}`;
+    if (usd < 1) return `$${usd.toFixed(3)}`;
+    return `$${usd.toFixed(2)}`;
   };
 
   return (
@@ -102,9 +114,15 @@ export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, on
           </div>
         )}
         <div className={styles.stat}>
-          <Text className={styles.statValue}>{totalDuration.toFixed(0)}ms</Text>
+          <Text className={styles.statValue}>{formatDuration(totalDuration)}</Text>
           <Text className={styles.statLabel}>Total Duration</Text>
         </div>
+        {totalCost > 0 && (
+          <div className={styles.stat}>
+            <Text className={styles.statValue}>{formatCost(totalCost)}</Text>
+            <Text className={styles.statLabel}>Total Cost</Text>
+          </div>
+        )}
       </div>
 
       <div className={styles.spans}>
