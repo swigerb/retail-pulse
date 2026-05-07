@@ -86,7 +86,11 @@ export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, on
     return count.toString();
   };
 
-  const formatCost = (usd: number) => `$${usd.toFixed(2)}`;
+  const formatCost = (usd: number) => {
+    if (usd === 0) return '$0.00';
+    if (usd < 0.01) return `$${usd.toFixed(4)}`;
+    return `$${usd.toFixed(2)}`;
+  };
 
   return (
     <div className={styles.panel}>

@@ -259,7 +259,7 @@ public class RetailPulseAgent
         return charts;
     }
 
-    private TokenUsage BuildTokenUsage(int inputTokens, int outputTokens, int totalTokens)
+    internal TokenUsage BuildTokenUsage(int inputTokens, int outputTokens, int totalTokens)
     {
         decimal? cost = null;
         var modelName = _agentDef.Model;
@@ -270,6 +270,13 @@ public class RetailPulseAgent
             var inputRate = pricingSection.GetValue<decimal>("InputPerMillion");
             var outputRate = pricingSection.GetValue<decimal>("OutputPerMillion");
             cost = (inputTokens * inputRate / 1_000_000m) + (outputTokens * outputRate / 1_000_000m);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "No TokenPricing config found for model '{ModelName}'. Cost will not be calculated. " +
+                "Add a TokenPricing:{ModelName} section to appsettings.json.",
+                modelName, modelName);
         }
 
         return new TokenUsage(inputTokens, outputTokens, totalTokens, cost);
