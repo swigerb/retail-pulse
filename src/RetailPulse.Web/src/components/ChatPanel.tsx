@@ -227,7 +227,7 @@ function SpansSummary({ spans, totalDurationMs, tokenUsage }: { spans: AgentSpan
     agentCalls.length > 0 ? `${agentCalls.length} agent call${agentCalls.length > 1 ? 's' : ''}` : '',
     `⏱️ ${(totalMs / 1000).toFixed(1)}s total`,
     tokenUsage ? `🪙 ${tokenUsage.totalTokens.toLocaleString()} tokens` : '',
-    tokenUsage?.estimatedCostUsd != null ? `💲~$${tokenUsage.estimatedCostUsd.toFixed(4)}` : '',
+    tokenUsage?.estimatedCostUsd != null ? `💲~$${tokenUsage.estimatedCostUsd.toFixed(2)}` : '',
   ].filter(Boolean).join(' · ');
 
   return (
