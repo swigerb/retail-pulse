@@ -28,7 +28,7 @@ When a user asks a question like *"Compare depletion trends across all regions"*
 Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
   → Azure OpenAI (via APIM AI Gateway) → model selects tools
   → MAF tool-calling loop → API proxy tools → MCP Server
-  → SimulatedMetricsData (in-memory) → results back up the chain
+  → RetailPulseDb (SQLite) → results back up the chain
 ```
 
 #### Step-by-Step Flow
@@ -41,7 +41,7 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 | **4. Tool selection** | Azure OpenAI | The model examines the user's question and the available tool schemas, then decides which tools to call and with what parameters. For a portfolio-wide question, it may call `GetPortfolioDepletionStats`; for a single brand, `GetDepletionStats`. |
 | **5. Tool execution loop** | MAF (`UseFunctionInvocation`) | Microsoft.Extensions.AI middleware intercepts each tool call. It invokes the registered `AITool` implementation, captures the result, and sends it back to the model. The model may call additional tools or generate its final response. Tools execute sequentially within a single turn. |
 | **6. API proxy call** | e.g., `DepletionStatsTool.cs` | Each tool is an HTTP proxy. It calls the MCP Server's REST endpoint (e.g., `GET /api/depletion-stats?brand=X&region=Y&period=Z`). If the MCP Server is unreachable, the tool returns hardcoded fallback data and logs a warning. |
-| **7. Data generation** | `SimulatedMetricsData.cs` | The MCP Server's singleton data service generates the response. Data is computed from `tenant.yaml` configuration (12 brands, 6 regions, 3 channels) using deterministic algorithms with quarterly multipliers. |
+| **7. Data retrieval** | `RetailPulseDb.cs` | The MCP Server's singleton SQLite service queries (or updates) the data. Data is seeded from `tenant.yaml` configuration (12 brands, 6 regions, 3 channels) using deterministic algorithms. The `UpdateMetrics` tool can also write to the database, enabling real-time data mutations by the agent. |
 | **8. Response assembly** | `RetailPulseAgent.cs` | After the model produces its final text response, the agent packages it with telemetry spans, chart data (if any), and `TotalDurationMs` (from the `Stopwatch`). |
 | **9. Frontend rendering** | `ChatPanel.tsx` | The response is displayed as formatted markdown. Charts render via `ChartRenderer` (Recharts). Telemetry spans stream to `TelemetryPanel` via SignalR for real-time display. |
 
@@ -49,14 +49,14 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 
 | Data | Location | Persistence |
 |------|----------|-------------|
-| **Depletion metrics** (sales velocity, YoY trends, inventory) | `SimulatedMetricsData._depletionData` — in-memory dictionary keyed by `(Brand, Region)` | Per-process. Regenerated identically on restart (deterministic from `tenant.yaml`). |
-| **Shipment data** (distribution, fill rates) | `SimulatedMetricsData._shipmentData` — in-memory dictionary | Same as above. |
-| **Field sentiment** (rep feedback, scores) | `SimulatedMetricsData._sentimentData` — in-memory dictionary | Same as above. |
-| **Tenant configuration** (brands, regions, channels) | `tenant.yaml` at repo root → loaded by `FileTenantProvider` | On disk. Single source of truth for the business domain. |
+| **Depletion metrics** (sales velocity, YoY trends, inventory) | `RetailPulseDb` → SQLite `Depletions` table, keyed by `(Brand, Region)` | On disk (`data/retailpulse.db`). Seeded from `tenant.yaml` on first run; persists AI mutations across restarts. |
+| **Shipment data** (distribution, fill rates) | `RetailPulseDb` → SQLite `Shipments` table | Same as above. |
+| **Field sentiment** (rep feedback, scores) | `RetailPulseDb` → SQLite `Sentiment` table | Same as above. |
+| **Tenant configuration** (brands, regions, channels) | `tenant.yaml` at repo root → loaded by `FileTenantProvider` | On disk. Single source of truth for the business domain. Changing this file triggers a database re-seed on next restart. |
 | **Conversation history** | Frontend state (`ChatPanel.tsx`) → sent with each request | Browser session only. Not persisted server-side. |
 | **Telemetry spans** | Frontend state (`Dashboard.tsx`) via SignalR | Browser session only. Resets on "Clear Telemetry" or "+ New Chat". |
 
-> **Key insight:** There is no database. The entire analytics dataset is generated in-memory by `SimulatedMetricsData` based on `tenant.yaml`. The intelligence comes from the LLM interpreting and synthesizing the simulated metrics — not from the data itself. This is by design for a demo platform; swapping to real data sources requires only replacing the MCP Server tool implementations.
+> **Key insight:** The analytics dataset lives in a SQLite database (`data/retailpulse.db`), seeded deterministically from `tenant.yaml`. Unlike the earlier in-memory approach, the agent can now **read and write** data via the `UpdateMetrics` MCP tool — enabling real-time scenario modeling, what-if analysis, and live data updates during demos. The database re-seeds automatically when `tenant.yaml` changes (tracked via content hash). To reset to baseline, delete the database file and restart. Swapping to production data sources requires only replacing the MCP Server tool implementations.
 
 ---
 
@@ -82,9 +82,9 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 
 | Decision | Rationale |
 |----------|-----------|
-| **Why MCP over direct HTTP calls?** | MCP is an emerging standard. Today's tools are simulated; tomorrow, swap to real APIs without changing agent code. Any MCP-compatible agent can use these tools. |
+| **Why MCP over direct HTTP calls?** | MCP is an emerging standard. Today's tools query a SQLite database; tomorrow, swap to real APIs without changing agent code. Any MCP-compatible agent can use these tools. |
 | **REST + MCP dual endpoints** | MCP SSE for agent communication. REST endpoints (`/api/depletion-stats`) for direct testing and integration. Same backing data, two access patterns. |
-| **Simulated data** | Enables demo without real data dependencies. Rich enough to show realistic patterns (growth leaders, declining brands, overstocked inventory). |
+| **SQLite data store** | Enables demo without real data dependencies. Seeded from `tenant.yaml` with rich, realistic patterns. Supports **read + write** — the agent can update data in real time via the `UpdateMetrics` tool. |
 
 ### React + Vite + TypeScript — Frontend
 

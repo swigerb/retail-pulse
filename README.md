@@ -31,7 +31,7 @@ Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI t
 |---------|---------|
 | **RetailPulse.AppHost** | Aspire orchestrator - wires McpServer → Api → TeamsBot → Frontend |
 | **RetailPulse.Api** | Minimal API + AI agent (Azure OpenAI via APIM), SignalR telemetry hub |
-| **RetailPulse.McpServer** | MCP tool host - simulated depletions, shipments, sentiment |
+| **RetailPulse.McpServer** | MCP tool host - SQLite-backed depletions, shipments, sentiment (read + write) |
 | **RetailPulse.Contracts** | Shared DTOs + tenant config model |
 | **RetailPulse.ServiceDefaults** | OTel, health checks, resilience defaults |
 | **RetailPulse.TeamsBot** | Microsoft Agents SDK - calls API, renders adaptive cards |
@@ -39,10 +39,10 @@ Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI t
 
 ### Key Patterns
 
-- **Tenant config** (`tenant.yaml`) drives everything - prompts, simulated data, UI branding. Loaded by `FileTenantProvider`, injected into system prompts.
+- **Tenant config** (`tenant.yaml`) drives everything - prompts, data seeding, UI branding. Loaded by `FileTenantProvider`, injected into system prompts.
 - **AI Gateway** - APIM fronts Azure OpenAI/Foundry with token limiting, metrics, managed identity auth. Deployed via Bicep.
 - **Real-time telemetry** - SignalR hub broadcasts agent spans to the frontend. Dashboard shows live tool calls, agent thoughts, and timing.
-- **MCP tools** - simulated retail metrics (depletions, shipments, field sentiment) shaped by tenant brands/regions.
+- **MCP tools** - SQLite-backed retail metrics (depletions, shipments, field sentiment) shaped by tenant brands/regions. Agent can **read and write** data via `UpdateMetrics` tool.
 - **Foundry delegation** - can hand off to persistent Azure AI Foundry agents for deeper analysis.
 - **Frontend** - single-page dashboard with ChatPanel, suggested retail prompts (grocery, QSR, home improvement, office supply, furniture), chart rendering, and span timeline.
 
@@ -199,6 +199,7 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 | **Agent** | Microsoft AI Framework (MAF) | AI agent with tool calling |
 | **Model** | GPT-5.4-mini (via APIM AI Gateway) | Reasoning and natural language |
 | **Tools** | Model Context Protocol (MCP) | Standardized tool access |
+| **Data** | SQLite (Microsoft.Data.Sqlite) | Mutable tenant-seeded metrics store |
 | **Frontend** | React 19 + Vite + TypeScript | Interactive dashboard |
 | **Real-time** | SignalR | Live telemetry streaming |
 | **Multi-Agent** | Azure AI Foundry Agent Service | Foundry-hosted Shipment Specialist (optional) |
@@ -222,7 +223,7 @@ retail-pulse/
 │   │   └── prompts.yaml              # Agent prompt configuration (tenant-templated)
 │   ├── RetailPulse.McpServer/        # MCP server (data tools)
 │   │   ├── Tools/                    # MCP tool definitions
-│   │   └── Data/                     # Simulated tenant-driven metrics
+│   │   └── Data/                     # SQLite-backed tenant-driven metrics
 │   ├── RetailPulse.Contracts/        # Shared models (ChartSpec, etc.)
 │   ├── RetailPulse.ServiceDefaults/  # Shared Aspire defaults
 │   ├── RetailPulse.TeamsBot/         # Microsoft Teams bot integration
@@ -317,4 +318,4 @@ See [Testing Guide](docs/testing-guide.md) for manual testing options and test s
 
 MIT - see [LICENSE](LICENSE) for details.
 
-This project is for demonstration purposes. All simulated data is fictional and does not represent actual business data.
+This project is for demonstration purposes. All data is fictional, seeded from `tenant.yaml`, and does not represent actual business data.

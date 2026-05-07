@@ -1,8 +1,8 @@
 # Retail Pulse — Demo Walkthrough
 
-> A pro-code agentic demo showcasing AI-powered brand analytics for retail & CPG brands
+> A pro-code agentic demo showcasing AI-powered brand analytics with **mutable data** — the agent can read, analyze, and update business metrics in real time
 
-This guide walks you through presenting Retail Pulse to stakeholders. Total demo time: **~10 minutes**.
+This guide walks you through presenting Retail Pulse to stakeholders. Total demo time: **~12 minutes**.
 
 ---
 
@@ -225,6 +225,141 @@ This demonstrates the agent handling different brands and a different tool (`Get
 
 ---
 
+### Act 5: "The Live Update" (~3 min)
+
+**Narration:**
+
+> *"Everything you've seen so far has been read-only — the agent queries data and synthesizes insights. But here's where it gets really powerful. With our SQLite-backed data store, the agent can actually update the data in real time. This turns our platform from a reporting tool into a dynamic command center."*
+
+> *"Think about the scenarios a category manager faces every day: a product recall, a supply chain disruption, an influencer going viral. They need to update their data and immediately see the downstream impact. Let me show you."*
+
+---
+
+#### Scenario 1: "The Social Crisis" — Sentiment & Brand Health
+
+**Narration:**
+
+> *"Imagine we just got word that FreshMart is facing a food safety concern in the Pacific Northwest. Social mentions are spiking negative. In a traditional system, you'd file a ticket, wait for the data team, and hope the dashboards update by tomorrow. Watch what happens when we just tell the agent."*
+
+**Action:** Type:
+
+```
+I'm seeing a spike in negative social mentions for FreshMart in the Pacific Northwest due to a food safety recall on their Organic Produce line. Set their sentiment to 15 and update their depletion status to 'At Risk' to reflect the brand hit.
+```
+
+**What happens (explain as it unfolds):**
+
+1. The agent reasons about the request and identifies it needs **two updates** across different tables
+2. Watch the telemetry panel:
+   - 🧠 `thought` — The agent plans the multi-table update
+   - 🔧 `tool_call` — `UpdateMetrics` called for the Sentiment table (sentiment → 15)
+   - 📊 `tool_result` — Confirmation: "Updated Sentiment for FreshMart in Pacific Northwest"
+   - 🔧 `tool_call` — `UpdateMetrics` called for the Depletions table (status → At Risk)
+   - 📊 `tool_result` — Confirmation: "Updated Status for FreshMart in Pacific Northwest"
+   - 💬 `response` — The agent summarizes both changes
+
+**Verification (the "wow"):** Now ask:
+
+```
+What's the current sentiment and status for FreshMart in the Pacific Northwest?
+```
+
+> *"See? The data actually changed. The agent reads back the updated values — sentiment at 15, status 'At Risk'. This isn't a simulation of an update; the SQLite database was physically modified. Every subsequent query reflects this new reality."*
+
+**Key talking point:**
+
+> *"This bridges the gap between 'Social Listening' and 'ERP Reality.' The category manager gets an alert, tells the AI, and the system updates instantly — no ticket queue, no data team delay."*
+
+---
+
+#### Scenario 2: "The Supply Chain Reroute" — Shipment Disruption
+
+**Narration:**
+
+> *"Now let's look at operational agility. A hurricane warning just came through for the Southeast, and our primary distribution hub is shutting down."*
+
+**Action:** Type:
+
+```
+A hurricane warning in the Southeast is shutting down our primary distribution hub for 72 hours. Set cases shipped for Sierra Gold Tequila in the Southeast to 0 and update the anomaly type to 'Supply Disruption' with risk level 'Critical'.
+```
+
+**What happens:**
+
+1. The agent makes **three** `UpdateMetrics` calls on the Shipments table:
+   - `CasesShipped` → 0
+   - `AnomalyType` → "Supply Disruption"
+   - `RiskLevel` → "Critical"
+2. Each update is confirmed in the telemetry panel
+
+**Verification:** Ask:
+
+```
+Show me the shipment pipeline for Sierra Gold Tequila in the Southeast
+```
+
+> *"The agent now reads back the disrupted state — zero cases shipped, 'Supply Disruption' anomaly, 'Critical' risk level. In a read-only system, this scenario is impossible to model. Here, the user sees inventory levels actually change in the database."*
+
+**Key talking point:**
+
+> *"This showcases operational agility. When logistics friction hits, the data needs to reflect reality immediately — not after a batch ETL runs overnight."*
+
+---
+
+#### Scenario 3: "The Influencer Lift" — Update + Immediate Analysis
+
+**Narration:**
+
+> *"Here's where the agentic pattern really shines. A major food influencer just featured Coastline Tacos, and the West Coast is seeing unprecedented demand. But we don't just want to update the data — we want the agent to immediately analyze the impact."*
+
+**Action:** Type:
+
+```
+Our partnership with a major food influencer just went viral for Coastline Tacos on the West Coast. Update their depletions YoY to 35.0 to reflect the surge, set sentiment to 95, and change their status to 'Growth Leader'. Then tell me which region now has the highest depletions for Coastline Tacos.
+```
+
+**What happens:**
+
+1. The agent updates **three values** across two tables (Depletions + Sentiment)
+2. Then it **immediately queries** the data to answer the follow-up question
+3. Watch the telemetry — you'll see `UpdateMetrics` calls followed by `GetDepletionStats` or `GetPortfolioDepletionStats` calls in the same conversation turn
+
+**Key talking point:**
+
+> *"After updating the data, the AI immediately performs a follow-up analysis. It doesn't just write — it reads back, compares across regions, and identifies which market is now leading. That's the 'Pulse' in Retail Pulse — moving from data entry to proactive alerting in a single interaction."*
+
+---
+
+#### Scenario 4: "The Competitive Pivot" — What-If Analysis
+
+**Narration:**
+
+> *"Finally, let's use this for strategic 'What-If' analysis. A competitor just launched a massive sale in the Southwest. What happens to our Home Improvement numbers?"*
+
+**Action:** Type:
+
+```
+A competitor just launched a massive Memorial Day sale in the Southwest. Decrease Pinnacle Hardware's depletions YoY to -5.0 to simulate the market share loss, but increase their sentiment to 70 to reflect our new 'Pro Quality' campaign. What does their overall picture look like now?
+```
+
+**What happens:**
+
+1. The agent updates depletions (simulating market share loss) and sentiment (reflecting the counter-campaign)
+2. Then it performs a **holistic analysis** — fetching the full brand picture to give the category manager a strategic view
+3. The response synthesizes: "Depletions are down, but sentiment is recovering due to the quality positioning."
+
+**Key talking point:**
+
+> *"The data isn't a static snapshot — it's a dynamic playground for testing business hypotheses. 'What if we lose share but invest in brand perception?' The agent executes the pivot, analyzes the result, and gives the category manager a strategy-level view. That's how a Copilot assists in real-time decision-making."*
+
+**Closing for Act 5:**
+
+> *"What you've just seen is a fundamental shift. The AI isn't just reading data — it's a collaborator that can update, analyze, and advise. And every single change is traceable in the telemetry. You can see exactly what was updated, when, and by whom. That's enterprise-grade agentic AI."*
+
+> **Pro tip:** To reset the data for the next demo, simply delete the SQLite database file (`data/retailpulse.db`) and restart the MCP Server. It will re-seed from `tenant.yaml` automatically.
+
+---
+
 ## Talking Points
 
 ### Why .NET Aspire?
@@ -237,7 +372,7 @@ This demonstrates the agent handling different brands and a different tool (`Get
 
 ### Why MCP (Model Context Protocol)?
 
-> *"MCP is the emerging standard for how AI agents access tools and data. By exposing our data through MCP, any agent — not just ours — can plug in. Today it's simulated data; tomorrow, swap the MCP server to call real business APIs, SAP, or Snowflake. The agent code doesn't change."*
+> *"MCP is the emerging standard for how AI agents access tools and data. By exposing our data through MCP, any agent — not just ours — can plug in. Today the data lives in SQLite; tomorrow, swap the MCP server to call real business APIs, SAP, or Snowflake. The agent code doesn't change."*
 
 ### Why AI Gateway (Azure API Management)?
 
@@ -249,7 +384,7 @@ This demonstrates the agent handling different brands and a different tool (`Get
 
 ### "Can this connect to real data?"
 
-> Absolutely. The MCP server is a standard protocol — swap the simulated data methods in `SimulatedMetricsData.cs` with calls to real APIs, databases, or data warehouses. The agent and frontend don't change at all. That's the power of the MCP abstraction.
+> Absolutely. The MCP server uses a standard protocol — the data layer is already a SQLite database (`RetailPulseDb.cs`) that the agent can both read and write. To connect to production data, swap the SQLite queries with calls to real APIs, databases, or data warehouses. The agent and frontend don't change at all. That's the power of the MCP abstraction. The current SQLite implementation is itself a demonstration of how the agent interacts with a real, mutable data store.
 
 ### "How does this scale?"
 
@@ -266,6 +401,10 @@ This demonstrates the agent handling different brands and a different tool (`Get
 ### "What model does it use?"
 
 > GPT-5.4-mini via Azure AI Foundry (through APIM AI Gateway). The architecture is model-agnostic — swap to GPT-4.1, Claude, or any `IChatClient`-compatible model by changing one line in `prompts.yaml`.
+
+### "Does the agent actually change the data?"
+
+> Yes. The `UpdateMetrics` MCP tool writes directly to the SQLite database. Changes persist across queries within the same session and survive MCP Server restarts (the database file is on disk). To reset to the original state, delete `data/retailpulse.db` and restart — it re-seeds automatically from `tenant.yaml`.
 
 ### "How long did this take to build?"
 
@@ -296,6 +435,8 @@ Northeast, Southeast, Midwest, Southwest, West Coast, Pacific Northwest
 
 ### Impressive Queries to Have Ready
 
+#### Read-Only Queries (Acts 1–4)
+
 1. **Pipeline Clog (the "wow"):** *"Analyze the shipment pipeline for Sierra Gold Tequila in Northeast"*
 2. **Three-Tier tension:** *"Show me the Three-Tier distribution tension for Sierra Gold Tequila nationally"*
 3. **Growth story:** *"Which brands are growth leaders nationally?"*
@@ -306,6 +447,13 @@ Northeast, Southeast, Midwest, Southwest, West Coast, Pacific Northwest
 8. **Grocery category:** *"Compare FreshMart and Harvest Table depletion trends in the Northeast"*
 9. **Home improvement:** *"What's the field sentiment for Pinnacle Hardware in the Midwest?"*
 10. **Furniture pipeline:** *"Analyze the shipment pipeline for Urban Living in West Coast"*
+
+#### Data Mutation Queries (Act 5)
+
+11. **Social crisis:** *"FreshMart is facing a food safety recall in the Pacific Northwest. Set their sentiment to 15 and update their depletion status to 'At Risk'."*
+12. **Supply disruption:** *"A hurricane is closing our Southeast hub. Set cases shipped for Sierra Gold Tequila in the Southeast to 0 and mark the anomaly type as 'Supply Disruption' with risk level 'Critical'."*
+13. **Influencer lift:** *"Coastline Tacos went viral on the West Coast. Update depletions YoY to 35.0, sentiment to 95, and status to 'Growth Leader'. Which region now has the highest depletions?"*
+14. **Competitive pivot:** *"A competitor launched a sale in the Southwest. Decrease Pinnacle Hardware depletions YoY to -5.0 but increase sentiment to 70. What does their picture look like now?"*
 
 ---
 
@@ -321,3 +469,5 @@ Northeast, Southeast, Midwest, Southwest, West Coast, Pacific Northwest
 | MCP tools return empty data | Diacritics are handled automatically - "Anejo" matches "Añejo". Check brand/region spelling against tenant.yaml. |
 | MCP tools return no data | Verify brand name matches tenant.yaml exactly. Check region spelling. |
 | No data in App Insights | Allow 2-5 minutes for telemetry to appear. Check the connection string in AppHost.cs. |
+| Data not resetting between demos | Delete `data/retailpulse.db` and restart the MCP Server. It will re-seed from `tenant.yaml`. |
+| UpdateMetrics returns "Invalid field" | Check field spelling against valid fields: Depletions (`DepletionsYoY`, `SellThroughYoY`, `InventoryWeeks`, `Status`, `SentimentSummary`), Shipments (`ShipmentsYoY`, `CasesShipped`, `CasesDepleted`, `AnomalyType`, `RiskLevel`), Sentiment (`Sentiment`). |
