@@ -101,6 +101,14 @@ builder.Services.AddScoped<ShipmentStatsTool>(sp =>
 // Chart data tool (always available)
 builder.Services.AddScoped<ChartDataTool>();
 
+builder.Services.AddScoped<VariantMixTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new VariantMixTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<VariantMixTool>>());
+});
+
 // Register IChatClient — Azure OpenAI via APIM AI Gateway.
 // In Production we fail fast if the API key is missing rather than silently
 // using "demo-key" which would surface as opaque 401s at runtime.
@@ -173,6 +181,7 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
     var sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
     var shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var variantMixTool = sp.GetRequiredService<VariantMixTool>();
     var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.RetailPulseAgent>>();
 
     var tools = new List<AITool>
@@ -181,6 +190,7 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
         AIFunctionFactory.Create(portfolioTool.GetPortfolioDepletionStats),
         AIFunctionFactory.Create(sentimentTool.GetFieldSentiment),
         AIFunctionFactory.Create(shipmentTool.GetShipmentStats),
+        AIFunctionFactory.Create(variantMixTool.GetVariantMix),
         AIFunctionFactory.Create(chartTool.CreateChart)
     };
 
