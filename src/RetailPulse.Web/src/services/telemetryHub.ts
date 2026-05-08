@@ -4,6 +4,7 @@ import type { AgentSpan } from '../types';
 const HUB_URL = '/hubs/telemetry';
 
 let connection: signalR.HubConnection | null = null;
+let startPromise: Promise<void> | null = null;
 const joinedSessions = new Set<string>();
 
 export function connectTelemetryHub(
@@ -11,7 +12,16 @@ export function connectTelemetryHub(
   onConnected?: () => void,
   onDisconnected?: () => void,
 ): signalR.HubConnection {
-  if (connection) return connection;
+  // If we already have a connection that isn't disconnected, reuse it
+  if (connection && connection.state !== signalR.HubConnectionState.Disconnected) {
+    // Re-register callbacks for the new React render cycle
+    connection.off('SpanReceived');
+    connection.on('SpanReceived', (span: AgentSpan) => onSpan(span));
+    if (connection.state === signalR.HubConnectionState.Connected) {
+      onConnected?.();
+    }
+    return connection;
+  }
 
   connection = new signalR.HubConnectionBuilder()
     .withUrl(HUB_URL)
@@ -35,10 +45,9 @@ export function connectTelemetryHub(
   });
   connection.onclose(() => onDisconnected?.());
 
-  connection.start()
+  startPromise = connection.start()
     .then(() => {
       onConnected?.();
-      // Join any sessions that were queued before the connection was ready
       joinPendingSessions();
     })
     .catch(err => {
@@ -85,6 +94,11 @@ export async function joinTelemetrySession(sessionId: string): Promise<void> {
 export async function disconnectTelemetryHub(): Promise<void> {
   if (connection) {
     try {
+      // Wait for any in-flight start to finish before stopping
+      if (startPromise) {
+        await startPromise.catch(() => {});
+        startPromise = null;
+      }
       await connection.stop();
     } catch (err) {
       if (import.meta.env.DEV) console.error('SignalR disconnect failed:', err);
