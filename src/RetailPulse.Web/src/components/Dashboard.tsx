@@ -93,7 +93,9 @@ export function Dashboard() {
   const [totalTokenUsage, setTotalTokenUsage] = useState<TokenUsage | undefined>();
   const styles = useStyles();
 
-  // SignalR connection lives at Dashboard level so spans persist across drawer open/close
+  // SignalR connection lives at Dashboard level so spans persist across drawer open/close.
+  // We intentionally do NOT disconnect on unmount — the connection is a module-level
+  // singleton that survives React StrictMode double-mount and persists for the app lifetime.
   useEffect(() => {
     connectTelemetryHub(
       (span) => setLiveSpans(prev => {
@@ -105,7 +107,6 @@ export function Dashboard() {
       () => setConnected(true),
       () => setConnected(false),
     );
-    return () => { void disconnectTelemetryHub(); };
   }, []);
 
   const handleNewChat = () => {
