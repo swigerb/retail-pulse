@@ -105,7 +105,7 @@ export function Dashboard() {
       () => setConnected(true),
       () => setConnected(false),
     );
-    return () => { disconnectTelemetryHub(); };
+    return () => { void disconnectTelemetryHub(); };
   }, []);
 
   const handleNewChat = () => {

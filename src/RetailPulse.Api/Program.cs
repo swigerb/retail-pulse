@@ -216,6 +216,7 @@ builder.Services.AddOpenApi();
 var app = builder.Build();
 
 app.UseCors();
+app.UseMiddleware<ApiKeyAuthMiddleware>();
 app.MapDefaultEndpoints();
 
 if (app.Environment.IsDevelopment())

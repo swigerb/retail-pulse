@@ -173,7 +173,7 @@ function RenderPieChart({ spec, donut }: { spec: ChartSpec; donut?: boolean }) {
           labelLine={{ stroke: '#A0A0A0' }}
         >
           {entries.map((e, i) => (
-            <Cell key={i} fill={e.fill || BRAND_COLORS[i % BRAND_COLORS.length]} />
+            <Cell key={e.name ?? `cell-${i}`} fill={e.fill || BRAND_COLORS[i % BRAND_COLORS.length]} />
           ))}
         </Pie>
         <Tooltip {...tooltipStyle} />
@@ -294,7 +294,7 @@ export default function ChartRenderer({ charts }: { charts: ChartSpec[] }) {
   return (
     <>
       {charts.map((spec, i) => (
-        <SingleChart key={i} spec={spec} />
+        <SingleChart key={spec.title || `chart-${i}`} spec={spec} />
       ))}
     </>
   );

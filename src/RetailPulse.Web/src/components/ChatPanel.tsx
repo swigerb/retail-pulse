@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
+import { ErrorBoundary } from './ErrorBoundary';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -246,7 +247,7 @@ function SpansSummary({ spans, totalDurationMs, tokenUsage }: { spans: AgentSpan
       {expanded && (
         <div className={styles.detail}>
           {spans.map((span, i) => (
-            <div key={i} className={styles.spanRow}>
+            <div key={`span-${span.name}-${i}`} className={styles.spanRow}>
               <span className={styles.spanIcon}>{SPAN_ICONS[span.type] ?? '📌'}</span>
               <span className={styles.spanName}>{span.name}</span>
               <span className={styles.spanDuration}>{span.durationMs > 0 ? `${span.durationMs}ms` : '—'}</span>
@@ -594,7 +595,7 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
 
         {messages.map((msg, i) => (
           <div
-            key={i}
+            key={`msg-${msg.role}-${i}`}
             className={`${styles.message} ${msg.role === 'user' ? styles.messageUser : styles.messageAssistant}`}
           >
             <Avatar
@@ -621,9 +622,11 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
                 <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} tokenUsage={msg.tokenUsage} />
               )}
               {msg.charts && msg.charts.length > 0 && (
-                <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
-                  <ChartRenderer charts={msg.charts} />
-                </Suspense>
+                <ErrorBoundary fallback={<div className={styles.loadingContainer}>Chart failed to load.</div>}>
+                  <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
+                    <ChartRenderer charts={msg.charts} />
+                  </Suspense>
+                </ErrorBoundary>
               )}
             </div>
           </div>

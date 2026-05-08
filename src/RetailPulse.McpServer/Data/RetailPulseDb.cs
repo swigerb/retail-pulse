@@ -591,29 +591,45 @@ public class RetailPulseDb
 
     // ── Update Methods (for AI-driven mutations) ─────────────────────────
 
+    private static readonly Dictionary<string, string[]> ValidTableFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Depletions"] = ["DepletionsYoY", "SellThroughYoY", "InventoryWeeks", "Status", "SentimentSummary"],
+        ["Shipments"] = ["ShipmentsYoY", "SellThroughYoY", "DepletionsYoY", "InventoryWeeks", "CasesShipped", "CasesDepleted", "AnomalyType", "RiskLevel", "Analysis"],
+        ["Sentiment"] = ["Sentiment"]
+    };
+
+    private static readonly Dictionary<string, string> CheckStatements = ValidTableFields.Keys
+        .ToDictionary(t => t, t => $"SELECT Brand, Region FROM {t} WHERE Brand LIKE @brand AND Region LIKE @region LIMIT 1");
+
+    private static readonly Dictionary<(string Table, string Field), string> UpdateStatements =
+        ValidTableFields.SelectMany(kv => kv.Value.Select(f => (Table: kv.Key, Field: f)))
+        .ToDictionary(pair => pair, pair => $"UPDATE {pair.Table} SET {pair.Field} = @value WHERE Brand = @brand AND Region = @region");
+
     public object UpdateMetric(string table, string brand, string region, string field, string value)
     {
-        var validTables = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Depletions"] = ["DepletionsYoY", "SellThroughYoY", "InventoryWeeks", "Status", "SentimentSummary"],
-            ["Shipments"] = ["ShipmentsYoY", "SellThroughYoY", "DepletionsYoY", "InventoryWeeks", "CasesShipped", "CasesDepleted", "AnomalyType", "RiskLevel", "Analysis"],
-            ["Sentiment"] = ["Sentiment"]
-        };
-
-        if (!validTables.TryGetValue(table, out var validFields))
-            return new { error = $"Invalid table '{table}'.", valid_tables = validTables.Keys.ToArray() };
+        if (!ValidTableFields.TryGetValue(table, out var validFields))
+            return new { error = $"Invalid table '{table}'.", valid_tables = ValidTableFields.Keys.ToArray() };
 
         // Case-insensitive field matching
         var matchedField = validFields.FirstOrDefault(f => f.Equals(field, StringComparison.OrdinalIgnoreCase));
         if (matchedField is null)
             return new { error = $"Invalid field '{field}' for table '{table}'.", valid_fields = validFields };
 
+        // Look up the canonical table name (preserves casing from the dictionary)
+        var canonicalTable = ValidTableFields.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+
+        if (!CheckStatements.TryGetValue(canonicalTable, out var checkSql))
+            return new { error = $"Invalid table '{table}'." };
+
+        if (!UpdateStatements.TryGetValue((canonicalTable, matchedField), out var updateSql))
+            return new { error = $"Invalid field '{field}' for table '{table}'." };
+
         using var conn = OpenConnection();
         conn.Open();
 
         // First verify the record exists
         using var checkCmd = conn.CreateCommand();
-        checkCmd.CommandText = $"SELECT Brand, Region FROM {table} WHERE Brand LIKE @brand AND Region LIKE @region LIMIT 1";
+        checkCmd.CommandText = checkSql;
         checkCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
         checkCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
 
@@ -626,9 +642,9 @@ public class RetailPulseDb
             actualRegion = reader.GetString(1);
         }
 
-        // Execute the update using the exact brand/region from DB
+        // Execute the update using the pre-built SQL and exact brand/region from DB
         using var updateCmd = conn.CreateCommand();
-        updateCmd.CommandText = $"UPDATE {table} SET {matchedField} = @value WHERE Brand = @brand AND Region = @region";
+        updateCmd.CommandText = updateSql;
         updateCmd.Parameters.AddWithValue("@value", value);
         updateCmd.Parameters.AddWithValue("@brand", actualBrand);
         updateCmd.Parameters.AddWithValue("@region", actualRegion);

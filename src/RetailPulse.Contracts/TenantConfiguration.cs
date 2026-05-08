@@ -1,35 +1,92 @@
+using System.Text.Json.Serialization;
+using YamlDotNet.Serialization;
+
 namespace RetailPulse.Contracts;
 
+/// <summary>
+/// Root tenant configuration loaded from tenant.yaml.
+/// </summary>
 public class TenantConfiguration
 {
-    public string Company { get; set; } = "Retail Pulse Demo";
-    public string Industry { get; set; } = "Retail & Consumer Goods";
-    public string Description { get; set; } = "";
-    public List<BrandConfig> Brands { get; set; } = new();
-    public List<string> Regions { get; set; } = new();
-    public List<string> Channels { get; set; } = new();
-    public ThemeConfig Theme { get; set; } = new();
-    public DistributionConfig Distribution { get; set; } = new();
+    public string Company { get; init; } = "Retail Pulse Demo";
+    public string Industry { get; init; } = "Retail & Consumer Goods";
+    public string Description { get; init; } = "";
+
+    [YamlMember(Alias = "brands")]
+    [JsonPropertyName("brands")]
+    public List<BrandConfig> BrandsList { get; init; } = new();
+
+    /// <summary>Read-only view of configured brands.</summary>
+    [YamlIgnore]
+    [JsonIgnore]
+    public IReadOnlyList<BrandConfig> Brands => BrandsList;
+
+    [YamlMember(Alias = "regions")]
+    [JsonPropertyName("regions")]
+    public List<string> RegionsList { get; init; } = new();
+
+    /// <summary>Read-only view of configured regions.</summary>
+    [YamlIgnore]
+    [JsonIgnore]
+    public IReadOnlyList<string> Regions => RegionsList;
+
+    [YamlMember(Alias = "channels")]
+    [JsonPropertyName("channels")]
+    public List<string> ChannelsList { get; init; } = new();
+
+    /// <summary>Read-only view of configured channels.</summary>
+    [YamlIgnore]
+    [JsonIgnore]
+    public IReadOnlyList<string> Channels => ChannelsList;
+
+    public ThemeConfig Theme { get; init; } = new();
+    public DistributionConfig Distribution { get; init; } = new();
 }
 
+/// <summary>
+/// Configuration for a single brand including its category, variants, and price segment.
+/// </summary>
 public class BrandConfig
 {
-    public string Name { get; set; } = "";
-    public string Category { get; set; } = "";
-    public List<string> Variants { get; set; } = new();
-    public string PriceSegment { get; set; } = "Premium";
+    public string Name { get; init; } = "";
+    public string Category { get; init; } = "";
+
+    [YamlMember(Alias = "variants")]
+    [JsonPropertyName("variants")]
+    public List<string> VariantsList { get; init; } = new();
+
+    /// <summary>Read-only view of configured variants.</summary>
+    [YamlIgnore]
+    [JsonIgnore]
+    public IReadOnlyList<string> Variants => VariantsList;
+
+    public string PriceSegment { get; init; } = "Premium";
 }
 
+/// <summary>
+/// UI theme configuration for the tenant.
+/// </summary>
 public class ThemeConfig
 {
-    public string PrimaryColor { get; set; } = "#1A73E8";
-    public string AccentColor { get; set; } = "#FFC107";
-    public string LogoPath { get; set; } = "assets/logo.png";
-    public string FontFamily { get; set; } = "Inter, system-ui, sans-serif";
+    public string PrimaryColor { get; init; } = "#1A73E8";
+    public string AccentColor { get; init; } = "#FFC107";
+    public string LogoPath { get; init; } = "assets/logo.png";
+    public string FontFamily { get; init; } = "Inter, system-ui, sans-serif";
 }
 
+/// <summary>
+/// Distribution model configuration for the tenant.
+/// </summary>
 public class DistributionConfig
 {
-    public string Model { get; set; } = "Three-Tier";
-    public List<string> DistributorTypes { get; set; } = new() { "Distributor", "Wholesaler", "Retailer" };
+    public string Model { get; init; } = "Three-Tier";
+
+    [YamlMember(Alias = "distributorTypes")]
+    [JsonPropertyName("distributorTypes")]
+    public List<string> DistributorTypesList { get; init; } = new() { "Distributor", "Wholesaler", "Retailer" };
+
+    /// <summary>Read-only view of configured distributor types.</summary>
+    [YamlIgnore]
+    [JsonIgnore]
+    public IReadOnlyList<string> DistributorTypes => DistributorTypesList;
 }

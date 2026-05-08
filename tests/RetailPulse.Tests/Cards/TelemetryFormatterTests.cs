@@ -17,10 +17,8 @@ public class TelemetryFormatterTests
     [InlineData(120500, "120.5s")]
     public void FormatDuration_ReturnsCorrectFormat(double durationMs, string expected)
     {
-        // Act
         var result = TelemetryFormatter.FormatDuration(durationMs);
 
-        // Assert
         result.Should().Be(expected);
     }
 
@@ -37,10 +35,8 @@ public class TelemetryFormatterTests
     [InlineData("", "•")]
     public void GetSpanIcon_ReturnsCorrectIcon(string spanType, string expectedIcon)
     {
-        // Act
         var result = TelemetryFormatter.GetSpanIcon(spanType);
 
-        // Assert
         result.Should().Be(expectedIcon);
     }
 
@@ -56,10 +52,8 @@ public class TelemetryFormatterTests
     [InlineData("custom_type", "CUSTOM_TYPE")]
     public void GetTypeBadge_ReturnsCorrectBadge(string spanType, string expected)
     {
-        // Act
         var result = TelemetryFormatter.GetTypeBadge(spanType);
 
-        // Assert
         result.Should().Be(expected);
     }
 
@@ -70,24 +64,19 @@ public class TelemetryFormatterTests
     [InlineData(null, 10, "")]
     public void TruncateName_ShortNames_ReturnsUnchanged(string? name, int maxLength, string expected)
     {
-        // Act
         var result = TelemetryFormatter.TruncateName(name!, maxLength);
 
-        // Assert
         result.Should().Be(expected);
     }
 
     [Fact]
     public void TruncateName_LongName_AddsEllipsis()
     {
-        // Arrange
         var longName = "This is a very long function name that exceeds the limit";
         var maxLength = 30;
 
-        // Act
         var result = TelemetryFormatter.TruncateName(longName, maxLength);
 
-        // Assert
         result.Should().HaveLength(30);
         result.Should().EndWith("…");
         result.Should().StartWith("This is a very long function");
@@ -99,23 +88,18 @@ public class TelemetryFormatterTests
     [InlineData(null, 60, "")]
     public void TruncateDetail_ShortText_ReturnsUnchanged(string? detail, int maxLength, string expected)
     {
-        // Act
         var result = TelemetryFormatter.TruncateDetail(detail, maxLength);
 
-        // Assert
         result.Should().Be(expected);
     }
 
     [Fact]
     public void TruncateDetail_WithNewlines_ReplacesWithSpaces()
     {
-        // Arrange
         var detailWithNewlines = "Line 1\nLine 2\r\nLine 3";
 
-        // Act
         var result = TelemetryFormatter.TruncateDetail(detailWithNewlines, 100);
 
-        // Assert
         result.Should().NotContain("\n");
         result.Should().NotContain("\r\n");
         result.Should().Be("Line 1 Line 2 Line 3");
@@ -124,14 +108,11 @@ public class TelemetryFormatterTests
     [Fact]
     public void TruncateDetail_LongText_TruncatesAndAddsEllipsis()
     {
-        // Arrange
         var longDetail = "This is a very detailed message that goes on for quite a while and should be truncated";
         var maxLength = 50;
 
-        // Act
         var result = TelemetryFormatter.TruncateDetail(longDetail, maxLength);
 
-        // Assert
         result.Should().HaveLength(50);
         result.Should().EndWith("…");
     }
@@ -144,10 +125,8 @@ public class TelemetryFormatterTests
     [InlineData(0, 100, 5)] // Minimum 5%
     public void CalculateWaterfallWidth_ReturnsCorrectPercentage(double spanDuration, double maxDuration, int expectedMin)
     {
-        // Act
         var result = TelemetryFormatter.CalculateWaterfallWidth(spanDuration, maxDuration);
 
-        // Assert
         result.Should().BeGreaterThanOrEqualTo(expectedMin);
         result.Should().BeLessThanOrEqualTo(100);
     }
@@ -155,20 +134,16 @@ public class TelemetryFormatterTests
     [Fact]
     public void CalculateWaterfallWidth_ZeroMaxDuration_ReturnsZero()
     {
-        // Act
         var result = TelemetryFormatter.CalculateWaterfallWidth(50, 0);
 
-        // Assert
         result.Should().Be(0);
     }
 
     [Fact]
     public void CalculateWaterfallWidth_NegativeMaxDuration_ReturnsZero()
     {
-        // Act
         var result = TelemetryFormatter.CalculateWaterfallWidth(50, -100);
 
-        // Assert
         result.Should().Be(0);
     }
 }

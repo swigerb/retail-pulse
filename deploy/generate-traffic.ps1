@@ -8,7 +8,7 @@
 #>
 param(
     [string]$GatewayUrl = "https://bsapim-dev-northcentralus-001.azure-api.net",
-    [string]$ApiKey = "9d946992317b434e9602d1a9de7583dc",
+    [Parameter(Mandatory=$true)][string]$ApiKey,
     [string]$Model = "gpt-5.4-mini",
     [string]$ApiVersion = "2025-03-01-preview",
     [int]$BatchCount = 3
