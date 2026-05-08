@@ -8,7 +8,7 @@
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
-[![Aspire](https://img.shields.io/badge/Aspire-Orchestrator-6C3BAA)](https://learn.microsoft.com/dotnet/aspire/)
+[![Aspire 13.3](https://img.shields.io/badge/Aspire-13.3.0-6C3BAA)](https://learn.microsoft.com/dotnet/aspire/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Overview
@@ -193,19 +193,22 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 
 ## Technology Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Orchestration** | .NET Aspire | Service discovery, health checks, dashboard |
-| **Agent** | Microsoft AI Framework (MAF) | AI agent with tool calling |
-| **Model** | GPT-5.4-mini (via APIM AI Gateway) | Reasoning and natural language |
-| **Tools** | Model Context Protocol (MCP) | Standardized tool access |
-| **Data** | SQLite (Microsoft.Data.Sqlite) | Mutable tenant-seeded metrics store |
-| **Frontend** | React 19 + Vite + TypeScript | Interactive dashboard |
-| **Real-time** | SignalR | Live telemetry streaming |
-| **Multi-Agent** | Azure AI Foundry Agent Service | Foundry-hosted Shipment Specialist (optional) |
-| **Observability** | OpenTelemetry + Aspire Dashboard | Distributed traces, metrics, logs |
-| **Monitoring** | Azure Application Insights | Production telemetry and traces |
-| **Gateway** | Azure API Management | Token metering, rate limiting, audit |
+| Layer | Technology | Version | Purpose |
+|-------|-----------|---------|---------|
+| **Orchestration** | .NET Aspire | 13.3.0 | Service discovery, health checks, dashboard |
+| **Runtime** | .NET | 10 | Backend services |
+| **Agent** | Microsoft AI Framework (MAF) | — | AI agent with tool calling |
+| **Model** | GPT-5.4-mini (via APIM AI Gateway) | — | Reasoning and natural language |
+| **Tools** | Model Context Protocol (MCP) | — | Standardized tool access |
+| **Data** | SQLite (Microsoft.Data.Sqlite) | — | Mutable tenant-seeded metrics store |
+| **Frontend** | React + Vite + TypeScript | 19 / 8 / 6 | Interactive dashboard |
+| **UI Components** | Fluent UI React | 9.x | Design system |
+| **Real-time** | SignalR | 10.x | Live telemetry streaming |
+| **Multi-Agent** | Azure AI Foundry Agent Service | — | Foundry-hosted Shipment Specialist (optional) |
+| **Observability** | OpenTelemetry + Aspire Dashboard | — | Distributed traces, metrics, logs |
+| **Monitoring** | Azure Application Insights | — | Production telemetry and traces |
+| **Gateway** | Azure API Management | — | Token metering, rate limiting, audit |
+| **Testing** | xUnit + Vitest | — | Backend + frontend tests |
 
 ---
 
@@ -214,24 +217,33 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 ```
 retail-pulse/
 ├── tenant.yaml                       # Tenant configuration (brands, regions, theme)
+├── RetailPulse.slnx                  # Solution file
 ├── src/
-│   ├── RetailPulse.AppHost/          # Aspire orchestrator
+│   ├── RetailPulse.AppHost/          # Aspire 13.3.0 orchestrator
 │   ├── RetailPulse.Api/              # Agent API service
 │   │   ├── Agents/                   # MAF agent implementation
-│   │   ├── Hubs/                     # SignalR telemetry hub
+│   │   ├── Hubs/                     # SignalR telemetry hub (session-scoped groups)
+│   │   ├── Middleware/               # Auth middleware
 │   │   ├── Tools/                    # MCP tool wrappers
 │   │   └── prompts.yaml              # Agent prompt configuration (tenant-templated)
 │   ├── RetailPulse.McpServer/        # MCP server (data tools)
-│   │   ├── Tools/                    # MCP tool definitions
+│   │   ├── Tools/                    # MCP tool definitions (parameterized queries)
 │   │   └── Data/                     # SQLite-backed tenant-driven metrics
-│   ├── RetailPulse.Contracts/        # Shared models (ChartSpec, etc.)
-│   ├── RetailPulse.ServiceDefaults/  # Shared Aspire defaults
-│   ├── RetailPulse.TeamsBot/         # Microsoft Teams bot integration
+│   ├── RetailPulse.Contracts/        # Shared models (immutable config, ChartSpec, etc.)
+│   ├── RetailPulse.ServiceDefaults/  # Shared Aspire defaults (OTel, health, resilience)
+│   ├── RetailPulse.TeamsBot/         # Microsoft Teams bot (JWT-validated, Adaptive Cards)
 │   └── RetailPulse.Web/              # React/Vite/TypeScript frontend
+│       ├── src/components/           # ChatPanel, SpanTimeline, Charts, ErrorBoundary
+│       └── src/hooks/                # SignalR connection, telemetry
+├── tests/
+│   └── RetailPulse.Tests/            # xUnit tests (174 passing)
+├── deploy/                           # Deployment & infrastructure
+│   ├── deploy.ps1 / deploy.sh        # One-click deployment scripts
+│   ├── apim-ai-gateway/              # APIM AI Gateway Bicep (main.bicep, policy.xml)
+│   ├── foundry-agent/                # Foundry agent deployment
+│   └── generate-traffic.ps1          # Load testing
 ├── ai-gateway-dev-portal/            # AI Gateway Dev Portal (APIM observability)
-├── deploy/                           # Deployment & infrastructure scripts
-├── docs/                             # Documentation
-└── RetailPulse.slnx                  # Solution file
+└── docs/                             # Documentation
 ```
 
 ---
@@ -269,16 +281,99 @@ See the [complete demo script](docs/demo-walkthrough.md) for a step-by-step pres
 
 ---
 
+## Azure Deployment
+
+### APIM AI Gateway
+
+The `deploy/apim-ai-gateway/` directory contains Bicep templates to deploy Azure API Management as an AI Gateway fronting Azure OpenAI:
+
+```powershell
+cd deploy/apim-ai-gateway
+.\deploy-apim-api.ps1
+```
+
+This deploys:
+- **main.bicep** — APIM instance with managed identity
+- **policy.xml** — Token metering, rate limiting, content safety policies
+- **role-assignment.bicep** — RBAC for APIM → Azure OpenAI access
+- **a2a-api.bicep** / **mcp-api.bicep** — Agent-to-agent and MCP API definitions
+
+### One-Click Deploy
+
+```powershell
+# Windows
+.\deploy\deploy.ps1
+
+# Linux/Mac
+./deploy/deploy.sh
+```
+
+> **Note:** Deployment scripts use user secrets for all credentials — no API keys are stored in source.
+
+### Infrastructure Security
+
+- Bicep outputs do not expose secrets or APIM subscription keys
+- Diagnostic settings (App Insights, Log Analytics) are deployed alongside resources
+- Application Insights connection strings are configured in the AppHost, not checked into `appsettings.json`
+
+---
+
+## Security
+
+| Area | Implementation |
+|------|---------------|
+| **API Authentication** | Auth middleware on all API endpoints |
+| **Teams Bot** | JWT token validation on incoming activities |
+| **MCP Server** | Parameterized SQL queries (no string interpolation) |
+| **SignalR** | Telemetry scoped to session groups (no cross-session leakage) |
+| **Secrets** | App Insights keys in AppHost only; user secrets for API keys |
+| **Frontend** | CSP headers, URL scheme validation in Adaptive Cards |
+| **Sessions** | 2-hour TTL with automatic eviction via `SessionManager` |
+| **Config** | Immutable config classes (`IReadOnlyList`) with input validation |
+
+---
+
+## Real-Time Telemetry
+
+The SignalR `TelemetryHub` streams agent execution spans to connected clients in real time. Clients join **session-scoped groups** so telemetry is isolated per conversation.
+
+**What gets streamed:**
+- Agent thought process and reasoning steps
+- MCP tool calls with arguments and results
+- Token usage and cost estimates (per-model pricing in `appsettings.json`)
+- Timing data for each span
+
+The React dashboard renders these as an interactive span timeline alongside the chat panel.
+
+---
+
 ## Configuration
+
+### User Secrets
 
 | Setting | User Secret Key | Default |
 |---------|----------------|---------|
 | API Key | `OpenAI:ApiKey` | *(required)* |
 | LLM Endpoint | `OpenAI:Endpoint` | APIM gateway URL |
+| API Version | `OpenAI:ApiVersion` | `2025-03-01-preview` |
 | MCP Server URL | `McpServer:BaseUrl` | `http://localhost:5200` |
 | Foundry Enabled | `FoundryAgent:Enabled` | `false` |
 | Foundry Project Endpoint | `FoundryAgent:ProjectEndpoint` | *(set by deploy script)* |
-| Foundry Shipment Agent ID | `FoundryAgent:ShipmentAgentId` | *(set by deploy script)* |
+| Foundry Agent Name | `FoundryAgent:ShipmentAgentName` | `Distribution Analysis Specialist` |
+| App Insights | `APPLICATIONINSIGHTS_CONNECTION_STRING` | *(set in AppHost)* |
+
+### tenant.yaml
+
+All tenant configuration lives in `tenant.yaml` at the repo root. Changes take effect on restart — no code changes required.
+
+| Key | Purpose |
+|-----|---------|
+| `company` / `industry` | Company identity, injected into agent system prompts |
+| `brands[]` | Brand definitions with category, variants, and price segment |
+| `regions[]` | Geographic regions for data segmentation |
+| `channels[]` | Distribution channels (On-Premise, Off-Premise, E-Commerce) |
+| `theme` | UI branding (primary/accent colors, logo, font) |
+| `distribution` | Distribution model config (Three-Tier, distributor types) |
 
 ## Ports
 
@@ -294,10 +389,14 @@ See the [complete demo script](docs/demo-walkthrough.md) for a step-by-step pres
 
 ## Tests
 
-Single xUnit project covering agent telemetry, chart/tool behavior, prompt config, tenant validation, simulated metrics, session management, and Teams card builders.
+**174 tests passing** across xUnit (.NET) and Vitest (frontend). Covers agent telemetry, chart/tool behavior, prompt config, tenant validation, simulated metrics, session management (TTL eviction), SignalR session-group broadcasting, and Teams Adaptive Card builders.
 
 ```bash
+# Run all .NET tests
 dotnet test
+
+# Run frontend tests
+cd src/RetailPulse.Web && npm test
 ```
 
 See [Testing Guide](docs/testing-guide.md) for manual testing options and test scenarios.
