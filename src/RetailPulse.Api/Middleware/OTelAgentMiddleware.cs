@@ -67,10 +67,14 @@ public class TelemetryCollector
         var span = new AgentSpan(name, type, detail, durationMs, DateTimeOffset.UtcNow, _sessionId, inputTokens, outputTokens);
         _spans.Enqueue(span);
 
-        // Send telemetry only to clients that joined the matching session group
+        // Send telemetry to the session group if available, otherwise broadcast to all
         if (!string.IsNullOrEmpty(_sessionId))
         {
             await _hubContext.Clients.Group(_sessionId).SendAsync("SpanReceived", span);
+        }
+        else
+        {
+            await _hubContext.Clients.All.SendAsync("SpanReceived", span);
         }
     }
 }

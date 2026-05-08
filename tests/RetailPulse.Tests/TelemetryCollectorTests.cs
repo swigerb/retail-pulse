@@ -15,8 +15,9 @@ public class TelemetryCollectorTests
     {
         var mockHubContext = new Mock<IHubContext<TelemetryHub>>();
         var mockClients = new Mock<IHubClients>();
-        var mockGroupProxy = new Mock<IClientProxy>();
-        mockClients.Setup(c => c.Group(It.IsAny<string>())).Returns(mockGroupProxy.Object);
+        var mockProxy = new Mock<IClientProxy>();
+        mockClients.Setup(c => c.All).Returns(mockProxy.Object);
+        mockClients.Setup(c => c.Group(It.IsAny<string>())).Returns(mockProxy.Object);
         mockHubContext.Setup(h => h.Clients).Returns(mockClients.Object);
         _collector = new TelemetryCollector(mockHubContext.Object);
     }
@@ -80,19 +81,19 @@ public class TelemetryCollectorTests
     }
 
     [Fact]
-    public async Task RecordSpanAsync_WithoutSessionId_SkipsBroadcast()
+    public async Task RecordSpanAsync_WithoutSessionId_BroadcastsToAll()
     {
         var mockHubContext = new Mock<IHubContext<TelemetryHub>>();
         var mockClients = new Mock<IHubClients>();
-        var mockGroupProxy = new Mock<IClientProxy>();
-        mockClients.Setup(c => c.Group(It.IsAny<string>())).Returns(mockGroupProxy.Object);
+        var mockAllProxy = new Mock<IClientProxy>();
+        mockClients.Setup(c => c.All).Returns(mockAllProxy.Object);
         mockHubContext.Setup(h => h.Clients).Returns(mockClients.Object);
 
         var collector = new TelemetryCollector(mockHubContext.Object);
         await collector.RecordSpanAsync("test", "thought", "detail", 5.0);
 
-        mockGroupProxy.Verify(
+        mockAllProxy.Verify(
             x => x.SendCoreAsync("SpanReceived", It.IsAny<object?[]>(), default),
-            Times.Never);
+            Times.Once);
     }
 }
