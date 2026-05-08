@@ -220,8 +220,8 @@ public class RetailPulseAgentTests
     {
         var hubContext = new Mock<IHubContext<TelemetryHub>>();
         var clients = new Mock<IHubClients>();
-        var allProxy = new Mock<IClientProxy>();
-        clients.Setup(c => c.All).Returns(allProxy.Object);
+        var groupProxy = new Mock<IClientProxy>();
+        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var configuration = new ConfigurationBuilder()

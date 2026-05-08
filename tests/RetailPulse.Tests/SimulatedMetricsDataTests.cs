@@ -14,14 +14,14 @@ public class SimulatedMetricsDataTests
         {
             Company = "Test Corp",
             Industry = "Spirits & Beverages",
-            Brands = new List<BrandConfig>
+            BrandsList = new List<BrandConfig>
             {
-                new() { Name = "Alpha Tequila", Category = "Tequila", Variants = new() { "Blanco", "Reposado" }, PriceSegment = "Premium" },
-                new() { Name = "Beta Vodka", Category = "Vodka", Variants = new() { "Original", "Citrus" }, PriceSegment = "Premium" },
-                new() { Name = "Gamma Bourbon", Category = "Bourbon", Variants = new() { "Small Batch", "Single Barrel" }, PriceSegment = "Ultra-Premium" },
+                new() { Name = "Alpha Tequila", Category = "Tequila", VariantsList = new() { "Blanco", "Reposado" }, PriceSegment = "Premium" },
+                new() { Name = "Beta Vodka", Category = "Vodka", VariantsList = new() { "Original", "Citrus" }, PriceSegment = "Premium" },
+                new() { Name = "Gamma Bourbon", Category = "Bourbon", VariantsList = new() { "Small Batch", "Single Barrel" }, PriceSegment = "Ultra-Premium" },
             },
-            Regions = new List<string> { "Northeast", "Southeast", "West Coast" },
-            Channels = new List<string> { "On-Premise", "Off-Premise" },
+            RegionsList = new List<string> { "Northeast", "Southeast", "West Coast" },
+            ChannelsList = new List<string> { "On-Premise", "Off-Premise" },
             Distribution = new DistributionConfig { Model = "Three-Tier" }
         };
 

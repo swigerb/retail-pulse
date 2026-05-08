@@ -49,14 +49,20 @@ public class RetailPulseAgent : AgentApplication
         var userMessage = activity.Text?.Trim() ?? string.Empty;
         var conversationId = activity.Conversation?.Id ?? Guid.NewGuid().ToString();
 
-        _logger.LogInformation("User message from {ConversationId}: {Message}", conversationId, userMessage);
-
-        // Check if this is an Action.Submit from a card
+        // Check if this is an Action.Submit from a card (before input validation)
         if (activity.Value != null)
         {
             await HandleCardActionAsync(turnContext, conversationId, cancellationToken);
             return;
         }
+
+        if (string.IsNullOrWhiteSpace(userMessage) || userMessage.Length > 4096)
+        {
+            await turnContext.SendActivityAsync("Please provide a message (max 4096 characters).", cancellationToken: cancellationToken);
+            return;
+        }
+
+        _logger.LogInformation("User message from {ConversationId}: {Message}", conversationId, userMessage);
 
         // Extract user identity via SSO
         UserContext? userContext = null;

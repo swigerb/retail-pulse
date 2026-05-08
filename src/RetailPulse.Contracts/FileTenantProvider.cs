@@ -22,7 +22,7 @@ public class FileTenantProvider : ITenantProvider
         if (!File.Exists(configPath))
         {
             throw new FileNotFoundException(
-                $"Tenant configuration file not found at '{configPath}'. " +
+                $"Tenant configuration file not found: '{Path.GetFileName(configPath)}'. " +
                 "Copy tenant.yaml.example to tenant.yaml at the repo root.",
                 configPath);
         }
@@ -41,11 +41,11 @@ public class FileTenantProvider : ITenantProvider
         catch (Exception ex)
         {
             throw new InvalidOperationException(
-                $"Failed to parse tenant configuration at '{configPath}': {ex.Message}", ex);
+                $"Failed to parse tenant configuration '{Path.GetFileName(configPath)}': {ex.Message}", ex);
         }
 
         _tenant = tenant ?? throw new InvalidOperationException(
-            $"Tenant configuration at '{configPath}' deserialized to null.");
+            $"Tenant configuration '{Path.GetFileName(configPath)}' deserialized to null.");
 
         Validate(_tenant, configPath);
     }
@@ -84,7 +84,7 @@ public class FileTenantProvider : ITenantProvider
         if (errors.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Invalid tenant configuration at '{configPath}':{Environment.NewLine}- " +
+                $"Invalid tenant configuration '{Path.GetFileName(configPath)}':{Environment.NewLine}- " +
                 string.Join($"{Environment.NewLine}- ", errors));
         }
     }

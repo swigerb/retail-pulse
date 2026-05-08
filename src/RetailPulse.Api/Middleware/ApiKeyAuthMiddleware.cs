@@ -37,13 +37,13 @@ public class ApiKeyAuthMiddleware
         if (_enabled && string.IsNullOrWhiteSpace(_expectedKey))
         {
             _logger.LogWarning(
-                "ApiKey:Enabled=true but ApiKey:Value is not configured. All /api/chat requests will be rejected.");
+                "ApiKey:Enabled=true but ApiKey:Value is not configured. All /api requests will be rejected.");
         }
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (!_enabled || !context.Request.Path.StartsWithSegments("/api/chat"))
+        if (!_enabled || !context.Request.Path.StartsWithSegments("/api"))
         {
             await _next(context);
             return;

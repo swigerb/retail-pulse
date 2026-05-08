@@ -82,8 +82,14 @@ export async function joinTelemetrySession(sessionId: string): Promise<void> {
   }
 }
 
-export function disconnectTelemetryHub() {
-  connection?.stop();
+export async function disconnectTelemetryHub(): Promise<void> {
+  if (connection) {
+    try {
+      await connection.stop();
+    } catch (err) {
+      if (import.meta.env.DEV) console.error('SignalR disconnect failed:', err);
+    }
+  }
   connection = null;
   joinedSessions.clear();
 }

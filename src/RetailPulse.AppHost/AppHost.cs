@@ -1,8 +1,7 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
 // App Insights connection string — read from appsettings.json, flows to all services via environment variable
-var appInsightsCs = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]
-    ?? throw new InvalidOperationException("APPLICATIONINSIGHTS_CONNECTION_STRING is not configured. Add it to appsettings.json or set it as an environment variable.");
+var appInsightsCs = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"] ?? "";
 
 var mcpServer = builder.AddProject<Projects.RetailPulse_McpServer>("mcpserver")
     .WithEnvironment("APPLICATIONINSIGHTS_CONNECTION_STRING", appInsightsCs);

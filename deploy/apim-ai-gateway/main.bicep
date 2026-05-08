@@ -211,7 +211,7 @@ resource subscription 'Microsoft.ApiManagement/service/subscriptions@2024-06-01-
 
 output apimGatewayUrl string = apim.properties.gatewayUrl
 
-@secure()
-output subscriptionKey string = subscription.listSecrets().primaryKey
+// To retrieve the subscription key after deployment, use:
+// az rest --method post --uri "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ApiManagement/service/{apim}/subscriptions/{subName}/listSecrets?api-version=2024-06-01-preview"
 
-output inferenceEndpoint string = '${apim.properties.gatewayUrl}/${inferenceApiPath}/openai'
+output inferenceEndpoint string= '${apim.properties.gatewayUrl}/${inferenceApiPath}/openai'

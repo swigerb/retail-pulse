@@ -1,4 +1,6 @@
 using Microsoft.Agents.Core.Models;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text.Json;
@@ -8,18 +10,27 @@ namespace RetailPulse.TeamsBot.Auth;
 public class TeamsSsoHandler
 {
     private readonly ILogger<TeamsSsoHandler> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly ConfigurationManager<OpenIdConnectConfiguration> _oidcConfigManager;
 
-    public TeamsSsoHandler(ILogger<TeamsSsoHandler> logger)
+    public TeamsSsoHandler(ILogger<TeamsSsoHandler> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _configuration = configuration;
+
+        var tenantId = _configuration["MicrosoftEntra:TenantId"] ?? "common";
+        var metadataAddress = $"https://login.microsoftonline.com/{tenantId}/v2.0/.well-known/openid-configuration";
+        _oidcConfigManager = new ConfigurationManager<OpenIdConnectConfiguration>(
+            metadataAddress,
+            new OpenIdConnectConfigurationRetriever(),
+            new HttpDocumentRetriever());
     }
 
     /// <summary>
-    /// Extracts a Teams SSO identity from the inbound activity. Synchronous
-    /// today (no I/O), but kept Task-returning so callers can adopt OBO/OIDC
-    /// token validation later without a signature change.
+    /// Extracts a Teams SSO identity from the inbound activity, validating the
+    /// token signature, issuer, and audience against Microsoft Entra ID OIDC metadata.
     /// </summary>
-    public Task<UserIdentity?> ExtractUserIdentityAsync(IActivity activity)
+    public async Task<UserIdentity?> ExtractUserIdentityAsync(IActivity activity)
     {
         try
         {
@@ -29,69 +40,72 @@ public class TeamsSsoHandler
             if (string.IsNullOrEmpty(token))
             {
                 _logger.LogWarning("No SSO token found in activity");
-                return Task.FromResult<UserIdentity?>(null);
+                return null;
             }
 
-            // SECURITY (demo-grade validation):
-            //
-            // ValidateToken below enforces token structure, lifetime, and that
-            // the value is a real JWT — sufficient to keep an unsigned blob or
-            // an expired token out of our identity pipeline.
-            //
-            // Production deployments MUST also validate signature, issuer, and
-            // audience against Microsoft Entra OIDC metadata (e.g.,
-            // https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration)
-            // and configure ValidateIssuerSigningKey = true with an
-            // IssuerSigningKeyResolver that fetches Microsoft's signing keys.
+            var tenantId = _configuration["MicrosoftEntra:TenantId"] ?? "common";
+            var botClientId = _configuration["MicrosoftEntra:ClientId"]
+                ?? throw new InvalidOperationException("MicrosoftEntra:ClientId must be configured for token validation.");
+
+            var oidcConfig = await _oidcConfigManager.GetConfigurationAsync(CancellationToken.None);
+
             var handler = new JwtSecurityTokenHandler();
             var validationParams = new TokenValidationParameters
             {
                 ValidateLifetime = true,
-                ValidateIssuer = false,
-                ValidateAudience = false,
-                ValidateIssuerSigningKey = false,
-                SignatureValidator = (string t, TokenValidationParameters _) => new JwtSecurityToken(t),
+                ValidateIssuer = true,
+                ValidIssuers = new[]
+                {
+                    $"https://login.microsoftonline.com/{tenantId}/v2.0",
+                    "https://login.microsoftonline.com/common/v2.0",
+                    $"https://sts.windows.net/{tenantId}/"
+                },
+                ValidateAudience = true,
+                ValidAudiences = new[] { botClientId },
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKeys = oidcConfig.SigningKeys,
                 ClockSkew = TimeSpan.FromMinutes(5)
             };
 
+            SecurityToken validatedToken;
             try
             {
-                handler.ValidateToken(token, validationParams, out var validatedToken);
+                handler.ValidateToken(token, validationParams, out validatedToken);
             }
             catch (SecurityTokenException stex)
             {
                 _logger.LogWarning(stex, "SSO token failed validation");
-                return Task.FromResult<UserIdentity?>(null);
+                return null;
             }
 
-            var jwtToken = handler.ReadJwtToken(token);
+            var jwtToken = (JwtSecurityToken)validatedToken;
 
             // Extract claims
             var oid = jwtToken.Claims.FirstOrDefault(c => c.Type == "oid")?.Value;
             var name = jwtToken.Claims.FirstOrDefault(c => c.Type == "name")?.Value;
             var email = jwtToken.Claims.FirstOrDefault(c => c.Type == "preferred_username" || c.Type == "upn")?.Value;
-            var tenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
+            var userTenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
 
             if (string.IsNullOrEmpty(oid))
             {
                 _logger.LogWarning("No object ID found in token");
-                return Task.FromResult<UserIdentity?>(null);
+                return null;
             }
 
             _logger.LogInformation("Successfully extracted user identity: {Name} ({Email})", name, email);
 
-            return Task.FromResult<UserIdentity?>(new UserIdentity
+            return new UserIdentity
             {
                 ObjectId = oid,
                 DisplayName = name ?? "Unknown User",
                 Email = email ?? string.Empty,
-                TenantId = tenantId ?? string.Empty
-            });
+                TenantId = userTenantId ?? string.Empty
+            };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to extract user identity from activity");
-            return Task.FromResult<UserIdentity?>(null);
+            return null;
         }
     }
 
