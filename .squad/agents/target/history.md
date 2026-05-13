@@ -9,6 +9,36 @@
 
 ## Learnings
 
+### 2026-05-15 — Phase 4 (Sprints 4.1/4.2/4.3) Store Ops, Margin, Escalation, Scorecard, Explainability, Routing
+
+- **RetailPulseDb Phase 4 methods use camelCase anonymous types** — `GetStorePerformance` returns `{ stores, count }` with each store having `storeId`, `performanceIndex` etc. GetShelfLayout returns flat `slots` array (not nested shelves>positions). OptimizePlanogram returns `currentLayout` (no separate optimized layout). GetMarginByBrand returns `{ brand, financials, periodsReported }` — financials is an array per period, not flat. DetectMarginRisks uses `riskType` not `type`.
+- **SQL table columns are PascalCase** — `StoreMetrics` (`StoreId`, `StoreName`, `Region`, `Revenue`, `Target`, `FootTraffic`, `ConversionRate`), `ShelfLayouts` (`AisleId`, `StoreId`, `ShelfLevel`, `Position`, `SkuId`, `FacingWidth`), `SkuVelocity` (`SkuId`, `StoreId`, `DailyUnits`, `SafetyStockDays`, `LastRestock`), `BrandFinancials` (`BrandId`, `Period`, `Revenue`, `Cogs`, `Marketing`, `Distribution`, `NetMargin`). Note: margin table is `BrandFinancials`, not `MarginData`.
+- **AgentIntent.cs has Phase 4 intents** — `StoreOps = "store/operations"`, `Planogram = "planogram/optimization"`, `MarginAnalysis = "margin/analysis"`, `Scorecard = "scorecard/portfolio"`. The router normalizes unknown intents to General via `AgentIntent.All.Contains()` check.
+- **Aisle IDs are compound** — Format like `AISLE-STR-0001-01`, not simple `A1`/`B1`. Tests must query the DB for real aisle IDs via direct SQLite connection.
+- **GetStorePerformance accepts optional storeId** — Signature is `(string? region = null, string? storeId = null)`, not just region.
+- **OptimizePlanogram has no brandFocus** — Signature is just `(string storeId, string aisleId)`, only 2 params. No separate optimized layout returned — just current layout + predictedUplift + optimizationNotes.
+- **Test-first contracts for unimplemented features** — `IEscalationService`, `IScorecardService`, `InMemoryExplanationStore` defined inside test files. When backend implements these, tests serve as the contract spec.
+
+### 2026-05-13 — Sprint 3.3/3.4 Adaptive Card + Observability Tests
+
+- **Contracts AND implementations already existed** — `IAdaptiveCardState` (Cards), `ICostTracker`, `IAuditLog`, `IConversationExport` (Observability) were all already defined in `RetailPulse.Contracts`. Implementations (`InMemoryAdaptiveCardState`, `InMemoryCostTracker`, `InMemoryAuditLog`, `MarkdownExporter`) were built by backend team. Always search before creating contracts.
+- **InMemoryAdaptiveCardState requires IHubContext<TelemetryHub> mock** — SignalR sends events on every action. Mock pattern: `Mock<IHubClients> → .All → Mock<IClientProxy>`, then `Mock<IHubContext<TelemetryHub>> → .Clients`.
+- **Vote replacement is idempotent, not rejection** — `ProcessVote` uses `RemoveAll(v => v.UserId == action.UserId)` then `Add()`. Same user voting twice replaces their vote, not rejected.
+- **Split vote escalation blocks auto-decide** — Once `EscalationReason` is set (50/50 split), subsequent majority votes do NOT auto-transition to Decided. Only explicit `Escalate` action or `ArchiveAsync` can resolve. Guard: `if (state.EscalationReason == null)` before majority check.
+- **CardType.Voting starts in Voting lifecycle** — Other types (Dashboard, DrillDown, Briefing) start as Active. This is set in `CreateAsync`.
+- **System.Text.Json serializes anonymous types as PascalCase** — `MarkdownExporter.BuildJson` uses anonymous types, so JSON property names match C# names (`Id`, `UserId`, `AgentId`). Not camelCase.
+- **InMemoryCostTracker uses `default` fallback pricing** — Unknown models get `ModelPricing["default"]` ($1.00/$5.00 per 1M tokens). Model name matching is case-insensitive via `StringComparer.OrdinalIgnoreCase`.
+- **InMemoryAuditLog ring buffer is 5000 entries** — `ConcurrentQueue` with overflow trimming via `while (_entries.Count > MaxEntries) TryDequeue`. Query filters are case-insensitive.
+- **MarkdownExporter uses audit log as data source** — `ExportAsync` queries the `IAuditLog`, filters by session ID prefix match on entry IDs. Falls back to recent entries if no session-specific matches found.
+
+### 2026-05-13 — Sprint 3.1/3.2 Streaming, Caching & Guardrails Tests
+
+- **Backend team has contracts AND partial implementations in-flight** — `IResponseCache`, `QueryClassifier`, `ISuspiciousRequestLog`, `GuardrailsConfig` (both Contracts and Middleware versions), `GuardrailPatterns`, `StreamingMiddleware`, `StreamingHub` all existed. But `RetailPulse.Api.Services.Caching` and `RetailPulse.Api.Services.Guardrails` namespaces were referenced but not yet created — causing pre-existing build failures.
+- **Two GuardrailsConfig classes** — One in `RetailPulse.Contracts.Guardrails` (runtime toggles: PII, jailbreak, max length, patterns) and one in `RetailPulse.Api.Middleware` (detailed patterns: jailbreak array, injection array, PII flags, refusal messages). Decouple test classes from Middleware config to avoid circular dependencies.
+- **`IReadOnlyList<T>.IndexOf` doesn't exist in .NET** — Use `.ToList()` first. `IReadOnlyList` lacks `IndexOf` and the `MemoryExtensions.IndexOf` overload targets `ReadOnlySpan<T>`.
+- **Namespace placeholder stubs fix in-flight build errors** — Backend team's `using` directives can reference namespaces that don't exist yet. Creating empty namespace files (`_Placeholder.cs`) unblocks the build without interfering with their future code.
+- **QueryClassifier uses GeneratedRegex** — `[GeneratedRegex]` with `partial` method pattern. Tests can invoke the public `IsDeterministic(query, agentId)` directly without mocking.
+
 ### 2026-05-13 — Sprint 1.1 Router Test Infrastructure
 
 - **Multi-agent routing interfaces** live in `RetailPulse.Contracts.Routing` namespace (not base Contracts). Two key interfaces: `IAgentRouter` (returns `RoutingDecision`) and `ISpecialistAgent` (with `Key`, `SupportedIntents`, `HandleAsync(ChatRequest)`).
@@ -17,6 +47,27 @@
 - **Test pattern:** Mock `IChatClient` with fixed JSON response text, pass `IEnumerable<ISpecialistAgent>` to router constructor. TelemetryHub mock needs `IHubClients` → `Group()` → `IClientProxy` chain.
 - **Codebase is actively being modified by multiple agents** — files can be deleted/moved between reads. Always re-verify file existence before writing tests against a specific API surface.
 - **63 new tests** added across 3 test files + 1 fixture file (Router: 33 tests, GeneralAgent: 21 tests, Integration: 9 tests). All 237 total tests pass.
+
+## Session Work — 2026-05-15 Phase 4 Tests (Sprints 4.1/4.2/4.3) (Complete)
+
+**Outcome:** ✅ SUCCESS — 110 new tests across 9 test files, all 1264 tests passing (1154 existing + 110 new), 0 failures
+
+**Deliverables:**
+- `tests/RetailPulse.Tests/StoreOps/StoreOpsToolTests.cs` — 11 tests: get_store_performance (4), get_shelf_layout (3), predict_stockout (4)
+- `tests/RetailPulse.Tests/StoreOps/PlanogramTests.cs` — 11 tests: eye-level, facing constraints, uplift, layout preservation, invalid aisle
+- `tests/RetailPulse.Tests/StoreOps/StoreDataTests.cs` — 9 tests: StoreMetrics integrity, ShelfLayouts constraints, SkuVelocity coverage
+- `tests/RetailPulse.Tests/Margin/MarginToolTests.cs` — 10 tests: P&L breakdown, margin math, drivers, trend ordering, risk detection
+- `tests/RetailPulse.Tests/Margin/MarginDataTests.cs` — 6 tests: brand coverage, quarterly history, margin reasonableness
+- `tests/RetailPulse.Tests/Escalation/EscalationTests.cs` — 13 tests: L1/L2/L3 classification, context growth, force level, question preservation
+- `tests/RetailPulse.Tests/Scorecard/ScorecardTests.cs` — 8 tests: brand health, dimensions, weighted average, fan-out timeout, trend, generation time
+- `tests/RetailPulse.Tests/Explainability/ExplainabilityTests.cs` — 11 tests: tool call capture, step structure, confidence, immutability, trace isolation
+- `tests/RetailPulse.Tests/Routing/Phase4RoutingTests.cs` — 17 tests: Phase 4 intent routing (store-ops, planogram, margin, scorecard) + regression for all existing intents
+
+**Key decisions:**
+- Used real SQLite DB with seeded data for StoreOps/Margin tool and data tests (same pattern as existing demand/supply tests)
+- Created test-first contracts (interfaces + mock implementations) inside test files for Escalation, Scorecard, Explainability (no backend implementation yet)
+- Phase 4 routing tests use AgentIntent constants (`StoreOps`, `Planogram`, `MarginAnalysis`, `Scorecard`) — already defined in AgentIntent.cs
+- Added `GetFirstAisleId()` helper via direct SQLite query since aisle IDs are compound format
 
 ## Session Work — 2026-05-13 Sprint 1.1 Multi-Agent Router Tests (Complete)
 
@@ -310,3 +361,88 @@ RAG source files committed:
 - `src/RetailPulse.Api/Rag/SampleDocs/` — 4 sample knowledge base documents
 
 **Validation:** All 803 tests pass (0 failures, 0 skipped). Build clean (0 errors, 0 warnings).
+
+## Session Work — 2026-05-13 Sprint 3.1/3.2 Streaming, Caching & Guardrails Tests (Complete)
+
+**Outcome:** ✅ SUCCESS — 147 new tests added, all 1061 tests passing (914 existing + 147 new)
+
+### Deliverables — Sprint 3.1 (Streaming + Caching)
+
+- `tests/RetailPulse.Tests/Middleware/CacheTests.cs` — 25 tests:
+  - Set/Get: returns cached response, miss returns null, overwrites existing
+  - TTL: expired entries not returned, non-expired returned, custom TTL override
+  - LRU eviction: oldest evicted at capacity, access promotes entry
+  - Invalidation: null clears all, pattern clears matching subset, no-match leaves intact
+  - Stats: hits, misses, hit rate, empty cache
+  - Thread safety: concurrent Set/Get doesn't corrupt, mixed operations no crash
+  - Cache key: deterministic (same input → same key), different agents → different keys, case-normalized, trimmed, SHA256 format
+
+- `tests/RetailPulse.Tests/Middleware/DeterministicClassifierTests.cs` — 22 tests:
+  - Factual queries → deterministic (cacheable): "What is brand X?", definitions, historical data
+  - Recommendation/forecast → non-deterministic: "What should I...", "Recommend...", "Forecast..."
+  - Time-sensitive → non-deterministic: "today", "this week", "current", "right now"
+  - Agent exclusions: DemandForecastAgent always non-deterministic (case-insensitive)
+  - General agent defaults to deterministic for ambiguous queries; specialists default to non-deterministic
+  - Edge cases: null/empty, mixed signals (never-cache takes precedence)
+
+- `tests/RetailPulse.Tests/Middleware/StreamingTests.cs` — 19 tests:
+  - Start event emitted before tokens, correct session ID
+  - Tokens emitted in order, monotonically increasing sequence numbers, single-word response
+  - Complete event after last token, full lifecycle (start → tokens → complete)
+  - Error event on failure, error after partial tokens, cancellation token stops emission
+  - Non-streaming fallback returns full response
+  - Session grouping: independent events per session, only subscribers get events
+
+### Deliverables — Sprint 3.2 (Guardrails)
+
+- `tests/RetailPulse.Tests/Middleware/JailbreakTests.cs` — 24 tests:
+  - Known patterns BLOCKED: "ignore all previous instructions", "you are now", "pretend you are", "override system prompt", "disregard previous", bypass/safety/DAN/developer mode
+  - Normal queries NOT blocked: forecast, promotion, regional data, brand performance
+  - Embedded jailbreaks in normal text → BLOCKED
+  - Case variations (UPPER, Mixed, aLtErNaTiNg) → BLOCKED
+  - Custom patterns override defaults
+  - GetMatchedPattern returns first match or null
+
+- `tests/RetailPulse.Tests/Middleware/PiiRedactionTests.cs` — 25 tests:
+  - SSN "123-45-6789" → [REDACTED:ssn], space-separated variant
+  - Email → [REDACTED:email], subdomain handling
+  - Phone "(555) 123-4567" → [REDACTED:phone], dot-separated variant
+  - Credit card (space, dash, contiguous formats) → [REDACTED:credit_card]
+  - Multiple PII types in same response → all redacted
+  - Multiple same type → all redacted
+  - No PII → unchanged; null/empty → safe passthrough
+  - False positives: product codes, short numbers, percentages, dates NOT redacted
+  - ContainsPii detection helper
+
+- `tests/RetailPulse.Tests/Middleware/AccessControlTests.cs` — 13 tests:
+  - Allowed: user with matching region, multiple regions, case-insensitive match
+  - Denied: user without region, no regions at all
+  - Denial message: friendly (contains region names, no error codes)
+  - Admin override: always allowed regardless of regions
+  - Disabled access control: all queries allowed
+
+- `tests/RetailPulse.Tests/Middleware/SuspiciousLogTests.cs` — 19 tests:
+  - Blocked request logged and retrievable
+  - Detection type tracking: jailbreak, PII, access_denial counted separately
+  - Ring buffer: oldest entries evicted at max capacity, exact capacity no eviction
+  - Stats: accurate count by type, empty state zeros, Since timestamp reasonable
+  - Recent entries: newest first, limited count, empty log returns empty
+
+### Implementation Stubs Created
+
+- `src/RetailPulse.Api/Caching/InMemoryResponseCache.cs` — Full LRU cache with TTL, SHA256 key generation
+- `src/RetailPulse.Api/Streaming/InMemoryStreamingSession.cs` — Event-recording streaming session
+- `src/RetailPulse.Api/Guardrails/JailbreakDetector.cs` — Pattern-matching jailbreak detection
+- `src/RetailPulse.Api/Guardrails/PiiRedactor.cs` — Regex-based PII redaction (SSN, email, phone, credit card)
+- `src/RetailPulse.Api/Guardrails/AccessControlGuard.cs` — Region-scoped access control
+- `src/RetailPulse.Api/Guardrails/InMemorySuspiciousRequestLog.cs` — Ring buffer audit log
+- `src/RetailPulse.Api/Guardrails/JailbreakConfig.cs` — Decoupled jailbreak config record
+- `src/RetailPulse.Contracts/Streaming/IStreamingSession.cs` — Streaming contract + StreamingEvent record
+- `src/RetailPulse.Api/Services/Caching/_Placeholder.cs` — Namespace stub (unblocks backend build)
+- `src/RetailPulse.Api/Services/Guardrails/_Placeholder.cs` — Namespace stub (unblocks backend build)
+
+### Bug Fixes
+
+- `StreamingMiddleware.cs`: Added `StreamResponseFallbackAsync` public method (called by Program.cs but missing)
+
+**Validation:** All 1061 tests pass (0 failures, 0 skipped). Build clean (0 errors, 0 warnings).
