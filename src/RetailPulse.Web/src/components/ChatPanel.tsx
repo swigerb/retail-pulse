@@ -12,7 +12,7 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
-import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision } from '../types';
+import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo } from '../types';
 import type { SendMessageOptions } from '../services/api';
 import { sendMessage } from '../services/api';
 import { joinTelemetrySession } from '../services/telemetryHub';
@@ -20,6 +20,8 @@ import { BrandLogo } from './BrandLogo';
 import { AgentRoutingIndicator } from './AgentRoutingIndicator';
 import { MemoryIndicator } from './MemoryIndicator';
 import { ApprovalCard } from './ApprovalCard';
+import { StreamingMessage, CacheIndicator } from './streaming';
+import { BlockedRequestMessage } from './guardrails';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
 
@@ -33,6 +35,9 @@ interface ChatMessage {
   tokenUsage?: TokenUsage;
   memoryContext?: MemoryContext;
   approval?: ApprovalRequest;
+  isStreaming?: boolean;
+  cacheInfo?: CacheInfo;
+  blocked?: { reason: string; suggestion?: string };
 }
 
 interface ChatPanelProps {
@@ -459,6 +464,12 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streamingTokens, setStreamingTokens] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  // Expose streaming state setters for future SignalR streaming events
+  void setStreamingTokens;
+  void setIsStreaming;
   const [sessionId] = useState<string>(() => crypto.randomUUID().replace(/-/g, ''));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
@@ -619,7 +630,17 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
                 className={`${styles.messageCard} ${msg.role === 'user' ? styles.userCard : styles.assistantCard}`}
                 appearance="subtle"
               >
-                {msg.role === 'assistant' ? (
+                {msg.role === 'assistant' && msg.blocked ? (
+                  <BlockedRequestMessage reason={msg.blocked.reason} suggestion={msg.blocked.suggestion} />
+                ) : msg.role === 'assistant' && msg.isStreaming ? (
+                  <StreamingMessage
+                    tokens={msg.content}
+                    isStreaming={true}
+                    onComplete={() => {
+                      setMessages(prev => prev.map((m, idx) => idx === i ? { ...m, isStreaming: false } : m));
+                    }}
+                  />
+                ) : msg.role === 'assistant' ? (
                   <div className="markdown-body">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                   </div>
@@ -627,6 +648,9 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
                   <div>{msg.content}</div>
                 )}
               </Card>
+              {msg.role === 'assistant' && msg.cacheInfo?.cached && (
+                <CacheIndicator cacheInfo={msg.cacheInfo} />
+              )}
               {msg.role === 'assistant' && msg.routing && (
                 <AgentRoutingIndicator routing={msg.routing} />
               )}
@@ -650,7 +674,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           </div>
         ))}
 
-        {loading && (
+        {loading && !isStreaming && (
           <div className={`${styles.message} ${styles.messageAssistant}`}>
             <Avatar
               size={36}
@@ -662,8 +686,28 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
             <div className={styles.messageContent}>
               <div className={styles.loadingContainer}>
                 <Spinner size="tiny" />
-                Analyzing data...
+                {loading && !isStreaming ? 'Thinking...' : 'Analyzing data...'}
               </div>
+            </div>
+          </div>
+        )}
+
+        {isStreaming && (
+          <div className={`${styles.message} ${styles.messageAssistant}`}>
+            <Avatar
+              size={36}
+              color="brand"
+              name="Retail Pulse"
+              icon={ASSISTANT_AVATAR_ICON}
+              style={ASSISTANT_AVATAR_STYLE}
+            />
+            <div className={styles.messageContent}>
+              <Card className={`${styles.messageCard} ${styles.assistantCard}`} appearance="subtle">
+                <StreamingMessage
+                  tokens={streamingTokens}
+                  isStreaming={true}
+                />
+              </Card>
             </div>
           </div>
         )}

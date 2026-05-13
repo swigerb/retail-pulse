@@ -1,0 +1,134 @@
+using FluentAssertions;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Moq;
+using RetailPulse.Api.Cards;
+using RetailPulse.Api.Hubs;
+using RetailPulse.Contracts.Cards;
+
+namespace RetailPulse.Tests.Cards;
+
+/// <summary>
+/// Tests for comment behavior on collaborative Adaptive Cards.
+/// Covers: add comment, multiple comments ordering, comment on archived card.
+/// </summary>
+public class CardCommentTests
+{
+    private readonly InMemoryAdaptiveCardState _state;
+
+    public CardCommentTests()
+    {
+        _state = new InMemoryAdaptiveCardState(CreateMockHub(), Mock.Of<ILogger<InMemoryAdaptiveCardState>>());
+    }
+
+    [Fact]
+    public async Task Comment_AddsCommentWithTimestamp()
+    {
+        var card = await _state.CreateAsync(MakeRequest("Comment Card"));
+        var action = MakeCommentAction("user-1", "Great analysis!");
+
+        var updated = await _state.ActionAsync(card.Id, action);
+
+        updated.Comments.Should().HaveCount(1);
+        updated.Comments[0].Text.Should().Be("Great analysis!");
+        updated.Comments[0].UserId.Should().Be("user-1");
+        updated.Comments[0].Timestamp.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Comment_MultipleComments_PreservesOrder()
+    {
+        var card = await _state.CreateAsync(MakeRequest("Multi Comment"));
+        await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "First"));
+        await _state.ActionAsync(card.Id, MakeCommentAction("user-2", "Second"));
+        var updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-3", "Third"));
+
+        updated.Comments.Should().HaveCount(3);
+        updated.Comments[0].Text.Should().Be("First");
+        updated.Comments[1].Text.Should().Be("Second");
+        updated.Comments[2].Text.Should().Be("Third");
+    }
+
+    [Fact]
+    public async Task Comment_OnArchivedCard_ThrowsInvalidOperation()
+    {
+        var card = await _state.CreateAsync(MakeRequest("Archived"));
+        await _state.ArchiveAsync(card.Id);
+
+        var action = MakeCommentAction("user-1", "Late comment");
+        var act = () => _state.ActionAsync(card.Id, action);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Comment_PreservesUserName()
+    {
+        var card = await _state.CreateAsync(MakeRequest("UserName Comment"));
+        var action = new CardAction("user-1", "Bob Jones", CardActionType.Comment, new() { ["text"] = "Hello" });
+        var updated = await _state.ActionAsync(card.Id, action);
+
+        updated.Comments[0].UserName.Should().Be("Bob Jones");
+    }
+
+    [Fact]
+    public async Task Comment_EmptyText_DoesNotAddComment()
+    {
+        var card = await _state.CreateAsync(MakeRequest("Empty Comment"));
+        var action = MakeCommentAction("user-1", "");
+        var updated = await _state.ActionAsync(card.Id, action);
+
+        updated.Comments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Comment_WhitespaceOnly_DoesNotAddComment()
+    {
+        var card = await _state.CreateAsync(MakeRequest("Whitespace Comment"));
+        var action = MakeCommentAction("user-1", "   ");
+        var updated = await _state.ActionAsync(card.Id, action);
+
+        updated.Comments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Comment_DoesNotAffectLifecycle()
+    {
+        var card = await _state.CreateAsync(MakeRequest("Lifecycle Comment"));
+        card.Lifecycle.Should().Be(CardLifecycle.Active);
+
+        var updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "Comment"));
+
+        updated.Lifecycle.Should().Be(CardLifecycle.Active);
+    }
+
+    [Fact]
+    public async Task Comment_SameUserMultipleTimes_AllPreserved()
+    {
+        var card = await _state.CreateAsync(MakeRequest("Repeat Commenter"));
+        await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "First thought"));
+        var updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "Second thought"));
+
+        updated.Comments.Should().HaveCount(2);
+    }
+
+    #region Helpers
+
+    private static CreateCardRequest MakeRequest(string title)
+        => new(title, CardType.Dashboard, "test-user", new Dictionary<string, object>());
+
+    private static CardAction MakeCommentAction(string userId, string text)
+        => new(userId, $"User {userId}", CardActionType.Comment, new() { ["text"] = text });
+
+    private static IHubContext<TelemetryHub> CreateMockHub()
+    {
+        var mockClients = new Mock<IHubClients>();
+        var mockProxy = new Mock<IClientProxy>();
+        mockClients.Setup(c => c.All).Returns(mockProxy.Object);
+        var mockHub = new Mock<IHubContext<TelemetryHub>>();
+        mockHub.Setup(h => h.Clients).Returns(mockClients.Object);
+        return mockHub.Object;
+    }
+
+    #endregion
+}
