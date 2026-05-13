@@ -36,4 +36,27 @@ public class TelemetryHub : Hub
 
         return Groups.RemoveFromGroupAsync(Context.ConnectionId, sessionId);
     }
+
+    /// <summary>
+    /// Subscribes the caller to card events for a specific card.
+    /// Used for per-card SignalR groups so card actions are scoped.
+    /// </summary>
+    public Task JoinCard(string cardId)
+    {
+        if (string.IsNullOrWhiteSpace(cardId))
+            return Task.CompletedTask;
+
+        return Groups.AddToGroupAsync(Context.ConnectionId, $"card:{cardId}");
+    }
+
+    /// <summary>
+    /// Removes the caller from a card group.
+    /// </summary>
+    public Task LeaveCard(string cardId)
+    {
+        if (string.IsNullOrWhiteSpace(cardId))
+            return Task.CompletedTask;
+
+        return Groups.RemoveFromGroupAsync(Context.ConnectionId, $"card:{cardId}");
+    }
 }

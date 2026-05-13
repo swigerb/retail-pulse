@@ -264,3 +264,27 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - JailbreakDetector.cs already had a separate JailbreakConfig.cs file from Kroger — adding a duplicate record causes CS0101
 
 **Validation:** Build clean (0 errors, 5 warnings), all 1061 tests pass
+
+## Session Work — 2026-05-13 Card State & Observability Services (Sprint 3.3 + 3.4)
+
+### What Was Done
+- **Card State Service**: Enhanced `InMemoryAdaptiveCardState` with `CreateFromVerdictAsync()` for council verdict → voting card integration and `ListAsync()` for type/lifecycle filtering
+- **Conversation Exporter**: Created `ConversationExporter.cs` implementing `IConversationExport` with Markdown/JSON export, session tracking via `TrackMessageAsync`
+- **TelemetryHub extensions**: Added `JoinCard`/`LeaveCard` methods for per-card SignalR groups (`card:{cardId}` pattern)
+- **DI wiring**: Registered all 4 services (IAdaptiveCardState, ICostTracker, IAuditLog, IConversationExport) as singletons in Program.cs
+- **REST endpoints**: 5 card endpoints + 7 observability endpoints with query parameter parsing, error handling, and filtering
+- **Chat pipeline instrumentation**: Cost tracking, audit logging, and conversation export tracking integrated after each agent response
+- **Duplicate cleanup**: Removed Kroger's duplicate endpoint set that caused ASP0022 route conflict warnings
+
+### Key Decisions
+- Used `init` properties (not positional records) for `TrackedMessage` to support object-initializer syntax used in chat pipeline
+- Escalation reason persists once set — majority vote does NOT auto-clear escalation (matches test expectations)
+- Card groups use `card:{cardId}` prefix matching existing `stream:{sessionId}` pattern in StreamingHub
+- ConversationExporter tracks messages via concrete `TrackMessageAsync` method (not on IConversationExport interface) for pipeline-specific concerns
+
+### Learnings
+- Kroger added both contracts AND duplicate endpoint registrations in a parallel session — always check for route conflicts when integrating parallel work
+- The `CreateFromVerdictAsync` maps council agents to card votes: Approve/Conditional → approve, Reject → reject
+- TrackedMessage needed `required` init properties to work with both named construction and object initializers
+
+**Validation:** Build clean (0 errors, 5 warnings), all 1154 tests pass
