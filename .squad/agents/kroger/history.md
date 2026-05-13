@@ -119,3 +119,36 @@
 **Test Status:** All 443 tests pass (97 new tests from parallel work + reconciliation fixes)
 
 **Decision Logged:** Conversation Memory Architecture
+
+## Session Work — 2026-05-13 Sprint 1.5 Proactive Sales Alerts (Complete)
+
+**Outcome:** ✅ SUCCESS — Lead architect role, full proactive alert subsystem implemented, 540 tests passing
+
+**Deliverables:**
+- `src/RetailPulse.Contracts/Alerts/IAlertService.cs` — Alert record + IAlertService interface (CheckForAlertsAsync, SnoozeAsync, DismissAsync, GetHistoryAsync, GetActiveAlertsAsync)
+- `src/RetailPulse.Api/Alerts/AlertDbSchema.cs` — SQLite DDL for Alerts, AlertThrottles, AlertSnoozes, AlertDismissals tables
+- `src/RetailPulse.Api/Alerts/SqliteAlertService.cs` — SQLite-backed IAlertService with WAL mode, throttle checking, alert persistence
+- `src/RetailPulse.Api/Alerts/ProactiveAlertService.cs` — IHostedService (BackgroundService) with configurable timer, anomaly detection algorithm, SignalR push
+- `src/RetailPulse.Api/Alerts/AlertServiceExtensions.cs` — `AddProactiveAlerts(dbPath)` DI registration
+- `src/RetailPulse.Api/Program.cs` — DI wiring + 4 REST endpoints (GET active, GET history, POST snooze, POST dismiss)
+- `src/RetailPulse.Api/appsettings.json` — `Alerts:CheckIntervalMinutes` configuration
+
+**Architecture Patterns:**
+- Singleton SqliteAlertService (WAL handles concurrency) — same pattern as SqliteApprovalGate and SqliteConversationMemory
+- BackgroundService with PeriodicTimer — configurable interval via appsettings.json (default 5 min)
+- Anomaly detection fetches demand data from MCP server via HttpClient (same `/api/historical-demand` endpoint used by existing tools)
+- Three detection rules: demand_spike (>20%), supply_drop (<-15%), trend_reversal (sign change + >10% magnitude)
+- Throttling: max 1 alert per (type, brand, region) per hour — prevents spam flooding
+- SignalR push: `alert_fired` event broadcast to all connected clients with full Alert payload
+- OTel tracing: `RetailPulse.Alerts` ActivitySource with `alert.check_cycle` spans
+- Alert DB at `data/alerts.db` alongside `data/approvals.db` and `data/memory.db`
+
+**REST Endpoints:**
+- `GET /api/alerts/active` — currently firing alerts (last 24h)
+- `GET /api/alerts/history?userId=&limit=` — alert history
+- `POST /api/alerts/{alertId}/snooze` — snooze an alert type for a user
+- `POST /api/alerts/{alertId}/dismiss` — dismiss/acknowledge an alert
+
+**Test Status:** All 540 tests pass (unchanged from baseline — no existing tests broken)
+
+**Decision Logged:** Proactive Sales Alert Architecture

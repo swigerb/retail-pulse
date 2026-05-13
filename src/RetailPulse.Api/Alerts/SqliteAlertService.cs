@@ -1,0 +1,249 @@
+using System.Globalization;
+using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using RetailPulse.Contracts.Alerts;
+
+namespace RetailPulse.Api.Alerts;
+
+/// <summary>
+/// SQLite-backed alert service — stores alerts, manages throttles and snoozes.
+/// Thread-safe via WAL mode (same pattern as SqliteApprovalGate / SqliteConversationMemory).
+/// </summary>
+public sealed class SqliteAlertService : IAlertService, IDisposable
+{
+    private readonly string _connectionString;
+    private readonly ILogger<SqliteAlertService> _logger;
+    private readonly TimeSpan _defaultThrottleWindow;
+
+    private const string Iso8601 = "yyyy-MM-ddTHH:mm:ss.fffzzz";
+
+    public SqliteAlertService(
+        string dbPath,
+        ILogger<SqliteAlertService> logger,
+        TimeSpan? defaultThrottleWindow = null)
+    {
+        _logger = logger;
+        _defaultThrottleWindow = defaultThrottleWindow ?? TimeSpan.FromHours(1);
+
+        var dir = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared
+        }.ToString();
+
+        InitializeSchema();
+    }
+
+    private SqliteConnection OpenConnection() => new(_connectionString);
+
+    private void InitializeSchema()
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = AlertDbSchema.CreateTables;
+        cmd.ExecuteNonQuery();
+    }
+
+    // ── IAlertService ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by ProactiveAlertService — not used directly. The hosted service
+    /// does its own anomaly detection and calls <see cref="PersistAlertAsync"/> directly.
+    /// This implementation returns active alerts from the last 24 hours.
+    /// </summary>
+    public async Task<IReadOnlyList<Alert>> CheckForAlertsAsync(CancellationToken ct = default)
+    {
+        return await GetActiveAlertsAsync(ct);
+    }
+
+    public Task<IReadOnlyList<Alert>> GetActiveAlertsAsync(CancellationToken ct = default)
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-24);
+
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata
+            FROM Alerts
+            WHERE DetectedAt >= @cutoff
+            ORDER BY DetectedAt DESC
+            """;
+        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString(Iso8601));
+
+        var alerts = ReadAlerts(cmd);
+        return Task.FromResult<IReadOnlyList<Alert>>(alerts);
+    }
+
+    public Task SnoozeAsync(string alertType, string userId, TimeSpan duration, CancellationToken ct = default)
+    {
+        var snoozedUntil = DateTimeOffset.UtcNow.Add(duration);
+
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO AlertSnoozes (UserId, AlertType, Brand, Region, SnoozedUntil)
+            VALUES (@userId, @alertType, NULL, NULL, @snoozedUntil)
+            """;
+        cmd.Parameters.AddWithValue("@userId", userId);
+        cmd.Parameters.AddWithValue("@alertType", alertType);
+        cmd.Parameters.AddWithValue("@snoozedUntil", snoozedUntil.ToString(Iso8601));
+        cmd.ExecuteNonQuery();
+
+        _logger.LogInformation("User {UserId} snoozed {AlertType} until {SnoozedUntil}", userId, alertType, snoozedUntil);
+        return Task.CompletedTask;
+    }
+
+    public Task DismissAsync(string alertId, string userId, CancellationToken ct = default)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT OR REPLACE INTO AlertDismissals (AlertId, UserId, DismissedAt)
+            VALUES (@alertId, @userId, @now)
+            """;
+        cmd.Parameters.AddWithValue("@alertId", alertId);
+        cmd.Parameters.AddWithValue("@userId", userId);
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString(Iso8601));
+        cmd.ExecuteNonQuery();
+
+        _logger.LogInformation("User {UserId} dismissed alert {AlertId}", userId, alertId);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<Alert>> GetHistoryAsync(string userId, int limit = 50, CancellationToken ct = default)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata
+            FROM Alerts
+            ORDER BY DetectedAt DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var alerts = ReadAlerts(cmd);
+        return Task.FromResult<IReadOnlyList<Alert>>(alerts);
+    }
+
+    // ── Internal methods used by ProactiveAlertService ────────────────────
+
+    /// <summary>Check if a (type, brand, region) combination was fired within the throttle window.</summary>
+    internal bool IsThrottled(string type, string brand, string region)
+    {
+        var cutoff = DateTimeOffset.UtcNow.Subtract(_defaultThrottleWindow);
+
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT LastFiredAt FROM AlertThrottles
+            WHERE Type = @type AND Brand = @brand AND Region = @region
+            """;
+        cmd.Parameters.AddWithValue("@type", type);
+        cmd.Parameters.AddWithValue("@brand", brand);
+        cmd.Parameters.AddWithValue("@region", region);
+
+        var result = cmd.ExecuteScalar();
+        if (result is string lastFiredStr &&
+            DateTimeOffset.TryParseExact(lastFiredStr, Iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out var lastFired))
+        {
+            return lastFired >= cutoff;
+        }
+
+        return false;
+    }
+
+    /// <summary>Record that an alert of this type was just fired (update throttle).</summary>
+    internal void UpdateThrottle(string type, string brand, string region)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT OR REPLACE INTO AlertThrottles (Type, Brand, Region, LastFiredAt)
+            VALUES (@type, @brand, @region, @now)
+            """;
+        cmd.Parameters.AddWithValue("@type", type);
+        cmd.Parameters.AddWithValue("@brand", brand);
+        cmd.Parameters.AddWithValue("@region", region);
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString(Iso8601));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Persist a new alert and update its throttle entry.</summary>
+    internal void PersistAlert(Alert alert)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO Alerts (Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata)
+            VALUES (@id, @type, @severity, @title, @description, @brand, @region, @action, @detectedAt, @metadata)
+            """;
+        cmd.Parameters.AddWithValue("@id", alert.Id);
+        cmd.Parameters.AddWithValue("@type", alert.Type);
+        cmd.Parameters.AddWithValue("@severity", alert.Severity);
+        cmd.Parameters.AddWithValue("@title", alert.Title);
+        cmd.Parameters.AddWithValue("@description", alert.Description);
+        cmd.Parameters.AddWithValue("@brand", alert.Brand);
+        cmd.Parameters.AddWithValue("@region", alert.Region);
+        cmd.Parameters.AddWithValue("@action", alert.RecommendedAction);
+        cmd.Parameters.AddWithValue("@detectedAt", alert.DetectedAt.ToString(Iso8601));
+        cmd.Parameters.AddWithValue("@metadata", alert.Metadata is not null ? JsonSerializer.Serialize(alert.Metadata) : DBNull.Value);
+        cmd.ExecuteNonQuery();
+
+        UpdateThrottle(alert.Type, alert.Brand, alert.Region);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+
+    private static List<Alert> ReadAlerts(SqliteCommand cmd)
+    {
+        var alerts = new List<Alert>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var metadataStr = reader.IsDBNull(9) ? null : reader.GetString(9);
+            Dictionary<string, object>? metadata = null;
+            if (metadataStr is not null)
+            {
+                try
+                {
+                    metadata = JsonSerializer.Deserialize<Dictionary<string, object>>(metadataStr);
+                }
+                catch
+                {
+                    // ignore malformed metadata
+                }
+            }
+
+            alerts.Add(new Alert(
+                Id: reader.GetString(0),
+                Type: reader.GetString(1),
+                Severity: reader.GetString(2),
+                Title: reader.GetString(3),
+                Description: reader.IsDBNull(4) ? "" : reader.GetString(4),
+                Brand: reader.IsDBNull(5) ? "" : reader.GetString(5),
+                Region: reader.IsDBNull(6) ? "" : reader.GetString(6),
+                RecommendedAction: reader.IsDBNull(7) ? "" : reader.GetString(7),
+                DetectedAt: DateTimeOffset.TryParseExact(reader.GetString(8), Iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
+                    ? dt : DateTimeOffset.UtcNow,
+                Metadata: metadata
+            ));
+        }
+        return alerts;
+    }
+
+    public void Dispose() { /* no persistent connections to dispose */ }
+}
