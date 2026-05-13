@@ -1633,7 +1633,7 @@ app.MapPost("/api/taskmodule/promo", async (PromoEvaluationRequest request, IHtt
         {
             required = false,
             request_id = (string?)null,
-            reason = (string?)null
+            reason = string.Empty
         }
     });
 })

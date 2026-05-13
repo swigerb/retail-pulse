@@ -199,27 +199,27 @@ public class TraceCollectorTests
     #region Concurrency
 
     [Fact]
-    public void ConcurrentCapture_NoDataLoss()
+    public async Task ConcurrentCapture_NoDataLoss()
     {
         var collector = new InMemoryTraceCollector(capacity: 200);
         var tasks = Enumerable.Range(0, 100).Select(i =>
             Task.Run(() => collector.CaptureSpan(MakeSpan($"trace-{i}", $"op-{i}")))
         ).ToArray();
 
-        Task.WaitAll(tasks);
+        await Task.WhenAll(tasks);
 
         collector.TraceCount.Should().Be(100, "all 100 traces should be captured");
     }
 
     [Fact]
-    public void ConcurrentCapture_SameTrace_AllSpansPresent()
+    public async Task ConcurrentCapture_SameTrace_AllSpansPresent()
     {
         var collector = new InMemoryTraceCollector();
         var tasks = Enumerable.Range(0, 50).Select(i =>
             Task.Run(() => collector.CaptureSpan(MakeSpan("shared-trace", $"op-{i}")))
         ).ToArray();
 
-        Task.WaitAll(tasks);
+        await Task.WhenAll(tasks);
 
         collector.TraceCount.Should().Be(1);
         collector.GetSpans("shared-trace")!.Should().HaveCount(50);

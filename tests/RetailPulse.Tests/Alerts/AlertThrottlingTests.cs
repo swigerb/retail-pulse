@@ -102,11 +102,11 @@ public class AlertThrottlingTests
     }
 
     [Fact]
-    public void IsThrottled_AfterAlert_ReturnsTrue()
+    public async Task IsThrottled_AfterAlert_ReturnsTrue()
     {
         var svc = CreateService();
         svc.SeedDataPoint("Brand H", "West", "demand_spike", baseline: 1000, current: 1300);
-        svc.CheckForAlertsAsync().Wait();
+        await svc.CheckForAlertsAsync();
 
         svc.IsThrottled("demand_spike", "Brand H", "West").Should().BeTrue();
     }
@@ -119,11 +119,11 @@ public class AlertThrottlingTests
     }
 
     [Fact]
-    public void ResetThrottle_AllowsAlertToFireAgain()
+    public async Task ResetThrottle_AllowsAlertToFireAgain()
     {
         var svc = CreateService();
         svc.SeedDataPoint("Brand J", "West", "demand_spike", baseline: 1000, current: 1300);
-        svc.CheckForAlertsAsync().Wait();
+        await svc.CheckForAlertsAsync();
 
         svc.IsThrottled("demand_spike", "Brand J", "West").Should().BeTrue();
         svc.ResetThrottle("demand_spike", "Brand J", "West");
