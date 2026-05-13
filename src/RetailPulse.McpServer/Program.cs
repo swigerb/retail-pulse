@@ -129,4 +129,49 @@ app.MapGet("/api/demand/risks", (RetailPulseDb data, string? brand = null, strin
 })
 .WithName("IdentifyDemandRisks");
 
+// ── Promo REST endpoints ─────────────────────────────────────────────
+app.MapGet("/api/promo/history", (RetailPulseDb data, string? brand = null, string? region = null, string? promoType = null, int months = 18) =>
+{
+    var result = data.GetPromoHistory(brand, region, promoType, months);
+    return Results.Ok(result);
+})
+.WithName("GetPromoHistory");
+
+app.MapGet("/api/promo/calculate-lift", (string brand, string region, string promoType, double spend, RetailPulseDb data) =>
+{
+    var result = data.CalculateLift(brand, region, promoType, spend);
+    return Results.Ok(result);
+})
+.WithName("CalculateLift");
+
+app.MapGet("/api/promo/evaluate-timing", (string brand, string region, string startDate, string endDate, RetailPulseDb data) =>
+{
+    if (!DateOnly.TryParse(startDate, out var start) || !DateOnly.TryParse(endDate, out var end))
+        return Results.BadRequest(new { error = "Invalid date format. Use ISO format (yyyy-MM-dd)." });
+    var result = data.EvaluateTiming(brand, region, start, end);
+    return Results.Ok(result);
+})
+.WithName("EvaluateTiming");
+
+app.MapGet("/api/promo/estimate-roi", (string brand, string region, string promoType, double spend, int durationWeeks, RetailPulseDb data) =>
+{
+    var result = data.EstimateROI(brand, region, promoType, spend, durationWeeks);
+    return Results.Ok(result);
+})
+.WithName("EstimateROI");
+
+app.MapGet("/api/promo/calendar", (RetailPulseDb data, string? brand = null, string? region = null, int months = 6) =>
+{
+    var result = data.GetPromoCalendar(brand, region, months);
+    return Results.Ok(result);
+})
+.WithName("GetPromoCalendar");
+
+app.MapGet("/api/promo/types", (RetailPulseDb data) =>
+{
+    var result = RetailPulseDb.GetPromoTypes();
+    return Results.Ok(result);
+})
+.WithName("GetPromoTypes");
+
 app.Run();
