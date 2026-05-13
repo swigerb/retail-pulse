@@ -282,6 +282,47 @@ public class CompetitiveToolTests : IDisposable
 
     #endregion
 
+    #region GetMarketShare — 6 Quarters of Data
+
+    [Fact]
+    public void GetMarketShare_Returns6QuartersOfData()
+    {
+        // The DB seeds exactly 6 quarters: 2025-Q1 through 2026-Q2
+        var result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast"));
+
+        var shareData = result.GetProperty("share_data");
+        shareData.GetArrayLength().Should().BeGreaterThan(0,
+            "should return market share data");
+
+        // Collect distinct periods across all records
+        var periods = shareData.EnumerateArray()
+            .Select(r => r.GetProperty("period").GetString()!)
+            .Distinct()
+            .OrderBy(p => p)
+            .ToList();
+
+        periods.Should().HaveCount(6,
+            "market share data should span exactly 6 quarters (2025-Q1 through 2026-Q2)");
+
+        periods.Should().Contain("2025-Q1");
+        periods.Should().Contain("2026-Q2");
+    }
+
+    [Fact]
+    public void GetMarketShare_PeriodsAreValidQuarterFormat()
+    {
+        var result = Parse(_db.GetMarketShare(category: "Spirits"));
+
+        foreach (var item in result.GetProperty("share_data").EnumerateArray())
+        {
+            var period = item.GetProperty("period").GetString()!;
+            period.Should().MatchRegex(@"^\d{4}-Q[1-4]$",
+                $"period '{period}' should be in yyyy-Qn format");
+        }
+    }
+
+    #endregion
+
     #region GetCompetitiveLandscape
 
     [Fact]

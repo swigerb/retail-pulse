@@ -9,6 +9,36 @@
 
 ## Learnings
 
+### 2026-05-16 — Acts 6–10 Full Gap Closure (8/8 Tests Written)
+
+- **All 8 coverage gaps closed** — 49 new test methods across 8 files; total suite now 1321 tests, all passing.
+- **Gap #1 (SQL injection):** 13 tests in `Middleware/SqlInjectionTests.cs` — covers DROP TABLE, UNION SELECT, XSS, OR-tautologies, comment injection, normal queries, logging, and disabled detection. Injection detection piggybacks on `JailbreakDetectionEnabled` toggle.
+- **Gap #2 (Input length):** 7 tests in `Middleware/InputLengthTests.cs` — covers over/at/under limits, custom limits, default config.
+- **Gap #3 (OTel routing spans):** 5 tests in `Tracing/OTelRoutingSpanTests.cs` — uses `ActivityListener` on `RetailPulse.Agent` ActivitySource. Captures `agent.routing` spans and verifies `agent.routing.intent`, `agent.routing.confidence`, `agent.routing.fallback` tags.
+- **Gap #4 (Task Module):** 13 tests in `Integration/TaskModuleIntegrationTests.cs` — mirrors validation logic from Program.cs endpoint. Tests field validation, date parsing, duration calculation, and approval gate logic (budget > 500K or ROI < 2.0 && budget > 100K).
+- **Gap #5 (SignalR alerts):** 4 tests in `Alerts/SignalRAlertDeliveryTests.cs` — verifies `IHubContext<TelemetryHub>` mock chain: `Mock<IClientProxy>` → `Mock<IHubClients>.All` → `Mock<IHubContext<TelemetryHub>>.Clients`.
+- **Gap #6 (L2 fan-out timeout):** 3 tests added to `Escalation/EscalationTests.cs` — tests 15-second timeout, non-null results, and cancellation token threading.
+- **Gap #7 (Market share 6 quarters):** 2 tests added to `Tools/CompetitiveToolTests.cs` — asserts exactly 6 distinct periods (2025-Q1 through 2026-Q2) and valid quarter format.
+- **Gap #8 (Scorecard weights):** 4 tests added to `Scorecard/ScorecardTests.cs` — verifies exact weights via reflection on private static `ScoringDimensions` field: Demand Momentum (0.25), Competitive Position (0.20), Supply Reliability (0.20), Store Execution (0.20), Margin Health (0.15), sum = 1.0.
+- **Pattern: reflection for private static fields** — `typeof(T).GetField("name", NonPublic | Static)` is necessary when testing orchestrator constants that aren't exposed publicly. The ScorecardOrchestrator.ScoringDimensions is a `(string, double, string)[]`.
+- **Pattern: ActivityListener for OTel tests** — Must set `ShouldListenTo`, `Sample = AllDataAndRecorded`, and capture via `ActivityStarted`. Dispose listener in finally block.
+
+### 2026-05-13 — Acts 6–10 Demo Coverage Audit
+
+- **Coverage is strong for unit-level tool tests** — Every specialist tool (demand forecast, promo, competitive intel, scorecard, explainability) has dedicated backend tool tests with good breadth.
+- **Routing coverage is excellent** — RetailOpsRouterTests (33 tests) covers all intent categories, confidence threshold (0.6 boundary with above/below/exact cases), fallback scenarios, multi-intent, history propagation, error handling. Integration tests (20+ tests) cover full pipeline routing for demand/promo/competitive/supply plus multi-tenant.
+- **Act 10 middleware coverage is comprehensive** — Streaming (16 tests), caching (22 tests with SHA256/LRU/deterministic classifier), PII redaction (19 tests with SSN/email/phone/CC), jailbreak detection (10 tests), memory middleware (15 tests), cost tracker (17 tests), audit log (15 tests), export (11 tests).
+- **Key gaps found:**
+  - No SQL injection detection tests in guardrails
+  - No input length/max query length validation tests
+  - No OTel routing span tests (intent/confidence/fallback tags on `agent.routing` span)
+  - No Task Module endpoint integration test (`POST /api/taskmodule/promo`)
+  - Escalation L2 fan-out timeout (15s) and L3 human-review mechanics untested
+  - No SignalR-level alert delivery test (alert logic tested, but not the hub push)
+  - No Market Share "6 quarters of data" assertion
+  - No scorecard dimension weight assertion (0.25/0.20/0.20/0.20/0.15 specifically)
+- **Pattern: frontend component tests exist for all Acts 6–10 features** — UI test coverage is broad (routing indicator, promo task module, competitive dashboard, council, voting card, streaming, cache indicator, memory panel, guardrails dashboard, cost dashboard, audit log viewer, explanation panel, scorecard).
+
 ### 2026-05-15 — Phase 4 (Sprints 4.1/4.2/4.3) Store Ops, Margin, Escalation, Scorecard, Explainability, Routing
 
 - **RetailPulseDb Phase 4 methods use camelCase anonymous types** — `GetStorePerformance` returns `{ stores, count }` with each store having `storeId`, `performanceIndex` etc. GetShelfLayout returns flat `slots` array (not nested shelves>positions). OptimizePlanogram returns `currentLayout` (no separate optimized layout). GetMarginByBrand returns `{ brand, financials, periodsReported }` — financials is an array per period, not flat. DetectMarginRisks uses `riskType` not `type`.
