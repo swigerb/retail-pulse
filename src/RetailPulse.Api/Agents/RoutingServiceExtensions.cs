@@ -26,7 +26,9 @@ public static class RoutingServiceExtensions
         AgentDefinition? demandForecastDef = null,
         Func<IServiceProvider, IEnumerable<AITool>>? demandToolsFactory = null,
         AgentDefinition? promoPlanningDef = null,
-        Func<IServiceProvider, IEnumerable<AITool>>? promoToolsFactory = null)
+        Func<IServiceProvider, IEnumerable<AITool>>? promoToolsFactory = null,
+        AgentDefinition? competitiveIntelDef = null,
+        Func<IServiceProvider, IEnumerable<AITool>>? competitiveToolsFactory = null)
     {
         // Register GeneralAgent as ISpecialistAgent
         services.AddScoped<GeneralAgent>(sp =>
@@ -72,6 +74,23 @@ public static class RoutingServiceExtensions
                 return new PromoPlanningAgent(chatClient, promoPlanningDef, hubContext, tools, logger, configuration, approvalGate);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<PromoPlanningAgent>());
+        }
+
+        // Register CompetitiveIntelAgent as ISpecialistAgent
+        if (competitiveIntelDef is not null && competitiveToolsFactory is not null)
+        {
+            services.AddScoped<CompetitiveIntelAgent>(sp =>
+            {
+                var chatClient = sp.GetRequiredService<IChatClient>();
+                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var tools = competitiveToolsFactory(sp);
+                var logger = sp.GetRequiredService<ILogger<CompetitiveIntelAgent>>();
+                var configuration = sp.GetRequiredService<IConfiguration>();
+                var alertService = sp.GetService<Alerts.SqliteAlertService>();
+
+                return new CompetitiveIntelAgent(chatClient, competitiveIntelDef, hubContext, tools, logger, configuration, alertService);
+            });
+            services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<CompetitiveIntelAgent>());
         }
 
         // Register MemoryManagementAgent as ISpecialistAgent

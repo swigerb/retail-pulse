@@ -174,4 +174,33 @@ app.MapGet("/api/promo/types", (RetailPulseDb data) =>
 })
 .WithName("GetPromoTypes");
 
+// ── Competitive Intelligence REST endpoints ──────────────────────────
+app.MapGet("/api/competitive/pricing", (RetailPulseDb data, string? brand = null, string? category = null, string? region = null, string? competitors = null) =>
+{
+    var result = data.GetCompetitorPricing(brand, category, region, competitors);
+    return Results.Ok(result);
+})
+.WithName("GetCompetitorPricing");
+
+app.MapGet("/api/competitive/market-share", (RetailPulseDb data, string? brand = null, string? category = null, string? region = null, string? period = null) =>
+{
+    var result = data.GetMarketShare(brand, category, region, period);
+    return Results.Ok(result);
+})
+.WithName("GetMarketShare");
+
+app.MapGet("/api/competitive/threats", (RetailPulseDb data, string? brand = null, string? category = null, string? region = null) =>
+{
+    var result = data.DetectCompetitiveThreats(brand, category, region);
+    return Results.Ok(result);
+})
+.WithName("DetectCompetitiveThreats");
+
+app.MapGet("/api/competitive/landscape", (string category, string region, RetailPulseDb data) =>
+{
+    var result = data.GetCompetitiveLandscape(category, region);
+    return Results.Ok(result);
+})
+.WithName("GetCompetitiveLandscape");
+
 app.Run();

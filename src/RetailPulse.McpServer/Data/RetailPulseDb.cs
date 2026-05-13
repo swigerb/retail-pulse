@@ -157,6 +157,50 @@ public class RetailPulseDb
                 PRIMARY KEY (Category, PromoType)
             );
 
+            CREATE TABLE IF NOT EXISTS CompetitorPricing (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Competitor TEXT NOT NULL COLLATE NOCASE,
+                Brand TEXT NOT NULL COLLATE NOCASE,
+                Category TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Price REAL NOT NULL,
+                PreviousPrice REAL,
+                PriceChangePercent REAL,
+                EffectiveDate TEXT NOT NULL,
+                Source TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_CompetitorPricing_BrandRegion ON CompetitorPricing (Brand, Region);
+            CREATE INDEX IF NOT EXISTS IX_CompetitorPricing_Competitor ON CompetitorPricing (Competitor);
+
+            CREATE TABLE IF NOT EXISTS MarketShare (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Brand TEXT NOT NULL COLLATE NOCASE,
+                Category TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Period TEXT NOT NULL COLLATE NOCASE,
+                SharePercent REAL NOT NULL,
+                PreviousSharePercent REAL,
+                ShareChangePoints REAL,
+                Source TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_MarketShare_BrandRegion ON MarketShare (Brand, Region);
+
+            CREATE TABLE IF NOT EXISTS CompetitorActivity (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Competitor TEXT NOT NULL COLLATE NOCASE,
+                ActivityType TEXT NOT NULL COLLATE NOCASE,
+                Category TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Description TEXT,
+                Impact TEXT,
+                DetectedDate TEXT NOT NULL,
+                ResponseRecommendation TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_CompetitorActivity_Category ON CompetitorActivity (Category, Region);
+
             CREATE TABLE IF NOT EXISTS SeedMetadata (
                 Key TEXT PRIMARY KEY,
                 Value TEXT NOT NULL
@@ -186,7 +230,7 @@ public class RetailPulseDb
         using var tx = conn.BeginTransaction();
 
         using var clearCmd = conn.CreateCommand();
-        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM PromoHistory; DELETE FROM LiftCoefficients; DELETE FROM SeedMetadata;";
+        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM PromoHistory; DELETE FROM LiftCoefficients; DELETE FROM CompetitorPricing; DELETE FROM MarketShare; DELETE FROM CompetitorActivity; DELETE FROM SeedMetadata;";
         clearCmd.ExecuteNonQuery();
 
         SeedDepletions(conn);
@@ -197,6 +241,9 @@ public class RetailPulseDb
         SeedSeasonalFactors(conn);
         SeedPromoHistory(conn);
         SeedLiftCoefficients(conn);
+        SeedCompetitorPricing(conn);
+        SeedMarketShare(conn);
+        SeedCompetitorActivity(conn);
 
         // Store hash
         using var hashCmd = conn.CreateCommand();
@@ -209,7 +256,7 @@ public class RetailPulseDb
 
     // Bump this version whenever the schema or seeding logic changes
     // to force a re-seed even if tenant.yaml hasn't changed.
-    private const int SchemaVersion = 4;
+    private const int SchemaVersion = 5;
 
     private string ComputeTenantHash()
     {
@@ -1812,6 +1859,242 @@ public class RetailPulseDb
         }
     }
 
+    // ── Competitive Intelligence Seeding ─────────────────────────────────
+
+    private static readonly Dictionary<string, string[]> CompetitorsByCategory = new()
+    {
+        ["Spirits"] = ["Jack Daniel's", "Maker's Mark", "Patrón", "Grey Goose", "Tito's"],
+        ["Grocery"] = ["Kroger", "Whole Foods", "Trader Joe's", "Aldi", "Safeway"],
+        ["Quick-Serve Restaurant"] = ["McDonald's", "Chick-fil-A", "Chipotle", "Taco Bell", "Wendy's"],
+        ["Home Improvement"] = ["Home Depot", "Lowe's", "Menards", "Ace Hardware", "True Value"],
+        ["Office Supply"] = ["Staples", "Office Depot", "Amazon Business", "Costco Business"],
+        ["Furniture"] = ["IKEA", "Wayfair", "Ashley Furniture", "Rooms To Go", "Pottery Barn"]
+    };
+
+    private static readonly string[] PricingSources = ["web_scrape", "field_report", "syndicated"];
+    private static readonly string[] ShareSources = ["Nielsen", "IRI", "internal_estimate", "syndicated"];
+    private static readonly string[] ActivityTypes = ["price_drop", "new_product", "promo_launch", "distribution_change"];
+    private static readonly string[] ImpactLevels = ["high", "medium", "low"];
+
+    private void SeedCompetitorPricing(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO CompetitorPricing (Competitor, Brand, Category, Region, Price, PreviousPrice, PriceChangePercent, EffectiveDate, Source)
+            VALUES (@competitor, @brand, @category, @region, @price, @prevPrice, @pctChange, @date, @source)
+            """;
+
+        var pCompetitor = cmd.Parameters.Add("@competitor", SqliteType.Text);
+        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        var pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pPrice = cmd.Parameters.Add("@price", SqliteType.Real);
+        var pPrevPrice = cmd.Parameters.Add("@prevPrice", SqliteType.Real);
+        var pPctChange = cmd.Parameters.Add("@pctChange", SqliteType.Real);
+        var pDate = cmd.Parameters.Add("@date", SqliteType.Text);
+        var pSource = cmd.Parameters.Add("@source", SqliteType.Text);
+
+        var baseDate = new DateOnly(2025, 6, 1);
+
+        foreach (var brand in _tenant.Brands)
+        {
+            var competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B", "Generic Competitor C"]);
+            var basePrice = brand.PriceSegment == "Premium" ? 45.0 : 25.0;
+
+            foreach (var competitor in competitors)
+            {
+                foreach (var region in _tenant.Regions)
+                {
+                    var seed = GetStableHash($"comprice|{competitor}|{brand.Name}|{region}");
+                    var rng = new Random(seed);
+
+                    // Generate 8-12 pricing records over time
+                    var recordCount = 8 + rng.Next(5);
+                    var competitorBase = basePrice * (0.85 + rng.NextDouble() * 0.35);
+
+                    for (int i = 0; i < recordCount; i++)
+                    {
+                        var date = baseDate.AddDays(i * 30 + rng.Next(15));
+                        var priceVariation = competitorBase * (0.90 + rng.NextDouble() * 0.20);
+                        var previousPrice = i == 0 ? competitorBase : competitorBase * (0.92 + rng.NextDouble() * 0.16);
+                        var pctChange = previousPrice > 0 ? Math.Round((priceVariation - previousPrice) / previousPrice * 100, 1) : 0;
+
+                        // ~15% chance of dramatic price drop (>10%)
+                        if (rng.NextDouble() < 0.15)
+                        {
+                            priceVariation = previousPrice * (0.80 + rng.NextDouble() * 0.08);
+                            pctChange = Math.Round((priceVariation - previousPrice) / previousPrice * 100, 1);
+                        }
+
+                        pCompetitor.Value = competitor;
+                        pBrand.Value = brand.Name;
+                        pCategory.Value = brand.Category;
+                        pRegion.Value = region;
+                        pPrice.Value = Math.Round(priceVariation, 2);
+                        pPrevPrice.Value = Math.Round(previousPrice, 2);
+                        pPctChange.Value = pctChange;
+                        pDate.Value = date.ToString("yyyy-MM-dd");
+                        pSource.Value = PricingSources[rng.Next(PricingSources.Length)];
+                        cmd.ExecuteNonQuery();
+
+                        competitorBase = priceVariation;
+                    }
+                }
+            }
+        }
+    }
+
+    private void SeedMarketShare(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO MarketShare (Brand, Category, Region, Period, SharePercent, PreviousSharePercent, ShareChangePoints, Source)
+            VALUES (@brand, @category, @region, @period, @share, @prevShare, @change, @source)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        var pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
+        var pShare = cmd.Parameters.Add("@share", SqliteType.Real);
+        var pPrevShare = cmd.Parameters.Add("@prevShare", SqliteType.Real);
+        var pChange = cmd.Parameters.Add("@change", SqliteType.Real);
+        var pSource = cmd.Parameters.Add("@source", SqliteType.Text);
+
+        // 6 quarters of data
+        var quarters = new[] { "2025-Q1", "2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1", "2026-Q2" };
+
+        foreach (var brand in _tenant.Brands)
+        {
+            var competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
+            var allPlayers = new List<string> { brand.Name };
+            allPlayers.AddRange(competitors);
+
+            foreach (var region in _tenant.Regions)
+            {
+                var seed = GetStableHash($"share|{brand.Category}|{region}");
+                var rng = new Random(seed);
+
+                // Allocate base shares — our brand gets 15-35%, competitors split the rest
+                var ourBaseShare = 15.0 + rng.NextDouble() * 20.0;
+                var remainingShare = 100.0 - ourBaseShare;
+                var competitorShares = new double[competitors.Length];
+                double totalComp = 0;
+                for (int c = 0; c < competitors.Length; c++)
+                {
+                    competitorShares[c] = 5 + rng.NextDouble() * 25;
+                    totalComp += competitorShares[c];
+                }
+                // Normalize competitor shares
+                for (int c = 0; c < competitors.Length; c++)
+                    competitorShares[c] = competitorShares[c] / totalComp * remainingShare;
+
+                double prevOurShare = ourBaseShare;
+                var prevCompShares = (double[])competitorShares.Clone();
+
+                for (int q = 0; q < quarters.Length; q++)
+                {
+                    // Our brand: slight random walk
+                    var drift = (rng.NextDouble() - 0.48) * 3.0;  // slight positive bias
+                    var currentShare = Math.Round(Math.Max(5, Math.Min(50, prevOurShare + drift)), 1);
+                    var changePoints = Math.Round(currentShare - prevOurShare, 1);
+
+                    pBrand.Value = brand.Name;
+                    pCategory.Value = brand.Category;
+                    pRegion.Value = region;
+                    pPeriod.Value = quarters[q];
+                    pShare.Value = currentShare;
+                    pPrevShare.Value = Math.Round(prevOurShare, 1);
+                    pChange.Value = changePoints;
+                    pSource.Value = ShareSources[rng.Next(ShareSources.Length)];
+                    cmd.ExecuteNonQuery();
+
+                    prevOurShare = currentShare;
+
+                    // Competitors
+                    for (int c = 0; c < competitors.Length; c++)
+                    {
+                        var compDrift = (rng.NextDouble() - 0.52) * 3.0;
+                        var compShare = Math.Round(Math.Max(3, Math.Min(45, prevCompShares[c] + compDrift)), 1);
+                        var compChange = Math.Round(compShare - prevCompShares[c], 1);
+
+                        pBrand.Value = competitors[c];
+                        pCategory.Value = brand.Category;
+                        pRegion.Value = region;
+                        pPeriod.Value = quarters[q];
+                        pShare.Value = compShare;
+                        pPrevShare.Value = Math.Round(prevCompShares[c], 1);
+                        pChange.Value = compChange;
+                        pSource.Value = ShareSources[rng.Next(ShareSources.Length)];
+                        cmd.ExecuteNonQuery();
+
+                        prevCompShares[c] = compShare;
+                    }
+                }
+            }
+        }
+    }
+
+    private void SeedCompetitorActivity(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO CompetitorActivity (Competitor, ActivityType, Category, Region, Description, Impact, DetectedDate, ResponseRecommendation)
+            VALUES (@competitor, @type, @category, @region, @desc, @impact, @date, @recommendation)
+            """;
+
+        var pCompetitor = cmd.Parameters.Add("@competitor", SqliteType.Text);
+        var pType = cmd.Parameters.Add("@type", SqliteType.Text);
+        var pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
+        var pImpact = cmd.Parameters.Add("@impact", SqliteType.Text);
+        var pDate = cmd.Parameters.Add("@date", SqliteType.Text);
+        var pRecommendation = cmd.Parameters.Add("@recommendation", SqliteType.Text);
+
+        var baseDate = new DateOnly(2025, 8, 1);
+        var activityTemplates = new (string type, string descTemplate, string recTemplate)[]
+        {
+            ("price_drop", "{0} dropped prices by {1}% on {2} products in {3}", "MATCH — Consider matching price within 2 weeks to avoid share loss"),
+            ("price_drop", "{0} launched aggressive pricing on premium {2} line in {3}", "DIFFERENTIATE — Emphasize quality/heritage vs price competition"),
+            ("new_product", "{0} launched new {2} product line targeting {3} market", "PREEMPT — Accelerate our own product pipeline to maintain innovation lead"),
+            ("new_product", "{0} introduced value-tier {2} option in {3}", "IGNORE — Different segment, minimal overlap with our premium positioning"),
+            ("promo_launch", "{0} started BOGO promotion on {2} in {3}", "MATCH — Launch counter-promotion within the same window"),
+            ("promo_launch", "{0} launched loyalty program for {2} in {3}", "DIFFERENTIATE — Focus on product quality rather than loyalty discounts"),
+            ("distribution_change", "{0} expanded {2} distribution to 200+ new stores in {3}", "PREEMPT — Secure additional shelf space before competitor gains foothold"),
+            ("distribution_change", "{0} partnered with major retailer for exclusive {2} placement in {3}", "MATCH — Negotiate similar exclusive deals with competing retailers"),
+        };
+
+        var seed = GetStableHash("competitive_activity_seed");
+        var rng = new Random(seed);
+
+        foreach (var brand in _tenant.Brands)
+        {
+            var competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
+
+            // 3-5 activities per category
+            var activityCount = 3 + rng.Next(3);
+            for (int i = 0; i < activityCount; i++)
+            {
+                var competitor = competitors[rng.Next(competitors.Length)];
+                var template = activityTemplates[rng.Next(activityTemplates.Length)];
+                var region = _tenant.Regions[rng.Next(_tenant.Regions.Count)];
+                var priceDrop = 8 + rng.Next(20);
+                var date = baseDate.AddDays(rng.Next(300));
+
+                pCompetitor.Value = competitor;
+                pType.Value = template.type;
+                pCategory.Value = brand.Category;
+                pRegion.Value = region;
+                pDesc.Value = string.Format(template.descTemplate, competitor, priceDrop, brand.Category, region);
+                pImpact.Value = ImpactLevels[rng.Next(ImpactLevels.Length)];
+                pDate.Value = date.ToString("yyyy-MM-dd");
+                pRecommendation.Value = template.recTemplate;
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
     // ── Promo Query Methods ────────────────────────────────────────────────
 
     public object GetPromoHistory(string? brand, string? region, string? promoType, int months = 18)
@@ -2177,6 +2460,440 @@ public class RetailPulseDb
             new { code = "bundle", name = "Bundle", description = "Product bundling promotions combining related items at a discount" }
         }
     };
+
+    // ── Competitive Intelligence Queries ─────────────────────────────────
+
+    public object GetCompetitorPricing(string? brand = null, string? category = null, string? region = null, string? competitors = null)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+
+        var filters = new List<string>();
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            filters.Add("Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand}%");
+        }
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            filters.Add("Category LIKE @category");
+            cmd.Parameters.AddWithValue("@category", $"%{category}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            filters.Add("Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region}%");
+        }
+        if (!string.IsNullOrWhiteSpace(competitors))
+        {
+            var compList = competitors.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var compFilters = new List<string>();
+            for (int i = 0; i < compList.Length; i++)
+            {
+                compFilters.Add($"Competitor LIKE @comp{i}");
+                cmd.Parameters.AddWithValue($"@comp{i}", $"%{compList[i]}%");
+            }
+            filters.Add($"({string.Join(" OR ", compFilters)})");
+        }
+
+        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        cmd.CommandText = $"""
+            SELECT Competitor, Brand, Category, Region, Price, PreviousPrice, PriceChangePercent, EffectiveDate, Source
+            FROM CompetitorPricing
+            {where}
+            ORDER BY EffectiveDate DESC
+            LIMIT 200
+            """;
+
+        using var reader = cmd.ExecuteReader();
+        var records = new List<object>();
+        while (reader.Read())
+        {
+            records.Add(new
+            {
+                competitor = reader.GetString(0),
+                brand = reader.GetString(1),
+                category = reader.GetString(2),
+                region = reader.GetString(3),
+                price = reader.GetDouble(4),
+                previous_price = reader.IsDBNull(5) ? (double?)null : reader.GetDouble(5),
+                price_change_percent = reader.IsDBNull(6) ? (double?)null : reader.GetDouble(6),
+                effective_date = reader.GetString(7),
+                source = reader.IsDBNull(8) ? null : reader.GetString(8)
+            });
+        }
+
+        // Identify dramatic price drops (>10%) as threats
+        var threats = records.Where(r =>
+        {
+            var pct = ((dynamic)r).price_change_percent;
+            return pct != null && (double)pct < -10;
+        }).ToList();
+
+        return new
+        {
+            filters = new { brand = brand ?? "all", category = category ?? "all", region = region ?? "all", competitors = competitors ?? "all" },
+            total_records = records.Count,
+            price_drop_threats = threats.Count,
+            pricing = records
+        };
+    }
+
+    public object GetMarketShare(string? brand = null, string? category = null, string? region = null, string? period = null)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+
+        var filters = new List<string>();
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            filters.Add("Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand}%");
+        }
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            filters.Add("Category LIKE @category");
+            cmd.Parameters.AddWithValue("@category", $"%{category}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            filters.Add("Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region}%");
+        }
+        if (!string.IsNullOrWhiteSpace(period))
+        {
+            filters.Add("Period LIKE @period");
+            cmd.Parameters.AddWithValue("@period", $"%{period}%");
+        }
+
+        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        cmd.CommandText = $"""
+            SELECT Brand, Category, Region, Period, SharePercent, PreviousSharePercent, ShareChangePoints, Source
+            FROM MarketShare
+            {where}
+            ORDER BY Period DESC, SharePercent DESC
+            LIMIT 300
+            """;
+
+        using var reader = cmd.ExecuteReader();
+        var records = new List<object>();
+        while (reader.Read())
+        {
+            records.Add(new
+            {
+                brand = reader.GetString(0),
+                category = reader.GetString(1),
+                region = reader.GetString(2),
+                period = reader.GetString(3),
+                share_percent = reader.GetDouble(4),
+                previous_share_percent = reader.IsDBNull(5) ? (double?)null : reader.GetDouble(5),
+                share_change_points = reader.IsDBNull(6) ? (double?)null : reader.GetDouble(6),
+                source = reader.IsDBNull(7) ? null : reader.GetString(7)
+            });
+        }
+
+        // Find significant share losses (>2 points)
+        var shareLosses = records.Where(r =>
+        {
+            var change = ((dynamic)r).share_change_points;
+            return change != null && (double)change < -2.0;
+        }).ToList();
+
+        return new
+        {
+            filters = new { brand = brand ?? "all", category = category ?? "all", region = region ?? "all", period = period ?? "all" },
+            total_records = records.Count,
+            significant_share_losses = shareLosses.Count,
+            share_data = records
+        };
+    }
+
+    public object DetectCompetitiveThreats(string? brand = null, string? category = null, string? region = null)
+    {
+        var threats = new List<object>();
+
+        // 1. Price drop threats (competitor dropped >10%)
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var pricingFilters = new List<string> { "PriceChangePercent < -10" };
+        using var priceCmd = conn.CreateCommand();
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            pricingFilters.Add("Brand LIKE @brand");
+            priceCmd.Parameters.AddWithValue("@brand", $"%{brand}%");
+        }
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            pricingFilters.Add("Category LIKE @category");
+            priceCmd.Parameters.AddWithValue("@category", $"%{category}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            pricingFilters.Add("Region LIKE @region");
+            priceCmd.Parameters.AddWithValue("@region", $"%{region}%");
+        }
+
+        priceCmd.CommandText = $"""
+            SELECT Competitor, Brand, Category, Region, Price, PreviousPrice, PriceChangePercent, EffectiveDate
+            FROM CompetitorPricing
+            WHERE {string.Join(" AND ", pricingFilters)}
+            ORDER BY PriceChangePercent ASC
+            LIMIT 20
+            """;
+
+        using var priceReader = priceCmd.ExecuteReader();
+        while (priceReader.Read())
+        {
+            var pctChange = priceReader.GetDouble(6);
+            var severity = pctChange < -20 ? "high" : "medium";
+            var recommendation = pctChange < -20 ? "MATCH" : "DIFFERENTIATE";
+            var reasoning = pctChange < -20
+                ? "Significant price undercut threatens market share. Consider matching within 1-2 weeks."
+                : "Moderate price drop. Differentiate on value proposition rather than matching.";
+
+            threats.Add(new
+            {
+                type = "price_drop",
+                severity,
+                competitor = priceReader.GetString(0),
+                brand = priceReader.GetString(1),
+                category = priceReader.GetString(2),
+                region = priceReader.GetString(3),
+                details = new { current_price = priceReader.GetDouble(4), previous_price = priceReader.GetDouble(5), change_percent = pctChange },
+                detected_date = priceReader.GetString(7),
+                recommendation,
+                reasoning,
+                historical_success_rate = recommendation == "MATCH" ? "72% effective in similar situations" : "65% effective in similar situations"
+            });
+        }
+
+        // 2. Market share threats (>2 point drop)
+        var shareFilters = new List<string> { "ShareChangePoints < -2" };
+        using var shareCmd = conn.CreateCommand();
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            shareFilters.Add("Brand LIKE @brand");
+            shareCmd.Parameters.AddWithValue("@brand", $"%{brand}%");
+        }
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            shareFilters.Add("Category LIKE @category");
+            shareCmd.Parameters.AddWithValue("@category", $"%{category}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            shareFilters.Add("Region LIKE @region");
+            shareCmd.Parameters.AddWithValue("@region", $"%{region}%");
+        }
+
+        shareCmd.CommandText = $"""
+            SELECT Brand, Category, Region, Period, SharePercent, PreviousSharePercent, ShareChangePoints
+            FROM MarketShare
+            WHERE {string.Join(" AND ", shareFilters)}
+            ORDER BY ShareChangePoints ASC
+            LIMIT 20
+            """;
+
+        using var shareReader = shareCmd.ExecuteReader();
+        while (shareReader.Read())
+        {
+            var changePoints = shareReader.GetDouble(6);
+            var severity = changePoints < -4 ? "high" : "medium";
+
+            threats.Add(new
+            {
+                type = "share_loss",
+                severity,
+                competitor = (string?)null,
+                brand = shareReader.GetString(0),
+                category = shareReader.GetString(1),
+                region = shareReader.GetString(2),
+                details = new { period = shareReader.GetString(3), current_share = shareReader.GetDouble(4), previous_share = shareReader.GetDouble(5), change_points = changePoints },
+                detected_date = shareReader.GetString(3),
+                recommendation = severity == "high" ? "PREEMPT" : "MATCH",
+                reasoning = severity == "high"
+                    ? "Significant share erosion detected. Launch counter-offensive with targeted promotions and distribution push."
+                    : "Moderate share loss. Increase competitive monitoring and prepare defensive promotions.",
+                historical_success_rate = severity == "high" ? "58% effective in similar situations" : "67% effective in similar situations"
+            });
+        }
+
+        // 3. Competitive activity threats
+        var actFilters = new List<string> { "Impact = 'high'" };
+        using var actCmd = conn.CreateCommand();
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            actFilters.Add("Category LIKE @category");
+            actCmd.Parameters.AddWithValue("@category", $"%{category}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            actFilters.Add("Region LIKE @region");
+            actCmd.Parameters.AddWithValue("@region", $"%{region}%");
+        }
+
+        actCmd.CommandText = $"""
+            SELECT Competitor, ActivityType, Category, Region, Description, Impact, DetectedDate, ResponseRecommendation
+            FROM CompetitorActivity
+            WHERE {string.Join(" AND ", actFilters)}
+            ORDER BY DetectedDate DESC
+            LIMIT 15
+            """;
+
+        using var actReader = actCmd.ExecuteReader();
+        while (actReader.Read())
+        {
+            var recText = actReader.IsDBNull(7) ? "IGNORE" : actReader.GetString(7);
+            var recommendation = recText.Contains("MATCH") ? "MATCH"
+                : recText.Contains("PREEMPT") ? "PREEMPT"
+                : recText.Contains("DIFFERENTIATE") ? "DIFFERENTIATE"
+                : "IGNORE";
+
+            threats.Add(new
+            {
+                type = actReader.GetString(1),
+                severity = "high",
+                competitor = actReader.GetString(0),
+                brand = (string?)null,
+                category = actReader.GetString(2),
+                region = actReader.GetString(3),
+                details = new { description = actReader.IsDBNull(4) ? "" : actReader.GetString(4) },
+                detected_date = actReader.GetString(6),
+                recommendation,
+                reasoning = recText,
+                historical_success_rate = recommendation == "MATCH" ? "72% effective" : recommendation == "PREEMPT" ? "58% effective" : "65% effective"
+            });
+        }
+
+        return new
+        {
+            filters = new { brand = brand ?? "all", category = category ?? "all", region = region ?? "all" },
+            total_threats = threats.Count,
+            high_severity = threats.Count(t => ((dynamic)t).severity == "high"),
+            medium_severity = threats.Count(t => ((dynamic)t).severity == "medium"),
+            threats
+        };
+    }
+
+    public object GetCompetitiveLandscape(string category, string region)
+    {
+        if (string.IsNullOrWhiteSpace(category))
+            return new { error = "Parameter 'category' is required." };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required." };
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        // Get latest market share for all players in this category/region
+        using var shareCmd = conn.CreateCommand();
+        shareCmd.CommandText = """
+            SELECT Brand, SharePercent, PreviousSharePercent, ShareChangePoints, Period
+            FROM MarketShare
+            WHERE Category LIKE @category AND Region LIKE @region
+            AND Period = (SELECT MAX(Period) FROM MarketShare WHERE Category LIKE @category AND Region LIKE @region)
+            ORDER BY SharePercent DESC
+            """;
+        shareCmd.Parameters.AddWithValue("@category", $"%{category}%");
+        shareCmd.Parameters.AddWithValue("@region", $"%{region}%");
+
+        var players = new List<object>();
+        string? latestPeriod = null;
+        using var shareReader = shareCmd.ExecuteReader();
+        while (shareReader.Read())
+        {
+            latestPeriod ??= shareReader.GetString(4);
+            players.Add(new
+            {
+                brand = shareReader.GetString(0),
+                share_percent = shareReader.GetDouble(1),
+                previous_share = shareReader.IsDBNull(2) ? (double?)null : shareReader.GetDouble(2),
+                share_change = shareReader.IsDBNull(3) ? (double?)null : shareReader.GetDouble(3),
+                trend = shareReader.IsDBNull(3) ? "stable"
+                    : shareReader.GetDouble(3) > 0.5 ? "gaining"
+                    : shareReader.GetDouble(3) < -0.5 ? "losing"
+                    : "stable"
+            });
+        }
+
+        // Recent competitive activities in this category/region
+        using var actCmd = conn.CreateCommand();
+        actCmd.CommandText = """
+            SELECT Competitor, ActivityType, Description, Impact, DetectedDate, ResponseRecommendation
+            FROM CompetitorActivity
+            WHERE Category LIKE @category AND Region LIKE @region
+            ORDER BY DetectedDate DESC
+            LIMIT 10
+            """;
+        actCmd.Parameters.AddWithValue("@category", $"%{category}%");
+        actCmd.Parameters.AddWithValue("@region", $"%{region}%");
+
+        var activities = new List<object>();
+        using var actReader = actCmd.ExecuteReader();
+        while (actReader.Read())
+        {
+            activities.Add(new
+            {
+                competitor = actReader.GetString(0),
+                type = actReader.GetString(1),
+                description = actReader.IsDBNull(2) ? "" : actReader.GetString(2),
+                impact = actReader.IsDBNull(3) ? "low" : actReader.GetString(3),
+                date = actReader.GetString(4),
+                recommendation = actReader.IsDBNull(5) ? null : actReader.GetString(5)
+            });
+        }
+
+        // Recent pricing moves
+        using var priceCmd = conn.CreateCommand();
+        priceCmd.CommandText = """
+            SELECT Competitor, Brand, Price, PreviousPrice, PriceChangePercent, EffectiveDate
+            FROM CompetitorPricing
+            WHERE Category LIKE @category AND Region LIKE @region
+            ORDER BY EffectiveDate DESC
+            LIMIT 20
+            """;
+        priceCmd.Parameters.AddWithValue("@category", $"%{category}%");
+        priceCmd.Parameters.AddWithValue("@region", $"%{region}%");
+
+        var pricingMoves = new List<object>();
+        using var priceReader = priceCmd.ExecuteReader();
+        while (priceReader.Read())
+        {
+            pricingMoves.Add(new
+            {
+                competitor = priceReader.GetString(0),
+                brand = priceReader.GetString(1),
+                price = priceReader.GetDouble(2),
+                previous_price = priceReader.IsDBNull(3) ? (double?)null : priceReader.GetDouble(3),
+                change_percent = priceReader.IsDBNull(4) ? (double?)null : priceReader.GetDouble(4),
+                date = priceReader.GetString(5)
+            });
+        }
+
+        // Identify our position
+        var ourBrands = _tenant.Brands
+            .Where(b => b.Category.Equals(category, StringComparison.OrdinalIgnoreCase))
+            .Select(b => b.Name)
+            .ToList();
+
+        var ourPosition = players.Where(p => ourBrands.Contains(((dynamic)p).brand as string, StringComparer.OrdinalIgnoreCase)).ToList();
+        var competitorPositions = players.Where(p => !ourBrands.Contains(((dynamic)p).brand as string, StringComparer.OrdinalIgnoreCase)).ToList();
+
+        return new
+        {
+            category,
+            region,
+            period = latestPeriod ?? "unknown",
+            our_brands = ourPosition,
+            competitors = competitorPositions,
+            total_players = players.Count,
+            recent_activities = activities,
+            pricing_moves = pricingMoves
+        };
+    }
 
     private static string NormalizeDiacritics(string text)
     {

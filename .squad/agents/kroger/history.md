@@ -174,3 +174,36 @@
 - `POST /api/taskmodule/promo` — Task Module endpoint in Program.cs
 
 **Test Status:** All 574 tests pass (34 new promo tests added by parallel sessions)
+
+## Session Work — 2026-05-20 Sprint 2.2 Competitive Intelligence Agent (Complete)
+
+**Outcome:** ✅ SUCCESS — Lead architect role, full competitive intelligence subsystem implemented
+
+**Deliverables:**
+- `src/RetailPulse.McpServer/Data/RetailPulseDb.cs` — 3 new tables (CompetitorPricing, MarketShare, CompetitorActivity), 3 seed methods, 4 query methods, SchemaVersion bumped to 5
+- `src/RetailPulse.McpServer/Tools/CompetitiveTools.cs` — 4 MCP server tools (GetCompetitorPricing, GetMarketShare, DetectThreats, GetCompetitiveLandscape)
+- `src/RetailPulse.McpServer/Program.cs` — 4 REST endpoints under `/api/competitive/`
+- `src/RetailPulse.Api/Tools/CompetitorPricingTool.cs` — API proxy for competitor pricing
+- `src/RetailPulse.Api/Tools/MarketShareTool.cs` — API proxy for market share
+- `src/RetailPulse.Api/Tools/DetectThreatsTool.cs` — API proxy for threat detection
+- `src/RetailPulse.Api/Tools/CompetitiveLandscapeTool.cs` — API proxy for landscape overview
+- `src/RetailPulse.Api/Agents/Specialists/CompetitiveIntelAgent.cs` — specialist agent with SqliteAlertService integration, proactive threat alerts, chart extraction, token cost calculation
+- `src/RetailPulse.Api/Agents/RoutingServiceExtensions.cs` — extended with competitiveIntelDef/competitiveToolsFactory params
+- `src/RetailPulse.Api/Program.cs` — competitive tool DI registrations, prompt resolution, AddAgentRouting wiring
+- `src/RetailPulse.Api/prompts.yaml` — competitive-intel agent definition (temp 0.4, defensive strategy framework)
+
+**Architecture Patterns:**
+- CompetitiveIntelAgent is the first specialist to integrate proactive alerts inline — fires `competitive_threat` alerts via SignalR when high-severity threats are detected in tool results
+- Temperature 0.4 (higher than demand/promo at 0.3) balances analytical precision with creative strategy recommendations
+- Defensive strategy framework: MATCH / DIFFERENTIATE / IGNORE / PREEMPT — codified in system prompt
+- Threat detection scans JSON results for high-severity threats and price drops >10%, firing alerts with 1-hour throttling
+- 6 competitor categories seeded: Spirits, Grocery, QSR, Home Improvement, Office Supply, Furniture (5-6 competitors each)
+- Market share data covers 6 quarters with realistic quarter-over-quarter movements
+
+**Reconciliation:** Parallel session created a basic CompetitiveIntelAgent.cs. Replaced with full implementation adding: SqliteAlertService dependency, CheckAndFireAlertsAsync, ExtractChartSpecs, BuildTokenUsage with cost calculation, OTel tool activity spans.
+
+**REST Endpoints:**
+- `GET /api/competitive/pricing?category=&region=` — competitor pricing comparison
+- `GET /api/competitive/market-share?category=&region=` — quarterly market share trends
+- `GET /api/competitive/threats?category=&region=` — competitive threat detection
+- `GET /api/competitive/landscape?category=&region=` — holistic competitive landscape

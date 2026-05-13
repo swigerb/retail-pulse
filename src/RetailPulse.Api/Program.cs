@@ -19,6 +19,8 @@ using RetailPulse.Contracts.Routing;
 using RetailPulse.Contracts.Tracing;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
+using RetailPulse.Api.Rag;
+using RetailPulse.Contracts.Rag;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -89,6 +91,20 @@ var promoPlanningDef = promptConfig.Agents.TryGetValue("promo-planning", out var
 if (promoPlanningDef != null)
 {
     promoPlanningDef.SystemPrompt = promoPlanningDef.SystemPrompt
+        .Replace("{tenant.company}", tenant.Company)
+        .Replace("{tenant.industry}", tenant.Industry)
+        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+}
+
+// Resolve competitive-intel agent prompt with tenant placeholders
+var competitiveIntelDef = promptConfig.Agents.TryGetValue("competitive-intel", out var compDef) ? compDef : null;
+if (competitiveIntelDef != null)
+{
+    competitiveIntelDef.SystemPrompt = competitiveIntelDef.SystemPrompt
         .Replace("{tenant.company}", tenant.Company)
         .Replace("{tenant.industry}", tenant.Industry)
         .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
@@ -210,6 +226,36 @@ builder.Services.AddScoped<EstimateROITool>(sp =>
         sp.GetService<ILogger<EstimateROITool>>());
 });
 
+// Competitive intelligence tools
+builder.Services.AddScoped<CompetitorPricingTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new CompetitorPricingTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<CompetitorPricingTool>>());
+});
+builder.Services.AddScoped<MarketShareTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new MarketShareTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<MarketShareTool>>());
+});
+builder.Services.AddScoped<DetectThreatsTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new DetectThreatsTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<DetectThreatsTool>>());
+});
+builder.Services.AddScoped<CompetitiveLandscapeTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new CompetitiveLandscapeTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<CompetitiveLandscapeTool>>());
+});
+
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
 var approvalDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>
@@ -236,6 +282,11 @@ builder.Services.AddSingleton<InMemoryTraceCollector>(sp =>
         sp.GetRequiredService<IHubContext<TelemetryHub>>(),
         sp.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton<ITraceCollector>(sp => sp.GetRequiredService<InMemoryTraceCollector>());
+
+// RAG Knowledge Base — in-memory BM25-based document store (no Azure dependency)
+builder.Services.AddSingleton<InMemoryKnowledgeBase>();
+builder.Services.AddSingleton<IKnowledgeBase>(sp => sp.GetRequiredService<InMemoryKnowledgeBase>());
+builder.Services.AddSingleton<RagContextProvider>();
 
 // Register IChatClient — Azure OpenAI via APIM AI Gateway.
 // In Production we fail fast if the API key is missing rather than silently
@@ -373,6 +424,24 @@ promoToolsFactory: sp =>
         AIFunctionFactory.Create(chartTool.CreateChart),
         AIFunctionFactory.Create(approvalTool.RequestApproval)
     };
+},
+competitiveIntelDef: competitiveIntelDef,
+competitiveToolsFactory: sp =>
+{
+    var competitorPricingTool = sp.GetRequiredService<CompetitorPricingTool>();
+    var marketShareTool = sp.GetRequiredService<MarketShareTool>();
+    var detectThreatsTool = sp.GetRequiredService<DetectThreatsTool>();
+    var competitiveLandscapeTool = sp.GetRequiredService<CompetitiveLandscapeTool>();
+    var chartTool = sp.GetRequiredService<ChartDataTool>();
+
+    return new List<AITool>
+    {
+        AIFunctionFactory.Create(competitorPricingTool.GetCompetitorPricing),
+        AIFunctionFactory.Create(marketShareTool.GetMarketShare),
+        AIFunctionFactory.Create(detectThreatsTool.DetectThreats),
+        AIFunctionFactory.Create(competitiveLandscapeTool.GetCompetitiveLandscape),
+        AIFunctionFactory.Create(chartTool.CreateChart)
+    };
 });
 
 // Keep legacy RetailPulseAgent registration for backward compatibility
@@ -417,6 +486,13 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
+
+// Seed RAG knowledge base with sample documents (idempotent)
+{
+    var kb = app.Services.GetRequiredService<InMemoryKnowledgeBase>();
+    var seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("KnowledgeBaseSeeder");
+    await KnowledgeBaseSeeder.SeedAsync(kb, seedLogger);
+}
 
 app.UseCors();
 app.UseMiddleware<ApiKeyAuthMiddleware>();
@@ -485,6 +561,18 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
                 historyWithMemory.AddRange(request.History);
 
             enrichedRequest = request with { History = historyWithMemory };
+        }
+
+        // RAG context injection — search knowledge base for relevant grounding
+        var ragProvider = app.Services.GetRequiredService<RagContextProvider>();
+        var ragContext = await ragProvider.GetContextAsync(request.Message, ct);
+        if (ragContext is not null)
+        {
+            var historyWithRag = new List<ChatHistoryMessage>(enrichedRequest.History ?? [])
+            {
+                new("system", ragContext)
+            };
+            enrichedRequest = enrichedRequest with { History = historyWithRag };
         }
 
         // Router classification with tracing
@@ -1001,6 +1089,184 @@ app.MapPost("/api/taskmodule/promo", async (PromoEvaluationRequest request, IHtt
 })
 .WithName("PromoTaskModule");
 
+// ── Knowledge Base endpoints ─────────────────────────────────────────────
+
+app.MapPost("/api/knowledge/upload", async (KnowledgeUploadRequest body, IKnowledgeBase kb, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Title) || string.IsNullOrWhiteSpace(body.Content))
+        return Results.BadRequest(new { error = "Fields 'title' and 'content' are required." });
+
+    var id = await kb.IngestDocumentAsync(body.Title, body.Content, body.Source ?? "upload", ct);
+    return Results.Ok(new { documentId = id, title = body.Title, status = "ingested" });
+})
+.WithName("UploadKnowledge");
+
+app.MapGet("/api/knowledge/documents", async (IKnowledgeBase kb, CancellationToken ct) =>
+{
+    var docs = await kb.ListDocumentsAsync(ct);
+    return Results.Ok(docs);
+})
+.WithName("ListKnowledgeDocuments");
+
+app.MapDelete("/api/knowledge/documents/{id}", async (string id, IKnowledgeBase kb, CancellationToken ct) =>
+{
+    await kb.DeleteDocumentAsync(id, ct);
+    return Results.Ok(new { documentId = id, status = "deleted" });
+})
+.WithName("DeleteKnowledgeDocument");
+
+app.MapPost("/api/knowledge/search", async (KnowledgeSearchRequest body, IKnowledgeBase kb, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Query))
+        return Results.BadRequest(new { error = "Field 'query' is required." });
+
+    var results = await kb.SearchAsync(body.Query, body.TopK ?? 5, ct);
+    return Results.Ok(new { query = body.Query, results });
+})
+.WithName("SearchKnowledge");
+
+app.MapGet("/api/knowledge/stats", async (IKnowledgeBase kb, CancellationToken ct) =>
+{
+    var docs = await kb.ListDocumentsAsync(ct);
+    var docCount = docs.Count;
+    var chunkCount = docs.Sum(d => d.ChunkCount);
+    var avgChunks = docCount > 0 ? (double)chunkCount / docCount : 0;
+
+    return Results.Ok(new
+    {
+        documentCount = docCount,
+        chunkCount,
+        averageChunksPerDocument = Math.Round(avgChunks, 1)
+    });
+})
+.WithName("KnowledgeStats");
+
+// ── Message Extension endpoints ──────────────────────────────────────────
+
+app.MapPost("/api/message-extension/query", async (MessageExtensionRequest body, IKnowledgeBase kb, IEnumerable<ISpecialistAgent> specialists, ILogger<Program> logger, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Text))
+        return Results.BadRequest(new { error = "Field 'text' is required." });
+
+    // Search knowledge base for relevant context
+    var searchResults = await kb.SearchAsync(body.Text, 5, ct);
+    var citations = searchResults
+        .Where(r => r.Score >= 0.3)
+        .Select(r => new
+        {
+            source = r.Title,
+            chunk = r.ChunkIndex >= 0 ? $"Chunk {r.ChunkIndex}" : r.Title,
+            relevance = Math.Round(r.Score, 2)
+        })
+        .ToList();
+
+    // Build grounded context for the agent
+    var contextBuilder = new System.Text.StringBuilder();
+    if (searchResults.Count > 0)
+    {
+        contextBuilder.AppendLine("--- Reference Context (from knowledge base) ---");
+        foreach (var result in searchResults.Take(3))
+        {
+            contextBuilder.AppendLine($"[Source: {result.Title}, chunk {result.ChunkIndex}]");
+            contextBuilder.AppendLine(result.Chunk);
+            contextBuilder.AppendLine();
+        }
+        contextBuilder.AppendLine("--- End Reference Context ---");
+    }
+
+    // Route to GeneralAgent with RAG context
+    var generalAgent = specialists.FirstOrDefault(s => s.Key == "general");
+    if (generalAgent is null)
+        return Results.StatusCode(503);
+
+    var ragHistory = new List<ChatHistoryMessage>();
+    if (contextBuilder.Length > 0)
+        ragHistory.Add(new ChatHistoryMessage("system", contextBuilder.ToString()));
+    if (!string.IsNullOrWhiteSpace(body.Context))
+        ragHistory.Add(new ChatHistoryMessage("system", $"Teams channel context: {body.Context}"));
+
+    var chatRequest = new ChatRequest(
+        body.Text,
+        SessionId: null,
+        User: null,
+        History: ragHistory
+    );
+
+    try
+    {
+        var response = await generalAgent.HandleAsync(chatRequest, ct);
+
+        var confidence = citations.Count switch
+        {
+            >= 3 => "high",
+            >= 1 => "medium",
+            _ => "low"
+        };
+
+        return Results.Ok(new
+        {
+            answer = response.Reply,
+            citations,
+            confidence,
+            agentUsed = generalAgent.DisplayName
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Message extension query failed for text: {Text}", body.Text[..Math.Min(50, body.Text.Length)]);
+        return Results.StatusCode(503);
+    }
+})
+.WithName("MessageExtensionQuery");
+
+app.MapGet("/api/message-extension/manifest", () =>
+{
+    var manifest = new
+    {
+        schema = "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+        manifestVersion = "1.16",
+        version = "1.0.0",
+        id = "retail-pulse-message-extension",
+        name = new { @short = "Retail Pulse Lookup", full = "Retail Pulse Knowledge Base Lookup" },
+        description = new
+        {
+            @short = "Search retail knowledge base from Teams messages",
+            full = "Select text in a Teams message and look up relevant retail insights, best practices, and data from the Retail Pulse knowledge base."
+        },
+        composeExtensions = new[]
+        {
+            new
+            {
+                botId = "{{BOT_ID}}",
+                commands = new[]
+                {
+                    new
+                    {
+                        id = "searchKnowledge",
+                        type = "query",
+                        title = "Search Knowledge Base",
+                        description = "Look up retail insights and best practices",
+                        initialRun = false,
+                        parameters = new[]
+                        {
+                            new
+                            {
+                                name = "query",
+                                title = "Search Query",
+                                description = "Text to search for in the knowledge base",
+                                inputType = "text"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    return Results.Ok(manifest);
+})
+.WithName("MessageExtensionManifest");
+
 app.Run();
 
 // ── DTOs ─────────────────────────────────────────────────────────────────
@@ -1019,6 +1285,21 @@ record AlertSnoozeDto(string UserId, string? AlertType = null, double DurationHo
 /// Request body for the POST /api/alerts/{alertId}/dismiss endpoint.
 /// </summary>
 record AlertDismissDto(string UserId);
+
+/// <summary>
+/// Request body for POST /api/knowledge/upload.
+/// </summary>
+record KnowledgeUploadRequest(string Title, string Content, string? Source = null);
+
+/// <summary>
+/// Request body for POST /api/knowledge/search.
+/// </summary>
+record KnowledgeSearchRequest(string Query, int? TopK = 5);
+
+/// <summary>
+/// Request body for POST /api/message-extension/query.
+/// </summary>
+record MessageExtensionRequest(string Text, string? Context = null);
 
 /// <summary>
 /// Request body for the POST /api/taskmodule/promo endpoint.
