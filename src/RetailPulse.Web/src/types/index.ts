@@ -186,3 +186,52 @@ export interface Trace {
   spans: TraceSpan[];
   status: 'in_progress' | 'completed' | 'error';
 }
+
+// --- Promotion Planning types (Sprint 2.1) ---
+
+export type PromoType = 'Discount' | 'BOGO' | 'Display' | 'Digital' | 'Bundle';
+export type PromoRecommendationLevel = 'recommended' | 'cautious' | 'not_recommended';
+
+export interface PromoRisk {
+  type: string;
+  detail: string;
+  severity: 'low' | 'medium' | 'high';
+}
+
+export interface PromoEvaluation {
+  recommendation: PromoRecommendationLevel;
+  roi: number;
+  roiLower: number;
+  roiUpper: number;
+  reasoning: string;
+  timingAssessment: string;
+  conflicts: string[];
+  seasonalityFit: string;
+  risks: PromoRisk[];
+  similarCampaigns: number;
+  breakEvenDays: number;
+  historicalAvgRoi: number;
+}
+
+export interface PromoCampaign {
+  id: string;
+  name: string;
+  brand: string;
+  region: string;
+  promoType: PromoType;
+  budget: number;
+  startDate: string;
+  endDate: string;
+  roi?: number;
+  status: 'active' | 'completed' | 'planned' | 'proposed';
+}
+
+export interface PromoFormData {
+  brand: string;
+  region: string;
+  promoType: PromoType;
+  budget: number;
+  startDate: string;
+  endDate: string;
+  targetLiftPercent?: number;
+}

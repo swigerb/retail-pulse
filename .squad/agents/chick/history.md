@@ -153,9 +153,40 @@ Tests (27 new):
 
 **Test Status:** 87 frontend tests passing (11 files), build clean
 
+## Session Work — 2026-05-14 Sprint 2.1 Campaign Planner UI (Complete)
+
+**Outcome:** ✅ SUCCESS — Promotion planning module built, 113 frontend tests passing (26 new), build clean
+
+**Deliverables:**
+
+- `src/components/promo/PromoTypeSelector.tsx` — Visual card picker for 5 promo types (BOGO, % Off, Bundle, Flash Sale, Loyalty Bonus). Shows emoji, description, historical ROI, selected state with green border.
+- `src/components/promo/PromoRecommendation.tsx` — Evaluation result display with recommendation badge (🟢 Recommended / 🟡 Conditional / 🔴 Not Recommended), projected ROI with confidence range, timing chips, conflict warnings, expandable risk cards sorted by severity, "Submit for Approval" button for campaigns > $50K.
+- `src/components/promo/PromoCalendar.tsx` — Gantt-style horizontal timeline. Region-grouped rows, status-colored bars, proposed campaign dashed bar, overlap detection (red highlighting), hover tooltips with campaign details, scrollable 6-month window (WEEK_PX=80, 26 weeks).
+- `src/components/promo/ROIChart.tsx` — Recharts ComposedChart with Bar (proposed vs historical avg), ErrorBar confidence intervals, break-even ReferenceLine, color-coded green/red above/below break-even.
+- `src/components/promo/PromoTaskModule.tsx` — Main orchestrating form: brand/region dropdowns, promo type selector, budget input, date pickers, target lift slider, evaluate button. Manages loading/error states, renders PromoRecommendation + ROIChart + PromoCalendar on results.
+- `src/components/promo/index.ts` — Barrel export.
+- `src/services/promoApi.ts` — API service: evaluatePromo (POST /api/taskmodule/promo), fetchExistingCampaigns (GET /api/campaigns), submitForApproval (POST /api/taskmodule/promo/submit).
+- `src/types/index.ts` — Added PromoType, PromoRecommendationLevel, PromoRisk, PromoEvaluation, PromoCampaign, PromoFormData types.
+- `src/constants/agentRouting.ts` — Added PROMO_COLORS (recommendation level colors) and PROMO_TYPE_CONFIG (emoji, description, historical ROI per type).
+
+Integration:
+- `Dashboard.tsx` — Added "Campaign Planner" toggle button (TargetArrow24Regular icon, green when active). New `activeView` state ('chat'|'promo') conditionally renders PromoTaskModule vs ChatPanel.
+
+Tests (26 new):
+- `PromoTaskModule.test.tsx` — 7 tests: render, promo type cards, disabled button, form submission + evaluation, loading state, error state, calendar rendering.
+- `PromoRecommendation.test.tsx` — 11 tests: all 3 recommendation states, ROI display, timing details, risk cards sorted by severity, expand/collapse, credibility note, approval button threshold.
+- `PromoCalendar.test.tsx` — 8 tests: render, campaign bars, proposed dashed bar, empty state, legend, tooltip on hover, overlap detection, region grouping.
+
+**Test Status:** 113 frontend tests passing (14 files), build clean
+
 ## Learnings
 
-- 2026-05-13T12:24:49-04:00 — Alert components live in `src/components/alerts/` — AlertCard (per-alert notification), AlertFeed (grouped stream), AlertHistory (filterable table). All export from barrel `index.ts`.
+- 2026-05-14 — Promo planning components live in `src/components/promo/` — PromoTypeSelector, PromoRecommendation, PromoCalendar, ROIChart, PromoTaskModule. All export from barrel `index.ts`.
+- 2026-05-14 — Griffel `makeStyles` does NOT support `:focus` pseudo-selector (causes "Type 'string' is not assignable to type 'undefined'" error). `:hover` works fine. Workaround: skip `:focus` or use inline styles.
+- 2026-05-14 — Fluent UI `Input` component wraps the native `<input>` in a way that `querySelector('input')` on the wrapper can return null in jsdom. Use `document.querySelectorAll<HTMLInputElement>('input')` and filter by `type` attribute for reliable test interaction.
+- 2026-05-14 — `vi.mock` factories are hoisted to top of file and cannot reference variables defined below. Fix: declare `vi.fn()` mock variables BEFORE `vi.mock()`, then use wrapper functions in the factory: `evaluatePromo: (...args) => mockEvaluatePromo(...args)`.
+- 2026-05-14 — High-spend threshold ($50,000) triggers "Submit for Approval" button in PromoRecommendation. PromoCalendar overlap detection compares all campaign pairs in same region for date overlap, storing conflicts in a Set by campaign ID.
+- 2026-05-13T12:24:49-04:00 — Alert componentslive in `src/components/alerts/` — AlertCard (per-alert notification), AlertFeed (grouped stream), AlertHistory (filterable table). All export from barrel `index.ts`.
 - 2026-05-13T12:24:49-04:00 — Trace visualization components live in `src/components/traces/` — TraceTimeline (waterfall chart), TraceCard (compact collapsible summary), TraceDashboard (overview panel). All export from barrel `index.ts`.
 - 2026-05-13T12:24:49-04:00 — Griffel (Fluent UI's CSS-in-JS) does not support shorthand `borderColor` in `makeStyles` — must use `borderTopColor`, `borderRightColor`, `borderBottomColor`, `borderLeftColor` individually.
 - 2026-05-13T12:24:49-04:00 — SignalR alert/trace events: `alert_fired` (new alert), `trace_started` (begin trace), `span_completed` (progressive span), `trace_completed` (finalize). All registered on the existing telemetry hub connection in Dashboard.
