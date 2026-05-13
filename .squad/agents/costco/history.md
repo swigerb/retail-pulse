@@ -229,6 +229,49 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - **API Proxy Tools (SupplyChainTools.cs):** InventoryLevelsTool, SupplyDisruptionsTool, FulfillmentRateTool, SupplyHealthTool
 - **MCP REST endpoints:** /api/supply/inventory, /api/supply/disruptions, /api/supply/fulfillment, /api/supply/health
 - **API endpoints:** Supply proxy endpoints + council endpoints (POST /api/council/convene, GET /api/council/agents)
+
+## Session Work — Phase 4 Implementation (4.1 + 4.2 + 4.3)
+
+### Overview
+Full Phase 4 implementation across all three sprints: Store Operations & Planogram (4.1), Margin Analysis & Escalation (4.2), Scorecard & Explainability (4.3).
+
+### Database — Schema v7
+- **5 new tables:** StoreMetrics, ShelfLayouts, SkuVelocity, BrandFinancials, MarginDrivers
+- **5 seed methods** for realistic retail data (store performance, shelf layouts, SKU velocity, brand financials, margin drivers)
+- **8 query methods:** GetStorePerformance, GetShelfLayout, OptimizePlanogram, PredictStockout, GetMarginByBrand, GetMarginDrivers, GetMarginTrend, DetectMarginRisks
+
+### MCP Tools
+- **StoreOpsTools.cs:** GetStorePerformance, GetShelfLayout, OptimizePlanogram, PredictStockout
+- **MarginTools.cs:** GetMarginByBrand, GetMarginDrivers, GetMarginTrend, DetectMarginRisks
+
+### API Proxy Tools
+- **StoreOpsProxyTools.cs:** StorePerformanceTool, ShelfLayoutTool, OptimizePlanogramTool, PredictStockoutTool
+- **MarginProxyTools.cs:** MarginByBrandTool, MarginDriversTool, MarginTrendTool, DetectMarginRisksTool
+
+### Specialist Agents
+- **StoreOpsAgent** (key: "store-ops", intent: "store/operations")
+- **PlanogramAgent** (key: "planogram", intent: "planogram/optimization")
+- **MarginAgent** (key: "margin-analysis", intent: "margin/analysis")
+
+### Orchestrators & Services
+- **EscalationOrchestrator:** L1→L2→L3 escalation chain with complexity detection
+- **ScorecardOrchestrator:** Fan-out brand scoring with 5 weighted dimensions (Demand 0.25, Competitive 0.20, Supply 0.20, Store Execution 0.20, Margin 0.15)
+- **ExplainabilityService:** Tool execution trace capture + "why?" handler for decision chains
+
+### Wiring
+- **AgentIntent.cs:** Added StoreOps, Planogram, MarginAnalysis, Scorecard constants
+- **RoutingServiceExtensions.cs:** 3 new agent registrations with tool factories
+- **prompts.yaml:** 4 new router intent categories + 5 new agent definitions (store-ops, planogram, margin, scorecard-synthesis, exec-brief)
+- **Program.cs:** Agent def loading, 8 proxy tool DI registrations, orchestrator/service DI, ~15 REST endpoints
+
+### Key Decisions
+- Used `$$"""` raw string literal pattern for ScorecardOrchestrator JSON templates (CS9006 fix)
+- Kept all agents on ISpecialistAgent interface with DemandForecastAgent as the canonical pattern
+- Schema versioning bumped 6→7 for Phase 4
+
+### Validation
+- Build: 0 errors (only pre-existing warnings)
+- Tests: 1264 pass, 0 failures (55+ new tests added by sub-agents for StoreOps, Planogram, Margin, Routing, Escalation, Scorecard)
 - **CouncilConveneRequest DTO** for convene endpoint request body
 
 ### Learnings
