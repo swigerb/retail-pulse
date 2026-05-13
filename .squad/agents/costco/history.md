@@ -38,6 +38,24 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - Impact: Model now reliably invokes data tools first, then CreateChart for visualizations
 - Validation: All 174 backend + 12 frontend tests pass
 
+## Session Work — 2026-05-08 Sprint 1.1 Multi-Agent Router Infrastructure
+
+### Task: Routing contracts, RetailOpsRouter, GeneralAgent refactor, DI/endpoints, router tests
+
+- **Context:** Sprint 1.1 issue — build multi-agent routing pipeline so messages can be classified by intent and dispatched to specialist agents
+- **Parallel work:** Kroger (Architect) independently implemented the same contracts and router during the same session
+- **Reconciliation:** Adopted Kroger's implementations (better namespace structure, richer contracts) and deleted my duplicates
+  - Kroger's namespace: `RetailPulse.Contracts.Routing` (vs my root-level `RetailPulse.Contracts`)
+  - Kroger's `ISpecialistAgent` uses `Key`/`SupportedIntents`/`HandleAsync(ChatRequest)` (vs my `AgentId`/`IntentCategories`/`ChatAsync`)
+  - Kroger's `RoutingDecision` record (vs my `AgentRoutingResult`)
+  - Kroger's slash-separated intents: `"demand/forecasting"` (vs my simple `"demand"`)
+- **My contributions:**
+  - Converted `RetailPulseAgent` to thin legacy wrapper delegating to `GeneralAgent` for backward compat
+  - Wrote/verified all 4 new test files aligned to Kroger's contracts (63 new tests)
+  - Removed duplicate contract files, top-level router prompt key, PromptConfiguration.Router property
+- **Validation:** Build clean (0 errors), all 237 tests pass (174 existing + 63 new)
+- **Decision:** When two agents build the same feature in parallel, prefer the architect's implementation and reconcile the implementer's work around it
+
 ## Learnings
 
 - 2026-05-04T10:32:17.680-04:00 — The telemetry drawer in `src\RetailPulse.Web\src\components\TelemetryPanel.tsx` should use a response-level wall-clock total, not a sum of span durations, because the backend `thought` span in `src\RetailPulse.Api\Agents\RetailPulseAgent.cs` already includes tool time.
@@ -49,3 +67,27 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - 2026-05-07T15:33:55-04:00 — New MCP tool `GetVariantMixTool` lives in `src\RetailPulse.McpServer\Tools\GetVariantMixTool.cs`. Supports region="National" (averages MixPercent/DepletionsYoY across all regions via GROUP BY). Pattern matches existing tools — static class, `[McpServerToolType]`, inject `RetailPulseDb`, return `data.GetVariantMix(brand, region)`.
 - 2026-05-07T15:33:55-04:00 — prompts.yaml update strategy for variant data: add to `tools:` array, `## Available Tools` section, `### Concept-to-Tool Mapping` table, and rewrite `### Always Chart Available Data` to call GetVariantMix first (real data, no "Estimated" label) rather than estimating from brand config.
 - 2026-05-07T16:45:21-04:00 — Strengthened variant mix prompt in `src\RetailPulse.Api\prompts.yaml` to prevent model from calling GetDepletionStats/GetFieldSentiment for variant queries. Added explicit FAILED/CORRECT examples and a concrete donut ChartSpec mapping showing how to turn GetVariantMix output (mix_percent values) into a working donut chart (each variant as its own series with one value). Root cause: the model ignored weak "call GetVariantMix" instructions and fell back to familiar tools, then couldn't map unfamiliar output to ChartSpec format.
+
+## Session Work — 2026-05-13 Sprint 1.1 Multi-Agent Router (Complete)
+
+**Outcome:** ✅ SUCCESS — Backend implementation role, reconciled with Kroger's parallel work, enhanced ChatResponse, added VariantMix data, 237 tests passing (174 existing + 63 new)
+
+**Deliverables:**
+- Contract reconciliation: adopted Kroger's `RetailPulse.Contracts.Routing` namespace design, deleted duplicate root-level contracts
+- Legacy wrapper: confirmed `RetailPulseAgent` thin wrapper delegating to `GeneralAgent.HandleAsync()` for backward compatibility
+- ChatResponse enhancement: added optional `RoutingInfo` field with agent metadata (agentId, agentName, intentCategory, confidence, reasoning)
+- SQLite schema: added `VariantMix` table (Brand, Region, Variant COLLATE NOCASE; MixPercent, DepletionsYoY REAL; PK: Brand/Region/Variant)
+- MCP tool: `GetVariantMixTool` in `src\RetailPulse.McpServer\Tools\`, supports region="National" for cross-region averaging
+- Seeding: deterministic via `GetStableHash("variant|{brand}|{region}")` normalized random weights
+- prompts.yaml: registered GetVariantMix in tools array, Available Tools section, Concept-to-Tool Mapping table, Always Chart Available Data section
+
+**Reconciliation Strategy:** When two agents implement the same feature in parallel, defer to the architect's contracts and rebuild your work around them. This session: verified Kroger's contracts were superior (namespace isolation, richer intents, cleaner interface), deleted my duplicates, rewrote tests to match his interfaces, and validated all 237 tests pass.
+
+**Cross-Agent Collaboration:**
+- Kroger (Architect): Lead on contracts and router implementation
+- Chick (Frontend): Routing UI visibility and constants
+- Target (Tester): Test coverage for reconciled contracts and integration
+
+**Test Status:** All 237 tests passing (174 existing + 63 new router/integration tests)
+
+**Decisions Logged:** Router Contract Reconciliation, Variant-Level Data in SQLite + GetVariantMix Tool
