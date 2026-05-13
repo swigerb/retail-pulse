@@ -247,3 +247,28 @@
 - `InMemoryTraceCollector.cs`: Added missing `using Microsoft.Extensions.Configuration` directive
 
 **Validation:** All 540 tests pass (0 failures, 0 skipped). Build clean (0 errors, 0 warnings).
+
+## 2026-05-13 — Sprint 2.1 Promotion Planning Tests
+
+### Context
+
+Sprint 2.1 introduced the Promotion Planning Agent and Task Module. Backend agent (Costco) built `PromoPlanningAgent.cs`, `PromoTools.cs`, and Program.cs promo endpoints, but left the RetailPulseDb data layer unfinished. Target completed the data layer (promo schema, seeding, 6 query methods) and wrote 99 comprehensive tests across 5 files.
+
+### Learnings
+
+- **Match upstream signatures exactly** — Costco's `PromoTools.cs` expected specific method signatures (e.g., `CalculateLift` takes 4 args including region, `EvaluateTiming` takes `DateOnly` not `string`). Discovered discrepancies by reading untracked files before writing tests.
+- **Edit tool duplicate danger** — When replacing a string that also appears in the new content, the edit tool can create CS0111 duplicate method errors. Use unique context strings for `old_str`.
+- **git checkout HEAD -- vs git checkout --** — In a multi-agent workflow where HEAD already has modifications, `git checkout --` restores to HEAD (which may include other agents' changes). Use explicit ref when needed.
+- **Seeding consistency matters** — 5 promo types (BOGO, Discount, Display, Digital, Bundle), 12 brands × 6 regions × 5 campaigns = 360 rows. Tests validate exact counts and cross-table integrity.
+- **IApprovalGate pattern** — `PromoPlanningAgent.CheckApprovalAsync` gates on spend thresholds: >$500K always requires approval, $100K-$500K when ROI < 2.0x. Tests cover boundary conditions on both axes.
+
+### Deliverables
+
+- `tests/RetailPulse.Tests/Agents/Specialists/PromoPlanningAgentTests.cs` — 34 tests: identity, HandleAsync, history, tool isolation, approval gate, error handling, brand parameterization
+- `tests/RetailPulse.Tests/Tools/PromoToolTests.cs` — 28 tests: GetPromoHistory, CalculateLift, EvaluateTiming, EstimateROI, GetPromoCalendar, GetPromoTypes
+- `tests/RetailPulse.Tests/Data/PromoDataTests.cs` — 20 tests: promo data integrity, coverage, cross-table validation
+- `tests/RetailPulse.Tests/Promo/TaskModuleTests.cs` — 12 tests: CheckApprovalAsync thresholds, approval gate integration, EstimateROI approval flag
+- `tests/RetailPulse.Tests/Integration/RouterIntegrationTests.cs` — 5 promo routing tests added (3 Theory + 2 Fact)
+- `src/RetailPulse.McpServer/Data/RetailPulseDb.cs` — Completed promo data layer: PromoHistory + LiftCoefficients DDL, SeedPromoHistory, SeedLiftCoefficients, GetPromoHistory, CalculateLift, EvaluateTiming, EstimateROI, GetPromoCalendar, GetPromoTypes
+
+**Validation:** All 639 tests pass (540 baseline + 99 new). Build clean (0 errors, 4 pre-existing warnings).
