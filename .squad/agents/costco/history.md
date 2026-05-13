@@ -58,6 +58,10 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 
 ## Learnings
 
+- 2026-05-13T11:08:14-04:00 — Demand forecasting tools: `DemandHistory` table stores daily granularity but `GetHistoricalDemand` aggregates to weekly buckets for manageable LLM output. Forecast algorithm is trailing-30-day avg × seasonal multiplier × (1 + trend_slope × days_ahead) with ±15% confidence bands. Risk detection uses 7-day rolling averages comparing week-over-week changes.
+- 2026-05-13T11:08:14-04:00 — `GetCategorySeasonalMultiplier()` is a static helper shared between seeding (to generate realistic data) and forecasting (to project future demand). This ensures the forecast model uses the same seasonal assumptions as the training data.
+- 2026-05-13T11:08:14-04:00 — Anomalies are injected at deterministic day offsets (seeded per brand) so `IdentifyDemandRisks` reliably detects them. Each brand gets 1-2 anomalies: one spike and one drop, separated by ≥30 days.
+
 - 2026-05-04T10:32:17.680-04:00 — The telemetry drawer in `src\RetailPulse.Web\src\components\TelemetryPanel.tsx` should use a response-level wall-clock total, not a sum of span durations, because the backend `thought` span in `src\RetailPulse.Api\Agents\RetailPulseAgent.cs` already includes tool time.
 - 2026-05-04T10:32:17.680-04:00 — `src\RetailPulse.Web\src\components\Dashboard.tsx` is the right place to own top-level telemetry stats and pass response metadata from `src\RetailPulse.Web\src\components\ChatPanel.tsx` into the telemetry drawer without changing SignalR span flow.
 - 2026-05-04T10:32:17.680-04:00 — Shared chat contract changes for telemetry belong in `src\RetailPulse.Contracts\ChatModels.cs`, with matching frontend shape updates in `src\RetailPulse.Web\src\types\index.ts`.
@@ -91,3 +95,45 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 **Test Status:** All 237 tests passing (174 existing + 63 new router/integration tests)
 
 **Decisions Logged:** Router Contract Reconciliation, Variant-Level Data in SQLite + GetVariantMix Tool
+
+## Session Work — 2026-05-13 Sprint 1.2 Demand Forecasting MCP Tools + Simulated Data
+
+### Task: DemandHistory/SeasonalFactors schema, 4 MCP tools, 365-day seed data with seasonal patterns
+
+- **Context:** Sprint 1.2 — build the data layer and MCP tools that power the Demand Forecasting Agent. Kroger designing the agent in parallel; Costco owns data + tools.
+- **Deliverables:**
+  - **Schema:** Added `DemandHistory` table (Brand, Region, Channel, Date, Volume, Units) with indexes on Brand/Region and Date. Added `SeasonalFactors` table (Category, Month, Multiplier, EventName, Description) with index on Category.
+  - **Seed data:** 365 days × 12 brands × 6 regions × 3 channels = ~78,840 daily demand records. Volumes parameterized from tenant.yaml with category-specific seasonal multipliers, day-of-week patterns, linear trend, ±8% random noise, and 1-2 injected anomalies per brand.
+  - **Seasonal factors:** 38 curated rows covering 6 categories (Spirits, Grocery, QSR, Home Improvement, Office Supply, Furniture) with holiday/seasonal event names and descriptions.
+  - **MCP Tools (DemandTools.cs):**
+    - `GetHistoricalDemand(brand?, region?, channel?, months?)` — weekly-aggregated history with summary stats
+    - `GenerateForecast(brand, region?, days?)` — trailing-30-day avg × seasonal multiplier × trend slope, ±15% confidence bands
+    - `GetSeasonalityFactors(category?)` — monthly multipliers with event names and impact classification
+    - `IdentifyDemandRisks(brand?, region?)` — detects sudden drops (>20%), unusual spikes (>30%), and trend reversals (>15%) over 90-day window
+  - **REST endpoints:** 4 new `/api/demand/*` routes in Program.cs matching tool signatures
+  - **Schema version bumped** to v3 to force re-seed on next startup
+- **Patterns followed:** Same `[McpServerToolType]` + `[McpServerTool]` + `[Description]` pattern as existing tools. Data methods on `RetailPulseDb` class. Deterministic seeding via `GetStableHash()`.
+- **Validation:** Build clean (0 errors), all 237 tests pass (no regressions)
+- **Seasonal patterns applied:**
+  - Spirits: +40% Dec (holidays), +15% Jul (summer entertaining), -15% Jan (post-holiday)
+  - Grocery: +30% Dec, +25% Sep (back-to-school), -10% Jan
+  - QSR: +20% Jul (summer peak), -12% Jan (winter dip)
+  - Home Improvement: +35% May (spring projects), +20% Sep (fall prep), -20% Jan
+  - Office Supply: +25% Aug (back-to-school), +15% Jan (new year setup)
+  - Furniture: +25% Nov (Black Friday), +20% Aug (dorm/apartment), -20% Jan
+
+## Session Work — Sprint 1.4 Human-in-the-Loop Approval System
+
+### Deliverables
+- **IApprovalGate contract** (Contracts/Approval/IApprovalGate.cs): ApprovalContext-based interface with RequestApprovalAsync, RespondAsync (void/idempotent), WaitForApprovalAsync, GetPendingAsync, GetHistoryAsync
+- **SqliteApprovalGate** (Api/Approval/SqliteApprovalGate.cs): WAL-mode SQLite, single-table schema, 2s polling, auto-timeout
+- **ApprovalTool** (Api/Agents/Tools/ApprovalTool.cs): AI-callable tool with SignalR push notifications (approval_requested/approval_resolved)
+- **REST endpoints**: GET /api/approvals/pending, GET /api/approvals/{id}, POST /api/approvals/{id}/respond, GET /api/approvals/history
+- **DI wiring**: IApprovalGate singleton + ApprovalTool scoped in Program.cs; tool added to DemandForecastAgent
+- **Tests**: 48 passing tests covering CRUD, timeout, concurrency, idempotency, audit trail
+
+### Learnings
+- `IClientProxy.SendAsync(string, object)` is an extension method in `Microsoft.AspNetCore.SignalR` namespace — top-level Program.cs needs explicit `using`
+- RespondAsync returning void (not ApprovalResult) simplifies idempotency — just UPDATE WHERE Decision='Pending'
+- Single-table schema (Decision column on ApprovalRequests) is simpler and faster than two-table request/result split
+- Large file rewrites via edit tool can fail on size limits — use PowerShell Set-Content for files >15KB

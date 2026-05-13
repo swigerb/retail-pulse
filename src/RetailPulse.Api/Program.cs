@@ -1,10 +1,18 @@
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Agents;
+using RetailPulse.Api.Agents.Specialists;
+using RetailPulse.Api.Agents.Tools;
+using RetailPulse.Api.Approval;
 using RetailPulse.Api.Hubs;
+using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Tools;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Approval;
+using RetailPulse.Contracts.Memory;
+using RetailPulse.Contracts.Routing;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -57,6 +65,20 @@ agentDef.SystemPrompt = agentDef.SystemPrompt
     .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
     .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
 
+// Resolve demand-forecast agent prompt with tenant placeholders
+var demandForecastDef = promptConfig.Agents["demand-forecast"];
+demandForecastDef.SystemPrompt = demandForecastDef.SystemPrompt
+    .Replace("{tenant.company}", tenant.Company)
+    .Replace("{tenant.industry}", tenant.Industry)
+    .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+    .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+    .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+    .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+    .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+
+// Router prompt doesn't need tenant placeholders (intent classification is domain-generic)
+var routerDef = promptConfig.Agents["router"];
+
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
 var mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]
@@ -108,6 +130,52 @@ builder.Services.AddScoped<VariantMixTool>(sp =>
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<VariantMixTool>>());
 });
+
+// Demand forecasting tools
+builder.Services.AddScoped<HistoricalDemandTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new HistoricalDemandTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<HistoricalDemandTool>>());
+});
+builder.Services.AddScoped<ForecastTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new ForecastTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<ForecastTool>>());
+});
+builder.Services.AddScoped<SeasonalityFactorsTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new SeasonalityFactorsTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<SeasonalityFactorsTool>>());
+});
+builder.Services.AddScoped<DemandRisksTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new DemandRisksTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<DemandRisksTool>>());
+});
+
+// Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
+var approvalDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "approvals.db");
+builder.Services.AddSingleton<IApprovalGate>(sp =>
+    new SqliteApprovalGate(approvalDbPath, sp.GetRequiredService<ILogger<SqliteApprovalGate>>()));
+
+// Approval tool — available to specialist agents for high-impact recommendations
+builder.Services.AddScoped<ApprovalTool>(sp =>
+    new ApprovalTool(
+        sp.GetRequiredService<IApprovalGate>(),
+        sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<TelemetryHub>>(),
+        sp.GetRequiredService<ILogger<ApprovalTool>>()));
+
+// Conversation memory — SQLite-backed, per-user, with configurable TTL
+var memoryDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "memory.db");
+builder.Services.AddConversationMemory(memoryDbPath);
 
 // Register IChatClient — Azure OpenAI via APIM AI Gateway.
 // In Production we fail fast if the API key is missing rather than silently
@@ -171,7 +239,63 @@ else
     builder.Services.AddScoped<LocalShipmentAnalyzer>();
 }
 
-// Register the agent with dynamic tool list
+// Register the multi-agent routing pipeline
+builder.Services.AddAgentRouting(promptConfig, agentDef, foundryEnabled, sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    var depletionTool = sp.GetRequiredService<DepletionStatsTool>();
+    var portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
+    var sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
+    var shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
+    var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var variantMixTool = sp.GetRequiredService<VariantMixTool>();
+
+    var tools = new List<AITool>
+    {
+        AIFunctionFactory.Create(depletionTool.GetDepletionStats),
+        AIFunctionFactory.Create(portfolioTool.GetPortfolioDepletionStats),
+        AIFunctionFactory.Create(sentimentTool.GetFieldSentiment),
+        AIFunctionFactory.Create(shipmentTool.GetShipmentStats),
+        AIFunctionFactory.Create(variantMixTool.GetVariantMix),
+        AIFunctionFactory.Create(chartTool.CreateChart)
+    };
+
+    // Add either Foundry or local shipment analyzer
+    if (foundryEnabled)
+    {
+        var foundryAgent = sp.GetRequiredService<FoundryShipmentAgent>();
+        tools.Add(AIFunctionFactory.Create(foundryAgent.AnalyzeShipments));
+    }
+    else
+    {
+        var localAnalyzer = sp.GetRequiredService<LocalShipmentAnalyzer>();
+        tools.Add(AIFunctionFactory.Create(localAnalyzer.AnalyzeShipments));
+    }
+
+    return tools;
+},
+demandForecastDef: demandForecastDef,
+demandToolsFactory: sp =>
+{
+    var historicalDemandTool = sp.GetRequiredService<HistoricalDemandTool>();
+    var forecastTool = sp.GetRequiredService<ForecastTool>();
+    var seasonalityTool = sp.GetRequiredService<SeasonalityFactorsTool>();
+    var demandRisksTool = sp.GetRequiredService<DemandRisksTool>();
+    var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var approvalTool = sp.GetRequiredService<ApprovalTool>();
+
+    return new List<AITool>
+    {
+        AIFunctionFactory.Create(historicalDemandTool.GetHistoricalDemand),
+        AIFunctionFactory.Create(forecastTool.GenerateForecast),
+        AIFunctionFactory.Create(seasonalityTool.GetSeasonalityFactors),
+        AIFunctionFactory.Create(demandRisksTool.IdentifyDemandRisks),
+        AIFunctionFactory.Create(chartTool.CreateChart),
+        AIFunctionFactory.Create(approvalTool.RequestApproval)
+    };
+});
+
+// Keep legacy RetailPulseAgent registration for backward compatibility
 builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
 {
     var chatClient = sp.GetRequiredService<IChatClient>();
@@ -194,7 +318,6 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
         AIFunctionFactory.Create(chartTool.CreateChart)
     };
 
-    // Add either Foundry or local shipment analyzer
     if (foundryEnabled)
     {
         var foundryAgent = sp.GetRequiredService<FoundryShipmentAgent>();
@@ -227,8 +350,8 @@ if (app.Environment.IsDevelopment())
 // SignalR hub
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
-// Chat endpoint
-app.MapPost("/api/chat", async (ChatRequest request, RetailPulse.Api.Agents.RetailPulseAgent agent, ILogger<Program> logger, CancellationToken ct) =>
+// Chat endpoint — routes through multi-agent router with conversation memory
+app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, ILogger<Program> logger, CancellationToken ct) =>
 {
     if (request is null || string.IsNullOrWhiteSpace(request.Message))
     {
@@ -237,7 +360,64 @@ app.MapPost("/api/chat", async (ChatRequest request, RetailPulse.Api.Agents.Reta
 
     try
     {
-        var response = await agent.ChatAsync(request, ct);
+        var userId = request.User?.ObjectId ?? "anonymous";
+
+        // Inject memory context into the request before routing
+        var memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+        var enrichedRequest = request;
+        if (memoryContext is not null)
+        {
+            // Prepend memory context to conversation history so agents see it
+            var historyWithMemory = new List<ChatHistoryMessage>
+            {
+                new("system", memoryContext)
+            };
+            if (request.History is { Count: > 0 })
+                historyWithMemory.AddRange(request.History);
+
+            enrichedRequest = request with { History = historyWithMemory };
+        }
+
+        // Route the message to the appropriate specialist
+        var decision = await router.RouteAsync(
+            enrichedRequest.Message,
+            enrichedRequest.History,
+            enrichedRequest.User,
+            tenantId: null,
+            ct);
+
+        // Find the specialist by key
+        var specialist = specialists.FirstOrDefault(s =>
+            string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase));
+
+        if (specialist is null)
+        {
+            logger.LogWarning("No specialist found for key '{AgentKey}' — using General agent", decision.AgentKey);
+            specialist = specialists.First(s => s.Key == "general");
+        }
+
+        logger.LogInformation(
+            "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}",
+            specialist.Key, specialist.DisplayName, decision.Intent, decision.Confidence);
+
+        var response = await specialist.HandleAsync(enrichedRequest, ct);
+
+        // Extract and store memory after the response (fire-and-forget style, non-blocking)
+        if (decision.Intent != AgentIntent.MemoryManagement)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await memoryMiddleware.ExtractAndStoreAsync(userId, request.Message, response.Reply, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Background memory extraction failed for user {UserId}", userId);
+                }
+            }, CancellationToken.None);
+        }
+
         return Results.Ok(response);
     }
     catch (Exception ex)
@@ -256,13 +436,118 @@ app.MapPost("/api/chat", async (ChatRequest request, RetailPulse.Api.Agents.Reta
 .WithName("Chat");
 
 // Health/info endpoint
-app.MapGet("/api/info", () => Results.Ok(new
+app.MapGet("/api/info", (IEnumerable<ISpecialistAgent> specialists) => Results.Ok(new
 {
     Name = "Retail Pulse API",
     Version = "1.0.0",
     Agent = agentDef.Name,
-    Tools = agentDef.Tools
+    Tools = agentDef.Tools,
+    Router = "RetailOpsRouter",
+    Specialists = specialists.Select(s => new { s.Key, s.DisplayName }).ToList()
 }))
 .WithName("Info");
 
+// ── Approval endpoints ───────────────────────────────────────────────────
+
+app.MapGet("/api/approvals/pending", async (IApprovalGate gate, HttpContext http, CancellationToken ct) =>
+{
+    // Use authenticated user's ObjectId when available, otherwise fall back to query param
+    var userId = http.Request.Query["userId"].FirstOrDefault() ?? "default";
+    var pending = await gate.GetPendingAsync(userId, ct);
+
+    return Results.Ok(pending.Select(r => new
+    {
+        id = r.RequestId,
+        action = r.Context.Action,
+        reasoning = r.Context.Reasoning,
+        impact = r.Context.Impact,
+        urgency = r.Context.Urgency,
+        agentId = r.Context.AgentId,
+        agentName = r.Context.AgentId,
+        requestedAt = r.CreatedAt,
+        timeoutAt = r.ExpiresAt,
+        status = r.Decision.ToString().ToLowerInvariant(),
+        comment = r.Comment
+    }));
+})
+.WithName("GetPendingApprovals");
+
+app.MapGet("/api/approvals/{requestId}", async (string requestId, IApprovalGate gate, CancellationToken ct) =>
+{
+    try
+    {
+        var result = await gate.GetResultAsync(requestId, ct);
+        return Results.Ok(new
+        {
+            requestId = result.RequestId,
+            decision = result.Decision.ToString().ToLowerInvariant(),
+            comment = result.Comment,
+            respondedAt = result.RespondedAt
+        });
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound(new { error = $"Approval request '{requestId}' not found." });
+    }
+})
+.WithName("GetApprovalStatus");
+
+app.MapPost("/api/approvals/{requestId}/respond", async (string requestId, ApprovalResponseDto body, IApprovalGate gate, Microsoft.AspNetCore.SignalR.IHubContext<TelemetryHub> hubContext, CancellationToken ct) =>
+{
+    if (!Enum.TryParse<ApprovalDecision>(body.Decision, true, out var decision) || decision == ApprovalDecision.Pending || decision == ApprovalDecision.TimedOut)
+    {
+        return Results.BadRequest(new { error = "Decision must be 'Approved', 'Rejected', or 'Modified'." });
+    }
+
+    try
+    {
+        await gate.RespondAsync(requestId, decision, body.Comment, ct);
+
+        // Notify connected dashboard clients of the resolution
+        await hubContext.Clients.All.SendAsync("approval_resolved", new
+        {
+            requestId,
+            decision = decision.ToString().ToLowerInvariant(),
+            comment = body.Comment,
+            respondedAt = DateTimeOffset.UtcNow
+        });
+
+        return Results.Ok(new { requestId, decision = decision.ToString().ToLowerInvariant(), comment = body.Comment });
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound(new { error = $"Approval request '{requestId}' not found." });
+    }
+})
+.WithName("RespondToApproval");
+
+app.MapGet("/api/approvals/history", async (IApprovalGate gate, CancellationToken ct) =>
+{
+    var history = await gate.GetHistoryAsync(50, ct);
+
+    return Results.Ok(history.Select(r => new
+    {
+        id = r.RequestId,
+        action = r.Context.Action,
+        reasoning = r.Context.Reasoning,
+        impact = r.Context.Impact,
+        urgency = r.Context.Urgency,
+        agentId = r.Context.AgentId,
+        agentName = r.Context.AgentId,
+        requestedAt = r.CreatedAt,
+        timeoutAt = r.ExpiresAt,
+        status = r.Decision.ToString().ToLowerInvariant(),
+        decidedAt = r.RespondedAt,
+        comment = r.Comment
+    }));
+})
+.WithName("GetApprovalHistory");
+
 app.Run();
+
+// ── DTOs ─────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Request body for the POST /api/approvals/{requestId}/respond endpoint.
+/// </summary>
+record ApprovalResponseDto(string Decision, string? Comment = null);

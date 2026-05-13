@@ -6,10 +6,14 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
+using RetailPulse.Api.Approval;
 using RetailPulse.Api.Hubs;
+using RetailPulse.Api.Memory;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Agents;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Approval;
+using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
 
 namespace RetailPulse.Tests.Integration;
@@ -426,6 +430,83 @@ public class RouterIntegrationTests
             [],
             Mock.Of<ILogger<GeneralAgent>>(),
             config);
+    }
+
+    #endregion
+
+    #region Memory & Approval Integration
+
+    [Fact]
+    public async Task MemoryPersists_AcrossMultipleConversations()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"integ_mem_{Guid.NewGuid():N}.db");
+        try
+        {
+            using var memory = new SqliteConversationMemory(dbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
+
+            var now = DateTimeOffset.UtcNow;
+            var prefEntry = new MemoryEntry(Guid.NewGuid().ToString("N"), "user-1",
+                MemoryType.UserPreference, "Prefers line charts", null, now, now.AddDays(90));
+            await memory.StoreAsync("user-1", prefEntry);
+
+            var entityEntry = new MemoryEntry(Guid.NewGuid().ToString("N"), "user-1",
+                MemoryType.EntityMention, "Discussed Brand X sales", "Brand X", now, now.AddDays(30));
+            await memory.StoreAsync("user-1", entityEntry);
+
+            var memories = await memory.RecallAsync("user-1", maxResults: 10);
+            memories.Should().HaveCount(2);
+            memories.Should().Contain(m => m.Type == MemoryType.UserPreference);
+            memories.Should().Contain(m => m.Type == MemoryType.EntityMention);
+        }
+        finally
+        {
+            try { File.Delete(dbPath); } catch { }
+            try { File.Delete(dbPath + "-wal"); } catch { }
+            try { File.Delete(dbPath + "-shm"); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task ApprovalFlow_EndToEnd_RequestRespondAgentReceives()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"integ_appr_{Guid.NewGuid():N}.db");
+        try
+        {
+            var gate = new SqliteApprovalGate(dbPath, Mock.Of<ILogger<SqliteApprovalGate>>());
+
+            var context = new ApprovalContext("demand-agent", "user-1",
+                "Generate Q4 forecast for all 12 brands",
+                "High compute cost", "Medium", "Quarterly forecast generation");
+            var request = await gate.RequestApprovalAsync(context);
+            request.RequestId.Should().NotBeNullOrEmpty();
+
+            await gate.RespondAsync(request.RequestId, ApprovalDecision.Approved,
+                comment: "Approved - run during off-peak");
+
+            var agentResult = await gate.GetResultAsync(request.RequestId);
+            agentResult.Decision.Should().Be(ApprovalDecision.Approved);
+            agentResult.Comment.Should().Be("Approved - run during off-peak");
+        }
+        finally
+        {
+            try { File.Delete(dbPath); } catch { }
+            try { File.Delete(dbPath + "-wal"); } catch { }
+            try { File.Delete(dbPath + "-shm"); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task MemoryManagementRouting_ForgetIntentRoutes()
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.MemoryManagement}\",\"confidence\":0.95,\"intents\":[\"{AgentIntent.MemoryManagement}\"]}}");
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("Done."));
+        var specialists = new List<ISpecialistAgent> { generalAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync("Forget everything about me", null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.MemoryManagement);
     }
 
     #endregion
