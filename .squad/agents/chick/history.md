@@ -192,3 +192,46 @@ Tests (26 new):
 - 2026-05-13T12:24:49-04:00 — SignalR alert/trace events: `alert_fired` (new alert), `trace_started` (begin trace), `span_completed` (progressive span), `trace_completed` (finalize). All registered on the existing telemetry hub connection in Dashboard.
 - 2026-05-13T12:24:49-04:00 — `TraceSpan` type uses `TraceSpanType` union: routing/agent/tool/memory/approval — each with its own color in the waterfall. This is separate from `AgentSpan.type` which maps to the existing telemetry system.
 
+## Session Work — 2026-05-13 Sprint 2.2+2.3 Competitive Intelligence + RAG Knowledge Base UI (Complete)
+
+**Outcome:** ✅ SUCCESS — Competitive dashboard + Knowledge Base UI built, 135 frontend tests passing (22 new), build clean
+
+**Deliverables:**
+
+Sprint 2.2 — Competitive Intelligence Dashboard:
+- `src/components/competitive/CompetitiveDashboard.tsx` — Main container with category/region filters and 4 tabs (Overview, Pricing, Market Share, Threats). Loads data from 3 API endpoints on mount.
+- `src/components/competitive/PricingGrid.tsx` — Competitor pricing table with sparkline trend charts (Recharts LineChart), price difference indicators (▲/▼ with color coding), and "our price" baseline comparison.
+- `src/components/competitive/MarketShareChart.tsx` — Stacked area chart (Recharts AreaChart) showing market share trends over time. Animated gradient fills per competitor, custom tooltip.
+- `src/components/competitive/ThreatCards.tsx` — Threat assessment cards sorted by severity (🔴🟡🟢). Expand/collapse detail, response plan generation with loading state, recommendation badges.
+- `src/components/competitive/CompetitorProfile.tsx` — Modal competitor detail view with strengths/weaknesses/recentMoves lists and market share stat.
+- `src/components/competitive/index.ts` — Barrel export.
+- `src/services/competitiveApi.ts` — API service: fetchCompetitorPricing, fetchMarketShare, fetchThreats, generateResponsePlan.
+
+Sprint 2.3 — RAG Knowledge Base UI:
+- `src/components/knowledge/KnowledgeBasePanel.tsx` — Main KB management panel: document list with status badges, search input, upload integration, stats sidebar. Loads documents + stats on mount.
+- `src/components/knowledge/DocumentUpload.tsx` — Drag-and-drop file upload with progress bar, title input, accepted file types (.pdf/.docx/.md/.txt). Drag-over visual feedback via inline styles (Griffel workaround).
+- `src/components/knowledge/CitationBadge.tsx` — Inline citation pill: shows [N] badge, hover tooltip with source info, click to expand full citation content with relevance score.
+- `src/components/knowledge/SearchResults.tsx` — KB search results display with relevance score bars, document source, snippet highlighting, expandable full content.
+- `src/components/knowledge/KnowledgeStats.tsx` — KB health widget: total docs, indexed count, avg relevance, top cited doc. Horizontal bar chart (Recharts BarChart) showing citation distribution.
+- `src/components/knowledge/index.ts` — Barrel export.
+- `src/services/knowledgeApi.ts` — API service: fetchDocuments, searchKnowledge, uploadDocument, fetchStats, deleteDocument.
+
+Integration:
+- `src/types/index.ts` — Added CompetitorPricing, PricePoint, MarketShareEntry, CompetitiveThreat, CompetitorOverview, KBDocument, KBSearchResult, KBStats, Citation types. ThreatSeverity/ThreatRecommendation unions.
+- `src/constants/agentRouting.ts` — Added COMPETITIVE_COLORS and KB_COLORS constant objects.
+- `Dashboard.tsx` — Added "Competitive" (Shield24Regular) and "Knowledge Base" (Library24Regular) header buttons. Extended activeView union with 'competitive'|'knowledge'. Conditional rendering for both new views.
+
+Tests (22 new):
+- `CompetitiveDashboard.test.tsx` — 11 tests: render, loading state, overview tab, pricing/threats tab switching, error state; ThreatCards severity sorting, expand/collapse, response plan generation, severity badge colors, empty state, recommendation display.
+- `KnowledgeBase.test.tsx` — 11 tests: KnowledgeBasePanel document loading/display, search, upload trigger, stats display; DocumentUpload render, file type display, title input; CitationBadge render, hover tooltip, click expand, relevance score.
+
+**Test Status:** 135 frontend tests passing (16 files), build clean
+
+## Learnings
+
+- 2026-05-13T13:37:00-04:00 — Competitive intelligence components live in `src/components/competitive/` — CompetitiveDashboard, PricingGrid, MarketShareChart, ThreatCards, CompetitorProfile. All export from barrel `index.ts`.
+- 2026-05-13T13:37:00-04:00 — Knowledge base components live in `src/components/knowledge/` — KnowledgeBasePanel, DocumentUpload, CitationBadge, SearchResults, KnowledgeStats. All export from barrel `index.ts`.
+- 2026-05-13T13:37:00-04:00 — Griffel `makeStyles` does NOT accept `borderColor` shorthand (TS2322 error). Use inline `style` prop for dynamic border colors, or use longhand `borderTopColor`/etc. Same issue applies to `backgroundColor` in some contexts. Pattern: keep `transform`/`transition` in makeStyles, put color overrides in inline style.
+- 2026-05-13T13:37:00-04:00 — Recharts v3 Tooltip `formatter` expects `(value: ValueType | undefined, ...)` — cast first arg with `Number(v)` before formatting. Pattern: `formatter={(v) => [\`${Number(v).toFixed(1)}%\`]}`.
+- 2026-05-13T13:37:00-04:00 — Testing-library "Found multiple elements" errors are common when tab text appears both in the tab bar and in rendered content. Use `getAllByText()[0]` to click the first (tab) instance.
+

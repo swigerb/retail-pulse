@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle } from '@fluentui/react-components';
-import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular } from '@fluentui/react-icons';
+import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
@@ -12,6 +12,8 @@ import { AlertFeed } from './alerts';
 import { AlertHistory as AlertHistoryPanel } from './alerts';
 import { TraceDashboard } from './traces';
 import { PromoTaskModule } from './promo';
+import { CompetitiveDashboard } from './competitive';
+import { KnowledgeBasePanel } from './knowledge';
 import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan } from '../types';
 import { connectTelemetryHub } from '../services/telemetryHub';
 
@@ -106,7 +108,7 @@ export function Dashboard() {
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRequest[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [traces, setTraces] = useState<Trace[]>([]);
-  const [activeView, setActiveView] = useState<'chat' | 'promo'>('chat');
+  const [activeView, setActiveView] = useState<'chat' | 'promo' | 'competitive' | 'knowledge'>('chat');
   const styles = useStyles();
 
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close.
@@ -267,6 +269,22 @@ export function Dashboard() {
             {activeView === 'promo' ? 'Back to Chat' : 'Campaign Planner'}
           </Button>
           <Button
+            appearance={activeView === 'competitive' ? 'primary' : 'subtle'}
+            icon={<Shield24Regular />}
+            onClick={() => setActiveView(prev => prev === 'competitive' ? 'chat' : 'competitive')}
+            style={activeView === 'competitive' ? { backgroundColor: '#ef4444', borderColor: '#ef4444' } : undefined}
+          >
+            {activeView === 'competitive' ? 'Back to Chat' : 'Competitive'}
+          </Button>
+          <Button
+            appearance={activeView === 'knowledge' ? 'primary' : 'subtle'}
+            icon={<Library24Regular />}
+            onClick={() => setActiveView(prev => prev === 'knowledge' ? 'chat' : 'knowledge')}
+            style={activeView === 'knowledge' ? { backgroundColor: '#06b6d4', borderColor: '#06b6d4' } : undefined}
+          >
+            {activeView === 'knowledge' ? 'Back to Chat' : 'Knowledge Base'}
+          </Button>
+          <Button
             appearance="subtle"
             icon={<Add24Regular />}
             onClick={handleNewChat}
@@ -291,6 +309,10 @@ export function Dashboard() {
             <div style={{ overflow: 'auto', height: '100%' }}>
               <PromoTaskModule />
             </div>
+          ) : activeView === 'competitive' ? (
+            <CompetitiveDashboard />
+          ) : activeView === 'knowledge' ? (
+            <KnowledgeBasePanel />
           ) : (
             <ChatPanel
               key={chatKey}
