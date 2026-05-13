@@ -697,4 +697,100 @@ public class RouterIntegrationTests
     }
 
     #endregion
+
+    #region Supply Chain Routing
+
+    [Theory]
+    [InlineData("Supply chain status")]
+    [InlineData("Any supply disruptions?")]
+    [InlineData("What's the inventory level for Sierra Gold?")]
+    public async Task Router_SupplyQuery_ClassifiesAsSupplyShipments(string message)
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.91,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
+
+        var supplyAgent = CreateMockSupplyAgent();
+        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        var specialists = new List<ISpecialistAgent> { generalAgent, supplyAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(message, null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.SupplyShipments);
+    }
+
+    [Fact]
+    public async Task FullPipeline_SupplyMessage_RoutesAndReturnsResponse()
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.93,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
+
+        var hubContext = new Mock<IHubContext<TelemetryHub>>();
+        var clients = new Mock<IHubClients>();
+        var groupProxy = new Mock<IClientProxy>();
+        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
+        hubContext.Setup(h => h.Clients).Returns(clients.Object);
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        var supplyAgent = new Agents.Specialists.SupplyChainAgent(
+            MockChatClient("Sierra Gold Tequila inventory is at 14 days of supply across all regions. No active disruptions. Fulfillment rate: 96%."),
+            new AgentDefinition { Name = "SupplyChain", Model = "gpt-5.4-mini", SystemPrompt = "supply specialist", Temperature = 0.3 },
+            hubContext.Object, [],
+            Mock.Of<ILogger<Agents.Specialists.SupplyChainAgent>>(),
+            config);
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        var specialists = new List<ISpecialistAgent> { generalAgent, supplyAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(
+            "What's the supply chain status for Sierra Gold Tequila?", null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.SupplyShipments);
+
+        var response = await supplyAgent.HandleAsync(
+            new ChatRequest("What's the supply chain status for Sierra Gold Tequila?", SessionId: "supply-pipeline-1"));
+        response.Reply.Should().Contain("Sierra Gold Tequila");
+        response.Spans.Should().NotBeEmpty();
+    }
+
+    private static ISpecialistAgent CreateMockSupplyAgent()
+    {
+        var mock = new Mock<ISpecialistAgent>();
+        mock.Setup(a => a.Key).Returns("supply-chain");
+        mock.Setup(a => a.DisplayName).Returns("Supply Chain Agent");
+        mock.Setup(a => a.SupportedIntents).Returns(new[] { AgentIntent.SupplyShipments });
+        mock.Setup(a => a.HandleAsync(
+                It.IsAny<ChatRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RetailPulse.Contracts.ChatResponse("Supply chain healthy", "session-supply", []));
+        return mock.Object;
+    }
+
+    #endregion
+
+    #region Council / Brand Health Routing
+
+    [Theory]
+    [InlineData("How healthy is Sierra Gold Tequila?")]
+    [InlineData("Brand health check")]
+    public async Task Router_HealthQuery_CouldTriggerCouncil(string message)
+    {
+        // Health queries are broad — they could go to General for now,
+        // or to a council endpoint once implemented. We verify the router
+        // classifies them and doesn't crash.
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.85,\"intents\":[\"{AgentIntent.General}\"]}}");
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("Brand health overview ready."));
+        var specialists = new List<ISpecialistAgent> { generalAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(message, null, null, null);
+        routingResult.Should().NotBeNull();
+        routingResult.Confidence.Should().BeGreaterThan(0);
+    }
+
+    #endregion
 }
