@@ -203,4 +203,33 @@ app.MapGet("/api/competitive/landscape", (string category, string region, Retail
 })
 .WithName("GetCompetitiveLandscape");
 
+// ── Supply Chain REST endpoints ──────────────────────────────────────
+app.MapGet("/api/supply/inventory", (RetailPulseDb data, string? brand = null, string? region = null, string? category = null, string? status = null) =>
+{
+    var result = data.GetInventoryLevels(brand, region, category, status);
+    return Results.Ok(result);
+})
+.WithName("GetInventoryLevels");
+
+app.MapGet("/api/supply/disruptions", (RetailPulseDb data, string? brand = null, string? region = null, string? severity = null, bool activeOnly = true) =>
+{
+    var result = data.GetSupplyDisruptions(brand, region, severity, activeOnly);
+    return Results.Ok(result);
+})
+.WithName("GetSupplyDisruptions");
+
+app.MapGet("/api/supply/fulfillment", (RetailPulseDb data, string? brand = null, string? region = null, string? period = null, int minPeriods = 6) =>
+{
+    var result = data.GetFulfillmentRates(brand, region, period, minPeriods);
+    return Results.Ok(result);
+})
+.WithName("GetFulfillmentRates");
+
+app.MapGet("/api/supply/health", (string brand, RetailPulseDb data, string? region = null) =>
+{
+    var result = data.GetSupplyHealthSummary(brand, region);
+    return Results.Ok(result);
+})
+.WithName("GetSupplyHealthSummary");
+
 app.Run();

@@ -201,6 +201,51 @@ public class RetailPulseDb
 
             CREATE INDEX IF NOT EXISTS IX_CompetitorActivity_Category ON CompetitorActivity (Category, Region);
 
+            CREATE TABLE IF NOT EXISTS InventoryLevels (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Brand TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Category TEXT NOT NULL COLLATE NOCASE,
+                SKU TEXT NOT NULL COLLATE NOCASE,
+                CurrentStock INTEGER NOT NULL,
+                SafetyStock INTEGER NOT NULL,
+                DaysOfSupply REAL NOT NULL,
+                Status TEXT NOT NULL COLLATE NOCASE,
+                LastUpdated TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_InventoryLevels_BrandRegion ON InventoryLevels (Brand, Region);
+            CREATE INDEX IF NOT EXISTS IX_InventoryLevels_Status ON InventoryLevels (Status);
+
+            CREATE TABLE IF NOT EXISTS SupplyDisruptions (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Brand TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                DisruptionType TEXT NOT NULL COLLATE NOCASE,
+                Severity TEXT NOT NULL COLLATE NOCASE,
+                Description TEXT,
+                StartDate TEXT NOT NULL,
+                EstimatedResolution TEXT,
+                ImpactedSKUs INTEGER DEFAULT 0,
+                IsActive INTEGER DEFAULT 1
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_SupplyDisruptions_BrandRegion ON SupplyDisruptions (Brand, Region);
+            CREATE INDEX IF NOT EXISTS IX_SupplyDisruptions_Severity ON SupplyDisruptions (Severity);
+
+            CREATE TABLE IF NOT EXISTS FulfillmentRates (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Brand TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Period TEXT NOT NULL COLLATE NOCASE,
+                FillRate REAL NOT NULL,
+                OnTimeRate REAL NOT NULL,
+                BackorderCount INTEGER DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_FulfillmentRates_BrandRegion ON FulfillmentRates (Brand, Region);
+            CREATE INDEX IF NOT EXISTS IX_FulfillmentRates_Period ON FulfillmentRates (Period);
+
             CREATE TABLE IF NOT EXISTS SeedMetadata (
                 Key TEXT PRIMARY KEY,
                 Value TEXT NOT NULL
@@ -230,7 +275,7 @@ public class RetailPulseDb
         using var tx = conn.BeginTransaction();
 
         using var clearCmd = conn.CreateCommand();
-        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM PromoHistory; DELETE FROM LiftCoefficients; DELETE FROM CompetitorPricing; DELETE FROM MarketShare; DELETE FROM CompetitorActivity; DELETE FROM SeedMetadata;";
+        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM PromoHistory; DELETE FROM LiftCoefficients; DELETE FROM CompetitorPricing; DELETE FROM MarketShare; DELETE FROM CompetitorActivity; DELETE FROM InventoryLevels; DELETE FROM SupplyDisruptions; DELETE FROM FulfillmentRates; DELETE FROM SeedMetadata;";
         clearCmd.ExecuteNonQuery();
 
         SeedDepletions(conn);
@@ -244,6 +289,9 @@ public class RetailPulseDb
         SeedCompetitorPricing(conn);
         SeedMarketShare(conn);
         SeedCompetitorActivity(conn);
+        SeedInventoryLevels(conn);
+        SeedSupplyDisruptions(conn);
+        SeedFulfillmentRates(conn);
 
         // Store hash
         using var hashCmd = conn.CreateCommand();
@@ -256,7 +304,7 @@ public class RetailPulseDb
 
     // Bump this version whenever the schema or seeding logic changes
     // to force a re-seed even if tenant.yaml hasn't changed.
-    private const int SchemaVersion = 5;
+    private const int SchemaVersion = 6;
 
     private string ComputeTenantHash()
     {
@@ -2905,5 +2953,563 @@ public class RetailPulseDb
                 sb.Append(c);
         }
         return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    // ── Supply Chain Seeding ─────────────────────────────────────────────
+
+    private static readonly string[] InventoryStatuses = ["healthy", "low", "critical", "out_of_stock"];
+    private static readonly string[] DisruptionTypes = ["logistics", "supplier", "weather", "demand_surge"];
+    private static readonly string[] DisruptionSeverities = ["high", "medium", "low"];
+
+    private void SeedInventoryLevels(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO InventoryLevels (Brand, Region, Category, SKU, CurrentStock, SafetyStock, DaysOfSupply, Status, LastUpdated)
+            VALUES (@brand, @region, @category, @sku, @current, @safety, @dos, @status, @updated)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
+        var pSku = cmd.Parameters.Add("@sku", SqliteType.Text);
+        var pCurrent = cmd.Parameters.Add("@current", SqliteType.Integer);
+        var pSafety = cmd.Parameters.Add("@safety", SqliteType.Integer);
+        var pDos = cmd.Parameters.Add("@dos", SqliteType.Real);
+        var pStatus = cmd.Parameters.Add("@status", SqliteType.Text);
+        var pUpdated = cmd.Parameters.Add("@updated", SqliteType.Text);
+
+        var skuCounter = 0;
+
+        foreach (var brand in _tenant.Brands)
+        {
+            foreach (var region in _tenant.Regions)
+            {
+                var seed = GetStableHash($"inv|{brand.Name}|{region}");
+                var rng = new Random(seed);
+
+                // Generate 2-3 SKUs per brand/region from their variants
+                var variantCount = Math.Min(brand.Variants.Count, 3);
+                if (variantCount == 0) variantCount = 2;
+
+                for (int v = 0; v < variantCount; v++)
+                {
+                    skuCounter++;
+                    var variant = v < brand.Variants.Count ? brand.Variants[v] : $"SKU-{v + 1}";
+                    var skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{region[..2].ToUpperInvariant()}-{skuCounter:D4}";
+
+                    // Status distribution: 60% healthy, 20% low, 15% critical, 5% out_of_stock
+                    var statusRoll = rng.NextDouble();
+                    string status;
+                    int safetyStock;
+                    int currentStock;
+                    double daysOfSupply;
+
+                    if (statusRoll < 0.05)
+                    {
+                        status = "out_of_stock";
+                        safetyStock = 200 + rng.Next(100, 500);
+                        currentStock = 0;
+                        daysOfSupply = 0;
+                    }
+                    else if (statusRoll < 0.20)
+                    {
+                        status = "critical";
+                        safetyStock = 200 + rng.Next(100, 500);
+                        currentStock = rng.Next(10, safetyStock / 3);
+                        daysOfSupply = Math.Round(3.0 + rng.NextDouble() * 4.0, 1);
+                    }
+                    else if (statusRoll < 0.40)
+                    {
+                        status = "low";
+                        safetyStock = 200 + rng.Next(100, 500);
+                        currentStock = rng.Next(safetyStock / 3, safetyStock);
+                        daysOfSupply = Math.Round(8.0 + rng.NextDouble() * 7.0, 1);
+                    }
+                    else
+                    {
+                        status = "healthy";
+                        safetyStock = 200 + rng.Next(100, 500);
+                        currentStock = safetyStock + rng.Next(200, 2000);
+                        daysOfSupply = Math.Round(15.0 + rng.NextDouble() * 45.0, 1);
+                    }
+
+                    pBrand.Value = brand.Name;
+                    pRegion.Value = region;
+                    pCategory.Value = brand.Category;
+                    pSku.Value = skuId;
+                    pCurrent.Value = currentStock;
+                    pSafety.Value = safetyStock;
+                    pDos.Value = daysOfSupply;
+                    pStatus.Value = status;
+                    pUpdated.Value = DateTime.UtcNow.AddHours(-rng.Next(1, 48)).ToString("o");
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+    }
+
+    private void SeedSupplyDisruptions(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO SupplyDisruptions (Brand, Region, DisruptionType, Severity, Description, StartDate, EstimatedResolution, ImpactedSKUs, IsActive)
+            VALUES (@brand, @region, @type, @severity, @desc, @start, @resolution, @impacted, @active)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pType = cmd.Parameters.Add("@type", SqliteType.Text);
+        var pSeverity = cmd.Parameters.Add("@severity", SqliteType.Text);
+        var pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
+        var pStart = cmd.Parameters.Add("@start", SqliteType.Text);
+        var pResolution = cmd.Parameters.Add("@resolution", SqliteType.Text);
+        var pImpacted = cmd.Parameters.Add("@impacted", SqliteType.Integer);
+        var pActive = cmd.Parameters.Add("@active", SqliteType.Integer);
+
+        var masterRng = new Random(GetStableHash("disruptions_master"));
+        var today = new DateOnly(2026, 5, 13);
+
+        // Generate 18 active disruptions spread across brands/regions
+        var disruptionDescriptions = new Dictionary<string, string[]>
+        {
+            ["logistics"] = [
+                "Port congestion causing 3-5 day delays on inbound shipments",
+                "Carrier capacity shortage affecting last-mile delivery",
+                "Distribution center labor shortage impacting order processing",
+                "Cross-dock facility equipment failure reducing throughput",
+                "Freight rate surge due to seasonal demand spike",
+                "Interstate route closure forcing alternate shipping lanes",
+                "Rail network delays affecting bulk shipments"
+            ],
+            ["supplier"] = [
+                "Key raw material supplier facing production issues",
+                "Supplier quality audit triggered product hold",
+                "Packaging supplier lead time extended by 2 weeks",
+                "Secondary supplier contract renegotiation in progress",
+                "Supplier facility upgrade causing temporary capacity reduction"
+            ],
+            ["weather"] = [
+                "Severe storms disrupting Southeast distribution routes",
+                "Winter weather advisories delaying Midwest deliveries",
+                "Hurricane season preparation affecting coastal warehousing",
+                "Heat wave impacting cold chain logistics"
+            ],
+            ["demand_surge"] = [
+                "Unexpected viral social media driving 3x demand spike",
+                "Competitor stockout redirecting demand to our brands",
+                "Regional event driving above-forecast consumption"
+            ]
+        };
+
+        var brandList = _tenant.Brands.ToList();
+        var regionList = _tenant.Regions.ToList();
+
+        for (int i = 0; i < 18; i++)
+        {
+            var brand = brandList[masterRng.Next(brandList.Count)];
+            var region = regionList[masterRng.Next(regionList.Count)];
+
+            // Type distribution: logistics 40%, supplier 25%, weather 20%, demand_surge 15%
+            var typeRoll = masterRng.NextDouble();
+            var disruptionType = typeRoll < 0.40 ? "logistics"
+                : typeRoll < 0.65 ? "supplier"
+                : typeRoll < 0.85 ? "weather"
+                : "demand_surge";
+
+            // Severity distribution: high 20%, medium 50%, low 30%
+            var sevRoll = masterRng.NextDouble();
+            var severity = sevRoll < 0.20 ? "high" : sevRoll < 0.70 ? "medium" : "low";
+
+            var descriptions = disruptionDescriptions[disruptionType];
+            var desc = descriptions[masterRng.Next(descriptions.Length)];
+
+            var startDaysAgo = masterRng.Next(1, 21);
+            var resolutionDaysOut = severity == "high" ? masterRng.Next(7, 21) : masterRng.Next(2, 10);
+            var impactedSkus = severity switch
+            {
+                "high" => masterRng.Next(15, 50),
+                "medium" => masterRng.Next(5, 20),
+                _ => masterRng.Next(1, 8)
+            };
+
+            pBrand.Value = brand.Name;
+            pRegion.Value = region;
+            pType.Value = disruptionType;
+            pSeverity.Value = severity;
+            pDesc.Value = desc;
+            pStart.Value = today.AddDays(-startDaysAgo).ToString("yyyy-MM-dd");
+            pResolution.Value = today.AddDays(resolutionDaysOut).ToString("yyyy-MM-dd");
+            pImpacted.Value = impactedSkus;
+            pActive.Value = 1;
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    private void SeedFulfillmentRates(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO FulfillmentRates (Brand, Region, Period, FillRate, OnTimeRate, BackorderCount)
+            VALUES (@brand, @region, @period, @fill, @ontime, @backorder)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
+        var pFill = cmd.Parameters.Add("@fill", SqliteType.Real);
+        var pOntime = cmd.Parameters.Add("@ontime", SqliteType.Real);
+        var pBackorder = cmd.Parameters.Add("@backorder", SqliteType.Integer);
+
+        // 6 months: Dec 2025 through May 2026
+        var periods = new[] { "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05" };
+
+        foreach (var brand in _tenant.Brands)
+        {
+            foreach (var region in _tenant.Regions)
+            {
+                var seed = GetStableHash($"fulfill|{brand.Name}|{region}");
+                var rng = new Random(seed);
+
+                // Base rates per brand/region
+                var baseFillRate = 90.0 + rng.NextDouble() * 8.0; // 90-98%
+                var baseOnTimeRate = 85.0 + rng.NextDouble() * 10.0; // 85-95%
+
+                // Some brand/region combos have declining trends (for Yellow/Red)
+                var trendDecline = rng.NextDouble() < 0.25; // 25% chance of declining trend
+                var declinePerMonth = trendDecline ? 0.3 + rng.NextDouble() * 0.8 : 0.0;
+
+                for (int p = 0; p < periods.Length; p++)
+                {
+                    var periodNoise = (rng.NextDouble() - 0.5) * 2.0;
+                    var fillRate = Math.Round(Math.Clamp(baseFillRate - (declinePerMonth * p) + periodNoise, 85.0, 99.5), 1);
+                    var onTimeRate = Math.Round(Math.Clamp(baseOnTimeRate - (declinePerMonth * 1.2 * p) + periodNoise, 80.0, 97.0), 1);
+                    var backorderCount = fillRate < 92
+                        ? rng.Next(20, 80)
+                        : fillRate < 95
+                            ? rng.Next(5, 25)
+                            : rng.Next(0, 8);
+
+                    pBrand.Value = brand.Name;
+                    pRegion.Value = region;
+                    pPeriod.Value = periods[p];
+                    pFill.Value = fillRate;
+                    pOntime.Value = onTimeRate;
+                    pBackorder.Value = backorderCount;
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+    }
+
+    // ── Supply Chain Query Methods ───────────────────────────────────────
+
+    public object GetInventoryLevels(string? brand, string? region, string? category, string? status)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var filters = new List<string>();
+        using var cmd = conn.CreateCommand();
+
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            filters.Add("Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            filters.Add("Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            filters.Add("Category LIKE @category");
+            cmd.Parameters.AddWithValue("@category", $"%{category.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            filters.Add("Status = @status");
+            cmd.Parameters.AddWithValue("@status", status.Trim().ToLowerInvariant());
+        }
+
+        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        cmd.CommandText = $"""
+            SELECT Brand, Region, Category, SKU, CurrentStock, SafetyStock, DaysOfSupply, Status, LastUpdated
+            FROM InventoryLevels
+            {where}
+            ORDER BY
+                CASE Status
+                    WHEN 'out_of_stock' THEN 0
+                    WHEN 'critical' THEN 1
+                    WHEN 'low' THEN 2
+                    ELSE 3
+                END,
+                DaysOfSupply ASC
+            """;
+
+        var items = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            items.Add(new
+            {
+                brand = reader.GetString(0),
+                region = reader.GetString(1),
+                category = reader.GetString(2),
+                sku = reader.GetString(3),
+                current_stock = reader.GetInt32(4),
+                safety_stock = reader.GetInt32(5),
+                days_of_supply = reader.GetDouble(6),
+                status = reader.GetString(7),
+                last_updated = reader.GetString(8)
+            });
+        }
+
+        // Summary stats
+        var total = items.Count;
+        var statusCounts = items.GroupBy(i => ((dynamic)i).status as string)
+            .ToDictionary(g => g.Key!, g => g.Count());
+
+        return new
+        {
+            items,
+            total_items = total,
+            status_breakdown = new
+            {
+                healthy = statusCounts.GetValueOrDefault("healthy", 0),
+                low = statusCounts.GetValueOrDefault("low", 0),
+                critical = statusCounts.GetValueOrDefault("critical", 0),
+                out_of_stock = statusCounts.GetValueOrDefault("out_of_stock", 0)
+            },
+            filters_applied = new { brand, region, category, status }
+        };
+    }
+
+    public object GetSupplyDisruptions(string? brand, string? region, string? severity, bool activeOnly)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var filters = new List<string>();
+        using var cmd = conn.CreateCommand();
+
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            filters.Add("Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            filters.Add("Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(severity))
+        {
+            filters.Add("Severity = @severity");
+            cmd.Parameters.AddWithValue("@severity", severity.Trim().ToLowerInvariant());
+        }
+        if (activeOnly)
+        {
+            filters.Add("IsActive = 1");
+        }
+
+        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        cmd.CommandText = $"""
+            SELECT Id, Brand, Region, DisruptionType, Severity, Description, StartDate, EstimatedResolution, ImpactedSKUs, IsActive
+            FROM SupplyDisruptions
+            {where}
+            ORDER BY
+                CASE Severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                StartDate DESC
+            """;
+
+        var disruptions = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            disruptions.Add(new
+            {
+                id = reader.GetInt32(0),
+                brand = reader.GetString(1),
+                region = reader.GetString(2),
+                disruption_type = reader.GetString(3),
+                severity = reader.GetString(4),
+                description = reader.IsDBNull(5) ? null : reader.GetString(5),
+                start_date = reader.GetString(6),
+                estimated_resolution = reader.IsDBNull(7) ? null : reader.GetString(7),
+                impacted_skus = reader.GetInt32(8),
+                is_active = reader.GetInt32(9) == 1
+            });
+        }
+
+        var severityCounts = disruptions.GroupBy(d => ((dynamic)d).severity as string)
+            .ToDictionary(g => g.Key!, g => g.Count());
+
+        return new
+        {
+            disruptions,
+            total_disruptions = disruptions.Count,
+            severity_breakdown = new
+            {
+                high = severityCounts.GetValueOrDefault("high", 0),
+                medium = severityCounts.GetValueOrDefault("medium", 0),
+                low = severityCounts.GetValueOrDefault("low", 0)
+            },
+            total_impacted_skus = disruptions.Sum(d => (int)((dynamic)d).impacted_skus),
+            filters_applied = new { brand, region, severity, active_only = activeOnly }
+        };
+    }
+
+    public object GetFulfillmentRates(string? brand, string? region, string? period, int minPeriods)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var filters = new List<string>();
+        using var cmd = conn.CreateCommand();
+
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            filters.Add("Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            filters.Add("Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(period))
+        {
+            filters.Add("Period = @period");
+            cmd.Parameters.AddWithValue("@period", period.Trim());
+        }
+
+        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        cmd.CommandText = $"""
+            SELECT Brand, Region, Period, FillRate, OnTimeRate, BackorderCount
+            FROM FulfillmentRates
+            {where}
+            ORDER BY Period DESC
+            """;
+
+        var rates = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            rates.Add(new
+            {
+                brand = reader.GetString(0),
+                region = reader.GetString(1),
+                period = reader.GetString(2),
+                fill_rate = reader.GetDouble(3),
+                on_time_rate = reader.GetDouble(4),
+                backorder_count = reader.GetInt32(5)
+            });
+        }
+
+        // Calculate averages
+        var avgFillRate = rates.Count > 0 ? Math.Round(rates.Average(r => (double)((dynamic)r).fill_rate), 1) : 0;
+        var avgOnTimeRate = rates.Count > 0 ? Math.Round(rates.Average(r => (double)((dynamic)r).on_time_rate), 1) : 0;
+
+        // Detect trend direction (latest vs earliest)
+        string trend = "stable";
+        if (rates.Count >= 2)
+        {
+            var latest = (double)((dynamic)rates.First()).fill_rate;
+            var earliest = (double)((dynamic)rates.Last()).fill_rate;
+            if (latest - earliest > 1.0) trend = "improving";
+            else if (earliest - latest > 1.0) trend = "declining";
+        }
+
+        return new
+        {
+            rates,
+            total_periods = rates.Count,
+            summary = new
+            {
+                avg_fill_rate = avgFillRate,
+                avg_on_time_rate = avgOnTimeRate,
+                trend
+            },
+            filters_applied = new { brand, region, period }
+        };
+    }
+
+    public object GetSupplyHealthSummary(string brand, string? region)
+    {
+        // Aggregate from all three supply chain tables
+        var inventory = GetInventoryLevels(brand, region, null, null);
+        var disruptions = GetSupplyDisruptions(brand, region, null, true);
+        var fulfillment = GetFulfillmentRates(brand, region, null, 3);
+
+        // Extract metrics for scoring
+        dynamic invData = inventory;
+        dynamic disData = disruptions;
+        dynamic fulData = fulfillment;
+
+        int criticalCount = (int)invData.status_breakdown.critical;
+        int oosCount = (int)invData.status_breakdown.out_of_stock;
+        int totalDisruptions = (int)disData.total_disruptions;
+        int highSeverity = (int)disData.severity_breakdown.high;
+        double avgFillRate = (double)fulData.summary.avg_fill_rate;
+        string fillTrend = (string)fulData.summary.trend;
+
+        // Calculate inventory health
+        string inventoryHealth;
+        if (oosCount > 0 || criticalCount > 3)
+            inventoryHealth = "Red";
+        else if (criticalCount > 0 || (int)invData.status_breakdown.low > 5)
+            inventoryHealth = "Yellow";
+        else
+            inventoryHealth = "Green";
+
+        // Calculate disruption impact
+        string disruptionImpact;
+        if (highSeverity > 1 || totalDisruptions > 5)
+            disruptionImpact = "Red";
+        else if (highSeverity > 0 || totalDisruptions > 2)
+            disruptionImpact = "Yellow";
+        else
+            disruptionImpact = "Green";
+
+        // Calculate fulfillment health
+        string fulfillmentHealth;
+        if (avgFillRate < 90 || fillTrend == "declining")
+            fulfillmentHealth = "Red";
+        else if (avgFillRate < 95)
+            fulfillmentHealth = "Yellow";
+        else
+            fulfillmentHealth = "Green";
+
+        // Overall status: worst of the three
+        var statuses = new[] { inventoryHealth, disruptionImpact, fulfillmentHealth };
+        string overallStatus;
+        if (statuses.Contains("Red"))
+            overallStatus = "Red";
+        else if (statuses.Contains("Yellow"))
+            overallStatus = "Yellow";
+        else
+            overallStatus = "Green";
+
+        return new
+        {
+            brand,
+            region = region ?? "All Regions",
+            overall_status = overallStatus,
+            inventory_health = inventoryHealth,
+            disruption_impact = disruptionImpact,
+            fulfillment_health = fulfillmentHealth,
+            details = new
+            {
+                total_skus = (int)invData.total_items,
+                critical_items = criticalCount,
+                out_of_stock_items = oosCount,
+                active_disruptions = totalDisruptions,
+                high_severity_disruptions = highSeverity,
+                avg_fill_rate = avgFillRate,
+                fill_rate_trend = fillTrend
+            }
+        };
     }
 }
