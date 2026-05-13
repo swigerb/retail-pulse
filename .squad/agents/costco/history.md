@@ -137,3 +137,28 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - RespondAsync returning void (not ApprovalResult) simplifies idempotency — just UPDATE WHERE Decision='Pending'
 - Single-table schema (Decision column on ApprovalRequests) is simpler and faster than two-table request/result split
 - Large file rewrites via edit tool can fail on size limits — use PowerShell Set-Content for files >15KB
+
+## Session Work — 2026-05-24 Sprint 1.6 Distributed Tracing Enhancement + Phase 1 Integration
+
+### Task: Enhanced distributed tracing with span hierarchy, trace summaries, SignalR push, token cost tracking, REST endpoints
+
+- **Context:** Sprint 1.6 — enhance the existing OTel tracing infrastructure to support full span hierarchy across the multi-agent pipeline, structured trace summaries for Teams cards, and real-time SignalR push of trace events.
+- **Approach:** Built on existing `ITraceCollector`/`InMemoryTraceCollector` infrastructure (created by another agent) rather than creating parallel implementations. Enhanced rather than replaced.
+- **Deliverables:**
+  - **Enhanced ITraceCollector contract:** Added `TraceStep`, `TraceTokenDetail`, `StructuredTraceSummary` records and `GetStructuredSummary()` method
+  - **Enhanced InMemoryTraceCollector:** SignalR push (trace_started, span_completed, trace_completed events), structured summary builder with step extraction, cost calculation with configurable pricing
+  - **Full span hierarchy in AgentTelemetry:** 8 new static methods (StartChatRequest, StartRouterClassify, StartRouterSelectAgent, StartAgentProcess, StartMemoryRecall, StartMemoryStore, StartApprovalRequest, StartApprovalWait) providing root-to-leaf span hierarchy
+  - **Chat endpoint trace instrumentation:** Full pipeline wrapped in trace spans with ITraceCollector capture
+  - **REST endpoints:** GET /api/traces/recent, GET /api/traces/{traceId}/summary, GET /api/traces/{traceId}/spans
+  - **DI registration:** InMemoryTraceCollector registered as singleton with SignalR hub context and IConfiguration
+  - **Token cost tracking:** Default gpt-5.4-mini pricing (0.15/0.60 per million tokens), configurable via TokenPricing config section
+
+### Learnings
+- `IDictionary<string,string>` does NOT have `GetValueOrDefault()` — only `IReadOnlyDictionary` does. Need static helper for tag extraction.
+- Lambda parameter `_` conflicts with fire-and-forget discard `_ =` — use named parameter or `Task.Run()` pattern.
+- `ChatResponse` ambiguity between `Microsoft.Extensions.AI.ChatResponse` and `RetailPulse.Contracts.ChatResponse` — resolve with `using ChatResponse = RetailPulse.Contracts.ChatResponse;` alias.
+- FluentAssertions uses `BeLessThanOrEqualTo()`, not `BeLessOrEqualTo()`.
+- When enhancing existing infrastructure created by other agents, always check for pre-existing interfaces and implementations before creating new ones.
+- SignalR events should be best-effort (wrapped in try/catch) to never break the span capture pipeline.
+
+**Test Status:** All 540 tests passing (0 failures, 0 skipped)
