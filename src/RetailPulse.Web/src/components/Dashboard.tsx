@@ -8,7 +8,10 @@ import { MemoryPanel } from './MemoryPanel';
 import { ApprovalHistory } from './ApprovalHistory';
 import { PendingApprovals } from './PendingApprovals';
 import { BrandLogo } from './BrandLogo';
-import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision } from '../types';
+import { AlertFeed } from './alerts';
+import { AlertHistory as AlertHistoryPanel } from './alerts';
+import { TraceDashboard } from './traces';
+import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan } from '../types';
 import { connectTelemetryHub } from '../services/telemetryHub';
 
 const DRAWER_WIDTH_PX = 560;
@@ -87,6 +90,8 @@ const useStyles = makeStyles({
 });
 
 const MAX_RETAINED_SPANS = 500;
+const MAX_ALERTS = 100;
+const MAX_TRACES = 50;
 
 export function Dashboard() {
   const [telemetryOpen, setTelemetryOpen] = useState(false);
@@ -98,6 +103,8 @@ export function Dashboard() {
   const [routingHistory, setRoutingHistory] = useState<RoutingInfo[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRequest[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [traces, setTraces] = useState<Trace[]>([]);
   const styles = useStyles();
 
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close.
@@ -134,6 +141,43 @@ export function Dashboard() {
         }
         return prev;
       });
+    });
+
+    // Alert events (Sprint 1.5)
+    conn.off('alert_fired');
+    conn.on('alert_fired', (alert: Alert) => {
+      setAlerts(prev => {
+        if (prev.some(a => a.id === alert.id)) return prev;
+        const next = [{ ...alert, status: alert.status || 'active' as const }, ...prev];
+        return next.length > MAX_ALERTS ? next.slice(0, MAX_ALERTS) : next;
+      });
+    });
+
+    // Trace events (Sprint 1.6)
+    conn.off('trace_started');
+    conn.on('trace_started', (trace: Trace) => {
+      setTraces(prev => {
+        if (prev.some(t => t.traceId === trace.traceId)) return prev;
+        const next = [{ ...trace, status: 'in_progress' as const, spans: trace.spans || [] }, ...prev];
+        return next.length > MAX_TRACES ? next.slice(0, MAX_TRACES) : next;
+      });
+    });
+
+    conn.off('span_completed');
+    conn.on('span_completed', (data: { traceId: string; span: TraceSpan }) => {
+      setTraces(prev => prev.map(t => {
+        if (t.traceId !== data.traceId) return t;
+        if (t.spans.some(s => s.id === data.span.id)) return t;
+        return { ...t, spans: [...t.spans, data.span] };
+      }));
+    });
+
+    conn.off('trace_completed');
+    conn.on('trace_completed', (data: { traceId: string; totalDurationMs: number; totalTokens: number; totalCostUsd: number }) => {
+      setTraces(prev => prev.map(t => {
+        if (t.traceId !== data.traceId) return t;
+        return { ...t, status: 'completed' as const, totalDurationMs: data.totalDurationMs, totalTokens: data.totalTokens, totalCostUsd: data.totalCostUsd };
+      }));
     });
   }, []);
 
@@ -183,6 +227,22 @@ export function Dashboard() {
         .map(a => ({ ...a, status: decision, decidedAt: new Date().toISOString() }))];
     });
   }, [pendingApprovals]);
+
+  const handleAlertDismiss = useCallback((id: string) => {
+    setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: 'dismissed' as const } : a));
+  }, []);
+
+  const handleAlertSnooze = useCallback((id: string, duration: SnoozeDuration) => {
+    const durationMap: Record<SnoozeDuration, number> = {
+      '1h': 3_600_000, '4h': 14_400_000, '24h': 86_400_000, '1wk': 604_800_000,
+    };
+    const snoozedUntil = new Date(Date.now() + durationMap[duration]).toISOString();
+    setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: 'snoozed' as const, snoozedUntil } : a));
+  }, []);
+
+  const handleClearAllAlerts = useCallback(() => {
+    setAlerts(prev => prev.map(a => a.status === 'active' ? { ...a, status: 'dismissed' as const } : a));
+  }, []);
 
   return (
     <div className={styles.dashboard}>
@@ -256,6 +316,21 @@ export function Dashboard() {
             </DrawerHeaderTitle>
           </DrawerHeader>
           <DrawerBody>
+            {alerts.length > 0 && (
+              <div style={{ marginBottom: '16px' }}>
+                <AlertFeed
+                  alerts={alerts}
+                  onDismiss={handleAlertDismiss}
+                  onSnooze={handleAlertSnooze}
+                  onClearAll={handleClearAllAlerts}
+                />
+              </div>
+            )}
+            {alerts.some(a => a.status !== 'active') && (
+              <div style={{ marginBottom: '16px' }}>
+                <AlertHistoryPanel alerts={alerts} />
+              </div>
+            )}
             <AgentRoutingPanel routingHistory={routingHistory} />
             {approvalHistory.length > 0 && (
               <div style={{ marginTop: '16px' }}>
@@ -265,6 +340,11 @@ export function Dashboard() {
             <div style={{ marginTop: '16px' }}>
               <MemoryPanel />
             </div>
+            {traces.length > 0 && (
+              <div style={{ marginTop: '16px' }}>
+                <TraceDashboard traces={traces} />
+              </div>
+            )}
             <TelemetryPanel
               connected={connected}
               liveSpans={liveSpans}

@@ -3,17 +3,22 @@ using Microsoft.Extensions.AI;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Agents.Tools;
+using RetailPulse.Api.Alerts;
 using RetailPulse.Api.Approval;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Tools;
+using RetailPulse.Api.Tracing;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Alerts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
+using RetailPulse.Contracts.Tracing;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
+using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,7 +32,7 @@ builder.Services.AddSingleton<ITenantProvider>(tenantProvider);
 
 // Add our custom ActivitySource to the OTel pipeline
 builder.Services.AddOpenTelemetry()
-    .WithTracing(tracing => tracing.AddSource("RetailPulse.Agent"));
+    .WithTracing(tracing => tracing.AddSource("RetailPulse.Agent").AddSource("RetailPulse.Alerts"));
 
 // SignalR for real-time telemetry
 builder.Services.AddSignalR()
@@ -176,6 +181,17 @@ builder.Services.AddScoped<ApprovalTool>(sp =>
 // Conversation memory — SQLite-backed, per-user, with configurable TTL
 var memoryDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "memory.db");
 builder.Services.AddConversationMemory(memoryDbPath);
+
+// Proactive alerts — background anomaly detection with SQLite persistence
+var alertsDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "alerts.db");
+builder.Services.AddProactiveAlerts(alertsDbPath);
+
+// Distributed tracing — in-memory ring buffer with SignalR push for real-time trace events
+builder.Services.AddSingleton<InMemoryTraceCollector>(sp =>
+    new InMemoryTraceCollector(
+        sp.GetRequiredService<IHubContext<TelemetryHub>>(),
+        sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddSingleton<ITraceCollector>(sp => sp.GetRequiredService<InMemoryTraceCollector>());
 
 // Register IChatClient — Azure OpenAI via APIM AI Gateway.
 // In Production we fail fast if the API key is missing rather than silently
@@ -350,8 +366,8 @@ if (app.Environment.IsDevelopment())
 // SignalR hub
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
-// Chat endpoint — routes through multi-agent router with conversation memory
-app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, ILogger<Program> logger, CancellationToken ct) =>
+// Chat endpoint — routes through multi-agent router with conversation memory and distributed tracing
+app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, ILogger<Program> logger, CancellationToken ct) =>
 {
     if (request is null || string.IsNullOrWhiteSpace(request.Message))
     {
@@ -360,14 +376,43 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
 
     try
     {
+        var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
         var userId = request.User?.ObjectId ?? "anonymous";
 
-        // Inject memory context into the request before routing
-        var memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+        // Start root trace span: chat_request
+        using var chatActivity = AgentTelemetry.StartChatRequest(sessionId, request.Message);
+        var traceId = chatActivity?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+        var traceStartTime = DateTimeOffset.UtcNow;
+
+        // Memory recall with tracing
+        string? memoryContext = null;
+        using (var memoryRecallActivity = AgentTelemetry.StartMemoryRecall(userId))
+        {
+            var memoryStart = DateTimeOffset.UtcNow;
+            memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+            var memoryEnd = DateTimeOffset.UtcNow;
+            var memoryDurationMs = (memoryEnd - memoryStart).TotalMilliseconds;
+
+            memoryRecallActivity?.SetTag("memory.entries_recalled", memoryContext is not null ? "context_found" : "none");
+
+            traceCollector.CaptureSpan(new TraceSpan(
+                SpanId: Guid.NewGuid().ToString("N")[..16],
+                TraceId: traceId,
+                ParentSpanId: chatActivity?.SpanId.ToString(),
+                OperationName: "memory.recall",
+                StartTime: memoryStart,
+                EndTime: memoryEnd,
+                DurationMs: memoryDurationMs,
+                Tags: new Dictionary<string, string>
+                {
+                    ["memory.user_id"] = userId,
+                    ["memory.entries_recalled"] = memoryContext is not null ? "context_found" : "none"
+                }));
+        }
+
         var enrichedRequest = request;
         if (memoryContext is not null)
         {
-            // Prepend memory context to conversation history so agents see it
             var historyWithMemory = new List<ChatHistoryMessage>
             {
                 new("system", memoryContext)
@@ -378,38 +423,162 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
             enrichedRequest = request with { History = historyWithMemory };
         }
 
-        // Route the message to the appropriate specialist
-        var decision = await router.RouteAsync(
-            enrichedRequest.Message,
-            enrichedRequest.History,
-            enrichedRequest.User,
-            tenantId: null,
-            ct);
-
-        // Find the specialist by key
-        var specialist = specialists.FirstOrDefault(s =>
-            string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase));
-
-        if (specialist is null)
+        // Router classification with tracing
+        RoutingDecision decision;
         {
-            logger.LogWarning("No specialist found for key '{AgentKey}' — using General agent", decision.AgentKey);
-            specialist = specialists.First(s => s.Key == "general");
+            var classifyStart = DateTimeOffset.UtcNow;
+            using var classifyActivity = AgentTelemetry.StartRouterClassify(enrichedRequest.Message);
+
+            decision = await router.RouteAsync(
+                enrichedRequest.Message,
+                enrichedRequest.History,
+                enrichedRequest.User,
+                tenantId: null,
+                ct);
+
+            var classifyEnd = DateTimeOffset.UtcNow;
+            classifyActivity?.SetTag("router.intent", decision.Intent);
+            classifyActivity?.SetTag("router.confidence", decision.Confidence);
+
+            traceCollector.CaptureSpan(new TraceSpan(
+                SpanId: Guid.NewGuid().ToString("N")[..16],
+                TraceId: traceId,
+                ParentSpanId: chatActivity?.SpanId.ToString(),
+                OperationName: "router.classify",
+                StartTime: classifyStart,
+                EndTime: classifyEnd,
+                DurationMs: (classifyEnd - classifyStart).TotalMilliseconds,
+                Tags: new Dictionary<string, string>
+                {
+                    ["router.intent"] = decision.Intent,
+                    ["router.confidence"] = decision.Confidence.ToString("F2")
+                }));
+        }
+
+        // Agent selection with tracing
+        ISpecialistAgent? specialist;
+        {
+            var selectStart = DateTimeOffset.UtcNow;
+            using var selectActivity = AgentTelemetry.StartRouterSelectAgent();
+
+            specialist = specialists.FirstOrDefault(s =>
+                string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase));
+
+            if (specialist is null)
+            {
+                logger.LogWarning("No specialist found for key '{AgentKey}' — using General agent", decision.AgentKey);
+                specialist = specialists.First(s => s.Key == "general");
+            }
+
+            var selectEnd = DateTimeOffset.UtcNow;
+            selectActivity?.SetTag("router.selected_agent", specialist.Key);
+            selectActivity?.SetTag("router.selected_agent_name", specialist.DisplayName);
+
+            traceCollector.CaptureSpan(new TraceSpan(
+                SpanId: Guid.NewGuid().ToString("N")[..16],
+                TraceId: traceId,
+                ParentSpanId: chatActivity?.SpanId.ToString(),
+                OperationName: "router.select_agent",
+                StartTime: selectStart,
+                EndTime: selectEnd,
+                DurationMs: (selectEnd - selectStart).TotalMilliseconds,
+                Tags: new Dictionary<string, string>
+                {
+                    ["router.selected_agent"] = specialist.Key,
+                    ["router.selected_agent_name"] = specialist.DisplayName
+                }));
         }
 
         logger.LogInformation(
-            "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}",
-            specialist.Key, specialist.DisplayName, decision.Intent, decision.Confidence);
+            "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}, traceId: {TraceId}",
+            specialist.Key, specialist.DisplayName, decision.Intent, decision.Confidence, traceId);
 
-        var response = await specialist.HandleAsync(enrichedRequest, ct);
+        // Agent execution with tracing
+        ChatResponse response;
+        {
+            var agentStart = DateTimeOffset.UtcNow;
+            using var agentActivity = AgentTelemetry.StartAgentProcess(specialist.Key);
 
-        // Extract and store memory after the response (fire-and-forget style, non-blocking)
+            response = await specialist.HandleAsync(enrichedRequest, ct);
+
+            var agentEnd = DateTimeOffset.UtcNow;
+            var toolsCalledCount = response.Spans?.Count(s => s.Type == "tool_call") ?? 0;
+            var inputTokens = response.TokenUsage?.InputTokens ?? 0;
+            var outputTokens = response.TokenUsage?.OutputTokens ?? 0;
+
+            agentActivity?.SetTag("agent.name", specialist.Key);
+            agentActivity?.SetTag("agent.tools_called_count", toolsCalledCount);
+            agentActivity?.SetTag("agent.token_input", inputTokens);
+            agentActivity?.SetTag("agent.token_output", outputTokens);
+
+            traceCollector.CaptureSpan(new TraceSpan(
+                SpanId: Guid.NewGuid().ToString("N")[..16],
+                TraceId: traceId,
+                ParentSpanId: chatActivity?.SpanId.ToString(),
+                OperationName: $"agent.{specialist.Key}.process",
+                StartTime: agentStart,
+                EndTime: agentEnd,
+                DurationMs: (agentEnd - agentStart).TotalMilliseconds,
+                InputTokens: inputTokens,
+                OutputTokens: outputTokens,
+                Tags: new Dictionary<string, string>
+                {
+                    ["agent.name"] = specialist.Key,
+                    ["agent.tools_called_count"] = toolsCalledCount.ToString(),
+                    ["agent.token_input"] = inputTokens.ToString(),
+                    ["agent.token_output"] = outputTokens.ToString()
+                }));
+        }
+
+        // Record individual tool spans from agent response
+        if (response.Spans is { Count: > 0 })
+        {
+            foreach (var span in response.Spans.Where(s => s.Type is "tool_call" or "tool_result"))
+            {
+                traceCollector.CaptureSpan(new TraceSpan(
+                    SpanId: Guid.NewGuid().ToString("N")[..16],
+                    TraceId: traceId,
+                    ParentSpanId: chatActivity?.SpanId.ToString(),
+                    OperationName: $"tool.{span.Name}",
+                    StartTime: span.Timestamp,
+                    EndTime: span.Timestamp.AddMilliseconds(span.DurationMs),
+                    DurationMs: span.DurationMs,
+                    Tags: new Dictionary<string, string>
+                    {
+                        ["tool.name"] = span.Name,
+                        ["tool.duration_ms"] = span.DurationMs.ToString("F0"),
+                        ["tool.result_size"] = span.Detail?.Length > 0 ? $"{span.Detail.Length} chars" : ""
+                    }));
+            }
+        }
+
+        // Memory store with tracing (fire-and-forget)
         if (decision.Intent != AgentIntent.MemoryManagement)
         {
+            var capturedTraceId = traceId;
+            var capturedParentSpanId = chatActivity?.SpanId.ToString();
             _ = Task.Run(async () =>
             {
                 try
                 {
+                    var storeStart = DateTimeOffset.UtcNow;
+                    using var memoryStoreActivity = AgentTelemetry.StartMemoryStore(userId);
                     await memoryMiddleware.ExtractAndStoreAsync(userId, request.Message, response.Reply, CancellationToken.None);
+                    var storeEnd = DateTimeOffset.UtcNow;
+
+                    traceCollector.CaptureSpan(new TraceSpan(
+                        SpanId: Guid.NewGuid().ToString("N")[..16],
+                        TraceId: capturedTraceId,
+                        ParentSpanId: capturedParentSpanId,
+                        OperationName: "memory.store",
+                        StartTime: storeStart,
+                        EndTime: storeEnd,
+                        DurationMs: (storeEnd - storeStart).TotalMilliseconds,
+                        Tags: new Dictionary<string, string>
+                        {
+                            ["memory.user_id"] = userId,
+                            ["memory.entries_stored"] = "extracted"
+                        }));
                 }
                 catch (Exception ex)
                 {
@@ -417,6 +586,12 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
                 }
             }, CancellationToken.None);
         }
+
+        // Notify trace completion via SignalR
+        _ = traceCollector.NotifyTraceCompletedAsync(traceId);
+
+        chatActivity?.SetTag("response.length", response.Reply.Length);
+        chatActivity?.SetTag("trace.id", traceId);
 
         return Results.Ok(response);
     }
@@ -446,6 +621,52 @@ app.MapGet("/api/info", (IEnumerable<ISpecialistAgent> specialists) => Results.O
     Specialists = specialists.Select(s => new { s.Key, s.DisplayName }).ToList()
 }))
 .WithName("Info");
+
+// ── Alert endpoints ──────────────────────────────────────────────────────
+
+app.MapGet("/api/alerts/active", async (IAlertService alertService, CancellationToken ct) =>
+{
+    var alerts = await alertService.GetActiveAlertsAsync(ct);
+    return Results.Ok(alerts);
+})
+.WithName("GetActiveAlerts");
+
+app.MapGet("/api/alerts/history", async (IAlertService alertService, HttpContext http, CancellationToken ct) =>
+{
+    var userId = http.Request.Query["userId"].FirstOrDefault() ?? "default";
+    var limitStr = http.Request.Query["limit"].FirstOrDefault();
+    var limit = int.TryParse(limitStr, out var l) ? l : 50;
+
+    var alerts = await alertService.GetHistoryAsync(userId, limit, ct);
+    return Results.Ok(alerts);
+})
+.WithName("GetAlertHistory");
+
+app.MapPost("/api/alerts/{alertId}/snooze", async (string alertId, AlertSnoozeDto body, IAlertService alertService, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.UserId))
+        return Results.BadRequest(new { error = "userId is required." });
+
+    var duration = body.DurationHours switch
+    {
+        <= 0 => TimeSpan.FromHours(1),
+        _ => TimeSpan.FromHours(body.DurationHours)
+    };
+
+    await alertService.SnoozeAsync(body.AlertType ?? alertId, body.UserId, duration, ct);
+    return Results.Ok(new { alertId, snoozedFor = duration.ToString(), userId = body.UserId });
+})
+.WithName("SnoozeAlert");
+
+app.MapPost("/api/alerts/{alertId}/dismiss", async (string alertId, AlertDismissDto body, IAlertService alertService, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.UserId))
+        return Results.BadRequest(new { error = "userId is required." });
+
+    await alertService.DismissAsync(alertId, body.UserId, ct);
+    return Results.Ok(new { alertId, dismissed = true, userId = body.UserId });
+})
+.WithName("DismissAlert");
 
 // ── Approval endpoints ───────────────────────────────────────────────────
 
@@ -543,6 +764,33 @@ app.MapGet("/api/approvals/history", async (IApprovalGate gate, CancellationToke
 })
 .WithName("GetApprovalHistory");
 
+// ── Trace endpoints ──────────────────────────────────────────────────────
+
+app.MapGet("/api/traces/recent", (ITraceCollector traceCollector, int? count) =>
+{
+    var traces = traceCollector.GetRecentTraces(count ?? 20);
+    return Results.Ok(traces);
+})
+.WithName("GetRecentTraces");
+
+app.MapGet("/api/traces/{traceId}/summary", (string traceId, ITraceCollector traceCollector) =>
+{
+    var summary = traceCollector.GetStructuredSummary(traceId);
+    return summary is not null
+        ? Results.Ok(summary)
+        : Results.NotFound(new { error = $"Trace '{traceId}' not found." });
+})
+.WithName("GetTraceSummary");
+
+app.MapGet("/api/traces/{traceId}/spans", (string traceId, ITraceCollector traceCollector) =>
+{
+    var spans = traceCollector.GetSpans(traceId);
+    return spans is not null
+        ? Results.Ok(spans)
+        : Results.NotFound(new { error = $"Trace '{traceId}' not found." });
+})
+.WithName("GetTraceSpans");
+
 app.Run();
 
 // ── DTOs ─────────────────────────────────────────────────────────────────
@@ -551,3 +799,13 @@ app.Run();
 /// Request body for the POST /api/approvals/{requestId}/respond endpoint.
 /// </summary>
 record ApprovalResponseDto(string Decision, string? Comment = null);
+
+/// <summary>
+/// Request body for the POST /api/alerts/{alertId}/snooze endpoint.
+/// </summary>
+record AlertSnoozeDto(string UserId, string? AlertType = null, double DurationHours = 1);
+
+/// <summary>
+/// Request body for the POST /api/alerts/{alertId}/dismiss endpoint.
+/// </summary>
+record AlertDismissDto(string UserId);

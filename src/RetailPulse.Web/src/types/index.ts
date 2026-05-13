@@ -137,3 +137,52 @@ export interface ApprovalResponse {
   decision: 'approved' | 'rejected' | 'modified';
   comment?: string;
 }
+
+// --- Alert types (Sprint 1.5) ---
+
+export type AlertSeverity = 'high' | 'medium' | 'low';
+export type AlertStatus = 'active' | 'snoozed' | 'dismissed';
+export type SnoozeDuration = '1h' | '4h' | '24h' | '1wk';
+
+export interface Alert {
+  id: string;
+  title: string;
+  severity: AlertSeverity;
+  brand?: string;
+  region?: string;
+  changePercent?: number;
+  description: string;
+  recommendedAction: string;
+  firedAt: string;
+  status: AlertStatus;
+  snoozedUntil?: string;
+}
+
+// --- Trace types (Sprint 1.6) ---
+
+export type TraceSpanType = 'routing' | 'agent' | 'tool' | 'memory' | 'approval';
+
+export interface TraceSpan {
+  id: string;
+  parentId?: string;
+  name: string;
+  type: TraceSpanType;
+  startTime: string;
+  durationMs: number;
+  attributes?: Record<string, string>;
+  inputTokens?: number;
+  outputTokens?: number;
+  estimatedCostUsd?: number;
+}
+
+export interface Trace {
+  traceId: string;
+  intent: string;
+  agentName: string;
+  startTime: string;
+  totalDurationMs: number;
+  totalTokens: number;
+  totalCostUsd: number;
+  spans: TraceSpan[];
+  status: 'in_progress' | 'completed' | 'error';
+}

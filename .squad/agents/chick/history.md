@@ -123,3 +123,41 @@ Tests (28 new):
 - `MemoryIndicator.test.tsx` — 4 tests: chip render, emoji, null-on-empty, accessible label.
 
 **Test Status:** 60 frontend tests passing (8 files), build clean
+
+## Session Work — 2026-05-13 Sprint 1.5+1.6 Alert Cards + Trace Visualization (Complete)
+
+**Outcome:** ✅ SUCCESS — Alert UI + Trace Visualization built, 87 frontend tests passing (27 new), build clean
+
+**Deliverables:**
+
+Sprint 1.5 — Alert UI:
+- `src/components/alerts/AlertCard.tsx` — Severity-coded alert card (🔴 high/red, 🟡 medium/amber, 🟢 low/green). Shows title, brand/region context, % change, recommended action. Actions: View Details (expand), Snooze (1h/4h/24h/1wk dropdown), Dismiss. Auto-dismiss after 30s with progress bar if not interacted. Slide-in animation, pulse on severity badge.
+- `src/components/alerts/AlertFeed.tsx` — Real-time alert stream. Groups by severity (high→medium→low), badge count, Clear All button. Empty state when no active alerts.
+- `src/components/alerts/AlertHistory.tsx` — Full history table: timestamp, severity, title, brand, region, status. Searchable, filterable by severity. Shows snooze status.
+- `src/components/alerts/index.ts` — Barrel export.
+
+Sprint 1.6 — Trace Visualization:
+- `src/components/traces/TraceTimeline.tsx` — Chrome DevTools-inspired waterfall chart. Color-coded bars (routing=indigo, agent=purple, tool=blue, memory=green, approval=amber). Hierarchical nesting via parent/child spans. Shows duration, token counts per step, total cost in footer. Legend bar, responsive layout.
+- `src/components/traces/TraceCard.tsx` — Compact "How I got this answer" summary: "⚡ 1.8s · 3 tools · $0.003". Collapsed by default. Expands to show step-by-step breakdown + full TraceTimeline waterfall.
+- `src/components/traces/TraceDashboard.tsx` — Overview panel: last 20 traces, aggregate stats (avg duration, avg cost, unique tools), tool usage distribution. Click to expand full TraceTimeline.
+- `src/components/traces/index.ts` — Barrel export.
+
+Integration:
+- `src/types/index.ts` — Added `Alert`, `AlertSeverity`, `AlertStatus`, `SnoozeDuration`, `TraceSpan`, `TraceSpanType`, `Trace` types.
+- `Dashboard.tsx` — SignalR listeners for `alert_fired`, `trace_started`, `span_completed`, `trace_completed`. Alert state management (dismiss, snooze, clear all). AlertFeed + AlertHistory + TraceDashboard rendered in telemetry drawer.
+
+Tests (27 new):
+- `AlertCard.test.tsx` — 11 tests: render, severity badges, context tags, change percent, expand/collapse, dismiss, snooze menu, ARIA, auto-dismiss bar.
+- `TraceTimeline.test.tsx` — 10 tests: render spans, header, waterfall bars, span names, cost footer, legend, empty state, span count, token counts.
+- `TraceCard.test.tsx` — 6 tests: compact summary, collapsed default, expand/collapse, step breakdown, multi-tool count, aria-expanded.
+
+**Test Status:** 87 frontend tests passing (11 files), build clean
+
+## Learnings
+
+- 2026-05-13T12:24:49-04:00 — Alert components live in `src/components/alerts/` — AlertCard (per-alert notification), AlertFeed (grouped stream), AlertHistory (filterable table). All export from barrel `index.ts`.
+- 2026-05-13T12:24:49-04:00 — Trace visualization components live in `src/components/traces/` — TraceTimeline (waterfall chart), TraceCard (compact collapsible summary), TraceDashboard (overview panel). All export from barrel `index.ts`.
+- 2026-05-13T12:24:49-04:00 — Griffel (Fluent UI's CSS-in-JS) does not support shorthand `borderColor` in `makeStyles` — must use `borderTopColor`, `borderRightColor`, `borderBottomColor`, `borderLeftColor` individually.
+- 2026-05-13T12:24:49-04:00 — SignalR alert/trace events: `alert_fired` (new alert), `trace_started` (begin trace), `span_completed` (progressive span), `trace_completed` (finalize). All registered on the existing telemetry hub connection in Dashboard.
+- 2026-05-13T12:24:49-04:00 — `TraceSpan` type uses `TraceSpanType` union: routing/agent/tool/memory/approval — each with its own color in the waterfall. This is separate from `AgentSpan.type` which maps to the existing telemetry system.
+
