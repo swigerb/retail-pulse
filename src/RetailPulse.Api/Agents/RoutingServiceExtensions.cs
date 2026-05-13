@@ -28,7 +28,9 @@ public static class RoutingServiceExtensions
         AgentDefinition? promoPlanningDef = null,
         Func<IServiceProvider, IEnumerable<AITool>>? promoToolsFactory = null,
         AgentDefinition? competitiveIntelDef = null,
-        Func<IServiceProvider, IEnumerable<AITool>>? competitiveToolsFactory = null)
+        Func<IServiceProvider, IEnumerable<AITool>>? competitiveToolsFactory = null,
+        AgentDefinition? supplyChainDef = null,
+        Func<IServiceProvider, IEnumerable<AITool>>? supplyToolsFactory = null)
     {
         // Register GeneralAgent as ISpecialistAgent
         services.AddScoped<GeneralAgent>(sp =>
@@ -91,6 +93,22 @@ public static class RoutingServiceExtensions
                 return new CompetitiveIntelAgent(chatClient, competitiveIntelDef, hubContext, tools, logger, configuration, alertService);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<CompetitiveIntelAgent>());
+        }
+
+        // Register SupplyChainAgent as ISpecialistAgent
+        if (supplyChainDef is not null && supplyToolsFactory is not null)
+        {
+            services.AddScoped<SupplyChainAgent>(sp =>
+            {
+                var chatClient = sp.GetRequiredService<IChatClient>();
+                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var tools = supplyToolsFactory(sp);
+                var logger = sp.GetRequiredService<ILogger<SupplyChainAgent>>();
+                var configuration = sp.GetRequiredService<IConfiguration>();
+
+                return new SupplyChainAgent(chatClient, supplyChainDef, hubContext, tools, logger, configuration);
+            });
+            services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<SupplyChainAgent>());
         }
 
         // Register MemoryManagementAgent as ISpecialistAgent
