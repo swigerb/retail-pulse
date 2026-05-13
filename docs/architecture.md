@@ -202,6 +202,225 @@ tool added to the agent must log first, then fall back.
 
 ---
 
+## Multi-Agent Router Architecture
+
+Retail Pulse uses a three-layer multi-agent system: a **Router** classifies user intent, **Specialist Agents** handle domain-specific queries, and an **Escalation Orchestrator** coordinates cross-domain analysis.
+
+### Router → Specialist Dispatch Flow
+
+```
+User Message → GuardrailsMiddleware (input filter)
+  → Cache Check (SHA256 key of normalized query)
+  → ConversationMemoryMiddleware (inject prior context)
+  → RetailOpsRouter (LLM classification, temp 0.1)
+      ├── confidence ≥ 0.6 → Specialist Agent (domain-specific tools + prompt)
+      └── confidence < 0.6 → GeneralAgent (all 7 original tools, fallback)
+  → Response Assembly (charts, telemetry, cost tracking)
+  → GuardrailsMiddleware (output PII redaction)
+  → Cache Store (deterministic queries only)
+  → Return
+```
+
+The `RetailOpsRouter` uses a dedicated low-temperature classification prompt (`agents.router` in `prompts.yaml`) that returns JSON with `intent`, `confidence`, and `reasoning` fields. Intent strings use slash-separated format (e.g., `demand/forecasting`) for future sub-categorization.
+
+### Specialist Agent Registry
+
+| Agent Key | Display Name | Intents | Temperature | Tools |
+|-----------|-------------|---------|-------------|-------|
+| `demand-forecasting` | Demand Forecast | `demand/forecasting` | 0.3 | GetHistoricalDemand, GenerateForecast, GetSeasonalityFactors, IdentifyDemandRisks |
+| `promo-planning` | Promo Planning | `promo/planning` | 0.3 | GetPromoHistory, CalculateLift, EvaluateTiming, EstimateROI |
+| `competitive-intel` | Competitive Intel | `competitive/intelligence` | 0.4 | GetCompetitorPricing, GetMarketShare, DetectThreats, GetCompetitiveLandscape |
+| `supply-chain` | Supply Chain | `supply/analysis` | 0.3 | GetShipmentStats + supply-specific tools |
+| `store-ops` | Store Operations | `store/operations` | 0.3 | GetStorePerformance, PredictStockout |
+| `planogram` | Planogram | `planogram/optimization` | 0.3 | GetShelfLayout, OptimizePlanogram |
+| `margin` | Margin Analysis | `margin/analysis` | 0.3 | GetMarginByBrand, GetMarginDrivers, GetMarginTrend, DetectMarginRisks |
+| `general` | General | All unmatched intents | 0.7 | All 7 original tools (depletions, shipments, sentiment, etc.) |
+
+All specialists implement `ISpecialistAgent` (in `RetailPulse.Contracts.Routing`) and register via DI through the `AddAgentRouting()` extension method. Adding a new specialist requires one class implementing the interface and one DI registration line.
+
+### Registration Pattern
+
+```csharp
+// In RoutingServiceExtensions.cs
+services.AddScoped<ISpecialistAgent>(sp => new DemandForecastAgent(...));
+services.AddScoped<ISpecialistAgent>(sp => new PromoPlanningAgent(...));
+// ... each specialist auto-discovered by IEnumerable<ISpecialistAgent>
+```
+
+The router discovers all specialists via `IEnumerable<ISpecialistAgent>` — no manual mapping required. The `GeneralAgent` catches all intent categories as the fallback handler.
+
+---
+
+## Escalation Chain (L1 → L2 → L3)
+
+When a query exceeds what a single specialist can handle, the `EscalationOrchestrator` coordinates multi-agent resolution:
+
+```
+User Query → Router → L1 (Single Specialist)
+  ├── Resolved within 8s → Return response
+  └── Timeout or complexity flag → L2 Escalation
+      ├── L2: Fan-out to multiple specialists (15s timeout)
+      │   ├── Specialist A (parallel)
+      │   ├── Specialist B (parallel)
+      │   └── Specialist C (parallel)
+      │   → Synthesize cross-domain response
+      └── L2 unresolved → L3: Flag for human review
+```
+
+| Level | Behavior | Timeout | When |
+|-------|----------|---------|------|
+| **L1** | Single specialist handles the query | 8 seconds | Default for all routed queries |
+| **L2** | Multiple specialists fan out in parallel | 15 seconds | When L1 times out, or query explicitly spans domains |
+| **L3** | Flags for human review | N/A | When L2 cannot reach confident resolution |
+
+The escalation endpoint is `POST /api/escalate`. Each level's activity is traced as OTel spans with escalation metadata.
+
+---
+
+## Portfolio Health Council (Consensus Pattern)
+
+The council is a structured multi-agent consensus mechanism for brand-level assessments:
+
+```
+Council Request (brand)
+  → Fan-out to N specialists (Demand, Supply, Competitive, Margin)
+  → Each specialist independently assesses the brand
+  → Assessments compared: agreements + disagreements surfaced
+  → Consensus synthesized → Executive brief generated via LLM
+  → Collaborative Adaptive Card auto-created
+      → Initial votes seeded from agent assessments
+      → Team members vote / comment / escalate
+```
+
+The Scorecard Orchestrator (`ScorecardOrchestrator`) drives portfolio-wide scoring across five weighted dimensions:
+
+| Dimension | Weight | Source Agent |
+|-----------|--------|-------------|
+| Demand | 0.25 | DemandForecastAgent |
+| Competitive | 0.20 | CompetitiveIntelAgent |
+| Supply | 0.20 | Supply Chain |
+| Store Execution | 0.20 | StoreOpsAgent |
+| Margin | 0.15 | MarginAgent |
+
+Output types: `BrandScore` (per-brand, per-dimension scores) and `PortfolioScorecard` (ranked composite).
+
+---
+
+## Memory Middleware Pipeline
+
+Conversation memory enables cross-session continuity scoped per user:
+
+```
+Incoming Request
+  → ConversationMemoryMiddleware.BuildMemoryContextAsync()
+      → Query SqliteConversationMemory for user's relevant memories
+      → Keyword-based relevance scoring with phrase matching
+      → Inject ~500 token memory context as prepended history message
+  → Router → Agent → Response
+  → ConversationMemoryMiddleware.ExtractAndStoreAsync() (fire-and-forget)
+      → MemoryExtractionService (LLM-based)
+      → Extract: ConversationSummary, UserPreference, EntityMention
+      → Store to SqliteConversationMemory (WAL mode, per-user scoping)
+```
+
+| Memory Type | TTL | Example |
+|-------------|-----|---------|
+| `ConversationSummary` | 30 days | "Discussed Sierra Gold Tequila Northeast pipeline concerns" |
+| `UserPreference` | 90 days | "Focuses on premium Spirits, especially tequila positioning" |
+| `EntityMention` | 90 days | "Sierra Gold Tequila, Ridgeline Bourbon, Northeast region" |
+
+The `MemoryManagementAgent` handles privacy: "forget everything" wipes all user data (GDPR-ready). Memory DB is at `data/memory.db`.
+
+---
+
+## Guardrails, Cache & Streaming Pipeline
+
+Enterprise middleware runs on every request in a defined pipeline order:
+
+```
+Request In
+  │
+  ├─ 1. GuardrailsMiddleware (INPUT)
+  │     ├── Jailbreak detection (compiled regex via GuardrailPatterns)
+  │     ├── SQL injection detection (substring matching)
+  │     ├── Input length gate (GuardrailsConfig.MaxInputLength)
+  │     └── PII detection logging
+  │
+  ├─ 2. Cache Check
+  │     ├── CacheHelpers.NormalizeQuery() — lowercase, trim, collapse whitespace
+  │     ├── CacheHelpers.BuildCacheKey() — SHA256 of normalized query
+  │     ├── CacheHelpers.IsCacheable() — rejects forecasts/recommendations/opinions
+  │     └── Hit? → Return cached response (skip routing + agent entirely)
+  │
+  ├─ 3. Memory Injection → Router → Agent → Response
+  │
+  ├─ 4. Cache Store (deterministic queries only)
+  │
+  ├─ 5. GuardrailsMiddleware (OUTPUT)
+  │     └── PII redaction: [REDACTED:EMAIL], [REDACTED:SSN], etc.
+  │
+  └─ 6. Return (or stream via SignalR)
+```
+
+### Streaming
+
+The `/api/chat/stream` endpoint pushes tokens via SignalR as they are generated:
+
+- `StreamingMiddleware.StreamResponseAsync()` — real IChatClient streaming
+- `StreamingMiddleware.StreamResponseFallbackAsync()` — splits pre-computed responses on word boundaries for simulated streaming UX
+- Clients subscribe to `stream:{sessionId}` SignalR group for progressive token delivery
+
+### Caching
+
+- **Key generation:** SHA256 of `pre-route|normalized_query` — same key regardless of which agent handles it
+- **Smart exclusion:** Forecasts, recommendations, and opinions are never cached (`IsCacheable()` check)
+- **LRU eviction** with configurable TTL and background cleanup
+
+### Observability Suite
+
+| Component | Storage | Endpoint |
+|-----------|---------|----------|
+| **Cost Tracker** | ConcurrentBag (in-memory) | `GET /api/observability/costs`, `/costs/agents`, `/costs/trend` |
+| **Audit Log** | ConcurrentQueue ring buffer (5000 max) | `GET /api/observability/audit`, `/audit/stats` |
+| **Conversation Export** | ConcurrentDictionary (in-memory) | `GET /api/observability/export/sessions`, `POST /api/observability/export/{id}` |
+
+Model pricing table: gpt-5.4-mini ($0.15/$0.60 per 1M tokens), gpt-4o ($2.50/$10.00), claude-sonnet ($3.00/$15.00).
+
+### Collaborative Adaptive Cards
+
+Cards enable team-based decision-making on AI-generated insights:
+
+- **State machine:** Active → Voting → Decided → Archived
+- **Actions:** Vote, Comment, Drill-down, Escalate
+- **Escalation rule:** Split vote (50/50) blocks auto-decide — requires explicit resolution
+- **SignalR events:** `card:created`, `card:action`, `card:lifecycle` for real-time sync
+- **Council integration:** Portfolio Health Council verdicts auto-create Voting cards with agent-seeded initial votes
+
+Endpoints: `POST /api/cards`, `GET /api/cards`, `GET /api/cards/{id}`, `POST /api/cards/{id}/action`, `POST /api/cards/{id}/archive`.
+
+---
+
+## Decision Explainability
+
+The `ExplainabilityService` captures the full reasoning chain during complex operations (scorecard generation, escalation, council consensus):
+
+```
+Operation Start → ExplainabilityService.StartTrace(traceId)
+  → Each tool call recorded as ExplanationStep (tool, input, output)
+  → Each routing decision recorded (agent, confidence, reasoning)
+  → Each agent response recorded (specialist key, assessment)
+  → Operation Complete → BuildExplanation(traceId)
+      → Human-readable explanation with:
+         ├── Data sources consulted
+         ├── Tool calls and results
+         ├── Reasoning chain
+         └── Weighted scoring breakdown (for scorecard)
+```
+
+Endpoint: `GET /api/explain/{traceId}` — returns `ExplanationChain` with ordered `ExplanationStep` records.
+
+---
+
 ## Deployment Topology
 
 ### Local Development

@@ -341,3 +341,16 @@
 - `GET /api/explain/{traceId}` — decision explainability
 
 **Test Status:** All 1264 tests pass (1154 original + 110 new Phase 4 tests, no regressions)
+
+### 2026-05-13 — Documentation Update: Demo Walkthrough + Architecture (Complete)
+
+**Architecture Decisions:**
+- Demo walkthrough extended with Acts 6–10 covering multi-agent routing, demand forecasting, promo planning/approval gates, competitive intel/threat detection/escalation, portfolio scorecard/explainability/council consensus, and enterprise features (guardrails, streaming, caching, memory, observability).
+- Architecture doc extended with 7 new sections: Multi-Agent Router Architecture, Escalation Chain, Portfolio Health Council, Memory Middleware Pipeline, Guardrails/Cache/Streaming Pipeline, Collaborative Adaptive Cards, Decision Explainability.
+- All existing content preserved — new sections are additive only.
+- Demo walkthrough total time updated from ~12 min to ~25 min with audience-specific guidance (Acts 1–5 for data teams, Acts 6–10 for enterprise/AI governance).
+- Added 15 new "Impressive Queries to Have Ready" covering specialist agents, escalation, scorecard, guardrails, and memory.
+
+**Key File Paths:**
+- `docs/demo-walkthrough.md` — Acts 6–10 added after Act 5, new queries section
+- `docs/architecture.md` — New sections between Resilience Patterns and Deployment Topology
