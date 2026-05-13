@@ -24,7 +24,9 @@ public static class RoutingServiceExtensions
         bool foundryEnabled,
         Func<IServiceProvider, IEnumerable<AITool>> toolsFactory,
         AgentDefinition? demandForecastDef = null,
-        Func<IServiceProvider, IEnumerable<AITool>>? demandToolsFactory = null)
+        Func<IServiceProvider, IEnumerable<AITool>>? demandToolsFactory = null,
+        AgentDefinition? promoPlanningDef = null,
+        Func<IServiceProvider, IEnumerable<AITool>>? promoToolsFactory = null)
     {
         // Register GeneralAgent as ISpecialistAgent
         services.AddScoped<GeneralAgent>(sp =>
@@ -53,6 +55,23 @@ public static class RoutingServiceExtensions
                 return new DemandForecastAgent(chatClient, demandForecastDef, hubContext, tools, logger, configuration);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<DemandForecastAgent>());
+        }
+
+        // Register PromoPlanningAgent as ISpecialistAgent
+        if (promoPlanningDef is not null && promoToolsFactory is not null)
+        {
+            services.AddScoped<PromoPlanningAgent>(sp =>
+            {
+                var chatClient = sp.GetRequiredService<IChatClient>();
+                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var tools = promoToolsFactory(sp);
+                var logger = sp.GetRequiredService<ILogger<PromoPlanningAgent>>();
+                var configuration = sp.GetRequiredService<IConfiguration>();
+                var approvalGate = sp.GetService<RetailPulse.Contracts.Approval.IApprovalGate>();
+
+                return new PromoPlanningAgent(chatClient, promoPlanningDef, hubContext, tools, logger, configuration, approvalGate);
+            });
+            services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<PromoPlanningAgent>());
         }
 
         // Register MemoryManagementAgent as ISpecialistAgent
