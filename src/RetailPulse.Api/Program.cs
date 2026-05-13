@@ -256,6 +256,36 @@ builder.Services.AddScoped<CompetitiveLandscapeTool>(sp =>
         sp.GetService<ILogger<CompetitiveLandscapeTool>>());
 });
 
+// Supply chain tools
+builder.Services.AddScoped<InventoryLevelsTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new InventoryLevelsTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<InventoryLevelsTool>>());
+});
+builder.Services.AddScoped<SupplyDisruptionsTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new SupplyDisruptionsTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<SupplyDisruptionsTool>>());
+});
+builder.Services.AddScoped<FulfillmentRateTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new FulfillmentRateTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<FulfillmentRateTool>>());
+});
+builder.Services.AddScoped<SupplyHealthTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new SupplyHealthTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<SupplyHealthTool>>());
+});
+
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
 var approvalDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>
@@ -1141,6 +1171,116 @@ app.MapGet("/api/knowledge/stats", async (IKnowledgeBase kb, CancellationToken c
 })
 .WithName("KnowledgeStats");
 
+// ── Council endpoints ────────────────────────────────────────────────────
+
+app.MapPost("/api/council/convene", async (CouncilConveneRequest body, IEnumerable<ISpecialistAgent> specialists, ILogger<Program> logger, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Brand))
+        return Results.BadRequest(new { error = "Field 'brand' is required." });
+
+    // The ConsensusOrchestrator (being built by Kroger) will handle the full council session.
+    // For now, return a structured placeholder that matches the expected CouncilVerdict shape,
+    // gathering data from available specialist agents to demonstrate the data flow.
+    var agentList = specialists.Select(s => new { key = s.Key, name = s.DisplayName, intents = s.SupportedIntents }).ToList();
+
+    logger.LogInformation("Council convened for brand={Brand}, region={Region} with {AgentCount} participants",
+        body.Brand, body.Region ?? "All", agentList.Count);
+
+    return Results.Ok(new
+    {
+        council_id = Guid.NewGuid().ToString("N"),
+        brand = body.Brand,
+        region = body.Region ?? "All Regions",
+        convened_at = DateTimeOffset.UtcNow,
+        status = "awaiting_orchestrator",
+        participants = agentList,
+        message = "ConsensusOrchestrator integration pending — council participants are registered and data layer is ready."
+    });
+})
+.WithName("ConveneCouncil");
+
+app.MapGet("/api/council/agents", (IEnumerable<ISpecialistAgent> specialists) =>
+{
+    var agents = specialists.Select(s => new
+    {
+        key = s.Key,
+        display_name = s.DisplayName,
+        supported_intents = s.SupportedIntents,
+        domain = s.Key switch
+        {
+            "demand-forecasting" => "Demand & forecasting analysis",
+            "promo-planning" => "Promotion planning & ROI estimation",
+            "competitive-intel" => "Competitive intelligence & market share",
+            "supply-chain" => "Supply chain health & disruption tracking",
+            "memory" => "Conversation memory management",
+            "general" => "General retail operations (fallback)",
+            _ => "Unknown domain"
+        }
+    }).ToList();
+
+    return Results.Ok(new { agents, total = agents.Count });
+})
+.WithName("ListCouncilAgents");
+
+app.MapGet("/api/supply/health", async (string brand, IHttpClientFactory httpFactory, CancellationToken ct, string? region = null) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/supply/health?brand={Uri.EscapeDataString(brand)}";
+    if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetSupplyHealth");
+
+app.MapGet("/api/supply/inventory", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? category = null, string? status = null) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = "/api/supply/inventory?";
+    if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
+    if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
+    if (!string.IsNullOrWhiteSpace(category)) url += $"&category={Uri.EscapeDataString(category)}";
+    if (!string.IsNullOrWhiteSpace(status)) url += $"&status={Uri.EscapeDataString(status)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetSupplyInventory");
+
+app.MapGet("/api/supply/disruptions", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? severity = null, bool activeOnly = true) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/supply/disruptions?activeOnly={activeOnly}";
+    if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
+    if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
+    if (!string.IsNullOrWhiteSpace(severity)) url += $"&severity={Uri.EscapeDataString(severity)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetSupplyDisruptions");
+
+app.MapGet("/api/supply/fulfillment", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? period = null, int minPeriods = 6) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/supply/fulfillment?minPeriods={minPeriods}";
+    if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
+    if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
+    if (!string.IsNullOrWhiteSpace(period)) url += $"&period={Uri.EscapeDataString(period)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetSupplyFulfillment");
+
 // ── Message Extension endpoints ──────────────────────────────────────────
 
 app.MapPost("/api/message-extension/query", async (MessageExtensionRequest body, IKnowledgeBase kb, IEnumerable<ISpecialistAgent> specialists, ILogger<Program> logger, CancellationToken ct) =>
@@ -1313,3 +1453,8 @@ record PromoEvaluationRequest(
     string EndDate,
     double? TargetLift = null
 );
+
+/// <summary>
+/// Request body for POST /api/council/convene.
+/// </summary>
+record CouncilConveneRequest(string Brand, string? Region = null);

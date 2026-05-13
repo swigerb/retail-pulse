@@ -188,3 +188,52 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - For files >1000 lines, the Python insertion approach (read full file → find insertion point → write) is more reliable than PowerShell Set-Content or edit tool for large appends
 
 **Validation:** Build clean (0 errors, 4 pre-existing warnings), all 540 tests pass
+
+## Session Work — 2026-05-13 Sprint 2.3 RAG Knowledge Base + Message Extension Backend
+
+### Task: BM25-based RAG system, knowledge base CRUD endpoints, message extension API, sample docs, agent integration
+
+- **Context:** Sprint 2.3 — build a Retrieval-Augmented Generation system so all specialist agents get grounded context from uploaded documents, plus a Teams message extension endpoint for quick lookups.
+- **Deliverables:**
+  - **IKnowledgeBase contract** (Contracts/Rag/IKnowledgeBase.cs): `IngestDocumentAsync`, `SearchAsync`, `ListDocumentsAsync`, `DeleteDocumentAsync` + `SearchResult` and `DocumentInfo` records
+  - **DocumentChunker** (Api/Rag/DocumentChunker.cs): Static utility. Splits by paragraph, merges short paragraphs up to ~500 tokens, creates overlapping chunks with 50-token overlap, preserves section headers for citations
+  - **InMemoryKnowledgeBase** (Api/Rag/InMemoryKnowledgeBase.cs): BM25 scoring (k1=1.2, b=0.75), thread-safe via ConcurrentDictionary, no Azure dependency. Simple whitespace tokenization. Score normalization to 0-1 range, threshold at 0.3
+  - **RagContextProvider** (Api/Rag/RagContextProvider.cs): Searches KB for top-3 relevant chunks, formats as "[Source: {title}, chunk {N}]" reference context injected into agent history
+  - **KnowledgeBaseSeeder** (Api/Rag/KnowledgeBaseSeeder.cs): 4 embedded sample documents (holiday planning, category management, promo effectiveness, competitive response), idempotent via `HasDocument()` check
+  - **Sample docs** (Api/Rag/SampleDocs/): 4 markdown files mirroring the embedded constants
+  - **REST endpoints:** POST /api/knowledge/upload, GET /api/knowledge/documents, DELETE /api/knowledge/documents/{id}, POST /api/knowledge/search, GET /api/knowledge/stats
+  - **Message extension:** POST /api/message-extension/query (searches KB → injects context → routes to GeneralAgent → returns answer with citations), GET /api/message-extension/manifest (Teams app manifest snippet)
+  - **DI wiring:** IKnowledgeBase + InMemoryKnowledgeBase as singleton, RagContextProvider as singleton, auto-seed on startup
+  - **RAG middleware:** Injected between memory enrichment and router classification in /api/chat — transparent to all agents
+
+### Technical Decisions
+- BM25 over embeddings for local dev — zero Azure dependency, works with `demo-key` config
+- RAG context appended as system message in History (not modifying system prompt) — clean separation
+- Citation format: `[Source: {title}, chunk {N}] (relevance: {score})`
+- Message extension returns confidence: high (3+ citations), medium (1-2), low (0)
+
+### Learnings
+- 2026-05-13T13:37:26-04:00 — BM25 scoring with IDF normalization works well for retail domain docs. `Math.Log((N - n + 0.5) / (n + 0.5) + 1.0)` avoids negative IDF for common terms.
+- 2026-05-13T13:37:26-04:00 — Score normalization to 0-1 range (dividing by max score) is essential for consistent threshold filtering across different query lengths.
+- 2026-05-13T13:37:26-04:00 — When test files pre-exist from another agent but target a different API surface, rewrite them completely rather than trying to patch — saves time and avoids subtle mismatches.
+- 2026-05-13T13:37:26-04:00 — RAG context injection point should be AFTER memory enrichment but BEFORE router classification, so all specialist agents benefit transparently.
+
+**Validation:** Build clean (0 errors), 60 new RAG tests pass (786 total pass, 17 pre-existing failures in Competitive/Alert tests)
+
+## 2026-05-13 — Sprint 2.4: Supply Chain Data Layer + Council Endpoints
+
+### Deliverables
+- **Schema v6:** 3 new tables (InventoryLevels, SupplyDisruptions, FulfillmentRates) with indexes
+- **Seed data:** ~180 inventory records, 18 active disruptions, 6 months fulfillment history per brand/region
+- **MCP Tools (SupplyTools.cs):** GetInventoryLevels, GetSupplyDisruptions, GetFulfillmentRate, GetSupplyHealthSummary
+- **API Proxy Tools (SupplyChainTools.cs):** InventoryLevelsTool, SupplyDisruptionsTool, FulfillmentRateTool, SupplyHealthTool
+- **MCP REST endpoints:** /api/supply/inventory, /api/supply/disruptions, /api/supply/fulfillment, /api/supply/health
+- **API endpoints:** Supply proxy endpoints + council endpoints (POST /api/council/convene, GET /api/council/agents)
+- **CouncilConveneRequest DTO** for convene endpoint request body
+
+### Learnings
+- Composite health summary queries (GetSupplyHealthSummary) that aggregate across multiple tables are more useful for agents than raw table queries — they reduce multi-tool orchestration overhead.
+- Council convene endpoint uses placeholder response pattern (returns participant list + "awaiting_orchestrator" status) — clean contract for parallel development with Kroger's ConsensusOrchestrator.
+- Pre-existing duplicate `.WithName()` values in MCP Program.cs (e.g., GetHistoricalDemand appears twice) don't cause build errors but may cause runtime issues — noted for future cleanup.
+
+**Validation:** Build clean (0 errors, 5 pre-existing warnings), all 816 tests pass
