@@ -1678,6 +1678,506 @@ public class RetailPulseDb
         }
     }
 
+    // ── Promo Seeding ────────────────────────────────────────────────────
+
+    private static readonly string[] PromoTypes = ["BOGO", "Discount", "Display", "Digital", "Bundle"];
+    private static readonly string[] SuccessRatings = ["Excellent", "Good", "Average", "Below Average", "Poor"];
+
+    private void SeedPromoHistory(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO PromoHistory (Brand, Region, PromoType, CampaignName, StartDate, EndDate, Spend, BaselineVolume, ActualVolume, LiftPercent, ROI, SuccessRating)
+            VALUES (@brand, @region, @type, @name, @start, @end, @spend, @baseline, @actual, @lift, @roi, @rating)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pType = cmd.Parameters.Add("@type", SqliteType.Text);
+        var pName = cmd.Parameters.Add("@name", SqliteType.Text);
+        var pStart = cmd.Parameters.Add("@start", SqliteType.Text);
+        var pEnd = cmd.Parameters.Add("@end", SqliteType.Text);
+        var pSpend = cmd.Parameters.Add("@spend", SqliteType.Real);
+        var pBaseline = cmd.Parameters.Add("@baseline", SqliteType.Real);
+        var pActual = cmd.Parameters.Add("@actual", SqliteType.Real);
+        var pLift = cmd.Parameters.Add("@lift", SqliteType.Real);
+        var pRoi = cmd.Parameters.Add("@roi", SqliteType.Real);
+        var pRating = cmd.Parameters.Add("@rating", SqliteType.Text);
+
+        var baseDate = new DateOnly(2025, 1, 1);
+
+        foreach (var brand in _tenant.Brands)
+        {
+            foreach (var region in _tenant.Regions)
+            {
+                var regionSeed = GetStableHash($"promo|{brand.Name}|{region}");
+                var rng = new Random(regionSeed);
+
+                for (int c = 0; c < 5; c++)
+                {
+                    var promoType = PromoTypes[rng.Next(PromoTypes.Length)];
+                    var campaignStart = baseDate.AddDays(rng.Next(0, 300));
+                    var durationDays = rng.Next(7, 45);
+                    var campaignEnd = campaignStart.AddDays(durationDays);
+
+                    var spend = Math.Round(5000 + rng.NextDouble() * 195000, 2);
+                    var baselineVolume = Math.Round(1000 + rng.NextDouble() * 9000, 0);
+
+                    var baseLift = promoType switch
+                    {
+                        "BOGO" => 15.0 + rng.NextDouble() * 25.0,
+                        "Discount" => 8.0 + rng.NextDouble() * 18.0,
+                        "Display" => 5.0 + rng.NextDouble() * 12.0,
+                        "Digital" => 3.0 + rng.NextDouble() * 10.0,
+                        "Bundle" => 10.0 + rng.NextDouble() * 20.0,
+                        _ => 5.0 + rng.NextDouble() * 10.0
+                    };
+
+                    var liftPercent = Math.Round(baseLift, 1);
+                    var actualVolume = Math.Round(baselineVolume * (1.0 + liftPercent / 100.0), 0);
+                    var incrementalRevenue = (actualVolume - baselineVolume) * (5.0 + rng.NextDouble() * 15.0);
+                    var roi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 1);
+
+                    var ratingIndex = roi switch
+                    {
+                        > 100 => 0,
+                        > 50 => 1,
+                        > 0 => 2,
+                        > -30 => 3,
+                        _ => 4
+                    };
+
+                    pBrand.Value = brand.Name;
+                    pRegion.Value = region;
+                    pType.Value = promoType;
+                    pName.Value = $"{brand.Name} {promoType} {campaignStart:MMMyy}";
+                    pStart.Value = campaignStart.ToString("yyyy-MM-dd");
+                    pEnd.Value = campaignEnd.ToString("yyyy-MM-dd");
+                    pSpend.Value = spend;
+                    pBaseline.Value = baselineVolume;
+                    pActual.Value = actualVolume;
+                    pLift.Value = liftPercent;
+                    pRoi.Value = roi;
+                    pRating.Value = SuccessRatings[ratingIndex];
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+    }
+
+    private void SeedLiftCoefficients(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO LiftCoefficients (Category, PromoType, AvgLiftPercent, StdDev, MinSpend, MaxEffectiveSpend)
+            VALUES (@cat, @type, @lift, @std, @min, @max)
+            """;
+
+        var pCat = cmd.Parameters.Add("@cat", SqliteType.Text);
+        var pType = cmd.Parameters.Add("@type", SqliteType.Text);
+        var pLift = cmd.Parameters.Add("@lift", SqliteType.Real);
+        var pStd = cmd.Parameters.Add("@std", SqliteType.Real);
+        var pMin = cmd.Parameters.Add("@min", SqliteType.Real);
+        var pMax = cmd.Parameters.Add("@max", SqliteType.Real);
+
+        var categories = _tenant.Brands.Select(b => b.Category).Distinct();
+
+        foreach (var category in categories)
+        {
+            var catSeed = GetStableHash($"lift|{category}");
+            var rng = new Random(catSeed);
+
+            foreach (var promoType in PromoTypes)
+            {
+                var avgLift = promoType switch
+                {
+                    "BOGO" => 22.0 + rng.NextDouble() * 8.0,
+                    "Discount" => 14.0 + rng.NextDouble() * 6.0,
+                    "Display" => 8.0 + rng.NextDouble() * 5.0,
+                    "Digital" => 5.0 + rng.NextDouble() * 4.0,
+                    "Bundle" => 16.0 + rng.NextDouble() * 6.0,
+                    _ => 10.0
+                };
+
+                var stdDev = Math.Round(avgLift * (0.15 + rng.NextDouble() * 0.25), 2);
+
+                pCat.Value = category;
+                pType.Value = promoType;
+                pLift.Value = Math.Round(avgLift, 2);
+                pStd.Value = stdDev;
+                pMin.Value = Math.Round(1000 + rng.NextDouble() * 4000, 0);
+                pMax.Value = Math.Round(150000 + rng.NextDouble() * 350000, 0);
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
+    // ── Promo Query Methods ────────────────────────────────────────────────
+
+    public object GetPromoHistory(string? brand, string? region, string? promoType, int months = 18)
+    {
+        months = Math.Clamp(months, 1, 24);
+        var cutoff = DateOnly.FromDateTime(DateTime.Today).AddMonths(-months);
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var where = new List<string> { "StartDate >= @cutoff" };
+        using var cmd = conn.CreateCommand();
+        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
+
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            where.Add("Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            where.Add("Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(promoType))
+        {
+            where.Add("PromoType LIKE @type");
+            cmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
+        }
+
+        cmd.CommandText = $"""
+            SELECT Brand, Region, PromoType, CampaignName, StartDate, EndDate,
+                   Spend, BaselineVolume, ActualVolume, LiftPercent, ROI, SuccessRating
+            FROM PromoHistory
+            WHERE {string.Join(" AND ", where)}
+            ORDER BY StartDate DESC
+            """;
+
+        var campaigns = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            campaigns.Add(new
+            {
+                brand = reader.GetString(0),
+                region = reader.GetString(1),
+                promo_type = reader.GetString(2),
+                campaign_name = reader.GetString(3),
+                start_date = reader.GetString(4),
+                end_date = reader.GetString(5),
+                spend = reader.GetDouble(6),
+                baseline_volume = reader.GetDouble(7),
+                actual_volume = reader.GetDouble(8),
+                lift_percent = reader.GetDouble(9),
+                roi = reader.GetDouble(10),
+                success_rating = reader.GetString(11)
+            });
+        }
+
+        return new
+        {
+            filters = new { brand = brand ?? "all", region = region ?? "all", promo_type = promoType ?? "all", months },
+            total_campaigns = campaigns.Count,
+            campaigns
+        };
+    }
+
+    public object CalculateLift(string brand, string region, string promoType, double spend)
+    {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+        if (string.IsNullOrWhiteSpace(promoType))
+            return new { error = "Parameter 'promoType' is required.", available_types = PromoTypes };
+
+        var brandConfig = _tenant.Brands.FirstOrDefault(b =>
+            b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (brandConfig == null)
+            return new { error = $"Unknown brand '{brand}'.", available_brands = GetAvailableBrands() };
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        using var coeffCmd = conn.CreateCommand();
+        coeffCmd.CommandText = """
+            SELECT AvgLiftPercent, StdDev, MinSpend, MaxEffectiveSpend
+            FROM LiftCoefficients
+            WHERE Category = @cat AND PromoType LIKE @type
+            LIMIT 1
+            """;
+        coeffCmd.Parameters.AddWithValue("@cat", brandConfig.Category);
+        coeffCmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
+
+        using var reader = coeffCmd.ExecuteReader();
+        if (!reader.Read())
+            return new { error = $"No lift data for category '{brandConfig.Category}' and promo type '{promoType}'." };
+
+        var avgLift = reader.GetDouble(0);
+        var stdDev = reader.GetDouble(1);
+        var minSpend = reader.GetDouble(2);
+        var maxEffective = reader.GetDouble(3);
+        reader.Close();
+
+        using var countCmd = conn.CreateCommand();
+        countCmd.CommandText = """
+            SELECT COUNT(*) FROM PromoHistory
+            WHERE Brand LIKE @brand AND Region LIKE @region AND PromoType LIKE @type
+            """;
+        countCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        countCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        countCmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
+        var similarCount = Convert.ToInt32(countCmd.ExecuteScalar());
+
+        var spendEfficiency = spend <= maxEffective ? 1.0 : maxEffective / spend;
+        var expectedLift = Math.Round(avgLift * spendEfficiency, 2);
+        var confidence = Math.Round(Math.Max(0.3, 1.0 - (stdDev / avgLift)), 2);
+
+        return new
+        {
+            brand = brandConfig.Name,
+            region,
+            category = brandConfig.Category,
+            promo_type = promoType.Trim(),
+            spend,
+            expected_lift_percent = expectedLift,
+            confidence,
+            similar_campaigns = similarCount,
+            diminishing_returns = spend > maxEffective,
+            spend_efficiency = Math.Round(spendEfficiency * 100, 1),
+            coefficient_details = new { avg_lift = avgLift, std_dev = stdDev, min_spend = minSpend, max_effective_spend = maxEffective }
+        };
+    }
+
+    public object EvaluateTiming(string brand, string region, DateOnly start, DateOnly end)
+    {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+        if (end <= start)
+            return new { error = "End date must be after start date." };
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        using var overlapCmd = conn.CreateCommand();
+        overlapCmd.CommandText = """
+            SELECT CampaignName, PromoType, StartDate, EndDate
+            FROM PromoHistory
+            WHERE Brand LIKE @brand AND Region LIKE @region
+            AND StartDate <= @end AND EndDate >= @start
+            ORDER BY StartDate
+            """;
+        overlapCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        overlapCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        overlapCmd.Parameters.AddWithValue("@start", start.ToString("yyyy-MM-dd"));
+        overlapCmd.Parameters.AddWithValue("@end", end.ToString("yyyy-MM-dd"));
+
+        var conflicts = new List<object>();
+        using (var reader = overlapCmd.ExecuteReader())
+        {
+            while (reader.Read())
+                conflicts.Add(new { campaign = reader.GetString(0), promo_type = reader.GetString(1), start_date = reader.GetString(2), end_date = reader.GetString(3) });
+        }
+
+        using var recentCmd = conn.CreateCommand();
+        var lookbackStart = start.AddDays(-60);
+        recentCmd.CommandText = """
+            SELECT CampaignName, PromoType, EndDate
+            FROM PromoHistory
+            WHERE Brand LIKE @brand AND Region LIKE @region
+            AND EndDate >= @lookback AND EndDate < @start
+            ORDER BY EndDate DESC
+            """;
+        recentCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        recentCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        recentCmd.Parameters.AddWithValue("@lookback", lookbackStart.ToString("yyyy-MM-dd"));
+        recentCmd.Parameters.AddWithValue("@start", start.ToString("yyyy-MM-dd"));
+
+        var recentPromos = new List<object>();
+        using (var reader = recentCmd.ExecuteReader())
+        {
+            while (reader.Read())
+                recentPromos.Add(new { campaign = reader.GetString(0), promo_type = reader.GetString(1), ended = reader.GetString(2) });
+        }
+
+        var brandConfig = _tenant.Brands.FirstOrDefault(b =>
+            b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
+        var seasonalityScore = GetSeasonalityScore(conn, brandConfig?.Category, start.Month);
+
+        var proximityPenalty = recentPromos.Count > 0 ? Math.Min(recentPromos.Count * 0.15, 0.50) : 0.0;
+        var timingScore = Math.Max(0.0, Math.Min(1.0,
+            seasonalityScore - proximityPenalty - (conflicts.Count > 0 ? 0.30 : 0.0)));
+        timingScore = Math.Round(timingScore, 2);
+
+        return new
+        {
+            proposed_period = new { start = start.ToString("yyyy-MM-dd"), end = end.ToString("yyyy-MM-dd") },
+            timing_score = timingScore,
+            has_conflicts = conflicts.Count > 0,
+            conflicts,
+            recent_similar_promos = recentPromos,
+            proximity_penalty = proximityPenalty,
+            seasonality_score = seasonalityScore,
+            recommendation = timingScore >= 0.70 ? "Good timing" : timingScore >= 0.40 ? "Acceptable, review conflicts" : "Poor timing, consider rescheduling"
+        };
+    }
+
+    private double GetSeasonalityScore(SqliteConnection conn, string? category, int month)
+    {
+        if (string.IsNullOrWhiteSpace(category)) return 0.6;
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT Multiplier FROM SeasonalFactors WHERE Category = @cat AND Month = @month LIMIT 1";
+        cmd.Parameters.AddWithValue("@cat", category);
+        cmd.Parameters.AddWithValue("@month", month);
+        var result = cmd.ExecuteScalar();
+        if (result is null or DBNull) return 0.6;
+        return Math.Min(1.0, Math.Max(0.2, Convert.ToDouble(result) / 1.5));
+    }
+
+    public object EstimateROI(string brand, string region, string promoType, double spend, int durationWeeks)
+    {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
+        if (string.IsNullOrWhiteSpace(region))
+            return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+        if (spend <= 0)
+            return new { error = "Parameter 'spend' must be positive." };
+        if (durationWeeks is < 1 or > 12)
+            return new { error = "Parameter 'durationWeeks' must be between 1 and 12." };
+
+        var brandConfig = _tenant.Brands.FirstOrDefault(b =>
+            b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (brandConfig == null)
+            return new { error = $"Unknown brand '{brand}'.", available_brands = GetAvailableBrands() };
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        double avgLift = 10.0, stdDev = 5.0;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT AvgLiftPercent, StdDev FROM LiftCoefficients WHERE Category = @cat AND PromoType LIKE @type LIMIT 1";
+            cmd.Parameters.AddWithValue("@cat", brandConfig.Category);
+            cmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                avgLift = reader.GetDouble(0);
+                stdDev = reader.GetDouble(1);
+            }
+        }
+
+        double baselineVolume = 5000;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT AVG(BaselineVolume) FROM PromoHistory WHERE Brand LIKE @brand AND Region LIKE @region";
+            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+            var result = cmd.ExecuteScalar();
+            if (result is not null and not DBNull)
+                baselineVolume = Convert.ToDouble(result);
+        }
+
+        var weeklyBaseline = baselineVolume / 4.0;
+        var totalBaseline = weeklyBaseline * durationWeeks;
+
+        var incrementalUnits = totalBaseline * (avgLift / 100.0);
+        var revenuePerUnit = 8.0 + (brandConfig.Category == "Spirits" ? 12.0 : brandConfig.Category == "Grocery" ? 2.0 : 5.0);
+        var incrementalRevenue = incrementalUnits * revenuePerUnit;
+        var expectedRoi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 2);
+
+        var lowerLift = Math.Max(0, avgLift - 1.96 * stdDev);
+        var upperLift = avgLift + 1.96 * stdDev;
+
+        var lowerRoi = Math.Round((totalBaseline * (lowerLift / 100.0) * revenuePerUnit - spend) / spend * 100.0, 2);
+        var upperRoi = Math.Round((totalBaseline * (upperLift / 100.0) * revenuePerUnit - spend) / spend * 100.0, 2);
+
+        var breakeven = Math.Round(spend / revenuePerUnit, 0);
+        var varianceFactor = Math.Round(stdDev / Math.Max(avgLift, 1.0), 2);
+
+        return new
+        {
+            brand = brandConfig.Name,
+            region,
+            promo_type = promoType.Trim(),
+            duration_weeks = durationWeeks,
+            inputs = new { spend, expected_lift_percent = avgLift, baseline_volume = totalBaseline, revenue_per_unit = revenuePerUnit },
+            roi = new { expected = expectedRoi, lower_bound = lowerRoi, upper_bound = upperRoi, confidence_interval_width = Math.Round(upperRoi - lowerRoi, 2) },
+            incremental = new { units = Math.Round(incrementalUnits, 0), revenue = Math.Round(incrementalRevenue, 2) },
+            breakeven_units = breakeven,
+            variance_factor = varianceFactor,
+            is_positive_roi = expectedRoi > 0,
+            requires_approval = spend > 500000,
+            risk_level = varianceFactor > 0.5 ? "high" : varianceFactor > 0.3 ? "medium" : "low"
+        };
+    }
+
+    public object GetPromoCalendar(string? brand = null, string? region = null, int months = 6)
+    {
+        months = Math.Clamp(months, 1, 24);
+        var cutoff = DateOnly.FromDateTime(DateTime.Today).AddMonths(-months);
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var where = new List<string> { "StartDate >= @cutoff" };
+        using var cmd = conn.CreateCommand();
+        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
+
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            where.Add("Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            where.Add("Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        }
+
+        cmd.CommandText = $"""
+            SELECT Brand, Region, PromoType, CampaignName, StartDate, EndDate, Spend, ROI
+            FROM PromoHistory
+            WHERE {string.Join(" AND ", where)}
+            ORDER BY StartDate ASC
+            """;
+
+        var events = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            events.Add(new
+            {
+                brand = reader.GetString(0),
+                region = reader.GetString(1),
+                promo_type = reader.GetString(2),
+                campaign = reader.GetString(3),
+                start_date = reader.GetString(4),
+                end_date = reader.GetString(5),
+                spend = reader.GetDouble(6),
+                roi = reader.GetDouble(7)
+            });
+        }
+
+        return new
+        {
+            filters = new { brand = brand ?? "all", region = region ?? "all", months },
+            total_events = events.Count,
+            calendar = events
+        };
+    }
+
+    public static object GetPromoTypes() => new
+    {
+        promo_types = new[]
+        {
+            new { code = "bogo", name = "Buy One Get One", description = "BOGO promotions offering free or discounted additional units" },
+            new { code = "discount", name = "Discount", description = "Price-off promotions, typically 10-30% off regular price" },
+            new { code = "display", name = "Display", description = "In-store display and end-cap placement promotions" },
+            new { code = "digital", name = "Digital", description = "Digital/online promotions including social media and email campaigns" },
+            new { code = "bundle", name = "Bundle", description = "Product bundling promotions combining related items at a discount" }
+        }
+    };
+
     private static string NormalizeDiacritics(string text)
     {
         var normalized = text.Normalize(NormalizationForm.FormD);

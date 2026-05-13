@@ -84,6 +84,20 @@ demandForecastDef.SystemPrompt = demandForecastDef.SystemPrompt
 // Router prompt doesn't need tenant placeholders (intent classification is domain-generic)
 var routerDef = promptConfig.Agents["router"];
 
+// Resolve promo-planning agent prompt with tenant placeholders
+var promoPlanningDef = promptConfig.Agents.TryGetValue("promo-planning", out var promoDef) ? promoDef : null;
+if (promoPlanningDef != null)
+{
+    promoPlanningDef.SystemPrompt = promoPlanningDef.SystemPrompt
+        .Replace("{tenant.company}", tenant.Company)
+        .Replace("{tenant.industry}", tenant.Industry)
+        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+}
+
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
 var mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]
@@ -336,6 +350,26 @@ demandToolsFactory: sp =>
         AIFunctionFactory.Create(forecastTool.GenerateForecast),
         AIFunctionFactory.Create(seasonalityTool.GetSeasonalityFactors),
         AIFunctionFactory.Create(demandRisksTool.IdentifyDemandRisks),
+        AIFunctionFactory.Create(chartTool.CreateChart),
+        AIFunctionFactory.Create(approvalTool.RequestApproval)
+    };
+},
+promoPlanningDef: promoPlanningDef,
+promoToolsFactory: sp =>
+{
+    var promoHistoryTool = sp.GetRequiredService<PromoHistoryTool>();
+    var calculateLiftTool = sp.GetRequiredService<CalculateLiftTool>();
+    var evaluateTimingTool = sp.GetRequiredService<EvaluateTimingTool>();
+    var estimateROITool = sp.GetRequiredService<EstimateROITool>();
+    var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var approvalTool = sp.GetRequiredService<ApprovalTool>();
+
+    return new List<AITool>
+    {
+        AIFunctionFactory.Create(promoHistoryTool.GetPromoHistory),
+        AIFunctionFactory.Create(calculateLiftTool.CalculateLift),
+        AIFunctionFactory.Create(evaluateTimingTool.EvaluateTiming),
+        AIFunctionFactory.Create(estimateROITool.EstimateROI),
         AIFunctionFactory.Create(chartTool.CreateChart),
         AIFunctionFactory.Create(approvalTool.RequestApproval)
     };
