@@ -15,6 +15,7 @@ namespace RetailPulse.Tests.Tracing;
 /// intent, confidence, and fallback attributes on the "agent.routing" activity.
 /// Act 6 coverage gap #3.
 /// </summary>
+[Collection("OTel")]
 public class OTelRoutingSpanTests : IDisposable
 {
     private readonly ActivityListener _listener;
@@ -26,7 +27,7 @@ public class OTelRoutingSpanTests : IDisposable
         {
             ShouldListenTo = source => source.Name == "RetailPulse.Agent",
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStarted = activity => _capturedActivities.Add(activity),
+            ActivityStopped = activity => _capturedActivities.Add(activity),
         };
         ActivitySource.AddActivityListener(_listener);
     }
@@ -75,7 +76,8 @@ public class OTelRoutingSpanTests : IDisposable
         await router.RouteAsync("What is the demand forecast?", null, null, null);
 
         var routingActivity = _capturedActivities
-            .FirstOrDefault(a => a.OperationName == "agent.routing");
+            .LastOrDefault(a => a.OperationName == "agent.routing"
+                && a.GetTagItem("agent.router") as string == "RetailOpsRouter");
         routingActivity.Should().NotBeNull("router should emit an agent.routing span");
 
         var intentTag = routingActivity!.GetTagItem("agent.routing.intent");
@@ -92,7 +94,8 @@ public class OTelRoutingSpanTests : IDisposable
         await router.RouteAsync("How is the competitive landscape?", null, null, null);
 
         var routingActivity = _capturedActivities
-            .FirstOrDefault(a => a.OperationName == "agent.routing");
+            .LastOrDefault(a => a.OperationName == "agent.routing"
+                && a.GetTagItem("agent.router") as string == "RetailOpsRouter");
         routingActivity.Should().NotBeNull();
 
         var confidenceTag = routingActivity!.GetTagItem("agent.routing.confidence");
@@ -116,7 +119,8 @@ public class OTelRoutingSpanTests : IDisposable
         await router.RouteAsync("Something vague", null, null, null);
 
         var routingActivity = _capturedActivities
-            .FirstOrDefault(a => a.OperationName == "agent.routing");
+            .LastOrDefault(a => a.OperationName == "agent.routing"
+                && a.GetTagItem("agent.router") as string == "RetailOpsRouter");
         routingActivity.Should().NotBeNull();
 
         var fallbackTag = routingActivity!.GetTagItem("agent.routing.fallback");
@@ -141,7 +145,8 @@ public class OTelRoutingSpanTests : IDisposable
         await router.RouteAsync("What is the demand forecast?", null, null, null);
 
         var routingActivity = _capturedActivities
-            .FirstOrDefault(a => a.OperationName == "agent.routing");
+            .LastOrDefault(a => a.OperationName == "agent.routing"
+                && a.GetTagItem("agent.router") as string == "RetailOpsRouter");
         routingActivity.Should().NotBeNull();
 
         // High confidence → no fallback tag set (or false)
@@ -160,7 +165,8 @@ public class OTelRoutingSpanTests : IDisposable
         await router.RouteAsync("Demand forecast?", null, null, null);
 
         var routingActivity = _capturedActivities
-            .FirstOrDefault(a => a.OperationName == "agent.routing");
+            .LastOrDefault(a => a.OperationName == "agent.routing"
+                && a.GetTagItem("agent.router") as string == "RetailOpsRouter");
         routingActivity.Should().NotBeNull();
 
         var fallbackTag = routingActivity!.GetTagItem("agent.routing.fallback");
