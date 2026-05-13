@@ -605,4 +605,96 @@ public class RouterIntegrationTests
     }
 
     #endregion
+
+    #region Competitive Intelligence Routing
+
+    [Theory]
+    [InlineData("What are competitors doing in the cereal category?")]
+    [InlineData("Show me the competitive landscape for spirits in the Northeast")]
+    [InlineData("Is BrandX a threat to Sierra Gold Tequila?")]
+    public async Task Router_CompetitiveQuery_ClassifiesAsCompetitiveMarket(string message)
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.91,\"intents\":[\"{AgentIntent.CompetitiveMarket}\"]}}");
+
+        var hubContext = new Mock<IHubContext<TelemetryHub>>();
+        var clients = new Mock<IHubClients>();
+        var groupProxy = new Mock<IClientProxy>();
+        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
+        hubContext.Setup(h => h.Clients).Returns(clients.Object);
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        var competitiveAgent = new CompetitiveIntelAgent(
+            MockChatClient("Competitive analysis for the requested category shows key threats."),
+            new AgentDefinition { Name = "CompetitiveIntel", Model = "gpt-5.4-mini", SystemPrompt = "competitive specialist", Temperature = 0.3 },
+            hubContext.Object, [],
+            Mock.Of<ILogger<CompetitiveIntelAgent>>(),
+            config);
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        var specialists = new List<ISpecialistAgent> { generalAgent, competitiveAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(message, null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.CompetitiveMarket);
+    }
+
+    [Fact]
+    public async Task FullPipeline_CompetitiveMessage_RoutesAndReturnsResponse()
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.93,\"intents\":[\"{AgentIntent.CompetitiveMarket}\"]}}");
+
+        var hubContext = new Mock<IHubContext<TelemetryHub>>();
+        var clients = new Mock<IHubClients>();
+        var groupProxy = new Mock<IClientProxy>();
+        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
+        hubContext.Setup(h => h.Clients).Returns(clients.Object);
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        var competitiveAgent = new CompetitiveIntelAgent(
+            MockChatClient("BrandX has dropped prices by 15% in the Northeast spirits category. Recommendation: DIFFERENTIATE on premium positioning."),
+            new AgentDefinition { Name = "CompetitiveIntel", Model = "gpt-5.4-mini", SystemPrompt = "competitive specialist", Temperature = 0.3 },
+            hubContext.Object, [],
+            Mock.Of<ILogger<CompetitiveIntelAgent>>(),
+            config);
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        var specialists = new List<ISpecialistAgent> { generalAgent, competitiveAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(
+            "What competitive threats exist for Sierra Gold Tequila in the Northeast?", null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.CompetitiveMarket);
+
+        var response = await competitiveAgent.HandleAsync(
+            new ChatRequest("What competitive threats exist for Sierra Gold Tequila?", SessionId: "comp-pipeline-1"));
+        response.Reply.Should().Contain("BrandX");
+        response.Spans.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Router_CompetitiveIntent_DoesNotRouteToDemandOrPromo()
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.89,\"intents\":[\"{AgentIntent.CompetitiveMarket}\"]}}");
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("general"));
+        var specialists = new List<ISpecialistAgent> { generalAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(
+            "Analyze the competitive landscape for snacks", null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.CompetitiveMarket);
+        routingResult.Intent.Should().NotBe(AgentIntent.DemandForecasting);
+        routingResult.Intent.Should().NotBe(AgentIntent.PromotionTrade);
+    }
+
+    #endregion
 }
