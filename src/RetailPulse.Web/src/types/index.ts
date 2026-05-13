@@ -286,6 +286,61 @@ export interface CompetitorOverview {
   marketShare: number;
 }
 
+// --- Council / Portfolio Health types (Sprint 2.4) ---
+
+export type HealthRating = 'green' | 'yellow' | 'red';
+
+export interface CouncilAgentVote {
+  agentId: string;
+  agentName: string;
+  domain: 'demand' | 'supply' | 'competitive';
+  rating: HealthRating;
+  confidence: number;
+  reasoning: string;
+  keyMetrics: string[];
+  responseTimeMs: number;
+  timedOut?: boolean;
+}
+
+export interface CouncilDisagreement {
+  topic: string;
+  agents: Array<{ agentName: string; position: string }>;
+  resolution: string;
+  dominantAgent: string;
+  dominantReason: string;
+}
+
+export interface CouncilVerdict {
+  overallRating: HealthRating;
+  unanimous: boolean;
+  synthesisText: string;
+  disagreements: CouncilDisagreement[];
+  actionItems: Array<{ priority: number; text: string }>;
+  totalConveneTimeMs: number;
+}
+
+export interface CouncilSession {
+  id: string;
+  brand: string;
+  region?: string;
+  convenedAt: string;
+  votes: CouncilAgentVote[];
+  verdict: CouncilVerdict;
+}
+
+export interface CouncilConveneRequest {
+  brand: string;
+  region?: string;
+}
+
+export interface CouncilConveneResponse {
+  sessionId: string;
+  brand: string;
+  region?: string;
+  votes: CouncilAgentVote[];
+  verdict: CouncilVerdict;
+}
+
 // --- Knowledge Base types (Sprint 2.3) ---
 
 export interface KBDocument {
@@ -319,4 +374,271 @@ export interface Citation {
   sourceTitle: string;
   chunkPreview: string;
   relevanceScore: number;
+}
+
+// --- Streaming types (Sprint 3.1) ---
+
+export interface StreamingToken {
+  content: string;
+  index: number;
+}
+
+export interface CacheInfo {
+  cached: boolean;
+  ttlSeconds?: number;
+  timeSavedMs?: number;
+}
+
+// --- Guardrails types (Sprint 3.2) ---
+
+export type GuardrailDetectionType = 'jailbreak' | 'pii' | 'access';
+
+export interface BlockedRequest {
+  id: string;
+  timestamp: string;
+  requestPreview: string;
+  detectionType: GuardrailDetectionType;
+  reason: string;
+  actionTaken: string;
+}
+
+export interface GuardrailsStats {
+  totalBlocked: number;
+  jailbreakAttempts: number;
+  piiDetections: number;
+  accessDenials: number;
+  recentBlocked: BlockedRequest[];
+  blocksPerHour: Array<{ hour: string; count: number }>;
+}
+
+export interface GuardrailsConfigData {
+  jailbreakEnabled: boolean;
+  piiEnabled: boolean;
+  accessControlEnabled: boolean;
+  blockedPatterns: string;
+}
+
+export type PiiRedactionType = 'email' | 'phone' | 'ssn' | 'address' | 'name' | 'credit_card' | 'unknown';
+
+// --- Collaborative Adaptive Cards types (Sprint 3.3) ---
+
+export type CardType = 'voting' | 'drilldown' | 'dashboard' | 'briefing';
+export type CardLifecycleState = 'active' | 'voting' | 'decided' | 'archived';
+export type VoteChoice = 'approve' | 'reject' | 'abstain';
+
+export interface CardComment {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  timestamp: string;
+}
+
+export interface UserVote {
+  userId: string;
+  userName: string;
+  choice: VoteChoice;
+  votedAt: string;
+}
+
+export interface AdaptiveCard {
+  id: string;
+  type: CardType;
+  title: string;
+  summary: string;
+  state: CardLifecycleState;
+  stateChangedAt: string;
+  createdAt: string;
+  createdBy: string;
+  votes?: UserVote[];
+  comments?: CardComment[];
+  data?: Record<string, unknown>;
+  escalated?: boolean;
+  escalationReason?: string;
+}
+
+export interface DrillDownLevel {
+  label: string;
+  data: Array<{ name: string; value: number; subItems?: Array<{ name: string; value: number }> }>;
+}
+
+// --- Observability types (Sprint 3.4) ---
+
+export type ObservabilityPeriod = 'today' | 'week' | 'month';
+
+export interface CostSummary {
+  totalTokens: number;
+  totalCost: number;
+  requestCount: number;
+  avgCostPerRequest: number;
+}
+
+export interface CostTrendPoint {
+  date: string;
+  cost: number;
+  tokens: number;
+  requests: number;
+}
+
+export interface AgentCostBreakdown {
+  agentName: string;
+  totalTokens: number;
+  totalCost: number;
+  requestCount: number;
+}
+
+export interface ToolUsageEntry {
+  toolName: string;
+  callCount: number;
+  totalTokens: number;
+  avgDurationMs: number;
+}
+
+export interface CostDashboardData {
+  summary: CostSummary;
+  trend: CostTrendPoint[];
+  agentBreakdown: AgentCostBreakdown[];
+  topTools: ToolUsageEntry[];
+}
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;
+  userId: string;
+  userName: string;
+  agentName: string;
+  action: string;
+  inputSummary: string;
+  outputSummary: string;
+  tokens: number;
+  durationMs: number;
+}
+
+export interface AuditLogFilters {
+  agent?: string;
+  startDate?: string;
+  endDate?: string;
+  actionType?: string;
+  searchText?: string;
+}
+
+export interface AuditLogPage {
+  entries: AuditLogEntry[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ExportSession {
+  sessionId: string;
+  startTime: string;
+  messageCount: number;
+  agentsUsed: string[];
+  totalTokens: number;
+}
+
+export interface ExportPreview {
+  sessionId: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>;
+  totalMessages: number;
+}
+
+// --- Store Operations types (Sprint 4.1) ---
+
+export type PerformanceLevel = 'green' | 'yellow' | 'red';
+
+export interface StorePerformance {
+  storeId: string;
+  storeName: string;
+  region: string;
+  revenue: number;
+  target: number;
+  performanceIndex: number;
+  issues: string[];
+  recommendations: string[];
+}
+
+export interface PlanogramSlot {
+  shelfLevel: number;
+  position: number;
+  skuName: string;
+  brand: string;
+  brandColor: string;
+  facingWidth: number;
+  predictedUplift?: number;
+}
+
+export interface PlanogramLayout {
+  shelfCount: number;
+  slots: PlanogramSlot[];
+  eyeLevelShelves: number[];
+}
+
+export interface StockoutRisk {
+  skuId: string;
+  skuName: string;
+  brand: string;
+  currentVelocity: number;
+  daysRemaining: number;
+  recommendedReorder: number;
+  region: string;
+}
+
+// --- Margin & Escalation types (Sprint 4.2) ---
+
+export interface MarginWaterfallStep {
+  label: string;
+  value: number;
+  isSubtotal?: boolean;
+}
+
+export interface MarginDriver {
+  name: string;
+  impact: number;
+  trend: 'improving' | 'worsening' | 'stable';
+  isRisk: boolean;
+}
+
+export type EscalationLevel = 'L1' | 'L2' | 'L3';
+
+export interface EscalationStep {
+  level: EscalationLevel;
+  agentName: string;
+  contextAdded: string;
+  timeSpentMs: number;
+  timestamp: string;
+  isCurrent: boolean;
+}
+
+// --- Portfolio Scorecard & Explainability types (Sprint 4.3) ---
+
+export interface BrandScore {
+  brandName: string;
+  healthScore: number;
+  trend: 'up' | 'down' | 'stable';
+  dimensions: {
+    demand: number;
+    margin: number;
+    competitive: number;
+    supply: number;
+  };
+  topRisk: string;
+  topOpportunity: string;
+}
+
+export interface ExplanationStep {
+  toolName: string;
+  inputSummary: string;
+  outputSummary: string;
+  reasoning: string;
+}
+
+export interface ExplanationData {
+  traceId: string;
+  question: string;
+  answer: string;
+  steps: ExplanationStep[];
+  confidence: number;
+  dataSources: Array<{ name: string; url?: string }>;
+  generatedAt: string;
 }

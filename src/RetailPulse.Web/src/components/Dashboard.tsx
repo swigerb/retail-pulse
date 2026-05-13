@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle } from '@fluentui/react-components';
-import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular } from '@fluentui/react-icons';
+import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
@@ -14,7 +14,14 @@ import { TraceDashboard } from './traces';
 import { PromoTaskModule } from './promo';
 import { CompetitiveDashboard } from './competitive';
 import { KnowledgeBasePanel } from './knowledge';
-import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan } from '../types';
+import { CouncilPanel } from './council';
+import { GuardrailsDashboard, GuardrailsConfig } from './guardrails';
+import { AdaptiveCardPanel } from './cards';
+import { ObservabilityPanel } from './observability';
+import { StoreHeatmap, StockoutAlert, StorePerformanceTable, PlanogramDiagram } from './stores';
+import { MarginWaterfall, MarginDrivers } from './margin';
+import { PortfolioScorecard, BrandScoreCard, ExplanationPanel } from './scorecard';
+import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, PlanogramLayout, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData } from '../types';
 import { connectTelemetryHub } from '../services/telemetryHub';
 
 const DRAWER_WIDTH_PX = 560;
@@ -108,8 +115,96 @@ export function Dashboard() {
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRequest[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [traces, setTraces] = useState<Trace[]>([]);
-  const [activeView, setActiveView] = useState<'chat' | 'promo' | 'competitive' | 'knowledge'>('chat');
+  const [activeView, setActiveView] = useState<'chat' | 'promo' | 'competitive' | 'knowledge' | 'council' | 'security' | 'cards' | 'observability' | 'stores' | 'financials' | 'portfolio'>('chat');
+  const [selectedBrand, setSelectedBrand] = useState<BrandScore | null>(null);
+  const [explanationOpen, setExplanationOpen] = useState(false);
+  const [explanationData, setExplanationData] = useState<ExplanationData | null>(null);
   const styles = useStyles();
+
+  // Demo data for Phase 4 views
+  const demoStores: StorePerformance[] = [
+    { storeId: 's1', storeName: 'Flagship Downtown', region: 'Northeast', revenue: 2450000, target: 2200000, performanceIndex: 111, issues: [], recommendations: ['Expand premium shelf space'] },
+    { storeId: 's2', storeName: 'Mall Central', region: 'Northeast', revenue: 1800000, target: 2000000, performanceIndex: 90, issues: ['Low foot traffic weekdays'], recommendations: ['Increase weekday promotions'] },
+    { storeId: 's3', storeName: 'Suburb Plaza', region: 'Southeast', revenue: 950000, target: 1400000, performanceIndex: 68, issues: ['Stockout on top SKUs', 'Staff turnover'], recommendations: ['Urgent restock needed', 'Retention program'] },
+    { storeId: 's4', storeName: 'Harbor View', region: 'West', revenue: 1650000, target: 1500000, performanceIndex: 110, issues: [], recommendations: ['Expand beverage section'] },
+    { storeId: 's5', storeName: 'Tech District', region: 'West', revenue: 1200000, target: 1300000, performanceIndex: 92, issues: ['Display compliance low'], recommendations: ['Audit display compliance'] },
+    { storeId: 's6', storeName: 'Lakeside', region: 'Midwest', revenue: 780000, target: 1100000, performanceIndex: 71, issues: ['Competitor opened nearby'], recommendations: ['Price match key SKUs'] },
+  ];
+
+  const demoStockouts: StockoutRisk[] = [
+    { skuId: 'sku1', skuName: 'Premium Blend 12pk', brand: 'Apex Grill', currentVelocity: 45, daysRemaining: 2, recommendedReorder: 500, region: 'Northeast' },
+    { skuId: 'sku2', skuName: 'Classic Lager 6pk', brand: 'Summit Brew', currentVelocity: 32, daysRemaining: 5, recommendedReorder: 300, region: 'Southeast' },
+    { skuId: 'sku3', skuName: 'Light Seltzer Variety', brand: 'Wave Drinks', currentVelocity: 28, daysRemaining: 6, recommendedReorder: 250, region: 'West' },
+  ];
+
+  const demoPlanogramBefore: PlanogramLayout = {
+    shelfCount: 5, eyeLevelShelves: [3, 4],
+    slots: [
+      { shelfLevel: 1, position: 1, skuName: 'Value Pack A', brand: 'Budget Brand', brandColor: '#94a3b8', facingWidth: 3 },
+      { shelfLevel: 2, position: 1, skuName: 'Mid-Range B', brand: 'Standard Co', brandColor: '#3b82f6', facingWidth: 2 },
+      { shelfLevel: 3, position: 1, skuName: 'Premium Blend', brand: 'Apex Grill', brandColor: '#f59e0b', facingWidth: 2 },
+      { shelfLevel: 4, position: 1, skuName: 'Classic Lager', brand: 'Summit Brew', brandColor: '#22c55e', facingWidth: 3 },
+      { shelfLevel: 5, position: 1, skuName: 'Bulk Economy', brand: 'Budget Brand', brandColor: '#94a3b8', facingWidth: 4 },
+    ],
+  };
+
+  const demoPlanogramAfter: PlanogramLayout = {
+    shelfCount: 5, eyeLevelShelves: [3, 4],
+    slots: [
+      { shelfLevel: 1, position: 1, skuName: 'Value Pack A', brand: 'Budget Brand', brandColor: '#94a3b8', facingWidth: 2 },
+      { shelfLevel: 2, position: 1, skuName: 'Mid-Range B', brand: 'Standard Co', brandColor: '#3b82f6', facingWidth: 2 },
+      { shelfLevel: 3, position: 1, skuName: 'Premium Blend', brand: 'Apex Grill', brandColor: '#f59e0b', facingWidth: 3, predictedUplift: 12.5 },
+      { shelfLevel: 4, position: 1, skuName: 'Classic Lager', brand: 'Summit Brew', brandColor: '#22c55e', facingWidth: 3, predictedUplift: 8.2 },
+      { shelfLevel: 5, position: 1, skuName: 'Bulk Economy', brand: 'Budget Brand', brandColor: '#94a3b8', facingWidth: 4 },
+    ],
+  };
+
+  const demoWaterfall: MarginWaterfallStep[] = [
+    { label: 'Revenue', value: 12500000, isSubtotal: true },
+    { label: 'COGS', value: -7200000 },
+    { label: 'Gross Margin', value: 5300000, isSubtotal: true },
+    { label: 'Marketing', value: -1800000 },
+    { label: 'Distribution', value: -950000 },
+    { label: 'Net Margin', value: 2550000, isSubtotal: true },
+  ];
+
+  const demoDrivers: MarginDriver[] = [
+    { name: 'Premium Mix Shift', impact: 3.2, trend: 'improving', isRisk: false },
+    { name: 'Raw Material Costs', impact: -2.1, trend: 'worsening', isRisk: true },
+    { name: 'Distribution Efficiency', impact: 1.5, trend: 'stable', isRisk: false },
+    { name: 'Promotional Depth', impact: -1.8, trend: 'worsening', isRisk: true },
+    { name: 'Channel Mix', impact: 0.9, trend: 'improving', isRisk: false },
+  ];
+
+  const demoBrands: BrandScore[] = [
+    { brandName: 'Apex Grill', healthScore: 82, trend: 'up', dimensions: { demand: 88, margin: 75, competitive: 80, supply: 85 }, topRisk: 'Competitor pricing pressure', topOpportunity: 'Expand to Midwest' },
+    { brandName: 'Summit Brew', healthScore: 65, trend: 'down', dimensions: { demand: 70, margin: 55, competitive: 68, supply: 72 }, topRisk: 'Margin erosion from COGS', topOpportunity: 'New seasonal SKU launch' },
+    { brandName: 'Wave Drinks', healthScore: 91, trend: 'up', dimensions: { demand: 95, margin: 88, competitive: 90, supply: 92 }, topRisk: 'Supply chain capacity', topOpportunity: 'Premium tier expansion' },
+    { brandName: 'Coastal Foods', healthScore: 45, trend: 'down', dimensions: { demand: 40, margin: 48, competitive: 42, supply: 50 }, topRisk: 'Market share loss to new entrants', topOpportunity: 'Rebrand + relaunch' },
+    { brandName: 'Peak Snacks', healthScore: 73, trend: 'stable', dimensions: { demand: 78, margin: 70, competitive: 72, supply: 74 }, topRisk: 'Flat growth in core region', topOpportunity: 'E-commerce expansion' },
+    { brandName: 'Valley Organics', healthScore: 58, trend: 'up', dimensions: { demand: 62, margin: 52, competitive: 55, supply: 64 }, topRisk: 'Low brand awareness', topOpportunity: 'Health trend tailwind' },
+  ];
+
+  const handleWhyClick = () => {
+    setExplanationData({
+      traceId: 'trace-demo-001',
+      question: 'Why is this brand scored this way?',
+      answer: 'The health score reflects a composite of demand, margin, competitive, and supply metrics weighted by recent performance trends.',
+      steps: [
+        { toolName: 'GetPortfolioDepletionStats', inputSummary: 'brand=all, period=Q1', outputSummary: '6 brands analyzed, 24 data points', reasoning: 'Queried depletion data to establish demand baseline across all regions.' },
+        { toolName: 'GetMarginAnalysis', inputSummary: 'brand=all', outputSummary: 'Margin range: 22-41%', reasoning: 'Calculated gross margin for each brand to assess financial health dimension.' },
+        { toolName: 'GetCompetitiveLandscape', inputSummary: 'category=all', outputSummary: '12 competitors tracked', reasoning: 'Assessed competitive positioning and recent market share movements.' },
+      ],
+      confidence: 87,
+      dataSources: [
+        { name: 'Q1 Depletion Report', url: '#' },
+        { name: 'Margin Analysis Dashboard' },
+        { name: 'Nielsen Competitive Data', url: '#' },
+      ],
+      generatedAt: new Date().toISOString(),
+    });
+    setExplanationOpen(true);
+  };
 
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close.
   // We intentionally do NOT disconnect on unmount — the connection is a module-level
@@ -285,6 +380,62 @@ export function Dashboard() {
             {activeView === 'knowledge' ? 'Back to Chat' : 'Knowledge Base'}
           </Button>
           <Button
+            appearance={activeView === 'council' ? 'primary' : 'subtle'}
+            icon={<HeartPulse24Regular />}
+            onClick={() => setActiveView(prev => prev === 'council' ? 'chat' : 'council')}
+            style={activeView === 'council' ? { backgroundColor: '#0f7b0f', borderColor: '#0f7b0f' } : undefined}
+          >
+            {activeView === 'council' ? 'Back to Chat' : 'Health Council'}
+          </Button>
+          <Button
+            appearance={activeView === 'security' ? 'primary' : 'subtle'}
+            icon={<ShieldCheckmark24Regular />}
+            onClick={() => setActiveView(prev => prev === 'security' ? 'chat' : 'security')}
+            style={activeView === 'security' ? { backgroundColor: '#f59e0b', borderColor: '#f59e0b' } : undefined}
+          >
+            {activeView === 'security' ? 'Back to Chat' : 'Security'}
+          </Button>
+          <Button
+            appearance={activeView === 'cards' ? 'primary' : 'subtle'}
+            icon={<CardUi24Regular />}
+            onClick={() => setActiveView(prev => prev === 'cards' ? 'chat' : 'cards')}
+            style={activeView === 'cards' ? { backgroundColor: '#3b82f6', borderColor: '#3b82f6' } : undefined}
+          >
+            {activeView === 'cards' ? 'Back to Chat' : 'Cards'}
+          </Button>
+          <Button
+            appearance={activeView === 'observability' ? 'primary' : 'subtle'}
+            icon={<Eye24Regular />}
+            onClick={() => setActiveView(prev => prev === 'observability' ? 'chat' : 'observability')}
+            style={activeView === 'observability' ? { backgroundColor: '#06b6d4', borderColor: '#06b6d4' } : undefined}
+          >
+            {activeView === 'observability' ? 'Back to Chat' : 'Observability'}
+          </Button>
+          <Button
+            appearance={activeView === 'stores' ? 'primary' : 'subtle'}
+            icon={<Building24Regular />}
+            onClick={() => setActiveView(prev => prev === 'stores' ? 'chat' : 'stores')}
+            style={activeView === 'stores' ? { backgroundColor: '#22c55e', borderColor: '#22c55e' } : undefined}
+          >
+            {activeView === 'stores' ? 'Back to Chat' : 'Stores'}
+          </Button>
+          <Button
+            appearance={activeView === 'financials' ? 'primary' : 'subtle'}
+            icon={<Money24Regular />}
+            onClick={() => setActiveView(prev => prev === 'financials' ? 'chat' : 'financials')}
+            style={activeView === 'financials' ? { backgroundColor: '#3b82f6', borderColor: '#3b82f6' } : undefined}
+          >
+            {activeView === 'financials' ? 'Back to Chat' : 'Financials'}
+          </Button>
+          <Button
+            appearance={activeView === 'portfolio' ? 'primary' : 'subtle'}
+            icon={<Star24Regular />}
+            onClick={() => setActiveView(prev => prev === 'portfolio' ? 'chat' : 'portfolio')}
+            style={activeView === 'portfolio' ? { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' } : undefined}
+          >
+            {activeView === 'portfolio' ? 'Back to Chat' : 'Portfolio'}
+          </Button>
+          <Button
             appearance="subtle"
             icon={<Add24Regular />}
             onClick={handleNewChat}
@@ -313,6 +464,68 @@ export function Dashboard() {
             <CompetitiveDashboard />
           ) : activeView === 'knowledge' ? (
             <KnowledgeBasePanel />
+          ) : activeView === 'council' ? (
+            <CouncilPanel />
+          ) : activeView === 'security' ? (
+            <div style={{ overflow: 'auto', height: '100%' }}>
+              <GuardrailsDashboard />
+              <GuardrailsConfig />
+            </div>
+          ) : activeView === 'cards' ? (
+            <div style={{ overflow: 'auto', height: '100%' }}>
+              <AdaptiveCardPanel />
+            </div>
+          ) : activeView === 'observability' ? (
+            <div style={{ overflow: 'auto', height: '100%' }}>
+              <ObservabilityPanel />
+            </div>
+          ) : activeView === 'stores' ? (
+            <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
+              <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>🏪 Store Operations</h2>
+              <StoreHeatmap stores={demoStores} onStoreClick={(id) => console.log('Store clicked:', id)} />
+              <div style={{ marginTop: '24px' }}>
+                <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>📦 Stockout Risks</h3>
+                <StockoutAlert risks={demoStockouts} />
+              </div>
+              <div style={{ marginTop: '24px' }}>
+                <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>🗂️ Planogram — Before vs After</h3>
+                <PlanogramDiagram before={demoPlanogramBefore} after={demoPlanogramAfter} comparisonMode />
+              </div>
+              <div style={{ marginTop: '24px' }}>
+                <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>📊 Performance Table</h3>
+                <StorePerformanceTable stores={demoStores} onStoreClick={(id) => console.log('Store clicked:', id)} />
+              </div>
+            </div>
+          ) : activeView === 'financials' ? (
+            <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
+              <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>💰 Financials</h2>
+              <MarginWaterfall steps={demoWaterfall} title="Q1 2026 P&L Waterfall" />
+              <div style={{ marginTop: '24px' }}>
+                <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>📈 Margin Drivers</h3>
+                <MarginDrivers drivers={demoDrivers} />
+              </div>
+            </div>
+          ) : activeView === 'portfolio' ? (
+            <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
+              <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>⭐ Portfolio Scorecard</h2>
+              {selectedBrand ? (
+                <div>
+                  <Button appearance="subtle" onClick={() => setSelectedBrand(null)} style={{ marginBottom: '16px' }}>← Back to all brands</Button>
+                  <BrandScoreCard brand={selectedBrand} onWhyClick={handleWhyClick} />
+                </div>
+              ) : (
+                <PortfolioScorecard
+                  brands={demoBrands}
+                  generationTimeMs={3200}
+                  onBrandClick={(name) => {
+                    const brand = demoBrands.find(b => b.brandName === name);
+                    if (brand) setSelectedBrand(brand);
+                  }}
+                  onWhyClick={handleWhyClick}
+                />
+              )}
+              <ExplanationPanel explanation={explanationData} open={explanationOpen} onClose={() => setExplanationOpen(false)} />
+            </div>
           ) : (
             <ChatPanel
               key={chatKey}

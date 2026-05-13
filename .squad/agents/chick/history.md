@@ -43,6 +43,29 @@
 - 2026-05-13T11:56:30-04:00 — Approval SignalR events (`approval_requested`, `approval_resolved`) are listened on the same telemetry hub connection in Dashboard. The `PendingApprovals` badge in the header shows count with pulse animation on new arrivals.
 - 2026-05-13T11:56:30-04:00 — API services for memory (`memoryApi.ts`) and approvals (`approvalApi.ts`) are separate from the main `api.ts` to keep concerns isolated.
 - 2026-05-13T11:56:30-04:00 — React 19 + TypeScript 6 requires `useRef<T>(undefined)` instead of `useRef<T>()` for refs that don't start with a value — the empty-argument overload was removed.
+- 2026-05-13T14:25:10-04:00 — Council visualization components live in `src/RetailPulse.Web/src/components/council/` — CouncilPanel (orchestrator), CouncilVoting (vote cards row), VoteCard (individual agent vote), CouncilVerdict (synthesis result), DisagreementHighlight (split decision detail), CouncilHistory (past sessions). All export from barrel `index.ts`.
+- 2026-05-13T14:25:10-04:00 — Council types (`HealthRating`, `CouncilAgentVote`, `CouncilDisagreement`, `CouncilVerdict`, `CouncilSession`, `CouncilConveneRequest`, `CouncilConveneResponse`) are defined in `types/index.ts`. API calls via `services/councilApi.ts` (conveneCouncil POST, fetchCouncilHistory GET).
+- 2026-05-13T14:25:10-04:00 — `COUNCIL_COLORS` and `COUNCIL_DOMAIN_CONFIG` in `agentRouting.ts` define health indicator colors (green=#0f7b0f, yellow=#d4a017, red=#d32f2f) and domain icon/label mappings. These vivid colors are chosen for dark background visibility.
+- 2026-05-13T14:25:10-04:00 — Dashboard `activeView` union now includes `'council'` alongside chat/promo/competitive/knowledge. The Health Council button uses `HeartPulse24Regular` icon from Fluent UI.
+- 2026-05-13T14:53:43-04:00 — Streaming components live in `src/RetailPulse.Web/src/components/streaming/` — StreamingMessage (progressive token display with typing cursor, markdown rendering) and CacheIndicator (⚡ Cached pill badge with tooltip and time-saved display). All export from barrel `index.ts`.
+- 2026-05-13T14:53:43-04:00 — Guardrails components live in `src/RetailPulse.Web/src/components/guardrails/` — BlockedRequestMessage (friendly amber shield UI), GuardrailsDashboard (stats cards + trend chart + filtered list), PiiRedactionBadge (inline [REDACTED:type] badges with renderWithRedactions parser), GuardrailsConfig (admin toggle/pattern panel). All export from barrel `index.ts`.
+- 2026-05-13T14:53:43-04:00 — Streaming/guardrails types (`StreamingToken`, `CacheInfo`, `GuardrailDetectionType`, `BlockedRequest`, `GuardrailsStats`, `GuardrailsConfigData`, `PiiRedactionType`) are defined in `types/index.ts`. Guardrails API service in `services/guardrailsApi.ts`.
+- 2026-05-13T15:27:25-04:00 — Collaborative Adaptive Cards components live in `src/RetailPulse.Web/src/components/cards/` — AdaptiveCardPanel (main container with fetch + SignalR), VotingCard (multi-user voting with tally bar, split-vote detection, escalation), DrillDownCard (expandable detail with breadcrumbs), CardComments (inline thread), CardLifecycleIndicator (horizontal stepper), EscalationBanner (amber notification). All export from barrel `index.ts`.
+- 2026-05-13T15:27:25-04:00 — Observability components live in `src/RetailPulse.Web/src/components/observability/` — ObservabilityPanel (tab container), CostDashboard (period selector + metric cards + Recharts trend/bar charts + tools table), AuditLogViewer (filterable paginated table with expandable rows), ConversationExport (session list + MD/JSON export + preview modal). All export from barrel `index.ts`.
+- 2026-05-13T15:27:25-04:00 — Card types (`CardType`, `CardLifecycleState`, `VoteChoice`, `CardComment`, `UserVote`, `AdaptiveCard`, `DrillDownLevel`) and Observability types (`ObservabilityPeriod`, `CostSummary`, `CostTrendPoint`, `AgentCostBreakdown`, `ToolUsageEntry`, `CostDashboardData`, `AuditLogEntry`, `AuditLogFilters`, `AuditLogPage`, `ExportSession`, `ExportPreview`) defined in `types/index.ts`.
+- 2026-05-13T15:27:25-04:00 — `CARD_COLORS`, `CARD_TYPE_CONFIG`, `CARD_LIFECYCLE_CONFIG` and `OBSERVABILITY_COLORS` constants in `agentRouting.ts`. Card colors use blue/amber/green/gray for lifecycle states. Observability colors use cyan (#06b6d4) as primary.
+- 2026-05-13T15:27:25-04:00 — API services: `services/cardsApi.ts` (fetchActiveCards, submitVote, addComment) and `services/observabilityApi.ts` (fetchCostDashboard, fetchAuditLog, fetchExportSessions, fetchExportPreview, exportSession with Blob download).
+- 2026-05-13T15:27:25-04:00 — Dashboard `activeView` union now includes `'cards'` and `'observability'`. Cards button uses `CardUi24Regular` icon (blue), Observability uses `Eye24Regular` icon (cyan).
+- 2026-05-13T14:53:43-04:00 — ChatPanel now supports streaming mode (StreamingMessage component), cache indicators (CacheIndicator inline), and blocked request rendering (BlockedRequestMessage). The loading state shows "Thinking..." before tokens arrive.
+- 2026-05-13T14:53:43-04:00 — Dashboard `activeView` union now includes `'security'` for the guardrails admin view. The Security button uses `ShieldCheckmark24Regular` icon with amber (#f59e0b) accent.
+- 2026-05-13T14:53:43-04:00 — Fluent UI `makeStyles` does not support `borderColor` or `resize` directly as string properties — use `as unknown as undefined` cast workaround for non-standard CSS properties.
+- 2026-05-13T16:16:48-04:00 — Store operations components live in `src/RetailPulse.Web/src/components/stores/` — StoreHeatmap (region-grouped performance grid), PlanogramDiagram (shelf layout with eye-level highlights and comparison mode), StockoutAlert (urgency-sorted risk cards), StorePerformanceTable (sortable ranked store list). All export from barrel `index.ts`.
+- 2026-05-13T16:16:48-04:00 — Margin/escalation components live in `src/RetailPulse.Web/src/components/margin/` — MarginWaterfall (Recharts stacked bar waterfall with comparison overlay), MarginDrivers (horizontal impact bars with trend arrows), EscalationPath (collapsible vertical timeline with pulse animation). All export from barrel `index.ts`.
+- 2026-05-13T16:16:48-04:00 — Scorecard/explainability components live in `src/RetailPulse.Web/src/components/scorecard/` — PortfolioScorecard (brand grid with SVG score rings and skeleton loading), BrandScoreCard (RadarChart detail with dimension progress bars), ExplanationPanel (slide-out with staggered step reveal animation), WhyButton (reusable purple "?" trigger). All export from barrel `index.ts`.
+- 2026-05-13T16:16:48-04:00 — Phase 4 types: `StorePerformance`, `PlanogramSlot`, `PlanogramLayout`, `StockoutRisk`, `MarginWaterfallStep`, `MarginDriver`, `EscalationStep`, `BrandScore`, `ExplanationStep`, `ExplanationData` defined in `types/index.ts`. Color constants: `STORE_COLORS`, `MARGIN_COLORS`, `SCORECARD_COLORS` in `agentRouting.ts`.
+- 2026-05-13T16:16:48-04:00 — Dashboard `activeView` union now includes `'stores'`, `'financials'`, and `'portfolio'`. Stores uses `Building24Regular` icon (green), Financials uses `Money24Regular` (blue), Portfolio uses `Star24Regular` (purple).
+- 2026-05-13T16:16:48-04:00 — API services: `services/storeApi.ts` (fetchStorePerformance, fetchPlanogram, fetchStockoutRisks), `services/marginApi.ts` (fetchMarginWaterfall, fetchMarginDrivers, fetchEscalationPath), `services/scorecardApi.ts` (fetchPortfolioScorecard, fetchBrandScore, fetchExplanation).
+- 2026-05-13T16:16:48-04:00 — Recharts waterfall chart pattern: compute running totals, use stacked bars with transparent `base` bar + colored `value` bar. For comparison overlay, render second bar set at 40% opacity.
 
 ## Session Work — 2026-05-13 Sprint 1.2 Demand Forecast Chart Components (Complete)
 
@@ -226,6 +249,36 @@ Tests (22 new):
 - `KnowledgeBase.test.tsx` — 11 tests: KnowledgeBasePanel document loading/display, search, upload trigger, stats display; DocumentUpload render, file type display, title input; CitationBadge render, hover tooltip, click expand, relevance score.
 
 **Test Status:** 135 frontend tests passing (16 files), build clean
+
+## Session Work — 2026-05-13 Sprint 3.1+3.2 Streaming Chat + Guardrails UI (Complete)
+
+**Outcome:** ✅ SUCCESS — Streaming chat, cache indicators, and guardrails UI built. 185 frontend tests passing (21 files), build clean.
+
+**Deliverables:**
+
+Sprint 3.1 — Streaming Chat UI:
+- `src/components/streaming/StreamingMessage.tsx` — Progressive token display with typing cursor, animated dots "Generating..." state, progressive markdown rendering via ReactMarkdown, cursor disappears on completion.
+- `src/components/streaming/CacheIndicator.tsx` — ⚡ Cached pill badge with lightning bolt animation, time-saved display (e.g. "Saved ~2.3s"), tooltip with TTL info.
+- `src/components/streaming/index.ts` — Barrel export.
+- `ChatPanel.tsx` updated: streaming state tracking, StreamingMessage integration for streaming responses, CacheIndicator inline on cached responses, BlockedRequestMessage for guardrail blocks, "Thinking..." state before tokens arrive.
+
+Sprint 3.2 — Guardrails UI:
+- `src/components/guardrails/BlockedRequestMessage.tsx` — Friendly amber-bordered message with 🛡️ shield icon, reason display, optional rephrasing suggestion. Accessible (role="alert").
+- `src/components/guardrails/GuardrailsDashboard.tsx` — Admin stats cards (total blocked, jailbreak, PII, access), trend bar chart (blocks/hour last 24h via Recharts), recent blocked requests list (last 50), type filter chips.
+- `src/components/guardrails/PiiRedactionBadge.tsx` — Inline styled badge for [REDACTED:type] markers with tooltip. `renderWithRedactions()` parser function for message content.
+- `src/components/guardrails/GuardrailsConfig.tsx` — Admin configuration with toggle switches per guardrail type, blocked patterns textarea, save/reset buttons calling PUT /api/guardrails/config.
+- `src/components/guardrails/index.ts` — Barrel export.
+- `src/services/guardrailsApi.ts` — API service for guardrails stats, config CRUD, and reset.
+- `src/types/index.ts` — Added StreamingToken, CacheInfo, GuardrailDetectionType, BlockedRequest, GuardrailsStats, GuardrailsConfigData, PiiRedactionType types.
+- `Dashboard.tsx` — Added "Security" tab (ShieldCheckmark24Regular icon, amber accent) rendering GuardrailsDashboard + GuardrailsConfig.
+
+Tests (25 new):
+- `StreamingMessage.test.tsx` — 6 tests: generating state, streaming cursor, cursor removal, onComplete callback, progressive reveal, markdown rendering.
+- `CacheIndicator.test.tsx` — 5 tests: hidden when not cached, badge display, time saved, no time saved, TTL tooltip.
+- `BlockedRequestMessage.test.tsx` — 7 tests: shield icon, reason display, prefix text, suggestion display, no suggestion, accessibility role, amber styling.
+- `GuardrailsDashboard.test.tsx` — 7 tests: loading state, stats display, stat labels, recent requests, error state, filter chips, title, trend chart.
+
+**Test Status:** 185 frontend tests passing (21 files), build clean
 
 ## Learnings
 
