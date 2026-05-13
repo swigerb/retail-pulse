@@ -20,6 +20,8 @@ using RetailPulse.Contracts.Tracing;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
 using RetailPulse.Api.Rag;
+using RetailPulse.Contracts.Caching;
+using RetailPulse.Contracts.Guardrails;
 using RetailPulse.Contracts.Rag;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -336,6 +338,21 @@ builder.Services.AddSingleton<InMemoryKnowledgeBase>();
 builder.Services.AddSingleton<IKnowledgeBase>(sp => sp.GetRequiredService<InMemoryKnowledgeBase>());
 builder.Services.AddSingleton<RagContextProvider>();
 
+// Response cache — in-memory with TTL expiration and LRU eviction
+builder.Services.AddSingleton<RetailPulse.Api.Caching.InMemoryResponseCache>();
+builder.Services.AddSingleton<IResponseCache>(sp => sp.GetRequiredService<RetailPulse.Api.Caching.InMemoryResponseCache>());
+
+// Guardrails — suspicious request log (ring buffer) and runtime config
+builder.Services.AddSingleton<RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog>();
+builder.Services.AddSingleton<ISuspiciousRequestLog>(sp => sp.GetRequiredService<RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog>());
+builder.Services.AddSingleton<GuardrailsConfig>();
+
+// Guardrails middleware — input filtering (jailbreak, injection) + output PII redaction
+builder.Services.AddScoped<GuardrailsMiddleware>();
+
+// Streaming middleware — progressive token delivery via SignalR
+builder.Services.AddScoped<StreamingMiddleware>();
+
 // Register IChatClient — Azure OpenAI via APIM AI Gateway.
 // In Production we fail fast if the API key is missing rather than silently
 // using "demo-key" which would surface as opaque 401s at runtime.
@@ -583,11 +600,12 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// SignalR hub
+// SignalR hubs
 app.MapHub<TelemetryHub>("/hubs/telemetry");
+app.MapHub<StreamingHub>("/hubs/streaming");
 
-// Chat endpoint — routes through multi-agent router with conversation memory and distributed tracing
-app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, ILogger<Program> logger, CancellationToken ct) =>
+// Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
+app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ILogger<Program> logger, CancellationToken ct) =>
 {
     if (request is null || string.IsNullOrWhiteSpace(request.Message))
     {
@@ -598,6 +616,36 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
     {
         var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
         var userId = request.User?.ObjectId ?? "anonymous";
+
+        // ── Guardrails: input check ──────────────────────────────────────
+        var guardrailResult = await guardrails.CheckInputAsync(request, ct);
+        if (guardrailResult.IsBlocked)
+        {
+            return Results.Ok(new ChatResponse(
+                guardrailResult.RefusalMessage!,
+                sessionId,
+                [],
+                null,
+                0));
+        }
+
+        // ── Cache: check for cached response ─────────────────────────────
+        if (CacheHelpers.IsCacheable(request.Message))
+        {
+            // Tentative agent key for cache — use "general" as prefix until we route
+            var cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
+            var cached = await responseCache.GetAsync(cacheKey, ct);
+            if (cached is not null)
+            {
+                logger.LogInformation("Cache hit for session {SessionId}, key {CacheKey}", sessionId, cacheKey[..8]);
+                return Results.Ok(new ChatResponse(
+                    cached.Response,
+                    sessionId,
+                    [new AgentSpan("cache.hit", "cache", $"Served from cache (agent: {cached.AgentId})", 0, DateTimeOffset.UtcNow, sessionId)],
+                    null,
+                    0));
+            }
+        }
 
         // Start root trace span: chat_request
         using var chatActivity = AgentTelemetry.StartChatRequest(sessionId, request.Message);
@@ -859,6 +907,22 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
         // Notify trace completion via SignalR
         _ = traceCollector.NotifyTraceCompletedAsync(traceId);
 
+        // ── Guardrails: output PII redaction ─────────────────────────────
+        var filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
+        if (filteredReply != response.Reply)
+        {
+            response = response with { Reply = filteredReply };
+        }
+
+        // ── Cache: store response for deterministic queries ──────────────
+        if (CacheHelpers.IsCacheable(request.Message))
+        {
+            var cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
+            await responseCache.SetAsync(cacheKey,
+                new CachedResponse(response.Reply, specialist.Key, DateTime.UtcNow, cacheKey),
+                TimeSpan.FromMinutes(5), ct);
+        }
+
         chatActivity?.SetTag("response.length", response.Reply.Length);
         chatActivity?.SetTag("trace.id", traceId);
 
@@ -878,6 +942,80 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
     }
 })
 .WithName("Chat");
+
+// Streaming chat endpoint — SSE/SignalR progressive token delivery
+app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, ILogger<Program> logger, CancellationToken ct) =>
+{
+    if (request is null || string.IsNullOrWhiteSpace(request.Message))
+    {
+        return Results.BadRequest(new { error = "Field 'message' is required." });
+    }
+
+    try
+    {
+        var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+        var userId = request.User?.ObjectId ?? "anonymous";
+
+        // Guardrails input check
+        var guardrailResult = await guardrails.CheckInputAsync(request, ct);
+        if (guardrailResult.IsBlocked)
+        {
+            return Results.Ok(new ChatResponse(
+                guardrailResult.RefusalMessage!,
+                sessionId,
+                [],
+                null,
+                0));
+        }
+
+        // Memory recall
+        var memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+        var enrichedRequest = request;
+        if (memoryContext is not null)
+        {
+            var historyWithMemory = new List<ChatHistoryMessage> { new("system", memoryContext) };
+            if (request.History is { Count: > 0 })
+                historyWithMemory.AddRange(request.History);
+            enrichedRequest = request with { History = historyWithMemory };
+        }
+
+        // Route to specialist
+        var decision = await router.RouteAsync(enrichedRequest.Message, enrichedRequest.History, enrichedRequest.User, null, ct);
+        var specialist = specialists.FirstOrDefault(s =>
+            string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase))
+            ?? specialists.First(s => s.Key == "general");
+
+        logger.LogInformation("Streaming route to {AgentKey} — intent: {Intent}", specialist.Key, decision.Intent);
+
+        // Execute agent — stream tokens via SignalR in parallel
+        var response = await specialist.HandleAsync(enrichedRequest, ct);
+
+        // Push the full response as streaming tokens via SignalR for clients listening
+        await streaming.StreamResponseFallbackAsync(sessionId, specialist.Key, response.Reply, ct);
+
+        // PII redaction on output
+        var filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
+        if (filteredReply != response.Reply)
+            response = response with { Reply = filteredReply };
+
+        // Fire-and-forget memory extraction
+        _ = Task.Run(async () =>
+        {
+            try { await memoryMiddleware.ExtractAndStoreAsync(userId, request.Message, response.Reply, CancellationToken.None); }
+            catch { /* swallow */ }
+        }, CancellationToken.None);
+
+        return Results.Ok(response);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Streaming chat error for session {SessionId}", request.SessionId);
+        return Results.Json(
+            new { error = "The AI service is temporarily unavailable.", code = "service_unavailable" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+})
+.WithName("ChatStream");
 
 // Health/info endpoint
 app.MapGet("/api/info", (IEnumerable<ISpecialistAgent> specialists) => Results.Ok(new
@@ -1509,6 +1647,106 @@ app.MapGet("/api/message-extension/manifest", () =>
 })
 .WithName("MessageExtensionManifest");
 
+// ── Cache endpoints ───────────────────────────────────────────────────────
+
+app.MapGet("/api/cache/stats", async (IResponseCache cache, CancellationToken ct) =>
+{
+    var stats = await cache.GetStatsAsync(ct);
+    return Results.Ok(new
+    {
+        totalEntries = stats.TotalEntries,
+        hits = stats.Hits,
+        misses = stats.Misses,
+        hitRate = Math.Round(stats.HitRate, 4),
+        memoryBytes = stats.MemoryBytes
+    });
+})
+.WithName("GetCacheStats");
+
+app.MapDelete("/api/cache", async (IResponseCache cache, CancellationToken ct) =>
+{
+    await cache.InvalidateAsync(null, ct);
+    return Results.Ok(new { status = "cleared" });
+})
+.WithName("ClearCache");
+
+app.MapDelete("/api/cache/{key}", async (string key, IResponseCache cache, CancellationToken ct) =>
+{
+    await cache.InvalidateAsync(key, ct);
+    return Results.Ok(new { key, status = "invalidated" });
+})
+.WithName("InvalidateCacheKey");
+
+// ── Guardrails endpoints ─────────────────────────────────────────────────
+
+app.MapGet("/api/guardrails/log", async (ISuspiciousRequestLog log, HttpContext http, CancellationToken ct) =>
+{
+    var countStr = http.Request.Query["count"].FirstOrDefault();
+    var count = int.TryParse(countStr, out var c) ? c : 50;
+
+    var recent = await log.GetRecentAsync(count, ct);
+    return Results.Ok(recent.Select(r => new
+    {
+        id = r.Id,
+        timestamp = r.Timestamp,
+        requestText = r.RequestText,
+        detectionType = r.DetectionType,
+        userContext = r.UserContext,
+        action = r.Action
+    }));
+})
+.WithName("GetGuardrailsLog");
+
+app.MapGet("/api/guardrails/stats", async (ISuspiciousRequestLog log, CancellationToken ct) =>
+{
+    var stats = await log.GetStatsAsync(ct);
+    return Results.Ok(new
+    {
+        totalBlocked = stats.TotalBlocked,
+        jailbreakAttempts = stats.JailbreakAttempts,
+        piiDetections = stats.PiiDetections,
+        accessDenials = stats.AccessDenials,
+        since = stats.Since
+    });
+})
+.WithName("GetGuardrailsStats");
+
+app.MapGet("/api/guardrails/config", (GuardrailsConfig config) =>
+{
+    return Results.Ok(new
+    {
+        piiDetectionEnabled = config.PiiDetectionEnabled,
+        jailbreakDetectionEnabled = config.JailbreakDetectionEnabled,
+        autoRedactPii = config.AutoRedactPii,
+        maxInputLength = config.MaxInputLength,
+        piiPatterns = RetailPulse.Api.Guardrails.GuardrailPatterns.PiiPatterns.Select(p => p.Name).ToList(),
+        jailbreakPatterns = RetailPulse.Api.Guardrails.GuardrailPatterns.JailbreakPatterns.Select(p => p.Name).ToList()
+    });
+})
+.WithName("GetGuardrailsConfig");
+
+app.MapPut("/api/guardrails/config", (GuardrailsConfigUpdateDto body, GuardrailsConfig config) =>
+{
+    if (body.PiiDetectionEnabled.HasValue)
+        config.PiiDetectionEnabled = body.PiiDetectionEnabled.Value;
+    if (body.JailbreakDetectionEnabled.HasValue)
+        config.JailbreakDetectionEnabled = body.JailbreakDetectionEnabled.Value;
+    if (body.AutoRedactPii.HasValue)
+        config.AutoRedactPii = body.AutoRedactPii.Value;
+    if (body.MaxInputLength.HasValue)
+        config.MaxInputLength = body.MaxInputLength.Value;
+
+    return Results.Ok(new
+    {
+        piiDetectionEnabled = config.PiiDetectionEnabled,
+        jailbreakDetectionEnabled = config.JailbreakDetectionEnabled,
+        autoRedactPii = config.AutoRedactPii,
+        maxInputLength = config.MaxInputLength,
+        status = "updated"
+    });
+})
+.WithName("UpdateGuardrailsConfig");
+
 app.Run();
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1577,3 +1815,12 @@ record PromoEvaluationRequest(
 /// Request body for POST /api/council/convene.
 /// </summary>
 record CouncilConveneRequest(string Brand, string? Region = null);
+
+/// <summary>
+/// Request body for PUT /api/guardrails/config.
+/// </summary>
+record GuardrailsConfigUpdateDto(
+    bool? PiiDetectionEnabled = null,
+    bool? JailbreakDetectionEnabled = null,
+    bool? AutoRedactPii = null,
+    int? MaxInputLength = null);

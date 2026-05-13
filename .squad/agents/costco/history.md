@@ -237,3 +237,30 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - Pre-existing duplicate `.WithName()` values in MCP Program.cs (e.g., GetHistoricalDemand appears twice) don't cause build errors but may cause runtime issues — noted for future cleanup.
 
 **Validation:** Build clean (0 errors, 5 pre-existing warnings), all 816 tests pass
+
+## Session Work — Sprint 3.1+3.2 Streaming, Caching & Guardrails Contracts + Wiring
+
+### Task: SignalR streaming hub, response cache contracts, query classifier, guardrails config, PII/jailbreak patterns, REST endpoints
+
+- **Context:** Sprint 3.1 (Streaming + Caching) and Sprint 3.2 (Guardrails Services) — create contract interfaces, implementations, and REST endpoints for real-time streaming, deterministic query caching, and security guardrails.
+- **Parallel work:** Kroger (Architect) independently created implementations (InMemoryResponseCache, InMemorySuspiciousRequestLog, JailbreakDetector, PiiRedactor, AccessControlGuard, GuardrailsMiddleware, StreamingMiddleware) in the same worktree, all referencing MY contract namespaces.
+- **Reconciliation:** Kept Kroger's implementations, deleted my duplicate `Api/Services/` directory. Fixed namespace references (`Api.Services.Caching` → `Api.Caching`, `Api.Services.Guardrails` → `Api.Guardrails`).
+
+- **My contributions (contracts + wiring):**
+  - `Contracts/Caching/IResponseCache.cs` — IResponseCache interface, CachedResponse, CacheStats records
+  - `Contracts/Caching/QueryClassifier.cs` — Static IsDeterministic with GeneratedRegex (never-cache: forecasts/recommendations/time-sensitive; always-cache: factual/historical)
+  - `Contracts/Guardrails/ISuspiciousRequestLog.cs` — ISuspiciousRequestLog interface, SuspiciousRequest, GuardrailsStats records
+  - `Contracts/Guardrails/GuardrailsConfig.cs` — Runtime-toggleable settings (PiiDetection, JailbreakDetection, AutoRedactPii, MaxInputLength)
+  - `Api/Hubs/StreamingHub.cs` — SignalR hub at `/hubs/streaming` with JoinSession/LeaveSession + StreamingEvents static helper
+  - `Api/Guardrails/GuardrailPatterns.cs` — Compiled regex: 4 PII patterns (SSN, Email, Phone, CreditCard) + 6 jailbreak patterns
+  - Program.cs DI: InMemoryResponseCache, InMemorySuspiciousRequestLog, GuardrailsConfig singletons
+  - Program.cs endpoints: GET/DELETE /api/cache/*, GET/PUT /api/guardrails/*
+  - Fixed GuardrailsMiddleware.cs using statement, removed duplicate JailbreakConfig from JailbreakDetector.cs
+  - Fixed StreamingMiddleware.cs using statement (`Api.Services.Caching` → `Api.Caching`)
+
+### Learnings
+- Kroger's implementations reference Costco's contract namespaces by design — contracts-first approach works for parallel development
+- When deleting duplicate implementations, check ALL files that imported the old namespace (middleware, middleware middleware, Program.cs)
+- JailbreakDetector.cs already had a separate JailbreakConfig.cs file from Kroger — adding a duplicate record causes CS0101
+
+**Validation:** Build clean (0 errors, 5 warnings), all 1061 tests pass
