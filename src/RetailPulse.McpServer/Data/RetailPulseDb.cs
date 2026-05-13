@@ -246,6 +246,62 @@ public class RetailPulseDb
             CREATE INDEX IF NOT EXISTS IX_FulfillmentRates_BrandRegion ON FulfillmentRates (Brand, Region);
             CREATE INDEX IF NOT EXISTS IX_FulfillmentRates_Period ON FulfillmentRates (Period);
 
+            CREATE TABLE IF NOT EXISTS StoreMetrics (
+                StoreId TEXT NOT NULL COLLATE NOCASE,
+                StoreName TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Revenue REAL NOT NULL,
+                Target REAL NOT NULL,
+                FootTraffic INTEGER NOT NULL,
+                ConversionRate REAL NOT NULL,
+                PRIMARY KEY (StoreId)
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_StoreMetrics_Region ON StoreMetrics (Region);
+
+            CREATE TABLE IF NOT EXISTS ShelfLayouts (
+                AisleId TEXT NOT NULL COLLATE NOCASE,
+                StoreId TEXT NOT NULL COLLATE NOCASE,
+                ShelfLevel INTEGER NOT NULL,
+                Position INTEGER NOT NULL,
+                SkuId TEXT NOT NULL COLLATE NOCASE,
+                FacingWidth REAL NOT NULL,
+                PRIMARY KEY (AisleId, StoreId, ShelfLevel, Position)
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_ShelfLayouts_StoreId ON ShelfLayouts (StoreId);
+
+            CREATE TABLE IF NOT EXISTS SkuVelocity (
+                SkuId TEXT NOT NULL COLLATE NOCASE,
+                StoreId TEXT NOT NULL COLLATE NOCASE,
+                DailyUnits REAL NOT NULL,
+                SafetyStockDays INTEGER NOT NULL,
+                LastRestock TEXT NOT NULL,
+                PRIMARY KEY (SkuId, StoreId)
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_SkuVelocity_StoreId ON SkuVelocity (StoreId);
+
+            CREATE TABLE IF NOT EXISTS BrandFinancials (
+                BrandId TEXT NOT NULL COLLATE NOCASE,
+                Period TEXT NOT NULL COLLATE NOCASE,
+                Revenue REAL NOT NULL,
+                Cogs REAL NOT NULL,
+                Marketing REAL NOT NULL,
+                Distribution REAL NOT NULL,
+                NetMargin REAL NOT NULL,
+                PRIMARY KEY (BrandId, Period)
+            );
+
+            CREATE TABLE IF NOT EXISTS MarginDrivers (
+                BrandId TEXT NOT NULL COLLATE NOCASE,
+                Category TEXT NOT NULL COLLATE NOCASE,
+                Amount REAL NOT NULL,
+                Impact REAL NOT NULL,
+                Trend TEXT NOT NULL COLLATE NOCASE,
+                PRIMARY KEY (BrandId, Category)
+            );
+
             CREATE TABLE IF NOT EXISTS SeedMetadata (
                 Key TEXT PRIMARY KEY,
                 Value TEXT NOT NULL
@@ -275,7 +331,7 @@ public class RetailPulseDb
         using var tx = conn.BeginTransaction();
 
         using var clearCmd = conn.CreateCommand();
-        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM PromoHistory; DELETE FROM LiftCoefficients; DELETE FROM CompetitorPricing; DELETE FROM MarketShare; DELETE FROM CompetitorActivity; DELETE FROM InventoryLevels; DELETE FROM SupplyDisruptions; DELETE FROM FulfillmentRates; DELETE FROM SeedMetadata;";
+        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM PromoHistory; DELETE FROM LiftCoefficients; DELETE FROM CompetitorPricing; DELETE FROM MarketShare; DELETE FROM CompetitorActivity; DELETE FROM InventoryLevels; DELETE FROM SupplyDisruptions; DELETE FROM FulfillmentRates; DELETE FROM StoreMetrics; DELETE FROM ShelfLayouts; DELETE FROM SkuVelocity; DELETE FROM BrandFinancials; DELETE FROM MarginDrivers; DELETE FROM SeedMetadata;";
         clearCmd.ExecuteNonQuery();
 
         SeedDepletions(conn);
@@ -292,6 +348,11 @@ public class RetailPulseDb
         SeedInventoryLevels(conn);
         SeedSupplyDisruptions(conn);
         SeedFulfillmentRates(conn);
+        SeedStoreMetrics(conn);
+        SeedShelfLayouts(conn);
+        SeedSkuVelocity(conn);
+        SeedBrandFinancials(conn);
+        SeedMarginDrivers(conn);
 
         // Store hash
         using var hashCmd = conn.CreateCommand();
@@ -304,7 +365,7 @@ public class RetailPulseDb
 
     // Bump this version whenever the schema or seeding logic changes
     // to force a re-seed even if tenant.yaml hasn't changed.
-    private const int SchemaVersion = 6;
+    private const int SchemaVersion = 7;
 
     private string ComputeTenantHash()
     {
@@ -3202,6 +3263,233 @@ public class RetailPulseDb
         }
     }
 
+    // ── Store, Shelf, Velocity, Brand Financial & Margin Seeding ────────
+
+    private void SeedStoreMetrics(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO StoreMetrics (StoreId, StoreName, Region, Revenue, Target, FootTraffic, ConversionRate)
+            VALUES (@storeId, @storeName, @region, @revenue, @target, @footTraffic, @conversionRate)
+            """;
+
+        var pStoreId = cmd.Parameters.Add("@storeId", SqliteType.Text);
+        var pStoreName = cmd.Parameters.Add("@storeName", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pRevenue = cmd.Parameters.Add("@revenue", SqliteType.Real);
+        var pTarget = cmd.Parameters.Add("@target", SqliteType.Real);
+        var pFootTraffic = cmd.Parameters.Add("@footTraffic", SqliteType.Integer);
+        var pConversionRate = cmd.Parameters.Add("@conversionRate", SqliteType.Real);
+
+        var storeTypes = new[] { "Flagship", "Mall", "Strip Center", "Downtown", "Outlet" };
+        int storeCounter = 0;
+
+        foreach (var region in _tenant.Regions)
+        {
+            // ~3-4 stores per region = ~20 stores across 6 regions
+            var regionSeed = GetStableHash($"store|{region}");
+            var rng = new Random(regionSeed);
+            var storesInRegion = 3 + (regionSeed % 2); // 3 or 4
+
+            for (int i = 0; i < storesInRegion; i++)
+            {
+                storeCounter++;
+                var storeId = $"STR-{storeCounter:D4}";
+                var storeType = storeTypes[rng.Next(storeTypes.Length)];
+                var storeName = $"{_tenant.Company} {storeType} #{storeCounter}";
+                var target = Math.Round(800_000 + rng.NextDouble() * 1_200_000, 2);
+                var perfVariance = 0.7 + rng.NextDouble() * 0.6; // 0.7 to 1.3
+                var revenue = Math.Round(target * perfVariance, 2);
+                var footTraffic = 5000 + rng.Next(25000);
+                var conversionRate = Math.Round(0.02 + rng.NextDouble() * 0.08, 4);
+
+                pStoreId.Value = storeId;
+                pStoreName.Value = storeName;
+                pRegion.Value = region;
+                pRevenue.Value = revenue;
+                pTarget.Value = target;
+                pFootTraffic.Value = footTraffic;
+                pConversionRate.Value = conversionRate;
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
+    private void SeedShelfLayouts(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO ShelfLayouts (AisleId, StoreId, ShelfLevel, Position, SkuId, FacingWidth)
+            VALUES (@aisleId, @storeId, @shelfLevel, @position, @skuId, @facingWidth)
+            """;
+
+        var pAisle = cmd.Parameters.Add("@aisleId", SqliteType.Text);
+        var pStore = cmd.Parameters.Add("@storeId", SqliteType.Text);
+        var pLevel = cmd.Parameters.Add("@shelfLevel", SqliteType.Integer);
+        var pPos = cmd.Parameters.Add("@position", SqliteType.Integer);
+        var pSku = cmd.Parameters.Add("@skuId", SqliteType.Text);
+        var pWidth = cmd.Parameters.Add("@facingWidth", SqliteType.Real);
+
+        // Generate shelf layouts for first 5 stores with 3 aisles each
+        for (int s = 1; s <= 5; s++)
+        {
+            var storeId = $"STR-{s:D4}";
+            var storeSeed = GetStableHash($"shelf|{storeId}");
+            var rng = new Random(storeSeed);
+
+            for (int a = 1; a <= 3; a++)
+            {
+                var aisleId = $"AISLE-{storeId}-{a:D2}";
+
+                // 4 shelf levels, ~7 positions each = ~28 slots per aisle
+                for (int level = 1; level <= 4; level++)
+                {
+                    var positionsOnLevel = 5 + rng.Next(5); // 5-9
+                    for (int pos = 1; pos <= positionsOnLevel; pos++)
+                    {
+                        var brandIdx = rng.Next(_tenant.Brands.Count);
+                        var brand = _tenant.Brands[brandIdx];
+                        var variantIdx = rng.Next(brand.Variants.Count);
+                        var skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{variantIdx + 1:D3}";
+                        var facingWidth = Math.Round(0.3 + rng.NextDouble() * 0.7, 2);
+
+                        pAisle.Value = aisleId;
+                        pStore.Value = storeId;
+                        pLevel.Value = level;
+                        pPos.Value = pos;
+                        pSku.Value = skuId;
+                        pWidth.Value = facingWidth;
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            }
+        }
+    }
+
+    private void SeedSkuVelocity(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO SkuVelocity (SkuId, StoreId, DailyUnits, SafetyStockDays, LastRestock)
+            VALUES (@skuId, @storeId, @dailyUnits, @safetyStockDays, @lastRestock)
+            """;
+
+        var pSku = cmd.Parameters.Add("@skuId", SqliteType.Text);
+        var pStore = cmd.Parameters.Add("@storeId", SqliteType.Text);
+        var pDaily = cmd.Parameters.Add("@dailyUnits", SqliteType.Real);
+        var pSafety = cmd.Parameters.Add("@safetyStockDays", SqliteType.Integer);
+        var pRestock = cmd.Parameters.Add("@lastRestock", SqliteType.Text);
+
+        var today = DateTime.UtcNow.Date;
+
+        for (int s = 1; s <= 5; s++)
+        {
+            var storeId = $"STR-{s:D4}";
+
+            foreach (var brand in _tenant.Brands)
+            {
+                for (int v = 0; v < brand.Variants.Count; v++)
+                {
+                    var skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{v + 1:D3}";
+                    var seed = GetStableHash($"velocity|{skuId}|{storeId}");
+                    var rng = new Random(seed);
+
+                    pSku.Value = skuId;
+                    pStore.Value = storeId;
+                    pDaily.Value = Math.Round(2.0 + rng.NextDouble() * 48.0, 1);
+                    pSafety.Value = 3 + rng.Next(12);
+                    pRestock.Value = today.AddDays(-rng.Next(30)).ToString("yyyy-MM-dd");
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+    }
+
+    private void SeedBrandFinancials(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO BrandFinancials (BrandId, Period, Revenue, Cogs, Marketing, Distribution, NetMargin)
+            VALUES (@brandId, @period, @revenue, @cogs, @marketing, @distribution, @netMargin)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brandId", SqliteType.Text);
+        var pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
+        var pRevenue = cmd.Parameters.Add("@revenue", SqliteType.Real);
+        var pCogs = cmd.Parameters.Add("@cogs", SqliteType.Real);
+        var pMktg = cmd.Parameters.Add("@marketing", SqliteType.Real);
+        var pDist = cmd.Parameters.Add("@distribution", SqliteType.Real);
+        var pNet = cmd.Parameters.Add("@netMargin", SqliteType.Real);
+
+        var periods = new[] { "2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1" };
+
+        foreach (var brand in _tenant.Brands)
+        {
+            var brandSeed = GetStableHash($"fin|{brand.Name}");
+            var rng = new Random(brandSeed);
+
+            var baseRevenue = brand.PriceSegment == "Premium" ? 5_000_000 + rng.NextDouble() * 15_000_000 : 3_000_000 + rng.NextDouble() * 10_000_000;
+            var cogsRatio = 0.45 + rng.NextDouble() * 0.2; // 45-65% COGS
+
+            foreach (var period in periods)
+            {
+                var periodVariance = 0.9 + rng.NextDouble() * 0.2;
+                var revenue = Math.Round(baseRevenue * periodVariance, 2);
+                var cogs = Math.Round(revenue * cogsRatio, 2);
+                var marketing = Math.Round(revenue * (0.05 + rng.NextDouble() * 0.1), 2);
+                var distribution = Math.Round(revenue * (0.03 + rng.NextDouble() * 0.05), 2);
+                var netMargin = Math.Round(revenue - cogs - marketing - distribution, 2);
+
+                pBrand.Value = brand.Name;
+                pPeriod.Value = period;
+                pRevenue.Value = revenue;
+                pCogs.Value = cogs;
+                pMktg.Value = marketing;
+                pDist.Value = distribution;
+                pNet.Value = netMargin;
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
+    private void SeedMarginDrivers(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO MarginDrivers (BrandId, Category, Amount, Impact, Trend)
+            VALUES (@brandId, @category, @amount, @impact, @trend)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brandId", SqliteType.Text);
+        var pCat = cmd.Parameters.Add("@category", SqliteType.Text);
+        var pAmount = cmd.Parameters.Add("@amount", SqliteType.Real);
+        var pImpact = cmd.Parameters.Add("@impact", SqliteType.Real);
+        var pTrend = cmd.Parameters.Add("@trend", SqliteType.Text);
+
+        var categories = new[] { "Raw Materials", "Labor", "Logistics", "Marketing", "Packaging", "Overhead" };
+        var trends = new[] { "increasing", "decreasing", "stable", "volatile" };
+
+        foreach (var brand in _tenant.Brands)
+        {
+            var brandSeed = GetStableHash($"driver|{brand.Name}");
+            var rng = new Random(brandSeed);
+
+            foreach (var cat in categories)
+            {
+                var amount = Math.Round(50_000 + rng.NextDouble() * 500_000, 2);
+                var impact = Math.Round(-5.0 + rng.NextDouble() * 10.0, 2); // -5% to +5%
+                var trend = trends[rng.Next(trends.Length)];
+
+                pBrand.Value = brand.Name;
+                pCat.Value = cat;
+                pAmount.Value = amount;
+                pImpact.Value = impact;
+                pTrend.Value = trend;
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
     // ── Supply Chain Query Methods ───────────────────────────────────────
 
     public object GetInventoryLevels(string? brand, string? region, string? category, string? status)
@@ -3511,5 +3799,351 @@ public class RetailPulseDb
                 fill_rate_trend = fillTrend
             }
         };
+    }
+
+    // ── Store Operations Queries ─────────────────────────────────────────
+
+    public object GetStorePerformance(string? region = null, string? storeId = null)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var sql = "SELECT StoreId, StoreName, Region, Revenue, Target, FootTraffic, ConversionRate FROM StoreMetrics WHERE 1=1";
+        if (!string.IsNullOrWhiteSpace(region)) sql += " AND Region = @region";
+        if (!string.IsNullOrWhiteSpace(storeId)) sql += " AND StoreId = @storeId";
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        if (!string.IsNullOrWhiteSpace(region)) cmd.Parameters.AddWithValue("@region", region);
+        if (!string.IsNullOrWhiteSpace(storeId)) cmd.Parameters.AddWithValue("@storeId", storeId);
+
+        var stores = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var rev = reader.GetDouble(3);
+            var target = reader.GetDouble(4);
+            var perfIndex = target > 0 ? Math.Round(rev / target, 3) : 0;
+            var issues = new List<string>();
+            if (perfIndex < 0.85) issues.Add("Significantly below target");
+            if (perfIndex < 0.95) issues.Add("Below target");
+            if (reader.GetDouble(6) < 0.03) issues.Add("Low conversion rate");
+            if (reader.GetInt32(5) < 8000) issues.Add("Low foot traffic");
+
+            stores.Add(new
+            {
+                storeId = reader.GetString(0),
+                storeName = reader.GetString(1),
+                region = reader.GetString(2),
+                revenue = rev,
+                target,
+                performanceIndex = perfIndex,
+                footTraffic = reader.GetInt32(5),
+                conversionRate = reader.GetDouble(6),
+                issues = issues.ToArray()
+            });
+        }
+
+        return new { stores, count = stores.Count };
+    }
+
+    public object GetShelfLayout(string storeId, string aisleId)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT sl.ShelfLevel, sl.Position, sl.SkuId, sl.FacingWidth, sv.DailyUnits
+            FROM ShelfLayouts sl
+            LEFT JOIN SkuVelocity sv ON sl.SkuId = sv.SkuId AND sl.StoreId = sv.StoreId
+            WHERE sl.StoreId = @storeId AND sl.AisleId = @aisleId
+            ORDER BY sl.ShelfLevel, sl.Position
+            """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
+        cmd.Parameters.AddWithValue("@aisleId", aisleId);
+
+        var slots = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            slots.Add(new
+            {
+                shelfLevel = reader.GetInt32(0),
+                position = reader.GetInt32(1),
+                skuId = reader.GetString(2),
+                facingWidth = reader.GetDouble(3),
+                dailyVelocity = reader.IsDBNull(4) ? 0.0 : reader.GetDouble(4)
+            });
+        }
+
+        return new { storeId, aisleId, slots, slotCount = slots.Count };
+    }
+
+    public object OptimizePlanogram(string storeId, string aisleId)
+    {
+        // Get current layout
+        var current = GetShelfLayout(storeId, aisleId);
+        var seed = GetStableHash($"optimize|{storeId}|{aisleId}");
+        var rng = new Random(seed);
+
+        var uplift = Math.Round(2.0 + rng.NextDouble() * 8.0, 1); // 2-10% predicted uplift
+        var notes = new List<string>();
+        if (rng.NextDouble() > 0.5) notes.Add("Move high-velocity SKUs to eye level (shelf 2-3)");
+        if (rng.NextDouble() > 0.3) notes.Add("Increase facing width for top performers");
+        if (rng.NextDouble() > 0.4) notes.Add("Reduce facing for slow movers to create space");
+        notes.Add($"Predicted revenue uplift: {uplift}%");
+
+        return new
+        {
+            storeId,
+            aisleId,
+            currentLayout = current,
+            predictedUplift = uplift,
+            optimizationNotes = notes.ToArray(),
+            recommendation = uplift > 5 ? "strongly_recommended" : "recommended"
+        };
+    }
+
+    public object PredictStockout(string storeId, string? skuId = null)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var sql = """
+            SELECT sv.SkuId, sv.StoreId, sv.DailyUnits, sv.SafetyStockDays, sv.LastRestock
+            FROM SkuVelocity sv
+            WHERE sv.StoreId = @storeId
+            """;
+        if (!string.IsNullOrWhiteSpace(skuId)) sql += " AND sv.SkuId = @skuId";
+        sql += " ORDER BY sv.DailyUnits DESC";
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
+        if (!string.IsNullOrWhiteSpace(skuId)) cmd.Parameters.AddWithValue("@skuId", skuId);
+
+        var predictions = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        var today = DateTime.UtcNow.Date;
+
+        while (reader.Read())
+        {
+            var sku = reader.GetString(0);
+            var dailyUnits = reader.GetDouble(2);
+            var safetyDays = reader.GetInt32(3);
+            var lastRestock = DateTime.TryParse(reader.GetString(4), out var lr) ? lr : today.AddDays(-15);
+            var daysSinceRestock = (today - lastRestock).Days;
+
+            // Estimate remaining stock based on velocity and safety stock
+            var stockSeed = GetStableHash($"stock|{sku}|{storeId}");
+            var rng = new Random(stockSeed);
+            var currentStock = safetyDays * dailyUnits * (0.3 + rng.NextDouble() * 1.5);
+            var daysUntilStockout = dailyUnits > 0 ? (int)(currentStock / dailyUnits) : 999;
+
+            predictions.Add(new
+            {
+                skuId = sku,
+                storeId = reader.GetString(1),
+                daysUntilStockout,
+                currentVelocity = dailyUnits,
+                safetyStock = safetyDays * dailyUnits,
+                riskLevel = daysUntilStockout <= 3 ? "critical" : daysUntilStockout <= 7 ? "high" : daysUntilStockout <= 14 ? "medium" : "low",
+                lastRestock = lastRestock.ToString("yyyy-MM-dd")
+            });
+        }
+
+        var atRisk = predictions.Count(p => ((dynamic)p).riskLevel is "critical" or "high");
+        return new { storeId, predictions, totalSkus = predictions.Count, atRiskCount = atRisk };
+    }
+
+    // ── Margin Queries ───────────────────────────────────────────────────
+
+    public object GetMarginByBrand(string brandId, string? period = null)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var sql = "SELECT BrandId, Period, Revenue, Cogs, Marketing, Distribution, NetMargin FROM BrandFinancials WHERE BrandId = @brandId COLLATE NOCASE";
+        if (!string.IsNullOrWhiteSpace(period)) sql += " AND Period = @period";
+        sql += " ORDER BY Period";
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("@brandId", brandId);
+        if (!string.IsNullOrWhiteSpace(period)) cmd.Parameters.AddWithValue("@period", period);
+
+        var records = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var revenue = reader.GetDouble(2);
+            var cogs = reader.GetDouble(3);
+            var grossMargin = revenue - cogs;
+            var marginPercent = revenue > 0 ? Math.Round(grossMargin / revenue * 100, 2) : 0;
+
+            records.Add(new
+            {
+                brandId = reader.GetString(0),
+                period = reader.GetString(1),
+                revenue,
+                cogs,
+                marketing = reader.GetDouble(4),
+                distribution = reader.GetDouble(5),
+                grossMargin = Math.Round(grossMargin, 2),
+                marginPercent,
+                netMargin = reader.GetDouble(6)
+            });
+        }
+
+        return new { brand = brandId, financials = records, periodsReported = records.Count };
+    }
+
+    public object GetMarginDrivers(string brandId)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT BrandId, Category, Amount, Impact, Trend FROM MarginDrivers WHERE BrandId = @brandId COLLATE NOCASE";
+        cmd.Parameters.AddWithValue("@brandId", brandId);
+
+        var drivers = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            drivers.Add(new
+            {
+                category = reader.GetString(1),
+                amount = reader.GetDouble(2),
+                impact = reader.GetDouble(3),
+                trend = reader.GetString(4)
+            });
+        }
+
+        return new { brand = brandId, drivers, driverCount = drivers.Count };
+    }
+
+    public object GetMarginTrend(string brandId, int quarters = 4)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT Period, Revenue, Cogs, NetMargin
+            FROM BrandFinancials
+            WHERE BrandId = @brandId COLLATE NOCASE
+            ORDER BY Period DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@brandId", brandId);
+        cmd.Parameters.AddWithValue("@limit", quarters);
+
+        var trend = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var revenue = reader.GetDouble(1);
+            var cogs = reader.GetDouble(2);
+            var grossMargin = revenue - cogs;
+
+            trend.Add(new
+            {
+                period = reader.GetString(0),
+                revenue,
+                grossMargin = Math.Round(grossMargin, 2),
+                marginPercent = revenue > 0 ? Math.Round(grossMargin / revenue * 100, 2) : 0,
+                netMargin = reader.GetDouble(3)
+            });
+        }
+
+        trend.Reverse();
+        return new { brand = brandId, trend, dataPoints = trend.Count };
+    }
+
+    public object DetectMarginRisks(string? brandId = null)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var sql = """
+            SELECT bf.BrandId, bf.Period, bf.Revenue, bf.Cogs, bf.Marketing, bf.Distribution, bf.NetMargin,
+                   md.Category AS DriverCategory, md.Impact AS DriverImpact, md.Trend AS DriverTrend
+            FROM BrandFinancials bf
+            LEFT JOIN MarginDrivers md ON bf.BrandId = md.BrandId COLLATE NOCASE
+            WHERE 1=1
+            """;
+        if (!string.IsNullOrWhiteSpace(brandId)) sql += " AND bf.BrandId = @brandId COLLATE NOCASE";
+        sql += " ORDER BY bf.BrandId, bf.Period";
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        if (!string.IsNullOrWhiteSpace(brandId)) cmd.Parameters.AddWithValue("@brandId", brandId);
+
+        var risks = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        var brandData = new Dictionary<string, List<(double revenue, double cogs, double net)>>();
+
+        while (reader.Read())
+        {
+            var brand = reader.GetString(0);
+            if (!brandData.ContainsKey(brand)) brandData[brand] = new();
+            brandData[brand].Add((reader.GetDouble(2), reader.GetDouble(3), reader.GetDouble(6)));
+
+            // Check drivers for increasing cost trends
+            if (!reader.IsDBNull(7))
+            {
+                var driverTrend = reader.GetString(9);
+                var driverImpact = reader.GetDouble(8);
+                if (driverTrend == "increasing" && driverImpact < -2.0)
+                {
+                    risks.Add(new
+                    {
+                        brand,
+                        riskType = "cost_escalation",
+                        severity = "high",
+                        detail = $"{reader.GetString(7)} costs increasing with {driverImpact:F1}% margin impact",
+                        recommendation = $"Review {reader.GetString(7).ToLower()} sourcing strategy"
+                    });
+                }
+            }
+        }
+
+        // Detect margin compression across periods
+        foreach (var (brand, data) in brandData)
+        {
+            if (data.Count < 2) continue;
+            var recent = data[^1];
+            var previous = data[^2];
+            var recentMargin = recent.revenue > 0 ? (recent.revenue - recent.cogs) / recent.revenue * 100 : 0;
+            var prevMargin = previous.revenue > 0 ? (previous.revenue - previous.cogs) / previous.revenue * 100 : 0;
+
+            if (recentMargin < prevMargin - 2.0)
+            {
+                risks.Add(new
+                {
+                    brand,
+                    riskType = "margin_compression",
+                    severity = recentMargin < prevMargin - 5.0 ? "critical" : "medium",
+                    detail = $"Gross margin declined from {prevMargin:F1}% to {recentMargin:F1}% (-{prevMargin - recentMargin:F1}pp)",
+                    recommendation = "Investigate COGS increases and pricing power"
+                });
+            }
+
+            if (recent.net < 0)
+            {
+                risks.Add(new
+                {
+                    brand,
+                    riskType = "negative_net_margin",
+                    severity = "critical",
+                    detail = $"Net margin is negative (${recent.net:N0})",
+                    recommendation = "Urgent cost review and potential price adjustment required"
+                });
+            }
+        }
+
+        return new { risks, riskCount = risks.Count, brandsAnalyzed = brandData.Count };
     }
 }

@@ -138,6 +138,52 @@ if (supplyChainDef != null)
 var councilSynthesisDef = promptConfig.Agents.TryGetValue("council-synthesis", out var synthDef) ? synthDef : null;
 var councilVoteDef = promptConfig.Agents.TryGetValue("council-vote", out var vDef) ? vDef : null;
 
+// Resolve store-ops agent prompt with tenant placeholders
+var storeOpsDef = promptConfig.Agents.TryGetValue("store-ops", out var soDef) ? soDef : null;
+if (storeOpsDef != null)
+{
+    storeOpsDef.SystemPrompt = storeOpsDef.SystemPrompt
+        .Replace("{tenant.company}", tenant.Company)
+        .Replace("{tenant.industry}", tenant.Industry)
+        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+}
+
+// Resolve planogram agent prompt with tenant placeholders
+var planogramDef = promptConfig.Agents.TryGetValue("planogram", out var pgDef) ? pgDef : null;
+if (planogramDef != null)
+{
+    planogramDef.SystemPrompt = planogramDef.SystemPrompt
+        .Replace("{tenant.company}", tenant.Company)
+        .Replace("{tenant.industry}", tenant.Industry)
+        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+}
+
+// Resolve margin agent prompt with tenant placeholders
+var marginDef = promptConfig.Agents.TryGetValue("margin", out var mrgDef) ? mrgDef : null;
+if (marginDef != null)
+{
+    marginDef.SystemPrompt = marginDef.SystemPrompt
+        .Replace("{tenant.company}", tenant.Company)
+        .Replace("{tenant.industry}", tenant.Industry)
+        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+}
+
+// Load scorecard and exec-brief synthesis definitions
+var scorecardSynthesisDef = promptConfig.Agents.TryGetValue("scorecard-synthesis", out var scSynthDef) ? scSynthDef : null;
+var execBriefDef = promptConfig.Agents.TryGetValue("exec-brief", out var ebDef) ? ebDef : null;
+
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
 var mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]
@@ -308,6 +354,66 @@ builder.Services.AddScoped<SupplyHealthTool>(sp =>
     return new SupplyHealthTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<SupplyHealthTool>>());
+});
+
+// Store operations tools
+builder.Services.AddScoped<StorePerformanceTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new StorePerformanceTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<StorePerformanceTool>>());
+});
+builder.Services.AddScoped<ShelfLayoutTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new ShelfLayoutTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<ShelfLayoutTool>>());
+});
+builder.Services.AddScoped<OptimizePlanogramTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new OptimizePlanogramTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<OptimizePlanogramTool>>());
+});
+builder.Services.AddScoped<PredictStockoutTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new PredictStockoutTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<PredictStockoutTool>>());
+});
+
+// Margin analysis tools
+builder.Services.AddScoped<MarginByBrandTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new MarginByBrandTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<MarginByBrandTool>>());
+});
+builder.Services.AddScoped<MarginDriversTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new MarginDriversTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<MarginDriversTool>>());
+});
+builder.Services.AddScoped<MarginTrendTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new MarginTrendTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<MarginTrendTool>>());
+});
+builder.Services.AddScoped<DetectMarginRisksTool>(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    return new DetectMarginRisksTool(
+        factory.CreateClient("McpServer"),
+        sp.GetService<ILogger<DetectMarginRisksTool>>());
 });
 
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
@@ -562,6 +668,58 @@ supplyToolsFactory: sp =>
         AIFunctionFactory.Create(supplyHealthTool.GetSupplyHealthSummary),
         AIFunctionFactory.Create(chartTool.CreateChart)
     };
+},
+storeOpsDef: storeOpsDef,
+storeOpsToolsFactory: sp =>
+{
+    var storePerformanceTool = sp.GetRequiredService<StorePerformanceTool>();
+    var shelfLayoutTool = sp.GetRequiredService<ShelfLayoutTool>();
+    var optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
+    var predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
+    var chartTool = sp.GetRequiredService<ChartDataTool>();
+
+    return new List<AITool>
+    {
+        AIFunctionFactory.Create(storePerformanceTool.GetStorePerformance),
+        AIFunctionFactory.Create(shelfLayoutTool.GetShelfLayout),
+        AIFunctionFactory.Create(optimizePlanogramTool.OptimizePlanogram),
+        AIFunctionFactory.Create(predictStockoutTool.PredictStockout),
+        AIFunctionFactory.Create(chartTool.CreateChart)
+    };
+},
+planogramDef: planogramDef,
+planogramToolsFactory: sp =>
+{
+    var shelfLayoutTool = sp.GetRequiredService<ShelfLayoutTool>();
+    var optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
+    var predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
+    var chartTool = sp.GetRequiredService<ChartDataTool>();
+
+    return new List<AITool>
+    {
+        AIFunctionFactory.Create(shelfLayoutTool.GetShelfLayout),
+        AIFunctionFactory.Create(optimizePlanogramTool.OptimizePlanogram),
+        AIFunctionFactory.Create(predictStockoutTool.PredictStockout),
+        AIFunctionFactory.Create(chartTool.CreateChart)
+    };
+},
+marginDef: marginDef,
+marginToolsFactory: sp =>
+{
+    var marginByBrandTool = sp.GetRequiredService<MarginByBrandTool>();
+    var marginDriversTool = sp.GetRequiredService<MarginDriversTool>();
+    var marginTrendTool = sp.GetRequiredService<MarginTrendTool>();
+    var detectMarginRisksTool = sp.GetRequiredService<DetectMarginRisksTool>();
+    var chartTool = sp.GetRequiredService<ChartDataTool>();
+
+    return new List<AITool>
+    {
+        AIFunctionFactory.Create(marginByBrandTool.GetMarginByBrand),
+        AIFunctionFactory.Create(marginDriversTool.GetMarginDrivers),
+        AIFunctionFactory.Create(marginTrendTool.GetMarginTrend),
+        AIFunctionFactory.Create(detectMarginRisksTool.DetectMarginRisks),
+        AIFunctionFactory.Create(chartTool.CreateChart)
+    };
 });
 
 // Register ConsensusOrchestrator for Portfolio Health Council
@@ -577,6 +735,38 @@ if (councilSynthesisDef is not null && councilVoteDef is not null)
             specialists, chatClient, councilSynthesisDef, councilVoteDef, logger);
     });
 }
+
+// Register EscalationOrchestrator for L1→L2→L3 escalation
+var escalationSynthDef = councilSynthesisDef ?? scorecardSynthesisDef;
+if (escalationSynthDef is not null)
+{
+    builder.Services.AddScoped<RetailPulse.Api.Escalation.EscalationOrchestrator>(sp =>
+    {
+        var specialists = sp.GetServices<ISpecialistAgent>();
+        var chatClient = sp.GetRequiredService<IChatClient>();
+        var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Escalation.EscalationOrchestrator>>();
+
+        return new RetailPulse.Api.Escalation.EscalationOrchestrator(
+            specialists, chatClient, escalationSynthDef, logger);
+    });
+}
+
+// Register ScorecardOrchestrator for portfolio scoring
+if (scorecardSynthesisDef is not null)
+{
+    builder.Services.AddScoped<RetailPulse.Api.Scorecard.ScorecardOrchestrator>(sp =>
+    {
+        var specialists = sp.GetServices<ISpecialistAgent>();
+        var chatClient = sp.GetRequiredService<IChatClient>();
+        var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Scorecard.ScorecardOrchestrator>>();
+
+        return new RetailPulse.Api.Scorecard.ScorecardOrchestrator(
+            specialists, chatClient, scorecardSynthesisDef, logger);
+    });
+}
+
+// Register ExplainabilityService (singleton for cross-request trace storage)
+builder.Services.AddSingleton<RetailPulse.Api.Explainability.ExplainabilityService>();
 
 // Keep legacy RetailPulseAgent registration for backward compatibility
 builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
@@ -1783,6 +1973,163 @@ app.MapGet("/api/supply/fulfillment", async (IHttpClientFactory httpFactory, Can
 })
 .WithName("GetSupplyFulfillment");
 
+// ── Store operations endpoints ───────────────────────────────────────────
+
+app.MapGet("/api/stores/performance", async (IHttpClientFactory httpFactory, CancellationToken ct, string? region = null) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = "/api/stores/performance?";
+    if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetStorePerformance");
+
+app.MapGet("/api/stores/{storeId}/planogram/{aisleId}", async (string storeId, string aisleId, IHttpClientFactory httpFactory, CancellationToken ct) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/stores/{Uri.EscapeDataString(storeId)}/planogram/{Uri.EscapeDataString(aisleId)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetShelfLayout");
+
+app.MapPost("/api/stores/{storeId}/planogram/{aisleId}/optimize", async (string storeId, string aisleId, IHttpClientFactory httpFactory, CancellationToken ct, string? brandFocus = null) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/stores/{Uri.EscapeDataString(storeId)}/planogram/{Uri.EscapeDataString(aisleId)}/optimize?";
+    if (!string.IsNullOrWhiteSpace(brandFocus)) url += $"&brandFocus={Uri.EscapeDataString(brandFocus)}";
+
+    var response = await client.PostAsync(url, null, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("OptimizePlanogram");
+
+app.MapGet("/api/stores/{storeId}/stockout-risk", async (string storeId, IHttpClientFactory httpFactory, CancellationToken ct, string? skuId = null) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/stores/{Uri.EscapeDataString(storeId)}/stockout-risk?";
+    if (!string.IsNullOrWhiteSpace(skuId)) url += $"&skuId={Uri.EscapeDataString(skuId)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("PredictStockout");
+
+// ── Margin endpoints ─────────────────────────────────────────────────────
+
+app.MapGet("/api/margin/{brandId}", async (string brandId, IHttpClientFactory httpFactory, CancellationToken ct, string? period = null) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/margin/{Uri.EscapeDataString(brandId)}?";
+    if (!string.IsNullOrWhiteSpace(period)) url += $"&period={Uri.EscapeDataString(period)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetMarginByBrand");
+
+app.MapGet("/api/margin/drivers/{brandId}", async (string brandId, IHttpClientFactory httpFactory, CancellationToken ct) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/margin/drivers/{Uri.EscapeDataString(brandId)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetMarginDrivers");
+
+app.MapGet("/api/margin/trend/{brandId}", async (string brandId, IHttpClientFactory httpFactory, CancellationToken ct, int quarters = 4) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = $"/api/margin/trend/{Uri.EscapeDataString(brandId)}?quarters={quarters}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("GetMarginTrend");
+
+app.MapGet("/api/margin/risks", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brandId = null) =>
+{
+    var client = httpFactory.CreateClient("McpServer");
+    var url = "/api/margin/risks?";
+    if (!string.IsNullOrWhiteSpace(brandId)) url += $"&brandId={Uri.EscapeDataString(brandId)}";
+
+    var response = await client.GetAsync(url, ct);
+    response.EnsureSuccessStatusCode();
+    var json = await response.Content.ReadAsStringAsync(ct);
+    return Results.Content(json, "application/json");
+})
+.WithName("DetectMarginRisks");
+
+// ── Scorecard endpoints ──────────────────────────────────────────────────
+
+app.MapPost("/api/scorecard", async (ScorecardRequest body, RetailPulse.Api.Scorecard.ScorecardOrchestrator? scorecard, CancellationToken ct) =>
+{
+    if (scorecard is null)
+        return Results.StatusCode(503);
+
+    if (body.Brands is null || body.Brands.Length == 0)
+        return Results.BadRequest(new { error = "At least one brand is required." });
+
+    var result = await scorecard.GenerateAsync(body.Brands, body.Region, ct);
+    return Results.Ok(result);
+})
+.WithName("GenerateScorecard");
+
+// ── Explainability endpoints ─────────────────────────────────────────────
+
+app.MapGet("/api/explain/{traceId}", (string traceId, RetailPulse.Api.Explainability.ExplainabilityService explainability) =>
+{
+    var trace = explainability.GetTrace(traceId);
+    if (trace is null)
+        return Results.NotFound(new { error = $"Trace '{traceId}' not found." });
+
+    return Results.Ok(new
+    {
+        traceId,
+        trace.SessionId,
+        trace.Query,
+        trace.ToolCallCount,
+        trace.TotalDurationMs,
+        trace.StartedAt,
+        dataSources = trace.DataSources,
+        reasoningChain = trace.ReasoningChain,
+        explanation = explainability.BuildExplanation(traceId)
+    });
+})
+.WithName("GetExplanation");
+
+app.MapGet("/api/explain/session/{sessionId}", (string sessionId, RetailPulse.Api.Explainability.ExplainabilityService explainability) =>
+{
+    var traces = explainability.GetSessionTraces(sessionId);
+    return Results.Ok(traces.Select(t => new
+    {
+        traceId = $"{t.SessionId}-{t.StartedAt:yyyyMMddHHmmss}",
+        t.Query,
+        t.ToolCallCount,
+        t.TotalDurationMs,
+        t.StartedAt
+    }));
+})
+.WithName("GetSessionTraces");
+
 // ── Message Extension endpoints ──────────────────────────────────────────
 
 app.MapPost("/api/message-extension/query", async (MessageExtensionRequest body, IKnowledgeBase kb, IEnumerable<ISpecialistAgent> specialists, ILogger<Program> logger, CancellationToken ct) =>
@@ -2009,6 +2356,27 @@ app.MapPut("/api/guardrails/config", (GuardrailsConfigUpdateDto body, Guardrails
 })
 .WithName("UpdateGuardrailsConfig");
 
+// ── Escalation endpoint ─────────────────────────────────────────────────
+app.MapPost("/api/escalate", async (ChatRequest request, RetailPulse.Api.Escalation.EscalationOrchestrator escalation, IAgentRouter router, ILogger<Program> logger, CancellationToken ct) =>
+{
+    if (request is null || string.IsNullOrWhiteSpace(request.Message))
+        return Results.BadRequest(new { error = "Field 'message' is required." });
+
+    var decision = await router.RouteAsync(request.Message, request.History, request.User, null, ct);
+    var result = await escalation.EscalateAsync(request, decision, ct);
+
+    return Results.Ok(new
+    {
+        reply = result.Reply,
+        level = result.Level,
+        agentsConsulted = result.AgentsConsulted,
+        durationMs = result.DurationMs,
+        needsHumanReview = result.NeedsHumanReview,
+        escalationReason = result.EscalationReason
+    });
+})
+.WithName("Escalate");
+
 app.Run();
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -2086,3 +2454,8 @@ record GuardrailsConfigUpdateDto(
     bool? JailbreakDetectionEnabled = null,
     bool? AutoRedactPii = null,
     int? MaxInputLength = null);
+
+/// <summary>
+/// Request body for POST /api/scorecard.
+/// </summary>
+record ScorecardRequest(string[] Brands, string? Region = null);

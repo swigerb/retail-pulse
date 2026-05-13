@@ -30,7 +30,13 @@ public static class RoutingServiceExtensions
         AgentDefinition? competitiveIntelDef = null,
         Func<IServiceProvider, IEnumerable<AITool>>? competitiveToolsFactory = null,
         AgentDefinition? supplyChainDef = null,
-        Func<IServiceProvider, IEnumerable<AITool>>? supplyToolsFactory = null)
+        Func<IServiceProvider, IEnumerable<AITool>>? supplyToolsFactory = null,
+        AgentDefinition? storeOpsDef = null,
+        Func<IServiceProvider, IEnumerable<AITool>>? storeOpsToolsFactory = null,
+        AgentDefinition? planogramDef = null,
+        Func<IServiceProvider, IEnumerable<AITool>>? planogramToolsFactory = null,
+        AgentDefinition? marginDef = null,
+        Func<IServiceProvider, IEnumerable<AITool>>? marginToolsFactory = null)
     {
         // Register GeneralAgent as ISpecialistAgent
         services.AddScoped<GeneralAgent>(sp =>
@@ -109,6 +115,54 @@ public static class RoutingServiceExtensions
                 return new SupplyChainAgent(chatClient, supplyChainDef, hubContext, tools, logger, configuration);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<SupplyChainAgent>());
+        }
+
+        // Register StoreOpsAgent as ISpecialistAgent
+        if (storeOpsDef is not null && storeOpsToolsFactory is not null)
+        {
+            services.AddScoped<StoreOpsAgent>(sp =>
+            {
+                var chatClient = sp.GetRequiredService<IChatClient>();
+                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var tools = storeOpsToolsFactory(sp);
+                var logger = sp.GetRequiredService<ILogger<StoreOpsAgent>>();
+                var configuration = sp.GetRequiredService<IConfiguration>();
+
+                return new StoreOpsAgent(chatClient, storeOpsDef, hubContext, tools, logger, configuration);
+            });
+            services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<StoreOpsAgent>());
+        }
+
+        // Register PlanogramAgent as ISpecialistAgent
+        if (planogramDef is not null && planogramToolsFactory is not null)
+        {
+            services.AddScoped<PlanogramAgent>(sp =>
+            {
+                var chatClient = sp.GetRequiredService<IChatClient>();
+                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var tools = planogramToolsFactory(sp);
+                var logger = sp.GetRequiredService<ILogger<PlanogramAgent>>();
+                var configuration = sp.GetRequiredService<IConfiguration>();
+
+                return new PlanogramAgent(chatClient, planogramDef, hubContext, tools, logger, configuration);
+            });
+            services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<PlanogramAgent>());
+        }
+
+        // Register MarginAgent as ISpecialistAgent
+        if (marginDef is not null && marginToolsFactory is not null)
+        {
+            services.AddScoped<MarginAgent>(sp =>
+            {
+                var chatClient = sp.GetRequiredService<IChatClient>();
+                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var tools = marginToolsFactory(sp);
+                var logger = sp.GetRequiredService<ILogger<MarginAgent>>();
+                var configuration = sp.GetRequiredService<IConfiguration>();
+
+                return new MarginAgent(chatClient, marginDef, hubContext, tools, logger, configuration);
+            });
+            services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<MarginAgent>());
         }
 
         // Register MemoryManagementAgent as ISpecialistAgent

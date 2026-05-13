@@ -240,3 +240,104 @@
 - `POST /api/chat/stream` — new streaming endpoint with guardrails + memory + routing + SignalR push
 
 **Test Status:** All 1061 tests pass (no regressions)
+
+### 2026-05-13 — Collaborative Adaptive Cards + Observability Suite (Sprint 3.3+3.4)
+
+**Architecture Decisions:**
+- Adaptive card state uses ConcurrentDictionary<string, CardState> with per-card locking for atomic action processing.
+- State transitions: Active → Voting → Decided → Archived. Once escalated (split vote 50/50), escalation persists and blocks auto-decide — requires explicit escalation action or archive.
+- SignalR events: `card:created`, `card:action`, `card:lifecycle` — broadcast to all clients via TelemetryHub.
+- Council verdicts auto-create Voting cards with initial votes seeded from agent assessments.
+- Observability: InMemoryCostTracker (ConcurrentBag), InMemoryAuditLog (ConcurrentQueue ring buffer, 5000 max), ConversationExporter (ConcurrentDictionary sessions).
+- Model pricing table: gpt-5.4-mini ($0.15/$0.60), gpt-4o ($2.50/$10.00), claude-sonnet ($3.00/$15.00) per 1M tokens.
+- Chat pipeline instrumented: cost tracking + audit log + conversation export after each agent response.
+
+## Session Work — 2026-05-13 Sprint 3.3+3.4 Collaborative Cards + Observability (Complete)
+
+**Outcome:** ✅ SUCCESS — Lead architect role, both enterprise polish features implemented, 1154 tests passing
+
+**Deliverables:**
+- `src/RetailPulse.Contracts/Cards/IAdaptiveCardState.cs` — IAdaptiveCardState interface + AdaptiveCard, CardVote, CardComment, CardAction records + CardType, CardLifecycle, CardActionType enums + CreateCardRequest
+- `src/RetailPulse.Api/Cards/InMemoryAdaptiveCardState.cs` — ConcurrentDictionary-backed card state with per-card lock, state machine transitions, escalation detection, SignalR sync
+- `src/RetailPulse.Contracts/Observability/ICostTracker.cs` — ICostTracker interface + UsageEvent, CostSummary, AgentCostBreakdown, CostTrend, DailyCost records + CostPeriod enum
+- `src/RetailPulse.Contracts/Observability/IAuditLog.cs` — IAuditLog interface + AuditEntry, AuditQuery, AuditStats records
+- `src/RetailPulse.Contracts/Observability/IConversationExport.cs` — IConversationExport interface + ExportResult, ExportableSession records + ExportFormat enum
+- `src/RetailPulse.Api/Observability/InMemoryCostTracker.cs` — ConcurrentBag-backed cost tracker with model pricing table
+- `src/RetailPulse.Api/Observability/InMemoryAuditLog.cs` — ConcurrentQueue ring buffer (5000 entries), filterable queries
+- `src/RetailPulse.Api/Observability/MarkdownExporter.cs` — Audit-log-backed Markdown/JSON exporter
+- `src/RetailPulse.Api/Observability/ConversationExporter.cs` — Fixed TrackedMessage record (parallel session bug), session-tracking exporter
+- `src/RetailPulse.Api/Program.cs` — DI registrations (IAdaptiveCardState, ICostTracker, IAuditLog, IConversationExport), 12 new REST endpoints, chat pipeline instrumentation (cost + audit + conversation tracking), council → card auto-creation
+
+**Reconciliation:** Parallel session had created:
+- `ConversationExporter.cs` with a TrackedMessage record bug (positional parameter + property Timestamp conflict) — fixed by converting to property-only record
+- Card voting tests with specific escalation persistence expectations — adapted vote logic to match: once escalated, blocks auto-decide
+
+**REST Endpoints (Cards):**
+- `POST /api/cards` — create a new card
+- `GET /api/cards` — list active cards
+- `GET /api/cards/{id}` — get card details
+- `POST /api/cards/{id}/action` — perform action (vote, comment, drill-down, escalate)
+- `POST /api/cards/{id}/archive` — archive card
+
+**REST Endpoints (Observability):**
+- `GET /api/observability/costs?period=week` — cost summary
+- `GET /api/observability/costs/agents?period=week` — per-agent breakdown
+- `GET /api/observability/costs/trend?days=7` — cost trend
+- `GET /api/observability/audit?agentId=X&from=Y&limit=50` — query audit log
+- `GET /api/observability/audit/stats` — audit statistics
+- `GET /api/observability/export/sessions` — list exportable sessions
+- `POST /api/observability/export/{sessionId}?format=markdown` — export conversation
+
+**Test Status:** All 1154 tests pass (no regressions)
+
+### 2026-07-24 — Phase 4: Store Ops, Margin, Scorecard (Sprints 4.1–4.3)
+
+**Sprint 4.1 — Store Operations + Planogram Agents:**
+- Created `StoreOpsAgent` (key: `store-ops`, intent: `store/operations`) — store performance, underperformer detection, stockout prediction.
+- Created `PlanogramAgent` (key: `planogram`, intent: `planogram/optimization`) — shelf layout analysis, eye-level optimization, velocity-based facing allocation.
+- MCP tools: `GetStorePerformance`, `GetShelfLayout`, `OptimizePlanogram`, `PredictStockout` with matching REST endpoints and API proxy tools.
+- DB tables: `StoreMetrics`, `ShelfLayouts`, `SkuVelocity` with deterministic seed data.
+
+**Sprint 4.2 — Margin Agent + Escalation Chain:**
+- Created `MarginAgent` (key: `margin`, intent: `margin/analysis`) — P&L analysis, margin drivers, trend tracking, risk detection.
+- Created `EscalationOrchestrator` — L1→L2→L3 escalation chain: L1 single specialist (8s timeout), L2 multi-specialist fan-out (15s timeout), L3 flags for human review.
+- MCP tools: `GetMarginByBrand`, `GetMarginDrivers`, `GetMarginTrend`, `DetectMarginRisks`.
+- DB tables: `BrandFinancials`, `MarginDrivers`.
+
+**Sprint 4.3 — Portfolio Scorecard + Decision Explainability:**
+- Created `ScorecardOrchestrator` — fans out per-brand assessments across 5 weighted dimensions (Demand 0.25, Competitive 0.20, Supply 0.20, Store Execution 0.20, Margin 0.15), synthesizes executive brief via LLM.
+- Created `ExplainabilityService` — ConcurrentDictionary-backed trace capture with tool steps, reasoning chain, human-readable explanation builder.
+- New contract types: `BrandScore`, `PortfolioScorecard`, `ExplanationChain`, `ExplanationStep`.
+
+**Architecture Decisions:**
+- All three new agents follow the canonical `DemandForecastAgent` template exactly (constructor, HandleAsync, chart extraction, token usage).
+- `RoutingServiceExtensions.AddAgentRouting()` extended with 6 new optional params (storeOpsDef/toolsFactory, planogramDef/toolsFactory, marginDef/toolsFactory).
+- Router prompt updated with 4 new intent categories; `AgentIntent.All` updated with `StoreOps`, `Planogram`, `MarginAnalysis`, `Scorecard`.
+- SchemaVersion bumped to 7 for re-seeding.
+
+**Key File Paths:**
+- `src/RetailPulse.Api/Agents/Specialists/StoreOpsAgent.cs`
+- `src/RetailPulse.Api/Agents/Specialists/PlanogramAgent.cs`
+- `src/RetailPulse.Api/Agents/Specialists/MarginAgent.cs`
+- `src/RetailPulse.Api/Escalation/EscalationOrchestrator.cs`
+- `src/RetailPulse.Api/Scorecard/ScorecardOrchestrator.cs`
+- `src/RetailPulse.Api/Explainability/ExplainabilityService.cs`
+- `src/RetailPulse.McpServer/Tools/StoreOpsTools.cs`
+- `src/RetailPulse.McpServer/Tools/MarginTools.cs`
+- `src/RetailPulse.Api/Tools/StoreOpsProxyTools.cs`
+- `src/RetailPulse.Api/Tools/MarginProxyTools.cs`
+
+**REST Endpoints:**
+- `GET /api/stores/performance?region=X` — store performance metrics
+- `GET /api/stores/{storeId}/planogram/{aisleId}` — shelf layout
+- `POST /api/stores/{storeId}/planogram/{aisleId}/optimize` — planogram optimization
+- `GET /api/stores/{storeId}/stockout-risk` — stockout prediction
+- `GET /api/margin/{brandId}` — brand P&L
+- `GET /api/margin/drivers/{brandId}` — margin drivers
+- `GET /api/margin/trend/{brandId}` — margin trend
+- `GET /api/margin/risks` — margin risk detection
+- `POST /api/escalate` — L1→L2→L3 escalation
+- `POST /api/scorecard` — portfolio scorecard generation
+- `GET /api/explain/{traceId}` — decision explainability
+
+**Test Status:** All 1264 tests pass (1154 original + 110 new Phase 4 tests, no regressions)
