@@ -227,6 +227,99 @@ public class ScorecardTests
 
     #endregion
 
+    #region Exact Dimension Weights (0.25/0.20/0.20/0.20/0.15)
+
+    [Fact]
+    public void ScorecardOrchestrator_DimensionWeights_AreExact()
+    {
+        // The ScorecardOrchestrator.ScoringDimensions defines exact weights:
+        //   Demand Momentum:     0.25
+        //   Competitive Position: 0.20
+        //   Supply Reliability:   0.20
+        //   Store Execution:      0.20
+        //   Margin Health:        0.15
+        // Total: 1.00
+
+        var expectedWeights = new Dictionary<string, double>
+        {
+            ["Demand Momentum"] = 0.25,
+            ["Competitive Position"] = 0.20,
+            ["Supply Reliability"] = 0.20,
+            ["Store Execution"] = 0.20,
+            ["Margin Health"] = 0.15
+        };
+
+        // Verify via reflection to ensure the actual orchestrator weights match
+        var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
+            .GetField("ScoringDimensions",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        field.Should().NotBeNull("ScoringDimensions field should exist on ScorecardOrchestrator");
+
+        var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
+        dimensions.Should().NotBeNull("ScoringDimensions should be castable to tuple array");
+        dimensions.Should().HaveCount(5, "there should be exactly 5 scoring dimensions");
+
+        var actualWeights = dimensions!.ToDictionary(d => d.Dimension, d => d.Weight);
+
+        foreach (var (name, expectedWeight) in expectedWeights)
+        {
+            actualWeights.Should().ContainKey(name, $"dimension '{name}' should exist");
+            actualWeights[name].Should().BeApproximately(expectedWeight, 0.001,
+                $"dimension '{name}' should have weight {expectedWeight}");
+        }
+
+        // Total weights must sum to 1.0
+        var totalWeight = dimensions.Sum(d => d.Weight);
+        totalWeight.Should().BeApproximately(1.0, 0.001,
+            "all dimension weights must sum to 1.0");
+    }
+
+    [Fact]
+    public void ScorecardOrchestrator_DimensionWeights_SumToOne()
+    {
+        var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
+            .GetField("ScoringDimensions",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
+        var total = dimensions!.Sum(d => d.Weight);
+
+        total.Should().BeApproximately(1.0, 0.001,
+            "portfolio scorecard dimension weights must sum to exactly 1.0");
+    }
+
+    [Fact]
+    public void ScorecardOrchestrator_DemandMomentum_HasHighestWeight()
+    {
+        var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
+            .GetField("ScoringDimensions",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
+        var maxDim = dimensions!.OrderByDescending(d => d.Weight).First();
+
+        maxDim.Dimension.Should().Be("Demand Momentum",
+            "Demand Momentum should have the highest weight (0.25)");
+        maxDim.Weight.Should().Be(0.25);
+    }
+
+    [Fact]
+    public void ScorecardOrchestrator_MarginHealth_HasLowestWeight()
+    {
+        var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
+            .GetField("ScoringDimensions",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
+        var minDim = dimensions!.OrderBy(d => d.Weight).First();
+
+        minDim.Dimension.Should().Be("Margin Health",
+            "Margin Health should have the lowest weight (0.15)");
+        minDim.Weight.Should().Be(0.15);
+    }
+
+    #endregion
+
     #region Test Infrastructure
 
     private static IScorecardService CreateScorecardService(bool simulateSlowBrands = false)
