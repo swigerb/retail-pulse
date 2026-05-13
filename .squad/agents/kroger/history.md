@@ -51,3 +51,71 @@
 **Test Status:** All 174 existing tests pass unchanged; 63 new tests bring total to 237 (all passing)
 
 **Decision Logged:** Multi-Agent Router Architecture
+
+## Session Work — 2026-05-15 Sprint 1.2 DemandForecastAgent (Complete)
+
+**Outcome:** ✅ SUCCESS — Lead architect role, first specialist agent fully implemented, 346 tests passing
+
+**Deliverables:**
+- `src/RetailPulse.Api/Agents/Specialists/DemandForecastAgent.cs` — specialist agent implementing ISpecialistAgent with key "demand-forecasting", temperature 0.3
+- `src/RetailPulse.McpServer/Tools/GetHistoricalDemandTool.cs` — MCP tool for historical demand queries
+- `src/RetailPulse.McpServer/Tools/GenerateForecastTool.cs` — MCP tool for 90-day demand forecasting
+- `src/RetailPulse.McpServer/Tools/GetSeasonalityFactorsTool.cs` — MCP tool for seasonal multipliers
+- `src/RetailPulse.McpServer/Tools/IdentifyDemandRisksTool.cs` — MCP tool for demand risk detection
+- `src/RetailPulse.Api/Tools/HistoricalDemandTool.cs` — API proxy for historical demand
+- `src/RetailPulse.Api/Tools/ForecastTool.cs` — API proxy for forecast generation
+- `src/RetailPulse.Api/Tools/SeasonalityFactorsTool.cs` — API proxy for seasonality
+- `src/RetailPulse.Api/Tools/DemandRisksTool.cs` — API proxy for demand risks
+- `src/RetailPulse.Api/prompts.yaml` — `demand-forecast` agent definition (temp 0.3, analytical prompt)
+- `src/RetailPulse.Api/Agents/RoutingServiceExtensions.cs` — extended with optional demand agent params
+- `src/RetailPulse.McpServer/Program.cs` — 5 new REST endpoints for demand tools
+
+**Reconciliation:** Parallel session had partially implemented demand data layer (seeding, queries, schema). Reconciled by:
+- Removing duplicate method blocks in RetailPulseDb.cs (kept the more sophisticated implementation with anomaly injection, weekly aggregation, linear regression)
+- Fixing schema table names (`DemandHistory`/`SeasonalFactors` with `Description` column) to match existing code
+- Adding default parameter values for backward compatibility
+
+**Architecture Patterns:**
+- Specialist agents own intents exclusively — removed `DemandForecasting` from GeneralAgent.SupportedIntents
+- RoutingServiceExtensions uses optional parameters for backward compat when adding new specialists
+- MCP tools → REST endpoints → API proxy tools pattern maintained consistently
+- Lower temperature (0.3 vs 0.7) for analytical/numerical precision
+
+**Test Status:** All 346 tests pass (109 new tests from parallel work + fixes)
+
+**Decision Logged:** DemandForecastAgent Architecture
+
+## Session Work — 2026-05-16 Sprint 1.3 Conversation Memory Architecture (Complete)
+
+**Outcome:** ✅ SUCCESS — Lead architect role, full memory subsystem implemented, 443 tests passing
+
+**Deliverables:**
+- `src/RetailPulse.Contracts/Memory/IConversationMemory.cs` — Rewrote contract: MemoryEntry record, MemoryType enum (ConversationSummary, UserPreference, EntityMention), StoreAsync(userId, MemoryEntry), ForgetEntryAsync(userId, memoryId) for privacy scoping
+- `src/RetailPulse.Api/Memory/SqliteConversationMemory.cs` — Full SQLite impl with WAL mode, keyword-based relevance scoring with phrase matching, TTL cleanup (30d summaries, 90d preferences/entities)
+- `src/RetailPulse.Api/Memory/MemoryExtractionService.cs` — LLM-based extraction of summaries, entities, preferences from conversation turns
+- `src/RetailPulse.Api/Memory/ConversationMemoryMiddleware.cs` — Pipeline middleware: BuildMemoryContextAsync (before routing) and ExtractAndStoreAsync (after response), ~500 token budget
+- `src/RetailPulse.Api/Memory/MemoryServiceExtensions.cs` — `AddConversationMemory(dbPath)` DI registration helper
+- `src/RetailPulse.Api/Agents/Specialists/MemoryManagementAgent.cs` — "Forget everything" specialist agent implementing ISpecialistAgent
+- `src/RetailPulse.Api/Program.cs` — Memory DI registration + chat endpoint integration (memory injection before routing, fire-and-forget extraction after)
+- `src/RetailPulse.Api/prompts.yaml` — Added memory/management intent to router classifier
+- `src/RetailPulse.Contracts/Routing/AgentIntent.cs` — Added MemoryManagement constant
+
+**Reconciliation:** Parallel session had created IConversationMemory.cs and IMemoryMiddleware.cs in Contracts with a different contract shape (MemoryEntryType enum, StoreAsync returning MemoryEntry with individual params, ForgetEntryAsync taking only entryId). Reconciled by:
+- Rewrote IConversationMemory to spec: MemoryType enum, StoreAsync(userId, MemoryEntry) → Task, ForgetEntryAsync(userId, memoryId)
+- Updated ConversationMemoryTests.cs (22 tests) to match new contract
+- Updated MemoryMiddlewareTests.cs (12 tests) to match new contract
+- Updated RouterIntegrationTests.cs impls for both IConversationMemory and IApprovalGate new shapes
+- Kept IMemoryMiddleware contract for test-side backward compat
+
+**Architecture Patterns:**
+- Memory is per-user, scoped by UserContext.ObjectId (falls back to "anonymous")
+- SQLite WAL mode for concurrency — same pattern as existing SqliteApprovalGate
+- Memory DB at `data/memory.db` alongside `data/approvals.db`
+- Singleton IConversationMemory (WAL handles concurrency); scoped extraction/middleware
+- Fire-and-forget extraction via Task.Run after response — non-blocking
+- Memory context injected as prepended conversation history message (~2000 chars ≈ 500 tokens)
+- Phrase-based keyword matching: ParseKeywords adds full query phrase + individual tokens for exact-match boosting
+
+**Test Status:** All 443 tests pass (97 new tests from parallel work + reconciliation fixes)
+
+**Decision Logged:** Conversation Memory Architecture

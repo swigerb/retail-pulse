@@ -502,7 +502,10 @@ public class RouterIntegrationTests
             $"{{\"intent\":\"{AgentIntent.MemoryManagement}\",\"confidence\":0.95,\"intents\":[\"{AgentIntent.MemoryManagement}\"]}}");
 
         var generalAgent = CreateGeneralAgent(MockChatClient("Done."));
-        var specialists = new List<ISpecialistAgent> { generalAgent };
+        var memoryAgent = new MemoryManagementAgent(
+            Mock.Of<IConversationMemory>(),
+            Mock.Of<ILogger<MemoryManagementAgent>>());
+        var specialists = new List<ISpecialistAgent> { generalAgent, memoryAgent };
         var router = CreateRouter(routerClient, specialists);
 
         var routingResult = await router.RouteAsync("Forget everything about me", null, null, null);

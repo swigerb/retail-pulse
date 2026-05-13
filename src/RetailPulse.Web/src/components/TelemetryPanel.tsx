@@ -73,6 +73,7 @@ export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, on
   const totalDuration = totalDurationMs ?? liveSpans.reduce((sum, s) => sum + s.durationMs, 0);
   const toolCalls = liveSpans.filter(s => s.type === 'tool_call').length;
   const agentCalls = liveSpans.filter(s => s.type === 'agent_delegation' || s.type === 'agent_call').length;
+  const routingSpans = liveSpans.filter(s => s.type === 'routing').length;
   const totalTokens = totalTokenUsage?.totalTokens ?? 0;
   const totalCost = totalTokenUsage?.estimatedCostUsd ?? 0;
 
@@ -112,6 +113,12 @@ export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, on
           <div className={styles.stat}>
             <Text className={styles.statValue}>{agentCalls}</Text>
             <Text className={styles.statLabel}>Agent Calls</Text>
+          </div>
+        )}
+        {routingSpans > 0 && (
+          <div className={styles.stat}>
+            <Text className={styles.statValue}>{routingSpans}</Text>
+            <Text className={styles.statLabel}>Routing</Text>
           </div>
         )}
         <div className={styles.stat}>
