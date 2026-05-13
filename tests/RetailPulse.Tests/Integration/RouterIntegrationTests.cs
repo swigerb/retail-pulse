@@ -513,4 +513,96 @@ public class RouterIntegrationTests
     }
 
     #endregion
+
+    #region Promo Planning Routing
+
+    [Theory]
+    [InlineData("Plan a BOGO promotion for Sierra Gold Tequila")]
+    [InlineData("What's the ROI on our last display campaign?")]
+    [InlineData("Estimate lift for a discount promo in the Northeast")]
+    public async Task Router_PromoMessages_RoutesToPromotionTrade(string message)
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.PromotionTrade}\",\"confidence\":0.92,\"intents\":[\"{AgentIntent.PromotionTrade}\"]}}");
+
+        var hubContext = new Mock<IHubContext<TelemetryHub>>();
+        var clients = new Mock<IHubClients>();
+        var groupProxy = new Mock<IClientProxy>();
+        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
+        hubContext.Setup(h => h.Clients).Returns(clients.Object);
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        var promoAgent = new PromoPlanningAgent(
+            MockChatClient("Promo analysis ready."),
+            new AgentDefinition { Name = "PromoPlanning", Model = "gpt-5.4-mini", SystemPrompt = "promo specialist", Temperature = 0.3 },
+            hubContext.Object, [],
+            Mock.Of<ILogger<PromoPlanningAgent>>(),
+            config);
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        var specialists = new List<ISpecialistAgent> { generalAgent, promoAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(message, null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.PromotionTrade);
+    }
+
+    [Fact]
+    public async Task FullPipeline_PromoMessage_RoutesAndReturnsResponse()
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.PromotionTrade}\",\"confidence\":0.90,\"intents\":[\"{AgentIntent.PromotionTrade}\"]}}");
+
+        var hubContext = new Mock<IHubContext<TelemetryHub>>();
+        var clients = new Mock<IHubClients>();
+        var groupProxy = new Mock<IClientProxy>();
+        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
+        hubContext.Setup(h => h.Clients).Returns(clients.Object);
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        var promoAgent = new PromoPlanningAgent(
+            MockChatClient("The BOGO campaign for Sierra Gold shows a projected 22% lift with ROI of 85%."),
+            new AgentDefinition { Name = "PromoPlanning", Model = "gpt-5.4-mini", SystemPrompt = "promo specialist", Temperature = 0.3 },
+            hubContext.Object, [],
+            Mock.Of<ILogger<PromoPlanningAgent>>(),
+            config);
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        var specialists = new List<ISpecialistAgent> { generalAgent, promoAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(
+            "Plan a BOGO promotion for Sierra Gold Tequila in the Northeast", null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.PromotionTrade);
+
+        var response = await promoAgent.HandleAsync(
+            new ChatRequest("Plan a BOGO promotion for Sierra Gold Tequila", SessionId: "promo-pipeline-1"));
+        response.Reply.Should().Contain("Sierra Gold");
+        response.Spans.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Router_PromoIntent_DoesNotRouteToDemand()
+    {
+        var routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.PromotionTrade}\",\"confidence\":0.88,\"intents\":[\"{AgentIntent.PromotionTrade}\"]}}");
+
+        var generalAgent = CreateGeneralAgent(MockChatClient("general"));
+        var specialists = new List<ISpecialistAgent> { generalAgent };
+        var router = CreateRouter(routerClient, specialists);
+
+        var routingResult = await router.RouteAsync(
+            "Estimate ROI for a bundle promotion", null, null, null);
+        routingResult.Intent.Should().Be(AgentIntent.PromotionTrade);
+        // Without a promo specialist registered, should NOT misroute to demand
+        routingResult.Intent.Should().NotBe(AgentIntent.DemandForecasting);
+    }
+
+    #endregion
 }
