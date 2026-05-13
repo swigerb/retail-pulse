@@ -132,6 +132,31 @@ public class RetailPulseDb
                 PRIMARY KEY (Category, Month)
             );
 
+            CREATE TABLE IF NOT EXISTS PromoHistory (
+                Brand TEXT NOT NULL,
+                Region TEXT NOT NULL,
+                PromoType TEXT NOT NULL,
+                CampaignName TEXT NOT NULL,
+                StartDate TEXT NOT NULL,
+                EndDate TEXT NOT NULL,
+                Spend REAL NOT NULL,
+                BaselineVolume REAL NOT NULL,
+                ActualVolume REAL NOT NULL,
+                LiftPercent REAL NOT NULL,
+                ROI REAL NOT NULL,
+                SuccessRating TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS LiftCoefficients (
+                Category TEXT NOT NULL,
+                PromoType TEXT NOT NULL,
+                AvgLiftPercent REAL NOT NULL,
+                StdDev REAL NOT NULL,
+                MinSpend REAL NOT NULL,
+                MaxEffectiveSpend REAL NOT NULL,
+                PRIMARY KEY (Category, PromoType)
+            );
+
             CREATE TABLE IF NOT EXISTS SeedMetadata (
                 Key TEXT PRIMARY KEY,
                 Value TEXT NOT NULL
@@ -161,7 +186,7 @@ public class RetailPulseDb
         using var tx = conn.BeginTransaction();
 
         using var clearCmd = conn.CreateCommand();
-        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM SeedMetadata;";
+        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM PromoHistory; DELETE FROM LiftCoefficients; DELETE FROM SeedMetadata;";
         clearCmd.ExecuteNonQuery();
 
         SeedDepletions(conn);
@@ -170,6 +195,8 @@ public class RetailPulseDb
         SeedVariantMix(conn);
         SeedDemandHistory(conn);
         SeedSeasonalFactors(conn);
+        SeedPromoHistory(conn);
+        SeedLiftCoefficients(conn);
 
         // Store hash
         using var hashCmd = conn.CreateCommand();
@@ -182,7 +209,7 @@ public class RetailPulseDb
 
     // Bump this version whenever the schema or seeding logic changes
     // to force a re-seed even if tenant.yaml hasn't changed.
-    private const int SchemaVersion = 3;
+    private const int SchemaVersion = 4;
 
     private string ComputeTenantHash()
     {

@@ -162,3 +162,29 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - SignalR events should be best-effort (wrapped in try/catch) to never break the span capture pipeline.
 
 **Test Status:** All 540 tests passing (0 failures, 0 skipped)
+
+## Session Work — 2026-05-13 Sprint 2.1 Promo Planning MCP Tools + Simulated Data
+
+### Task: PromoHistory/LiftCoefficients schema, 4 MCP tools, 60+ campaign seed data, Task Module endpoint with approval gate
+
+- **Context:** Sprint 2.1 — build the data layer, MCP tools, and orchestrating Task Module endpoint for promo campaign planning. Follows same patterns as Sprint 1.2 demand tools.
+- **Deliverables:**
+  - **Schema:** Added `PromoHistory` table (Brand, Region, PromoType, CampaignName, StartDate, EndDate, Spend, BaselineVolume, ActualVolume, LiftPercent, ROI, SuccessRating) with indexes. Added `LiftCoefficients` table (Category, PromoType, AvgLiftPercent, StdDev, MinSpend, MaxEffectiveSpend).
+  - **Seed data:** 60+ campaigns across 12 brands (5-6 per brand), 18-month window, 5 promo types (discount 30%, BOGO 20%, display 20%, digital 20%, bundle 10%), ~15% intentionally poor performers. 30 lift coefficient rows (6 categories × 5 types) with category-specific adjustments.
+  - **MCP Tools (PromoTools.cs):**
+    - `GetPromoHistory(brand?, region?, promoType?, months?)` — filtered campaign history with summary stats
+    - `CalculateLift(brand, region, promoType, spend)` — expected lift with diminishing returns and confidence scoring
+    - `EvaluateTiming(brand, region, startDate, endDate)` — conflict detection, seasonality analysis, cannibalization risk
+    - `EstimateROI(brand, region, promoType, spend, durationWeeks)` — full ROI projection with breakeven analysis
+  - **REST endpoints:** 6 new `/api/promo/*` routes in McpServer Program.cs (history, calculate-lift, evaluate-timing, estimate-roi, calendar, types)
+  - **API proxy tools:** 4 HTTP proxy tools (PromoHistoryTool, CalculateLiftTool, EvaluateTimingTool, EstimateROITool)
+  - **Task Module endpoint:** `POST /api/taskmodule/promo` orchestrating all 4 tools with approval gate triggers (budget > $500K or ROI < 2.0x with budget > $100K)
+  - **Schema version bumped** to v4
+
+### Learnings
+- PowerShell heredoc strings with backtick escaping corrupt C# files — always use Python for multi-line file operations
+- `git checkout HEAD --` on a branch restores from the branch's HEAD commit, not from main — verify the commit content first
+- PowerShell `>` redirection adds BOM and may change encoding — use Python subprocess for binary-safe git operations
+- For files >1000 lines, the Python insertion approach (read full file → find insertion point → write) is more reliable than PowerShell Set-Content or edit tool for large appends
+
+**Validation:** Build clean (0 errors, 4 pre-existing warnings), all 540 tests pass
