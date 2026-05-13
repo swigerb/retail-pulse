@@ -12,6 +12,7 @@ public static class AgentIntent
     public const string CompetitiveMarket = "competitive/market";
     public const string SentimentField = "sentiment/field";
     public const string MemoryManagement = "memory/management";
+    public const string PortfolioHealth = "council/health";
     public const string General = "general/fallback";
 
     /// <summary>All known intents for validation.</summary>
@@ -23,6 +24,7 @@ public static class AgentIntent
         CompetitiveMarket,
         SentimentField,
         MemoryManagement,
+        PortfolioHealth,
         General
     ];
 }

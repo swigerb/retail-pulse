@@ -114,6 +114,24 @@ if (competitiveIntelDef != null)
         .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
 }
 
+// Resolve supply-chain agent prompt with tenant placeholders
+var supplyChainDef = promptConfig.Agents.TryGetValue("supply-chain", out var scDef) ? scDef : null;
+if (supplyChainDef != null)
+{
+    supplyChainDef.SystemPrompt = supplyChainDef.SystemPrompt
+        .Replace("{tenant.company}", tenant.Company)
+        .Replace("{tenant.industry}", tenant.Industry)
+        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
+        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
+        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
+        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
+        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+}
+
+// Load council synthesis and vote prompt definitions
+var councilSynthesisDef = promptConfig.Agents.TryGetValue("council-synthesis", out var synthDef) ? synthDef : null;
+var councilVoteDef = promptConfig.Agents.TryGetValue("council-vote", out var vDef) ? vDef : null;
+
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
 var mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]
@@ -472,7 +490,39 @@ competitiveToolsFactory: sp =>
         AIFunctionFactory.Create(competitiveLandscapeTool.GetCompetitiveLandscape),
         AIFunctionFactory.Create(chartTool.CreateChart)
     };
+},
+supplyChainDef: supplyChainDef,
+supplyToolsFactory: sp =>
+{
+    var inventoryTool = sp.GetRequiredService<InventoryLevelsTool>();
+    var disruptionsTool = sp.GetRequiredService<SupplyDisruptionsTool>();
+    var fulfillmentTool = sp.GetRequiredService<FulfillmentRateTool>();
+    var supplyHealthTool = sp.GetRequiredService<SupplyHealthTool>();
+    var chartTool = sp.GetRequiredService<ChartDataTool>();
+
+    return new List<AITool>
+    {
+        AIFunctionFactory.Create(inventoryTool.GetInventoryLevels),
+        AIFunctionFactory.Create(disruptionsTool.GetSupplyDisruptions),
+        AIFunctionFactory.Create(fulfillmentTool.GetFulfillmentRate),
+        AIFunctionFactory.Create(supplyHealthTool.GetSupplyHealthSummary),
+        AIFunctionFactory.Create(chartTool.CreateChart)
+    };
 });
+
+// Register ConsensusOrchestrator for Portfolio Health Council
+if (councilSynthesisDef is not null && councilVoteDef is not null)
+{
+    builder.Services.AddScoped<RetailPulse.Contracts.Consensus.IConsensusCouncil>(sp =>
+    {
+        var specialists = sp.GetServices<ISpecialistAgent>();
+        var chatClient = sp.GetRequiredService<IChatClient>();
+        var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Consensus.ConsensusOrchestrator>>();
+
+        return new RetailPulse.Api.Consensus.ConsensusOrchestrator(
+            specialists, chatClient, councilSynthesisDef, councilVoteDef, logger);
+    });
+}
 
 // Keep legacy RetailPulseAgent registration for backward compatibility
 builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
@@ -674,6 +724,43 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
         logger.LogInformation(
             "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}, traceId: {TraceId}",
             specialist.Key, specialist.DisplayName, decision.Intent, decision.Confidence, traceId);
+
+        // Council interception: if the router classified as council/health, convene the council
+        if (decision.DetectedIntents?.Any(i => string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true
+            || string.Equals(decision.Intent, "council/health", StringComparison.OrdinalIgnoreCase))
+        {
+            var council = app.Services.GetService<RetailPulse.Contracts.Consensus.IConsensusCouncil>();
+            if (council is not null)
+            {
+                // Extract brand from the message (best-effort: first capitalized word or fallback)
+                var brand = ExtractBrand(enrichedRequest.Message, tenant);
+                var verdict = await council.ConveneAsync(brand, null, ct);
+
+                var councilReply = $"## Portfolio Health Council — {verdict.Brand}\n\n" +
+                    $"**Overall Rating: {verdict.OverallRating}** {(verdict.IsUnanimous ? "(unanimous)" : "(split decision)")}\n\n" +
+                    $"{verdict.Synthesis}\n\n" +
+                    (verdict.ActionItems.Length > 0
+                        ? "### Action Items\n" + string.Join("\n", verdict.ActionItems.Select(a => $"- {a}")) + "\n\n"
+                        : "") +
+                    (verdict.Disagreements.Length > 0
+                        ? "### Disagreements\n" + string.Join("\n", verdict.Disagreements.Select(d => $"- {d}")) + "\n\n"
+                        : "") +
+                    "### Agent Votes\n" +
+                    string.Join("\n", verdict.Votes.Select(v =>
+                        $"- **{v.AgentName}**: {v.Rating} (confidence: {v.Confidence:F2}) — {v.Reasoning}"));
+
+                var councilResponse = new ChatResponse(
+                    councilReply,
+                    enrichedRequest.SessionId ?? sessionId,
+                    [],
+                    null,
+                    (long)verdict.TotalDuration.TotalMilliseconds);
+
+                await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, councilReply, ct);
+
+                return Results.Ok(councilResponse);
+            }
+        }
 
         // Agent execution with tracing
         ChatResponse response;
@@ -1173,28 +1260,43 @@ app.MapGet("/api/knowledge/stats", async (IKnowledgeBase kb, CancellationToken c
 
 // ── Council endpoints ────────────────────────────────────────────────────
 
-app.MapPost("/api/council/convene", async (CouncilConveneRequest body, IEnumerable<ISpecialistAgent> specialists, ILogger<Program> logger, CancellationToken ct) =>
+app.MapPost("/api/council/convene", async (CouncilConveneRequest body, ILogger<Program> logger, CancellationToken ct, RetailPulse.Contracts.Consensus.IConsensusCouncil? council = null) =>
 {
     if (string.IsNullOrWhiteSpace(body.Brand))
         return Results.BadRequest(new { error = "Field 'brand' is required." });
 
-    // The ConsensusOrchestrator (being built by Kroger) will handle the full council session.
-    // For now, return a structured placeholder that matches the expected CouncilVerdict shape,
-    // gathering data from available specialist agents to demonstrate the data flow.
-    var agentList = specialists.Select(s => new { key = s.Key, name = s.DisplayName, intents = s.SupportedIntents }).ToList();
+    if (council is null)
+    {
+        logger.LogWarning("Council convene requested but IConsensusCouncil is not registered");
+        return Results.StatusCode(503);
+    }
 
-    logger.LogInformation("Council convened for brand={Brand}, region={Region} with {AgentCount} participants",
-        body.Brand, body.Region ?? "All", agentList.Count);
+    logger.LogInformation("Council convening for brand={Brand}, region={Region}",
+        body.Brand, body.Region ?? "All");
+
+    var verdict = await council.ConveneAsync(body.Brand, body.Region, ct);
 
     return Results.Ok(new
     {
-        council_id = Guid.NewGuid().ToString("N"),
-        brand = body.Brand,
-        region = body.Region ?? "All Regions",
-        convened_at = DateTimeOffset.UtcNow,
-        status = "awaiting_orchestrator",
-        participants = agentList,
-        message = "ConsensusOrchestrator integration pending — council participants are registered and data layer is ready."
+        brand = verdict.Brand,
+        region = verdict.Region ?? "All Regions",
+        overall_rating = verdict.OverallRating.ToString(),
+        synthesis = verdict.Synthesis,
+        is_unanimous = verdict.IsUnanimous,
+        disagreements = verdict.Disagreements,
+        action_items = verdict.ActionItems,
+        convened_at = verdict.ConvenedAt,
+        total_duration_ms = verdict.TotalDuration.TotalMilliseconds,
+        votes = verdict.Votes.Select(v => new
+        {
+            agent_id = v.AgentId,
+            agent_name = v.AgentName,
+            rating = v.Rating.ToString(),
+            reasoning = v.Reasoning,
+            confidence = v.Confidence,
+            key_metrics = v.KeyMetrics,
+            response_time_ms = v.ResponseTime.TotalMilliseconds
+        })
     });
 })
 .WithName("ConveneCouncil");
@@ -1408,6 +1510,23 @@ app.MapGet("/api/message-extension/manifest", () =>
 .WithName("MessageExtensionManifest");
 
 app.Run();
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Best-effort extraction of a brand name from a user message by matching
+/// against the known brands in tenant configuration.
+/// </summary>
+static string ExtractBrand(string message, RetailPulse.Contracts.TenantConfiguration tenant)
+{
+    foreach (var brand in tenant.Brands)
+    {
+        if (message.Contains(brand.Name, StringComparison.OrdinalIgnoreCase))
+            return brand.Name;
+    }
+    // Fallback: return the first brand if none matched
+    return tenant.Brands.FirstOrDefault()?.Name ?? "Unknown";
+}
 
 // ── DTOs ─────────────────────────────────────────────────────────────────
 
