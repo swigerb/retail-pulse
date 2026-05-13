@@ -14,6 +14,7 @@ const spanColors: Record<string, string> = {
   agent_delegation: '#c084fc',
   agent_call: '#a855f7',
   agent_response: '#8b5cf6',
+  routing: '#06b6d4',
 };
 
 const spanIcons: Record<string, string> = {
@@ -24,6 +25,7 @@ const spanIcons: Record<string, string> = {
   agent_delegation: '🤝',
   agent_call: '🏭',
   agent_response: '📋',
+  routing: '🔀',
 };
 
 const useStyles = makeStyles({

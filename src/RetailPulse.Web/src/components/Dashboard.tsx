@@ -3,8 +3,12 @@ import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHead
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
+import { AgentRoutingPanel } from './AgentRoutingPanel';
+import { MemoryPanel } from './MemoryPanel';
+import { ApprovalHistory } from './ApprovalHistory';
+import { PendingApprovals } from './PendingApprovals';
 import { BrandLogo } from './BrandLogo';
-import type { AgentSpan, TokenUsage } from '../types';
+import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision } from '../types';
 import { connectTelemetryHub } from '../services/telemetryHub';
 
 const DRAWER_WIDTH_PX = 560;
@@ -91,13 +95,16 @@ export function Dashboard() {
   const [liveSpans, setLiveSpans] = useState<AgentSpan[]>([]);
   const [totalDurationMs, setTotalDurationMs] = useState<number | undefined>();
   const [totalTokenUsage, setTotalTokenUsage] = useState<TokenUsage | undefined>();
+  const [routingHistory, setRoutingHistory] = useState<RoutingInfo[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [approvalHistory, setApprovalHistory] = useState<ApprovalRequest[]>([]);
   const styles = useStyles();
 
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close.
   // We intentionally do NOT disconnect on unmount — the connection is a module-level
   // singleton that survives React StrictMode double-mount and persists for the app lifetime.
   useEffect(() => {
-    connectTelemetryHub(
+    const conn = connectTelemetryHub(
       (span) => setLiveSpans(prev => {
         const next = [...prev, span];
         return next.length > MAX_RETAINED_SPANS
@@ -107,6 +114,27 @@ export function Dashboard() {
       () => setConnected(true),
       () => setConnected(false),
     );
+
+    // Listen for approval events on SignalR
+    conn.off('approval_requested');
+    conn.on('approval_requested', (approval: ApprovalRequest) => {
+      setPendingApprovals(prev => {
+        if (prev.some(a => a.id === approval.id)) return prev;
+        return [...prev, { ...approval, status: 'pending' }];
+      });
+    });
+
+    conn.off('approval_resolved');
+    conn.on('approval_resolved', (resolved: { id: string; status: ApprovalDecision; decidedBy?: string; decidedAt?: string }) => {
+      setPendingApprovals(prev => prev.filter(a => a.id !== resolved.id));
+      setApprovalHistory(prev => {
+        const existing = prev.find(a => a.id === resolved.id);
+        if (existing) {
+          return prev.map(a => a.id === resolved.id ? { ...a, ...resolved } : a);
+        }
+        return prev;
+      });
+    });
   }, []);
 
   const handleNewChat = () => {
@@ -114,16 +142,21 @@ export function Dashboard() {
     setLiveSpans([]);
     setTotalDurationMs(undefined);
     setTotalTokenUsage(undefined);
+    setRoutingHistory([]);
   };
 
   const handleClearSpans = useCallback(() => {
     setLiveSpans([]);
     setTotalDurationMs(undefined);
     setTotalTokenUsage(undefined);
+    setRoutingHistory([]);
   }, []);
 
-  const handleResponseReceived = useCallback((response: { totalDurationMs?: number; tokenUsage?: TokenUsage }) => {
+  const handleResponseReceived = useCallback((response: { totalDurationMs?: number; tokenUsage?: TokenUsage; routing?: RoutingInfo }) => {
     setTotalDurationMs(prev => (prev ?? 0) + (response.totalDurationMs ?? 0));
+    if (response.routing) {
+      setRoutingHistory(prev => [...prev, response.routing!]);
+    }
     if (response.tokenUsage) {
       setTotalTokenUsage(prev => {
         if (!prev) return response.tokenUsage;
@@ -137,6 +170,20 @@ export function Dashboard() {
     }
   }, []);
 
+  const handleApprovalResolved = useCallback((id: string, decision: ApprovalDecision) => {
+    setPendingApprovals(prev => prev.filter(a => a.id !== id));
+    setApprovalHistory(prev => {
+      const resolved = prev.find(a => a.id === id);
+      if (resolved) {
+        return prev.map(a => a.id === id ? { ...a, status: decision, decidedAt: new Date().toISOString() } : a);
+      }
+      // If it was only in pending, move it to history
+      return [...prev, ...pendingApprovals
+        .filter(a => a.id === id)
+        .map(a => ({ ...a, status: decision, decidedAt: new Date().toISOString() }))];
+    });
+  }, [pendingApprovals]);
+
   return (
     <div className={styles.dashboard}>
       <header className={styles.header}>
@@ -145,6 +192,10 @@ export function Dashboard() {
           <span className={styles.headerTagline}>Brand Intelligence Platform</span>
         </div>
         <div className={`${styles.headerActions} ${telemetryOpen ? styles.headerActionsOpen : ''}`}>
+          <PendingApprovals
+            pendingApprovals={pendingApprovals}
+            onClick={() => setTelemetryOpen(true)}
+          />
           <Button
             appearance="subtle"
             icon={<Add24Regular />}
@@ -166,7 +217,12 @@ export function Dashboard() {
 
       <main className={styles.main}>
         <div className={`${styles.chatContainer} ${telemetryOpen ? styles.chatContainerOpen : ''}`}>
-          <ChatPanel key={chatKey} onResponseReceived={handleResponseReceived} />
+          <ChatPanel
+            key={chatKey}
+            onResponseReceived={handleResponseReceived}
+            approvals={pendingApprovals}
+            onApprovalResolved={handleApprovalResolved}
+          />
         </div>
 
         <Drawer
@@ -200,6 +256,15 @@ export function Dashboard() {
             </DrawerHeaderTitle>
           </DrawerHeader>
           <DrawerBody>
+            <AgentRoutingPanel routingHistory={routingHistory} />
+            {approvalHistory.length > 0 && (
+              <div style={{ marginTop: '16px' }}>
+                <ApprovalHistory approvals={approvalHistory} />
+              </div>
+            )}
+            <div style={{ marginTop: '16px' }}>
+              <MemoryPanel />
+            </div>
             <TelemetryPanel
               connected={connected}
               liveSpans={liveSpans}

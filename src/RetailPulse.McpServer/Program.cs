@@ -68,4 +68,65 @@ app.MapGet("/api/variant-mix", (string brand, RetailPulseDb data, string region 
 })
 .WithName("GetVariantMix");
 
+app.MapGet("/api/historical-demand", (string brand, RetailPulseDb data, string region = "National", string channel = "All") =>
+{
+    var effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
+    var effectiveChannel = string.Equals(channel, "All", StringComparison.OrdinalIgnoreCase) ? null : channel;
+    var result = data.GetHistoricalDemand(brand, effectiveRegion, effectiveChannel);
+    return Results.Ok(result);
+})
+.WithName("GetHistoricalDemand");
+
+app.MapGet("/api/forecast", (string brand, RetailPulseDb data, string region = "National") =>
+{
+    var effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
+    var result = data.GenerateForecast(brand, effectiveRegion);
+    return Results.Ok(result);
+})
+.WithName("GenerateForecast");
+
+app.MapGet("/api/seasonality-factors", (RetailPulseDb data, string category = "All") =>
+{
+    var effectiveCategory = string.Equals(category, "All", StringComparison.OrdinalIgnoreCase) ? null : category;
+    var result = data.GetSeasonalityFactors(effectiveCategory);
+    return Results.Ok(result);
+})
+.WithName("GetSeasonalityFactors");
+
+app.MapGet("/api/demand-risks", (string brand, RetailPulseDb data, string region = "National") =>
+{
+    var effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
+    var result = data.IdentifyDemandRisks(brand, effectiveRegion);
+    return Results.Ok(result);
+})
+.WithName("IdentifyDemandRisks");
+
+app.MapGet("/api/demand/history", (RetailPulseDb data, string? brand = null, string? region = null, string? channel = null, int months = 12) =>
+{
+    var result = data.GetHistoricalDemand(brand, region, channel, months);
+    return Results.Ok(result);
+})
+.WithName("GetHistoricalDemand");
+
+app.MapGet("/api/demand/forecast", (string brand, RetailPulseDb data, string? region = null, int days = 90) =>
+{
+    var result = data.GenerateForecast(brand, region, days);
+    return Results.Ok(result);
+})
+.WithName("GenerateForecast");
+
+app.MapGet("/api/demand/seasonality", (RetailPulseDb data, string? category = null) =>
+{
+    var result = data.GetSeasonalityFactors(category);
+    return Results.Ok(result);
+})
+.WithName("GetSeasonalityFactors");
+
+app.MapGet("/api/demand/risks", (RetailPulseDb data, string? brand = null, string? region = null) =>
+{
+    var result = data.IdentifyDemandRisks(brand, region);
+    return Results.Ok(result);
+})
+.WithName("IdentifyDemandRisks");
+
 app.Run();

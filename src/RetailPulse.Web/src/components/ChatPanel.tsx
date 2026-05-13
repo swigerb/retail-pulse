@@ -12,11 +12,14 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
-import type { AgentSpan, ChatHistoryMessage, ChartSpec, TokenUsage } from '../types';
+import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision } from '../types';
 import type { SendMessageOptions } from '../services/api';
 import { sendMessage } from '../services/api';
 import { joinTelemetrySession } from '../services/telemetryHub';
 import { BrandLogo } from './BrandLogo';
+import { AgentRoutingIndicator } from './AgentRoutingIndicator';
+import { MemoryIndicator } from './MemoryIndicator';
+import { ApprovalCard } from './ApprovalCard';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
 
@@ -25,12 +28,17 @@ interface ChatMessage {
   content: string;
   spans?: AgentSpan[];
   charts?: ChartSpec[];
+  routing?: RoutingInfo;
   totalDurationMs?: number;
   tokenUsage?: TokenUsage;
+  memoryContext?: MemoryContext;
+  approval?: ApprovalRequest;
 }
 
 interface ChatPanelProps {
-  onResponseReceived?: (response: { totalDurationMs?: number; tokenUsage?: TokenUsage }) => void;
+  onResponseReceived?: (response: { totalDurationMs?: number; tokenUsage?: TokenUsage; routing?: RoutingInfo }) => void;
+  approvals?: ApprovalRequest[];
+  onApprovalResolved?: (id: string, decision: ApprovalDecision) => void;
 }
 
 const SPAN_ICONS: Record<string, string> = {
@@ -41,6 +49,7 @@ const SPAN_ICONS: Record<string, string> = {
   agent_delegation: '🤝',
   agent_call: '📡',
   agent_response: '✅',
+  routing: '🔀',
 };
 
 // Stable inline-style constants — hoisted so they don't re-allocate per render.
@@ -446,7 +455,7 @@ const useChatStyles = makeStyles({
   },
 });
 
-export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
+export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -499,10 +508,10 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
           options,
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
-        onResponseReceived?.({ totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage });
+        onResponseReceived?.({ totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, routing: response.routing });
         setMessages(prev => [
           ...prev,
-          { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage },
+          { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts, routing: response.routing, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, memoryContext: response.memoryContext },
         ]);
       } catch (err) {
         if (!isMountedRef.current || controller.signal.aborted) return;
@@ -618,6 +627,15 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
                   <div>{msg.content}</div>
                 )}
               </Card>
+              {msg.role === 'assistant' && msg.routing && (
+                <AgentRoutingIndicator routing={msg.routing} />
+              )}
+              {msg.role === 'assistant' && msg.memoryContext && msg.memoryContext.entries.length > 0 && (
+                <MemoryIndicator memoryContext={msg.memoryContext} />
+              )}
+              {msg.approval && (
+                <ApprovalCard approval={msg.approval} onResolved={onApprovalResolved} />
+              )}
               {msg.spans && msg.spans.length > 0 && (
                 <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} tokenUsage={msg.tokenUsage} />
               )}
@@ -649,6 +667,21 @@ export function ChatPanel({ onResponseReceived }: ChatPanelProps) {
             </div>
           </div>
         )}
+
+        {approvals && approvals.filter(a => a.status === 'pending').map(approval => (
+          <div key={approval.id} className={`${styles.message} ${styles.messageAssistant}`} style={{ maxWidth: '95%' }}>
+            <Avatar
+              size={36}
+              color="brand"
+              name="Retail Pulse"
+              icon={ASSISTANT_AVATAR_ICON}
+              style={ASSISTANT_AVATAR_STYLE}
+            />
+            <div className={styles.messageContent}>
+              <ApprovalCard approval={approval} onResolved={onApprovalResolved} />
+            </div>
+          </div>
+        ))}
 
         <div ref={messagesEndRef} />
       </div>

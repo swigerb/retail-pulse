@@ -1,4 +1,4 @@
-import type { ChatRequest, ChatResponse } from '../types';
+import type { ChatRequest, ChatResponse, RoutingInfo } from '../types';
 
 async function parseErrorBody(res: Response): Promise<string> {
   const contentType = res.headers.get('content-type') ?? '';
@@ -22,14 +22,32 @@ async function parseErrorBody(res: Response): Promise<string> {
   return res.statusText || 'Unknown error';
 }
 
-function isChatResponse(value: unknown): value is ChatResponse {
+function isRoutingInfo(value: unknown): value is RoutingInfo {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v.reply === 'string' &&
-    typeof v.sessionId === 'string' &&
-    Array.isArray(v.spans)
+    typeof v.agentId === 'string' &&
+    typeof v.agentName === 'string' &&
+    typeof v.intentCategory === 'string' &&
+    typeof v.confidence === 'number'
   );
+}
+
+function isChatResponse(value: unknown): value is ChatResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (
+    typeof v.reply !== 'string' ||
+    typeof v.sessionId !== 'string' ||
+    !Array.isArray(v.spans)
+  ) {
+    return false;
+  }
+  // routing is optional but must be valid when present
+  if (v.routing !== undefined && v.routing !== null && !isRoutingInfo(v.routing)) {
+    return false;
+  }
+  return true;
 }
 
 export interface SendMessageOptions {

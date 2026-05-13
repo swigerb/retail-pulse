@@ -7,7 +7,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 import { Card, makeStyles } from '@fluentui/react-components';
-import type { ChartSpec, ChartSeries } from '../types';
+import type { ChartSpec, ChartSeries, ForecastData } from '../types';
+import { ForecastChart } from './forecast';
 
 const BRAND_COLORS = ['#1565C0', '#42A5F5', '#4682B4', '#2E8B57', '#1E88E5', '#64B5F6', '#5F9EA0', '#0D47A1'];
 
@@ -290,12 +291,26 @@ function SingleChart({ spec }: { spec: ChartSpec }) {
   );
 }
 
-export default function ChartRenderer({ charts }: { charts: ChartSpec[] }) {
+// Detect forecast-shaped data embedded in a chart spec's metadata
+function isForecastSpec(spec: ChartSpec): spec is ChartSpec & { forecast: ForecastData } {
+  return 'forecast' in spec && !!(spec as ChartSpec & { forecast?: ForecastData }).forecast;
+}
+
+export default function ChartRenderer({ charts, forecastData }: { charts: ChartSpec[]; forecastData?: ForecastData }) {
+  // If standalone forecast data is provided, render the full forecast visualization
+  if (forecastData) {
+    return <ForecastChart data={forecastData} />;
+  }
+
   return (
     <>
-      {charts.map((spec, i) => (
-        <SingleChart key={spec.title || `chart-${i}`} spec={spec} />
-      ))}
+      {charts.map((spec, i) =>
+        isForecastSpec(spec) ? (
+          <ForecastChart key={spec.title || `forecast-${i}`} data={spec.forecast} />
+        ) : (
+          <SingleChart key={spec.title || `chart-${i}`} spec={spec} />
+        ),
+      )}
     </>
   );
 }

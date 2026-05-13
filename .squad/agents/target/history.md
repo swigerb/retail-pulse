@@ -113,3 +113,63 @@
 **Validation:** All 346 tests pass (0 failures, 0 skipped). Build clean (0 errors, 0 warnings).
 
 **Decision Logged:** Demand Forecasting Test Strategy
+
+## Session Work — Sprint 1.3/1.4 Memory & Approval Tests (Complete)
+
+**Outcome:** ✅ SUCCESS — 97 new tests added, all 443 tests passing (346 existing + 97 new)
+
+### Learnings
+
+- **Backend team (Costco) built implementations in parallel** — Contract interfaces and implementations for both Conversation Memory and Approval Gate were already complete. Always read real implementations before writing test stubs.
+- **SqliteConversationMemory.ParseKeywords includes full phrase** — Inserts trimmed query as first keyword for exact-match boosting, then individual tokens (≥3 chars, no stop words, max 7). Total keywords = phrase + tokens, max 8.
+- **SqliteApprovalGate.RespondAsync is idempotent** — Silently ignores re-respond on already-resolved requests (no exception). First decision wins.
+- **ConversationMemoryMiddleware is a standalone class** — Does NOT implement IMemoryMiddleware interface. Has `BuildMemoryContextAsync` and `ExtractAndStoreAsync` methods. MaxContextChars = 2000.
+- **MemoryExtractionService.ParseExtraction is internal static** — Testable via InternalsVisibleTo. Returns ExtractionResult with Summary, Entities[], Preference?.
+- **ConversationMemoryMiddleware.FormatAge is internal static** — Formats TimeSpan as human-readable ("just now", "2h ago", "1d ago", "1w ago").
+- **ApprovalTool returns JSON strings** — Not ApprovalResult objects. Catches OperationCanceledException and general exceptions, returns JSON error objects.
+- **GetHistoryAsync is global** — Returns ALL users' history (no user filter), ordered by RespondedAt DESC.
+
+### Deliverables
+
+- `tests/RetailPulse.Tests/Memory/ConversationMemoryTests.cs` — 24 tests:
+  - StoreAsync: entry creation, TTL validation (30d/90d), entity key persistence, unique IDs
+  - RecallAsync: privacy scoping (no cross-user leaks), maxResults limit, query relevance ranking, entity key matching, empty state
+  - TTL enforcement: expired entries pruned, valid entries returned
+  - ForgetAsync: full purge, cross-user isolation, empty user no-op
+  - ForgetEntryAsync: single entry removal, nonexistent ID no-op
+  - Concurrency: parallel stores across users and same user
+  - ParseKeywords (internal): count validation, 8-keyword limit, phrase inclusion
+
+- `tests/RetailPulse.Tests/Memory/MemoryMiddlewareTests.cs` — 15 tests:
+  - BuildMemoryContextAsync: context block generation, token budget (~2000 chars), first-time user null, preference labels
+  - ExtractAndStoreAsync: summary extraction, entity mentions, user preferences, short exchange handling, extraction failure resilience
+  - ParseExtraction (internal): valid JSON parsing, malformed JSON handling, null preference, empty entities
+  - FormatAge (internal): human-readable time formatting
+
+- `tests/RetailPulse.Tests/Approval/ApprovalGateTests.cs` — 26 tests:
+  - RequestApprovalAsync: unique IDs, timestamps, 5-min default timeout, urgency/impact, pending initial state
+  - GetResultAsync: pending/approved/rejected states, nonexistent ID throws
+  - RespondAsync: approved/rejected/modified decisions, optional comments, idempotent re-respond
+  - WaitForApprovalAsync: blocking wait, timeout, already-resolved immediate return
+  - Concurrency: parallel requests, independent resolution
+  - Audit trail: request/response persistence, history ordering
+  - GetPendingAsync/GetHistoryAsync: user filtering, resolved exclusion, limit
+
+- `tests/RetailPulse.Tests/Approval/ApprovalToolTests.cs` — 8 tests:
+  - Tool creates approval request with agent context
+  - JSON return format validation
+  - Timeout/rejection/modified decision handling
+  - Error handling (gate throws, cancellation)
+
+- `tests/RetailPulse.Tests/Approval/ApprovalApiTests.cs` — 13 tests:
+  - GET pending: user filtering, empty state, urgency/impact inclusion
+  - POST respond: approved/rejected/modified decisions, invalid ID, idempotent re-respond
+  - GET history: resolved requests, ordering, empty state, pending exclusion, global audit trail
+  - Full flow: request → pending → respond → history
+
+- `tests/RetailPulse.Tests/Integration/RouterIntegrationTests.cs` — 3 new integration tests:
+  - Memory persistence across conversations (uses real SqliteConversationMemory)
+  - Approval end-to-end flow (uses real SqliteApprovalGate)
+  - MemoryManagement intent routing
+
+**Validation:** All 443 tests pass (0 failures, 0 skipped). Build clean.
