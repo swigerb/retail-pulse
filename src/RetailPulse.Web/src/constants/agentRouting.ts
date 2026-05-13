@@ -43,3 +43,29 @@ export const AGENT_LABELS: Record<IntentCategory, string> = {
   sentiment: 'Sentiment',
   general: 'General',
 };
+
+// Promotion planning chart colors
+export const PROMO_COLORS = {
+  recommended: '#22c55e',
+  cautious: '#eab308',
+  notRecommended: '#ef4444',
+  roi: '#22c55e',
+  roiBelow: '#ef4444',
+  breakEven: '#94a3b8',
+  confidence: '#3b82f6',
+  historical: '#6b7280',
+  proposedBar: '#8b5cf6',
+  calendarActive: '#3b82f6',
+  calendarCompleted: '#6b7280',
+  calendarPlanned: '#a855f7',
+  calendarProposed: '#22c55e',
+  calendarConflict: '#ef4444',
+} as const;
+
+export const PROMO_TYPE_CONFIG: Record<string, { emoji: string; description: string; hint: string }> = {
+  Discount: { emoji: '💰', description: 'Price reduction on selected items', hint: 'Best for: price-sensitive categories' },
+  BOGO: { emoji: '🎁', description: 'Buy one get one free/discounted', hint: 'Best for: impulse & trial categories' },
+  Display: { emoji: '🏪', description: 'In-store display & placement', hint: 'Best for: seasonal & new products' },
+  Digital: { emoji: '📱', description: 'Online & mobile campaigns', hint: 'Best for: younger demographics' },
+  Bundle: { emoji: '📦', description: 'Multi-product package deals', hint: 'Best for: complementary products' },
+} as const;

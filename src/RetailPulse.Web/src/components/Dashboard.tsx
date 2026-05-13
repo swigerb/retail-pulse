@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle } from '@fluentui/react-components';
-import { Add24Regular, DataUsage24Regular, Dismiss24Regular } from '@fluentui/react-icons';
+import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
@@ -11,6 +11,7 @@ import { BrandLogo } from './BrandLogo';
 import { AlertFeed } from './alerts';
 import { AlertHistory as AlertHistoryPanel } from './alerts';
 import { TraceDashboard } from './traces';
+import { PromoTaskModule } from './promo';
 import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan } from '../types';
 import { connectTelemetryHub } from '../services/telemetryHub';
 
@@ -105,6 +106,7 @@ export function Dashboard() {
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRequest[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [traces, setTraces] = useState<Trace[]>([]);
+  const [activeView, setActiveView] = useState<'chat' | 'promo'>('chat');
   const styles = useStyles();
 
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close.
@@ -257,6 +259,14 @@ export function Dashboard() {
             onClick={() => setTelemetryOpen(true)}
           />
           <Button
+            appearance={activeView === 'promo' ? 'primary' : 'subtle'}
+            icon={<TargetArrow24Regular />}
+            onClick={() => setActiveView(prev => prev === 'promo' ? 'chat' : 'promo')}
+            style={activeView === 'promo' ? { backgroundColor: '#22c55e', borderColor: '#22c55e' } : undefined}
+          >
+            {activeView === 'promo' ? 'Back to Chat' : 'Campaign Planner'}
+          </Button>
+          <Button
             appearance="subtle"
             icon={<Add24Regular />}
             onClick={handleNewChat}
@@ -277,12 +287,18 @@ export function Dashboard() {
 
       <main className={styles.main}>
         <div className={`${styles.chatContainer} ${telemetryOpen ? styles.chatContainerOpen : ''}`}>
-          <ChatPanel
-            key={chatKey}
-            onResponseReceived={handleResponseReceived}
-            approvals={pendingApprovals}
-            onApprovalResolved={handleApprovalResolved}
-          />
+          {activeView === 'promo' ? (
+            <div style={{ overflow: 'auto', height: '100%' }}>
+              <PromoTaskModule />
+            </div>
+          ) : (
+            <ChatPanel
+              key={chatKey}
+              onResponseReceived={handleResponseReceived}
+              approvals={pendingApprovals}
+              onApprovalResolved={handleApprovalResolved}
+            />
+          )}
         </div>
 
         <Drawer
