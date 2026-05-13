@@ -207,3 +207,36 @@
 - `GET /api/competitive/market-share?category=&region=` — quarterly market share trends
 - `GET /api/competitive/threats?category=&region=` — competitive threat detection
 - `GET /api/competitive/landscape?category=&region=` — holistic competitive landscape
+
+## Session Work — 2026-05-16 Sprint 3.1+3.2 Streaming/Caching Middleware + Guardrails (Complete)
+
+**Outcome:** ✅ SUCCESS — Lead architect role, guardrails middleware + streaming/caching pipeline integrated, 1061 tests passing
+
+**Deliverables:**
+- `src/RetailPulse.Api/Middleware/GuardrailsMiddleware.cs` — Input filtering (jailbreak via GuardrailPatterns compiled regex, SQL injection via substring matching, input length gate via GuardrailsConfig.MaxInputLength, PII detection logging) and output PII redaction with `[REDACTED:{TYPE}]` markers
+- `src/RetailPulse.Api/Middleware/StreamingMiddleware.cs` — SignalR token streaming via StreamingEvents helpers, `StreamResponseAsync()` for IChatClient streaming, `StreamResponseFallbackAsync()` for pushing pre-computed responses as simulated tokens, `StreamTokensAsync()` IAsyncEnumerable for SSE
+- `src/RetailPulse.Api/Middleware/StreamingMiddleware.cs (CacheHelpers)` — Static `CacheHelpers` class: `BuildCacheKey()` (SHA256 deterministic), `NormalizeQuery()` (lowercase + trim + collapse whitespace + strip trailing punctuation), `IsCacheable()` (rejects forecasts/recommendations/opinions)
+- `src/RetailPulse.Api/Program.cs` — DI registration of GuardrailsMiddleware (scoped) + StreamingMiddleware (scoped), guardrails input check before routing in /api/chat, cache lookup/store for deterministic queries, PII redaction on response output, new `/api/chat/stream` endpoint with guardrails + memory + routing + SignalR streaming
+
+**Architecture Patterns:**
+- Pipeline ordering: Guardrails (input) → Cache Check → Router → Agent Execute → Cache Store → Guardrails (output/PII) → Return
+- GuardrailsMiddleware is transparent to agents — wraps the existing chat pipeline, not injected into agent logic
+- Cache uses `CacheHelpers.IsCacheable()` to skip non-deterministic queries (forecasts, recommendations, opinions)
+- Cache key: SHA256 of `pre-route|normalized_query` — routes through same key regardless of which agent handles it
+- Streaming endpoint pushes tokens via SignalR `StreamingEvents.SendTokenAsync()` — clients subscribe to `stream:{sessionId}` group
+- `StreamResponseFallbackAsync` splits full response on word boundaries for simulated streaming UX
+
+**Reconciliation:** Parallel session had created foundational infrastructure:
+- `RetailPulse.Api.Caching.InMemoryResponseCache` — full LRU cache with TTL, GenerateKey(), background cleanup
+- `RetailPulse.Api.Guardrails.GuardrailPatterns` — source-generated regex for PII + jailbreak
+- `RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog` — ring buffer logger
+- `RetailPulse.Contracts.Guardrails.GuardrailsConfig` — runtime toggles
+- `RetailPulse.Api.Hubs.StreamingHub` — SignalR hub + StreamingEvents helper
+- Existing DI registrations + REST endpoints for cache stats, guardrails log/stats/config
+- Reconciled by using all existing contracts and services, only adding middleware layer + pipeline integration
+
+**REST Endpoints:**
+- `POST /api/chat` — enhanced with guardrails input check, cache lookup/store, PII output redaction
+- `POST /api/chat/stream` — new streaming endpoint with guardrails + memory + routing + SignalR push
+
+**Test Status:** All 1061 tests pass (no regressions)
