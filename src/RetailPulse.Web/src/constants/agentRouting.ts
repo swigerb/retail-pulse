@@ -69,3 +69,36 @@ export const PROMO_TYPE_CONFIG: Record<string, { emoji: string; description: str
   Digital: { emoji: '📱', description: 'Online & mobile campaigns', hint: 'Best for: younger demographics' },
   Bundle: { emoji: '📦', description: 'Multi-product package deals', hint: 'Best for: complementary products' },
 } as const;
+
+// Competitive Intelligence colors (Sprint 2.2)
+export const COMPETITIVE_COLORS = {
+  ourBrand: '#3b82f6',
+  competitor: '#6b7280',
+  competitorMuted: 'rgba(107,114,128,0.4)',
+  threatHigh: '#ef4444',
+  threatMedium: '#f59e0b',
+  threatLow: '#22c55e',
+  priceUp: '#ef4444',
+  priceDown: '#22c55e',
+  priceNeutral: '#94a3b8',
+  match: '#f59e0b',
+  differentiate: '#3b82f6',
+  ignore: '#6b7280',
+  preempt: '#a855f7',
+  shareArea: '#3b82f620',
+  gridLine: 'rgba(255,255,255,0.06)',
+} as const;
+
+// Knowledge Base colors (Sprint 2.3)
+export const KB_COLORS = {
+  primary: '#06b6d4',
+  accent: '#0ea5e9',
+  success: '#22c55e',
+  dropZone: 'rgba(6,182,212,0.1)',
+  dropZoneBorder: '#06b6d4',
+  citationPill: 'rgba(6,182,212,0.15)',
+  citationText: '#67e8f9',
+  relevanceHigh: '#22c55e',
+  relevanceMedium: '#f59e0b',
+  relevanceLow: '#94a3b8',
+} as const;

@@ -235,3 +235,88 @@ export interface PromoFormData {
   endDate: string;
   targetLiftPercent?: number;
 }
+
+// --- Competitive Intelligence types (Sprint 2.2) ---
+
+export type ThreatSeverity = 'high' | 'medium' | 'low';
+export type ThreatRecommendation = 'MATCH' | 'DIFFERENTIATE' | 'IGNORE' | 'PREEMPT';
+
+export interface CompetitorPricing {
+  competitor: string;
+  sku: string;
+  category: string;
+  currentPrice: number;
+  previousPrice: number;
+  changePercent: number;
+  priceHistory: Array<{ month: string; price: number }>;
+}
+
+export interface MarketShareEntry {
+  quarter: string;
+  brand: string;
+  share: number;
+  isOurBrand: boolean;
+}
+
+export interface CompetitiveEvent {
+  date: string;
+  description: string;
+  competitor: string;
+}
+
+export interface CompetitiveThreat {
+  id: string;
+  title: string;
+  severity: ThreatSeverity;
+  recommendation: ThreatRecommendation;
+  description: string;
+  reasoning: string;
+  historicalContext: string;
+  competitor: string;
+  category: string;
+  detectedAt: string;
+}
+
+export interface CompetitorOverview {
+  name: string;
+  categories: string[];
+  regions: string[];
+  recentMoves: Array<{ date: string; action: string }>;
+  pricingHistory: Array<{ month: string; avgPrice: number }>;
+  marketShare: number;
+}
+
+// --- Knowledge Base types (Sprint 2.3) ---
+
+export interface KBDocument {
+  id: string;
+  title: string;
+  source: string;
+  sourceType: 'markdown' | 'text' | 'upload';
+  ingestedAt: string;
+  chunkCount: number;
+  contentPreview?: string;
+}
+
+export interface KBSearchResult {
+  documentId: string;
+  documentTitle: string;
+  chunkPreview: string;
+  relevanceScore: number;
+  chunkIndex: number;
+}
+
+export interface KBStats {
+  totalDocuments: number;
+  totalChunks: number;
+  lastIngestionDate: string;
+  documentsBySourceType: Array<{ sourceType: string; count: number }>;
+  mostCitedDocuments: Array<{ title: string; citations: number }>;
+}
+
+export interface Citation {
+  sourceName: string;
+  sourceTitle: string;
+  chunkPreview: string;
+  relevanceScore: number;
+}
