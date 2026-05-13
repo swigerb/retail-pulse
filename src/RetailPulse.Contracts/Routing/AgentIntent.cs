@@ -13,6 +13,10 @@ public static class AgentIntent
     public const string SentimentField = "sentiment/field";
     public const string MemoryManagement = "memory/management";
     public const string PortfolioHealth = "council/health";
+    public const string StoreOps = "store/operations";
+    public const string Planogram = "planogram/optimization";
+    public const string MarginAnalysis = "margin/analysis";
+    public const string Scorecard = "scorecard/portfolio";
     public const string General = "general/fallback";
 
     /// <summary>All known intents for validation.</summary>
@@ -25,6 +29,10 @@ public static class AgentIntent
         SentimentField,
         MemoryManagement,
         PortfolioHealth,
+        StoreOps,
+        Planogram,
+        MarginAnalysis,
+        Scorecard,
         General
     ];
 }

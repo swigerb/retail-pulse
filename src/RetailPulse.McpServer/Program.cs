@@ -232,4 +232,62 @@ app.MapGet("/api/supply/health", (string brand, RetailPulseDb data, string? regi
 })
 .WithName("GetSupplyHealthSummary");
 
+// ── Store Operations REST endpoints ──────────────────────────────────
+app.MapGet("/api/stores/performance", (RetailPulseDb data, string? region = null, string? storeId = null) =>
+{
+    var result = data.GetStorePerformance(region, storeId);
+    return Results.Ok(result);
+})
+.WithName("GetStorePerformance");
+
+app.MapGet("/api/stores/{storeId}/planogram/{aisleId}", (string storeId, string aisleId, RetailPulseDb data) =>
+{
+    var result = data.GetShelfLayout(storeId, aisleId);
+    return Results.Ok(result);
+})
+.WithName("GetShelfLayout");
+
+app.MapPost("/api/stores/{storeId}/planogram/{aisleId}/optimize", (string storeId, string aisleId, RetailPulseDb data) =>
+{
+    var result = data.OptimizePlanogram(storeId, aisleId);
+    return Results.Ok(result);
+})
+.WithName("OptimizePlanogram");
+
+app.MapGet("/api/stores/{storeId}/stockout-risk", (string storeId, RetailPulseDb data, string? skuId = null) =>
+{
+    var result = data.PredictStockout(storeId, skuId);
+    return Results.Ok(result);
+})
+.WithName("PredictStockout");
+
+// ── Margin REST endpoints ────────────────────────────────────────────
+app.MapGet("/api/margin/{brand}", (string brand, RetailPulseDb data, string? period = null) =>
+{
+    var result = data.GetMarginByBrand(brand, period);
+    return Results.Ok(result);
+})
+.WithName("GetMarginByBrand");
+
+app.MapGet("/api/margin/drivers/{brand}", (string brand, RetailPulseDb data) =>
+{
+    var result = data.GetMarginDrivers(brand);
+    return Results.Ok(result);
+})
+.WithName("GetMarginDrivers");
+
+app.MapGet("/api/margin/trend/{brand}", (string brand, RetailPulseDb data, int quarters = 4) =>
+{
+    var result = data.GetMarginTrend(brand, quarters);
+    return Results.Ok(result);
+})
+.WithName("GetMarginTrend");
+
+app.MapGet("/api/margin/risks", (RetailPulseDb data, string? brand = null) =>
+{
+    var result = data.DetectMarginRisks(brand);
+    return Results.Ok(result);
+})
+.WithName("DetectMarginRisks");
+
 app.Run();
