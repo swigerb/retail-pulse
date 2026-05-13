@@ -1,0 +1,169 @@
+using System.Collections.Concurrent;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using RetailPulse.Contracts.Observability;
+
+namespace RetailPulse.Api.Observability;
+
+/// <summary>
+/// Tracks conversation sessions in-memory and exports them as Markdown or JSON.
+/// Sessions are created automatically when the first message is tracked.
+/// </summary>
+public class ConversationExporter : IConversationExport
+{
+    private readonly ConcurrentDictionary<string, TrackedSession> _sessions = new();
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    public Task<ExportResult> ExportAsync(string sessionId, ExportFormat format, CancellationToken ct = default)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            throw new KeyNotFoundException($"Session '{sessionId}' not found.");
+
+        var content = format switch
+        {
+            ExportFormat.Markdown => ExportMarkdown(session),
+            ExportFormat.Json => ExportJson(session),
+            _ => throw new ArgumentOutOfRangeException(nameof(format))
+        };
+
+        var extension = format == ExportFormat.Markdown ? "md" : "json";
+        var fileName = $"session-{sessionId[..Math.Min(8, sessionId.Length)]}.{extension}";
+
+        return Task.FromResult(new ExportResult(content, format, fileName, DateTime.UtcNow));
+    }
+
+    public Task<IReadOnlyList<ExportableSession>> ListSessionsAsync(CancellationToken ct = default)
+    {
+        var sessions = _sessions.Values
+            .OrderByDescending(s => s.StartedAt)
+            .Select(s => new ExportableSession(
+                s.SessionId,
+                s.StartedAt,
+                s.Messages.Count,
+                s.AgentsUsed.ToArray()))
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<ExportableSession>>(sessions);
+    }
+
+    /// <summary>
+    /// Track a message in a session, creating the session if needed.
+    /// </summary>
+    public Task TrackMessageAsync(string sessionId, TrackedMessage message, CancellationToken ct = default)
+    {
+        var session = _sessions.GetOrAdd(sessionId, id => new TrackedSession
+        {
+            SessionId = id,
+            StartedAt = DateTime.UtcNow
+        });
+
+        session.Messages.Add(message);
+
+        if (!string.IsNullOrEmpty(message.AgentId))
+            session.AgentsUsed.Add(message.AgentId);
+
+        return Task.CompletedTask;
+    }
+
+    // ── Export formatters ────────────────────────────────────────────────
+
+    private static string ExportMarkdown(TrackedSession session)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Conversation Export — Session {session.SessionId}");
+        sb.AppendLine();
+        sb.AppendLine($"**Started:** {session.StartedAt:yyyy-MM-dd HH:mm:ss UTC}");
+        sb.AppendLine($"**Messages:** {session.Messages.Count}");
+        sb.AppendLine($"**Agents:** {string.Join(", ", session.AgentsUsed)}");
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine();
+
+        foreach (var msg in session.Messages)
+        {
+            var agentLabel = !string.IsNullOrEmpty(msg.AgentId) ? $" [{msg.AgentId}]" : "";
+            sb.AppendLine($"### {msg.Role}{agentLabel} — {msg.Timestamp:HH:mm:ss}");
+            sb.AppendLine();
+            sb.AppendLine(msg.Content);
+            sb.AppendLine();
+
+            if (msg.ToolCalls is { Count: > 0 })
+            {
+                sb.AppendLine("**Tool Calls:**");
+                foreach (var tool in msg.ToolCalls)
+                {
+                    sb.AppendLine($"- `{tool}`");
+                }
+                sb.AppendLine();
+            }
+
+            if (!string.IsNullOrEmpty(msg.Reasoning))
+            {
+                sb.AppendLine($"> **Reasoning:** {msg.Reasoning}");
+                sb.AppendLine();
+            }
+
+            if (msg.DurationMs.HasValue)
+            {
+                sb.AppendLine($"*Duration: {msg.DurationMs:F0}ms*");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("---");
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    private static string ExportJson(TrackedSession session)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            sessionId = session.SessionId,
+            startedAt = session.StartedAt,
+            messageCount = session.Messages.Count,
+            agentsUsed = session.AgentsUsed.ToArray(),
+            messages = session.Messages.Select(m => new
+            {
+                role = m.Role,
+                content = m.Content,
+                agentId = m.AgentId,
+                timestamp = m.Timestamp,
+                toolCalls = m.ToolCalls,
+                reasoning = m.Reasoning,
+                durationMs = m.DurationMs
+            })
+        }, JsonOptions);
+    }
+
+    // ── Internal types ──────────────────────────────────────────────────
+
+    internal class TrackedSession
+    {
+        public required string SessionId { get; init; }
+        public DateTime StartedAt { get; init; }
+        public List<TrackedMessage> Messages { get; } = [];
+        public HashSet<string> AgentsUsed { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+}
+
+/// <summary>
+/// A message tracked within a conversation session.
+/// </summary>
+public record TrackedMessage
+{
+    public required string Role { get; init; }
+    public required string Content { get; init; }
+    public string? AgentId { get; init; }
+    public DateTime Timestamp { get; init; } = DateTime.UtcNow;
+    public List<string>? ToolCalls { get; init; }
+    public string? Reasoning { get; init; }
+    public double? DurationMs { get; init; }
+}

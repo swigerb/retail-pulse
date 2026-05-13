@@ -21,8 +21,12 @@ using ChatRequest = RetailPulse.Contracts.ChatRequest;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
 using RetailPulse.Api.Rag;
 using RetailPulse.Contracts.Caching;
+using RetailPulse.Contracts.Cards;
 using RetailPulse.Contracts.Guardrails;
+using RetailPulse.Contracts.Observability;
 using RetailPulse.Contracts.Rag;
+using RetailPulse.Api.Cards;
+using RetailPulse.Api.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -353,6 +357,39 @@ builder.Services.AddScoped<GuardrailsMiddleware>();
 // Streaming middleware — progressive token delivery via SignalR
 builder.Services.AddScoped<StreamingMiddleware>();
 
+// ── Card State — thread-safe in-memory with SignalR events ───────────────
+builder.Services.AddSingleton<RetailPulse.Api.Cards.InMemoryAdaptiveCardState>();
+builder.Services.AddSingleton<RetailPulse.Contracts.Cards.IAdaptiveCardState>(sp =>
+    sp.GetRequiredService<RetailPulse.Api.Cards.InMemoryAdaptiveCardState>());
+
+// ── Observability Services — cost tracking, audit log, conversation export ─
+builder.Services.AddSingleton<RetailPulse.Api.Observability.InMemoryCostTracker>();
+builder.Services.AddSingleton<RetailPulse.Contracts.Observability.ICostTracker>(sp =>
+    sp.GetRequiredService<RetailPulse.Api.Observability.InMemoryCostTracker>());
+
+builder.Services.AddSingleton<RetailPulse.Api.Observability.InMemoryAuditLog>();
+builder.Services.AddSingleton<RetailPulse.Contracts.Observability.IAuditLog>(sp =>
+    sp.GetRequiredService<RetailPulse.Api.Observability.InMemoryAuditLog>());
+
+builder.Services.AddSingleton<RetailPulse.Api.Observability.ConversationExporter>();
+builder.Services.AddSingleton<RetailPulse.Contracts.Observability.IConversationExport>(sp =>
+    sp.GetRequiredService<RetailPulse.Api.Observability.ConversationExporter>());
+
+// Collaborative Adaptive Cards — in-memory multi-user card state with SignalR sync
+builder.Services.AddSingleton<InMemoryAdaptiveCardState>(sp =>
+    new InMemoryAdaptiveCardState(
+        sp.GetRequiredService<IHubContext<TelemetryHub>>(),
+        sp.GetRequiredService<ILogger<InMemoryAdaptiveCardState>>()));
+builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<InMemoryAdaptiveCardState>());
+
+// Observability Suite — cost tracking, audit log, conversation export
+builder.Services.AddSingleton<InMemoryCostTracker>();
+builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<InMemoryCostTracker>());
+builder.Services.AddSingleton<InMemoryAuditLog>();
+builder.Services.AddSingleton<IAuditLog>(sp => sp.GetRequiredService<InMemoryAuditLog>());
+builder.Services.AddSingleton<ConversationExporter>();
+builder.Services.AddSingleton<IConversationExport>(sp => sp.GetRequiredService<ConversationExporter>());
+
 // Register IChatClient — Azure OpenAI via APIM AI Gateway.
 // In Production we fail fast if the API key is missing rather than silently
 // using "demo-key" which would surface as opaque 401s at runtime.
@@ -605,7 +642,7 @@ app.MapHub<TelemetryHub>("/hubs/telemetry");
 app.MapHub<StreamingHub>("/hubs/streaming");
 
 // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ILogger<Program> logger, CancellationToken ct) =>
+app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ILogger<Program> logger, CancellationToken ct) =>
 {
     if (request is null || string.IsNullOrWhiteSpace(request.Message))
     {
@@ -806,6 +843,30 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
 
                 await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, councilReply, ct);
 
+                // Auto-create a Voting card from the council verdict
+                var cardState = app.Services.GetRequiredService<IAdaptiveCardState>();
+                var cardData = new Dictionary<string, object>
+                {
+                    ["brand"] = verdict.Brand,
+                    ["overallRating"] = verdict.OverallRating.ToString(),
+                    ["synthesis"] = verdict.Synthesis,
+                    ["isUnanimous"] = verdict.IsUnanimous
+                };
+                var votingCard = await cardState.CreateAsync(
+                    new CreateCardRequest(
+                        $"Health Assessment: {verdict.Brand}",
+                        CardType.Voting,
+                        userId,
+                        cardData), ct);
+
+                // Seed initial votes from council agent votes
+                foreach (var vote in verdict.Votes)
+                {
+                    await cardState.ActionAsync(votingCard.Id, new CardAction(
+                        vote.AgentId, vote.AgentName, CardActionType.Vote,
+                        new Dictionary<string, string> { ["vote"] = vote.Rating.ToString() }), ct);
+                }
+
                 return Results.Ok(councilResponse);
             }
         }
@@ -906,6 +967,50 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
 
         // Notify trace completion via SignalR
         _ = traceCollector.NotifyTraceCompletedAsync(traceId);
+
+        // ── Observability: cost tracking + audit log ─────────────────────
+        {
+            var inputTokens = response.TokenUsage?.InputTokens ?? 0;
+            var outputTokens = response.TokenUsage?.OutputTokens ?? 0;
+            var agentDuration = response.TotalDurationMs.HasValue
+                ? TimeSpan.FromMilliseconds(response.TotalDurationMs.Value)
+                : TimeSpan.Zero;
+
+            await costTracker.TrackUsageAsync(new UsageEvent(
+                specialist.Key, "gpt-4o", inputTokens, outputTokens,
+                response.Spans?.FirstOrDefault(s => s.Type == "tool_call")?.Name,
+                DateTime.UtcNow), ct);
+
+            await auditLog.LogAsync(new AuditEntry(
+                $"{sessionId}-{Guid.NewGuid():N}"[..32],
+                DateTime.UtcNow, userId, specialist.Key,
+                $"chat.{decision.Intent}",
+                request.Message[..Math.Min(200, request.Message.Length)],
+                response.Reply[..Math.Min(200, response.Reply.Length)],
+                inputTokens + outputTokens,
+                agentDuration), ct);
+
+            // Track messages in conversation exporter for session export
+            var toolCalls = response.Spans?
+                .Where(s => s.Type == "tool_call")
+                .Select(s => s.Name)
+                .ToList();
+
+            await conversationExporter.TrackMessageAsync(sessionId, new TrackedMessage
+            {
+                Role = "user",
+                Content = request.Message
+            }, ct);
+
+            await conversationExporter.TrackMessageAsync(sessionId, new TrackedMessage
+            {
+                Role = "assistant",
+                Content = response.Reply,
+                AgentId = specialist.Key,
+                ToolCalls = toolCalls,
+                DurationMs = response.TotalDurationMs.HasValue ? (double)response.TotalDurationMs.Value : null
+            }, ct);
+        }
 
         // ── Guardrails: output PII redaction ─────────────────────────────
         var filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
@@ -1461,6 +1566,163 @@ app.MapGet("/api/council/agents", (IEnumerable<ISpecialistAgent> specialists) =>
     return Results.Ok(new { agents, total = agents.Count });
 })
 .WithName("ListCouncilAgents");
+
+// ── Card endpoints ───────────────────────────────────────────────────────
+
+app.MapPost("/api/cards", async (CreateCardRequest body, IAdaptiveCardState cardState, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Title))
+        return Results.BadRequest(new { error = "Field 'title' is required." });
+
+    var card = await cardState.CreateAsync(body, ct);
+    return Results.Ok(card);
+})
+.WithName("CreateCard");
+
+app.MapGet("/api/cards", async (HttpContext http, IAdaptiveCardState cardState, CancellationToken ct) =>
+{
+    // Parse optional filters
+    var typeStr = http.Request.Query["type"].FirstOrDefault();
+    var lifecycleStr = http.Request.Query["lifecycle"].FirstOrDefault();
+
+    CardType? typeFilter = Enum.TryParse<CardType>(typeStr, true, out var t) ? t : null;
+    CardLifecycle? lifecycleFilter = Enum.TryParse<CardLifecycle>(lifecycleStr, true, out var l) ? l : null;
+
+    // Use ListAsync if the implementation supports it, otherwise fall back to GetActiveAsync
+    if (cardState is RetailPulse.Api.Cards.InMemoryAdaptiveCardState impl)
+    {
+        var cards = await impl.ListAsync(typeFilter, lifecycleFilter, ct);
+        return Results.Ok(cards);
+    }
+
+    var active = await cardState.GetActiveAsync(ct);
+    return Results.Ok(active);
+})
+.WithName("ListCards");
+
+app.MapGet("/api/cards/{id}", async (string id, IAdaptiveCardState cardState, CancellationToken ct) =>
+{
+    try
+    {
+        var card = await cardState.GetAsync(id, ct);
+        return Results.Ok(card);
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound(new { error = $"Card '{id}' not found." });
+    }
+})
+.WithName("GetCard");
+
+app.MapPost("/api/cards/{id}/action", async (string id, CardAction body, IAdaptiveCardState cardState, CancellationToken ct) =>
+{
+    try
+    {
+        var card = await cardState.ActionAsync(id, body, ct);
+        return Results.Ok(card);
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound(new { error = $"Card '{id}' not found." });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+.WithName("CardAction");
+
+app.MapPost("/api/cards/{id}/archive", async (string id, IAdaptiveCardState cardState, CancellationToken ct) =>
+{
+    try
+    {
+        await cardState.ArchiveAsync(id, ct);
+        return Results.Ok(new { id, status = "archived" });
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound(new { error = $"Card '{id}' not found." });
+    }
+})
+.WithName("ArchiveCard");
+
+// ── Observability endpoints ──────────────────────────────────────────────
+
+app.MapGet("/api/observability/costs", async (HttpContext http, ICostTracker costTracker, CancellationToken ct) =>
+{
+    var periodStr = http.Request.Query["period"].FirstOrDefault() ?? "week";
+    var period = Enum.TryParse<CostPeriod>(periodStr, true, out var p) ? p : CostPeriod.Week;
+    var summary = await costTracker.GetSummaryAsync(period, ct);
+    return Results.Ok(summary);
+})
+.WithName("GetCostSummary");
+
+app.MapGet("/api/observability/costs/agents", async (HttpContext http, ICostTracker costTracker, CancellationToken ct) =>
+{
+    var periodStr = http.Request.Query["period"].FirstOrDefault() ?? "week";
+    var period = Enum.TryParse<CostPeriod>(periodStr, true, out var p) ? p : CostPeriod.Week;
+    var agents = await costTracker.GetByAgentAsync(period, ct);
+    return Results.Ok(agents);
+})
+.WithName("GetCostsByAgent");
+
+app.MapGet("/api/observability/costs/trend", async (HttpContext http, ICostTracker costTracker, CancellationToken ct) =>
+{
+    var daysStr = http.Request.Query["days"].FirstOrDefault();
+    var days = int.TryParse(daysStr, out var d) ? d : 7;
+    var trend = await costTracker.GetTrendAsync(days, ct);
+    return Results.Ok(trend);
+})
+.WithName("GetCostTrend");
+
+app.MapGet("/api/observability/audit", async (HttpContext http, IAuditLog auditLog, CancellationToken ct) =>
+{
+    var query = new AuditQuery(
+        AgentId: http.Request.Query["agentId"].FirstOrDefault(),
+        UserId: http.Request.Query["userId"].FirstOrDefault(),
+        From: DateTime.TryParse(http.Request.Query["from"].FirstOrDefault(), out var from) ? from : null,
+        To: DateTime.TryParse(http.Request.Query["to"].FirstOrDefault(), out var to) ? to : null,
+        Action: http.Request.Query["action"].FirstOrDefault(),
+        Limit: int.TryParse(http.Request.Query["limit"].FirstOrDefault(), out var limit) ? limit : 50
+    );
+
+    var entries = await auditLog.QueryAsync(query, ct);
+    return Results.Ok(entries);
+})
+.WithName("GetAuditLog");
+
+app.MapGet("/api/observability/audit/stats", async (IAuditLog auditLog, CancellationToken ct) =>
+{
+    var stats = await auditLog.GetStatsAsync(ct);
+    return Results.Ok(stats);
+})
+.WithName("GetAuditStats");
+
+app.MapGet("/api/observability/export/sessions", async (IConversationExport exporter, CancellationToken ct) =>
+{
+    var sessions = await exporter.ListSessionsAsync(ct);
+    return Results.Ok(sessions);
+})
+.WithName("ListExportSessions");
+
+app.MapPost("/api/observability/export/{sessionId}", async (string sessionId, HttpContext http, IConversationExport exporter, CancellationToken ct) =>
+{
+    var formatStr = http.Request.Query["format"].FirstOrDefault() ?? "markdown";
+    var format = string.Equals(formatStr, "json", StringComparison.OrdinalIgnoreCase)
+        ? ExportFormat.Json
+        : ExportFormat.Markdown;
+
+    try
+    {
+        var result = await exporter.ExportAsync(sessionId, format, ct);
+        return Results.Ok(result);
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound(new { error = $"Session '{sessionId}' not found." });
+    }
+})
+.WithName("ExportSession");
 
 app.MapGet("/api/supply/health", async (string brand, IHttpClientFactory httpFactory, CancellationToken ct, string? region = null) =>
 {
