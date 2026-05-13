@@ -60,3 +60,56 @@
 **Validation:** All 237 tests pass (0 failures). Build clean. Test coverage now includes routing layer as regression safety net for ongoing specialist agent work.
 
 **Decision Logged:** Router Test Infrastructure Decision
+
+## Session Work — 2026-05-14 Sprint 1.2 Demand Forecasting Tests (Complete)
+
+**Outcome:** ✅ SUCCESS — 109 new tests added, all 346 tests passing (237 existing + 109 new)
+
+### Learnings
+
+- **Backend team (Costco) was further along than expected** — `DemandForecastAgent.cs`, all 4 MCP tools, DB schema, seed methods, and query methods were already implemented. Always check existing implementations before writing stubs.
+- **Duplicate method trap:** Adding seed/query methods without scrolling the full `RetailPulseDb.cs` (1770+ lines) caused duplicate definitions. Backend team's implementations lived at lines 808+. Lesson: always search the entire file for a method name before adding it.
+- **Dynamic dispatch + extension methods don't mix:** `severityOrder.GetValueOrDefault(((dynamic)r).severity, 3)` fails because extension methods can't be resolved on `dynamic`. Fix: explicit cast `(string)((dynamic)r).severity`.
+- **`GenerateForecast` signature mismatch:** Tool passed 3 args (`brand, region, channel`) but DB method only takes 2 (`brand, region`). Fixed by removing `channel` parameter from tool call.
+- **FluentAssertions `BeOneOf` with `because` string:** `BeOneOf(11, 12, "reason")` fails because the string arg gets interpreted as a `params int[]` element. Use `BeOneOf(new[] { 11, 12 }, "reason")` instead.
+- **Duplicate MCP tool registration risk:** Both individual tool files (e.g., `GetHistoricalDemandTool.cs`) AND `DemandTools.cs` define `[McpServerTool]` with identical names. Builds fine but may cause runtime duplicate registration errors.
+- **Seeded data is deterministic but large:** 12 brands × 6 regions × 3 channels × 365 days = ~79,000 rows. Data integrity tests still run in ~14s total including all 346 tests.
+
+### Deliverables
+
+- `tests/RetailPulse.Tests/Agents/Specialists/DemandForecastAgentTests.cs` — 28 tests:
+  - ISpecialistAgent interface compliance (Key, DisplayName, SupportedIntents)
+  - Response shape validation (JSON structure, forecast fields)
+  - Tool isolation (only claims DemandForecasting intent, not General)
+  - History propagation and conversation context
+  - Error handling (null/empty prompts, LLM failures)
+  - Parameterized brand tests across all 12 brands
+
+- `tests/RetailPulse.Tests/Tools/DemandToolTests.cs` — 30 tests:
+  - GetHistoricalDemand: brand/region/channel filtering, monthly aggregation, null-brand returns all
+  - GenerateForecast: confidence bands (±15%), seasonal adjustment, date ranges
+  - GetSeasonalityFactors: category filtering, impact classification, null returns all
+  - IdentifyDemandRisks: anomaly detection (spike/drop), severity sorting, brand/region filtering
+
+- `tests/RetailPulse.Tests/Data/DemandDataTests.cs` — 46 tests:
+  - Brand coverage (all 12 brands present in seed data)
+  - Region coverage (all 6 regions)
+  - Channel coverage (all 3 channels)
+  - Time span validation (365 days, no gaps, correct date range)
+  - Seasonal patterns (multipliers vary by month, spirits peak Nov/Dec)
+  - Volume integrity (positive values, reasonable ranges)
+
+- `tests/RetailPulse.Tests/Integration/RouterIntegrationTests.cs` — 5 new tests added:
+  - Demand routing: router dispatches demand intents to DemandForecastAgent
+  - Backward compatibility: demand routing doesn't break existing general routing
+  - Multi-specialist coexistence: DemandForecastAgent + GeneralAgent in same pipeline
+
+### Bug Fixes (pre-existing backend issues)
+
+- `GenerateForecastTool.cs` line 21: removed extra `channel` parameter not in DB method signature
+- `RetailPulseDb.cs` ~line 1311: explicit `(string)` cast on dynamic severity to fix extension method dispatch
+- Both fixes are in backend team's code — flagged for Costco review
+
+**Validation:** All 346 tests pass (0 failures, 0 skipped). Build clean (0 errors, 0 warnings).
+
+**Decision Logged:** Demand Forecasting Test Strategy

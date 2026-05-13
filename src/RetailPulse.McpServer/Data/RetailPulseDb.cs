@@ -89,6 +89,49 @@ public class RetailPulseDb
                 PRIMARY KEY (Brand, Region, Variant)
             );
 
+            CREATE TABLE IF NOT EXISTS DemandHistory (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Brand TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Channel TEXT NOT NULL COLLATE NOCASE,
+                Date TEXT NOT NULL,
+                Volume REAL NOT NULL,
+                Units INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_DemandHistory_BrandRegion ON DemandHistory (Brand, Region);
+            CREATE INDEX IF NOT EXISTS IX_DemandHistory_Date ON DemandHistory (Date);
+
+            CREATE TABLE IF NOT EXISTS SeasonalFactors (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Category TEXT NOT NULL COLLATE NOCASE,
+                Month INTEGER NOT NULL,
+                Multiplier REAL NOT NULL,
+                EventName TEXT,
+                Description TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_SeasonalFactors_Category ON SeasonalFactors (Category);
+
+            CREATE TABLE IF NOT EXISTS DemandHistory (
+                Brand TEXT NOT NULL COLLATE NOCASE,
+                Region TEXT NOT NULL COLLATE NOCASE,
+                Channel TEXT NOT NULL COLLATE NOCASE,
+                Date TEXT NOT NULL,
+                Volume REAL NOT NULL,
+                Units INTEGER NOT NULL,
+                PRIMARY KEY (Brand, Region, Channel, Date)
+            );
+
+            CREATE TABLE IF NOT EXISTS SeasonalFactors (
+                Category TEXT NOT NULL COLLATE NOCASE,
+                Month INTEGER NOT NULL,
+                Multiplier REAL NOT NULL,
+                EventName TEXT,
+                Description TEXT,
+                PRIMARY KEY (Category, Month)
+            );
+
             CREATE TABLE IF NOT EXISTS SeedMetadata (
                 Key TEXT PRIMARY KEY,
                 Value TEXT NOT NULL
@@ -118,13 +161,15 @@ public class RetailPulseDb
         using var tx = conn.BeginTransaction();
 
         using var clearCmd = conn.CreateCommand();
-        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM SeedMetadata;";
+        clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM SeedMetadata;";
         clearCmd.ExecuteNonQuery();
 
         SeedDepletions(conn);
         SeedShipments(conn);
         SeedSentiment(conn);
         SeedVariantMix(conn);
+        SeedDemandHistory(conn);
+        SeedSeasonalFactors(conn);
 
         // Store hash
         using var hashCmd = conn.CreateCommand();
@@ -137,7 +182,7 @@ public class RetailPulseDb
 
     // Bump this version whenever the schema or seeding logic changes
     // to force a re-seed even if tenant.yaml hasn't changed.
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
 
     private string ComputeTenantHash()
     {
@@ -588,6 +633,702 @@ public class RetailPulseDb
 
         return new { brand = actualBrand, region = "National", variants, total_variants = variants.Count };
     }
+
+    // ── Demand History & Seasonal Factors Seeding ──────────────────────────
+
+    private void SeedDemandHistory(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO DemandHistory (Brand, Region, Channel, Date, Volume, Units)
+            VALUES (@brand, @region, @channel, @date, @volume, @units)
+            """;
+
+        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        var pChannel = cmd.Parameters.Add("@channel", SqliteType.Text);
+        var pDate = cmd.Parameters.Add("@date", SqliteType.Text);
+        var pVolume = cmd.Parameters.Add("@volume", SqliteType.Real);
+        var pUnits = cmd.Parameters.Add("@units", SqliteType.Integer);
+
+        // Generate 365 days ending "today" (May 13, 2026)
+        var endDate = new DateOnly(2026, 5, 13);
+        var startDate = endDate.AddDays(-364);
+
+        foreach (var brand in _tenant.Brands)
+        {
+            var baseVolume = GetBaseVolume(brand);
+            var brandSeed = GetStableHash($"demand|{brand.Name}");
+
+            foreach (var region in _tenant.Regions)
+            {
+                var regionSeed = GetStableHash($"demand|{brand.Name}|{region}");
+
+                // Inject 1-2 anomalies per brand (shared across regions for visibility)
+                var anomalyRng = new Random(brandSeed + 7);
+                var anomalyDay1 = anomalyRng.Next(60, 300);
+                var anomalyDay2 = anomalyRng.Next(60, 300);
+                while (Math.Abs(anomalyDay2 - anomalyDay1) < 30)
+                    anomalyDay2 = anomalyRng.Next(60, 300);
+                var anomalyType1 = anomalyRng.NextDouble() > 0.5; // true = spike, false = drop
+
+                foreach (var channel in _tenant.Channels)
+                {
+                    var channelSeed = GetStableHash($"demand|{brand.Name}|{region}|{channel}");
+                    var rng = new Random(channelSeed);
+
+                    var channelShare = channel switch
+                    {
+                        "Off-Premise" => 0.50,
+                        "On-Premise" => 0.30,
+                        "E-Commerce" => 0.20,
+                        _ => 0.33
+                    };
+
+                    var channelBase = baseVolume * channelShare;
+                    // Regional variance ±15%
+                    var regionFactor = 0.85 + (new Random(regionSeed).NextDouble() * 0.30);
+                    channelBase *= regionFactor;
+
+                    // Linear trend slope (±0.05% per day)
+                    var trendSlope = (rng.NextDouble() - 0.45) * 0.001;
+
+                    for (int dayOffset = 0; dayOffset < 365; dayOffset++)
+                    {
+                        var date = startDate.AddDays(dayOffset);
+                        var month = date.Month;
+
+                        // Seasonal multiplier based on category
+                        var seasonal = GetCategorySeasonalMultiplier(brand.Category, month);
+
+                        // Day-of-week pattern (weekends higher for QSR/Spirits)
+                        var dow = date.DayOfWeek;
+                        var dowFactor = (brand.Category is "Quick-Serve Restaurant" or "Spirits") && (dow is DayOfWeek.Friday or DayOfWeek.Saturday)
+                            ? 1.15 : 1.0;
+
+                        // Trend component
+                        var trendFactor = 1.0 + trendSlope * dayOffset;
+
+                        // Random noise ±8%
+                        var noise = 0.92 + rng.NextDouble() * 0.16;
+
+                        var volume = channelBase * seasonal * dowFactor * trendFactor * noise;
+
+                        // Apply anomalies
+                        if (Math.Abs(dayOffset - anomalyDay1) <= 3)
+                            volume *= anomalyType1 ? 1.45 : 0.55;
+                        if (Math.Abs(dayOffset - anomalyDay2) <= 2)
+                            volume *= anomalyType1 ? 0.60 : 1.40;
+
+                        volume = Math.Max(1.0, volume);
+                        var units = Math.Max(1, (int)(volume / 28.0)); // ~28 volume per unit (case equivalent)
+
+                        pBrand.Value = brand.Name;
+                        pRegion.Value = region;
+                        pChannel.Value = channel;
+                        pDate.Value = date.ToString("yyyy-MM-dd");
+                        pVolume.Value = Math.Round(volume, 2);
+                        pUnits.Value = units;
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            }
+        }
+    }
+
+    private static double GetBaseVolume(BrandConfig brand)
+    {
+        // Bigger brands = more daily volume
+        return brand.Category switch
+        {
+            "Grocery" => 1200.0,
+            "Quick-Serve Restaurant" => 900.0,
+            "Spirits" => 350.0,
+            "Home Improvement" => 600.0,
+            "Office Supply" => 400.0,
+            "Furniture" => 250.0,
+            _ => 500.0
+        } * (brand.PriceSegment == "Premium" ? 0.8 : 1.0);
+    }
+
+    private static double GetCategorySeasonalMultiplier(string category, int month)
+    {
+        return category switch
+        {
+            "Spirits" => month switch
+            {
+                11 => 1.30, 12 => 1.40,       // Holidays
+                6 => 1.10, 7 => 1.15,          // Summer entertaining
+                1 => 0.85, 2 => 0.90,          // Post-holiday dip
+                _ => 1.0
+            },
+            "Grocery" => month switch
+            {
+                8 => 1.20, 9 => 1.25,          // Back-to-school
+                11 => 1.25, 12 => 1.30,        // Holidays
+                1 => 0.90, 2 => 0.92,          // Post-holiday
+                _ => 1.0
+            },
+            "Quick-Serve Restaurant" => month switch
+            {
+                6 => 1.15, 7 => 1.20, 8 => 1.18, // Summer
+                1 => 0.88, 2 => 0.90,             // Winter dip
+                12 => 0.95,                        // Holiday competition
+                _ => 1.0
+            },
+            "Home Improvement" => month switch
+            {
+                3 => 1.20, 4 => 1.30, 5 => 1.35, // Spring projects
+                9 => 1.20,                          // Fall prep
+                1 => 0.80, 2 => 0.82,              // Winter low
+                12 => 0.85,                         // Winter
+                _ => 1.0
+            },
+            "Office Supply" => month switch
+            {
+                8 => 1.25, 9 => 1.20,          // Back-to-school
+                1 => 1.15,                       // New year office setup
+                6 => 0.90, 7 => 0.88,           // Summer lull
+                _ => 1.0
+            },
+            "Furniture" => month switch
+            {
+                3 => 1.15, 4 => 1.10,          // Spring refresh
+                8 => 1.20, 9 => 1.15,          // Back-to-school / dorm
+                11 => 1.25, 12 => 1.10,        // Holiday gifting
+                1 => 0.80, 2 => 0.85,          // Post-holiday
+                _ => 1.0
+            },
+            _ => 1.0
+        };
+    }
+
+    private void SeedSeasonalFactors(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO SeasonalFactors (Category, Month, Multiplier, EventName, Description)
+            VALUES (@category, @month, @multiplier, @event, @desc)
+            """;
+
+        var pCat = cmd.Parameters.Add("@category", SqliteType.Text);
+        var pMonth = cmd.Parameters.Add("@month", SqliteType.Integer);
+        var pMult = cmd.Parameters.Add("@multiplier", SqliteType.Real);
+        var pEvent = cmd.Parameters.Add("@event", SqliteType.Text);
+        var pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
+
+        var factors = new (string Category, int Month, double Mult, string? Event, string Desc)[]
+        {
+            // Spirits
+            ("Spirits", 1, 0.85, "Post-Holiday Dip", "Consumer spending contracts after holiday season; spirits purchases decline sharply in January"),
+            ("Spirits", 2, 0.90, "Post-Holiday Recovery", "Gradual recovery from January dip; Valentine's Day provides modest lift"),
+            ("Spirits", 6, 1.10, "Summer Entertaining", "Outdoor entertaining season begins; cocktail culture drives spirits demand"),
+            ("Spirits", 7, 1.15, "Peak Summer", "July 4th celebrations and peak summer entertaining drive spirits sales"),
+            ("Spirits", 11, 1.30, "Thanksgiving", "Thanksgiving gatherings and early holiday gifting boost spirits significantly"),
+            ("Spirits", 12, 1.40, "Holiday Season", "Christmas, New Year's Eve, and holiday gifting create peak spirits demand"),
+
+            // Grocery
+            ("Grocery", 1, 0.90, "Post-Holiday Reset", "Consumers shift to healthier eating; reduced spending after holidays"),
+            ("Grocery", 2, 0.92, "Winter Lull", "Continued lower traffic; Super Bowl provides one-week spike only"),
+            ("Grocery", 8, 1.20, "Back-to-School", "Families stock up on school lunches, snacks, and meal prep essentials"),
+            ("Grocery", 9, 1.25, "Peak Back-to-School", "Full school routines drive consistent grocery spending; fall meal planning"),
+            ("Grocery", 11, 1.25, "Thanksgiving Prep", "Largest cooking holiday drives massive grocery volume across all categories"),
+            ("Grocery", 12, 1.30, "Holiday Entertaining", "Holiday parties, baking, and family gatherings sustain elevated demand"),
+
+            // Quick-Serve Restaurant
+            ("Quick-Serve Restaurant", 1, 0.88, "Winter Dip", "Cold weather and post-holiday budget tightening reduce QSR traffic"),
+            ("Quick-Serve Restaurant", 2, 0.90, "Continued Winter", "Lingering winter weather suppresses foot traffic; budget recovery continues"),
+            ("Quick-Serve Restaurant", 6, 1.15, "Summer Start", "School's out, families eat out more; summer travel begins"),
+            ("Quick-Serve Restaurant", 7, 1.20, "Peak Summer", "Peak travel and outdoor activity season; highest QSR traffic"),
+            ("Quick-Serve Restaurant", 8, 1.18, "Late Summer", "Continued summer momentum; back-to-school transitions begin"),
+            ("Quick-Serve Restaurant", 12, 0.95, "Holiday Competition", "Holiday home cooking and sit-down restaurants compete for dining occasions"),
+
+            // Home Improvement
+            ("Home Improvement", 1, 0.80, "Winter Low", "Shortest days, coldest weather; outdoor projects impossible in most regions"),
+            ("Home Improvement", 2, 0.82, "Late Winter", "Planning begins but execution still limited by weather"),
+            ("Home Improvement", 3, 1.20, "Spring Awakening", "Spring project planning converts to purchases; garden prep begins"),
+            ("Home Improvement", 4, 1.30, "Peak Spring", "Prime project season — landscaping, painting, deck building in full swing"),
+            ("Home Improvement", 5, 1.35, "Spring Peak", "Highest demand period; Memorial Day weekend sales event drives volume"),
+            ("Home Improvement", 9, 1.20, "Fall Prep", "Winterization projects, fall landscaping, and pre-holiday home improvements"),
+            ("Home Improvement", 12, 0.85, "Winter Decline", "Outdoor projects cease; holiday focus shifts spending to gifts"),
+
+            // Office Supply
+            ("Office Supply", 1, 1.15, "New Year Setup", "New year office reorganization and budget spending drives demand"),
+            ("Office Supply", 6, 0.90, "Summer Lull", "School's out, offices at reduced capacity; lowest demand period"),
+            ("Office Supply", 7, 0.88, "Deep Summer", "Continued summer slowdown; vacation season reduces office supply needs"),
+            ("Office Supply", 8, 1.25, "Back-to-School Peak", "Massive back-to-school demand for supplies, technology, and furniture"),
+            ("Office Supply", 9, 1.20, "School Continuation", "Ongoing school-year supply needs; corporate Q3 budget refresh"),
+
+            // Furniture
+            ("Furniture", 1, 0.80, "Post-Holiday Low", "Consumer spending exhausted from holidays; lowest furniture demand"),
+            ("Furniture", 2, 0.85, "Winter Slow", "Presidents' Day sales provide brief lift but overall demand remains low"),
+            ("Furniture", 3, 1.15, "Spring Refresh", "Spring cleaning and home refresh drive new furniture purchases"),
+            ("Furniture", 4, 1.10, "Spring Continuation", "Moving season begins; apartment leases turn over"),
+            ("Furniture", 8, 1.20, "Back-to-School / Dorm", "College dorm furnishing and apartment setup for new school year"),
+            ("Furniture", 9, 1.15, "Fall Nesting", "Fall nesting instinct; consumers invest in home comfort as weather cools"),
+            ("Furniture", 11, 1.25, "Holiday Gifting", "Black Friday and holiday furniture sales; largest promotional period"),
+            ("Furniture", 12, 1.10, "Holiday Sales", "Continued holiday sales momentum; gift card redemption begins"),
+        };
+
+        foreach (var (cat, month, mult, evt, desc) in factors)
+        {
+            pCat.Value = cat;
+            pMonth.Value = month;
+            pMult.Value = mult;
+            pEvent.Value = evt ?? (object)DBNull.Value;
+            pDesc.Value = desc;
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    // ── Demand Query Methods ─────────────────────────────────────────────
+
+    public object GetHistoricalDemand(string? brand, string? region = null, string? channel = null, int months = 12)
+    {
+        months = Math.Clamp(months, 1, 24);
+        var endDate = new DateOnly(2026, 5, 13);
+        var startDate = endDate.AddMonths(-months);
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        var sql = new StringBuilder("""
+            SELECT Brand, Region, Channel, Date, Volume, Units
+            FROM DemandHistory
+            WHERE Date >= @start AND Date <= @end
+            """);
+        using var cmd = conn.CreateCommand();
+        cmd.Parameters.AddWithValue("@start", startDate.ToString("yyyy-MM-dd"));
+        cmd.Parameters.AddWithValue("@end", endDate.ToString("yyyy-MM-dd"));
+
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            sql.Append(" AND Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            sql.Append(" AND Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(channel))
+        {
+            sql.Append(" AND Channel LIKE @channel");
+            cmd.Parameters.AddWithValue("@channel", $"%{channel.Trim()}%");
+        }
+
+        // Aggregate to weekly for readability
+        sql.Append("""
+            
+            ORDER BY Brand, Region, Date
+            """);
+        cmd.CommandText = sql.ToString();
+
+        var rows = new List<object>();
+        var totalVolume = 0.0;
+        var totalUnits = 0;
+        string? firstBrand = null;
+
+        using var reader = cmd.ExecuteReader();
+        // Aggregate into weekly buckets for manageable output
+        var weekBucket = new Dictionary<string, (string Brand, string Region, string Channel, string WeekStart, double Volume, int Units, int Days)>();
+
+        while (reader.Read())
+        {
+            var b = reader.GetString(0);
+            var r = reader.GetString(1);
+            var ch = reader.GetString(2);
+            var d = reader.GetString(3);
+            var v = reader.GetDouble(4);
+            var u = reader.GetInt32(5);
+
+            firstBrand ??= b;
+            totalVolume += v;
+            totalUnits += u;
+
+            var dateObj = DateOnly.Parse(d);
+            // ISO week start (Monday)
+            var daysSinceMonday = ((int)dateObj.DayOfWeek + 6) % 7;
+            var weekStart = dateObj.AddDays(-daysSinceMonday).ToString("yyyy-MM-dd");
+            var key = $"{b}|{r}|{ch}|{weekStart}";
+
+            if (weekBucket.TryGetValue(key, out var existing))
+                weekBucket[key] = (b, r, ch, weekStart, existing.Volume + v, existing.Units + u, existing.Days + 1);
+            else
+                weekBucket[key] = (b, r, ch, weekStart, v, u, 1);
+        }
+
+        var weeklyData = weekBucket.Values
+            .OrderBy(w => w.Brand).ThenBy(w => w.Region).ThenBy(w => w.WeekStart)
+            .Select(w => new
+            {
+                brand = w.Brand,
+                region = w.Region,
+                channel = w.Channel,
+                week_starting = w.WeekStart,
+                volume = Math.Round(w.Volume, 1),
+                units = w.Units,
+                avg_daily_volume = Math.Round(w.Volume / w.Days, 1)
+            })
+            .ToList();
+
+        return new
+        {
+            period = new { start = startDate.ToString("yyyy-MM-dd"), end = endDate.ToString("yyyy-MM-dd"), months },
+            filters = new { brand = brand ?? "all", region = region ?? "all", channel = channel ?? "all" },
+            summary = new
+            {
+                total_volume = Math.Round(totalVolume, 1),
+                total_units = totalUnits,
+                weeks_of_data = weeklyData.Count,
+                avg_weekly_volume = weeklyData.Count > 0 ? Math.Round(totalVolume / weeklyData.Select(w => w.week_starting).Distinct().Count(), 1) : 0
+            },
+            weekly_data = weeklyData
+        };
+    }
+
+    public object GenerateForecast(string brand, string? region = null, int days = 90)
+    {
+        if (string.IsNullOrWhiteSpace(brand))
+            return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
+
+        days = Math.Clamp(days, 7, 365);
+        var forecastStart = new DateOnly(2026, 5, 14); // Day after "today"
+        var historyStart = new DateOnly(2025, 5, 14); // 12 months of history
+
+        using var conn = OpenConnection();
+        conn.Open();
+
+        // Get trailing 90 days of actual data for trend calculation
+        var trailing90Start = new DateOnly(2026, 2, 12);
+        using var histCmd = conn.CreateCommand();
+        histCmd.CommandText = """
+            SELECT Date, SUM(Volume) as DayVolume, SUM(Units) as DayUnits
+            FROM DemandHistory
+            WHERE Brand LIKE @brand AND Date >= @start AND Date <= @end
+            """;
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            histCmd.CommandText += " AND Region LIKE @region";
+            histCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        }
+        histCmd.CommandText += " GROUP BY Date ORDER BY Date";
+        histCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        histCmd.Parameters.AddWithValue("@start", trailing90Start.ToString("yyyy-MM-dd"));
+        histCmd.Parameters.AddWithValue("@end", "2026-05-13");
+
+        var historicalDays = new List<(DateOnly Date, double Volume)>();
+        using (var reader = histCmd.ExecuteReader())
+        {
+            while (reader.Read())
+                historicalDays.Add((DateOnly.Parse(reader.GetString(0)), reader.GetDouble(1)));
+        }
+
+        if (historicalDays.Count < 7)
+            return new { error = $"Insufficient historical data for brand '{brand}'. Need at least 7 days.", available_brands = GetAvailableBrands() };
+
+        // Trailing 30-day average
+        var trailing30 = historicalDays.TakeLast(30).Average(d => d.Volume);
+
+        // Linear regression on 90 days for trend slope
+        var n = historicalDays.Count;
+        var xMean = (n - 1) / 2.0;
+        var yMean = historicalDays.Average(d => d.Volume);
+        var numerator = 0.0;
+        var denominator = 0.0;
+        for (int i = 0; i < n; i++)
+        {
+            numerator += (i - xMean) * (historicalDays[i].Volume - yMean);
+            denominator += (i - xMean) * (i - xMean);
+        }
+        var trendSlope = denominator > 0 ? numerator / denominator / yMean : 0; // Normalized daily slope
+
+        // Determine category for seasonal factors
+        var matchingBrand = _tenant.Brands.FirstOrDefault(b =>
+            b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
+        var category = matchingBrand?.Category ?? "Other";
+
+        // Generate forecast
+        var forecastData = new List<object>();
+        var seasonalFactorsApplied = new HashSet<string>();
+
+        for (int d = 0; d < days; d++)
+        {
+            var date = forecastStart.AddDays(d);
+            var seasonal = GetCategorySeasonalMultiplier(category, date.Month);
+
+            if (Math.Abs(seasonal - 1.0) > 0.01)
+                seasonalFactorsApplied.Add($"{date.ToString("MMM")} ({seasonal:F2}x)");
+
+            var predicted = trailing30 * seasonal * (1.0 + trendSlope * d);
+            predicted = Math.Max(1.0, predicted);
+            var upper = Math.Round(predicted * 1.15, 1);
+            var lower = Math.Round(predicted * 0.85, 1);
+
+            forecastData.Add(new
+            {
+                date = date.ToString("yyyy-MM-dd"),
+                predicted_volume = Math.Round(predicted, 1),
+                confidence_upper = upper,
+                confidence_lower = lower
+            });
+        }
+
+        return new
+        {
+            brand = matchingBrand?.Name ?? brand,
+            region = region ?? "all regions",
+            forecast_period = new
+            {
+                start = forecastStart.ToString("yyyy-MM-dd"),
+                end = forecastStart.AddDays(days - 1).ToString("yyyy-MM-dd"),
+                days
+            },
+            algorithm = new
+            {
+                method = "trailing_average_with_seasonal_adjustment",
+                trailing_30day_avg = Math.Round(trailing30, 1),
+                trend_slope_per_day = Math.Round(trendSlope, 6),
+                trend_direction = trendSlope > 0.0005 ? "upward" : trendSlope < -0.0005 ? "downward" : "flat",
+                category,
+                seasonal_factors_applied = seasonalFactorsApplied.OrderBy(s => s).ToArray()
+            },
+            confidence_band = "±15%",
+            forecast = forecastData
+        };
+    }
+
+    public object GetSeasonalityFactors(string? category)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        using var cmd = conn.CreateCommand();
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            cmd.CommandText = """
+                SELECT Category, Month, Multiplier, EventName, Description
+                FROM SeasonalFactors
+                WHERE Category LIKE @category
+                ORDER BY Category, Month
+                """;
+            cmd.Parameters.AddWithValue("@category", $"%{category.Trim()}%");
+        }
+        else
+        {
+            cmd.CommandText = """
+                SELECT Category, Month, Multiplier, EventName, Description
+                FROM SeasonalFactors
+                ORDER BY Category, Month
+                """;
+        }
+
+        var factors = new List<object>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            factors.Add(new
+            {
+                category = reader.GetString(0),
+                month = reader.GetInt32(1),
+                month_name = CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(reader.GetInt32(1)),
+                multiplier = reader.GetDouble(2),
+                event_name = reader.IsDBNull(3) ? null : reader.GetString(3),
+                description = reader.IsDBNull(4) ? null : reader.GetString(4),
+                impact = reader.GetDouble(2) switch
+                {
+                    > 1.2 => "strong_boost",
+                    > 1.05 => "moderate_boost",
+                    < 0.85 => "significant_decline",
+                    < 0.95 => "moderate_decline",
+                    _ => "baseline"
+                }
+            });
+        }
+
+        if (factors.Count == 0 && !string.IsNullOrWhiteSpace(category))
+            return new { error = $"No seasonal factors found for category '{category}'.", available_categories = GetAvailableCategories() };
+
+        var categories = factors.Select(f => ((dynamic)f).category as string).Distinct().ToArray();
+        return new
+        {
+            categories,
+            total_factors = factors.Count,
+            factors
+        };
+    }
+
+    public object IdentifyDemandRisks(string? brand, string? region = null)
+    {
+        using var conn = OpenConnection();
+        conn.Open();
+
+        // Get last 90 days of daily aggregated data
+        var endDate = new DateOnly(2026, 5, 13);
+        var startDate = endDate.AddDays(-89);
+
+        using var cmd = conn.CreateCommand();
+        var sql = new StringBuilder("""
+            SELECT Brand, Region, Date, SUM(Volume) as DayVolume
+            FROM DemandHistory
+            WHERE Date >= @start AND Date <= @end
+            """);
+        cmd.Parameters.AddWithValue("@start", startDate.ToString("yyyy-MM-dd"));
+        cmd.Parameters.AddWithValue("@end", endDate.ToString("yyyy-MM-dd"));
+
+        if (!string.IsNullOrWhiteSpace(brand))
+        {
+            sql.Append(" AND Brand LIKE @brand");
+            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+        }
+        if (!string.IsNullOrWhiteSpace(region))
+        {
+            sql.Append(" AND Region LIKE @region");
+            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        }
+        sql.Append(" GROUP BY Brand, Region, Date ORDER BY Brand, Region, Date");
+        cmd.CommandText = sql.ToString();
+
+        // Load data grouped by brand+region
+        var seriesData = new Dictionary<string, List<(DateOnly Date, double Volume)>>();
+        using (var reader = cmd.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                var b = reader.GetString(0);
+                var r = reader.GetString(1);
+                var key = $"{b}|{r}";
+                var date = DateOnly.Parse(reader.GetString(2));
+                var vol = reader.GetDouble(3);
+
+                if (!seriesData.ContainsKey(key))
+                    seriesData[key] = [];
+                seriesData[key].Add((date, vol));
+            }
+        }
+
+        var risks = new List<object>();
+
+        foreach (var (key, points) in seriesData)
+        {
+            var parts = key.Split('|');
+            var brandName = parts[0];
+            var regionName = parts[1];
+
+            if (points.Count < 14) continue;
+
+            // Calculate rolling 7-day averages
+            var rollingAvgs = new List<(DateOnly Date, double Avg)>();
+            for (int i = 6; i < points.Count; i++)
+            {
+                var avg = points.Skip(i - 6).Take(7).Average(p => p.Volume);
+                rollingAvgs.Add((points[i].Date, avg));
+            }
+
+            // Detect sudden drops (>20% week-over-week)
+            for (int i = 7; i < rollingAvgs.Count; i++)
+            {
+                var prevAvg = rollingAvgs[i - 7].Avg;
+                var curAvg = rollingAvgs[i].Avg;
+                if (prevAvg > 0)
+                {
+                    var change = (curAvg - prevAvg) / prevAvg;
+                    if (change < -0.20)
+                    {
+                        risks.Add(new
+                        {
+                            brand = brandName,
+                            region = regionName,
+                            risk_type = "sudden_drop",
+                            severity = change < -0.35 ? "high" : "medium",
+                            change_percent = Math.Round(change * 100, 1),
+                            description = $"Demand dropped {Math.Round(Math.Abs(change) * 100, 0)}% in a 7-day window",
+                            affected_period = new { start = rollingAvgs[i - 7].Date.ToString("yyyy-MM-dd"), end = rollingAvgs[i].Date.ToString("yyyy-MM-dd") }
+                        });
+                        break; // One drop risk per series
+                    }
+                }
+            }
+
+            // Detect unusual spikes (>30% above trailing average)
+            for (int i = 7; i < rollingAvgs.Count; i++)
+            {
+                var prevAvg = rollingAvgs[i - 7].Avg;
+                var curAvg = rollingAvgs[i].Avg;
+                if (prevAvg > 0)
+                {
+                    var change = (curAvg - prevAvg) / prevAvg;
+                    if (change > 0.30)
+                    {
+                        risks.Add(new
+                        {
+                            brand = brandName,
+                            region = regionName,
+                            risk_type = "unusual_spike",
+                            severity = change > 0.50 ? "high" : "medium",
+                            change_percent = Math.Round(change * 100, 1),
+                            description = $"Demand spiked {Math.Round(change * 100, 0)}% above trailing average — may indicate unsustainable surge or data anomaly",
+                            affected_period = new { start = rollingAvgs[i - 7].Date.ToString("yyyy-MM-dd"), end = rollingAvgs[i].Date.ToString("yyyy-MM-dd") }
+                        });
+                        break;
+                    }
+                }
+            }
+
+            // Detect trend reversal (first half vs second half of 90 days)
+            if (rollingAvgs.Count >= 30)
+            {
+                var firstHalf = rollingAvgs.Take(rollingAvgs.Count / 2).Average(r => r.Avg);
+                var secondHalf = rollingAvgs.Skip(rollingAvgs.Count / 2).Average(r => r.Avg);
+                if (firstHalf > 0)
+                {
+                    var trendShift = (secondHalf - firstHalf) / firstHalf;
+                    if (Math.Abs(trendShift) > 0.15)
+                    {
+                        var direction = trendShift > 0 ? "upward" : "downward";
+                        risks.Add(new
+                        {
+                            brand = brandName,
+                            region = regionName,
+                            risk_type = "trend_reversal",
+                            severity = Math.Abs(trendShift) > 0.25 ? "high" : trendShift < 0 ? "medium" : "low",
+                            change_percent = Math.Round(trendShift * 100, 1),
+                            description = $"Significant {direction} trend shift of {Math.Round(Math.Abs(trendShift) * 100, 0)}% between first and second half of 90-day window",
+                            affected_period = new
+                            {
+                                start = rollingAvgs[0].Date.ToString("yyyy-MM-dd"),
+                                end = rollingAvgs[^1].Date.ToString("yyyy-MM-dd")
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // Sort risks by severity
+        var severityOrder = new Dictionary<string, int> { ["high"] = 0, ["medium"] = 1, ["low"] = 2 };
+        var sortedRisks = risks
+            .OrderBy(r => severityOrder.GetValueOrDefault((string)((dynamic)r).severity, 3))
+            .ThenBy(r => ((dynamic)r).brand as string)
+            .ToList();
+
+        return new
+        {
+            analysis_period = new { start = startDate.ToString("yyyy-MM-dd"), end = endDate.ToString("yyyy-MM-dd"), days = 90 },
+            filters = new { brand = brand ?? "all", region = region ?? "all" },
+            total_risks = sortedRisks.Count,
+            risk_summary = new
+            {
+                high = sortedRisks.Count(r => ((dynamic)r).severity == "high"),
+                medium = sortedRisks.Count(r => ((dynamic)r).severity == "medium"),
+                low = sortedRisks.Count(r => ((dynamic)r).severity == "low")
+            },
+            risks = sortedRisks
+        };
+    }
+
+    private string[] GetAvailableCategories() =>
+        _tenant.Brands.Select(b => b.Category).Distinct().ToArray();
 
     // ── Update Methods (for AI-driven mutations) ─────────────────────────
 
