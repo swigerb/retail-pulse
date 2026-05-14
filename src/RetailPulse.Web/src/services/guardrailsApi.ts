@@ -3,11 +3,17 @@ import type { GuardrailsStats, GuardrailsConfigData } from '../types';
 export async function fetchGuardrailsStats(): Promise<GuardrailsStats> {
   const res = await fetch('/api/guardrails/stats');
   if (!res.ok) throw new Error(`Failed to fetch guardrails stats: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  return {
+    ...data,
+    recentBlocked: data.recentBlocked ?? [],
+    blocksPerHour: data.blocksPerHour ?? [],
+  };
 }
 
 export async function fetchGuardrailsConfig(): Promise<GuardrailsConfigData> {
   const res = await fetch('/api/guardrails/config');
+  if (res.status === 404) return { jailbreakEnabled: false, piiEnabled: false, accessControlEnabled: false, blockedPatterns: '' };
   if (!res.ok) throw new Error(`Failed to fetch guardrails config: ${res.status}`);
   return res.json();
 }

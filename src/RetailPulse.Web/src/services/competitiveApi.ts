@@ -5,6 +5,7 @@ export async function fetchCompetitorPricing(category?: string, region?: string)
   if (category) params.set('category', category);
   if (region) params.set('region', region);
   const res = await fetch(`/api/competitive/pricing?${params}`);
+  if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Failed to fetch pricing: ${res.status}`);
   return res.json();
 }
@@ -14,6 +15,7 @@ export async function fetchMarketShare(category?: string, region?: string): Prom
   if (category) params.set('category', category);
   if (region) params.set('region', region);
   const res = await fetch(`/api/competitive/market-share?${params}`);
+  if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Failed to fetch market share: ${res.status}`);
   return res.json();
 }
@@ -23,18 +25,21 @@ export async function fetchThreats(category?: string, region?: string): Promise<
   if (category) params.set('category', category);
   if (region) params.set('region', region);
   const res = await fetch(`/api/competitive/threats?${params}`);
+  if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Failed to fetch threats: ${res.status}`);
   return res.json();
 }
 
-export async function fetchCompetitorProfile(name: string): Promise<CompetitorOverview> {
+export async function fetchCompetitorProfile(name: string): Promise<CompetitorOverview | null> {
   const res = await fetch(`/api/competitive/competitor/${encodeURIComponent(name)}`);
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Failed to fetch competitor profile: ${res.status}`);
   return res.json();
 }
 
-export async function generateResponsePlan(threatId: string): Promise<{ plan: string }> {
+export async function generateResponsePlan(threatId: string): Promise<{ plan: string } | null> {
   const res = await fetch(`/api/competitive/threats/${threatId}/response-plan`, { method: 'POST' });
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Failed to generate response plan: ${res.status}`);
   return res.json();
 }
