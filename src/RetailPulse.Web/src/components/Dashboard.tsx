@@ -5,6 +5,7 @@ import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
 import { MemoryPanel } from './MemoryPanel';
+import { CollapsibleSection } from './CollapsibleSection';
 import { ApprovalHistory } from './ApprovalHistory';
 import { PendingApprovals } from './PendingApprovals';
 import { BrandLogo } from './BrandLogo';
@@ -583,27 +584,31 @@ export function Dashboard() {
                 <AlertHistoryPanel alerts={alerts} />
               </div>
             )}
-            <AgentRoutingPanel routingHistory={routingHistory} />
+            <CollapsibleSection title="Agent Routing">
+              <AgentRoutingPanel routingHistory={routingHistory} />
+            </CollapsibleSection>
             {approvalHistory.length > 0 && (
-              <div style={{ marginTop: '16px' }}>
+              <CollapsibleSection title="Approval History">
                 <ApprovalHistory approvals={approvalHistory} />
-              </div>
+              </CollapsibleSection>
             )}
-            <div style={{ marginTop: '16px' }}>
+            <CollapsibleSection title="Memory">
               <MemoryPanel />
-            </div>
+            </CollapsibleSection>
             {traces.length > 0 && (
-              <div style={{ marginTop: '16px' }}>
+              <CollapsibleSection title="Trace Dashboard">
                 <TraceDashboard traces={traces} />
-              </div>
+              </CollapsibleSection>
             )}
-            <TelemetryPanel
-              connected={connected}
-              liveSpans={liveSpans}
-              totalDurationMs={totalDurationMs}
-              totalTokenUsage={totalTokenUsage}
-              onClear={handleClearSpans}
-            />
+            <CollapsibleSection title="Live Spans">
+              <TelemetryPanel
+                connected={connected}
+                liveSpans={liveSpans}
+                totalDurationMs={totalDurationMs}
+                totalTokenUsage={totalTokenUsage}
+                onClear={handleClearSpans}
+              />
+            </CollapsibleSection>
           </DrawerBody>
         </Drawer>
       </main>

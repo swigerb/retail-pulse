@@ -158,19 +158,30 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
   const styles = useStyles();
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
 
+  // Filter out empty traces (no spans, or no duration AND no tokens)
+  const meaningfulTraces = useMemo(
+    () => traces.filter(t => {
+      const spanCount = (t.spans ?? []).length;
+      if (spanCount === 0) return false;
+      if (t.totalDurationMs === 0 && t.totalTokens === 0) return false;
+      return true;
+    }),
+    [traces],
+  );
+
   const recentTraces = useMemo(
-    () => [...traces]
+    () => [...meaningfulTraces]
       .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
       .slice(0, maxDisplay),
-    [traces, maxDisplay],
+    [meaningfulTraces, maxDisplay],
   );
 
   const aggregates = useMemo(() => {
-    if (traces.length === 0) return { avgDuration: 0, avgCost: 0, toolUsage: new Map<string, number>() };
-    const durations = traces.map(t => t.totalDurationMs ?? 0);
-    const costs = traces.map(t => t.totalCostUsd ?? 0);
+    if (meaningfulTraces.length === 0) return { avgDuration: 0, avgCost: 0, toolUsage: new Map<string, number>() };
+    const durations = meaningfulTraces.map(t => t.totalDurationMs ?? 0);
+    const costs = meaningfulTraces.map(t => t.totalCostUsd ?? 0);
     const toolUsage = new Map<string, number>();
-    traces.forEach(t => (t.spans ?? []).forEach(s => {
+    meaningfulTraces.forEach(t => (t.spans ?? []).forEach(s => {
       if (s?.type === 'tool') {
         toolUsage.set(s.name, (toolUsage.get(s.name) ?? 0) + 1);
       }
@@ -180,7 +191,7 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
       avgCost: costs.reduce((a, b) => a + b, 0) / costs.length,
       toolUsage,
     };
-  }, [traces]);
+  }, [meaningfulTraces]);
 
   const selectedTrace = recentTraces.find(t => t.traceId === selectedTraceId);
 
@@ -189,7 +200,7 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
     [aggregates.toolUsage],
   );
 
-  if (traces.length === 0) {
+  if (meaningfulTraces.length === 0) {
     return (
       <div className={styles.empty} data-testid="trace-dashboard">
         <Text style={{ fontSize: '28px', marginBottom: '8px' }}>🔍</Text>
@@ -207,7 +218,7 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
 
       <div className={styles.stats}>
         <div className={styles.stat}>
-          <Text className={styles.statValue}>{traces.length}</Text>
+          <Text className={styles.statValue}>{meaningfulTraces.length}</Text>
           <Text className={styles.statLabel}>Traces</Text>
         </div>
         <div className={styles.stat}>
