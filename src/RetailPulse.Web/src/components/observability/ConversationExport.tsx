@@ -259,20 +259,19 @@ export default function ConversationExport() {
   const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    fetchExportSessions()
+    const controller = new AbortController();
+    fetchExportSessions(controller.signal)
       .then(result => {
-        if (cancelled) return;
         setSessions(result);
         setError(null);
         setLoading(false);
       })
       .catch(e => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setError(e instanceof Error ? e.message : 'Failed to load sessions');
         setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, []);
 
   const handleExport = async (sessionId: string, format: 'markdown' | 'json') => {

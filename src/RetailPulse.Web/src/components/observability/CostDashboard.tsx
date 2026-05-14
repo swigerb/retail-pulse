@@ -218,20 +218,19 @@ export default function CostDashboard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    fetchCostDashboard(period)
+    const controller = new AbortController();
+    fetchCostDashboard(period, controller.signal)
       .then(result => {
-        if (cancelled) return;
         setData(result);
         setError(null);
         setLoading(false);
       })
       .catch(e => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setError(e instanceof Error ? e.message : 'Failed to load cost data');
         setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [period]);
 
   const handlePeriodChange = (p: ObservabilityPeriod) => {

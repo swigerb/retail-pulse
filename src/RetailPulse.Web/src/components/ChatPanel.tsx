@@ -464,12 +464,6 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [streamingTokens, setStreamingTokens] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-
-  // Expose streaming state setters for future SignalR streaming events
-  void setStreamingTokens;
-  void setIsStreaming;
   const [sessionId] = useState<string>(() => crypto.randomUUID().replace(/-/g, ''));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
@@ -674,7 +668,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           </div>
         ))}
 
-        {loading && !isStreaming && (
+        {loading && (
           <div className={`${styles.message} ${styles.messageAssistant}`}>
             <Avatar
               size={36}
@@ -686,28 +680,8 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
             <div className={styles.messageContent}>
               <div className={styles.loadingContainer}>
                 <Spinner size="tiny" />
-                {loading && !isStreaming ? 'Thinking...' : 'Analyzing data...'}
+                Thinking...
               </div>
-            </div>
-          </div>
-        )}
-
-        {isStreaming && (
-          <div className={`${styles.message} ${styles.messageAssistant}`}>
-            <Avatar
-              size={36}
-              color="brand"
-              name="Retail Pulse"
-              icon={ASSISTANT_AVATAR_ICON}
-              style={ASSISTANT_AVATAR_STYLE}
-            />
-            <div className={styles.messageContent}>
-              <Card className={`${styles.messageCard} ${styles.assistantCard}`} appearance="subtle">
-                <StreamingMessage
-                  tokens={streamingTokens}
-                  isStreaming={true}
-                />
-              </Card>
             </div>
           </div>
         )}
