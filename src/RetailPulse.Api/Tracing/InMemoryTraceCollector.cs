@@ -7,7 +7,7 @@ using RetailPulse.Contracts.Tracing;
 namespace RetailPulse.Api.Tracing;
 
 /// <summary>
-/// In-memory trace collector with ring buffer eviction and SignalR push.
+/// In-memory trace collector with ring buffer eviction and bounded-channel SignalR push.
 /// Thread-safe for concurrent span capture.
 /// Default capacity: 100 traces.
 /// </summary>
@@ -18,6 +18,7 @@ public class InMemoryTraceCollector : ITraceCollector
     private readonly object _evictionLock = new();
     private readonly IHubContext<TelemetryHub>? _hubContext;
     private readonly IConfiguration? _configuration;
+    private readonly TelemetryPushChannel? _pushChannel;
 
     // Default gpt-5.4-mini pricing per million tokens
     private const decimal DefaultInputPricePerMillion = 0.15m;
@@ -40,6 +41,18 @@ public class InMemoryTraceCollector : ITraceCollector
         Capacity = capacity;
     }
 
+    public InMemoryTraceCollector(
+        IHubContext<TelemetryHub> hubContext,
+        IConfiguration configuration,
+        TelemetryPushChannel pushChannel,
+        int capacity = 100)
+    {
+        _hubContext = hubContext;
+        _configuration = configuration;
+        _pushChannel = pushChannel;
+        Capacity = capacity;
+    }
+
     public int TraceCount => _traces.Count;
 
     public void CaptureSpan(TraceSpan span)
@@ -48,18 +61,24 @@ public class InMemoryTraceCollector : ITraceCollector
 
         var bag = _traces.GetOrAdd(span.TraceId, traceId =>
         {
-            // Track insertion order for ring buffer eviction
             _traceOrder.Enqueue(traceId);
 
-            // Fire-and-forget: notify clients of new trace
-            Task.Run(() => NotifyTraceStartedAsync(traceId, span.StartTime));
+            // Push via bounded channel (backpressure) instead of fire-and-forget
+            if (_pushChannel is not null)
+            {
+                _pushChannel.TryWrite(new TelemetryPushItem("trace_started", TraceId: traceId, Timestamp: span.StartTime));
+            }
+
             return new ConcurrentBag<TraceSpan>();
         });
 
         bag.Add(span);
 
-        // Fire-and-forget: notify clients of completed span
-        _ = NotifySpanCompletedAsync(span);
+        // Push span via bounded channel instead of fire-and-forget
+        if (_pushChannel is not null)
+        {
+            _pushChannel.TryWrite(new TelemetryPushItem("span_completed", Span: span));
+        }
 
         // Ring buffer eviction
         EvictIfNeeded();

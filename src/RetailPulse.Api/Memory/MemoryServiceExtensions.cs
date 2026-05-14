@@ -9,7 +9,8 @@ public static class MemoryServiceExtensions
 {
     /// <summary>
     /// Registers <see cref="IConversationMemory"/> (SQLite-backed singleton),
-    /// <see cref="MemoryExtractionService"/>, and <see cref="ConversationMemoryMiddleware"/>.
+    /// <see cref="MemoryExtractionService"/>, <see cref="ConversationMemoryMiddleware"/>,
+    /// <see cref="MemoryExtractionChannel"/>, and <see cref="MemoryExtractionBackgroundService"/>.
     /// </summary>
     public static IServiceCollection AddConversationMemory(
         this IServiceCollection services,
@@ -27,6 +28,10 @@ public static class MemoryServiceExtensions
 
         // Scoped — middleware wraps each agent call
         services.AddScoped<ConversationMemoryMiddleware>();
+
+        // Bounded channel + background service for fire-and-forget memory extraction
+        services.AddSingleton<MemoryExtractionChannel>();
+        services.AddHostedService<MemoryExtractionBackgroundService>();
 
         return services;
     }
