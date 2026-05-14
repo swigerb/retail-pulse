@@ -1,12 +1,3 @@
-# Chick — History
-
-## 2026-04-30 — Team Initialization
-
-- **Project:** Retail Pulse — a generic pro-code agentic demo for retail & consumer goods organizations (grocers, QSRs, big box retail)
-- **Stack:** .NET 10, C#, Aspire (host + OTel, non-containerized), React/Vite/TypeScript, Azure API Management, AI Gateway pattern
-- **Owner:** Brian Swiger
-- **Context:** Built on Patron Pulse but updated to be generic with tenant configuration, extra organization examples, and corrected diagrams
-
 ## Session Work — 2026-05-04 Telemetry Accuracy Session
 
 ### Fix: Chart X-Axis Label Overlap (Commit a53657f)
@@ -287,4 +278,14 @@ Tests (25 new):
 - 2026-05-13T13:37:00-04:00 — Griffel `makeStyles` does NOT accept `borderColor` shorthand (TS2322 error). Use inline `style` prop for dynamic border colors, or use longhand `borderTopColor`/etc. Same issue applies to `backgroundColor` in some contexts. Pattern: keep `transform`/`transition` in makeStyles, put color overrides in inline style.
 - 2026-05-13T13:37:00-04:00 — Recharts v3 Tooltip `formatter` expects `(value: ValueType | undefined, ...)` — cast first arg with `Number(v)` before formatting. Pattern: `formatter={(v) => [\`${Number(v).toFixed(1)}%\`]}`.
 - 2026-05-13T13:37:00-04:00 — Testing-library "Found multiple elements" errors are common when tab text appears both in the tab bar and in rendered content. Use `getAllByText()[0]` to click the first (tab) instance.
+
+
+## Session Work — 2026-05-14 Memory Panel 404 Fix
+
+### Fix: Memory Panel 404 Error Graceful Degradation
+- Fixed MemoryPanel component failing when memory API returns 404
+- Updated memoryApi.ts to return empty array on 404 instead of throwing error
+- Panel now displays graceful empty state instead of error banner
+- Validation: Build + 249 tests pass
+
 
