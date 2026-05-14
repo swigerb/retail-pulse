@@ -74,6 +74,9 @@
 - 2026-05-13T16:16:48-04:00 — Dashboard `activeView` union now includes `'stores'`, `'financials'`, and `'portfolio'`. Stores uses `Building24Regular` icon (green), Financials uses `Money24Regular` (blue), Portfolio uses `Star24Regular` (purple).
 - 2026-05-13T16:16:48-04:00 — API services: `services/storeApi.ts` (fetchStorePerformance, fetchPlanogram, fetchStockoutRisks), `services/marginApi.ts` (fetchMarginWaterfall, fetchMarginDrivers, fetchEscalationPath), `services/scorecardApi.ts` (fetchPortfolioScorecard, fetchBrandScore, fetchExplanation).
 - 2026-05-13T16:16:48-04:00 — Recharts waterfall chart pattern: compute running totals, use stacked bars with transparent `base` bar + colored `value` bar. For comparison overlay, render second bar set at 40% opacity.
+- 2026-05-14T11:00:26-04:00 — `StoreDetailDialog` component (`src/RetailPulse.Web/src/components/stores/StoreDetailDialog.tsx`) is a Fluent UI v9 Dialog that displays store details (name, region, revenue, target, performance, issues, recommendations). Opened by clicking store names in StoreHeatmap or StorePerformanceTable. State lives in Dashboard.tsx (`selectedStore`).
+- 2026-05-14T11:00:26-04:00 — Planogram section removed from Stores page rendering (PlanogramDiagram.tsx file kept for future use). Layout order: Heatmap → Performance Table → Stockout Risks. This was a Brian decision to declutter the demo flow.
+- 2026-05-14T11:00:26-04:00 — StoreHeatmap uses compact cell sizing (80px min, 8px padding, 6px gap) to avoid vertical scroll in the viewport. Original 110px/14px/8px sizing was too spacious.
 
 ## Session Work — 2026-05-13 Sprint 1.2 Demand Forecast Chart Components (Complete)
 
