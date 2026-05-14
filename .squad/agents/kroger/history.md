@@ -354,3 +354,20 @@
 **Key File Paths:**
 - `docs/demo-walkthrough.md` — Acts 6–10 added after Act 5, new queries section
 - `docs/architecture.md` — New sections between Resilience Patterns and Deployment Topology
+
+### 2026-05-13T20:12:05.840-04:00 — Full Codebase Review Before Sprint Planning
+
+**Outcome:** Completed comprehensive review across API, Aspire host, MCP server, contracts, service defaults, Teams bot, React frontend, tests, and docs. Full report written to `docs/code-review-report.md`.
+
+**Findings Summary:**
+- 24 findings total: 1 Critical, 6 High, 11 Medium, 6 Low.
+- Critical production blocker: API endpoints and SignalR hubs lack a real authorization boundary; optional API-key middleware is disabled by default.
+- High-priority risks: missing rate limiting, broad credentialed CORS, Teams SSO `common` tenant fallback, unbounded in-memory observability/knowledge stores, and `Program.cs` acting as a god file.
+- Medium architecture debt: duplicate DI registrations, sync SQLite approval paths, fire-and-forget memory work, SignalR trace fanout without backpressure, frontend/backend knowledge API mismatch, duplicate MCP demand routes, specialist-agent copy/paste, and weak bot integration coverage.
+- Low cleanup: dev `demo-key` fallback, swallowed parse diagnostics, dead streaming state, timer/fetch churn, and docs drift around local bot SSO.
+
+**Architecture Patterns Noted:**
+- Aspire orchestration remains correctly non-containerized in `src/RetailPulse.AppHost/AppHost.cs`.
+- Solution project dependencies stay directionally clean: Api/McpServer/TeamsBot depend on Contracts and ServiceDefaults; AppHost orchestrates projects.
+- Tenant configuration is centralized, but contracts still contain demo-specific defaults that should move to sample config.
+- SQLite usage is generally parameterized, reducing SQL injection risk, but several API-facing paths still need async execution, cancellation, and quotas.
