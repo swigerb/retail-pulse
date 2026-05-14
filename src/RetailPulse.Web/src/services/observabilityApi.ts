@@ -15,7 +15,20 @@ export async function fetchCostDashboard(
 ): Promise<CostDashboardData> {
   const res = await fetch(`${BASE}/costs?period=${period}`, { signal });
   if (!res.ok) throw new Error(`Cost data fetch failed: ${res.status}`);
-  return res.json();
+  const raw = await res.json();
+  // Backend may return flat summary fields or nested structure
+  const summary = raw.summary ?? {
+    totalTokens: raw.totalTokens ?? 0,
+    totalCost: raw.totalCost ?? 0,
+    requestCount: raw.requestCount ?? 0,
+    avgCostPerRequest: raw.avgCostPerRequest ?? (raw.requestCount ? raw.totalCost / raw.requestCount : 0),
+  };
+  return {
+    summary,
+    trend: raw.trend ?? [],
+    agentBreakdown: raw.agentBreakdown ?? [],
+    topTools: raw.topTools ?? [],
+  };
 }
 
 export async function fetchAuditLog(
