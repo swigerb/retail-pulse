@@ -21,6 +21,7 @@
     <PackageVersion Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.4.83" />
     <PackageVersion Include="Microsoft.Agents.Storage" Version="1.4.83" />
     <!-- ASP.NET Core / Extensions -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.6" />
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.6" />
     <PackageVersion Include="Microsoft.Bcl.Memory" Version="10.0.4" />
@@ -38,6 +39,7 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
     <!-- Serialization -->
+    <PackageVersion Include="System.Threading.RateLimiting" Version="10.0.8" />
     <PackageVersion Include="YamlDotNet" Version="17.0.1" />
     <!-- Test -->
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
