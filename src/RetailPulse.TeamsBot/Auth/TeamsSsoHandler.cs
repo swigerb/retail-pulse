@@ -11,15 +11,35 @@ public class TeamsSsoHandler
 {
     private readonly ILogger<TeamsSsoHandler> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IHostEnvironment _environment;
     private readonly ConfigurationManager<OpenIdConnectConfiguration> _oidcConfigManager;
+    private readonly string? _configuredTenantId;
+    private readonly bool _strictTenantValidation;
 
-    public TeamsSsoHandler(ILogger<TeamsSsoHandler> logger, IConfiguration configuration)
+    public TeamsSsoHandler(ILogger<TeamsSsoHandler> logger, IConfiguration configuration, IHostEnvironment environment)
     {
         _logger = logger;
         _configuration = configuration;
+        _environment = environment;
 
-        var tenantId = _configuration["MicrosoftEntra:TenantId"] ?? "common";
-        var metadataAddress = $"https://login.microsoftonline.com/{tenantId}/v2.0/.well-known/openid-configuration";
+        _configuredTenantId = _configuration["MicrosoftEntra:TenantId"];
+        var isDevelopment = _environment.IsDevelopment();
+
+        // Require explicit tenant config outside Development
+        if (string.IsNullOrEmpty(_configuredTenantId) && !isDevelopment)
+        {
+            throw new InvalidOperationException(
+                "MicrosoftEntra:TenantId is required in non-development environments");
+        }
+
+        // Strict validation defaults to true in Production, false in Development
+        var strictConfigValue = _configuration["MicrosoftEntra:StrictTenantValidation"];
+        _strictTenantValidation = strictConfigValue != null
+            ? bool.Parse(strictConfigValue)
+            : !isDevelopment;
+
+        var metadataTenantId = _configuredTenantId ?? "common";
+        var metadataAddress = $"https://login.microsoftonline.com/{metadataTenantId}/v2.0/.well-known/openid-configuration";
         _oidcConfigManager = new ConfigurationManager<OpenIdConnectConfiguration>(
             metadataAddress,
             new OpenIdConnectConfigurationRetriever(),
@@ -28,7 +48,7 @@ public class TeamsSsoHandler
 
     /// <summary>
     /// Extracts a Teams SSO identity from the inbound activity, validating the
-    /// token signature, issuer, and audience against Microsoft Entra ID OIDC metadata.
+    /// token signature, issuer, audience, and tenant against Microsoft Entra ID OIDC metadata.
     /// </summary>
     public async Task<UserIdentity?> ExtractUserIdentityAsync(IActivity activity)
     {
@@ -43,23 +63,19 @@ public class TeamsSsoHandler
                 return null;
             }
 
-            var tenantId = _configuration["MicrosoftEntra:TenantId"] ?? "common";
             var botClientId = _configuration["MicrosoftEntra:ClientId"]
                 ?? throw new InvalidOperationException("MicrosoftEntra:ClientId must be configured for token validation.");
 
             var oidcConfig = await _oidcConfigManager.GetConfigurationAsync(CancellationToken.None);
+
+            var validIssuers = BuildValidIssuers();
 
             var handler = new JwtSecurityTokenHandler();
             var validationParams = new TokenValidationParameters
             {
                 ValidateLifetime = true,
                 ValidateIssuer = true,
-                ValidIssuers = new[]
-                {
-                    $"https://login.microsoftonline.com/{tenantId}/v2.0",
-                    "https://login.microsoftonline.com/common/v2.0",
-                    $"https://sts.windows.net/{tenantId}/"
-                },
+                ValidIssuers = validIssuers,
                 ValidateAudience = true,
                 ValidAudiences = new[] { botClientId },
                 ValidateIssuerSigningKey = true,
@@ -80,11 +96,17 @@ public class TeamsSsoHandler
 
             var jwtToken = (JwtSecurityToken)validatedToken;
 
+            // Validate tid claim against configured tenant
+            var userTenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
+            if (!ValidateTenantClaim(userTenantId))
+            {
+                return null;
+            }
+
             // Extract claims
             var oid = jwtToken.Claims.FirstOrDefault(c => c.Type == "oid")?.Value;
             var name = jwtToken.Claims.FirstOrDefault(c => c.Type == "name")?.Value;
             var email = jwtToken.Claims.FirstOrDefault(c => c.Type == "preferred_username" || c.Type == "upn")?.Value;
-            var userTenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
 
             if (string.IsNullOrEmpty(oid))
             {
@@ -107,6 +129,68 @@ public class TeamsSsoHandler
             _logger.LogError(ex, "Failed to extract user identity from activity");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Builds the set of valid issuers based on environment and tenant configuration.
+    /// Only includes the common issuer in Development when no tenant is configured.
+    /// </summary>
+    internal string[] BuildValidIssuers()
+    {
+        if (!string.IsNullOrEmpty(_configuredTenantId))
+        {
+            // Tenant-specific issuers only — no common endpoint
+            return new[]
+            {
+                $"https://login.microsoftonline.com/{_configuredTenantId}/v2.0",
+                $"https://sts.windows.net/{_configuredTenantId}/"
+            };
+        }
+
+        // Development fallback with common issuer (no tenant configured)
+        return new[]
+        {
+            "https://login.microsoftonline.com/common/v2.0",
+            "https://sts.windows.net/common/"
+        };
+    }
+
+    /// <summary>
+    /// Validates the tid claim from the token against the configured tenant.
+    /// Returns false (reject) when strict validation is enabled and tenants don't match.
+    /// </summary>
+    internal bool ValidateTenantClaim(string? tokenTenantId)
+    {
+        if (string.IsNullOrEmpty(_configuredTenantId))
+        {
+            // No configured tenant — skip tid check (Development-only path)
+            _logger.LogDebug("No tenant configured; skipping tid claim validation");
+            return true;
+        }
+
+        if (string.IsNullOrEmpty(tokenTenantId))
+        {
+            _logger.LogWarning("Token missing tid claim; rejecting");
+            return false;
+        }
+
+        if (!string.Equals(tokenTenantId, _configuredTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            if (_strictTenantValidation)
+            {
+                _logger.LogWarning(
+                    "Token tid {TokenTenant} does not match configured tenant {ConfiguredTenant}; rejecting",
+                    tokenTenantId, _configuredTenantId);
+                return false;
+            }
+
+            _logger.LogWarning(
+                "Token tid {TokenTenant} does not match configured tenant {ConfiguredTenant}; " +
+                "allowing because StrictTenantValidation is disabled",
+                tokenTenantId, _configuredTenantId);
+        }
+
+        return true;
     }
 
     private string? GetSsoTokenFromActivity(IActivity activity)
