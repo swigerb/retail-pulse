@@ -2,6 +2,40 @@
 
 This guide covers how to run tests and manually verify the Teams bot integration and chart visualization features.
 
+---
+
+## Authentication Environments
+
+Retail Pulse behaves differently depending on where you're testing. Understanding the auth boundary is critical for accurate test expectations.
+
+### Local Development (Bot Framework Emulator / HTTP Harness)
+
+| Aspect | Behavior |
+|--------|----------|
+| **Auth handler** | `DevelopmentAuthHandler` bypasses authentication — no SSO, no JWT validation |
+| **User identity** | Falls back to `activity.From` info (anonymous context) |
+| **Tenant validation** | Inactive — no `TenantId` required |
+| **SSO token** | Not available — the Emulator does not support Teams SSO |
+| **API auth** | `Security:RequireAuth` defaults to `false` in Development; optional `ApiKey` middleware disabled by default |
+| **Rate limiting** | Active but lenient — `relaxed` (100/min) policy on most endpoints |
+
+> **Bottom line:** In local dev, the entire auth stack is bypassed. You can test all agent, tool, and visualization behavior without any Azure resources.
+
+### Real Teams Client (SSO Required)
+
+| Aspect | Behavior |
+|--------|----------|
+| **Auth handler** | `TeamsSsoHandler` validates JWT tokens from Teams SSO |
+| **User identity** | Extracted from SSO token claims (`name`, `email`, `oid`) |
+| **Tenant validation** | Active — `MicrosoftEntra:TenantId` required in production; `StrictTenantValidation` enforces `tid` claim match |
+| **SSO token** | Provided by Teams client via `webApplicationInfo` manifest config |
+| **API auth** | JWT Bearer authentication via `Security:JwtAuthority` and `Security:JwtAudience` |
+| **Rate limiting** | Full policy enforcement — `strict` (10/min) on chat/AI routes, `upload` (5/min) on knowledge upload |
+
+> **Bottom line:** In real Teams, auth is fully active. Missing or misconfigured tenant IDs will reject requests.
+
+---
+
 ## Running Unit Tests
 
 ### Run All Tests
@@ -58,6 +92,15 @@ The test suite covers the following components:
 - ✅ Span storage and retrieval
 - ✅ Session clearing functionality
 
+### Router & Agent Tests (Sprint 1+)
+- ✅ RetailOpsRouter: 33 tests — intent classification, confidence threshold (0.6), fallback, ParseClassification edge cases
+- ✅ GeneralAgent: 21 tests — ISpecialistAgent identity, HandleAsync contract, backward compatibility
+- ✅ Router Integration: 9 tests — full pipeline, DI registration, telemetry span verification, multi-tenant scenarios
+- ✅ Specialist agents: demand forecast, promo planning, competitive intel, supply chain, store ops, planogram, margin
+- ✅ Guardrails, streaming, caching middleware
+- ✅ Collaborative adaptive cards, observability suite
+- ✅ Escalation orchestrator, scorecard orchestrator, explainability service
+
 ## Manual Testing the Teams Bot
 
 ### Prerequisites
@@ -68,16 +111,20 @@ The test suite covers the following components:
    ```
    The TeamsBot will be available at `http://localhost:5300`.
 
-### Option A: Bot Framework Emulator (No App Registration)
+### Option A: Bot Framework Emulator (No App Registration, No SSO)
 
-The [Bot Framework Emulator](https://github.com/microsoft/BotFramework-Emulator/releases) provides a full chat UI — no Azure resources needed.
+The [Bot Framework Emulator](https://github.com/microsoft/BotFramework-Emulator/releases) provides a full chat UI — no Azure resources needed. **SSO is not available** in this mode; the bot uses `DevelopmentAuthHandler` and anonymous user context.
 
 1. Download and open the Bot Framework Emulator
 2. Click **Open Bot** and enter: `http://localhost:5300/api/messages`
 3. Leave **Microsoft App ID** and **Microsoft App Password** blank
 4. Click **Connect** and start chatting
 
-### Option B: HTTP Test Harness
+**What works:** Message processing, Adaptive Cards, chart rendering, telemetry, multi-agent routing, all specialist agents.
+
+**What does NOT work:** SSO authentication, tenant validation, JWT token flows. User identity falls back to `activity.From` info.
+
+### Option B: HTTP Test Harness (No SSO)
 
 Use the pre-built `.http` file with VS Code REST Client or JetBrains HTTP Client:
 
@@ -87,32 +134,41 @@ tests/RetailPulse.Tests/bot-test.http
 
 This includes 6 Activity payloads covering messages, conversation updates, and card actions. See `tests/RetailPulse.Tests/bot-test-README.md` for details.
 
-### Option C: Real Teams Client (Requires App Registration)
+**Auth note:** Like the Emulator, the HTTP harness bypasses auth entirely. No SSO tokens are exchanged.
 
-For testing in the actual Teams client:
+### Option C: Real Teams Client (Requires App Registration + SSO)
+
+For testing in the actual Teams client with full SSO:
 
 1. **Bot Registration**: Register your bot in Azure Bot Service with:
    - App ID and password configured in user secrets
    - Messaging endpoint pointed to your tunnel or Azure deployment
    - Teams channel enabled
 
-2. **Tunnel**: Use ngrok or dev tunnels:
+2. **SSO Configuration**: Configure Entra ID app registration per [Teams Setup Guide](teams-setup.md):
+   - `MicrosoftEntra:TenantId` — required for tenant validation
+   - `MicrosoftEntra:StrictTenantValidation` — set to `true` for production
+   - `MicrosoftEntra:ClientId` — your Entra ID app client ID
+
+3. **Tunnel**: Use ngrok or dev tunnels:
    ```bash
    ngrok http 5300
    ```
    Update the bot messaging endpoint in Azure Portal to: `https://your-ngrok-url.ngrok.io/api/messages`
 
-### Test Scenarios Checklist
+### Test Scenarios by Environment
 
-#### ✅ Basic Chat Response
-1. Open Teams and navigate to your bot
+#### Emulator / HTTP Harness (Local Dev — No SSO)
+
+##### ✅ Basic Chat Response
+1. Open the Emulator and connect to `http://localhost:5300/api/messages`
 2. Send a simple message: "Hello"
 3. **Expected**: 
    - Receive a chat response card with the Retail Pulse branding (🥃)
    - Reply text is displayed
    - "View Telemetry" button is visible but telemetry section is collapsed by default
 
-#### ✅ Telemetry Toggle Visibility
+##### ✅ Telemetry Toggle Visibility
 1. Send any message to the bot
 2. Click "📊 View Telemetry" button
 3. **Expected**:
@@ -123,7 +179,7 @@ For testing in the actual Teams client:
 4. Click "📊 View Telemetry" again
 5. **Expected**: Telemetry section collapses
 
-#### ✅ Detailed Telemetry Report
+##### ✅ Detailed Telemetry Report
 1. Send a message that generates telemetry
 2. Click "View Telemetry" to expand the section
 3. Click "📋 Full Telemetry Report" button
@@ -133,7 +189,7 @@ For testing in the actual Teams client:
    - Waterfall visualization displays timing bars
    - Detailed spans section lists all spans with full details
 
-#### ✅ Chart Generation and Display
+##### ✅ Chart Generation and Display
 1. Send a message requesting visualization: "Show me a chart of sales trends"
 2. **Expected**:
    - Response card includes both text reply and chart section
@@ -141,17 +197,20 @@ For testing in the actual Teams client:
    - Native Adaptive Card chart element is rendered (Chart.Line, Chart.Donut, etc.)
    - Chart title and data labels are visible
 
-#### ✅ Welcome Card on Member Join
-1. Add the bot to a new Teams chat or channel (or rejoin if testing)
+##### ✅ Multi-Agent Routing
+1. Send: "What's the 90-day demand forecast for Sierra Gold Tequila?"
+2. **Expected**: Routing span shows `demand/forecasting`, blue "Demand Forecast" badge
+3. Send: "What are the competitive threats in the Spirits category?"
+4. **Expected**: Routing span shows `competitive/intelligence`, red "Competitive Intel" badge
+
+##### ✅ Welcome Card on Member Join
+1. Add the bot to a new chat (or simulate a conversation update)
 2. **Expected**:
    - Welcome card appears with "👋 Welcome to Retail Pulse, [Your Name]!"
    - Branding (🥃) is prominent
-   - Suggested actions are displayed:
-     - "Show shipment status — Track SH-2025-042"
-     - "Analyze trends — Performance over time"
-     - "Generate report — Charts and insights"
+   - Suggested actions are displayed
 
-#### ✅ Error Handling (API Down)
+##### ✅ Error Handling (API Down)
 1. Stop the RetailPulse.Api service (stop Aspire or kill the API process)
 2. Send a message to the bot
 3. **Expected**:
@@ -162,14 +221,7 @@ For testing in the actual Teams client:
 4. Restart the API and click "Try Again"
 5. **Expected**: Bot should process the request successfully
 
-#### ✅ SSO Authentication Flow
-1. Send a message that requires user context
-2. **Expected**:
-   - Bot should use SSO token to authenticate
-   - User's display name and email are passed to the API
-   - No manual sign-in prompt (if already authenticated in Teams)
-
-#### ✅ Multi-turn Conversation (Session Persistence)
+##### ✅ Multi-turn Conversation (Session Persistence)
 1. Start a new conversation: "What's the status of shipment SH-2025-042?"
 2. Send a follow-up: "Show me its history"
 3. Send another follow-up: "Create a chart"
@@ -178,7 +230,7 @@ For testing in the actual Teams client:
    - Session ID remains the same across all turns (visible in telemetry if detailed report requested)
    - Telemetry from all turns is available
 
-#### ✅ Chart Data Validation
+##### ✅ Chart Data Validation
 1. Send a message that generates a chart
 2. Check the API response in logs or Aspire dashboard
 3. **Expected**:
@@ -186,6 +238,25 @@ For testing in the actual Teams client:
    - Each `ChartSpec` has: `Type`, `Title`, `Data` (with series and data points)
    - Web UI renders the chart as an interactive Recharts SVG
    - Teams renders the chart as a native Adaptive Card chart element
+
+#### Real Teams Client (SSO Active)
+
+##### ✅ SSO Authentication Flow
+1. Open the bot in Teams and send a message
+2. **Expected**:
+   - Bot uses SSO token to authenticate — no manual sign-in prompt
+   - User's display name and email are extracted from JWT token claims
+   - `TeamsSsoHandler` validates the token signature, issuer, audience, and expiry
+   - Tenant (`tid`) claim matches the configured `MicrosoftEntra:TenantId`
+
+##### ✅ Tenant Validation
+1. With `StrictTenantValidation: true`, send a message from a user in a different tenant
+2. **Expected**: Request is rejected — `tid` claim does not match configured tenant
+3. With `StrictTenantValidation: false` (or unconfigured), multi-tenant `common` issuer is accepted
+
+##### ✅ Rate Limiting Enforcement
+1. Send more than 10 messages in rapid succession
+2. **Expected**: After the limit, responses return HTTP 429 (Too Many Requests) per the `strict` rate policy
 
 ## Verifying Telemetry Flow
 

@@ -19,13 +19,71 @@ Before you begin, ensure you have:
 
 ---
 
+## SSO & Tenant Validation (Sprint 2–3 Hardening)
+
+Retail Pulse uses a two-layer authentication model depending on the environment:
+
+### Local Development — `DevelopmentAuthHandler`
+
+In the `Development` environment, the `DevelopmentAuthHandler` bypasses all authentication. This lets contributors run the sample with Bot Framework Emulator or the HTTP test harness without standing up an identity provider.
+
+- No SSO tokens are exchanged
+- No tenant validation occurs
+- User identity falls back to `activity.From` info (anonymous context)
+- The API uses `Security:RequireAuth: false` by default
+
+### Production / Real Teams — `TeamsSsoHandler` + JWT Bearer
+
+When deployed to a real Teams tenant, full SSO hardening is active:
+
+| Config Key | Description | Required |
+|---|---|---|
+| `MicrosoftEntra:TenantId` | Your Entra ID tenant GUID. **Required in production.** Without it, the handler falls back to multi-tenant `common` issuer validation, which accepts identities from any Entra tenant. | Yes (prod) |
+| `MicrosoftEntra:StrictTenantValidation` | When `true`, the `tid` (tenant ID) claim in the SSO JWT must exactly match the configured `TenantId`. Rejects cross-tenant tokens. **Set to `true` for all production deployments.** | Recommended |
+| `MicrosoftEntra:ClientId` | The Entra ID application (client) ID. Used as the expected JWT audience. | Yes |
+| `Security:JwtAuthority` | The JWT issuer authority (e.g., `https://login.microsoftonline.com/{TenantId}/v2.0`). | Yes (prod) |
+| `Security:JwtAudience` | The expected JWT audience (typically the application client ID). | Yes (prod) |
+
+**How `TeamsSsoHandler` validates tokens:**
+1. Fetches OIDC metadata from `https://login.microsoftonline.com/{TenantId}/v2.0/.well-known/openid-configuration`
+2. Validates JWT signature, issuer, audience, and expiry
+3. Extracts `tid` claim and validates against `MicrosoftEntra:TenantId` via `ValidateTenantClaim()`
+4. When `StrictTenantValidation: true`, rejects any token where `tid` does not match
+
+> **⚠️ Security note:** Without `StrictTenantValidation`, the handler includes the `common` issuer as valid, which can accept identities from unintended Entra tenants. Always set `StrictTenantValidation: true` in production.
+
+### Health Check Configuration
+
+The TeamsBot service exposes health check behavior configurable via `TeamsBot:HealthMode`:
+
+| Mode | Behavior | When to Use |
+|---|---|---|
+| `degraded` (default) | If the SignalR telemetry connection to the API is down, the bot reports `Degraded` health but continues processing messages. Telemetry is unavailable but chat works. | Development, demos |
+| `fail-fast` | If the SignalR connection fails, the bot reports `Unhealthy` and the health endpoint returns a failure status. Aspire or orchestrators can restart the service. | Production, CI/CD |
+
+**Configuration:**
+
+```json
+{
+  "TeamsBot": {
+    "HealthMode": "fail-fast"
+  }
+}
+```
+
+Health endpoints (from ServiceDefaults):
+- `GET /health` — full health check (includes SignalR connectivity)
+- `GET /alive` — liveness probe only
+
+---
+
 ## Testing Locally Without App Registration
 
-> **Can't create an Entra ID app registration?** You can still develop, test, and debug the bot locally. The `/api/messages` endpoint has no authentication middleware, and the custom `ProcessActivityAsync` handler directly deserializes Activity JSON—so an app registration is only required for real Teams client connectivity and SSO.
+> **Can't create an Entra ID app registration?** You can still develop, test, and debug the bot locally. The `DevelopmentAuthHandler` bypasses auth entirely, and the custom `ProcessActivityAsync` handler directly deserializes Activity JSON—so an app registration is only required for real Teams client connectivity and SSO.
 
 ### Option A: Bot Framework Emulator (Recommended)
 
-The [Bot Framework Emulator](https://github.com/microsoft/BotFramework-Emulator/releases) gives you a full chat UI for testing bot conversations without any Azure resources.
+The [Bot Framework Emulator](https://github.com/microsoft/BotFramework-Emulator/releases) gives you a full chat UI for testing bot conversations without any Azure resources. **SSO is not available** in this mode.
 
 1. **Start the Aspire app host:**
 
@@ -44,9 +102,9 @@ The [Bot Framework Emulator](https://github.com/microsoft/BotFramework-Emulator/
 5. Leave **Microsoft App ID** and **Microsoft App Password** blank.
 6. Click **Connect** and start sending messages.
 
-> **What works:** Message processing, Adaptive Card responses, chart rendering, and telemetry display all function normally in the Emulator.
+> **What works:** Message processing, Adaptive Card responses, chart rendering, telemetry, multi-agent routing, all specialist agents.
 >
-> **What doesn't:** SSO authentication is unavailable—the bot falls back to anonymous user context using `activity.From` info.
+> **What doesn't:** SSO authentication — the bot falls back to anonymous user context using `activity.From` info. Tenant validation is inactive.
 
 ### Option B: HTTP Test Harness
 
@@ -82,13 +140,16 @@ If you need to test inside the real Teams client (SSO, sideloading, Teams-specif
 
 | Feature | Without App Reg | Notes |
 |---|---|---|
-| Message processing | ✅ | Full pipeline works |
+| Message processing | ✅ | Full pipeline works (all specialist agents, routing) |
 | Adaptive Card responses | ✅ | Rendered in Emulator |
 | Chart visualizations | ✅ | Recharts (web), native AC elements (Teams) |
 | Telemetry display | ✅ | SignalR spans collected |
-| SSO authentication | ❌ | Falls back to anonymous |
+| Multi-agent routing | ✅ | All 8 specialist agents available |
+| SSO authentication | ❌ | Falls back to anonymous (`DevelopmentAuthHandler`) |
+| Tenant validation | ❌ | `StrictTenantValidation` not enforced |
 | Real Teams client | ❌ | Requires app reg + Azure Bot |
 | Teams-specific UI | ❌ | Use Emulator approximation |
+| Rate limiting | ✅ | Active but lenient policies |
 
 ---
 

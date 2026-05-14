@@ -8,6 +8,14 @@
 
 ![Retail Pulse Architecture](retail-pulse-component-diagram.png)
 
+The component diagram shows the five-service architecture orchestrated by .NET Aspire:
+
+- **React Frontend** — Chat UI, telemetry dashboard, agent routing indicators, streaming message display, collaborative cards
+- **RetailPulse API** — Composition root with endpoint group extensions (`Endpoints/*.cs`), multi-agent router pipeline, guardrails/cache/streaming middleware, bounded telemetry and memory channels, rate limiting (4 tiers), observability suite (cost tracking, audit log, conversation export)
+- **MCP Server** — REST + MCP dual endpoints for all domain tools (depletions, shipments, sentiment, demand, promo, competitive, store ops, margin), SQLite data store with deterministic seeding from `tenant.yaml`
+- **Teams Bot** — Adaptive Card rendering, SSO via `TeamsSsoHandler` with `StrictTenantValidation`, configurable health checks (`HealthMode: fail-fast | degraded`), `DevelopmentAuthHandler` bypass in local dev
+- **Aspire AppHost** — Non-containerized orchestration, OpenTelemetry, service discovery, health endpoints
+
 ---
 
 ## Data Flow
@@ -164,18 +172,61 @@ POST https://bsapim-dev-northcentralus-001.azure-api.net/inference/openai/deploy
 |---------|-----------|
 | API key storage | User secrets locally; Azure Key Vault in production |
 | API key in transit | HTTPS enforced; APIM terminates TLS |
-| Prompt injection | Agent has constrained system prompt; tools only return structured data |
+| Prompt injection | Agent has constrained system prompt; tools only return structured data; GuardrailsMiddleware blocks jailbreak patterns |
 | Data access | MCP server can enforce row-level security per user/role |
-| Audit trail | OpenTelemetry traces + APIM logs capture every interaction |
-| Rate limiting | APIM token-per-minute and request-per-second policies |
+| Audit trail | OpenTelemetry traces + APIM logs + InMemoryAuditLog capture every interaction |
+| Rate limiting | Four-tier rate limiting: `strict` (10/min) for AI routes, `upload` (5/min), `moderate` (30/min), `relaxed` (100/min). Configured via `AddRateLimiter` + `UseRateLimiter`. |
 | Content safety | APIM content filtering policies (Azure AI Content Safety) |
+| Authentication | `DevelopmentAuthHandler` in dev (bypass); JWT Bearer + `TeamsSsoHandler` in production |
+| Tenant isolation | `StrictTenantValidation` enforces `tid` claim in JWT against configured `MicrosoftEntra:TenantId` |
 
-> **`/api/chat` auth note:** The chat endpoint is intentionally open in the
-> demo so contributors can run the sample without standing up an identity
-> provider. An off-by-default API-key gate is wired in
-> `Middleware/ApiKeyAuthMiddleware.cs` (`ApiKey:Enabled`, `ApiKey:Value`) to
-> demonstrate the pattern. Production deployments must replace this with
-> JWT bearer authentication and `.RequireAuthorization()` policies.
+> **Auth model:** In development, `DevelopmentAuthHandler` bypasses all auth so contributors can run the sample without an identity provider. In production, JWT Bearer authentication is active on the API (`Security:JwtAuthority`, `Security:JwtAudience`), and the Teams bot uses `TeamsSsoHandler` with required `MicrosoftEntra:TenantId` and optional `StrictTenantValidation` flag. See [Teams Setup Guide](teams-setup.md) for configuration details.
+
+---
+
+## Endpoint Extensions Pattern (Sprint 2)
+
+`Program.cs` has been decomposed from a 2,300+ line god file into a composition-only root that delegates to dedicated endpoint group classes in `src/RetailPulse.Api/Endpoints/`:
+
+| Endpoint Group | File | Routes |
+|---|---|---|
+| Chat | `ChatEndpoints.cs` | `/api/chat`, `/api/chat/stream` |
+| Cards | `CardEndpoints.cs` | `/api/cards`, `/api/cards/{id}`, `/api/cards/{id}/action`, `/api/cards/{id}/archive` |
+| Observability | `ObservabilityEndpoints.cs` | `/api/observability/costs`, `/audit`, `/export` |
+| Alerts | `AlertEndpoints.cs` | `/api/alerts/active`, `/api/alerts/history`, `/api/alerts/{id}/snooze`, `/api/alerts/{id}/dismiss` |
+| Approvals | `ApprovalEndpoints.cs` | Approval gate routes |
+| Knowledge | `KnowledgeEndpoints.cs` | `/api/knowledge/upload`, `/api/knowledge/search` |
+| Guardrails | `GuardrailEndpoints.cs` | `/api/guardrails/log`, `/api/guardrails/stats`, `/api/guardrails/config` |
+| Escalation | `EscalationEndpoints.cs` | `/api/escalate` |
+| Scorecard | `ScorecardEndpoints.cs` | `/api/scorecard` |
+| Promo | `PromoEndpoints.cs` | `/api/taskmodule/promo` |
+| Supply | `SupplyEndpoints.cs` | Supply chain routes |
+| Store Ops | `StoreEndpoints.cs` | `/api/stores/performance`, planogram, stockout |
+| Margin | `MarginEndpoints.cs` | `/api/margin/{brandId}`, drivers, trend, risks |
+
+Each endpoint group uses `MapGroup()` with route-specific rate limiting policies (e.g., `RequireRateLimiting("strict")` on chat routes).
+
+---
+
+## Bounded Channels & Backpressure (Sprint 3)
+
+Fire-and-forget patterns from Sprints 1–2 have been replaced with bounded `Channel<T>` queues processed by hosted background services:
+
+### Telemetry Push Channel
+
+- **File:** `src/RetailPulse.Api/Tracing/TelemetryPushChannel.cs`
+- **Type:** `Channel<TelemetryPushItem>` with `BoundedChannelOptions { Capacity = 1000 }`
+- **Behavior:** When the channel is full, `TryWrite()` drops the item and increments `DroppedCount`. A `TelemetryPushBackgroundService` reads items and pushes them via SignalR.
+- **Why:** Replaces per-span fire-and-forget `Task.Run` calls that could create unbounded background work under load.
+
+### Memory Extraction Channel
+
+- **File:** `src/RetailPulse.Api/Memory/MemoryExtractionChannel.cs`
+- **Type:** `Channel<MemoryWorkItem>` with `BoundedChannelOptions { Capacity = 1000 }`
+- **Behavior:** Memory extraction work items are enqueued after each response. A background service processes them with proper cancellation and error handling.
+- **Why:** Replaces `Task.Run` with `CancellationToken.None` that ignored request cancellation and could run LLM work for already-cancelled requests.
+
+Both channels expose `DroppedCount` metrics so degradation is visible in monitoring.
 
 ---
 
@@ -237,6 +288,8 @@ The `RetailOpsRouter` uses a dedicated low-temperature classification prompt (`a
 | `general` | General | All unmatched intents | 0.7 | All 7 original tools (depletions, shipments, sentiment, etc.) |
 
 All specialists implement `ISpecialistAgent` (in `RetailPulse.Contracts.Routing`) and register via DI through the `AddAgentRouting()` extension method. Adding a new specialist requires one class implementing the interface and one DI registration line.
+
+> **Architecture note (Sprint 2):** The specialist agent pipeline was identified for consolidation into a shared `SpecialistAgentBase` to reduce copy/paste duplication of message construction, history truncation, chart extraction, and token accounting across agents. This refactoring is tracked but not yet implemented — each specialist currently repeats the common orchestration logic in its `HandleAsync` method.
 
 ### Registration Pattern
 

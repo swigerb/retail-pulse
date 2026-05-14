@@ -251,3 +251,38 @@ The next sprints should harden the boundary first, then split the monolith, then
 5. **Replace singleton memory with bounded stores.** In-memory is fine for the demo, but every in-memory subsystem needs capacity, TTL, and visible degradation behavior.
 6. **Standardize agent execution.** A shared specialist pipeline will prevent copy/paste drift as the agent roster grows.
 7. **Turn manual bot checks into gates.** The Teams bot is a first-class entry point; it needs automated coverage before sprint velocity increases.
+
+---
+
+## Resolution Status
+
+All 24 findings from the original review have been addressed across Sprints 1–4. The table below maps each finding to its resolution sprint and current status.
+
+| # | Severity | Finding | Resolution Sprint | Status |
+|---|---|---|---|---|
+| 1 | **CRITICAL** | API and SignalR Surface Has No Production Authorization Boundary | Sprint 1 | ✅ Resolved — JWT Bearer auth added to API (`DevelopmentAuthHandler` bypass in dev, `Security:RequireAuth` flag); `TeamsSsoHandler` added to TeamsBot with `StrictTenantValidation` |
+| 2 | HIGH | No Rate Limiting on AI, State Mutation, or Telemetry Endpoints | Sprint 1 | ✅ Resolved — `AddRateLimiter` with 4 policies: `strict` (10/min), `upload` (5/min), `moderate` (30/min), `relaxed` (100/min); `UseRateLimiter()` in pipeline |
+| 3 | HIGH | Credentialed CORS Policy Is Too Broad for Production | Sprint 1 | ✅ Resolved — Production CORS tightened alongside auth boundary work |
+| 4 | HIGH | Teams SSO Validation Falls Back to Multi-Tenant `common` | Sprint 1 | ✅ Resolved — `MicrosoftEntra:TenantId` required in prod; `StrictTenantValidation` enforces `tid` claim match; `common` issuer only in dev |
+| 5 | HIGH | Unbounded In-Memory Observability Stores Can Leak Memory | Sprint 1 | ✅ Resolved — Bounded retention, TTL, and capacity limits added to observability stores |
+| 6 | HIGH | API Composition Root Has Become a God File | Sprint 2 | ✅ Resolved — `Program.cs` decomposed into 14 endpoint group classes in `src/RetailPulse.Api/Endpoints/` (ChatEndpoints, CardEndpoints, ObservabilityEndpoints, etc.) |
+| 7 | HIGH | Knowledge Upload and Search Are Unbounded In-Memory Paths | Sprint 1 | ✅ Resolved — Upload size, document count, and chunk count quotas added |
+| 8 | MEDIUM | Duplicate Singleton Registrations Create Ambiguous Service Wiring | Sprint 2 | ✅ Resolved — Consolidated during endpoint group extraction |
+| 9 | MEDIUM | Approval Gate Uses Synchronous SQLite Calls in Async Request Paths | Sprint 3 | ✅ Resolved — Async SQLite APIs, cancellation checks, backoff strategy added |
+| 10 | MEDIUM | Fire-and-Forget Memory Work Ignores Request Cancellation | Sprint 3 | ✅ Resolved — Replaced with `MemoryExtractionChannel` (bounded `Channel<MemoryWorkItem>`, capacity 1000) processed by background service with cancellation support |
+| 11 | MEDIUM | SignalR Trace Notifications Can Create Excess Background Work | Sprint 3 | ✅ Resolved — Replaced with `TelemetryPushChannel` (bounded `Channel<TelemetryPushItem>`, capacity 1000) with `DroppedCount` metric for visible degradation |
+| 12 | MEDIUM | Frontend Knowledge API Does Not Match Backend Routes | Sprint 2 | ✅ Resolved — Frontend/backend knowledge API contracts aligned during endpoint group extraction |
+| 13 | MEDIUM | MCP Server Exposes Duplicate Demand Route Shapes and Names | Sprint 4 | ✅ Resolved — Legacy demand routes deprecated; canonical `/api/demand/*` routes retained |
+| 14 | MEDIUM | Specialist Agents Duplicate the Same Pipeline Implementation | Sprint 2 | ⚠️ Tracked — Identified for `SpecialistAgentBase` extraction; not yet refactored. Each agent still repeats common orchestration logic. |
+| 15 | MEDIUM | Cost Tracking Uses the Wrong Model Name | Sprint 2 | ✅ Resolved — Actual model name from agent definition passed into `UsageEvent` |
+| 16 | MEDIUM | Teams Bot Telemetry Startup Failure Is Hidden | Sprint 3 | ✅ Resolved — `SignalRHealthCheck` exposes degraded/unhealthy state; `TeamsBot:HealthMode` configures `fail-fast` vs `degraded` behavior |
+| 17 | MEDIUM | Tenant Configuration Defaults Are Demo-Specific | Sprint 4 | ✅ Resolved — Demo defaults moved to `tenant.yaml` / sample config |
+| 18 | MEDIUM | Bot Critical Paths Are Mostly Manual-Tested | Sprint 3 | ✅ Resolved — Automated bot endpoint integration tests added |
+| 19 | LOW | Development `demo-key` Can Mask Configuration Errors | Sprint 4 | ✅ Resolved — Clear warning logged when fake key is used; cannot flow outside development |
+| 20 | LOW | Chart and Alert Parsing Swallows Exceptions Without Diagnostics | Sprint 4 | ✅ Resolved — Filtered `JsonException` catches with debug-level structured logs |
+| 21 | LOW | Streaming State in ChatPanel Is Dead Code | Sprint 4 | ✅ Resolved — SignalR streaming integration completed; dead state removed |
+| 22 | LOW | StreamingMessage Timer Churns on Every Reveal Step | Sprint 4 | ✅ Resolved — Optimized to single interval loop |
+| 23 | LOW | Conversation Export Frontend Does Not Abort In-Flight Preview Requests | Sprint 4 | ✅ Resolved — `AbortController` support added to observability API client |
+| 24 | LOW | Documentation Gives Conflicting Bot SSO Expectations | Sprint 4 | ✅ Resolved — Testing guide now splits local emulator (no SSO) from real Teams (SSO required) expectations |
+
+**Summary:** 23 of 24 findings fully resolved. 1 finding (specialist agent pipeline duplication) is tracked for future refactoring.
