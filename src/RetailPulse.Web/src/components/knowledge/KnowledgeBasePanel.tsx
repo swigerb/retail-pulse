@@ -144,8 +144,7 @@ const useStyles = makeStyles({
 });
 
 const SOURCE_ICONS: Record<string, string> = {
-  markdown: '📝',
-  text: '📄',
+  internal: '📝',
   upload: '📎',
 };
 
@@ -198,9 +197,9 @@ export default function KnowledgeBasePanel() {
     }
   }, []);
 
-  const handleUploadComplete = useCallback((doc: KBDocument) => {
-    setDocuments(prev => [doc, ...prev]);
-  }, []);
+  const handleUploadComplete = useCallback(() => {
+    loadDocuments();
+  }, [loadDocuments]);
 
   return (
     <div className={styles.container} data-testid="knowledge-base-panel">
@@ -261,7 +260,7 @@ export default function KnowledgeBasePanel() {
               <div className={styles.docList} data-testid="document-list">
                 {documents.map(doc => (
                   <div key={doc.id} className={styles.docCard} data-testid="document-card">
-                    <span className={styles.docIcon}>{SOURCE_ICONS[doc.sourceType] || '📄'}</span>
+                    <span className={styles.docIcon}>{SOURCE_ICONS[doc.source] || '📄'}</span>
                     <div className={styles.docInfo}>
                       <div className={styles.docTitle}>{doc.title}</div>
                       <div className={styles.docMeta}>

@@ -103,25 +103,25 @@ function ResultCard({ result }: { result: KBSearchResult }) {
       onKeyDown={e => e.key === 'Enter' && setExpanded(prev => !prev)}
     >
       <div className={styles.resultHeader}>
-        <span className={styles.resultTitle}>📄 {result.documentTitle}</span>
+        <span className={styles.resultTitle}>📄 {result.title}</span>
         <Badge
           appearance="filled"
           style={{
-            background: `${getScoreColor(result.relevanceScore)}20`,
-            color: getScoreColor(result.relevanceScore),
+            background: `${getScoreColor(result.score)}20`,
+            color: getScoreColor(result.score),
             fontSize: '10px',
           }}
         >
-          {(result.relevanceScore * 100).toFixed(0)}% match
+          {(result.score * 100).toFixed(0)}% match
         </Badge>
       </div>
-      <div className={styles.resultPreview}>{result.chunkPreview}</div>
+      <div className={styles.resultPreview}>{result.chunk}</div>
       {expanded && (
         <div className={styles.resultExpanded} data-testid="result-expanded">
           <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-text)' }}>
             Chunk #{result.chunkIndex + 1}
           </div>
-          {result.chunkPreview}
+          {result.chunk}
         </div>
       )}
     </div>

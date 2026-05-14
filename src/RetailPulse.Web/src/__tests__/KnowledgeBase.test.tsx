@@ -9,7 +9,6 @@ const mockDocuments: KBDocument[] = [
     id: 'doc-1',
     title: 'Sales Playbook 2026',
     source: 'internal',
-    sourceType: 'markdown',
     ingestedAt: '2026-05-10T10:00:00Z',
     chunkCount: 24,
   },
@@ -17,31 +16,24 @@ const mockDocuments: KBDocument[] = [
     id: 'doc-2',
     title: 'Competitor Analysis Notes',
     source: 'upload',
-    sourceType: 'text',
     ingestedAt: '2026-05-12T14:00:00Z',
     chunkCount: 8,
   },
 ];
 
 const mockStats: KBStats = {
-  totalDocuments: 2,
-  totalChunks: 32,
-  lastIngestionDate: '2026-05-12T14:00:00Z',
-  documentsBySourceType: [
-    { sourceType: 'markdown', count: 1 },
-    { sourceType: 'text', count: 1 },
-  ],
-  mostCitedDocuments: [
-    { title: 'Sales Playbook 2026', citations: 15 },
-  ],
+  documentCount: 2,
+  chunkCount: 32,
+  averageChunksPerDocument: 16,
 };
 
 const mockSearchResults: KBSearchResult[] = [
   {
     documentId: 'doc-1',
-    documentTitle: 'Sales Playbook 2026',
-    chunkPreview: 'When approaching enterprise clients in the Southeast...',
-    relevanceScore: 0.92,
+    title: 'Sales Playbook 2026',
+    chunk: 'When approaching enterprise clients in the Southeast...',
+    score: 0.92,
+    source: 'internal',
     chunkIndex: 3,
   },
 ];
@@ -49,7 +41,7 @@ const mockSearchResults: KBSearchResult[] = [
 const mockFetchDocs = vi.fn().mockResolvedValue(mockDocuments);
 const mockDeleteDoc = vi.fn().mockResolvedValue(undefined);
 const mockSearchKB = vi.fn().mockResolvedValue(mockSearchResults);
-const mockUploadDoc = vi.fn().mockResolvedValue({ ...mockDocuments[0], id: 'doc-new', chunkCount: 12 });
+const mockUploadDoc = vi.fn().mockResolvedValue({ documentId: 'doc-new', title: 'Test Doc', status: 'ingested' });
 const mockFetchStats = vi.fn().mockResolvedValue(mockStats);
 
 vi.mock('../services/knowledgeApi', () => ({

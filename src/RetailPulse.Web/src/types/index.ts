@@ -342,31 +342,35 @@ export interface CouncilConveneResponse {
 }
 
 // --- Knowledge Base types (Sprint 2.3) ---
+// Aligned with backend DTOs: DocumentInfo, SearchResult, /api/knowledge/stats response
 
 export interface KBDocument {
   id: string;
   title: string;
   source: string;
-  sourceType: 'markdown' | 'text' | 'upload';
   ingestedAt: string;
   chunkCount: number;
-  contentPreview?: string;
 }
 
 export interface KBSearchResult {
   documentId: string;
-  documentTitle: string;
-  chunkPreview: string;
-  relevanceScore: number;
+  title: string;
+  chunk: string;
+  score: number;
+  source: string;
   chunkIndex: number;
 }
 
 export interface KBStats {
-  totalDocuments: number;
-  totalChunks: number;
-  lastIngestionDate: string;
-  documentsBySourceType: Array<{ sourceType: string; count: number }>;
-  mostCitedDocuments: Array<{ title: string; citations: number }>;
+  documentCount: number;
+  chunkCount: number;
+  averageChunksPerDocument: number;
+}
+
+export interface KnowledgeUploadResponse {
+  documentId: string;
+  title: string;
+  status: string;
 }
 
 export interface Citation {
