@@ -288,4 +288,6 @@ Tests (25 new):
 - Panel now displays graceful empty state instead of error banner
 - Validation: Build + 249 tests pass
 
+- 2026-05-14T10:09:00-04:00 — `CollapsibleSection` component at `src/RetailPulse.Web/src/components/CollapsibleSection.tsx` provides reusable accordion/twist UI for the telemetry drawer. Uses CSS `max-height` transition and a rotated ▶ chevron. Default state: collapsed.
+- 2026-05-14T10:09:00-04:00 — Empty trace filtering in TraceDashboard: traces with 0 spans or (0 duration AND 0 tokens) are excluded from display and aggregates to prevent "Invalid Date" / "Unknown intent" noise.
 
