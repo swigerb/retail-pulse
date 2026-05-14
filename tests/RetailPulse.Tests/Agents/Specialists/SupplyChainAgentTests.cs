@@ -511,6 +511,7 @@ public class SupplyChainAgent : ISpecialistAgent
 
     public string Key => "supply-chain";
     public string DisplayName => "Supply Chain Agent";
+    public string Model => _agentDef.Model;
     public IReadOnlyList<string> SupportedIntents { get; } =
     [
         AgentIntent.SupplyShipments

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Observability;
@@ -15,7 +16,23 @@ public class CostTrackerTests
 
     public CostTrackerTests()
     {
-        _tracker = new InMemoryCostTracker(Options.Create(new ObservabilityOptions()));
+        _tracker = CreateTrackerWithPricing();
+    }
+
+    private static InMemoryCostTracker CreateTrackerWithPricing()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["TokenPricing:gpt-5.4-mini:InputPerMillion"] = "0.15",
+                ["TokenPricing:gpt-5.4-mini:OutputPerMillion"] = "0.60",
+                ["TokenPricing:gpt-4o:InputPerMillion"] = "2.50",
+                ["TokenPricing:gpt-4o:OutputPerMillion"] = "10.00",
+                ["TokenPricing:claude-sonnet:InputPerMillion"] = "3.00",
+                ["TokenPricing:claude-sonnet:OutputPerMillion"] = "15.00",
+            })
+            .Build();
+        return new InMemoryCostTracker(Options.Create(new ObservabilityOptions()), config);
     }
 
     #region TrackUsageAsync

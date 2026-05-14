@@ -58,11 +58,13 @@ public static class AgentTestFixtures
     public static ISpecialistAgent CreateMockSpecialist(
         string key,
         IReadOnlyList<string> supportedIntents,
-        string displayName = "Mock Agent")
+        string displayName = "Mock Agent",
+        string model = "gpt-4o")
     {
         var mock = new Mock<ISpecialistAgent>();
         mock.Setup(a => a.Key).Returns(key);
         mock.Setup(a => a.DisplayName).Returns(displayName);
+        mock.Setup(a => a.Model).Returns(model);
         mock.Setup(a => a.SupportedIntents).Returns(supportedIntents);
         mock.Setup(a => a.HandleAsync(
                 It.IsAny<ChatRequest>(),

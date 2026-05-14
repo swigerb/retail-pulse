@@ -19,6 +19,12 @@ public interface ISpecialistAgent
     string DisplayName { get; }
 
     /// <summary>
+    /// The LLM model this agent uses, sourced from <see cref="AgentDefinition.Model"/>.
+    /// Used for accurate cost tracking. Returns "none" for agents that don't call an LLM.
+    /// </summary>
+    string Model { get; }
+
+    /// <summary>
     /// The intent categories this specialist handles.
     /// Used by the router to validate routing decisions.
     /// </summary>
