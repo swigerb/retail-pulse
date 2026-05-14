@@ -62,18 +62,19 @@
 - **Impact:** The model should now reliably call data tools first, then CreateChart for visualizations, instead of producing text-only responses. No C# or frontend changes needed — this is prompt engineering only.
 - **Owner:** Costco (Backend Dev)
 
-### Telemetry Total Duration (2026-05-04)
 
-- **Context:** The backend `thought` span covers the full `GetResponseAsync()` wall-clock time, so summing span durations in the web telemetry drawer overstates total request time when tool calls are present.
-- **Decision:** Expose `TotalDurationMs` on the shared `ChatResponse` contract and have the telemetry drawer prefer that response-level value, with a fallback to summed spans when the response-level value is absent.
-- **Impact:** Individual span durations remain visible, the total duration display reflects real request time, and older clients/responses stay compatible through the fallback path.
-- **Owner:** Costco (Backend Dev)
+### Align Demo Store Regions to Tenant.yaml Naming (2026-05-14)
 
-### Logo Placement (2026-05-05)
-
-- **Context:** The app needs both a compact brand mark for general navigation chrome and the full shipped logo image for the chat welcome experience.
-- **Decision:** `BrandLogo.tsx` should remain the synthetic RP gradient box plus wordmark component, while `/retail-pulse-logo.jpg` is used only in `ChatPanel.tsx`'s empty-state welcome area as a centered hero image.
-- **Impact:** Shared UI keeps the lighter, scalable brand mark, and the large raster logo is confined to the one place where a full-brand splash is desired.
+- **Context:** The demo store data in Dashboard.tsx used "West" as a region name, but tenant.yaml defines "West Coast". This caused a mismatch between what the heatmap displays and the canonical tenant configuration.
+- **Decision:** Renamed all "West" region references in demo data to "West Coast" to match tenant.yaml exactly. Added stores for Southwest and Pacific Northwest to ensure all 6 tenant regions are represented.
+- **Canonical regions (from tenant.yaml):**
+  1. Northeast
+  2. Southeast
+  3. Midwest
+  4. Southwest
+  5. West Coast
+  6. Pacific Northwest
+- **Impact:** Any future demo data or region references should use these exact names.
 - **Owner:** Chick (Frontend Dev)
 
 ## Directives
@@ -719,4 +720,5 @@ The key insight: by using **real velocity data from the seeded database**, the o
 1. **Reuse existing `OptimizePlanogram` tool** — Rejected because its response shape (raw slots without brand names/colors) doesn't match the frontend type. A new tool with the right shape is cleaner than adapter logic.
 2. **Render in side panel instead of inline** — Rejected because inline follows the established `ChartSpec` pattern and keeps the demo flow linear (ask → see result).
 3. **Add to Stores page permanently** — Rejected for Phase 1; can be a Phase 2 enhancement where last optimization is cached per store.
+
 
