@@ -71,6 +71,7 @@ Both features enable enhanced retail data analysis workflows without breaking ch
 - 2026-05-07T15:33:55-04:00 — New MCP tool `GetVariantMixTool` lives in `src\RetailPulse.McpServer\Tools\GetVariantMixTool.cs`. Supports region="National" (averages MixPercent/DepletionsYoY across all regions via GROUP BY). Pattern matches existing tools — static class, `[McpServerToolType]`, inject `RetailPulseDb`, return `data.GetVariantMix(brand, region)`.
 - 2026-05-07T15:33:55-04:00 — prompts.yaml update strategy for variant data: add to `tools:` array, `## Available Tools` section, `### Concept-to-Tool Mapping` table, and rewrite `### Always Chart Available Data` to call GetVariantMix first (real data, no "Estimated" label) rather than estimating from brand config.
 - 2026-05-07T16:45:21-04:00 — Strengthened variant mix prompt in `src\RetailPulse.Api\prompts.yaml` to prevent model from calling GetDepletionStats/GetFieldSentiment for variant queries. Added explicit FAILED/CORRECT examples and a concrete donut ChartSpec mapping showing how to turn GetVariantMix output (mix_percent values) into a working donut chart (each variant as its own series with one value). Root cause: the model ignored weak "call GetVariantMix" instructions and fell back to familiar tools, then couldn't map unfamiliar output to ChartSpec format.
+- 2026-05-13T20:22:06-04:00 — Bounded in-memory stores pattern: use ConcurrentQueue (not ConcurrentBag) when you need FIFO eviction order. Use lock-per-session (not ConcurrentBag<T> for messages) when order matters in exported output. IOptions<T> pattern preferred over raw IConfiguration for quota settings.
 
 ## Session Work — 2026-05-13 Sprint 1.1 Multi-Agent Router (Complete)
 
@@ -331,3 +332,65 @@ Full Phase 4 implementation across all three sprints: Store Operations & Planogr
 - TrackedMessage needed `required` init properties to work with both named construction and object initializers
 
 **Validation:** Build clean (0 errors, 5 warnings), all 1154 tests pass
+
+## Session Work — 2026-05-13 Teams SSO Tenant Validation Hardening
+
+### Task: Fix cross-tenant token acceptance in TeamsSsoHandler
+
+- **Context:** Code review flagged that `TeamsSsoHandler` used `common` as fallback when `MicrosoftEntra:TenantId` was missing, and always included the common issuer as valid. This made tenant restriction optional and could accept identities from unintended Entra tenants.
+- **Changes:**
+  - **Startup guard:** Constructor now throws `InvalidOperationException` in non-Development environments when `MicrosoftEntra:TenantId` is not configured
+  - **tid claim validation:** After JWT signature/issuer/audience validation passes, `ValidateTenantClaim()` compares the token's `tid` claim against the configured tenant ID
+  - **Issuer lockdown:** `BuildValidIssuers()` only includes tenant-specific issuers when a tenant is configured; `common` issuer only included in Development with no tenant configured
+  - **StrictTenantValidation config:** `MicrosoftEntra:StrictTenantValidation` (default true in Production, false in Development) controls whether tid mismatch = rejection
+  - **appsettings.json:** Added `StrictTenantValidation: true` default
+  - **appsettings.Development.json:** Added `StrictTenantValidation: false` override for local testing
+- **Files modified:** `TeamsSsoHandler.cs`, `appsettings.json`, `appsettings.Development.json`
+
+### Learnings
+- 2026-05-13 — IHostEnvironment injection into auth handlers enables environment-aware security policy without preprocessor directives
+- 2026-05-13 — Extracting `BuildValidIssuers()` and `ValidateTenantClaim()` as `internal` methods enables direct unit testing of security logic
+- 2026-05-13 — Production auth handlers should fail-closed: require explicit config, not default to permissive fallbacks
+
+**Validation:** Build clean (0 errors, 0 warnings)
+
+## Session Work - 2026-05-13 Security Hardening (Auth + Rate Limiting + CORS)
+
+### Deliverables
+- **DevelopmentAuthHandler** (src/RetailPulse.Api/Auth/DevelopmentAuthHandler.cs): Auto-succeeds in Development, produces synthetic ClaimsPrincipal with dev-user identity. Production uses JWT Bearer scheme.
+- **Authentication & Authorization**: Added AddAuthentication() + AddAuthorization() to DI. Development uses custom DevelopmentAuthHandler as default scheme; Production defaults to JWT Bearer.
+- **Rate Limiting**: Four fixed-window policies: strict (10/min for chat, council, scorecard, escalate), upload (5/min for knowledge upload), moderate (30/min for config mutations), relaxed (100/min for read endpoints). Applied via RequireRateLimiting on every /api/* route.
+- **CORS Split**: Two named policies (Development = allow any origin, Production = only configured Security:AllowedOrigins with restricted methods/headers). Policy selected at runtime based on environment.
+- **SignalR Hub Authorization**: TelemetryHub and StreamingHub mapped with RequireAuthorization().
+- **Config entries**: Security:RequireAuth (default true in prod, false in dev), Security:AllowedOrigins in appsettings.json + appsettings.Development.json.
+
+### Files Modified/Created
+- src/RetailPulse.Api/Auth/DevelopmentAuthHandler.cs (new)
+- src/RetailPulse.Api/Program.cs (DI + middleware pipeline + all route security)
+- src/RetailPulse.Api/appsettings.json (Security section)
+- src/RetailPulse.Api/appsettings.Development.json (Security overrides)
+- Directory.Packages.props (Microsoft.AspNetCore.Authentication.JwtBearer package)
+
+### Learnings
+- .NET 10 AddFixedWindowLimiter extension lives in Microsoft.AspNetCore.RateLimiting namespace (shared framework, no extra NuGet)
+- Microsoft.AspNetCore.Authentication.JwtBearer requires explicit NuGet reference even on .NET 10
+- Development auth handler pattern: extend AuthenticationHandler, return synthetic claims for seamless demo without tokens
+- CORS AllowCredentials() cannot be used with AllowAnyOrigin() so Development policy omits credentials
+- Health probes (/health, /alive) remain unauthenticated via Aspire MapDefaultEndpoints()
+
+**Validation:** API project builds clean (0 errors, 0 warnings)
+
+## Session Work — 2026-05-13 Quotas & Bounded Storage
+
+### Task: Add quotas and bounded storage to knowledge base and observability stores
+
+- **Context:** Code review flagged three DoS vectors — unbounded uploads in InMemoryKnowledgeBase, unbounded cost events in InMemoryCostTracker, and unbounded sessions/messages (with thread-unsafe List<T>) in ConversationExporter.
+- **Changes:**
+  - Created `Configuration/KnowledgeOptions.cs` and `Configuration/ObservabilityOptions.cs` — IOptions<T> pattern for all quotas
+  - `InMemoryKnowledgeBase`: doc size (10MB), doc count (100), chunk count (5000) validation before ingestion; cancellation token propagation through ingest/search loops
+  - `InMemoryCostTracker`: swapped ConcurrentBag → ConcurrentQueue for ordered eviction; 10K event cap + 24h TTL eviction on each write; Interlocked counting
+  - `ConversationExporter`: lock-per-session for thread-safe message writes; 200 msg/session cap; 1K session cap with LRU eviction (oldest by last-activity ticks); AgentsUsed → ConcurrentBag; export formatters take snapshot under lock
+  - Registered `Configure<KnowledgeOptions>` and `Configure<ObservabilityOptions>` in Program.cs DI
+  - Added `Knowledge:` and `Observability:` sections to appsettings.json
+  - Updated 4 test files to pass IOptions to new constructors
+- **Validation:** Full solution builds clean (0 new errors). All pre-existing test signatures updated.

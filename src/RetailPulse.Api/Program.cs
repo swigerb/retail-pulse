@@ -1,6 +1,12 @@
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Agents;
+using RetailPulse.Api.Auth;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Agents.Tools;
 using RetailPulse.Api.Alerts;
@@ -26,12 +32,17 @@ using RetailPulse.Contracts.Guardrails;
 using RetailPulse.Contracts.Observability;
 using RetailPulse.Contracts.Rag;
 using RetailPulse.Api.Cards;
+using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Aspire ServiceDefaults (OTel, health checks, service discovery)
 builder.AddServiceDefaults();
+
+// Quota configuration (IOptions pattern)
+builder.Services.Configure<KnowledgeOptions>(builder.Configuration.GetSection(KnowledgeOptions.SectionName));
+builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
 // Load tenant configuration
 var tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
@@ -49,17 +60,92 @@ builder.Services.AddSignalR()
         options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 
-// CORS for React frontend — origins are configurable via Cors:AllowedOrigins
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-    ?? new[] { "http://localhost:5173", "https://localhost:5173" };
+// ── CORS — split policies for Development vs Production ─────────────────
+var corsDevOrigins = new[] { "http://localhost:5173", "https://localhost:5173" };
+var corsProdOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>()
+    ?? Array.Empty<string>();
+
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy =>
+    options.AddPolicy("Development", policy =>
     {
-        policy.WithOrigins(allowedOrigins)
+        policy.AllowAnyOrigin()
             .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
+            .AllowAnyMethod();
+    });
+
+    options.AddPolicy("Production", policy =>
+    {
+        if (corsProdOrigins.Length > 0)
+        {
+            policy.WithOrigins(corsProdOrigins)
+                .WithMethods("GET", "POST", "PUT", "DELETE")
+                .WithHeaders("Content-Type", "Authorization", "X-Requested-With")
+                .AllowCredentials();
+        }
+        // If no origins configured, policy allows nothing (deny by default)
+    });
+});
+
+// ── Authentication & Authorization ──────────────────────────────────────
+var requireAuth = builder.Configuration.GetValue("Security:RequireAuth",
+    !builder.Environment.IsDevelopment());
+
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddAuthentication(DevelopmentAuthHandler.SchemeName)
+        .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthHandler>(
+            DevelopmentAuthHandler.SchemeName, _ => { })
+        .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+        {
+            // JWT scheme available but not default in dev — allows testing with real tokens
+            options.Authority = builder.Configuration["Security:JwtAuthority"];
+            options.TokenValidationParameters.ValidateAudience = false;
+        });
+}
+else
+{
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+        {
+            options.Authority = builder.Configuration["Security:JwtAuthority"];
+            options.Audience = builder.Configuration["Security:JwtAudience"];
+        });
+}
+
+builder.Services.AddAuthorization();
+
+// ── Rate Limiting ───────────────────────────────────────────────────────
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddFixedWindowLimiter("strict", opt =>
+    {
+        opt.PermitLimit = 10;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 0;
+    });
+
+    options.AddFixedWindowLimiter("upload", opt =>
+    {
+        opt.PermitLimit = 5;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 0;
+    });
+
+    options.AddFixedWindowLimiter("moderate", opt =>
+    {
+        opt.PermitLimit = 30;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 0;
+    });
+
+    options.AddFixedWindowLimiter("relaxed", opt =>
+    {
+        opt.PermitLimit = 100;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 0;
     });
 });
 
@@ -818,8 +904,14 @@ var app = builder.Build();
     await KnowledgeBaseSeeder.SeedAsync(kb, seedLogger);
 }
 
-app.UseCors();
+// Select CORS policy based on environment
+app.UseCors(app.Environment.IsDevelopment() ? "Development" : "Production");
 app.UseMiddleware<ApiKeyAuthMiddleware>();
+
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseRateLimiter();
+
 app.MapDefaultEndpoints();
 
 if (app.Environment.IsDevelopment())
@@ -827,9 +919,9 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// SignalR hubs
-app.MapHub<TelemetryHub>("/hubs/telemetry");
-app.MapHub<StreamingHub>("/hubs/streaming");
+// SignalR hubs — require authorization
+app.MapHub<TelemetryHub>("/hubs/telemetry").RequireAuthorization();
+app.MapHub<StreamingHub>("/hubs/streaming").RequireAuthorization();
 
 // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
 app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ILogger<Program> logger, CancellationToken ct) =>
@@ -1236,7 +1328,9 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
             statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 })
-.WithName("Chat");
+.WithName("Chat")
+.RequireAuthorization()
+.RequireRateLimiting("strict");
 
 // Streaming chat endpoint — SSE/SignalR progressive token delivery
 app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, ILogger<Program> logger, CancellationToken ct) =>
@@ -1310,7 +1404,9 @@ app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router,
             statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 })
-.WithName("ChatStream");
+.WithName("ChatStream")
+.RequireAuthorization()
+.RequireRateLimiting("strict");
 
 // Health/info endpoint
 app.MapGet("/api/info", (IEnumerable<ISpecialistAgent> specialists) => Results.Ok(new
@@ -1322,7 +1418,9 @@ app.MapGet("/api/info", (IEnumerable<ISpecialistAgent> specialists) => Results.O
     Router = "RetailOpsRouter",
     Specialists = specialists.Select(s => new { s.Key, s.DisplayName }).ToList()
 }))
-.WithName("Info");
+.WithName("Info")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 // ── Alert endpoints ──────────────────────────────────────────────────────
 
@@ -1331,7 +1429,9 @@ app.MapGet("/api/alerts/active", async (IAlertService alertService, Cancellation
     var alerts = await alertService.GetActiveAlertsAsync(ct);
     return Results.Ok(alerts);
 })
-.WithName("GetActiveAlerts");
+.WithName("GetActiveAlerts")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 app.MapGet("/api/alerts/history", async (IAlertService alertService, HttpContext http, CancellationToken ct) =>
 {
@@ -1342,7 +1442,9 @@ app.MapGet("/api/alerts/history", async (IAlertService alertService, HttpContext
     var alerts = await alertService.GetHistoryAsync(userId, limit, ct);
     return Results.Ok(alerts);
 })
-.WithName("GetAlertHistory");
+.WithName("GetAlertHistory")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 app.MapPost("/api/alerts/{alertId}/snooze", async (string alertId, AlertSnoozeDto body, IAlertService alertService, CancellationToken ct) =>
 {
@@ -1358,7 +1460,9 @@ app.MapPost("/api/alerts/{alertId}/snooze", async (string alertId, AlertSnoozeDt
     await alertService.SnoozeAsync(body.AlertType ?? alertId, body.UserId, duration, ct);
     return Results.Ok(new { alertId, snoozedFor = duration.ToString(), userId = body.UserId });
 })
-.WithName("SnoozeAlert");
+.WithName("SnoozeAlert")
+.RequireAuthorization()
+.RequireRateLimiting("moderate");
 
 app.MapPost("/api/alerts/{alertId}/dismiss", async (string alertId, AlertDismissDto body, IAlertService alertService, CancellationToken ct) =>
 {
@@ -1368,7 +1472,9 @@ app.MapPost("/api/alerts/{alertId}/dismiss", async (string alertId, AlertDismiss
     await alertService.DismissAsync(alertId, body.UserId, ct);
     return Results.Ok(new { alertId, dismissed = true, userId = body.UserId });
 })
-.WithName("DismissAlert");
+.WithName("DismissAlert")
+.RequireAuthorization()
+.RequireRateLimiting("moderate");
 
 // ── Approval endpoints ───────────────────────────────────────────────────
 
@@ -1393,7 +1499,9 @@ app.MapGet("/api/approvals/pending", async (IApprovalGate gate, HttpContext http
         comment = r.Comment
     }));
 })
-.WithName("GetPendingApprovals");
+.WithName("GetPendingApprovals")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 app.MapGet("/api/approvals/{requestId}", async (string requestId, IApprovalGate gate, CancellationToken ct) =>
 {
@@ -1413,7 +1521,9 @@ app.MapGet("/api/approvals/{requestId}", async (string requestId, IApprovalGate 
         return Results.NotFound(new { error = $"Approval request '{requestId}' not found." });
     }
 })
-.WithName("GetApprovalStatus");
+.WithName("GetApprovalStatus")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 app.MapPost("/api/approvals/{requestId}/respond", async (string requestId, ApprovalResponseDto body, IApprovalGate gate, Microsoft.AspNetCore.SignalR.IHubContext<TelemetryHub> hubContext, CancellationToken ct) =>
 {
@@ -1442,7 +1552,9 @@ app.MapPost("/api/approvals/{requestId}/respond", async (string requestId, Appro
         return Results.NotFound(new { error = $"Approval request '{requestId}' not found." });
     }
 })
-.WithName("RespondToApproval");
+.WithName("RespondToApproval")
+.RequireAuthorization()
+.RequireRateLimiting("moderate");
 
 app.MapGet("/api/approvals/history", async (IApprovalGate gate, CancellationToken ct) =>
 {
@@ -1464,7 +1576,9 @@ app.MapGet("/api/approvals/history", async (IApprovalGate gate, CancellationToke
         comment = r.Comment
     }));
 })
-.WithName("GetApprovalHistory");
+.WithName("GetApprovalHistory")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 // ── Trace endpoints ──────────────────────────────────────────────────────
 
@@ -1473,7 +1587,9 @@ app.MapGet("/api/traces/recent", (ITraceCollector traceCollector, int? count) =>
     var traces = traceCollector.GetRecentTraces(count ?? 20);
     return Results.Ok(traces);
 })
-.WithName("GetRecentTraces");
+.WithName("GetRecentTraces")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 app.MapGet("/api/traces/{traceId}/summary", (string traceId, ITraceCollector traceCollector) =>
 {
@@ -1482,7 +1598,9 @@ app.MapGet("/api/traces/{traceId}/summary", (string traceId, ITraceCollector tra
         ? Results.Ok(summary)
         : Results.NotFound(new { error = $"Trace '{traceId}' not found." });
 })
-.WithName("GetTraceSummary");
+.WithName("GetTraceSummary")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 app.MapGet("/api/traces/{traceId}/spans", (string traceId, ITraceCollector traceCollector) =>
 {
@@ -1491,7 +1609,9 @@ app.MapGet("/api/traces/{traceId}/spans", (string traceId, ITraceCollector trace
         ? Results.Ok(spans)
         : Results.NotFound(new { error = $"Trace '{traceId}' not found." });
 })
-.WithName("GetTraceSpans");
+.WithName("GetTraceSpans")
+.RequireAuthorization()
+.RequireRateLimiting("relaxed");
 
 // ── Promo planning endpoints ─────────────────────────────────────────────
 
@@ -1512,7 +1632,7 @@ app.MapGet("/api/promo/calendar", async (HttpContext http, IHttpClientFactory ht
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetPromoCalendar");
+.WithName("GetPromoCalendar").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/promo/types", async (IHttpClientFactory httpFactory, CancellationToken ct) =>
 {
@@ -1522,7 +1642,7 @@ app.MapGet("/api/promo/types", async (IHttpClientFactory httpFactory, Cancellati
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetPromoTypes");
+.WithName("GetPromoTypes").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapPost("/api/taskmodule/promo", async (PromoEvaluationRequest request, IHttpClientFactory httpFactory, IApprovalGate approvalGate, ILogger<Program> logger, CancellationToken ct) =>
 {
@@ -1637,7 +1757,7 @@ app.MapPost("/api/taskmodule/promo", async (PromoEvaluationRequest request, IHtt
         }
     });
 })
-.WithName("PromoTaskModule");
+.WithName("PromoTaskModule").RequireAuthorization().RequireRateLimiting("moderate");
 
 // ── Knowledge Base endpoints ─────────────────────────────────────────────
 
@@ -1649,21 +1769,21 @@ app.MapPost("/api/knowledge/upload", async (KnowledgeUploadRequest body, IKnowle
     var id = await kb.IngestDocumentAsync(body.Title, body.Content, body.Source ?? "upload", ct);
     return Results.Ok(new { documentId = id, title = body.Title, status = "ingested" });
 })
-.WithName("UploadKnowledge");
+.WithName("UploadKnowledge").RequireAuthorization().RequireRateLimiting("upload");
 
 app.MapGet("/api/knowledge/documents", async (IKnowledgeBase kb, CancellationToken ct) =>
 {
     var docs = await kb.ListDocumentsAsync(ct);
     return Results.Ok(docs);
 })
-.WithName("ListKnowledgeDocuments");
+.WithName("ListKnowledgeDocuments").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapDelete("/api/knowledge/documents/{id}", async (string id, IKnowledgeBase kb, CancellationToken ct) =>
 {
     await kb.DeleteDocumentAsync(id, ct);
     return Results.Ok(new { documentId = id, status = "deleted" });
 })
-.WithName("DeleteKnowledgeDocument");
+.WithName("DeleteKnowledgeDocument").RequireAuthorization().RequireRateLimiting("moderate");
 
 app.MapPost("/api/knowledge/search", async (KnowledgeSearchRequest body, IKnowledgeBase kb, CancellationToken ct) =>
 {
@@ -1673,7 +1793,7 @@ app.MapPost("/api/knowledge/search", async (KnowledgeSearchRequest body, IKnowle
     var results = await kb.SearchAsync(body.Query, body.TopK ?? 5, ct);
     return Results.Ok(new { query = body.Query, results });
 })
-.WithName("SearchKnowledge");
+.WithName("SearchKnowledge").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/knowledge/stats", async (IKnowledgeBase kb, CancellationToken ct) =>
 {
@@ -1689,7 +1809,7 @@ app.MapGet("/api/knowledge/stats", async (IKnowledgeBase kb, CancellationToken c
         averageChunksPerDocument = Math.Round(avgChunks, 1)
     });
 })
-.WithName("KnowledgeStats");
+.WithName("KnowledgeStats").RequireAuthorization().RequireRateLimiting("relaxed");
 
 // ── Council endpoints ────────────────────────────────────────────────────
 
@@ -1732,7 +1852,7 @@ app.MapPost("/api/council/convene", async (CouncilConveneRequest body, ILogger<P
         })
     });
 })
-.WithName("ConveneCouncil");
+.WithName("ConveneCouncil").RequireAuthorization().RequireRateLimiting("strict");
 
 app.MapGet("/api/council/agents", (IEnumerable<ISpecialistAgent> specialists) =>
 {
@@ -1755,7 +1875,7 @@ app.MapGet("/api/council/agents", (IEnumerable<ISpecialistAgent> specialists) =>
 
     return Results.Ok(new { agents, total = agents.Count });
 })
-.WithName("ListCouncilAgents");
+.WithName("ListCouncilAgents").RequireAuthorization().RequireRateLimiting("relaxed");
 
 // ── Card endpoints ───────────────────────────────────────────────────────
 
@@ -1767,7 +1887,7 @@ app.MapPost("/api/cards", async (CreateCardRequest body, IAdaptiveCardState card
     var card = await cardState.CreateAsync(body, ct);
     return Results.Ok(card);
 })
-.WithName("CreateCard");
+.WithName("CreateCard").RequireAuthorization().RequireRateLimiting("moderate");
 
 app.MapGet("/api/cards", async (HttpContext http, IAdaptiveCardState cardState, CancellationToken ct) =>
 {
@@ -1788,7 +1908,7 @@ app.MapGet("/api/cards", async (HttpContext http, IAdaptiveCardState cardState, 
     var active = await cardState.GetActiveAsync(ct);
     return Results.Ok(active);
 })
-.WithName("ListCards");
+.WithName("ListCards").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/cards/{id}", async (string id, IAdaptiveCardState cardState, CancellationToken ct) =>
 {
@@ -1802,7 +1922,7 @@ app.MapGet("/api/cards/{id}", async (string id, IAdaptiveCardState cardState, Ca
         return Results.NotFound(new { error = $"Card '{id}' not found." });
     }
 })
-.WithName("GetCard");
+.WithName("GetCard").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapPost("/api/cards/{id}/action", async (string id, CardAction body, IAdaptiveCardState cardState, CancellationToken ct) =>
 {
@@ -1820,7 +1940,7 @@ app.MapPost("/api/cards/{id}/action", async (string id, CardAction body, IAdapti
         return Results.BadRequest(new { error = ex.Message });
     }
 })
-.WithName("CardAction");
+.WithName("CardAction").RequireAuthorization().RequireRateLimiting("moderate");
 
 app.MapPost("/api/cards/{id}/archive", async (string id, IAdaptiveCardState cardState, CancellationToken ct) =>
 {
@@ -1834,7 +1954,7 @@ app.MapPost("/api/cards/{id}/archive", async (string id, IAdaptiveCardState card
         return Results.NotFound(new { error = $"Card '{id}' not found." });
     }
 })
-.WithName("ArchiveCard");
+.WithName("ArchiveCard").RequireAuthorization().RequireRateLimiting("moderate");
 
 // ── Observability endpoints ──────────────────────────────────────────────
 
@@ -1845,7 +1965,7 @@ app.MapGet("/api/observability/costs", async (HttpContext http, ICostTracker cos
     var summary = await costTracker.GetSummaryAsync(period, ct);
     return Results.Ok(summary);
 })
-.WithName("GetCostSummary");
+.WithName("GetCostSummary").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/observability/costs/agents", async (HttpContext http, ICostTracker costTracker, CancellationToken ct) =>
 {
@@ -1854,7 +1974,7 @@ app.MapGet("/api/observability/costs/agents", async (HttpContext http, ICostTrac
     var agents = await costTracker.GetByAgentAsync(period, ct);
     return Results.Ok(agents);
 })
-.WithName("GetCostsByAgent");
+.WithName("GetCostsByAgent").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/observability/costs/trend", async (HttpContext http, ICostTracker costTracker, CancellationToken ct) =>
 {
@@ -1863,7 +1983,7 @@ app.MapGet("/api/observability/costs/trend", async (HttpContext http, ICostTrack
     var trend = await costTracker.GetTrendAsync(days, ct);
     return Results.Ok(trend);
 })
-.WithName("GetCostTrend");
+.WithName("GetCostTrend").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/observability/audit", async (HttpContext http, IAuditLog auditLog, CancellationToken ct) =>
 {
@@ -1879,21 +1999,21 @@ app.MapGet("/api/observability/audit", async (HttpContext http, IAuditLog auditL
     var entries = await auditLog.QueryAsync(query, ct);
     return Results.Ok(entries);
 })
-.WithName("GetAuditLog");
+.WithName("GetAuditLog").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/observability/audit/stats", async (IAuditLog auditLog, CancellationToken ct) =>
 {
     var stats = await auditLog.GetStatsAsync(ct);
     return Results.Ok(stats);
 })
-.WithName("GetAuditStats");
+.WithName("GetAuditStats").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/observability/export/sessions", async (IConversationExport exporter, CancellationToken ct) =>
 {
     var sessions = await exporter.ListSessionsAsync(ct);
     return Results.Ok(sessions);
 })
-.WithName("ListExportSessions");
+.WithName("ListExportSessions").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapPost("/api/observability/export/{sessionId}", async (string sessionId, HttpContext http, IConversationExport exporter, CancellationToken ct) =>
 {
@@ -1912,7 +2032,7 @@ app.MapPost("/api/observability/export/{sessionId}", async (string sessionId, Ht
         return Results.NotFound(new { error = $"Session '{sessionId}' not found." });
     }
 })
-.WithName("ExportSession");
+.WithName("ExportSession").RequireAuthorization().RequireRateLimiting("moderate");
 
 app.MapGet("/api/supply/health", async (string brand, IHttpClientFactory httpFactory, CancellationToken ct, string? region = null) =>
 {
@@ -1925,7 +2045,7 @@ app.MapGet("/api/supply/health", async (string brand, IHttpClientFactory httpFac
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetSupplyHealth");
+.WithName("GetSupplyHealth").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/supply/inventory", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? category = null, string? status = null) =>
 {
@@ -1941,7 +2061,7 @@ app.MapGet("/api/supply/inventory", async (IHttpClientFactory httpFactory, Cance
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetSupplyInventory");
+.WithName("GetSupplyInventory").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/supply/disruptions", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? severity = null, bool activeOnly = true) =>
 {
@@ -1956,7 +2076,7 @@ app.MapGet("/api/supply/disruptions", async (IHttpClientFactory httpFactory, Can
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetSupplyDisruptions");
+.WithName("GetSupplyDisruptions").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/supply/fulfillment", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? period = null, int minPeriods = 6) =>
 {
@@ -1971,7 +2091,7 @@ app.MapGet("/api/supply/fulfillment", async (IHttpClientFactory httpFactory, Can
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetSupplyFulfillment");
+.WithName("GetSupplyFulfillment").RequireAuthorization().RequireRateLimiting("relaxed");
 
 // ── Store operations endpoints ───────────────────────────────────────────
 
@@ -1986,7 +2106,7 @@ app.MapGet("/api/stores/performance", async (IHttpClientFactory httpFactory, Can
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetStorePerformance");
+.WithName("GetStorePerformance").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/stores/{storeId}/planogram/{aisleId}", async (string storeId, string aisleId, IHttpClientFactory httpFactory, CancellationToken ct) =>
 {
@@ -1998,7 +2118,7 @@ app.MapGet("/api/stores/{storeId}/planogram/{aisleId}", async (string storeId, s
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetShelfLayout");
+.WithName("GetShelfLayout").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapPost("/api/stores/{storeId}/planogram/{aisleId}/optimize", async (string storeId, string aisleId, IHttpClientFactory httpFactory, CancellationToken ct, string? brandFocus = null) =>
 {
@@ -2011,7 +2131,7 @@ app.MapPost("/api/stores/{storeId}/planogram/{aisleId}/optimize", async (string 
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("OptimizePlanogram");
+.WithName("OptimizePlanogram").RequireAuthorization().RequireRateLimiting("moderate");
 
 app.MapGet("/api/stores/{storeId}/stockout-risk", async (string storeId, IHttpClientFactory httpFactory, CancellationToken ct, string? skuId = null) =>
 {
@@ -2024,7 +2144,7 @@ app.MapGet("/api/stores/{storeId}/stockout-risk", async (string storeId, IHttpCl
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("PredictStockout");
+.WithName("PredictStockout").RequireAuthorization().RequireRateLimiting("relaxed");
 
 // ── Margin endpoints ─────────────────────────────────────────────────────
 
@@ -2039,7 +2159,7 @@ app.MapGet("/api/margin/{brandId}", async (string brandId, IHttpClientFactory ht
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetMarginByBrand");
+.WithName("GetMarginByBrand").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/margin/drivers/{brandId}", async (string brandId, IHttpClientFactory httpFactory, CancellationToken ct) =>
 {
@@ -2051,7 +2171,7 @@ app.MapGet("/api/margin/drivers/{brandId}", async (string brandId, IHttpClientFa
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetMarginDrivers");
+.WithName("GetMarginDrivers").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/margin/trend/{brandId}", async (string brandId, IHttpClientFactory httpFactory, CancellationToken ct, int quarters = 4) =>
 {
@@ -2063,7 +2183,7 @@ app.MapGet("/api/margin/trend/{brandId}", async (string brandId, IHttpClientFact
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("GetMarginTrend");
+.WithName("GetMarginTrend").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/margin/risks", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brandId = null) =>
 {
@@ -2076,7 +2196,7 @@ app.MapGet("/api/margin/risks", async (IHttpClientFactory httpFactory, Cancellat
     var json = await response.Content.ReadAsStringAsync(ct);
     return Results.Content(json, "application/json");
 })
-.WithName("DetectMarginRisks");
+.WithName("DetectMarginRisks").RequireAuthorization().RequireRateLimiting("relaxed");
 
 // ── Scorecard endpoints ──────────────────────────────────────────────────
 
@@ -2091,7 +2211,7 @@ app.MapPost("/api/scorecard", async (ScorecardRequest body, RetailPulse.Api.Scor
     var result = await scorecard.GenerateAsync(body.Brands, body.Region, ct);
     return Results.Ok(result);
 })
-.WithName("GenerateScorecard");
+.WithName("GenerateScorecard").RequireAuthorization().RequireRateLimiting("strict");
 
 // ── Explainability endpoints ─────────────────────────────────────────────
 
@@ -2114,7 +2234,7 @@ app.MapGet("/api/explain/{traceId}", (string traceId, RetailPulse.Api.Explainabi
         explanation = explainability.BuildExplanation(traceId)
     });
 })
-.WithName("GetExplanation");
+.WithName("GetExplanation").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/explain/session/{sessionId}", (string sessionId, RetailPulse.Api.Explainability.ExplainabilityService explainability) =>
 {
@@ -2128,7 +2248,7 @@ app.MapGet("/api/explain/session/{sessionId}", (string sessionId, RetailPulse.Ap
         t.StartedAt
     }));
 })
-.WithName("GetSessionTraces");
+.WithName("GetSessionTraces").RequireAuthorization().RequireRateLimiting("relaxed");
 
 // ── Message Extension endpoints ──────────────────────────────────────────
 
@@ -2206,7 +2326,7 @@ app.MapPost("/api/message-extension/query", async (MessageExtensionRequest body,
         return Results.StatusCode(503);
     }
 })
-.WithName("MessageExtensionQuery");
+.WithName("MessageExtensionQuery").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/message-extension/manifest", () =>
 {
@@ -2254,7 +2374,7 @@ app.MapGet("/api/message-extension/manifest", () =>
 
     return Results.Ok(manifest);
 })
-.WithName("MessageExtensionManifest");
+.WithName("MessageExtensionManifest").RequireAuthorization().RequireRateLimiting("relaxed");
 
 // ── Cache endpoints ───────────────────────────────────────────────────────
 
@@ -2270,21 +2390,21 @@ app.MapGet("/api/cache/stats", async (IResponseCache cache, CancellationToken ct
         memoryBytes = stats.MemoryBytes
     });
 })
-.WithName("GetCacheStats");
+.WithName("GetCacheStats").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapDelete("/api/cache", async (IResponseCache cache, CancellationToken ct) =>
 {
     await cache.InvalidateAsync(null, ct);
     return Results.Ok(new { status = "cleared" });
 })
-.WithName("ClearCache");
+.WithName("ClearCache").RequireAuthorization().RequireRateLimiting("moderate");
 
 app.MapDelete("/api/cache/{key}", async (string key, IResponseCache cache, CancellationToken ct) =>
 {
     await cache.InvalidateAsync(key, ct);
     return Results.Ok(new { key, status = "invalidated" });
 })
-.WithName("InvalidateCacheKey");
+.WithName("InvalidateCacheKey").RequireAuthorization().RequireRateLimiting("moderate");
 
 // ── Guardrails endpoints ─────────────────────────────────────────────────
 
@@ -2304,7 +2424,7 @@ app.MapGet("/api/guardrails/log", async (ISuspiciousRequestLog log, HttpContext 
         action = r.Action
     }));
 })
-.WithName("GetGuardrailsLog");
+.WithName("GetGuardrailsLog").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/guardrails/stats", async (ISuspiciousRequestLog log, CancellationToken ct) =>
 {
@@ -2318,7 +2438,7 @@ app.MapGet("/api/guardrails/stats", async (ISuspiciousRequestLog log, Cancellati
         since = stats.Since
     });
 })
-.WithName("GetGuardrailsStats");
+.WithName("GetGuardrailsStats").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapGet("/api/guardrails/config", (GuardrailsConfig config) =>
 {
@@ -2332,7 +2452,7 @@ app.MapGet("/api/guardrails/config", (GuardrailsConfig config) =>
         jailbreakPatterns = RetailPulse.Api.Guardrails.GuardrailPatterns.JailbreakPatterns.Select(p => p.Name).ToList()
     });
 })
-.WithName("GetGuardrailsConfig");
+.WithName("GetGuardrailsConfig").RequireAuthorization().RequireRateLimiting("relaxed");
 
 app.MapPut("/api/guardrails/config", (GuardrailsConfigUpdateDto body, GuardrailsConfig config) =>
 {
@@ -2354,7 +2474,7 @@ app.MapPut("/api/guardrails/config", (GuardrailsConfigUpdateDto body, Guardrails
         status = "updated"
     });
 })
-.WithName("UpdateGuardrailsConfig");
+.WithName("UpdateGuardrailsConfig").RequireAuthorization().RequireRateLimiting("moderate");
 
 // ── Escalation endpoint ─────────────────────────────────────────────────
 app.MapPost("/api/escalate", async (ChatRequest request, RetailPulse.Api.Escalation.EscalationOrchestrator escalation, IAgentRouter router, ILogger<Program> logger, CancellationToken ct) =>
@@ -2375,7 +2495,7 @@ app.MapPost("/api/escalate", async (ChatRequest request, RetailPulse.Api.Escalat
         escalationReason = result.EscalationReason
     });
 })
-.WithName("Escalate");
+.WithName("Escalate").RequireAuthorization().RequireRateLimiting("strict");
 
 app.Run();
 

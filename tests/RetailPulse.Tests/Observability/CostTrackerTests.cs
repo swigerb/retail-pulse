@@ -1,4 +1,6 @@
 using FluentAssertions;
+using Microsoft.Extensions.Options;
+using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Observability;
 using RetailPulse.Contracts.Observability;
 
@@ -13,7 +15,7 @@ public class CostTrackerTests
 
     public CostTrackerTests()
     {
-        _tracker = new InMemoryCostTracker();
+        _tracker = new InMemoryCostTracker(Options.Create(new ObservabilityOptions()));
     }
 
     #region TrackUsageAsync

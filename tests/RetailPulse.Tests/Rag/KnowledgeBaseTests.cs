@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Rag;
 using RetailPulse.Contracts.Rag;
 
@@ -13,7 +15,8 @@ namespace RetailPulse.Tests.Rag;
 public class KnowledgeBaseTests
 {
     private static InMemoryKnowledgeBase CreateKb() =>
-        new(NullLoggerFactory.Instance.CreateLogger<InMemoryKnowledgeBase>());
+        new(NullLoggerFactory.Instance.CreateLogger<InMemoryKnowledgeBase>(),
+            Options.Create(new KnowledgeOptions()));
 
     #region Ingest -> Document Count
 

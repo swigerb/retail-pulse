@@ -1,11 +1,14 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Options;
+using RetailPulse.Api.Configuration;
 using RetailPulse.Contracts.Rag;
 
 namespace RetailPulse.Api.Rag;
 
 /// <summary>
 /// In-memory knowledge base using BM25 scoring for document retrieval.
-/// Thread-safe via ConcurrentDictionary. No external dependencies required.
+/// Thread-safe via ConcurrentDictionary. Enforces configurable quotas on
+/// document count, chunk count, and individual document size.
 /// </summary>
 public sealed class InMemoryKnowledgeBase : IKnowledgeBase
 {
@@ -17,19 +20,34 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
     private readonly ConcurrentDictionary<string, IndexedDocument> _documents = new();
     private readonly ConcurrentDictionary<string, IndexedChunk> _chunks = new();
     private readonly ILogger<InMemoryKnowledgeBase> _logger;
+    private readonly KnowledgeOptions _options;
 
     // Global corpus stats for BM25
     private double _avgDocLength;
     private int _totalChunks;
     private readonly object _statsLock = new();
 
-    public InMemoryKnowledgeBase(ILogger<InMemoryKnowledgeBase> logger)
+    public InMemoryKnowledgeBase(ILogger<InMemoryKnowledgeBase> logger, IOptions<KnowledgeOptions> options)
     {
         _logger = logger;
+        _options = options.Value;
     }
 
     public Task<string> IngestDocumentAsync(string title, string content, string source, CancellationToken ct = default)
     {
+        // Validate document size (UTF-8 byte count)
+        var sizeBytes = (long)System.Text.Encoding.UTF8.GetByteCount(content);
+        if (sizeBytes > _options.MaxDocumentSizeBytes)
+            throw new InvalidOperationException(
+                $"Document '{title}' is {sizeBytes:N0} bytes, which exceeds the {_options.MaxDocumentSizeBytes:N0}-byte limit.");
+
+        // Validate document count
+        if (_documents.Count >= _options.MaxDocuments)
+            throw new InvalidOperationException(
+                $"Knowledge base is full ({_options.MaxDocuments} documents). Delete a document before uploading more.");
+
+        ct.ThrowIfCancellationRequested();
+
         var documentId = Guid.NewGuid().ToString("N")[..12];
         var chunks = DocumentChunker.Chunk(content);
 
@@ -39,11 +57,19 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
             return Task.FromResult(documentId);
         }
 
+        // Validate chunk count (check before ingesting)
+        if (_chunks.Count + chunks.Count > _options.MaxChunks)
+            throw new InvalidOperationException(
+                $"Ingesting '{title}' would produce {chunks.Count} chunks, exceeding the {_options.MaxChunks} chunk limit " +
+                $"(current: {_chunks.Count}). Delete documents to free space.");
+
         var doc = new IndexedDocument(documentId, title, source, DateTime.UtcNow, chunks.Count);
         _documents[documentId] = doc;
 
         foreach (var chunk in chunks)
         {
+            ct.ThrowIfCancellationRequested();
+
             var chunkId = $"{documentId}:{chunk.Index}";
             var tokens = Tokenize(chunk.Text);
             var termFrequencies = BuildTermFrequencies(tokens);
@@ -80,6 +106,7 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         var idfScores = new Dictionary<string, double>();
         foreach (var term in queryTerms.Distinct())
         {
+            ct.ThrowIfCancellationRequested();
             var docsContaining = _chunks.Values.Count(c => c.TermFrequencies.ContainsKey(term));
             idfScores[term] = Math.Log((_totalChunks - docsContaining + 0.5) / (docsContaining + 0.5) + 1.0);
         }
@@ -88,6 +115,8 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         var scored = new List<(IndexedChunk Chunk, double Score)>();
         foreach (var chunk in _chunks.Values)
         {
+            ct.ThrowIfCancellationRequested();
+
             var score = 0.0;
             foreach (var term in queryTerms)
             {
