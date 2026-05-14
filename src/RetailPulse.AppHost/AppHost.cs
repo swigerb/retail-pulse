@@ -27,4 +27,5 @@ builder.AddNpmApp("frontend", "../RetailPulse.Web", "dev")
     .WaitFor(api)
     .WithExternalHttpEndpoints();
 
+// Azure deployment: backend services publish to Container Apps, frontend to App Service (configured in azure.yaml)
 builder.Build().Run();

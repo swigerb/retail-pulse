@@ -49,3 +49,6 @@ appsettings.*.local.json
 .squad-workstream
 # Squad: ignore runtime state (logs, inbox, sessions)
 .squad/.scratch/
+
+# Azure Developer CLI
+.azure/
