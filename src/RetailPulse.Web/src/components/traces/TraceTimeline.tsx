@@ -201,16 +201,19 @@ function flattenSpans(spans: TraceSpan[]): FlatSpan[] {
 }
 
 function formatDuration(ms: number): string {
+  if (ms == null || isNaN(ms)) return '0ms';
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
   return `${ms.toFixed(0)}ms`;
 }
 
 function formatTokens(count: number): string {
+  if (count == null || isNaN(count)) return '0';
   if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
   return count.toString();
 }
 
 function formatCost(usd: number): string {
+  if (usd == null || isNaN(usd)) return '$0.00';
   if (usd === 0) return '$0.00';
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(3)}`;
@@ -218,20 +221,21 @@ function formatCost(usd: number): string {
 
 export function TraceTimeline({ trace }: TraceTimelineProps) {
   const styles = useStyles();
+  const spans = trace.spans ?? [];
 
-  const flatSpans = useMemo(() => flattenSpans(trace.spans), [trace.spans]);
+  const flatSpans = useMemo(() => flattenSpans(spans), [spans]);
 
   const traceStart = useMemo(() => {
-    if (trace.spans.length === 0) return 0;
-    return Math.min(...trace.spans.map(s => new Date(s.startTime).getTime()));
-  }, [trace.spans]);
+    if (spans.length === 0) return 0;
+    return Math.min(...spans.filter(s => s != null).map(s => new Date(s.startTime).getTime()));
+  }, [spans]);
 
-  const totalMs = trace.totalDurationMs || Math.max(1, ...trace.spans.map(s => {
+  const totalMs = trace.totalDurationMs || Math.max(1, ...spans.filter(s => s != null).map(s => {
     const offset = new Date(s.startTime).getTime() - traceStart;
-    return offset + s.durationMs;
+    return offset + (s.durationMs ?? 0);
   }));
 
-  if (trace.spans.length === 0) {
+  if (spans.length === 0) {
     return (
       <div className={styles.empty} data-testid="trace-timeline">
         <Text>No spans recorded for this trace</Text>
@@ -321,7 +325,7 @@ export function TraceTimeline({ trace }: TraceTimelineProps) {
 
       <div className={styles.footer}>
         <span className={styles.footerDuration}>
-          Total: {formatDuration(trace.totalDurationMs)} · {trace.spans.length} spans
+          Total: {formatDuration(trace.totalDurationMs)} · {spans.length} spans
         </span>
         <span className={styles.footerCost}>
           💰 {formatCost(trace.totalCostUsd)}

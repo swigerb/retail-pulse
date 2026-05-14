@@ -78,17 +78,20 @@ export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, on
   const totalCost = totalTokenUsage?.estimatedCostUsd ?? 0;
 
   const formatDuration = (ms: number) => {
+    if (ms == null || isNaN(ms)) return '0ms';
     if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
     return `${ms.toFixed(0)}ms`;
   };
 
   const formatTokens = (count: number) => {
+    if (count == null || isNaN(count)) return '0';
     if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
     if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
     return count.toString();
   };
 
   const formatCost = (usd: number) => {
+    if (usd == null || isNaN(usd)) return '$0.00';
     if (usd === 0) return '$0.00';
     if (usd < 0.01) return `$${usd.toFixed(4)}`;
     return `$${usd.toFixed(2)}`;
