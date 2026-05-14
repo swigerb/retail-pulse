@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { makeStyles } from '@fluentui/react-components';
@@ -60,36 +60,52 @@ const useStyles = makeStyles({
   },
 });
 
+const TICK_MS = 18;
+
 export function StreamingMessage({ tokens, isStreaming, onComplete }: StreamingMessageProps) {
   const styles = useStyles();
   const [displayedLength, setDisplayedLength] = useState(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const completedRef = useRef(false);
+  const targetRef = useRef(tokens.length);
+  const lastTickRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
 
-  // Progressively reveal tokens with smooth animation
-  useEffect(() => {
-    if (displayedLength >= tokens.length && !isStreaming) {
-      if (!completedRef.current) {
-        completedRef.current = true;
-        onComplete?.();
-      }
+  // Keep target length in sync with incoming tokens
+  targetRef.current = tokens.length;
+
+  const tick = useCallback((now: number) => {
+    if (now - lastTickRef.current < TICK_MS) {
+      rafRef.current = requestAnimationFrame(tick);
       return;
     }
+    lastTickRef.current = now;
 
-    if (displayedLength < tokens.length) {
-      intervalRef.current = setInterval(() => {
-        setDisplayedLength(prev => {
-          const remaining = tokens.length - prev;
-          const step = remaining > 20 ? Math.min(remaining, 5) : 1;
-          return Math.min(prev + step, tokens.length);
-        });
-      }, 18);
-    }
+    setDisplayedLength(prev => {
+      const target = targetRef.current;
+      if (prev >= target) return prev;
+      const remaining = target - prev;
+      const step = remaining > 20 ? Math.min(remaining, 5) : 1;
+      return Math.min(prev + step, target);
+    });
 
+    rafRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  // Single animation loop — starts once, cleans up on unmount
+  useEffect(() => {
+    rafRef.current = requestAnimationFrame(tick);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, [tokens.length, displayedLength, isStreaming, onComplete]);
+  }, [tick]);
+
+  // Fire onComplete once all tokens are revealed and streaming is done
+  useEffect(() => {
+    if (displayedLength >= tokens.length && !isStreaming && !completedRef.current) {
+      completedRef.current = true;
+      onComplete?.();
+    }
+  }, [displayedLength, tokens.length, isStreaming, onComplete]);
 
   const displayedText = useMemo(
     () => tokens.slice(0, displayedLength),

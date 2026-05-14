@@ -104,7 +104,7 @@ describe('CostDashboard', () => {
     });
     fireEvent.click(screen.getByText('This Week'));
     await waitFor(() => {
-      expect(fetchCostDashboard).toHaveBeenCalledWith('week');
+      expect(fetchCostDashboard).toHaveBeenCalledWith('week', expect.any(AbortSignal));
     });
   });
 });

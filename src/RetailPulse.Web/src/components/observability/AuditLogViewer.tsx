@@ -232,21 +232,20 @@ export default function AuditLogViewer() {
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   useEffect(() => {
-    let cancelled = false;
-    fetchAuditLog(filters, page, PAGE_SIZE)
+    const controller = new AbortController();
+    fetchAuditLog(filters, page, PAGE_SIZE, controller.signal)
       .then(result => {
-        if (cancelled) return;
         setEntries(result.entries);
         setTotalCount(result.totalCount);
         setError(null);
         setLoading(false);
       })
       .catch(e => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setError(e instanceof Error ? e.message : 'Failed to load audit log');
         setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [filters, page, fetchGen]);
 
   const updateFilter = <K extends keyof AuditLogFilters>(key: K, value: AuditLogFilters[K]) => {
