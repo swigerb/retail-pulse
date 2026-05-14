@@ -1,5 +1,22 @@
 # Target — History
 
+## Summary (May 2026)
+
+**Major Accomplishments:**
+- **Act 10 Full Coverage** (May 16) — Closed all 8 test coverage gaps (SQL injection, input length, OTel routing spans, Task Module integration, SignalR alert delivery, escalation L2 timeout, market share quarters assertion, scorecard weights verification). Added 49 new test methods across 8 files.
+- **Router Test Infrastructure** (May 13) — Implemented comprehensive routing tests (33 tests on RetailOpsRouter, 21 tests on GeneralAgent, 9 integration tests), validating classification, confidence threshold (0.6 boundary), fallback, multi-intent, and error handling.
+- **Demand Forecasting Tests** (May 12) — 109 new tests across 4 files: agent contract (28 tests), tool/query layer (30 tests), data integrity (46 tests), routing integration (5 tests). Real SQLite backend with seeded data, parameterized brand tests, seasonal pattern validation.
+- **Alert & Tracing Tests** (May 15) — 97 new tests: alert testing (45 tests on InMemoryAlertService), tracing (25 tests on InMemoryTraceCollector), Phase 1 regression (15 tests).
+- **Phase 4 Coverage Patterns** (May 16) — Established test-first contract approach for unimplemented features (IEscalationService, IScorecardService), reflection-based private static field testing, ActivityListener for OTel instrumentation testing.
+
+**Test Coverage:** 1,321 tests total. All passing. Comprehensive coverage across routing, tools, middleware, and emerging phase 4 features.
+
+**Key Patterns:** Real DB testing (not mocks), parameterized [Theory] tests, reflection for private statics, ActivityListener for OTel spans, SignalR hub mocking, task-first contract testing.
+
+**Quality Leadership:** Full closure on demo coverage gaps. Established testing patterns for routing classification, multi-agent integration, and emerging specialist agents.
+
+---
+
 ## 2026-04-30 — Team Initialization
 
 - **Project:** Retail Pulse — a generic pro-code agentic demo for retail & consumer goods organizations (grocers, QSRs, big box retail)

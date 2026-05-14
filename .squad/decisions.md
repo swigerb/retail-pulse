@@ -471,4 +471,38 @@ Sprints 1.5 (Proactive Alerts) and 1.6 (Distributed Tracing) introduced new subs
 - Alert service uses string-based Type/Severity (matching backend team's contract choice), not enums.
 - `SnoozeWithDetailsAsync` naming convention established for extended interface methods.
 
+### Use Fluent UI v9 Accordion Primitives for Collapsible Sections (2026-05-14)
+
+- **Context:** `CollapsibleSection.tsx` was a hand-rolled accordion with anti-patterns: `▶` text chevron, `maxHeight: 5000px` CSS hack, manual ARIA/keyboard handling, and custom CSS variables that bypass Fluent theming.
+- **Decision:** Replace all hand-rolled collapsible/accordion UI with Fluent UI v9's `Accordion`, `AccordionItem`, `AccordionHeader`, `AccordionPanel` from `@fluentui/react-components`. These primitives handle chevron rendering, keyboard navigation, ARIA attributes, and expand/collapse animation natively.
+- **Implications:**
+  - **New collapsible sections** should use `CollapsibleSection` (which wraps Fluent Accordion) or use Fluent Accordion primitives directly — no hand-rolling.
+  - **Theming:** Use Fluent `tokens.*` for colors instead of custom CSS variables like `var(--color-text-subtle)`. This ensures proper theming under `teamsDarkTheme`.
+  - **Accessibility:** Fluent Accordion provides WCAG-compliant keyboard nav and ARIA out of the box — don't add manual `role="button"` or `aria-expanded` on top.
+- **Owner:** Chick (Frontend Dev)
+- **Status:** Implemented
+
+### Fluent UI v9 Compliance — Standing User Directive (2026-05-14)
+
+- **Directive:** All UX must follow Fluent UI v9 guidelines. Use native Fluent UI v9 components (Accordion, Button, Drawer, etc.) instead of hand-rolled alternatives. The frontend agent (Chick) must treat this as a standing rule for all UI work.
+- **Rationale:** User request — captured for team memory
+- **Owner:** Brian Swiger (via Copilot)
+
+### Azure OpenAI Client Network Timeout + Timeout Error Handling (2026-05-14)
+
+- **Context:** The multi-tool Promo Planning Agent (`PromoPlanningAgent`) triggers 4+ sequential function-calling round-trips (PromoHistoryTool, CalculateLiftTool, EvaluateTimingTool, EstimateROITool, MarginProxyTools). When MCP server latency is high or unreachable, the cumulative time exceeds the default 100-second `HttpClient.Timeout`, causing `TaskCanceledException` that surfaces as the generic "Something went wrong" error.
+- **Decision:**
+  1. **Set `NetworkTimeout = 3 minutes`** on `AzureOpenAIClientOptions` passed to the `AzureOpenAIClient` constructor in `Program.cs`. This gives multi-tool agents enough headroom for their function-calling loops.
+  2. **Catch `TaskCanceledException` and `OperationCanceledException`** (when not user-initiated cancellation) in `AgentExecutionPipeline.ExecuteAsync` BEFORE the generic `Exception` catch. Return a dedicated timeout message: "⏳ The request took too long to complete..."
+- **Rationale:**
+  - 3 minutes is generous but bounded — prevents indefinite hangs while supporting complex multi-step analyses.
+  - The `when (!ct.IsCancellationRequested)` filter ensures user-initiated cancellations still propagate normally.
+  - Timeout-specific messaging helps users understand the failure mode vs. a generic server error.
+- **Impact:**
+  - All agents benefit from the increased timeout (single shared `AzureOpenAIClient`).
+  - No behavioral change for queries that complete within 100s — only extends the ceiling.
+  - Telemetry tags `error.type = "timeout"` for observability filtering.
+- **Owner:** Costco (Backend Dev)
+- **Status:** Implemented
+
 
