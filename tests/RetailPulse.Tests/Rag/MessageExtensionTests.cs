@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Rag;
 using RetailPulse.Contracts.Rag;
 using Moq;
@@ -16,7 +18,8 @@ namespace RetailPulse.Tests.Rag;
 public class MessageExtensionTests
 {
     private static InMemoryKnowledgeBase CreateKb() =>
-        new(NullLoggerFactory.Instance.CreateLogger<InMemoryKnowledgeBase>());
+        new(NullLoggerFactory.Instance.CreateLogger<InMemoryKnowledgeBase>(),
+            Options.Create(new KnowledgeOptions()));
 
     private static RagContextProvider CreateProvider(IKnowledgeBase kb) =>
         new(kb, NullLoggerFactory.Instance.CreateLogger<RagContextProvider>());

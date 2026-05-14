@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
+using RetailPulse.Api.Configuration;
 using RetailPulse.Contracts.Observability;
 
 namespace RetailPulse.Api.Observability;
@@ -9,10 +11,13 @@ namespace RetailPulse.Api.Observability;
 /// <summary>
 /// Tracks conversation sessions in-memory and exports them as Markdown or JSON.
 /// Sessions are created automatically when the first message is tracked.
+/// Bounded by configurable session count and per-session message limits.
+/// Thread-safe via lock-per-session for message lists and LRU eviction.
 /// </summary>
 public class ConversationExporter : IConversationExport
 {
     private readonly ConcurrentDictionary<string, TrackedSession> _sessions = new();
+    private readonly ObservabilityOptions _options;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -20,15 +25,26 @@ public class ConversationExporter : IConversationExport
         Converters = { new JsonStringEnumConverter() }
     };
 
+    public ConversationExporter(IOptions<ObservabilityOptions> options)
+    {
+        _options = options.Value;
+    }
+
     public Task<ExportResult> ExportAsync(string sessionId, ExportFormat format, CancellationToken ct = default)
     {
         if (!_sessions.TryGetValue(sessionId, out var session))
             throw new KeyNotFoundException($"Session '{sessionId}' not found.");
 
+        List<TrackedMessage> snapshot;
+        lock (session.Lock)
+        {
+            snapshot = [.. session.Messages];
+        }
+
         var content = format switch
         {
-            ExportFormat.Markdown => ExportMarkdown(session),
-            ExportFormat.Json => ExportJson(session),
+            ExportFormat.Markdown => ExportMarkdown(session, snapshot),
+            ExportFormat.Json => ExportJson(session, snapshot),
             _ => throw new ArgumentOutOfRangeException(nameof(format))
         };
 
@@ -41,12 +57,17 @@ public class ConversationExporter : IConversationExport
     public Task<IReadOnlyList<ExportableSession>> ListSessionsAsync(CancellationToken ct = default)
     {
         var sessions = _sessions.Values
-            .OrderByDescending(s => s.StartedAt)
-            .Select(s => new ExportableSession(
-                s.SessionId,
-                s.StartedAt,
-                s.Messages.Count,
-                s.AgentsUsed.ToArray()))
+            .OrderByDescending(s => Volatile.Read(ref s.LastActivity))
+            .Select(s =>
+            {
+                int count;
+                lock (s.Lock) { count = s.Messages.Count; }
+                return new ExportableSession(
+                    s.SessionId,
+                    s.StartedAt,
+                    count,
+                    s.AgentsUsed.ToArray());
+            })
             .ToList();
 
         return Task.FromResult<IReadOnlyList<ExportableSession>>(sessions);
@@ -54,6 +75,7 @@ public class ConversationExporter : IConversationExport
 
     /// <summary>
     /// Track a message in a session, creating the session if needed.
+    /// Enforces per-session message limits and LRU session eviction.
     /// </summary>
     public Task TrackMessageAsync(string sessionId, TrackedMessage message, CancellationToken ct = default)
     {
@@ -63,7 +85,18 @@ public class ConversationExporter : IConversationExport
             StartedAt = DateTime.UtcNow
         });
 
-        session.Messages.Add(message);
+        // LRU eviction: if session limit reached and this is a brand-new session, remove oldest
+        if (_sessions.Count > _options.MaxSessions)
+            EvictOldestSession(sessionId);
+
+        lock (session.Lock)
+        {
+            if (session.Messages.Count < _options.MaxMessagesPerSession)
+                session.Messages.Add(message);
+            // Silently drop messages beyond limit — the session stays usable
+        }
+
+        Volatile.Write(ref session.LastActivity, DateTime.UtcNow.Ticks);
 
         if (!string.IsNullOrEmpty(message.AgentId))
             session.AgentsUsed.Add(message.AgentId);
@@ -71,21 +104,34 @@ public class ConversationExporter : IConversationExport
         return Task.CompletedTask;
     }
 
+    /// <summary>Remove the session with the oldest last-activity timestamp.</summary>
+    private void EvictOldestSession(string excludeSessionId)
+    {
+        var oldest = _sessions
+            .Where(kv => kv.Key != excludeSessionId)
+            .OrderBy(kv => Volatile.Read(ref kv.Value.LastActivity))
+            .Select(kv => kv.Key)
+            .FirstOrDefault();
+
+        if (oldest is not null)
+            _sessions.TryRemove(oldest, out _);
+    }
+
     // ── Export formatters ────────────────────────────────────────────────
 
-    private static string ExportMarkdown(TrackedSession session)
+    private static string ExportMarkdown(TrackedSession session, List<TrackedMessage> messages)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# Conversation Export — Session {session.SessionId}");
         sb.AppendLine();
         sb.AppendLine($"**Started:** {session.StartedAt:yyyy-MM-dd HH:mm:ss UTC}");
-        sb.AppendLine($"**Messages:** {session.Messages.Count}");
+        sb.AppendLine($"**Messages:** {messages.Count}");
         sb.AppendLine($"**Agents:** {string.Join(", ", session.AgentsUsed)}");
         sb.AppendLine();
         sb.AppendLine("---");
         sb.AppendLine();
 
-        foreach (var msg in session.Messages)
+        foreach (var msg in messages)
         {
             var agentLabel = !string.IsNullOrEmpty(msg.AgentId) ? $" [{msg.AgentId}]" : "";
             sb.AppendLine($"### {msg.Role}{agentLabel} — {msg.Timestamp:HH:mm:ss}");
@@ -122,15 +168,15 @@ public class ConversationExporter : IConversationExport
         return sb.ToString();
     }
 
-    private static string ExportJson(TrackedSession session)
+    private static string ExportJson(TrackedSession session, List<TrackedMessage> messages)
     {
         return JsonSerializer.Serialize(new
         {
             sessionId = session.SessionId,
             startedAt = session.StartedAt,
-            messageCount = session.Messages.Count,
+            messageCount = messages.Count,
             agentsUsed = session.AgentsUsed.ToArray(),
-            messages = session.Messages.Select(m => new
+            messages = messages.Select(m => new
             {
                 role = m.Role,
                 content = m.Content,
@@ -149,8 +195,10 @@ public class ConversationExporter : IConversationExport
     {
         public required string SessionId { get; init; }
         public DateTime StartedAt { get; init; }
+        public long LastActivity = DateTime.UtcNow.Ticks;
+        public readonly object Lock = new();
         public List<TrackedMessage> Messages { get; } = [];
-        public HashSet<string> AgentsUsed { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public ConcurrentBag<string> AgentsUsed { get; } = [];
     }
 }
 
