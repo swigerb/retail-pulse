@@ -70,10 +70,10 @@ const useStyles= makeStyles({
 export function TelemetryPanel({ liveSpans, totalDurationMs, totalTokenUsage, onClear }: Props) {
   const styles = useStyles();
 
-  const totalDuration = totalDurationMs ?? liveSpans.reduce((sum, s) => sum + s.durationMs, 0);
-  const toolCalls = liveSpans.filter(s => s.type === 'tool_call').length;
-  const agentCalls = liveSpans.filter(s => s.type === 'agent_delegation' || s.type === 'agent_call').length;
-  const routingSpans = liveSpans.filter(s => s.type === 'routing').length;
+  const totalDuration = totalDurationMs ?? liveSpans.reduce((sum, s) => sum + (s?.durationMs ?? 0), 0);
+  const toolCalls = liveSpans.filter(s => s?.type === 'tool_call').length;
+  const agentCalls = liveSpans.filter(s => s?.type === 'agent_delegation' || s?.type === 'agent_call').length;
+  const routingSpans = liveSpans.filter(s => s?.type === 'routing').length;
   const totalTokens = totalTokenUsage?.totalTokens ?? 0;
   const totalCost = totalTokenUsage?.estimatedCostUsd ?? 0;
 

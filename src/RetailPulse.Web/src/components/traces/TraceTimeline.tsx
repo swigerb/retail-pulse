@@ -179,8 +179,9 @@ interface FlatSpan extends TraceSpan {
 }
 
 function flattenSpans(spans: TraceSpan[]): FlatSpan[] {
+  const validSpans = spans.filter((s): s is TraceSpan => s != null && s.id != null);
   const byParent = new Map<string, TraceSpan[]>();
-  for (const s of spans) {
+  for (const s of validSpans) {
     const key = s.parentId || '__root__';
     if (!byParent.has(key)) byParent.set(key, []);
     byParent.get(key)!.push(s);

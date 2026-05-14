@@ -118,24 +118,25 @@ const useStyles = makeStyles({
 
 export function SpanTimeline({ spans }: Props) {
   const styles = useStyles();
+  const validSpans = useMemo(() => spans.filter((s): s is AgentSpan => s != null && s.type != null), [spans]);
   const itemStyles = useMemo(
-    () => spans.map((span) => ({ borderLeftColor: spanColors[span.type] || '#666' })),
-    [spans],
+    () => validSpans.map((span) => ({ borderLeftColor: spanColors[span.type] || '#666' })),
+    [validSpans],
   );
   const badgeStyles = useMemo(
-    () => spans.map((span) => ({ color: spanColors[span.type] })),
-    [spans],
+    () => validSpans.map((span) => ({ color: spanColors[span.type] })),
+    [validSpans],
   );
 
   return (
     <div className={styles.timeline}>
-      {spans.length === 0 && (
+      {validSpans.length === 0 && (
         <div className={styles.empty}>
           <Text className={styles.emptyText}>Waiting for agent activity...</Text>
           <Text className={styles.emptyHint}>Send a message to see real-time telemetry</Text>
         </div>
       )}
-      {spans.map((span, i) => (
+      {validSpans.map((span, i) => (
         <div
           key={`span-${span.name}-${span.timestamp}`}
           className={styles.item}

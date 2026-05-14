@@ -264,6 +264,7 @@ export function Dashboard() {
 
     conn.off('span_completed');
     conn.on('span_completed', (data: { traceId: string; span: TraceSpan }) => {
+      if (!data?.span?.id) return;
       setTraces(prev => prev.map(t => {
         if (t.traceId !== data.traceId) return t;
         if (t.spans.some(s => s.id === data.span.id)) return t;
