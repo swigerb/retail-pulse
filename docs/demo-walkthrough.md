@@ -364,7 +364,7 @@ A competitor just launched a massive Memorial Day sale in the Southwest. Decreas
 
 ### Act 6: "The Specialist Network" (~3 min)
 
-> **What's new:** Multi-agent routing and the Demand Forecasting specialist — the system classifies user intent and dispatches to the right expert.
+> Multi-agent routing and the Demand Forecasting specialist — the system classifies user intent and dispatches to the right expert.
 
 **Narration:**
 
@@ -406,7 +406,7 @@ How is the field sentiment for Apex Grill in the Southwest?
 
 ### Act 7: "The Promo War Room" (~3 min)
 
-> **What's new:** Promotion Planning specialist with ROI modeling, approval gates, and the Task Module orchestration endpoint.
+> Promotion Planning specialist with ROI modeling, approval gates, and the Task Module orchestration endpoint.
 
 **Narration:**
 
@@ -450,7 +450,7 @@ What if we increase the budget to $600K for that Ridgeline Bourbon promotion?
 
 ### Act 8: "The Threat Board" (~3 min)
 
-> **What's new:** Competitive Intelligence specialist with threat detection, market share analysis, and proactive alerts.
+> Competitive Intelligence specialist with threat detection, market share analysis, and proactive alerts.
 
 **Narration:**
 
@@ -497,7 +497,7 @@ This is a serious competitive threat. I need a deeper analysis with supply chain
 
 ### Act 9: "The Portfolio Scorecard" (~4 min)
 
-> **What's new:** Portfolio Scorecard with weighted multi-dimensional scoring, the Portfolio Health Council consensus pattern, and Decision Explainability.
+> Portfolio Scorecard with weighted multi-dimensional scoring, the Portfolio Health Council consensus pattern, and Decision Explainability.
 
 **Narration:**
 
@@ -561,7 +561,7 @@ Convene the portfolio health council for Sierra Gold Tequila
 
 ### Act 10: "The Enterprise Shield" (~3 min)
 
-> **What's new:** Streaming responses, response caching, guardrails (input filtering + PII redaction), conversation memory, and the observability suite (cost tracking, audit log, conversation export).
+> Streaming responses, response caching, guardrails (input filtering + PII redaction), conversation memory, and the observability suite (cost tracking, audit log, conversation export).
 
 **Narration:**
 
