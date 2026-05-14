@@ -14,6 +14,8 @@ This guide walks you through presenting Retail Pulse to stakeholders. Total demo
 - A modern browser (Edge or Chrome recommended)
 - **For Act 2 (multi-agent delegation):** Foundry Shipment Agent must be enabled (`FoundryAgent:Enabled: true` in configuration)
 
+> **Auth note:** The demo runs in the `Development` environment where `DevelopmentAuthHandler` bypasses authentication. No SSO tokens or Entra ID configuration are needed. Rate limiting is active but lenient (`relaxed` policy = 100 requests/min on most endpoints). If you hit 429 errors during rapid demo queries, wait a few seconds or adjust the rate limiter config.
+
 ## Quick Start (30 seconds)
 
 ### 1. Configure your API key
@@ -756,3 +758,5 @@ Northeast, Southeast, Midwest, Southwest, West Coast, Pacific Northwest
 | No data in App Insights | Allow 2-5 minutes for telemetry to appear. Check the connection string in AppHost.cs. |
 | Data not resetting between demos | Delete `data/retailpulse.db` and restart the MCP Server. It will re-seed from `tenant.yaml`. |
 | UpdateMetrics returns "Invalid field" | Check field spelling against valid fields: Depletions (`DepletionsYoY`, `SellThroughYoY`, `InventoryWeeks`, `Status`, `SentimentSummary`), Shipments (`ShipmentsYoY`, `CasesShipped`, `CasesDepleted`, `AnomalyType`, `RiskLevel`), Sentiment (`Sentiment`). |
+| HTTP 429 Too Many Requests | Rate limiting is active. `strict` policy allows 10/min on chat routes. Wait a few seconds or adjust rate limiter config for demo. |
+| Bot SSO not working in Emulator | Expected — Bot Framework Emulator does not support SSO. Use `DevelopmentAuthHandler` (automatic in Development environment). See [Testing Guide](testing-guide.md). |
