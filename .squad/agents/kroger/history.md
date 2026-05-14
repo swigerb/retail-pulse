@@ -1,5 +1,19 @@
 # Kroger — History
 
+## Summary (May 2026)
+
+**Major Accomplishments:**
+- **Multi-Agent Router Architecture** (May 13) — Designed routing contracts (`IAgentRouter`, `ISpecialistAgent`), implemented LLM-based `RetailOpsRouter` with 0.6 confidence threshold, slash-separated intents (demand/forecasting, promo/campaign, etc.), refactored GeneralAgent, established DI pattern for specialist registration.
+- **Phase 4 Architectural Foundation** (Ongoing) — Defined system architecture for sprints 4.1–4.3 covering store operations, planogram optimization, margin analysis, escalation, scorecard, and explainability. Established patterns for multi-step orchestration, multi-agent voting, escalation fan-out, and financial modeling.
+
+**Test Coverage:** 174+ existing tests passing unchanged. Router infrastructure supports extensive specialist agent coverage.
+
+**Key Patterns:** Contract-driven specialist pattern, JSON-mode LLM classification, confidence thresholding, DI discovery pattern, YAML-based prompt configuration.
+
+**Lead Architect Role:** Established core routing and multi-agent orchestration patterns that define Sprint 1.1+ architecture. Cross-agent reconciliation ensured contract alignment with Costco backend work.
+
+---
+
 ## 2026-04-30 — Team Initialization
 
 - **Project:** Retail Pulse — a generic pro-code agentic demo for retail & consumer goods organizations (grocers, QSRs, big box retail)

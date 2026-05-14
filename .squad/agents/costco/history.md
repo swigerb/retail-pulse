@@ -1,5 +1,24 @@
 # Costco — History
 
+## Summary (May 2026)
+
+**Major Accomplishments:**
+- **Performance & Telemetry Fixes** (May 4-7) — Resolved telemetry double-counting bug (TotalDurationMs), improved tool enforcement in system prompt with concept-to-tool mapping.
+- **Multi-Agent Router Infrastructure** (May 8) — Implemented routing contracts, RetailOpsRouter, GeneralAgent refactor, DI wiring, and comprehensive test coverage. Reconciled parallel architecture work with Kroger.
+- **Demand Forecasting System** (May 13) — Built demand history schema (365-day daily granularity), seasonal factors table (38 rows), 4 MCP tools (GetHistoricalDemand, GenerateForecast, GetSeasonalityFactors, IdentifyDemandRisks).
+- **Distributed Tracing** (May 13) — Enhanced tracing with span hierarchy, trace summaries, SignalR push, token cost tracking, REST endpoints, OTel instrumentation.
+- **Promo Planning Agent** (May 13) — Integrated 4+ MCP tools (PromoHistory, CalculateLift, Evaluateming, EstimateROI), Task Module endpoint with approval gate (budget/ROI rules).
+- **Knowledge Base (RAG)** (May 13) — BM25-based search, CRUD endpoints, message extension API, sample docs, agent integration.
+- **Streaming & Guardrails** (May 13) — SignalR streaming hub, response cache contracts, query classifier, PII/jailbreak pattern detection, REST endpoints.
+- **Azure Timeout Handling** (May 14) — Set NetworkTimeout to 3 minutes for multi-tool agents, dedicated timeout error handling.
+- **Additional Work** (May 13-14) — Cross-tenant token fixes, quotas and bounded storage, Task cancellation handling, cost tracking with model passthrough.
+
+**Test Coverage:** 1,576 tests passing. All builds clean.
+
+**Key Patterns:** MCP tool integration, SQLite schema versioning, multi-tool function calling, SignalR hub integration, telemetry instrumentation.
+
+---
+
 ## 2026-04-30 — Team Initialization
 
 - **Project:** Retail Pulse — a generic pro-code agentic demo for retail & consumer goods organizations (grocers, QSRs, big box retail)
