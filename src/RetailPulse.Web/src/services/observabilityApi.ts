@@ -40,20 +40,38 @@ export async function fetchAuditLog(
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('pageSize', String(pageSize));
+  params.set('limit', String(pageSize));
   if (filters.agent) params.set('agent', filters.agent);
+  if (filters.agent) params.set('agentId', filters.agent);
   if (filters.startDate) params.set('startDate', filters.startDate);
+  if (filters.startDate) params.set('from', filters.startDate);
   if (filters.endDate) params.set('endDate', filters.endDate);
+  if (filters.endDate) params.set('to', filters.endDate);
   if (filters.actionType) params.set('actionType', filters.actionType);
+  if (filters.actionType) params.set('action', filters.actionType);
   if (filters.searchText) params.set('search', filters.searchText);
   const res = await fetch(`${BASE}/audit?${params.toString()}`, { signal });
+  if (res.status === 404) return { entries: [], totalCount: 0, page, pageSize };
   if (!res.ok) throw new Error(`Audit log fetch failed: ${res.status}`);
-  return res.json();
+  const raw = await res.json();
+  // Backend may return a flat array or the expected { entries, totalCount } shape
+  if (Array.isArray(raw)) {
+    return { entries: raw ?? [], totalCount: raw.length, page, pageSize };
+  }
+  return {
+    entries: raw?.entries ?? [],
+    totalCount: raw?.totalCount ?? (raw?.entries?.length ?? 0),
+    page: raw?.page ?? page,
+    pageSize: raw?.pageSize ?? pageSize,
+  };
 }
 
 export async function fetchExportSessions(signal?: AbortSignal): Promise<ExportSession[]> {
   const res = await fetch(`${BASE}/export/sessions`, { signal });
+  if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Sessions fetch failed: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
 export async function fetchExportPreview(
@@ -61,8 +79,14 @@ export async function fetchExportPreview(
   signal?: AbortSignal,
 ): Promise<ExportPreview> {
   const res = await fetch(`${BASE}/export/${sessionId}/preview`, { signal });
+  if (res.status === 404) return { sessionId, messages: [], totalMessages: 0 };
   if (!res.ok) throw new Error(`Preview fetch failed: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  return {
+    sessionId: data?.sessionId ?? sessionId,
+    messages: data?.messages ?? [],
+    totalMessages: data?.totalMessages ?? (data?.messages?.length ?? 0),
+  };
 }
 
 export async function exportSession(

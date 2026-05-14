@@ -371,8 +371,8 @@ export default function AuditLogViewer() {
                         <span className={styles.agentPill}>{entry.agentName}</span>
                       </td>
                       <td className={styles.tableCell}>{entry.action}</td>
-                      <td className={styles.tableCellMuted}>{entry.tokens.toLocaleString()}</td>
-                      <td className={styles.tableCellMuted}>{entry.durationMs}ms</td>
+                      <td className={styles.tableCellMuted}>{(entry.tokens ?? 0).toLocaleString()}</td>
+                      <td className={styles.tableCellMuted}>{entry.durationMs ?? 0}ms</td>
                     </tr>
                     {expandedId === entry.id && (
                       <tr key={`${entry.id}-detail`} className={styles.expandedRow}>
