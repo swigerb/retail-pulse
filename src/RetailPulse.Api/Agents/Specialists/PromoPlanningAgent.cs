@@ -17,6 +17,7 @@ public class PromoPlanningAgent : ISpecialistAgent
 {
     private readonly IAgentExecutionPipeline _pipeline;
     private readonly AgentDefinition _agentDef;
+    public string Model => _agentDef.Model;
     private readonly IEnumerable<AITool> _tools;
     private readonly IApprovalGate? _approvalGate;
 

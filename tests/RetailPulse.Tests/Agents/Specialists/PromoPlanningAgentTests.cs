@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
@@ -428,8 +430,14 @@ public class PromoPlanningAgentTests
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        return new PromoPlanningAgent(
+        var pipeline = new AgentExecutionPipeline(
             chatClient ?? Mock.Of<IChatClient>(),
+            hubContext,
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return new PromoPlanningAgent(
+            pipeline,
             new AgentDefinition
             {
                 Name = "PromoPlanningAgent",
@@ -437,10 +445,7 @@ public class PromoPlanningAgentTests
                 SystemPrompt = "You are a promotion planning specialist for retail brands.",
                 Temperature = 0.3
             },
-            hubContext,
             tools ?? [],
-            Mock.Of<ILogger<PromoPlanningAgent>>(),
-            config,
             approvalGate);
     }
 

@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
@@ -199,13 +201,16 @@ public class Phase4RoutingTests
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        return new GeneralAgent(
+        var pipeline = new AgentExecutionPipeline(
             Mock.Of<IChatClient>(),
-            new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "Test", Temperature = 0.7 },
             hubContext.Object,
-            [],
-            Mock.Of<ILogger<GeneralAgent>>(),
-            config);
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return new GeneralAgent(
+            pipeline,
+            new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "Test", Temperature = 0.7 },
+            []);
     }
 
     #endregion

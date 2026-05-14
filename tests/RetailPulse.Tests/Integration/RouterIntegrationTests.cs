@@ -3,14 +3,15 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Approval;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Models;
-using RetailPulse.Api.Agents;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Memory;
@@ -330,13 +331,15 @@ public class RouterIntegrationTests
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.95,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
 
         var demandChatClient = MockChatClient("Sierra Gold Tequila demand is projected to grow 8%.");
+        var demandHubContext = CreateMockHubContext();
+        var demandConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+        var demandPipeline = new AgentExecutionPipeline(
+            demandChatClient, demandHubContext, demandConfig,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
         var demandAgent = new DemandForecastAgent(
-            demandChatClient,
+            demandPipeline,
             new AgentDefinition { Name = "DemandForecast", Model = "gpt-5.4-mini", SystemPrompt = "Demand specialist", Temperature = 0.3 },
-            CreateMockHubContext(),
-            [],
-            Mock.Of<ILogger<DemandForecastAgent>>(),
-            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build());
+            []);
 
         var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { demandAgent, generalAgent };
@@ -423,13 +426,16 @@ public class RouterIntegrationTests
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        return new GeneralAgent(
+        var pipeline = new AgentExecutionPipeline(
             chatClient ?? Mock.Of<IChatClient>(),
-            new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "Test", Temperature = 0.7 },
             hubContext.Object,
-            [],
-            Mock.Of<ILogger<GeneralAgent>>(),
-            config);
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return new GeneralAgent(
+            pipeline,
+            new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "Test", Temperature = 0.7 },
+            []);
     }
 
     #endregion
@@ -531,16 +537,20 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var config = new ConfigurationBuilder()
+        var promoConfig = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        var promoAgent = new PromoPlanningAgent(
+        var promoPipeline = new AgentExecutionPipeline(
             MockChatClient("Promo analysis ready."),
+            hubContext.Object,
+            promoConfig,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        var promoAgent = new PromoPlanningAgent(
+            promoPipeline,
             new AgentDefinition { Name = "PromoPlanning", Model = "gpt-5.4-mini", SystemPrompt = "promo specialist", Temperature = 0.3 },
-            hubContext.Object, [],
-            Mock.Of<ILogger<PromoPlanningAgent>>(),
-            config);
+            []);
 
         var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, promoAgent };
@@ -562,16 +572,20 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var config = new ConfigurationBuilder()
+        var promoConfig2 = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        var promoAgent = new PromoPlanningAgent(
+        var promoPipeline2 = new AgentExecutionPipeline(
             MockChatClient("The BOGO campaign for Sierra Gold shows a projected 22% lift with ROI of 85%."),
+            hubContext.Object,
+            promoConfig2,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        var promoAgent = new PromoPlanningAgent(
+            promoPipeline2,
             new AgentDefinition { Name = "PromoPlanning", Model = "gpt-5.4-mini", SystemPrompt = "promo specialist", Temperature = 0.3 },
-            hubContext.Object, [],
-            Mock.Of<ILogger<PromoPlanningAgent>>(),
-            config);
+            []);
 
         var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, promoAgent };
@@ -623,16 +637,22 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var config = new ConfigurationBuilder()
+        var compConfig = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        var competitiveAgent = new CompetitiveIntelAgent(
+        var compPipeline = new AgentExecutionPipeline(
             MockChatClient("Competitive analysis for the requested category shows key threats."),
+            hubContext.Object,
+            compConfig,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        var competitiveAgent = new CompetitiveIntelAgent(
+            compPipeline,
             new AgentDefinition { Name = "CompetitiveIntel", Model = "gpt-5.4-mini", SystemPrompt = "competitive specialist", Temperature = 0.3 },
-            hubContext.Object, [],
-            Mock.Of<ILogger<CompetitiveIntelAgent>>(),
-            config);
+            [],
+            hubContext.Object,
+            Mock.Of<ILogger<CompetitiveIntelAgent>>());
 
         var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, competitiveAgent };
@@ -654,16 +674,22 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var config = new ConfigurationBuilder()
+        var compConfig2 = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        var competitiveAgent = new CompetitiveIntelAgent(
+        var compPipeline2 = new AgentExecutionPipeline(
             MockChatClient("BrandX has dropped prices by 15% in the Northeast spirits category. Recommendation: DIFFERENTIATE on premium positioning."),
+            hubContext.Object,
+            compConfig2,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        var competitiveAgent = new CompetitiveIntelAgent(
+            compPipeline2,
             new AgentDefinition { Name = "CompetitiveIntel", Model = "gpt-5.4-mini", SystemPrompt = "competitive specialist", Temperature = 0.3 },
-            hubContext.Object, [],
-            Mock.Of<ILogger<CompetitiveIntelAgent>>(),
-            config);
+            [],
+            hubContext.Object,
+            Mock.Of<ILogger<CompetitiveIntelAgent>>());
 
         var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, competitiveAgent };

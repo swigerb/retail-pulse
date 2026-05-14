@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
@@ -97,8 +99,14 @@ public static class AgentTestFixtures
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        return new GeneralAgent(
+        var pipeline = new AgentExecutionPipeline(
             chatClient ?? Mock.Of<IChatClient>(),
+            CreateMockHubContext(),
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return new GeneralAgent(
+            pipeline,
             new AgentDefinition
             {
                 Name = "General",
@@ -106,10 +114,7 @@ public static class AgentTestFixtures
                 SystemPrompt = "You are a retail analytics assistant.",
                 Temperature = 0.7
             },
-            CreateMockHubContext(),
-            tools ?? [],
-            Mock.Of<ILogger<GeneralAgent>>(),
-            config);
+            tools ?? []);
     }
 
     /// <summary>

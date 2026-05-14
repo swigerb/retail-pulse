@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
@@ -312,8 +314,8 @@ public class GeneralAgentTests
     [Fact]
     public void BuildTokenUsage_WithKnownModel_CalculatesCost()
     {
-        var agent = CreateAgentWithPricing();
-        var usage = agent.BuildTokenUsage(10000, 5000, 15000);
+        var (pipeline, _) = CreateAgentWithPricingParts();
+        var usage = pipeline.BuildTokenUsage(10000, 5000, 15000, "gpt-5.4-mini");
 
         usage.InputTokens.Should().Be(10000);
         usage.OutputTokens.Should().Be(5000);
@@ -324,16 +326,16 @@ public class GeneralAgentTests
     [Fact]
     public void BuildTokenUsage_WithUnknownModel_ReturnsNullCost()
     {
-        var agent = CreateAgent();
-        var usage = agent.BuildTokenUsage(1000, 500, 1500);
+        var (pipeline, _) = CreateAgentParts();
+        var usage = pipeline.BuildTokenUsage(1000, 500, 1500, "gpt-4o");
         usage.EstimatedCostUsd.Should().BeNull();
     }
 
     [Fact]
     public void BuildTokenUsage_WithZeroTokens_ReturnsZeroCost()
     {
-        var agent = CreateAgentWithPricing();
-        var usage = agent.BuildTokenUsage(0, 0, 0);
+        var (pipeline, _) = CreateAgentWithPricingParts();
+        var usage = pipeline.BuildTokenUsage(0, 0, 0, "gpt-5.4-mini");
         usage.EstimatedCostUsd.Should().Be(0m);
     }
 
@@ -356,21 +358,38 @@ public class GeneralAgentTests
 
     private static GeneralAgent CreateAgent(IChatClient? chatClient = null)
     {
+        var (pipeline, _) = CreateAgentParts(chatClient);
+        return new GeneralAgent(
+            pipeline,
+            new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "You are a retail analyst.", Temperature = 0.7 },
+            []);
+    }
+
+    private static (AgentExecutionPipeline Pipeline, AgentDefinition AgentDef) CreateAgentParts(IChatClient? chatClient = null)
+    {
         var hubContext = CreateMockHubContext();
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        return new GeneralAgent(
+        var pipeline = new AgentExecutionPipeline(
             chatClient ?? Mock.Of<IChatClient>(),
-            new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "You are a retail analyst.", Temperature = 0.7 },
             hubContext,
-            [],
-            Mock.Of<ILogger<GeneralAgent>>(),
-            config);
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        var agentDef = new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "You are a retail analyst.", Temperature = 0.7 };
+
+        return (pipeline, agentDef);
     }
 
     private static GeneralAgent CreateAgentWithPricing(IChatClient? chatClient = null)
+    {
+        var (pipeline, agentDef) = CreateAgentWithPricingParts(chatClient);
+        return new GeneralAgent(pipeline, agentDef, []);
+    }
+
+    private static (AgentExecutionPipeline Pipeline, AgentDefinition AgentDef) CreateAgentWithPricingParts(IChatClient? chatClient = null)
     {
         var hubContext = CreateMockHubContext();
         var config = new ConfigurationBuilder()
@@ -381,13 +400,15 @@ public class GeneralAgentTests
             })
             .Build();
 
-        return new GeneralAgent(
+        var pipeline = new AgentExecutionPipeline(
             chatClient ?? Mock.Of<IChatClient>(),
-            new AgentDefinition { Name = "General", Model = "gpt-5.4-mini", SystemPrompt = "Analyst", Temperature = 0.7 },
             hubContext,
-            [],
-            Mock.Of<ILogger<GeneralAgent>>(),
-            config);
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        var agentDef = new AgentDefinition { Name = "General", Model = "gpt-5.4-mini", SystemPrompt = "Analyst", Temperature = 0.7 };
+
+        return (pipeline, agentDef);
     }
 
     private static IHubContext<TelemetryHub> CreateMockHubContext()

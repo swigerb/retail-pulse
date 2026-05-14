@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
@@ -53,10 +55,17 @@ public class TaskModuleTests : IDisposable
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
-        return new PromoPlanningAgent(
+
+        var pipeline = new AgentExecutionPipeline(
             Mock.Of<IChatClient>(),
+            hubContext,
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return new PromoPlanningAgent(
+            pipeline,
             new AgentDefinition { Name = "PromoPlanningAgent", Model = "gpt-5.4-mini", SystemPrompt = "test", Temperature = 0.3 },
-            hubContext, [], Mock.Of<ILogger<PromoPlanningAgent>>(), config, gate);
+            [], gate);
     }
 
     private static IHubContext<TelemetryHub> CreateMockHubContext()

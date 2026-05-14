@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
@@ -394,8 +396,14 @@ public class DemandForecastAgentTests
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        return new DemandForecastAgent(
+        var pipeline = new AgentExecutionPipeline(
             chatClient ?? Mock.Of<IChatClient>(),
+            hubContext,
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return new DemandForecastAgent(
+            pipeline,
             new AgentDefinition
             {
                 Name = "DemandForecast",
@@ -403,10 +411,7 @@ public class DemandForecastAgentTests
                 SystemPrompt = "You are a demand forecasting specialist for retail brands.",
                 Temperature = 0.3
             },
-            hubContext,
-            tools ?? [],
-            Mock.Of<ILogger<DemandForecastAgent>>(),
-            config);
+            tools ?? []);
     }
 
     private static IHubContext<TelemetryHub> CreateMockHubContext()
