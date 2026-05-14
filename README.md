@@ -238,10 +238,15 @@ retail-pulse/
 ├── tests/
 │   └── RetailPulse.Tests/            # xUnit tests (174 passing)
 ├── deploy/                           # Deployment & infrastructure
-│   ├── deploy.ps1 / deploy.sh        # One-click deployment scripts
+│   ├── deploy.ps1 / deploy.sh        # One-click local deployment scripts
 │   ├── apim-ai-gateway/              # APIM AI Gateway Bicep (main.bicep, policy.xml)
 │   ├── foundry-agent/                # Foundry agent deployment
 │   └── generate-traffic.ps1          # Load testing
+├── infra/                            # Azure infrastructure (Bicep, used by azd)
+│   ├── main.bicep                    # Subscription-scoped orchestrator
+│   └── modules/                      # App Insights, Container Apps Env, App Service
+├── azd-hooks/                        # Azure Developer CLI lifecycle hooks
+├── azure.yaml                        # Azure Developer CLI project file
 ├── ai-gateway-dev-portal/            # AI Gateway Dev Portal (APIM observability)
 └── docs/                             # Documentation
 ```
@@ -283,6 +288,22 @@ See the [complete demo script](docs/demo-walkthrough.md) for a step-by-step pres
 
 ## Azure Deployment
 
+### Azure Developer CLI (`azd up`) — Recommended
+
+The fastest way to deploy Retail Pulse to Azure:
+
+```bash
+azd auth login
+azd up
+```
+
+This deploys:
+- **Backend** (API, McpServer, TeamsBot) → Azure Container Apps
+- **Frontend** (React/Vite) → Azure App Service (Node 20 LTS)
+- **Monitoring** → Application Insights + Log Analytics
+
+See [docs/deployment-azd.md](docs/deployment-azd.md) for full documentation.
+
 ### APIM AI Gateway
 
 The `deploy/apim-ai-gateway/` directory contains Bicep templates to deploy Azure API Management as an AI Gateway fronting Azure OpenAI:
@@ -298,7 +319,7 @@ This deploys:
 - **role-assignment.bicep** — RBAC for APIM → Azure OpenAI access
 - **a2a-api.bicep** / **mcp-api.bicep** — Agent-to-agent and MCP API definitions
 
-### One-Click Deploy
+### One-Click Local Deploy
 
 ```powershell
 # Windows

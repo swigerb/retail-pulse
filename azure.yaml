@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+name: retail-pulse
+metadata:
+  template: azd-init@1.11.0
+services:
+  api:
+    project: ./src/RetailPulse.Api
+    host: containerapp
+    language: dotnet
+  mcpserver:
+    project: ./src/RetailPulse.McpServer
+    host: containerapp
+    language: dotnet
+  teamsbot:
+    project: ./src/RetailPulse.TeamsBot
+    host: containerapp
+    language: dotnet
+  frontend:
+    project: ./src/RetailPulse.Web
+    host: appservice
+    language: js
+    dist: dist
+hooks:
+  preprovision:
+    shell: sh
+    run: azd-hooks/preprovision.sh
+    continueOnError: false

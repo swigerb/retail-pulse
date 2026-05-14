@@ -1,0 +1,9 @@
+{
+  "resourcesResourceGroups": "rg-",
+  "insightsComponents": "appi-",
+  "operationalInsightsWorkspaces": "log-",
+  "appManagedEnvironments": "cae-",
+  "appContainerApps": "ca-",
+  "webSites": "app-",
+  "webServerFarms": "plan-"
+}
