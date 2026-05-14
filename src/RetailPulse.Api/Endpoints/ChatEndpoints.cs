@@ -1,0 +1,599 @@
+using RetailPulse.Api.Memory;
+using RetailPulse.Api.Middleware;
+using RetailPulse.Api.Models;
+using RetailPulse.Api.Observability;
+using RetailPulse.Api.Rag;
+using RetailPulse.Api.Tracing;
+using RetailPulse.Contracts;
+using RetailPulse.Contracts.Caching;
+using RetailPulse.Contracts.Cards;
+using RetailPulse.Contracts.Consensus;
+using RetailPulse.Contracts.Observability;
+using RetailPulse.Contracts.Routing;
+using RetailPulse.Contracts.Tracing;
+using ChatRequest = RetailPulse.Contracts.ChatRequest;
+using ChatResponse = RetailPulse.Contracts.ChatResponse;
+
+namespace RetailPulse.Api.Endpoints;
+
+public static class ChatEndpoints
+{
+    public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
+    {
+        // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
+        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, ILogger<Program> logger, CancellationToken ct) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Message))
+            {
+                return Results.BadRequest(new { error = "Field 'message' is required." });
+            }
+
+            try
+            {
+                var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+                var userId = request.User?.ObjectId ?? "anonymous";
+
+                // ── Guardrails: input check ──────────────────────────────────────
+                var guardrailResult = await guardrails.CheckInputAsync(request, ct);
+                if (guardrailResult.IsBlocked)
+                {
+                    return Results.Ok(new ChatResponse(
+                        guardrailResult.RefusalMessage!,
+                        sessionId,
+                        [],
+                        null,
+                        0));
+                }
+
+                // ── Cache: check for cached response ─────────────────────────────
+                if (CacheHelpers.IsCacheable(request.Message))
+                {
+                    var cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
+                    var cached = await responseCache.GetAsync(cacheKey, ct);
+                    if (cached is not null)
+                    {
+                        logger.LogInformation("Cache hit for session {SessionId}, key {CacheKey}", sessionId, cacheKey[..8]);
+                        return Results.Ok(new ChatResponse(
+                            cached.Response,
+                            sessionId,
+                            [new AgentSpan("cache.hit", "cache", $"Served from cache (agent: {cached.AgentId})", 0, DateTimeOffset.UtcNow, sessionId)],
+                            null,
+                            0));
+                    }
+                }
+
+                // Start root trace span: chat_request
+                using var chatActivity = AgentTelemetry.StartChatRequest(sessionId, request.Message);
+                var traceId = chatActivity?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+                var traceStartTime = DateTimeOffset.UtcNow;
+
+                // Memory recall with tracing
+                string? memoryContext = null;
+                using (var memoryRecallActivity = AgentTelemetry.StartMemoryRecall(userId))
+                {
+                    var memoryStart = DateTimeOffset.UtcNow;
+                    memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+                    var memoryEnd = DateTimeOffset.UtcNow;
+                    var memoryDurationMs = (memoryEnd - memoryStart).TotalMilliseconds;
+
+                    memoryRecallActivity?.SetTag("memory.entries_recalled", memoryContext is not null ? "context_found" : "none");
+
+                    traceCollector.CaptureSpan(new TraceSpan(
+                        SpanId: Guid.NewGuid().ToString("N")[..16],
+                        TraceId: traceId,
+                        ParentSpanId: chatActivity?.SpanId.ToString(),
+                        OperationName: "memory.recall",
+                        StartTime: memoryStart,
+                        EndTime: memoryEnd,
+                        DurationMs: memoryDurationMs,
+                        Tags: new Dictionary<string, string>
+                        {
+                            ["memory.user_id"] = userId,
+                            ["memory.entries_recalled"] = memoryContext is not null ? "context_found" : "none"
+                        }));
+                }
+
+                var enrichedRequest = request;
+                if (memoryContext is not null)
+                {
+                    var historyWithMemory = new List<ChatHistoryMessage>
+                    {
+                        new("system", memoryContext)
+                    };
+                    if (request.History is { Count: > 0 })
+                        historyWithMemory.AddRange(request.History);
+
+                    enrichedRequest = request with { History = historyWithMemory };
+                }
+
+                // RAG context injection — search knowledge base for relevant grounding
+                var ragContext = await ragProvider.GetContextAsync(request.Message, ct);
+                if (ragContext is not null)
+                {
+                    var historyWithRag = new List<ChatHistoryMessage>(enrichedRequest.History ?? [])
+                    {
+                        new("system", ragContext)
+                    };
+                    enrichedRequest = enrichedRequest with { History = historyWithRag };
+                }
+
+                // Router classification with tracing
+                RoutingDecision decision;
+                {
+                    var classifyStart = DateTimeOffset.UtcNow;
+                    using var classifyActivity = AgentTelemetry.StartRouterClassify(enrichedRequest.Message);
+
+                    decision = await router.RouteAsync(
+                        enrichedRequest.Message,
+                        enrichedRequest.History,
+                        enrichedRequest.User,
+                        tenantId: null,
+                        ct);
+
+                    var classifyEnd = DateTimeOffset.UtcNow;
+                    classifyActivity?.SetTag("router.intent", decision.Intent);
+                    classifyActivity?.SetTag("router.confidence", decision.Confidence);
+
+                    traceCollector.CaptureSpan(new TraceSpan(
+                        SpanId: Guid.NewGuid().ToString("N")[..16],
+                        TraceId: traceId,
+                        ParentSpanId: chatActivity?.SpanId.ToString(),
+                        OperationName: "router.classify",
+                        StartTime: classifyStart,
+                        EndTime: classifyEnd,
+                        DurationMs: (classifyEnd - classifyStart).TotalMilliseconds,
+                        Tags: new Dictionary<string, string>
+                        {
+                            ["router.intent"] = decision.Intent,
+                            ["router.confidence"] = decision.Confidence.ToString("F2")
+                        }));
+                }
+
+                // Agent selection with tracing
+                ISpecialistAgent? specialist;
+                {
+                    var selectStart = DateTimeOffset.UtcNow;
+                    using var selectActivity = AgentTelemetry.StartRouterSelectAgent();
+
+                    specialist = specialists.FirstOrDefault(s =>
+                        string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase));
+
+                    if (specialist is null)
+                    {
+                        logger.LogWarning("No specialist found for key '{AgentKey}' — using General agent", decision.AgentKey);
+                        specialist = specialists.First(s => s.Key == "general");
+                    }
+
+                    var selectEnd = DateTimeOffset.UtcNow;
+                    selectActivity?.SetTag("router.selected_agent", specialist.Key);
+                    selectActivity?.SetTag("router.selected_agent_name", specialist.DisplayName);
+
+                    traceCollector.CaptureSpan(new TraceSpan(
+                        SpanId: Guid.NewGuid().ToString("N")[..16],
+                        TraceId: traceId,
+                        ParentSpanId: chatActivity?.SpanId.ToString(),
+                        OperationName: "router.select_agent",
+                        StartTime: selectStart,
+                        EndTime: selectEnd,
+                        DurationMs: (selectEnd - selectStart).TotalMilliseconds,
+                        Tags: new Dictionary<string, string>
+                        {
+                            ["router.selected_agent"] = specialist.Key,
+                            ["router.selected_agent_name"] = specialist.DisplayName
+                        }));
+                }
+
+                logger.LogInformation(
+                    "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}, traceId: {TraceId}",
+                    specialist.Key, specialist.DisplayName, decision.Intent, decision.Confidence, traceId);
+
+                // Council interception: if the router classified as council/health, convene the council
+                if (decision.DetectedIntents?.Any(i => string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true
+                    || string.Equals(decision.Intent, "council/health", StringComparison.OrdinalIgnoreCase))
+                {
+                    var council = app.Services.GetService<IConsensusCouncil>();
+                    if (council is not null)
+                    {
+                        var tenant = tenantProvider.GetTenant();
+                        var brand = ExtractBrand(enrichedRequest.Message, tenant);
+                        var verdict = await council.ConveneAsync(brand, null, ct);
+
+                        var councilReply = $"## Portfolio Health Council — {verdict.Brand}\n\n" +
+                            $"**Overall Rating: {verdict.OverallRating}** {(verdict.IsUnanimous ? "(unanimous)" : "(split decision)")}\n\n" +
+                            $"{verdict.Synthesis}\n\n" +
+                            (verdict.ActionItems.Length > 0
+                                ? "### Action Items\n" + string.Join("\n", verdict.ActionItems.Select(a => $"- {a}")) + "\n\n"
+                                : "") +
+                            (verdict.Disagreements.Length > 0
+                                ? "### Disagreements\n" + string.Join("\n", verdict.Disagreements.Select(d => $"- {d}")) + "\n\n"
+                                : "") +
+                            "### Agent Votes\n" +
+                            string.Join("\n", verdict.Votes.Select(v =>
+                                $"- **{v.AgentName}**: {v.Rating} (confidence: {v.Confidence:F2}) — {v.Reasoning}"));
+
+                        var councilResponse = new ChatResponse(
+                            councilReply,
+                            enrichedRequest.SessionId ?? sessionId,
+                            [],
+                            null,
+                            (long)verdict.TotalDuration.TotalMilliseconds);
+
+                        await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, councilReply, ct);
+
+                        // Auto-create a Voting card from the council verdict
+                        var cardState = app.Services.GetRequiredService<IAdaptiveCardState>();
+                        var cardData = new Dictionary<string, object>
+                        {
+                            ["brand"] = verdict.Brand,
+                            ["overallRating"] = verdict.OverallRating.ToString(),
+                            ["synthesis"] = verdict.Synthesis,
+                            ["isUnanimous"] = verdict.IsUnanimous
+                        };
+                        var votingCard = await cardState.CreateAsync(
+                            new CreateCardRequest(
+                                $"Health Assessment: {verdict.Brand}",
+                                CardType.Voting,
+                                userId,
+                                cardData), ct);
+
+                        // Seed initial votes from council agent votes
+                        foreach (var vote in verdict.Votes)
+                        {
+                            await cardState.ActionAsync(votingCard.Id, new CardAction(
+                                vote.AgentId, vote.AgentName, CardActionType.Vote,
+                                new Dictionary<string, string> { ["vote"] = vote.Rating.ToString() }), ct);
+                        }
+
+                        return Results.Ok(councilResponse);
+                    }
+                }
+
+                // Agent execution with tracing
+                ChatResponse response;
+                {
+                    var agentStart = DateTimeOffset.UtcNow;
+                    using var agentActivity = AgentTelemetry.StartAgentProcess(specialist.Key);
+
+                    response = await specialist.HandleAsync(enrichedRequest, ct);
+
+                    var agentEnd = DateTimeOffset.UtcNow;
+                    var toolsCalledCount = response.Spans?.Count(s => s.Type == "tool_call") ?? 0;
+                    var inputTokens = response.TokenUsage?.InputTokens ?? 0;
+                    var outputTokens = response.TokenUsage?.OutputTokens ?? 0;
+
+                    agentActivity?.SetTag("agent.name", specialist.Key);
+                    agentActivity?.SetTag("agent.tools_called_count", toolsCalledCount);
+                    agentActivity?.SetTag("agent.token_input", inputTokens);
+                    agentActivity?.SetTag("agent.token_output", outputTokens);
+
+                    traceCollector.CaptureSpan(new TraceSpan(
+                        SpanId: Guid.NewGuid().ToString("N")[..16],
+                        TraceId: traceId,
+                        ParentSpanId: chatActivity?.SpanId.ToString(),
+                        OperationName: $"agent.{specialist.Key}.process",
+                        StartTime: agentStart,
+                        EndTime: agentEnd,
+                        DurationMs: (agentEnd - agentStart).TotalMilliseconds,
+                        InputTokens: inputTokens,
+                        OutputTokens: outputTokens,
+                        Tags: new Dictionary<string, string>
+                        {
+                            ["agent.name"] = specialist.Key,
+                            ["agent.tools_called_count"] = toolsCalledCount.ToString(),
+                            ["agent.token_input"] = inputTokens.ToString(),
+                            ["agent.token_output"] = outputTokens.ToString()
+                        }));
+                }
+
+                // Record individual tool spans from agent response
+                if (response.Spans is { Count: > 0 })
+                {
+                    foreach (var span in response.Spans.Where(s => s.Type is "tool_call" or "tool_result"))
+                    {
+                        traceCollector.CaptureSpan(new TraceSpan(
+                            SpanId: Guid.NewGuid().ToString("N")[..16],
+                            TraceId: traceId,
+                            ParentSpanId: chatActivity?.SpanId.ToString(),
+                            OperationName: $"tool.{span.Name}",
+                            StartTime: span.Timestamp,
+                            EndTime: span.Timestamp.AddMilliseconds(span.DurationMs),
+                            DurationMs: span.DurationMs,
+                            Tags: new Dictionary<string, string>
+                            {
+                                ["tool.name"] = span.Name,
+                                ["tool.duration_ms"] = span.DurationMs.ToString("F0"),
+                                ["tool.result_size"] = span.Detail?.Length > 0 ? $"{span.Detail.Length} chars" : ""
+                            }));
+                    }
+                }
+
+                // Memory store with tracing (fire-and-forget)
+                if (decision.Intent != AgentIntent.MemoryManagement)
+                {
+                    var capturedTraceId = traceId;
+                    var capturedParentSpanId = chatActivity?.SpanId.ToString();
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var storeStart = DateTimeOffset.UtcNow;
+                            using var memoryStoreActivity = AgentTelemetry.StartMemoryStore(userId);
+                            await memoryMiddleware.ExtractAndStoreAsync(userId, request.Message, response.Reply, CancellationToken.None);
+                            var storeEnd = DateTimeOffset.UtcNow;
+
+                            traceCollector.CaptureSpan(new TraceSpan(
+                                SpanId: Guid.NewGuid().ToString("N")[..16],
+                                TraceId: capturedTraceId,
+                                ParentSpanId: capturedParentSpanId,
+                                OperationName: "memory.store",
+                                StartTime: storeStart,
+                                EndTime: storeEnd,
+                                DurationMs: (storeEnd - storeStart).TotalMilliseconds,
+                                Tags: new Dictionary<string, string>
+                                {
+                                    ["memory.user_id"] = userId,
+                                    ["memory.entries_stored"] = "extracted"
+                                }));
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Background memory extraction failed for user {UserId}", userId);
+                        }
+                    }, CancellationToken.None);
+                }
+
+                // Notify trace completion via SignalR
+                _ = traceCollector.NotifyTraceCompletedAsync(traceId);
+
+                // ── Observability: cost tracking + audit log ─────────────────────
+                {
+                    var inputTokens = response.TokenUsage?.InputTokens ?? 0;
+                    var outputTokens = response.TokenUsage?.OutputTokens ?? 0;
+                    var agentDuration = response.TotalDurationMs.HasValue
+                        ? TimeSpan.FromMilliseconds(response.TotalDurationMs.Value)
+                        : TimeSpan.Zero;
+
+                    await costTracker.TrackUsageAsync(new UsageEvent(
+                        specialist.Key, "gpt-4o", inputTokens, outputTokens,
+                        response.Spans?.FirstOrDefault(s => s.Type == "tool_call")?.Name,
+                        DateTime.UtcNow), ct);
+
+                    await auditLog.LogAsync(new AuditEntry(
+                        $"{sessionId}-{Guid.NewGuid():N}"[..32],
+                        DateTime.UtcNow, userId, specialist.Key,
+                        $"chat.{decision.Intent}",
+                        request.Message[..Math.Min(200, request.Message.Length)],
+                        response.Reply[..Math.Min(200, response.Reply.Length)],
+                        inputTokens + outputTokens,
+                        agentDuration), ct);
+
+                    // Track messages in conversation exporter for session export
+                    var toolCalls = response.Spans?
+                        .Where(s => s.Type == "tool_call")
+                        .Select(s => s.Name)
+                        .ToList();
+
+                    await conversationExporter.TrackMessageAsync(sessionId, new TrackedMessage
+                    {
+                        Role = "user",
+                        Content = request.Message
+                    }, ct);
+
+                    await conversationExporter.TrackMessageAsync(sessionId, new TrackedMessage
+                    {
+                        Role = "assistant",
+                        Content = response.Reply,
+                        AgentId = specialist.Key,
+                        ToolCalls = toolCalls,
+                        DurationMs = response.TotalDurationMs.HasValue ? (double)response.TotalDurationMs.Value : null
+                    }, ct);
+                }
+
+                // ── Guardrails: output PII redaction ─────────────────────────────
+                var filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
+                if (filteredReply != response.Reply)
+                {
+                    response = response with { Reply = filteredReply };
+                }
+
+                // ── Cache: store response for deterministic queries ──────────────
+                if (CacheHelpers.IsCacheable(request.Message))
+                {
+                    var cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
+                    await responseCache.SetAsync(cacheKey,
+                        new CachedResponse(response.Reply, specialist.Key, DateTime.UtcNow, cacheKey),
+                        TimeSpan.FromMinutes(5), ct);
+                }
+
+                chatActivity?.SetTag("response.length", response.Reply.Length);
+                chatActivity?.SetTag("trace.id", traceId);
+
+                return Results.Ok(response);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Unhandled error from chat agent for session {SessionId}", request.SessionId);
+
+                return Results.Json(
+                    new
+                    {
+                        error = "The AI service is temporarily unavailable. Please try again shortly.",
+                        code = "service_unavailable"
+                    },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        })
+        .WithName("Chat")
+        .RequireAuthorization()
+        .RequireRateLimiting("strict");
+
+        // Streaming chat endpoint — SSE/SignalR progressive token delivery
+        app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, ILogger<Program> logger, CancellationToken ct) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Message))
+            {
+                return Results.BadRequest(new { error = "Field 'message' is required." });
+            }
+
+            try
+            {
+                var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+                var userId = request.User?.ObjectId ?? "anonymous";
+
+                // Guardrails input check
+                var guardrailResult = await guardrails.CheckInputAsync(request, ct);
+                if (guardrailResult.IsBlocked)
+                {
+                    return Results.Ok(new ChatResponse(
+                        guardrailResult.RefusalMessage!,
+                        sessionId,
+                        [],
+                        null,
+                        0));
+                }
+
+                // Memory recall
+                var memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+                var enrichedRequest = request;
+                if (memoryContext is not null)
+                {
+                    var historyWithMemory = new List<ChatHistoryMessage> { new("system", memoryContext) };
+                    if (request.History is { Count: > 0 })
+                        historyWithMemory.AddRange(request.History);
+                    enrichedRequest = request with { History = historyWithMemory };
+                }
+
+                // Route to specialist
+                var decision = await router.RouteAsync(enrichedRequest.Message, enrichedRequest.History, enrichedRequest.User, null, ct);
+                var specialist = specialists.FirstOrDefault(s =>
+                    string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase))
+                    ?? specialists.First(s => s.Key == "general");
+
+                logger.LogInformation("Streaming route to {AgentKey} — intent: {Intent}", specialist.Key, decision.Intent);
+
+                // Execute agent — stream tokens via SignalR in parallel
+                var response = await specialist.HandleAsync(enrichedRequest, ct);
+
+                // Push the full response as streaming tokens via SignalR for clients listening
+                await streaming.StreamResponseFallbackAsync(sessionId, specialist.Key, response.Reply, ct);
+
+                // PII redaction on output
+                var filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
+                if (filteredReply != response.Reply)
+                    response = response with { Reply = filteredReply };
+
+                // Fire-and-forget memory extraction
+                _ = Task.Run(async () =>
+                {
+                    try { await memoryMiddleware.ExtractAndStoreAsync(userId, request.Message, response.Reply, CancellationToken.None); }
+                    catch { /* swallow */ }
+                }, CancellationToken.None);
+
+                return Results.Ok(response);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Streaming chat error for session {SessionId}", request.SessionId);
+                return Results.Json(
+                    new { error = "The AI service is temporarily unavailable.", code = "service_unavailable" },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        })
+        .WithName("ChatStream")
+        .RequireAuthorization()
+        .RequireRateLimiting("strict");
+
+        // Health/info endpoint
+        app.MapGet("/api/info", (IEnumerable<ISpecialistAgent> specialists) => Results.Ok(new
+        {
+            Name = "Retail Pulse API",
+            Version = "1.0.0",
+            Agent = agentDef.Name,
+            Tools = agentDef.Tools,
+            Router = "RetailOpsRouter",
+            Specialists = specialists.Select(s => new { s.Key, s.DisplayName }).ToList()
+        }))
+        .WithName("Info")
+        .RequireAuthorization()
+        .RequireRateLimiting("relaxed");
+
+        // ── Council endpoints ────────────────────────────────────────────────
+        app.MapPost("/api/council/convene", async (CouncilConveneRequest body, ILogger<Program> logger, CancellationToken ct, IConsensusCouncil? council = null) =>
+        {
+            if (string.IsNullOrWhiteSpace(body.Brand))
+                return Results.BadRequest(new { error = "Field 'brand' is required." });
+
+            if (council is null)
+            {
+                logger.LogWarning("Council convene requested but IConsensusCouncil is not registered");
+                return Results.StatusCode(503);
+            }
+
+            logger.LogInformation("Council convening for brand={Brand}, region={Region}",
+                body.Brand, body.Region ?? "All");
+
+            var verdict = await council.ConveneAsync(body.Brand, body.Region, ct);
+
+            return Results.Ok(new
+            {
+                brand = verdict.Brand,
+                region = verdict.Region ?? "All Regions",
+                overall_rating = verdict.OverallRating.ToString(),
+                synthesis = verdict.Synthesis,
+                is_unanimous = verdict.IsUnanimous,
+                disagreements = verdict.Disagreements,
+                action_items = verdict.ActionItems,
+                convened_at = verdict.ConvenedAt,
+                total_duration_ms = verdict.TotalDuration.TotalMilliseconds,
+                votes = verdict.Votes.Select(v => new
+                {
+                    agent_id = v.AgentId,
+                    agent_name = v.AgentName,
+                    rating = v.Rating.ToString(),
+                    reasoning = v.Reasoning,
+                    confidence = v.Confidence,
+                    key_metrics = v.KeyMetrics,
+                    response_time_ms = v.ResponseTime.TotalMilliseconds
+                })
+            });
+        })
+        .WithName("ConveneCouncil").RequireAuthorization().RequireRateLimiting("strict");
+
+        app.MapGet("/api/council/agents", (IEnumerable<ISpecialistAgent> specialists) =>
+        {
+            var agents = specialists.Select(s => new
+            {
+                key = s.Key,
+                display_name = s.DisplayName,
+                supported_intents = s.SupportedIntents,
+                domain = s.Key switch
+                {
+                    "demand-forecasting" => "Demand & forecasting analysis",
+                    "promo-planning" => "Promotion planning & ROI estimation",
+                    "competitive-intel" => "Competitive intelligence & market share",
+                    "supply-chain" => "Supply chain health & disruption tracking",
+                    "memory" => "Conversation memory management",
+                    "general" => "General retail operations (fallback)",
+                    _ => "Unknown domain"
+                }
+            }).ToList();
+
+            return Results.Ok(new { agents, total = agents.Count });
+        })
+        .WithName("ListCouncilAgents").RequireAuthorization().RequireRateLimiting("relaxed");
+
+        return app;
+    }
+
+    private static string ExtractBrand(string message, TenantConfiguration tenant)
+    {
+        foreach (var brand in tenant.Brands)
+        {
+            if (message.Contains(brand.Name, StringComparison.OrdinalIgnoreCase))
+                return brand.Name;
+        }
+        return tenant.Brands.FirstOrDefault()?.Name ?? "Unknown";
+    }
+}
+
+record CouncilConveneRequest(string Brand, string? Region = null);
