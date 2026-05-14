@@ -21,7 +21,7 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken ct) =>
+        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken ct, IConsensusCouncil? council = null) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
             {
@@ -191,7 +191,6 @@ public static class ChatEndpoints
                 if (decision.DetectedIntents?.Any(i => string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true
                     || string.Equals(decision.Intent, "council/health", StringComparison.OrdinalIgnoreCase))
                 {
-                    var council = app.Services.GetService<IConsensusCouncil>();
                     if (council is not null)
                     {
                         var tenant = tenantProvider.GetTenant();
