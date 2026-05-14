@@ -158,7 +158,7 @@ function ThreatCard({
     setGeneratingPlan(true);
     try {
       const result = await generateResponsePlan(threat.id);
-      setResponsePlan(result.plan);
+      setResponsePlan(result?.plan ?? 'No response plan available.');
     } catch {
       setResponsePlan('Failed to generate response plan. Please try again.');
     } finally {
