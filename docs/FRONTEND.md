@@ -37,6 +37,48 @@ App.tsx
 - **Centralized constants** — `constants/agentRouting.ts` holds all agent colors, emojis, labels, and domain configs
 - **Type-safe contracts** — `types/index.ts` defines all shared interfaces aligned with backend API responses
 
+## Dashboard Tabs
+
+The header bar contains toggle buttons that switch the main content area between the chat and specialized dashboards. Click a tab to open it; click again (or "Back to Chat") to return.
+
+| Tab | Icon | What It Shows |
+|-----|------|---------------|
+| Approvals | Badge | Pending human-in-the-loop approvals for promotions and campaigns |
+| Campaign Planner | 🎯 | Promotion planning workspace with ROI modeling and approval gates |
+| Competitive | 🛡️ | Competitive intelligence — threats, market share, pricing alerts |
+| Knowledge Base | 📚 | RAG-indexed documents the agent uses for grounded answers |
+| Health Council | 💓 | Multi-agent consensus scoring for brand/portfolio health |
+| Security | ✅ | Guardrails dashboard — blocked requests, PII redaction, jailbreak stats |
+| Cards | 🃏 | Adaptive Cards for structured agent responses (voting, sign-offs) |
+| Observability | 👁️ | Token usage, cost tracking, audit log, conversation export |
+| Stores | 🏢 | Store operations — heatmap, stockout risks, planograms, performance |
+| Financials | 💰 | P&L waterfall chart and margin driver analysis |
+| Portfolio | ⭐ | Portfolio Scorecard — weighted brand scoring with drill-down explainability |
+
+### Tab Details
+
+**Approvals** — Shows a badge count in the header when approvals are pending. Click to open the telemetry drawer and review/approve/reject promotion proposals the agent generated. Approvals arrive in real time via SignalR.
+
+**Campaign Planner** — A full-screen workspace for building promotional campaigns. Enter campaign parameters (target audience, discount %, duration) and the agent models expected ROI, cannibalization risk, and recommends a go/no-go. Requires human approval before execution. *(Demo Act 7)*
+
+**Competitive** — Displays competitor threat cards, market share trends, pricing comparison grids, and real-time pricing alerts. The agent monitors competitor activity and surfaces actionable intelligence. *(Demo Act 8)*
+
+**Knowledge Base** — Browse and search the document corpus the agent draws from when answering questions. Shows indexed documents, relevance scores, and lets you verify what sources the agent used. Useful for grounding audits.
+
+**Health Council** — A panel of specialist AI agents (demand, margin, competitive, supply) each vote on brand health. The council produces a consensus score with per-dimension breakdowns. Click a brand to see individual agent votes and reasoning. *(Demo Act 9)*
+
+**Security** — Real-time guardrails monitoring: total blocked requests, jailbreak attempt count, PII detections, and access denials. Includes a configuration panel to adjust sensitivity levels and view block-rate timelines. *(Demo Act 10)*
+
+**Cards** — Interactive Adaptive Cards that agents send for structured collaboration. Cards support voting (thumbs up/down), structured data display, and multi-step wizards. Used for team decisions and approval workflows.
+
+**Observability** — Enterprise monitoring suite showing token consumption, cost per conversation, model usage breakdown, and a full audit trail. Includes conversation export (JSON) for compliance. *(Demo Act 10)*
+
+**Stores** — Store operations dashboard with a geographic heatmap (color-coded by performance), stockout risk alerts, before/after planogram comparisons, and a sortable performance table.
+
+**Financials** — Visualizes the P&L as a waterfall chart (revenue → COGS → gross margin → opex → net) and shows margin drivers ranked by impact. Useful for understanding where margin is gained or lost.
+
+**Portfolio** — Multi-dimensional brand scorecard weighting demand, margin, competitive position, and supply chain health. Click any brand for a detailed score card. Click "Why?" on any score to see the agent's decision explanation with tool calls and sources cited. *(Demo Act 9)*
+
 ## Directory Layout
 
 ```
