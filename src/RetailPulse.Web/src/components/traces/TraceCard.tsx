@@ -88,11 +88,13 @@ const STEP_ICONS: Record<string, string> = {
 };
 
 function formatDuration(ms: number): string {
+  if (ms == null || isNaN(ms)) return '0ms';
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
   return `${ms.toFixed(0)}ms`;
 }
 
 function formatCost(usd: number): string {
+  if (usd == null || isNaN(usd)) return '$0.000';
   if (usd === 0) return '$0.000';
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(3)}`;
@@ -127,7 +129,7 @@ export function TraceCard({ trace }: TraceCardProps) {
             <Text style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '4px' }}>
               Steps taken:
             </Text>
-            {trace.spans.map((span) => (
+            {(trace.spans ?? []).filter(s => s != null).map((span) => (
               <div key={span.id} className={styles.step}>
                 <span className={styles.stepIcon}>{STEP_ICONS[span.type] || '⚡'}</span>
                 <span className={styles.stepName}>{span.name}</span>

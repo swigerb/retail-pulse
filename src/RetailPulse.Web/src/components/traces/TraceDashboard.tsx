@@ -142,11 +142,13 @@ const useStyles = makeStyles({
 });
 
 function formatDuration(ms: number): string {
+  if (ms == null || isNaN(ms)) return '0ms';
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
   return `${ms.toFixed(0)}ms`;
 }
 
 function formatCost(usd: number): string {
+  if (usd == null || isNaN(usd)) return '$0.00';
   if (usd === 0) return '$0.00';
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(3)}`;
@@ -165,8 +167,8 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
 
   const aggregates = useMemo(() => {
     if (traces.length === 0) return { avgDuration: 0, avgCost: 0, toolUsage: new Map<string, number>() };
-    const durations = traces.map(t => t.totalDurationMs);
-    const costs = traces.map(t => t.totalCostUsd);
+    const durations = traces.map(t => t.totalDurationMs ?? 0);
+    const costs = traces.map(t => t.totalCostUsd ?? 0);
     const toolUsage = new Map<string, number>();
     traces.forEach(t => (t.spans ?? []).forEach(s => {
       if (s?.type === 'tool') {
@@ -255,7 +257,7 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
             <span className={styles.traceDuration}>{formatDuration(trace.totalDurationMs)}</span>
             <span className={styles.traceCost}>{formatCost(trace.totalCostUsd)}</span>
             <Badge appearance="filled" color={trace.status === 'completed' ? 'success' : trace.status === 'error' ? 'danger' : 'warning'} style={{ fontSize: '9px' }}>
-              {trace.spans.length}
+              {(trace.spans ?? []).length}
             </Badge>
           </div>
         ))}
