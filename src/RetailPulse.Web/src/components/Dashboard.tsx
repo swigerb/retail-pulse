@@ -19,10 +19,10 @@ import { CouncilPanel } from './council';
 import { GuardrailsDashboard, GuardrailsConfig } from './guardrails';
 import { AdaptiveCardPanel } from './cards';
 import { ObservabilityPanel } from './observability';
-import { StoreHeatmap, StockoutAlert, StorePerformanceTable, PlanogramDiagram } from './stores';
+import { StoreHeatmap, StockoutAlert, StorePerformanceTable, StoreDetailDialog } from './stores';
 import { MarginWaterfall, MarginDrivers } from './margin';
 import { PortfolioScorecard, BrandScoreCard, ExplanationPanel } from './scorecard';
-import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, PlanogramLayout, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData } from '../types';
+import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData } from '../types';
 import { connectTelemetryHub } from '../services/telemetryHub';
 
 const DRAWER_WIDTH_PX = 560;
@@ -118,6 +118,7 @@ export function Dashboard() {
   const [traces, setTraces] = useState<Trace[]>([]);
   const [activeView, setActiveView] = useState<'chat' | 'promo' | 'competitive' | 'knowledge' | 'council' | 'security' | 'cards' | 'observability' | 'stores' | 'financials' | 'portfolio'>('chat');
   const [selectedBrand, setSelectedBrand] = useState<BrandScore | null>(null);
+  const [selectedStore, setSelectedStore] = useState<StorePerformance | null>(null);
   const [explanationOpen, setExplanationOpen] = useState(false);
   const [explanationData, setExplanationData] = useState<ExplanationData | null>(null);
   const styles = useStyles();
@@ -137,28 +138,6 @@ export function Dashboard() {
     { skuId: 'sku2', skuName: 'Classic Lager 6pk', brand: 'Summit Brew', currentVelocity: 32, daysRemaining: 5, recommendedReorder: 300, region: 'Southeast' },
     { skuId: 'sku3', skuName: 'Light Seltzer Variety', brand: 'Wave Drinks', currentVelocity: 28, daysRemaining: 6, recommendedReorder: 250, region: 'West' },
   ];
-
-  const demoPlanogramBefore: PlanogramLayout = {
-    shelfCount: 5, eyeLevelShelves: [3, 4],
-    slots: [
-      { shelfLevel: 1, position: 1, skuName: 'Value Pack A', brand: 'Budget Brand', brandColor: '#94a3b8', facingWidth: 3 },
-      { shelfLevel: 2, position: 1, skuName: 'Mid-Range B', brand: 'Standard Co', brandColor: '#3b82f6', facingWidth: 2 },
-      { shelfLevel: 3, position: 1, skuName: 'Premium Blend', brand: 'Apex Grill', brandColor: '#f59e0b', facingWidth: 2 },
-      { shelfLevel: 4, position: 1, skuName: 'Classic Lager', brand: 'Summit Brew', brandColor: '#22c55e', facingWidth: 3 },
-      { shelfLevel: 5, position: 1, skuName: 'Bulk Economy', brand: 'Budget Brand', brandColor: '#94a3b8', facingWidth: 4 },
-    ],
-  };
-
-  const demoPlanogramAfter: PlanogramLayout = {
-    shelfCount: 5, eyeLevelShelves: [3, 4],
-    slots: [
-      { shelfLevel: 1, position: 1, skuName: 'Value Pack A', brand: 'Budget Brand', brandColor: '#94a3b8', facingWidth: 2 },
-      { shelfLevel: 2, position: 1, skuName: 'Mid-Range B', brand: 'Standard Co', brandColor: '#3b82f6', facingWidth: 2 },
-      { shelfLevel: 3, position: 1, skuName: 'Premium Blend', brand: 'Apex Grill', brandColor: '#f59e0b', facingWidth: 3, predictedUplift: 12.5 },
-      { shelfLevel: 4, position: 1, skuName: 'Classic Lager', brand: 'Summit Brew', brandColor: '#22c55e', facingWidth: 3, predictedUplift: 8.2 },
-      { shelfLevel: 5, position: 1, skuName: 'Bulk Economy', brand: 'Budget Brand', brandColor: '#94a3b8', facingWidth: 4 },
-    ],
-  };
 
   const demoWaterfall: MarginWaterfallStep[] = [
     { label: 'Revenue', value: 12500000, isSubtotal: true },
@@ -482,21 +461,17 @@ export function Dashboard() {
               <ObservabilityPanel />
             </div>
           ) : activeView === 'stores' ? (
-            <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
-              <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>🏪 Store Operations</h2>
-              <StoreHeatmap stores={demoStores} onStoreClick={(id) => console.log('Store clicked:', id)} />
-              <div style={{ marginTop: '24px' }}>
-                <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>📦 Stockout Risks</h3>
+            <div style={{ overflow: 'auto', height: '100%', padding: '20px' }}>
+              <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '16px', fontSize: '20px' }}>🏪 Store Operations</h2>
+              <StoreHeatmap stores={demoStores} onStoreClick={(id) => setSelectedStore(demoStores.find(s => s.storeId === id) ?? null)} />
+              <div style={{ marginTop: '16px' }}>
+                <StorePerformanceTable stores={demoStores} onStoreClick={(id) => setSelectedStore(demoStores.find(s => s.storeId === id) ?? null)} />
+              </div>
+              <div style={{ marginTop: '16px' }}>
+                <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '8px', fontSize: '14px' }}>📦 Stockout Risks</h3>
                 <StockoutAlert risks={demoStockouts} />
               </div>
-              <div style={{ marginTop: '24px' }}>
-                <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>🗂️ Planogram — Before vs After</h3>
-                <PlanogramDiagram before={demoPlanogramBefore} after={demoPlanogramAfter} comparisonMode />
-              </div>
-              <div style={{ marginTop: '24px' }}>
-                <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>📊 Performance Table</h3>
-                <StorePerformanceTable stores={demoStores} onStoreClick={(id) => console.log('Store clicked:', id)} />
-              </div>
+              <StoreDetailDialog store={selectedStore} open={!!selectedStore} onClose={() => setSelectedStore(null)} />
             </div>
           ) : activeView === 'financials' ? (
             <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
