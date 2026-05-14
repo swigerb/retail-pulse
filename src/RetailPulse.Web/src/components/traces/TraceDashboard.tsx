@@ -168,8 +168,8 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
     const durations = traces.map(t => t.totalDurationMs);
     const costs = traces.map(t => t.totalCostUsd);
     const toolUsage = new Map<string, number>();
-    traces.forEach(t => t.spans.forEach(s => {
-      if (s.type === 'tool') {
+    traces.forEach(t => (t.spans ?? []).forEach(s => {
+      if (s?.type === 'tool') {
         toolUsage.set(s.name, (toolUsage.get(s.name) ?? 0) + 1);
       }
     }));

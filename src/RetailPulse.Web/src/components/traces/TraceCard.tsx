@@ -102,7 +102,7 @@ export function TraceCard({ trace }: TraceCardProps) {
   const styles = useStyles();
   const [expanded, setExpanded] = useState(false);
 
-  const toolCount = trace.spans.filter(s => s.type === 'tool').length;
+  const toolCount = (trace.spans ?? []).filter(s => s?.type === 'tool').length;
   const summaryLine = `⚡ ${formatDuration(trace.totalDurationMs)} · ${toolCount} tool${toolCount !== 1 ? 's' : ''} · ${formatCost(trace.totalCostUsd)}`;
 
   return (
