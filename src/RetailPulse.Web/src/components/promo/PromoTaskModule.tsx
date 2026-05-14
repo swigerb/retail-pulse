@@ -7,6 +7,8 @@ import {
   Spinner,
   makeStyles,
   Card,
+  Dropdown,
+  Option,
 } from '@fluentui/react-components';
 import type { PromoType, PromoFormData, PromoEvaluation, PromoCampaign } from '../../types';
 import PromoTypeSelector from './PromoTypeSelector';
@@ -77,16 +79,6 @@ const useStyles = makeStyles({
     '@media (max-width: 600px)': {
       gridColumn: 'span 1',
     },
-  },
-  select: {
-    width: '100%',
-    padding: '8px 12px',
-    borderRadius: '6px',
-    border: '1px solid rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    color: '#e2e8f0',
-    fontSize: '14px',
-    outline: 'none',
   },
   sliderRow: {
     display: 'flex',
@@ -240,32 +232,34 @@ export default function PromoTaskModule() {
         <div className={styles.formGrid}>
           <div className={styles.field}>
             <Label className={styles.fieldLabel}>Brand</Label>
-            <select
-              className={styles.select}
-              value={brand}
-              onChange={e => setBrand(e.target.value)}
+            <Dropdown
+              value={brand || ''}
+              placeholder="Select brand..."
+              selectedOptions={brand ? [brand] : []}
+              onOptionSelect={(_, data) => setBrand(data.optionValue ?? '')}
               data-testid="brand-select"
+              size="medium"
             >
-              <option value="">Select brand...</option>
               {TENANT_BRANDS.map(b => (
-                <option key={b} value={b}>{b}</option>
+                <Option key={b} value={b}>{b}</Option>
               ))}
-            </select>
+            </Dropdown>
           </div>
 
           <div className={styles.field}>
             <Label className={styles.fieldLabel}>Region</Label>
-            <select
-              className={styles.select}
-              value={region}
-              onChange={e => setRegion(e.target.value)}
+            <Dropdown
+              value={region || ''}
+              placeholder="Select region..."
+              selectedOptions={region ? [region] : []}
+              onOptionSelect={(_, data) => setRegion(data.optionValue ?? '')}
               data-testid="region-select"
+              size="medium"
             >
-              <option value="">Select region...</option>
               {TENANT_REGIONS.map(r => (
-                <option key={r} value={r}>{r}</option>
+                <Option key={r} value={r}>{r}</Option>
               ))}
-            </select>
+            </Dropdown>
           </div>
 
           <div className={styles.field}>

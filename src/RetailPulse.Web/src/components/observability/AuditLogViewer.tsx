@@ -1,5 +1,18 @@
 import { useState, useEffect } from 'react';
-import { makeStyles } from '@fluentui/react-components';
+import {
+  makeStyles,
+  Dropdown,
+  Option,
+  Input,
+  Button,
+  Table,
+  TableHeader,
+  TableHeaderCell,
+  TableBody,
+  TableRow,
+  TableCell,
+  tokens,
+} from '@fluentui/react-components';
 import { OBSERVABILITY_COLORS } from '../../constants/agentRouting';
 import { fetchAuditLog } from '../../services/observabilityApi';
 import type { AuditLogFilters, AuditLogEntry } from '../../types';
@@ -18,45 +31,15 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
     alignItems: 'center',
   },
-  filterSelect: {
-    padding: '8px 14px',
-    borderRadius: '8px',
-    border: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    color: 'var(--color-text)',
-    fontSize: '13px',
-    cursor: 'pointer',
-    outline: 'none',
-    fontWeight: '500',
-    minWidth: '140px',
-    transition: 'border-color 0.2s ease',
-    ':focus': {
-    },
-  },
   filterInput:{
     padding: '8px 14px',
     borderRadius: '8px',
     border: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
     backgroundColor: 'rgba(255,255,255,0.04)',
-    color: 'var(--color-text)',
+    color: tokens.colorNeutralForeground1,
     fontSize: '13px',
     outline: 'none',
     fontWeight: '500',
-    transition: 'border-color 0.2s ease',
-    ':focus': {
-    },
-  },
-  searchInput:{
-    padding: '8px 14px',
-    borderRadius: '8px',
-    border: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    color: 'var(--color-text)',
-    fontSize: '13px',
-    outline: 'none',
-    fontWeight: '500',
-    flex: '1',
-    minWidth: '200px',
     transition: 'border-color 0.2s ease',
     ':focus': {
     },
@@ -66,41 +49,6 @@ const useStyles = makeStyles({
     border: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
     borderRadius: '12px',
     overflow: 'hidden',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '13px',
-  },
-  tableHead: {
-    textAlign: 'left',
-    padding: '12px 14px',
-    fontSize: '11px',
-    color: 'var(--color-text-muted)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.8px',
-    borderBottom: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
-    fontWeight: '600',
-    background: 'rgba(255,255,255,0.02)',
-  },
-  tableRow: {
-    cursor: 'pointer',
-    transition: 'background 0.15s ease',
-    ':hover': {
-      backgroundColor: 'rgba(255,255,255,0.03)',
-    },
-  },
-  tableCell: {
-    padding: '10px 14px',
-    color: 'var(--color-text)',
-    borderBottom: '1px solid rgba(255,255,255,0.04)',
-    verticalAlign: 'top',
-  },
-  tableCellMuted: {
-    padding: '10px 14px',
-    color: 'var(--color-text-muted)',
-    borderBottom: '1px solid rgba(255,255,255,0.04)',
-    verticalAlign: 'top',
   },
   expandedRow: {
     background: 'rgba(255,255,255,0.02)',
@@ -120,14 +68,14 @@ const useStyles = makeStyles({
   },
   detailLabel: {
     fontSize: '11px',
-    color: 'var(--color-text-muted)',
+    color: tokens.colorNeutralForeground3,
     textTransform: 'uppercase',
     letterSpacing: '0.8px',
     fontWeight: '600',
   },
   detailText: {
     fontSize: '13px',
-    color: 'var(--color-text)',
+    color: tokens.colorNeutralForeground1,
     lineHeight: '1.6',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
@@ -140,29 +88,11 @@ const useStyles = makeStyles({
   },
   pageInfo: {
     fontSize: '13px',
-    color: 'var(--color-text-muted)',
+    color: tokens.colorNeutralForeground3,
   },
   pageButtons: {
     display: 'flex',
     gap: '8px',
-  },
-  pageBtn: {
-    padding: '6px 16px',
-    borderRadius: '8px',
-    border: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
-    background: 'rgba(255,255,255,0.04)',
-    color: 'var(--color-text)',
-    fontSize: '13px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    ':hover': {
-      background: 'rgba(255,255,255,0.06)',
-    },
-    ':disabled':{
-      opacity: 0.4,
-      cursor: 'default',
-    },
   },
   skeleton: {
     display: 'flex',
@@ -194,7 +124,7 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     padding: '60px 20px',
-    color: 'var(--color-text-muted)',
+    color: tokens.colorNeutralForeground3,
     fontSize: '14px',
     gap: '8px',
   },
@@ -206,6 +136,9 @@ const useStyles = makeStyles({
     background: `${OBSERVABILITY_COLORS.primary}20`,
     color: OBSERVABILITY_COLORS.primary,
     fontWeight: '600',
+  },
+  mutedCell: {
+    color: tokens.colorNeutralForeground3,
   },
 });
 
@@ -264,21 +197,22 @@ export default function AuditLogViewer() {
     <div className={styles.container} data-testid="audit-log-viewer">
       {/* Filter Bar */}
       <div className={styles.filterBar} data-testid="audit-filters">
-        <select
-          className={styles.filterSelect}
-          value={filters.agent ?? ''}
-          onChange={e => updateFilter('agent', e.target.value)}
+        <Dropdown
+          value={filters.agent || 'All Agents'}
+          selectedOptions={[filters.agent ?? '']}
+          onOptionSelect={(_, data) => updateFilter('agent', data.optionValue ?? '')}
           data-testid="filter-agent"
           aria-label="Filter by agent"
+          size="small"
         >
-          <option value="">All Agents</option>
-          <option value="DemandAgent">Demand Agent</option>
-          <option value="SupplyAgent">Supply Agent</option>
-          <option value="PromoAgent">Promo Agent</option>
-          <option value="CompetitiveAgent">Competitive Agent</option>
-          <option value="SentimentAgent">Sentiment Agent</option>
-          <option value="OrchestratorAgent">Orchestrator</option>
-        </select>
+          <Option value="">All Agents</Option>
+          <Option value="DemandAgent">Demand Agent</Option>
+          <Option value="SupplyAgent">Supply Agent</Option>
+          <Option value="PromoAgent">Promo Agent</Option>
+          <Option value="CompetitiveAgent">Competitive Agent</Option>
+          <Option value="SentimentAgent">Sentiment Agent</Option>
+          <Option value="OrchestratorAgent">Orchestrator</Option>
+        </Dropdown>
         <input
           type="date"
           className={styles.filterInput}
@@ -295,27 +229,28 @@ export default function AuditLogViewer() {
           data-testid="filter-end-date"
           aria-label="End date"
         />
-        <select
-          className={styles.filterSelect}
-          value={filters.actionType ?? ''}
-          onChange={e => updateFilter('actionType', e.target.value)}
+        <Dropdown
+          value={filters.actionType || 'All Actions'}
+          selectedOptions={[filters.actionType ?? '']}
+          onOptionSelect={(_, data) => updateFilter('actionType', data.optionValue ?? '')}
           data-testid="filter-action"
           aria-label="Filter by action type"
+          size="small"
         >
-          <option value="">All Actions</option>
-          <option value="query">Query</option>
-          <option value="tool_call">Tool Call</option>
-          <option value="approval">Approval</option>
-          <option value="escalation">Escalation</option>
-        </select>
-        <input
-          type="text"
-          className={styles.searchInput}
+          <Option value="">All Actions</Option>
+          <Option value="query">Query</Option>
+          <Option value="tool_call">Tool Call</Option>
+          <Option value="approval">Approval</Option>
+          <Option value="escalation">Escalation</Option>
+        </Dropdown>
+        <Input
           placeholder="🔍 Search logs..."
           value={filters.searchText ?? ''}
-          onChange={e => updateFilter('searchText', e.target.value)}
+          onChange={(_e, data) => updateFilter('searchText', data.value)}
           data-testid="filter-search"
           aria-label="Search audit logs"
+          style={{ flex: 1, minWidth: '200px' }}
+          size="small"
         />
       </div>
 
@@ -341,39 +276,39 @@ export default function AuditLogViewer() {
       {!loading && entries.length > 0 && (
         <>
           <div className={styles.tableWrapper}>
-            <table className={styles.table} data-testid="audit-table">
-              <thead>
-                <tr>
-                  <th className={styles.tableHead}>Timestamp</th>
-                  <th className={styles.tableHead}>User</th>
-                  <th className={styles.tableHead}>Agent</th>
-                  <th className={styles.tableHead}>Action</th>
-                  <th className={styles.tableHead}>Tokens</th>
-                  <th className={styles.tableHead}>Duration</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table size="small" data-testid="audit-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Timestamp</TableHeaderCell>
+                  <TableHeaderCell>User</TableHeaderCell>
+                  <TableHeaderCell>Agent</TableHeaderCell>
+                  <TableHeaderCell>Action</TableHeaderCell>
+                  <TableHeaderCell>Tokens</TableHeaderCell>
+                  <TableHeaderCell>Duration</TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {entries.map(entry => (
                   <>
-                    <tr
+                    <TableRow
                       key={entry.id}
-                      className={styles.tableRow}
                       onClick={() => toggleRow(entry.id)}
                       data-testid={`audit-row-${entry.id}`}
                       role="button"
                       tabIndex={0}
                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') toggleRow(entry.id); }}
                       aria-expanded={expandedId === entry.id}
+                      style={{ cursor: 'pointer' }}
                     >
-                      <td className={styles.tableCellMuted}>{formatTimestamp(entry.timestamp)}</td>
-                      <td className={styles.tableCell}>{entry.userName}</td>
-                      <td className={styles.tableCell}>
+                      <TableCell className={styles.mutedCell}>{formatTimestamp(entry.timestamp)}</TableCell>
+                      <TableCell>{entry.userName}</TableCell>
+                      <TableCell>
                         <span className={styles.agentPill}>{entry.agentName}</span>
-                      </td>
-                      <td className={styles.tableCell}>{entry.action}</td>
-                      <td className={styles.tableCellMuted}>{(entry.tokens ?? 0).toLocaleString()}</td>
-                      <td className={styles.tableCellMuted}>{entry.durationMs ?? 0}ms</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{entry.action}</TableCell>
+                      <TableCell className={styles.mutedCell}>{(entry.tokens ?? 0).toLocaleString()}</TableCell>
+                      <TableCell className={styles.mutedCell}>{entry.durationMs ?? 0}ms</TableCell>
+                    </TableRow>
                     {expandedId === entry.id && (
                       <tr key={`${entry.id}-detail`} className={styles.expandedRow}>
                         <td className={styles.expandedCell} colSpan={6}>
@@ -392,8 +327,8 @@ export default function AuditLogViewer() {
                     )}
                   </>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
 
           {/* Pagination */}
@@ -402,22 +337,24 @@ export default function AuditLogViewer() {
               Page {page} of {totalPages} ({totalCount.toLocaleString()} entries)
             </span>
             <div className={styles.pageButtons}>
-              <button
-                className={styles.pageBtn}
+              <Button
+                appearance="subtle"
+                size="small"
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page <= 1}
                 data-testid="page-prev"
               >
                 ← Previous
-              </button>
-              <button
-                className={styles.pageBtn}
+              </Button>
+              <Button
+                appearance="subtle"
+                size="small"
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
                 data-testid="page-next"
               >
                 Next →
-              </button>
+              </Button>
             </div>
           </div>
         </>

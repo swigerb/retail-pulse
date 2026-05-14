@@ -307,3 +307,48 @@ Tests (25 new):
 - 2026-05-14T10:25:37-04:00 — Prefer Fluent UI primitives over hand-rolled interactive patterns. AccordionHeader handles chevron, keyboard, and ARIA automatically — no need for manual `role="button"`, `tabIndex`, `onKeyDown`, or `aria-expanded`.
 - 2026-05-14T10:25:37-04:00 — Use `tokens.colorNeutralForeground2` from `@fluentui/react-components` for subtle text in dark theme instead of custom CSS variables like `var(--color-text-subtle)`.
 
+## Session Work — 2026-05-14 Fluent UI v9 Compliance Audit
+
+### Audit: Full component scan for Fluent UI v9 anti-patterns
+Scanned all components under `src/RetailPulse.Web/src/components/` for violations of Brian's Fluent UI v9 directive.
+
+### Fixed — Raw `<select>/<option>` → Fluent `Dropdown`/`Option`:
+- `competitive/CompetitiveDashboard.tsx` — 2 selects (category, region filters)
+- `observability/AuditLogViewer.tsx` — 2 selects (agent, action type filters)
+- `promo/PromoTaskModule.tsx` — 2 selects (brand, region) + updated test `fillForm` helper for Fluent Dropdown interaction
+
+### Fixed — Raw `<table>` → Fluent `Table`/`TableHeader`/`TableRow`/`TableCell`:
+- `ApprovalHistory.tsx` — approval history table
+- `observability/AuditLogViewer.tsx` — audit log table
+- `stores/StorePerformanceTable.tsx` — store performance table with sortable headers
+
+### Fixed — `var(--color-*)` CSS variables → Fluent tokens:
+- `ApprovalHistory.tsx` — 13 occurrences → `tokens.colorNeutral*`
+- `competitive/CompetitiveDashboard.tsx` — 8 occurrences
+- `observability/AuditLogViewer.tsx` — 11 occurrences
+- `stores/StorePerformanceTable.tsx` — 5 occurrences
+
+### Fixed — Other anti-patterns:
+- `CompetitiveDashboard.tsx` — loading text `⏳` → Fluent `Spinner`
+- `StorePerformanceTable.tsx` — `▲`/`▼` sort glyphs → Fluent `ArrowUp16Filled`/`ArrowDown16Filled` icons
+- `StorePerformanceTable.tsx` — custom issues badge pill → Fluent `Badge`
+- `AuditLogViewer.tsx` — raw `<button>` pagination → Fluent `Button`
+- `AuditLogViewer.tsx` — raw `<input type="text">` search → Fluent `Input`
+
+### Validation: Build passes, 249/249 tests pass (30 test files)
+
+### Remaining tech debt (not fixed — too large/risky for this pass):
+- `cards/DrillDownCard.tsx` — custom breadcrumb, expander chevron, 8 CSS variable instances
+- `margin/EscalationPath.tsx` — `▾`/`▸` expand-collapse, custom badge for levels
+- `AgentRoutingIndicator.tsx` — custom pill/badge, rotated chevron, 5 CSS variable instances
+- `cards/CardLifecycleIndicator.tsx`, `guardrails/PiiRedactionBadge.tsx`, `knowledge/CitationBadge.tsx` — custom badge spans
+- `promo/PromoTaskModule.tsx` — `var(--color-surface-alt)` still present (1 instance)
+- Various files still use hardcoded hex colors (e.g., `#22c55e`, `#ef4444`) — these are intentional brand/semantic colors, not theme violations
+
+## Learnings
+
+- 2026-05-14T10:25:37-04:00 — Fluent UI v9 `Dropdown` requires `value` to always be a string (never `undefined`) to avoid "uncontrolled to controlled" React warnings. Use `value={state || ''}` not `value={state || undefined}`.
+- 2026-05-14T10:25:37-04:00 — When replacing `<select>` with Fluent `Dropdown`, tests that used `fireEvent.change(element, { target: { value } })` must be rewritten to use `userEvent.click(trigger)` then `userEvent.click(optionText)`.
+- 2026-05-14T10:25:37-04:00 — Fluent `Table` from `@fluentui/react-components` uses `Table`, `TableHeader`, `TableHeaderCell`, `TableBody`, `TableRow`, `TableCell` — no `<thead>`/`<tbody>` wrappers needed, but raw `<tr>`/`<td>` can still be mixed in for expanded detail rows.
+- 2026-05-14T10:25:37-04:00 — Common Fluent token mappings for dark theme: `var(--color-text)` → `tokens.colorNeutralForeground1`, `var(--color-text-muted)` → `tokens.colorNeutralForeground3`, `var(--color-border)` → `tokens.colorNeutralStroke1`, `var(--color-surface)` → `tokens.colorNeutralBackground2`, `var(--color-bg)` → `tokens.colorNeutralBackground1`.
+
