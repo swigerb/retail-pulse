@@ -61,8 +61,16 @@ describe('PromoTaskModule', () => {
 
   // Helper to fill the entire form
   async function fillForm() {
-    fireEvent.change(screen.getByTestId('brand-select'), { target: { value: 'Apex Grill' } });
-    fireEvent.change(screen.getByTestId('region-select'), { target: { value: 'Northeast' } });
+    const user = userEvent.setup();
+
+    // Open brand dropdown and select option
+    await user.click(screen.getByTestId('brand-select'));
+    await user.click(screen.getByText('Apex Grill'));
+
+    // Open region dropdown and select option
+    await user.click(screen.getByTestId('region-select'));
+    await user.click(screen.getByText('Northeast'));
+
     fireEvent.click(screen.getByTestId('promo-type-discount'));
 
     // Fluent UI Input renders native <input> inside the wrapper
@@ -71,8 +79,8 @@ describe('PromoTaskModule', () => {
     const dateInputs = Array.from(inputs).filter(i => i.type === 'date');
 
     if (budgetInput) {
-      await userEvent.clear(budgetInput);
-      await userEvent.type(budgetInput, '25000');
+      await user.clear(budgetInput);
+      await user.type(budgetInput, '25000');
     }
     if (dateInputs[0]) {
       fireEvent.change(dateInputs[0], { target: { value: '2026-06-01' } });

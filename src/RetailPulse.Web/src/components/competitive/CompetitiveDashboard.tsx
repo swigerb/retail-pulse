@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { makeStyles, Tab, TabList } from '@fluentui/react-components';
+import { makeStyles, Tab, TabList, Dropdown, Option, Spinner, tokens } from '@fluentui/react-components';
 import type { CompetitorPricing, MarketShareEntry, CompetitiveThreat, CompetitorOverview } from '../../types';
 import { fetchCompetitorPricing, fetchMarketShare, fetchThreats, fetchCompetitorProfile } from '../../services/competitiveApi';
 import PricingGrid from './PricingGrid';
@@ -19,7 +19,7 @@ const useStyles = makeStyles({
     height: '100%',
     overflow: 'auto',
     padding: '24px',
-    backgroundColor: 'var(--color-bg)',
+    backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
     display: 'flex',
@@ -39,7 +39,7 @@ const useStyles = makeStyles({
   },
   subtitle: {
     fontSize: '12px',
-    color: 'var(--color-text-muted)',
+    color: tokens.colorNeutralForeground3,
     textTransform: 'uppercase',
     letterSpacing: '1px',
     fontWeight: '500',
@@ -50,19 +50,9 @@ const useStyles = makeStyles({
     marginLeft: 'auto',
     flexWrap: 'wrap',
   },
-  filterSelect: {
-    padding: '6px 12px',
-    borderRadius: '6px',
-    border: '1px solid var(--color-border)',
-    backgroundColor: 'var(--color-surface)',
-    color: 'var(--color-text)',
-    fontSize: '13px',
-    cursor: 'pointer',
-    outline: 'none',
-  },
   tabList: {
     marginBottom: '20px',
-    borderBottom: '1px solid var(--color-border)',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
   },
   content: {
     flex: 1,
@@ -70,10 +60,12 @@ const useStyles = makeStyles({
   },
   loading: {
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: '12px',
     padding: '60px',
-    color: 'var(--color-text-muted)',
+    color: tokens.colorNeutralForeground3,
     fontSize: '14px',
   },
   error: {
@@ -144,22 +136,24 @@ export default function CompetitiveDashboard() {
           <div className={styles.subtitle}>War Room • Real-Time Market Analysis</div>
         </div>
         <div className={styles.filters}>
-          <select
+          <Dropdown
             data-testid="category-filter"
-            className={styles.filterSelect}
             value={category}
-            onChange={e => setCategory(e.target.value)}
+            selectedOptions={[category]}
+            onOptionSelect={(_, data) => setCategory(data.optionValue ?? 'All Categories')}
+            size="small"
           >
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select
+            {CATEGORIES.map(c => <Option key={c} value={c}>{c}</Option>)}
+          </Dropdown>
+          <Dropdown
             data-testid="region-filter"
-            className={styles.filterSelect}
             value={region}
-            onChange={e => setRegion(e.target.value)}
+            selectedOptions={[region]}
+            onOptionSelect={(_, data) => setRegion(data.optionValue ?? 'All Regions')}
+            size="small"
           >
-            {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+            {REGIONS.map(r => <Option key={r} value={r}>{r}</Option>)}
+          </Dropdown>
         </div>
       </div>
 
@@ -177,7 +171,10 @@ export default function CompetitiveDashboard() {
       {error && <div className={styles.error} data-testid="error-message">⚠️ {error}</div>}
 
       {loading ? (
-        <div className={styles.loading}>⏳ Loading competitive intelligence...</div>
+        <div className={styles.loading}>
+          <Spinner size="medium" />
+          Loading competitive intelligence...
+        </div>
       ) : (
         <div className={styles.content}>
           {activeTab === 'overview' && (

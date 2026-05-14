@@ -4,6 +4,13 @@ import {
   Badge,
   Text,
   makeStyles,
+  Table,
+  TableHeader,
+  TableHeaderCell,
+  TableBody,
+  TableRow,
+  TableCell,
+  tokens,
 } from '@fluentui/react-components';
 import { Search24Regular } from '@fluentui/react-icons';
 import type { ApprovalRequest, ApprovalDecision } from '../types';
@@ -26,9 +33,9 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: '12px',
     padding: '16px',
-    backgroundColor: 'var(--color-surface)',
+    backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: '12px',
-    border: '1px solid var(--color-border)',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
   },
   header: {
     display: 'flex',
@@ -42,7 +49,7 @@ const useStyles = makeStyles({
     gap: '8px',
     fontSize: '16px',
     fontWeight: '600',
-    color: 'var(--color-text)',
+    color: tokens.colorNeutralForeground1,
   },
   filtersRow: {
     display: 'flex',
@@ -60,39 +67,18 @@ const useStyles = makeStyles({
     fontWeight: '500',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
-    border: '1px solid var(--color-border)',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
     backgroundColor: 'transparent',
-    color: 'var(--color-text-muted)',
+    color: tokens.colorNeutralForeground3,
     ':hover': {
-      backgroundColor: 'var(--color-surface-hover)',
+      backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
   filterChipActive: {
-    backgroundColor: 'var(--brand-accent-soft)',
-    border: '1px solid var(--brand-accent-border)',
-    color: 'var(--brand-accent)',
+    backgroundColor: tokens.colorBrandBackground2,
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    color: tokens.colorBrandForeground1,
     fontWeight: '600',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '12px',
-  },
-  th: {
-    textAlign: 'left',
-    padding: '8px 10px',
-    fontSize: '11px',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    color: 'var(--color-text-subtle)',
-    borderBottom: '1px solid var(--color-border)',
-  },
-  td: {
-    padding: '8px 10px',
-    color: 'var(--color-text)',
-    borderBottom: '1px solid var(--color-border-faint)',
-    verticalAlign: 'top',
   },
   actionCell: {
     maxWidth: '200px',
@@ -106,7 +92,7 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '8px',
     padding: '24px 16px',
-    color: 'var(--color-text-muted)',
+    color: tokens.colorNeutralForeground3,
     textAlign: 'center',
   },
 });
@@ -153,7 +139,7 @@ export function ApprovalHistory({ approvals }: ApprovalHistoryProps) {
       </div>
 
       <div className={styles.filtersRow}>
-        <Search24Regular style={{ color: 'var(--color-text-muted)', flexShrink: 0, fontSize: '16px' }} />
+        <Search24Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0, fontSize: '16px' }} />
         <Input
           value={search}
           onChange={(_e, data) => setSearch(data.value)}
@@ -192,37 +178,39 @@ export function ApprovalHistory({ approvals }: ApprovalHistoryProps) {
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th className={styles.th}>Action</th>
-                <th className={styles.th}>Agent</th>
-                <th className={styles.th}>Decision</th>
-                <th className={styles.th}>By</th>
-                <th className={styles.th}>When</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table size="small">
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Action</TableHeaderCell>
+                <TableHeaderCell>Agent</TableHeaderCell>
+                <TableHeaderCell>Decision</TableHeaderCell>
+                <TableHeaderCell>By</TableHeaderCell>
+                <TableHeaderCell>When</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {filtered.map(approval => {
                 const config = DECISION_CONFIG[approval.status] ?? DECISION_CONFIG.pending;
                 return (
-                  <tr key={approval.id} data-testid="history-row">
-                    <td className={`${styles.td} ${styles.actionCell}`} title={approval.action}>
-                      {approval.action}
-                    </td>
-                    <td className={styles.td}>{approval.agentName}</td>
-                    <td className={styles.td}>
+                  <TableRow key={approval.id} data-testid="history-row">
+                    <TableCell>
+                      <span className={styles.actionCell} title={approval.action}>
+                        {approval.action}
+                      </span>
+                    </TableCell>
+                    <TableCell>{approval.agentName}</TableCell>
+                    <TableCell>
                       <Badge appearance="tint" color={config.badge} size="small">
                         {config.emoji} {config.label}
                       </Badge>
-                    </td>
-                    <td className={styles.td}>{approval.decidedBy ?? '—'}</td>
-                    <td className={styles.td}>{formatShortDate(approval.decidedAt ?? approval.requestedAt)}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>{approval.decidedBy ?? '—'}</TableCell>
+                    <TableCell>{formatShortDate(approval.decidedAt ?? approval.requestedAt)}</TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>

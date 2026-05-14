@@ -1,5 +1,16 @@
 import { useState, useMemo, useCallback } from 'react';
-import { makeStyles } from '@fluentui/react-components';
+import {
+  makeStyles,
+  Badge,
+  Table,
+  TableHeader,
+  TableHeaderCell,
+  TableBody,
+  TableRow,
+  TableCell,
+  tokens,
+} from '@fluentui/react-components';
+import { ArrowUp16Filled, ArrowDown16Filled } from '@fluentui/react-icons';
 import { STORE_COLORS } from '../../constants/agentRouting';
 import type { StorePerformance, PerformanceLevel } from '../../types';
 
@@ -81,45 +92,12 @@ const useStyles = makeStyles({
     border: `1px solid ${STORE_COLORS.cardBorder}`,
     background: STORE_COLORS.cardBg,
   },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '13px',
-  },
-  th: {
-    textAlign: 'left',
-    padding: '10px 14px',
-    fontSize: '11px',
-    fontWeight: '700',
-    color: 'var(--color-text-muted, rgba(255,255,255,0.55))',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    borderBottom: `1px solid ${STORE_COLORS.cardBorder}`,
+  sortableHeader: {
     cursor: 'pointer',
     userSelect: 'none',
-    whiteSpace: 'nowrap',
-    transition: 'color 0.15s ease',
-    ':hover': {
-      color: 'var(--color-text, #e2e8f0)',
-    },
-  },
-  thActive: {
-    color: '#fff',
-  },
-  sortArrow: {
-    marginLeft: '4px',
-    fontSize: '10px',
-  },
-  tr: {
-    transition: 'background 0.15s ease',
-    ':hover': {
-      background: STORE_COLORS.heatmapHover,
-    },
-  },
-  td: {
-    padding: '10px 14px',
-    borderBottom: `1px solid ${STORE_COLORS.gridLine}`,
-    color: 'var(--color-text, #e2e8f0)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
   },
   storeLink: {
     fontWeight: '600',
@@ -136,21 +114,9 @@ const useStyles = makeStyles({
     fontWeight: '700',
     fontSize: '12px',
   },
-  issuesBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: '24px',
-    padding: '2px 8px',
-    borderRadius: '10px',
-    fontWeight: '700',
-    fontSize: '11px',
-    background: 'rgba(239,68,68,0.15)',
-    color: '#fca5a5',
-  },
   recText: {
     fontSize: '12px',
-    color: 'var(--color-text-muted, rgba(255,255,255,0.6))',
+    color: tokens.colorNeutralForeground3,
     maxWidth: '220px',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -159,7 +125,7 @@ const useStyles = makeStyles({
   empty: {
     padding: '40px',
     textAlign: 'center',
-    color: 'var(--color-text-muted, rgba(255,255,255,0.5))',
+    color: tokens.colorNeutralForeground3,
     fontSize: '14px',
   },
 });
@@ -208,33 +174,32 @@ export function StorePerformanceTable({ stores, onStoreClick }: StorePerformance
         <span className={styles.title}>📊 Store Performance</span>
       </div>
       <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
+        <Table size="small">
+          <TableHeader>
+            <TableRow>
               {COLUMNS.map(col => (
-                <th
+                <TableHeaderCell
                   key={col.key}
-                  className={`${styles.th} ${sortKey === col.key ? styles.thActive : ''}`}
                   onClick={() => handleSort(col.key)}
                   data-testid={`sort-${col.key}`}
                   aria-sort={sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                 >
-                  {col.label}
-                  {sortKey === col.key && (
-                    <span className={styles.sortArrow}>
-                      {sortDir === 'asc' ? '▲' : '▼'}
-                    </span>
-                  )}
-                </th>
+                  <span className={styles.sortableHeader}>
+                    {col.label}
+                    {sortKey === col.key && (
+                      sortDir === 'asc' ? <ArrowUp16Filled /> : <ArrowDown16Filled />
+                    )}
+                  </span>
+                </TableHeaderCell>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {sorted.map(store => {
               const level = getPerformanceLevel(store);
               return (
-                <tr key={store.storeId} className={styles.tr} data-testid="table-row">
-                  <td className={styles.td}>
+                <TableRow key={store.storeId} data-testid="table-row">
+                  <TableCell>
                     <span
                       className={styles.storeLink}
                       role="button"
@@ -244,11 +209,11 @@ export function StorePerformanceTable({ stores, onStoreClick }: StorePerformance
                     >
                       {store.storeName}
                     </span>
-                  </td>
-                  <td className={styles.td}>{store.region}</td>
-                  <td className={styles.td}>{formatCurrency(store.revenue)}</td>
-                  <td className={styles.td}>{formatCurrency(store.target)}</td>
-                  <td className={styles.td}>
+                  </TableCell>
+                  <TableCell>{store.region}</TableCell>
+                  <TableCell>{formatCurrency(store.revenue)}</TableCell>
+                  <TableCell>{formatCurrency(store.target)}</TableCell>
+                  <TableCell>
                     <span
                       className={styles.perfBadge}
                       style={{
@@ -258,24 +223,26 @@ export function StorePerformanceTable({ stores, onStoreClick }: StorePerformance
                     >
                       {store.performanceIndex.toFixed(0)}%
                     </span>
-                  </td>
-                  <td className={styles.td}>
+                  </TableCell>
+                  <TableCell>
                     {store.issues.length > 0 ? (
-                      <span className={styles.issuesBadge}>{store.issues.length}</span>
+                      <Badge appearance="tint" color="danger" size="small">
+                        {store.issues.length}
+                      </Badge>
                     ) : (
                       <span style={{ color: STORE_COLORS.green, fontSize: '12px' }}>✓</span>
                     )}
-                  </td>
-                  <td className={styles.td}>
+                  </TableCell>
+                  <TableCell>
                     <span className={styles.recText}>
                       {store.recommendations[0] ?? '—'}
                     </span>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   );
