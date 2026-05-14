@@ -212,7 +212,7 @@ This demonstrates the agent handling different brands and a different tool (`Get
 
 #### Application Insights
 
-> *"Beyond the local Aspire dashboard, everything flows to Azure Application Insights. Open the Azure Portal → Application Insights → bsappinsights-dev-northcentralus-001. Here you can see:"*
+> *"Beyond the local Aspire dashboard, everything flows to Azure Application Insights. Open the Azure Portal → Application Insights → your deployed instance (created by `azd up`). Here you can see:"*
 
 - **Transaction search** — find specific agent conversations
 - **Application map** — see the full dependency graph (API → APIM → Azure OpenAI, API → MCP Server)
