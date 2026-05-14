@@ -372,3 +372,11 @@ Scanned all components under `src/RetailPulse.Web/src/components/` for violation
 - 2026-05-14T10:25:37-04:00 — Fluent `Table` from `@fluentui/react-components` uses `Table`, `TableHeader`, `TableHeaderCell`, `TableBody`, `TableRow`, `TableCell` — no `<thead>`/`<tbody>` wrappers needed, but raw `<tr>`/`<td>` can still be mixed in for expanded detail rows.
 - 2026-05-14T10:25:37-04:00 — Common Fluent token mappings for dark theme: `var(--color-text)` → `tokens.colorNeutralForeground1`, `var(--color-text-muted)` → `tokens.colorNeutralForeground3`, `var(--color-border)` → `tokens.colorNeutralStroke1`, `var(--color-surface)` → `tokens.colorNeutralBackground2`, `var(--color-bg)` → `tokens.colorNeutralBackground1`.
 
+
+## 2026-05-14 — Stores Page UX Overhaul (b6d69d9)
+
+- Compacted heatmap: cell min-width 110px → 80px, padding 14px → 8px, gap 8px → 6px
+- Planogram section removed from render; component/tests kept for future reuse
+- Store click opens Fluent UI v9 Dialog showing store details
+- Layout reordered: Heatmap → Performance Table → Stockout Risks
+- All 249 tests passing, build clean

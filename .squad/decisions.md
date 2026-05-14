@@ -506,3 +506,217 @@ Sprints 1.5 (Proactive Alerts) and 1.6 (Distributed Tracing) introduced new subs
 - **Status:** Implemented
 
 
+
+
+### Stores Page UX Overhaul (2026-05-14)
+- **Context:** Brian reported 3 UX issues on the Stores page: vertical scroll from oversized heatmap, useless Planogram section, and store click doing nothing visible.
+- **Decision:**
+  1. **Planogram removed** from Stores page rendering entirely. `PlanogramDiagram.tsx` file kept in case it's useful later, but not rendered. Demo data removed from Dashboard.tsx.
+  2. **Heatmap compacted** — cells reduced from 110px min-width to 80px, padding from 14px to 8px, gap from 8px to 6px. Reduces vertical footprint significantly.
+  3. **Store click** now opens a Fluent UI v9 `Dialog` showing store details (name, region, revenue, target, performance level, issues, recommendations) via new `StoreDetailDialog.tsx` component.
+  4. **Layout reordered** — Heatmap → Performance Table → Stockout Risks (was: Heatmap → Stockout → Planogram → Table).
+- **Impact:** All 249 tests pass. Build clean. The PlanogramDiagram component file and its tests remain untouched. Dashboard no longer imports PlanogramDiagram or the PlanogramLayout type.
+- **Owner:** Chick (Frontend Dev)
+
+
+### Dynamic Planogram — Agent-Driven Shelf Optimization
+
+`PlanogramDiagram.tsx` exists, is tested, and renders before/after shelf layouts beautifully — but was removed from the Stores page because it rendered static hardcoded data. Brian wants this to be a genuine AI-driven capability triggered by natural language:
+
+> "Optimize shelf layout for Store X with Product Y"
+
+The existing MCP tool `OptimizePlanogram` already returns optimization metadata (uplift %, notes) but its response shape doesn't match the frontend's `PlanogramLayout` type — it returns raw slot arrays without brand names, colors, or eye-level indicators. We need to bridge that gap.
+
+## Architecture
+
+### 1. MCP Tool: `GeneratePlanogramLayout`
+
+A **new** MCP tool (not a rename of `OptimizePlanogram`) that returns data shaped for direct frontend rendering.
+
+**Tool Signature:**
+```csharp
+[McpServerTool(Name = "GeneratePlanogramLayout")]
+[Description("Generate before/after planogram layouts for shelf optimization. Returns full rendering data including brand colors, eye-level indicators, and per-slot predicted uplift.")]
+public static object GeneratePlanogramLayout(
+    RetailPulseDb data,
+    [Description("Store ID (required, e.g. 'STR-0001')")] string storeId,
+    [Description("Aisle or category to optimize (e.g. 'snacks', 'beverages', 'A-003')")] string category,
+    [Description("Optional: specific product/brand to feature (e.g. 'Apex Grill')")] string? featureProduct = null)
+```
+
+**Response Schema (JSON):**
+```json
+{
+  "storeId": "STR-0001",
+  "storeName": "Westfield Market",
+  "category": "snacks",
+  "featureProduct": "Apex Grill",
+  "summary": "Moved Apex Grill to eye-level shelf 3, expanded facing from 1→2. Predicted +6.3% category revenue.",
+  "predictedUpliftPercent": 6.3,
+  "before": {
+    "shelfCount": 5,
+    "eyeLevelShelves": [2, 3],
+    "slots": [
+      {
+        "shelfLevel": 1,
+        "position": 0,
+        "skuName": "Classic Chips 12oz",
+        "brand": "SnackCo",
+        "brandColor": "#4A90D9",
+        "facingWidth": 2,
+        "predictedUplift": null
+      }
+    ]
+  },
+  "after": {
+    "shelfCount": 5,
+    "eyeLevelShelves": [2, 3],
+    "slots": [
+      {
+        "shelfLevel": 3,
+        "position": 0,
+        "skuName": "Apex Grill Smoky BBQ",
+        "brand": "Apex Grill",
+        "brandColor": "#E8451C",
+        "facingWidth": 2,
+        "predictedUplift": 12.1
+      }
+    ]
+  }
+}
+```
+
+The `before` and `after` fields map 1:1 to the existing `PlanogramLayout` TypeScript interface. No type changes needed.
+
+**Simulation Logic (demo-grade):**
+1. Query `ShelfLayouts` + `SkuVelocity` for the store/aisle to build the "before" state
+2. Resolve SKU names and brand names from the `Products` table (new lookup — currently `GetShelfLayout` only returns skuId)
+3. Assign deterministic `brandColor` from a palette keyed by brand name hash
+4. Build "after" by applying optimization rules:
+   - Move `featureProduct` (if specified) to eye-level shelf
+   - Sort remaining slots by `dailyVelocity` descending → higher velocity gets eye-level priority
+   - Expand facing width for top 20% velocity SKUs, shrink bottom 20%
+   - Assign `predictedUplift` per slot based on position improvement (eye-level bonus = +8-15%, demotion = -3-5%)
+5. Calculate aggregate `predictedUpliftPercent` as weighted average of slot uplifts by velocity
+
+### 2. Agent Integration
+
+**Router Classification:**
+- New intent: `store-ops/planogram` added to `AgentIntent.cs`
+- The existing `StoreOpsAgent` (or a new `PlanogramAgent` specialist — team to decide) handles this intent
+- Trigger phrases: "optimize shelf", "planogram", "shelf layout", "rearrange", "product placement"
+
+**Agent Flow:**
+1. Router classifies → `store-ops/planogram` at confidence > 0.6
+2. Agent extracts parameters from natural language:
+   - Store: resolved from query ("Store X", "Westfield", store ID)
+   - Category/Aisle: extracted or defaulted to the store's highest-revenue aisle
+   - Feature product: extracted if mentioned, otherwise null
+3. Agent calls `GeneratePlanogramLayout` MCP tool via existing proxy pattern
+4. Agent returns structured response with:
+   - `reply`: narrative summary (the `summary` field from tool response, expanded with context)
+   - `planogram`: the `{ before, after }` payload as a new optional field on `ChatResponse`
+
+**ChatResponse Extension:**
+```typescript
+export interface ChatResponse {
+  reply: string;
+  sessionId: string;
+  spans: AgentSpan[];
+  charts?: ChartSpec[];
+  planogram?: PlanogramResponse;  // ← NEW
+  routing?: RoutingInfo;
+  totalDurationMs?: number;
+  tokenUsage?: TokenUsage;
+  memoryContext?: MemoryContext;
+}
+
+export interface PlanogramResponse {
+  storeId: string;
+  storeName: string;
+  category: string;
+  featureProduct?: string;
+  summary: string;
+  predictedUpliftPercent: number;
+  before: PlanogramLayout;
+  after: PlanogramLayout;
+}
+```
+
+### 3. Frontend Rendering
+
+**Rendering Location:** Inline in chat, below the agent's text reply — same pattern as `ChartSpec` rendering.
+
+**Implementation:**
+```tsx
+// In ChatMessage rendering (where charts are already rendered):
+{message.planogram && (
+  <PlanogramDiagram
+    before={message.planogram.before}
+    after={message.planogram.after}
+    comparisonMode={true}
+  />
+)}
+```
+
+The existing `PlanogramDiagram` component already supports `comparisonMode` with side-by-side "Before" / "After" panels, uplift badges, and eye-level indicators. No component changes needed.
+
+**Optional Enhancement (Phase 2):** Also show the planogram on the Stores page when the user navigates there after an optimization query — surface the last optimization result from memory/session context.
+
+### 4. Demo Data Strategy
+
+The simulation must feel intelligent without real ML. Strategy:
+
+| Rule | Logic |
+|------|-------|
+| **Eye-level premium** | Shelves 2-3 (of 5) are eye level. Products placed here get +8-15% predicted uplift |
+| **Velocity-based ranking** | Use actual `SkuVelocity.DailyUnits` from seeded data. High-velocity items earn eye-level placement |
+| **Feature product boost** | If user specifies a product, it always moves to eye-level with expanded facing |
+| **Brand color consistency** | Deterministic color from brand name hash → same brand always same color across queries |
+| **Realistic slot count** | 5 shelves × 4-6 positions = 20-30 slots per layout (matches real gondola sections) |
+| **Aggregate uplift** | 3-10% range — believable for planogram optimization |
+
+The key insight: by using **real velocity data from the seeded database**, the optimization feels data-driven even though the algorithm is just "sort by velocity and put fast movers at eye level."
+
+### 5. Demo Script Entry
+
+**User Query:**
+> "Optimize the shelf layout for Westfield Market's snack aisle, featuring Apex Grill products"
+
+**What They See:**
+1. Agent routing indicator shows "Store Ops" agent (orange pill)
+2. Text reply: "I've analyzed the snack aisle at Westfield Market and generated an optimized planogram. By moving Apex Grill Smoky BBQ and Hickory Wings to eye-level (shelves 2-3) and expanding their facing width, the model predicts a **+6.3% category revenue uplift**."
+3. Below the text: `PlanogramDiagram` renders in comparison mode showing:
+   - **Before:** Current layout with Apex Grill products on bottom shelf, small facing
+   - **After:** Apex Grill at eye level with green uplift badges (+12.1%, +9.8%), slower-moving items shifted down
+4. Eye-level indicator stripe highlights shelves 2-3 in both panels
+5. Telemetry drawer shows the `GeneratePlanogramLayout` tool call span
+
+## Implementation Plan
+
+| # | Task | Owner | Dependencies |
+|---|------|-------|-------------|
+| 1 | `GeneratePlanogramLayout` MCP tool + `RetailPulseDb` method | Costco | None |
+| 2 | API proxy tool (`PlanogramLayoutTool.cs`) + REST endpoint | Costco | #1 |
+| 3 | Add `store-ops/planogram` intent to router + specialist wiring | Costco | #2 |
+| 4 | `PlanogramResponse` type on `ChatResponse` contract | Costco | #3 |
+| 5 | Frontend: add `planogram?` to ChatResponse type | Chick | #4 |
+| 6 | Frontend: render `PlanogramDiagram` inline in chat messages | Chick | #5 |
+| 7 | Tests: MCP tool unit tests + agent integration tests | Target | #1-#4 |
+| 8 | Demo script validation: end-to-end query → rendered planogram | All | #1-#6 |
+
+## Constraints Respected
+
+- ✅ Uses existing `PlanogramLayout` / `PlanogramSlot` types unchanged
+- ✅ Uses existing `PlanogramDiagram` component unchanged
+- ✅ Follows Aspire → McpServer → Api → Frontend data flow
+- ✅ Follows `charts?` pattern for optional structured data on ChatResponse
+- ✅ Fluent UI v9 (component already uses `makeStyles`)
+- ✅ Demo-grade — no real ML, uses seeded velocity data for realism
+
+## Alternatives Considered
+
+1. **Reuse existing `OptimizePlanogram` tool** — Rejected because its response shape (raw slots without brand names/colors) doesn't match the frontend type. A new tool with the right shape is cleaner than adapter logic.
+2. **Render in side panel instead of inline** — Rejected because inline follows the established `ChartSpec` pattern and keeps the demo flow linear (ask → see result).
+3. **Add to Stores page permanently** — Rejected for Phase 1; can be a Phase 2 enhancement where last optimization is cached per store.
+
