@@ -128,15 +128,19 @@ export function Dashboard() {
     { storeId: 's1', storeName: 'Flagship Downtown', region: 'Northeast', revenue: 2450000, target: 2200000, performanceIndex: 111, issues: [], recommendations: ['Expand premium shelf space'] },
     { storeId: 's2', storeName: 'Mall Central', region: 'Northeast', revenue: 1800000, target: 2000000, performanceIndex: 90, issues: ['Low foot traffic weekdays'], recommendations: ['Increase weekday promotions'] },
     { storeId: 's3', storeName: 'Suburb Plaza', region: 'Southeast', revenue: 950000, target: 1400000, performanceIndex: 68, issues: ['Stockout on top SKUs', 'Staff turnover'], recommendations: ['Urgent restock needed', 'Retention program'] },
-    { storeId: 's4', storeName: 'Harbor View', region: 'West', revenue: 1650000, target: 1500000, performanceIndex: 110, issues: [], recommendations: ['Expand beverage section'] },
-    { storeId: 's5', storeName: 'Tech District', region: 'West', revenue: 1200000, target: 1300000, performanceIndex: 92, issues: ['Display compliance low'], recommendations: ['Audit display compliance'] },
+    { storeId: 's4', storeName: 'Harbor View', region: 'West Coast', revenue: 1650000, target: 1500000, performanceIndex: 110, issues: [], recommendations: ['Expand beverage section'] },
+    { storeId: 's5', storeName: 'Tech District', region: 'West Coast', revenue: 1200000, target: 1300000, performanceIndex: 92, issues: ['Display compliance low'], recommendations: ['Audit display compliance'] },
     { storeId: 's6', storeName: 'Lakeside', region: 'Midwest', revenue: 780000, target: 1100000, performanceIndex: 71, issues: ['Competitor opened nearby'], recommendations: ['Price match key SKUs'] },
+    { storeId: 's7', storeName: 'Desert Springs', region: 'Southwest', revenue: 1100000, target: 1250000, performanceIndex: 88, issues: ['High shrinkage rate'], recommendations: ['Loss prevention audit'] },
+    { storeId: 's8', storeName: 'Mesa Grande', region: 'Southwest', revenue: 920000, target: 1050000, performanceIndex: 87, issues: [], recommendations: ['Increase local brand assortment'] },
+    { storeId: 's9', storeName: 'Rainier Square', region: 'Pacific Northwest', revenue: 1380000, target: 1400000, performanceIndex: 99, issues: [], recommendations: ['Launch loyalty program pilot'] },
+    { storeId: 's10', storeName: 'Emerald Market', region: 'Pacific Northwest', revenue: 1050000, target: 1200000, performanceIndex: 88, issues: ['Weekend staffing gaps'], recommendations: ['Adjust weekend scheduling'] },
   ];
 
   const demoStockouts: StockoutRisk[] = [
     { skuId: 'sku1', skuName: 'Premium Blend 12pk', brand: 'Apex Grill', currentVelocity: 45, daysRemaining: 2, recommendedReorder: 500, region: 'Northeast' },
     { skuId: 'sku2', skuName: 'Classic Lager 6pk', brand: 'Summit Brew', currentVelocity: 32, daysRemaining: 5, recommendedReorder: 300, region: 'Southeast' },
-    { skuId: 'sku3', skuName: 'Light Seltzer Variety', brand: 'Wave Drinks', currentVelocity: 28, daysRemaining: 6, recommendedReorder: 250, region: 'West' },
+    { skuId: 'sku3', skuName: 'Light Seltzer Variety', brand: 'Wave Drinks', currentVelocity: 28, daysRemaining: 6, recommendedReorder: 250, region: 'West Coast' },
   ];
 
   const demoWaterfall: MarginWaterfallStep[] = [
