@@ -23,6 +23,21 @@
 
 ## Learnings
 
+### 2026-05-14 — Dynamic Planogram Architectural Proposal
+
+**Context:** Brian wanted the existing `PlanogramDiagram.tsx` (removed from Stores page as static demo clutter) to become an AI-driven capability triggered by natural language queries.
+
+**Key Decisions:**
+- New MCP tool `GeneratePlanogramLayout` (not reusing existing `OptimizePlanogram` — wrong response shape) that returns data matching `PlanogramLayout` type directly
+- Response includes `before`/`after` layouts with brand names, colors, eye-level indicators, and per-slot predicted uplift
+- Renders inline in chat (following `charts?` pattern on ChatResponse) — new optional `planogram?` field
+- Simulation uses real `SkuVelocity` seeded data + velocity-based sorting to eye-level — feels data-driven without ML
+- Intent routed as `store-ops/planogram` through existing specialist agent pattern
+
+**Architecture Pattern:** Optional structured payloads on ChatResponse (charts, planogram, future: scorecard, waterfall) — each gets its own typed field and renders inline below the agent's text reply. This is the standard pattern for rich agent outputs.
+
+**Proposal Location:** `.squad/decisions/inbox/kroger-dynamic-planogram.md`
+
 ### 2026-05-13 — Multi-Agent Router Architecture (Sprint 1.1)
 
 **Architecture Decisions:**
