@@ -178,7 +178,7 @@ public class TenantConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void MissingDistributionSection_UsesDefault()
+    public void MissingDistributionSection_ThrowsValidationError()
     {
         var path = WriteTempYaml("""
             company: "Test Co"
@@ -189,17 +189,19 @@ public class TenantConfigurationTests : IDisposable
                 variants: ["v"]
                 priceSegment: "Premium"
             regions: ["R1"]
+            channels: ["On-Premise"]
+            theme:
+              primaryColor: "#123456"
             """);
 
-        var tenant = new FileTenantProvider(path).GetTenant();
+        Action act = () => new FileTenantProvider(path);
 
-        tenant.Distribution.Should().NotBeNull("missing distribution section should fall back to default model");
-        tenant.Distribution.Model.Should().Be("Three-Tier");
-        tenant.Distribution.DistributorTypes.Should().NotBeEmpty();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*distribution.model*");
     }
 
     [Fact]
-    public void MissingThemeSection_UsesDefault()
+    public void MissingThemeSection_ThrowsValidationError()
     {
         var path = WriteTempYaml("""
             company: "Test Co"
@@ -210,13 +212,15 @@ public class TenantConfigurationTests : IDisposable
                 variants: ["v"]
                 priceSegment: "Premium"
             regions: ["R1"]
+            channels: ["On-Premise"]
+            distribution:
+              model: "Direct"
             """);
 
-        var tenant = new FileTenantProvider(path).GetTenant();
+        Action act = () => new FileTenantProvider(path);
 
-        tenant.Theme.Should().NotBeNull();
-        tenant.Theme.PrimaryColor.Should().StartWith("#");
-        tenant.Theme.AccentColor.Should().StartWith("#");
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*primaryColor*");
     }
 
     [Fact]
@@ -232,6 +236,11 @@ public class TenantConfigurationTests : IDisposable
                 variants: ["v"]
                 priceSegment: "Ultra-Premium"
             regions: ["R1"]
+            channels: ["On-Premise"]
+            theme:
+              primaryColor: "#123456"
+            distribution:
+              model: "Direct"
             """);
 
         var tenant = new FileTenantProvider(path).GetTenant();
@@ -243,7 +252,7 @@ public class TenantConfigurationTests : IDisposable
     public void SnakeCaseKeys_AreNotRecognizedByCamelCaseDeserializer()
     {
         // Production uses CamelCaseNamingConvention with IgnoreUnmatchedProperties.
-        // snake_case keys should be silently ignored, leaving the property at default.
+        // snake_case keys should be silently ignored, leaving the property at default (empty string).
         var path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test"
@@ -253,10 +262,15 @@ public class TenantConfigurationTests : IDisposable
                 variants: ["v"]
                 price_segment: "Ultra-Premium"
             regions: ["R1"]
+            channels: ["On-Premise"]
+            theme:
+              primaryColor: "#123456"
+            distribution:
+              model: "Direct"
             """);
 
         var tenant = new FileTenantProvider(path).GetTenant();
-        tenant.Brands[0].PriceSegment.Should().Be("Premium",
+        tenant.Brands[0].PriceSegment.Should().BeEmpty(
             "snake_case keys are not bound by the CamelCase deserializer used in production");
     }
 
@@ -270,7 +284,10 @@ public class TenantConfigurationTests : IDisposable
         tenant.Channels.Should().NotBeNull().And.BeEmpty();
         tenant.Theme.Should().NotBeNull();
         tenant.Distribution.Should().NotBeNull();
-        tenant.Distribution.DistributorTypes.Should().NotBeNullOrEmpty();
+        // Defaults are empty — demo values now live in tenant.yaml only
+        tenant.Distribution.DistributorTypes.Should().NotBeNull().And.BeEmpty();
+        tenant.Company.Should().BeEmpty();
+        tenant.Industry.Should().BeEmpty();
     }
 
     private static string FindProjectRoot()

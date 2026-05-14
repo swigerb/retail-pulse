@@ -8,8 +8,8 @@ namespace RetailPulse.Contracts;
 /// </summary>
 public class TenantConfiguration
 {
-    public string Company { get; init; } = "Retail Pulse Demo";
-    public string Industry { get; init; } = "Retail & Consumer Goods";
+    public string Company { get; init; } = "";
+    public string Industry { get; init; } = "";
     public string Description { get; init; } = "";
 
     [YamlMember(Alias = "brands")]
@@ -60,7 +60,7 @@ public class BrandConfig
     [JsonIgnore]
     public IReadOnlyList<string> Variants => VariantsList;
 
-    public string PriceSegment { get; init; } = "Premium";
+    public string PriceSegment { get; init; } = "";
 }
 
 /// <summary>
@@ -68,10 +68,10 @@ public class BrandConfig
 /// </summary>
 public class ThemeConfig
 {
-    public string PrimaryColor { get; init; } = "#1A73E8";
-    public string AccentColor { get; init; } = "#FFC107";
-    public string LogoPath { get; init; } = "assets/logo.png";
-    public string FontFamily { get; init; } = "Inter, system-ui, sans-serif";
+    public string PrimaryColor { get; init; } = "";
+    public string AccentColor { get; init; } = "";
+    public string LogoPath { get; init; } = "";
+    public string FontFamily { get; init; } = "";
 }
 
 /// <summary>
@@ -79,11 +79,11 @@ public class ThemeConfig
 /// </summary>
 public class DistributionConfig
 {
-    public string Model { get; init; } = "Three-Tier";
+    public string Model { get; init; } = "";
 
     [YamlMember(Alias = "distributorTypes")]
     [JsonPropertyName("distributorTypes")]
-    public List<string> DistributorTypesList { get; init; } = new() { "Distributor", "Wholesaler", "Retailer" };
+    public List<string> DistributorTypesList { get; init; } = new();
 
     /// <summary>Read-only view of configured distributor types.</summary>
     [YamlIgnore]
