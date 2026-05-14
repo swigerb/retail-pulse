@@ -2,10 +2,9 @@ import { useState, useCallback, useRef } from 'react';
 import { makeStyles, Button } from '@fluentui/react-components';
 import { KB_COLORS } from '../../constants/agentRouting';
 import { uploadDocument } from '../../services/knowledgeApi';
-import type { KBDocument } from '../../types';
 
 interface DocumentUploadProps {
-  onUploadComplete: (doc: KBDocument) => void;
+  onUploadComplete: () => void;
 }
 
 const ACCEPTED_FORMATS = ['.md', '.txt'];
@@ -115,7 +114,7 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
   const [title, setTitle] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadResult, setUploadResult] = useState<{ success: boolean; chunkCount?: number; error?: string } | null>(null);
+  const [uploadResult, setUploadResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const handleFileSelect = useCallback((file: File) => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -147,11 +146,11 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
     }, 200);
 
     try {
-      const doc = await uploadDocument(selectedFile, title);
+      await uploadDocument(selectedFile, title);
       clearInterval(progressInterval);
       setUploadProgress(100);
-      setUploadResult({ success: true, chunkCount: doc.chunkCount });
-      onUploadComplete(doc);
+      setUploadResult({ success: true });
+      onUploadComplete();
       setTimeout(() => {
         setSelectedFile(null);
         setTitle('');
@@ -237,7 +236,7 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
 
       {uploadResult?.success && (
         <div className={styles.success} data-testid="upload-success">
-          ✅ Indexed: {uploadResult.chunkCount} chunks created
+          ✅ Document indexed successfully
         </div>
       )}
 
