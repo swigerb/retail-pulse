@@ -33,6 +33,7 @@ using RetailPulse.Contracts.Observability;
 using RetailPulse.Contracts.Rag;
 using RetailPulse.Api.Cards;
 using RetailPulse.Api.Configuration;
+using RetailPulse.Api.Endpoints;
 using RetailPulse.Api.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -549,23 +550,8 @@ builder.Services.AddScoped<GuardrailsMiddleware>();
 // Streaming middleware — progressive token delivery via SignalR
 builder.Services.AddScoped<StreamingMiddleware>();
 
-// ── Card State — thread-safe in-memory with SignalR events ───────────────
-builder.Services.AddSingleton<RetailPulse.Api.Cards.InMemoryAdaptiveCardState>();
-builder.Services.AddSingleton<RetailPulse.Contracts.Cards.IAdaptiveCardState>(sp =>
-    sp.GetRequiredService<RetailPulse.Api.Cards.InMemoryAdaptiveCardState>());
-
 // ── Observability Services — cost tracking, audit log, conversation export ─
-builder.Services.AddSingleton<RetailPulse.Api.Observability.InMemoryCostTracker>();
-builder.Services.AddSingleton<RetailPulse.Contracts.Observability.ICostTracker>(sp =>
-    sp.GetRequiredService<RetailPulse.Api.Observability.InMemoryCostTracker>());
-
-builder.Services.AddSingleton<RetailPulse.Api.Observability.InMemoryAuditLog>();
-builder.Services.AddSingleton<RetailPulse.Contracts.Observability.IAuditLog>(sp =>
-    sp.GetRequiredService<RetailPulse.Api.Observability.InMemoryAuditLog>());
-
-builder.Services.AddSingleton<RetailPulse.Api.Observability.ConversationExporter>();
-builder.Services.AddSingleton<RetailPulse.Contracts.Observability.IConversationExport>(sp =>
-    sp.GetRequiredService<RetailPulse.Api.Observability.ConversationExporter>());
+// (Registered below alongside Adaptive Card state)
 
 // Collaborative Adaptive Cards — in-memory multi-user card state with SignalR sync
 builder.Services.AddSingleton<InMemoryAdaptiveCardState>(sp =>
@@ -1259,7 +1245,7 @@ app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnume
                 : TimeSpan.Zero;
 
             await costTracker.TrackUsageAsync(new UsageEvent(
-                specialist.Key, "gpt-4o", inputTokens, outputTokens,
+                specialist.Key, specialist.Model, inputTokens, outputTokens,
                 response.Spans?.FirstOrDefault(s => s.Type == "tool_call")?.Name,
                 DateTime.UtcNow), ct);
 

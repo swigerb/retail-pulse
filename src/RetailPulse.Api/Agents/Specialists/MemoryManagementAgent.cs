@@ -16,6 +16,7 @@ public class MemoryManagementAgent : ISpecialistAgent
 
     public string Key => "memory-management";
     public string DisplayName => "Memory Management";
+    public string Model => "none";
     public IReadOnlyList<string> SupportedIntents { get; } = [AgentIntent.MemoryManagement];
 
     public MemoryManagementAgent(

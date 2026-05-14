@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Observability;
@@ -12,6 +13,14 @@ namespace RetailPulse.Tests.Observability;
 /// </summary>
 public class CostTrackerQuotaTests
 {
+    private static readonly IConfiguration EmptyConfig = new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["TokenPricing:gpt-5.4-mini:InputPerMillion"] = "0.15",
+            ["TokenPricing:gpt-5.4-mini:OutputPerMillion"] = "0.60",
+        })
+        .Build();
+
     private static InMemoryCostTracker CreateTracker(
         int maxEvents = 10_000,
         double ttlHours = 24)
@@ -20,7 +29,7 @@ public class CostTrackerQuotaTests
         {
             MaxCostEvents = maxEvents,
             CostEventTtlHours = ttlHours
-        }));
+        }), EmptyConfig);
     }
 
     private static UsageEvent MakeEvent(string agentId = "test-agent", DateTime? timestamp = null)

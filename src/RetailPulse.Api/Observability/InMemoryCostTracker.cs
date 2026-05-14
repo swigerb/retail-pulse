@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Contracts.Observability;
@@ -6,7 +7,8 @@ using RetailPulse.Contracts.Observability;
 namespace RetailPulse.Api.Observability;
 
 /// <summary>
-/// In-memory cost tracker with model pricing table.
+/// In-memory cost tracker with config-driven model pricing table.
+/// Reads pricing from appsettings.json TokenPricing section.
 /// Bounded by configurable max events and TTL eviction.
 /// Thread-safe via ConcurrentQueue for ordered eviction.
 /// </summary>
@@ -15,20 +17,29 @@ public class InMemoryCostTracker : ICostTracker
     private readonly ConcurrentQueue<UsageEvent> _events = new();
     private int _eventCount;
     private readonly ObservabilityOptions _options;
+    private readonly Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)> _modelPricing;
 
-    // Demo pricing table (per 1M tokens)
-    private static readonly Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)> ModelPricing = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["gpt-5.4-mini"] = (0.15m, 0.60m),
-        ["gpt-4o"] = (2.50m, 10.00m),
-        ["claude-sonnet"] = (3.00m, 15.00m),
-        // Fallback for unknown models
-        ["default"] = (1.00m, 5.00m)
-    };
+    private static readonly (decimal InputPer1M, decimal OutputPer1M) DefaultPricing = (1.00m, 5.00m);
 
-    public InMemoryCostTracker(IOptions<ObservabilityOptions> options)
+    public InMemoryCostTracker(IOptions<ObservabilityOptions> options, IConfiguration configuration)
     {
         _options = options.Value;
+        _modelPricing = BuildPricingTable(configuration);
+    }
+
+    private static Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)> BuildPricingTable(IConfiguration configuration)
+    {
+        var pricing = new Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)>(StringComparer.OrdinalIgnoreCase);
+        var section = configuration.GetSection("TokenPricing");
+
+        foreach (var child in section.GetChildren())
+        {
+            var inputRate = child.GetValue<decimal>("InputPerMillion");
+            var outputRate = child.GetValue<decimal>("OutputPerMillion");
+            pricing[child.Key] = (inputRate, outputRate);
+        }
+
+        return pricing;
     }
 
     public Task TrackUsageAsync(UsageEvent usage, CancellationToken ct = default)
@@ -122,9 +133,9 @@ public class InMemoryCostTracker : ICostTracker
         return _events.Where(e => e.Timestamp >= cutoff).ToList();
     }
 
-    private static decimal CalculateCost(UsageEvent e)
+    private decimal CalculateCost(UsageEvent e)
     {
-        var pricing = ModelPricing.GetValueOrDefault(e.Model, ModelPricing["default"]);
+        var pricing = _modelPricing.GetValueOrDefault(e.Model, DefaultPricing);
         var inputCost = (decimal)e.InputTokens / 1_000_000m * pricing.InputPer1M;
         var outputCost = (decimal)e.OutputTokens / 1_000_000m * pricing.OutputPer1M;
         return inputCost + outputCost;
