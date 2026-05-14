@@ -291,3 +291,19 @@ Tests (25 new):
 - 2026-05-14T10:09:00-04:00 — `CollapsibleSection` component at `src/RetailPulse.Web/src/components/CollapsibleSection.tsx` provides reusable accordion/twist UI for the telemetry drawer. Uses CSS `max-height` transition and a rotated ▶ chevron. Default state: collapsed.
 - 2026-05-14T10:09:00-04:00 — Empty trace filtering in TraceDashboard: traces with 0 spans or (0 duration AND 0 tokens) are excluded from display and aggregates to prevent "Invalid Date" / "Unknown intent" noise.
 
+## Session Work — 2026-05-14 CollapsibleSection Fluent Accordion Refactor
+
+### Refactor: CollapsibleSection to Fluent UI v2 Accordion
+- Replaced hand-rolled accordion logic with Fluent UI v9 `Accordion`/`AccordionItem`/`AccordionHeader`/`AccordionPanel`
+- Removed: `▶` text chevron, `maxHeight: 5000px` CSS hack, manual ARIA, manual keyboard handling, `useState`, custom CSS variables
+- Fluent AccordionHeader handles chevron icon, keyboard nav, and ARIA natively
+- Used `tokens.colorNeutralForeground2` for header text color (respects teamsDarkTheme)
+- Preserved existing API (`title`, `defaultExpanded`, `children`) — zero changes needed in Dashboard.tsx
+- Validation: Build passes, 249/249 tests pass (30 test files)
+
+## Learnings
+
+- 2026-05-14T10:25:37-04:00 — `CollapsibleSection` now wraps Fluent UI v9 `Accordion`/`AccordionItem`/`AccordionHeader`/`AccordionPanel`. No hand-rolled expand/collapse logic. The `collapsible` prop enables independent toggle, `defaultOpenItems` controls initial state.
+- 2026-05-14T10:25:37-04:00 — Prefer Fluent UI primitives over hand-rolled interactive patterns. AccordionHeader handles chevron, keyboard, and ARIA automatically — no need for manual `role="button"`, `tabIndex`, `onKeyDown`, or `aria-expanded`.
+- 2026-05-14T10:25:37-04:00 — Use `tokens.colorNeutralForeground2` from `@fluentui/react-components` for subtle text in dark theme instead of custom CSS variables like `var(--color-text-subtle)`.
+
