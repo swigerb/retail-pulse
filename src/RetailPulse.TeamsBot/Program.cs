@@ -11,9 +11,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
-// Health checks
+// Health checks — includes SignalR connection status
 builder.Services.AddHealthChecks()
-    .AddCheck("bot", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Bot is running"));
+    .AddCheck("bot", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Bot is running"))
+    .AddCheck<RetailPulse.TeamsBot.SignalRHealthCheck>("signalr");
 
 // M365 Agents SDK setup
 builder.Services.AddHttpClient();
@@ -57,7 +58,13 @@ builder.Services.AddSingleton(sp =>
 });
 
 // Services
-builder.Services.AddSingleton<TelemetrySignalRClient>();
+builder.Services.AddSingleton<TelemetrySignalRClient>(sp =>
+{
+    var conn = sp.GetRequiredService<HubConnection>();
+    var logger = sp.GetRequiredService<ILogger<TelemetrySignalRClient>>();
+    var mode = builder.Configuration["TeamsBot:HealthMode"] ?? "degraded";
+    return new TelemetrySignalRClient(conn, logger, mode);
+});
 builder.Services.AddSingleton<SessionManager>();
 builder.Services.AddScoped<TeamsSsoHandler>();
 builder.Services.AddSingleton<AdaptiveCardBuilder>();

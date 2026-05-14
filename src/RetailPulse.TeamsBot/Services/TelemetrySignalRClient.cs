@@ -6,24 +6,36 @@ namespace RetailPulse.TeamsBot.Services;
 
 /// <summary>
 /// SignalR client for receiving real-time telemetry spans from the RetailPulse API.
-/// Spans are now scoped to per-session SignalR groups, so this client must call
-/// JoinSession before it will receive anything for a given conversation.
+/// Surfaces degraded health when the SignalR connection fails, with exponential
+/// backoff reconnection. Health mode is configurable: "fail-fast" vs "degraded".
 /// </summary>
 public class TelemetrySignalRClient : IAsyncDisposable
 {
     private readonly HubConnection _connection;
     private readonly ILogger<TelemetrySignalRClient> _logger;
     private readonly ConcurrentDictionary<string, ConcurrentQueue<AgentSpan>> _spanCollections = new();
+    private readonly string _healthMode;
     private bool _isConnected;
+    private int _reconnectAttempts;
 
-    public TelemetrySignalRClient(HubConnection connection, ILogger<TelemetrySignalRClient> logger)
+    // Exponential backoff parameters
+    internal static readonly TimeSpan InitialReconnectDelay = TimeSpan.FromSeconds(1);
+    internal static readonly TimeSpan MaxReconnectDelay = TimeSpan.FromSeconds(30);
+    internal const double ReconnectBackoffMultiplier = 2.0;
+    internal const int MaxReconnectAttempts = 10;
+
+    /// <summary>True when the SignalR connection is alive.</summary>
+    public bool IsConnected => _isConnected;
+
+    /// <summary>True when the connection is degraded (disconnected but not in fail-fast mode).</summary>
+    public bool IsDegraded => !_isConnected && _healthMode != "fail-fast";
+
+    public TelemetrySignalRClient(HubConnection connection, ILogger<TelemetrySignalRClient> logger, string healthMode = "degraded")
     {
         _connection = connection;
         _logger = logger;
+        _healthMode = healthMode;
 
-        // The API emits a single AgentSpan object (matching the Web client
-        // contract). Match that shape exactly — the previous six-positional-arg
-        // overload silently dropped every span.
         _connection.On<AgentSpan>("SpanReceived", span =>
         {
             var sessionId = span.SessionId;
@@ -37,24 +49,78 @@ public class TelemetrySignalRClient : IAsyncDisposable
             queue.Enqueue(span);
             _logger.LogDebug("Received span for session {SessionId}: {Type} - {Name}", sessionId, span.Type, span.Name);
         });
+
+        _connection.Closed += OnConnectionClosed;
+        _connection.Reconnected += OnReconnected;
+    }
+
+    private Task OnConnectionClosed(Exception? ex)
+    {
+        _isConnected = false;
+        _logger.LogWarning(ex, "SignalR telemetry connection closed. HealthMode={HealthMode}", _healthMode);
+        return Task.CompletedTask;
+    }
+
+    private Task OnReconnected(string? connectionId)
+    {
+        _isConnected = true;
+        _reconnectAttempts = 0;
+        _logger.LogInformation("SignalR telemetry connection restored. ConnectionId={ConnectionId}", connectionId);
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Connects to the SignalR hub
+    /// Connects to the SignalR hub with exponential backoff retry.
+    /// In fail-fast mode, throws on failure. In degraded mode, logs and continues.
     /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
         if (_isConnected) return;
 
-        try
+        var delay = InitialReconnectDelay;
+
+        while (!cancellationToken.IsCancellationRequested)
         {
-            await _connection.StartAsync(cancellationToken);
-            _isConnected = true;
-            _logger.LogInformation("Connected to telemetry SignalR hub");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to connect to telemetry SignalR hub");
+            try
+            {
+                await _connection.StartAsync(cancellationToken);
+                _isConnected = true;
+                _reconnectAttempts = 0;
+                _logger.LogInformation("Connected to telemetry SignalR hub");
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("SignalR connection cancelled");
+                return; // graceful exit on cancellation in any mode
+            }
+            catch (Exception ex) when (_reconnectAttempts < MaxReconnectAttempts)
+            {
+                _reconnectAttempts++;
+                _logger.LogWarning(ex,
+                    "Failed to connect to telemetry SignalR hub (attempt {Attempt}/{Max}). Retrying in {Delay}ms",
+                    _reconnectAttempts, MaxReconnectAttempts, delay.TotalMilliseconds);
+
+                if (_healthMode == "fail-fast" && _reconnectAttempts >= MaxReconnectAttempts)
+                    throw;
+
+                try { await Task.Delay(delay, cancellationToken); }
+                catch (OperationCanceledException) { return; }
+
+                delay = TimeSpan.FromMilliseconds(Math.Min(
+                    delay.TotalMilliseconds * ReconnectBackoffMultiplier,
+                    MaxReconnectDelay.TotalMilliseconds));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to connect to telemetry SignalR hub after {Max} attempts. HealthMode={HealthMode}",
+                    MaxReconnectAttempts, _healthMode);
+
+                if (_healthMode == "fail-fast")
+                    throw;
+
+                return; // degraded mode: continue without telemetry
+            }
         }
     }
 

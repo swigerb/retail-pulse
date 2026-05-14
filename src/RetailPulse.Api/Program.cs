@@ -516,6 +516,7 @@ builder.Services.AddScoped<ApprovalTool>(sp =>
         sp.GetRequiredService<ILogger<ApprovalTool>>()));
 
 // Conversation memory — SQLite-backed, per-user, with configurable TTL
+// Conversation memory — SQLite-backed with bounded-channel background extraction
 var memoryDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "memory.db");
 builder.Services.AddConversationMemory(memoryDbPath);
 
@@ -523,12 +524,15 @@ builder.Services.AddConversationMemory(memoryDbPath);
 var alertsDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "alerts.db");
 builder.Services.AddProactiveAlerts(alertsDbPath);
 
-// Distributed tracing — in-memory ring buffer with SignalR push for real-time trace events
+// Distributed tracing — in-memory ring buffer with bounded-channel SignalR push
+builder.Services.AddSingleton<RetailPulse.Api.Tracing.TelemetryPushChannel>();
 builder.Services.AddSingleton<InMemoryTraceCollector>(sp =>
     new InMemoryTraceCollector(
         sp.GetRequiredService<IHubContext<TelemetryHub>>(),
-        sp.GetRequiredService<IConfiguration>()));
+        sp.GetRequiredService<IConfiguration>(),
+        sp.GetRequiredService<RetailPulse.Api.Tracing.TelemetryPushChannel>()));
 builder.Services.AddSingleton<ITraceCollector>(sp => sp.GetRequiredService<InMemoryTraceCollector>());
+builder.Services.AddHostedService<RetailPulse.Api.Tracing.TelemetryPushBackgroundService>();
 
 // RAG Knowledge Base — in-memory BM25-based document store (no Azure dependency)
 builder.Services.AddSingleton<InMemoryKnowledgeBase>();

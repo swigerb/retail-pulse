@@ -21,7 +21,7 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, ILogger<Program> logger, CancellationToken ct) =>
+        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken ct) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
             {
@@ -307,39 +307,15 @@ public static class ChatEndpoints
                     }
                 }
 
-                // Memory store with tracing (fire-and-forget)
+                // Memory store via bounded channel (background service processes)
                 if (decision.Intent != AgentIntent.MemoryManagement)
                 {
-                    var capturedTraceId = traceId;
-                    var capturedParentSpanId = chatActivity?.SpanId.ToString();
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var storeStart = DateTimeOffset.UtcNow;
-                            using var memoryStoreActivity = AgentTelemetry.StartMemoryStore(userId);
-                            await memoryMiddleware.ExtractAndStoreAsync(userId, request.Message, response.Reply, CancellationToken.None);
-                            var storeEnd = DateTimeOffset.UtcNow;
-
-                            traceCollector.CaptureSpan(new TraceSpan(
-                                SpanId: Guid.NewGuid().ToString("N")[..16],
-                                TraceId: capturedTraceId,
-                                ParentSpanId: capturedParentSpanId,
-                                OperationName: "memory.store",
-                                StartTime: storeStart,
-                                EndTime: storeEnd,
-                                DurationMs: (storeEnd - storeStart).TotalMilliseconds,
-                                Tags: new Dictionary<string, string>
-                                {
-                                    ["memory.user_id"] = userId,
-                                    ["memory.entries_stored"] = "extracted"
-                                }));
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.LogWarning(ex, "Background memory extraction failed for user {UserId}", userId);
-                        }
-                    }, CancellationToken.None);
+                    memoryChannel.TryWrite(new MemoryWorkItem(
+                        userId,
+                        request.Message,
+                        response.Reply,
+                        TraceId: traceId,
+                        ParentSpanId: chatActivity?.SpanId.ToString()));
                 }
 
                 // Notify trace completion via SignalR
@@ -428,7 +404,7 @@ public static class ChatEndpoints
         .RequireRateLimiting("strict");
 
         // Streaming chat endpoint — SSE/SignalR progressive token delivery
-        app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, ILogger<Program> logger, CancellationToken ct) =>
+        app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken ct) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
             {
@@ -482,12 +458,8 @@ public static class ChatEndpoints
                 if (filteredReply != response.Reply)
                     response = response with { Reply = filteredReply };
 
-                // Fire-and-forget memory extraction
-                _ = Task.Run(async () =>
-                {
-                    try { await memoryMiddleware.ExtractAndStoreAsync(userId, request.Message, response.Reply, CancellationToken.None); }
-                    catch { /* swallow */ }
-                }, CancellationToken.None);
+                // Memory extraction via bounded channel (linked to request CancellationToken)
+                memoryChannel.TryWrite(new MemoryWorkItem(userId, request.Message, response.Reply));
 
                 return Results.Ok(response);
             }
