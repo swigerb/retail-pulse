@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Alerts;
@@ -177,13 +179,15 @@ public class Phase1IntegrationTests : IDisposable
     public async Task DemandForecastAgent_HandleAsync_ReturnsValidResponse()
     {
         var chatClient = MockChatClient("Brand X demand is projected to grow 15% next quarter.");
+        var hubContext = CreateMockHubContext();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+        var pipeline = new AgentExecutionPipeline(
+            chatClient, hubContext, config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
         var agent = new DemandForecastAgent(
-            chatClient,
+            pipeline,
             new AgentDefinition { Name = "DemandForecast", Model = "gpt-5.4-mini", SystemPrompt = "Demand specialist", Temperature = 0.3 },
-            CreateMockHubContext(),
-            [],
-            Mock.Of<ILogger<DemandForecastAgent>>(),
-            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build());
+            []);
 
         var response = await agent.HandleAsync(
             new ChatRequest("Forecast for Brand X", SessionId: "demand-test"));
@@ -417,13 +421,16 @@ public class Phase1IntegrationTests : IDisposable
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        return new GeneralAgent(
+        var pipeline = new AgentExecutionPipeline(
             chatClient ?? Mock.Of<IChatClient>(),
-            new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "Test", Temperature = 0.7 },
             CreateMockHubContext(),
-            [],
-            Mock.Of<ILogger<GeneralAgent>>(),
-            config);
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return new GeneralAgent(
+            pipeline,
+            new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "Test", Temperature = 0.7 },
+            []);
     }
 
     private static RetailOpsRouter CreateRouter(IChatClient chatClient, IEnumerable<ISpecialistAgent> specialists)

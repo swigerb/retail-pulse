@@ -38,16 +38,22 @@ public static class RoutingServiceExtensions
         AgentDefinition? marginDef = null,
         Func<IServiceProvider, IEnumerable<AITool>>? marginToolsFactory = null)
     {
-        // Register GeneralAgent as ISpecialistAgent
-        services.AddScoped<GeneralAgent>(sp =>
+        // Register the shared execution pipeline
+        services.AddScoped<IAgentExecutionPipeline>(sp =>
         {
             var chatClient = sp.GetRequiredService<IChatClient>();
             var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
-            var tools = toolsFactory(sp);
-            var logger = sp.GetRequiredService<ILogger<GeneralAgent>>();
             var configuration = sp.GetRequiredService<IConfiguration>();
+            var logger = sp.GetRequiredService<ILogger<AgentExecutionPipeline>>();
+            return new AgentExecutionPipeline(chatClient, hubContext, configuration, logger);
+        });
 
-            return new GeneralAgent(chatClient, generalAgentDef, hubContext, tools, logger, configuration);
+        // Register GeneralAgent as ISpecialistAgent
+        services.AddScoped<GeneralAgent>(sp =>
+        {
+            var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+            var tools = toolsFactory(sp);
+            return new GeneralAgent(pipeline, generalAgentDef, tools);
         });
         services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<GeneralAgent>());
 
@@ -56,13 +62,9 @@ public static class RoutingServiceExtensions
         {
             services.AddScoped<DemandForecastAgent>(sp =>
             {
-                var chatClient = sp.GetRequiredService<IChatClient>();
-                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
                 var tools = demandToolsFactory(sp);
-                var logger = sp.GetRequiredService<ILogger<DemandForecastAgent>>();
-                var configuration = sp.GetRequiredService<IConfiguration>();
-
-                return new DemandForecastAgent(chatClient, demandForecastDef, hubContext, tools, logger, configuration);
+                return new DemandForecastAgent(pipeline, demandForecastDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<DemandForecastAgent>());
         }
@@ -72,14 +74,10 @@ public static class RoutingServiceExtensions
         {
             services.AddScoped<PromoPlanningAgent>(sp =>
             {
-                var chatClient = sp.GetRequiredService<IChatClient>();
-                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
                 var tools = promoToolsFactory(sp);
-                var logger = sp.GetRequiredService<ILogger<PromoPlanningAgent>>();
-                var configuration = sp.GetRequiredService<IConfiguration>();
                 var approvalGate = sp.GetService<RetailPulse.Contracts.Approval.IApprovalGate>();
-
-                return new PromoPlanningAgent(chatClient, promoPlanningDef, hubContext, tools, logger, configuration, approvalGate);
+                return new PromoPlanningAgent(pipeline, promoPlanningDef, tools, approvalGate);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<PromoPlanningAgent>());
         }
@@ -89,14 +87,12 @@ public static class RoutingServiceExtensions
         {
             services.AddScoped<CompetitiveIntelAgent>(sp =>
             {
-                var chatClient = sp.GetRequiredService<IChatClient>();
+                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
                 var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
                 var tools = competitiveToolsFactory(sp);
                 var logger = sp.GetRequiredService<ILogger<CompetitiveIntelAgent>>();
-                var configuration = sp.GetRequiredService<IConfiguration>();
                 var alertService = sp.GetService<Alerts.SqliteAlertService>();
-
-                return new CompetitiveIntelAgent(chatClient, competitiveIntelDef, hubContext, tools, logger, configuration, alertService);
+                return new CompetitiveIntelAgent(pipeline, competitiveIntelDef, tools, hubContext, logger, alertService);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<CompetitiveIntelAgent>());
         }
@@ -106,13 +102,9 @@ public static class RoutingServiceExtensions
         {
             services.AddScoped<SupplyChainAgent>(sp =>
             {
-                var chatClient = sp.GetRequiredService<IChatClient>();
-                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
                 var tools = supplyToolsFactory(sp);
-                var logger = sp.GetRequiredService<ILogger<SupplyChainAgent>>();
-                var configuration = sp.GetRequiredService<IConfiguration>();
-
-                return new SupplyChainAgent(chatClient, supplyChainDef, hubContext, tools, logger, configuration);
+                return new SupplyChainAgent(pipeline, supplyChainDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<SupplyChainAgent>());
         }
@@ -122,13 +114,9 @@ public static class RoutingServiceExtensions
         {
             services.AddScoped<StoreOpsAgent>(sp =>
             {
-                var chatClient = sp.GetRequiredService<IChatClient>();
-                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
                 var tools = storeOpsToolsFactory(sp);
-                var logger = sp.GetRequiredService<ILogger<StoreOpsAgent>>();
-                var configuration = sp.GetRequiredService<IConfiguration>();
-
-                return new StoreOpsAgent(chatClient, storeOpsDef, hubContext, tools, logger, configuration);
+                return new StoreOpsAgent(pipeline, storeOpsDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<StoreOpsAgent>());
         }
@@ -138,13 +126,9 @@ public static class RoutingServiceExtensions
         {
             services.AddScoped<PlanogramAgent>(sp =>
             {
-                var chatClient = sp.GetRequiredService<IChatClient>();
-                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
                 var tools = planogramToolsFactory(sp);
-                var logger = sp.GetRequiredService<ILogger<PlanogramAgent>>();
-                var configuration = sp.GetRequiredService<IConfiguration>();
-
-                return new PlanogramAgent(chatClient, planogramDef, hubContext, tools, logger, configuration);
+                return new PlanogramAgent(pipeline, planogramDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<PlanogramAgent>());
         }
@@ -154,13 +138,9 @@ public static class RoutingServiceExtensions
         {
             services.AddScoped<MarginAgent>(sp =>
             {
-                var chatClient = sp.GetRequiredService<IChatClient>();
-                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
                 var tools = marginToolsFactory(sp);
-                var logger = sp.GetRequiredService<ILogger<MarginAgent>>();
-                var configuration = sp.GetRequiredService<IConfiguration>();
-
-                return new MarginAgent(chatClient, marginDef, hubContext, tools, logger, configuration);
+                return new MarginAgent(pipeline, marginDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<MarginAgent>());
         }

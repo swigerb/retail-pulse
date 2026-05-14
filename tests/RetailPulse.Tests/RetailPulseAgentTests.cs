@@ -89,7 +89,7 @@ public class RetailPulseAgentTests
 
         var response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-429"));
 
-        response.Reply.Should().Be("⏳ The AI service is temporarily rate-limited. Please wait a moment and try again. (APIM token limit: 10,000 TPM)");
+        response.Reply.Should().Be("⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.");
         response.SessionId.Should().Be("session-429");
         response.Spans.Should().BeEmpty();
         response.Charts.Should().BeNull();

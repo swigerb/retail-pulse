@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
@@ -491,8 +493,14 @@ public class CompetitiveIntelAgentTests
             .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
-        return new CompetitiveIntelAgent(
+        var pipeline = new AgentExecutionPipeline(
             chatClient ?? Mock.Of<IChatClient>(),
+            hubContext,
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return new CompetitiveIntelAgent(
+            pipeline,
             new AgentDefinition
             {
                 Name = "CompetitiveIntel",
@@ -500,10 +508,9 @@ public class CompetitiveIntelAgentTests
                 SystemPrompt = "You are a competitive intelligence specialist for retail brands.",
                 Temperature = 0.3
             },
-            hubContext,
             tools ?? [],
-            Mock.Of<ILogger<CompetitiveIntelAgent>>(),
-            config);
+            hubContext,
+            Mock.Of<ILogger<CompetitiveIntelAgent>>());
     }
 
     private static IHubContext<TelemetryHub> CreateMockHubContext()
