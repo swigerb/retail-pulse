@@ -61,6 +61,11 @@ public class FileTenantProvider : ITenantProvider
             errors.Add("'company' is required.");
         }
 
+        if (string.IsNullOrWhiteSpace(tenant.Industry))
+        {
+            errors.Add("'industry' is required.");
+        }
+
         if (tenant.Brands is null || tenant.Brands.Count == 0)
         {
             errors.Add("At least one entry under 'brands' is required.");
@@ -79,6 +84,21 @@ public class FileTenantProvider : ITenantProvider
         if (tenant.Regions is null || tenant.Regions.Count == 0)
         {
             errors.Add("At least one entry under 'regions' is required.");
+        }
+
+        if (tenant.Channels is null || tenant.Channels.Count == 0)
+        {
+            errors.Add("At least one entry under 'channels' is required.");
+        }
+
+        if (tenant.Distribution is null || string.IsNullOrWhiteSpace(tenant.Distribution.Model))
+        {
+            errors.Add("'distribution.model' is required.");
+        }
+
+        if (tenant.Theme is null || string.IsNullOrWhiteSpace(tenant.Theme.PrimaryColor))
+        {
+            errors.Add("'theme.primaryColor' is required.");
         }
 
         if (errors.Count > 0)

@@ -323,7 +323,8 @@ builder.Services.AddScoped<VariantMixTool>(sp =>
         sp.GetService<ILogger<VariantMixTool>>());
 });
 
-// Demand forecasting tools
+// Demand forecasting tools (deprecated — kept for backward compat during v2 transition)
+#pragma warning disable CS0618 // Obsolete demand tool proxies still registered for legacy agent pipeline
 builder.Services.AddScoped<HistoricalDemandTool>(sp =>
 {
     var factory = sp.GetRequiredService<IHttpClientFactory>();
@@ -352,6 +353,7 @@ builder.Services.AddScoped<DemandRisksTool>(sp =>
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<DemandRisksTool>>());
 });
+#pragma warning restore CS0618
 
 // Promo planning tools
 builder.Services.AddScoped<PromoHistoryTool>(sp =>
@@ -672,10 +674,12 @@ builder.Services.AddAgentRouting(promptConfig, agentDef, foundryEnabled, sp =>
 demandForecastDef: demandForecastDef,
 demandToolsFactory: sp =>
 {
+#pragma warning disable CS0618 // Obsolete demand tool proxies still used in legacy agent pipeline
     var historicalDemandTool = sp.GetRequiredService<HistoricalDemandTool>();
     var forecastTool = sp.GetRequiredService<ForecastTool>();
     var seasonalityTool = sp.GetRequiredService<SeasonalityFactorsTool>();
     var demandRisksTool = sp.GetRequiredService<DemandRisksTool>();
+#pragma warning restore CS0618
     var chartTool = sp.GetRequiredService<ChartDataTool>();
     var approvalTool = sp.GetRequiredService<ApprovalTool>();
 

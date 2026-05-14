@@ -3,6 +3,7 @@ using System.Text.Json;
 
 namespace RetailPulse.Api.Tools;
 
+[Obsolete("Use MCP demand tool instead. Will be removed in v2.")]
 public class ForecastTool
 {
     private readonly HttpClient _httpClient;

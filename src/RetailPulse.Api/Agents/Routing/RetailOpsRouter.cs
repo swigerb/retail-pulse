@@ -159,14 +159,14 @@ public class RetailOpsRouter : IAgentRouter
         var response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
         var responseText = response.Text ?? "";
 
-        return ParseClassification(responseText);
+        return ParseClassification(responseText, _logger);
     }
 
     /// <summary>
     /// Parses the LLM's JSON classification response into an IntentClassification.
     /// Expected format: { "intent": "demand/forecasting", "confidence": 0.92, "intents": ["demand/forecasting"] }
     /// </summary>
-    internal static IntentClassification ParseClassification(string json)
+    internal static IntentClassification ParseClassification(string json, ILogger? logger = null)
     {
         try
         {
@@ -202,8 +202,9 @@ public class RetailOpsRouter : IAgentRouter
 
             return new IntentClassification(intent, confidence, detectedIntents);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            logger?.LogDebug(ex, "Failed to parse {Type}", nameof(IntentClassification));
             return new IntentClassification(AgentIntent.General, 0.0, [AgentIntent.General]);
         }
     }

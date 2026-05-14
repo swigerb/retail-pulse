@@ -68,66 +68,76 @@ app.MapGet("/api/variant-mix", (string brand, RetailPulseDb data, string region 
 })
 .WithName("GetVariantMix");
 
-app.MapGet("/api/historical-demand", (string brand, RetailPulseDb data, string region = "National", string channel = "All") =>
+// ── Legacy demand routes (deprecated — use /api/demand/* instead) ────
+app.MapGet("/api/historical-demand", (HttpContext ctx, string brand, RetailPulseDb data, string region = "National", string channel = "All") =>
 {
+    ctx.Response.Headers["X-Deprecated"] = "true";
+    ctx.Response.Headers["Sunset"] = "2026-12-31";
     var effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
     var effectiveChannel = string.Equals(channel, "All", StringComparison.OrdinalIgnoreCase) ? null : channel;
     var result = data.GetHistoricalDemand(brand, effectiveRegion, effectiveChannel);
     return Results.Ok(result);
 })
-.WithName("GetHistoricalDemand");
+.WithName("GetHistoricalDemand_Legacy");
 
-app.MapGet("/api/forecast", (string brand, RetailPulseDb data, string region = "National") =>
+app.MapGet("/api/forecast", (HttpContext ctx, string brand, RetailPulseDb data, string region = "National") =>
 {
+    ctx.Response.Headers["X-Deprecated"] = "true";
+    ctx.Response.Headers["Sunset"] = "2026-12-31";
     var effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
     var result = data.GenerateForecast(brand, effectiveRegion);
     return Results.Ok(result);
 })
-.WithName("GenerateForecast");
+.WithName("GenerateForecast_Legacy");
 
-app.MapGet("/api/seasonality-factors", (RetailPulseDb data, string category = "All") =>
+app.MapGet("/api/seasonality-factors", (HttpContext ctx, RetailPulseDb data, string category = "All") =>
 {
+    ctx.Response.Headers["X-Deprecated"] = "true";
+    ctx.Response.Headers["Sunset"] = "2026-12-31";
     var effectiveCategory = string.Equals(category, "All", StringComparison.OrdinalIgnoreCase) ? null : category;
     var result = data.GetSeasonalityFactors(effectiveCategory);
     return Results.Ok(result);
 })
-.WithName("GetSeasonalityFactors");
+.WithName("GetSeasonalityFactors_Legacy");
 
-app.MapGet("/api/demand-risks", (string brand, RetailPulseDb data, string region = "National") =>
+app.MapGet("/api/demand-risks", (HttpContext ctx, string brand, RetailPulseDb data, string region = "National") =>
 {
+    ctx.Response.Headers["X-Deprecated"] = "true";
+    ctx.Response.Headers["Sunset"] = "2026-12-31";
     var effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
     var result = data.IdentifyDemandRisks(brand, effectiveRegion);
     return Results.Ok(result);
 })
-.WithName("IdentifyDemandRisks");
+.WithName("IdentifyDemandRisks_Legacy");
 
-app.MapGet("/api/demand/history", (RetailPulseDb data, string? brand = null, string? region = null, string? channel = null, int months = 12) =>
+// ── Current demand routes ────────────────────────────────────────────
+app.MapGet("/api/demand/history",(RetailPulseDb data, string? brand = null, string? region = null, string? channel = null, int months = 12) =>
 {
     var result = data.GetHistoricalDemand(brand, region, channel, months);
     return Results.Ok(result);
 })
-.WithName("GetHistoricalDemand");
+.WithName("GetDemandHistory");
 
 app.MapGet("/api/demand/forecast", (string brand, RetailPulseDb data, string? region = null, int days = 90) =>
 {
     var result = data.GenerateForecast(brand, region, days);
     return Results.Ok(result);
 })
-.WithName("GenerateForecast");
+.WithName("GetDemandForecast");
 
 app.MapGet("/api/demand/seasonality", (RetailPulseDb data, string? category = null) =>
 {
     var result = data.GetSeasonalityFactors(category);
     return Results.Ok(result);
 })
-.WithName("GetSeasonalityFactors");
+.WithName("GetDemandSeasonality");
 
 app.MapGet("/api/demand/risks", (RetailPulseDb data, string? brand = null, string? region = null) =>
 {
     var result = data.IdentifyDemandRisks(brand, region);
     return Results.Ok(result);
 })
-.WithName("IdentifyDemandRisks");
+.WithName("GetDemandRisks");
 
 // ── Promo REST endpoints ─────────────────────────────────────────────
 app.MapGet("/api/promo/history", (RetailPulseDb data, string? brand = null, string? region = null, string? promoType = null, int months = 18) =>

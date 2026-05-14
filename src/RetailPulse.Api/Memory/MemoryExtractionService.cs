@@ -83,7 +83,7 @@ public class MemoryExtractionService
             var response = await _chatClient.GetResponseAsync(messages, options, ct);
             var json = response.Text ?? "";
 
-            var extraction = ParseExtraction(json);
+            var extraction = ParseExtraction(json, _logger);
 
             // 1. Conversation summary
             if (!string.IsNullOrWhiteSpace(extraction.Summary))
@@ -144,7 +144,7 @@ public class MemoryExtractionService
 
     // ── Parsing ──────────────────────────────────────────────────────────
 
-    internal static ExtractionResult ParseExtraction(string json)
+    internal static ExtractionResult ParseExtraction(string json, ILogger? logger = null)
     {
         try
         {
@@ -170,8 +170,9 @@ public class MemoryExtractionService
 
             return new ExtractionResult(summary ?? "", entities, preference);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            logger?.LogDebug(ex, "Failed to parse {Type}", nameof(ExtractionResult));
             return new ExtractionResult("", [], null);
         }
     }
