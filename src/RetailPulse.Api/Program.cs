@@ -598,9 +598,15 @@ if (string.IsNullOrWhiteSpace(openAiApiKey))
     }
 }
 
+var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
+{
+    NetworkTimeout = TimeSpan.FromMinutes(3)
+};
+
 var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
     new Uri(openAiEndpoint),
-    new System.ClientModel.ApiKeyCredential(openAiApiKey));
+    new System.ClientModel.ApiKeyCredential(openAiApiKey),
+    azureClientOptions);
 
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDef.Model).AsIChatClient())

@@ -394,3 +394,19 @@ Full Phase 4 implementation across all three sprints: Store Operations & Planogr
   - Added `Knowledge:` and `Observability:` sections to appsettings.json
   - Updated 4 test files to pass IOptions to new constructors
 - **Validation:** Full solution builds clean (0 new errors). All pre-existing test signatures updated.
+
+## Session Work — 2026-05-14 Promo Agent Timeout Fix
+
+### Task: Fix TaskCanceledException on complex multi-tool promo queries
+
+- **Context:** "Evaluate a summer promotion for Ridgeline Bourbon in the Midwest" consistently timed out because the default 100s HttpClient timeout was exceeded during multi-tool function-calling loops.
+- **Root cause:** `AzureOpenAIClient` in Program.cs created without `AzureOpenAIClientOptions`, inheriting default 100s network timeout.
+- **Fix 1 (Program.cs ~line 601):** Added `AzureOpenAIClientOptions { NetworkTimeout = TimeSpan.FromMinutes(3) }` to client constructor.
+- **Fix 2 (AgentExecutionPipeline.cs):** Added dedicated `TaskCanceledException`/`OperationCanceledException` catch blocks (with `when (!ct.IsCancellationRequested)` filter) before the generic Exception catch. New `HandleTimeoutError` method returns user-friendly timeout message with `error.type = "timeout"` telemetry tag.
+
+### Learnings
+- 2026-05-14 — `AzureOpenAIClientOptions.NetworkTimeout` controls the underlying HttpClient timeout for all LLM calls through that client instance. Default is 100s which is too short for multi-tool agents (promo agent does 4-5 sequential tool calls with LLM round-trips each).
+- 2026-05-14 — `when (!ct.IsCancellationRequested)` exception filter distinguishes timeout-caused cancellation from user-initiated cancellation — critical for correct error handling.
+- 2026-05-14 — Key file paths: `src/RetailPulse.Api/Program.cs` (client init ~line 601), `src/RetailPulse.Api/Agents/AgentExecutionPipeline.cs` (execution pipeline try-catch).
+
+**Validation:** Build clean (0 errors), all 1576 tests pass

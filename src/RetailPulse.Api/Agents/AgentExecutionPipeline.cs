@@ -63,6 +63,14 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         {
             return HandleRateLimitError(ex, sw, thoughtActivity, context.AgentName, sessionId);
         }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            return HandleTimeoutError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            return HandleTimeoutError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+        }
         catch (Exception ex)
         {
             return HandleUnexpectedError(ex, sw, thoughtActivity, context.AgentName, sessionId);
@@ -259,6 +267,23 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
 
         return new ChatResponse(
             "⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.",
+            sessionId, [], null, failureDurationMs);
+    }
+
+    private ChatResponse HandleTimeoutError(
+        Exception ex, Stopwatch sw, Activity? thoughtActivity,
+        string agentName, string sessionId)
+    {
+        var failureDurationMs = sw.ElapsedMilliseconds;
+        thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
+        thoughtActivity?.SetTag("error.type", "timeout");
+
+        _logger.LogWarning(ex,
+            "Agent {AgentName} timed out after {DurationMs}ms for session {SessionId}",
+            agentName, failureDurationMs, sessionId);
+
+        return new ChatResponse(
+            "⏳ The request took too long to complete. This can happen with complex multi-step analyses. Please try again — if the issue persists, try a simpler question first.",
             sessionId, [], null, failureDurationMs);
     }
 
