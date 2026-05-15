@@ -15,7 +15,7 @@ interface CollapsibleSectionProps {
 
 const useStyles = makeStyles({
   section: {
-    marginBottom: '16px',
+    marginBottom: '4px',
   },
   header: {
     fontSize: '13px',
