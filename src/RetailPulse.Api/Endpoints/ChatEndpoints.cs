@@ -32,9 +32,11 @@ public static class ChatEndpoints
 
             // Per-request timeout: caps the whole pipeline (router classify + agent execute
             // + tool calls) so a hung AI Gateway call cannot leave the UI spinning forever.
-            // 75s gives complex multi-tool chats room to finish while still bounding worst-case latency.
+            // 150s accommodates multi-step function-calling agents (tool calls + synthesis at up to
+            // 90s per LLM roundtrip) while still preventing indefinite hangs. Frontend timeout (180s)
+            // is the outer safety net.
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
-            requestCts.CancelAfter(TimeSpan.FromSeconds(75));
+            requestCts.CancelAfter(TimeSpan.FromSeconds(150));
             var ct = requestCts.Token;
 
             try
@@ -440,7 +442,7 @@ public static class ChatEndpoints
 
             // Per-request timeout (see /api/chat for rationale).
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
-            requestCts.CancelAfter(TimeSpan.FromSeconds(75));
+            requestCts.CancelAfter(TimeSpan.FromSeconds(150));
             var ct = requestCts.Token;
 
             try

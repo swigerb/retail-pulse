@@ -21,8 +21,10 @@ public class ConsensusOrchestrator : IConsensusCouncil
     private readonly AgentDefinition _voteDef;
     private readonly ILogger<ConsensusOrchestrator> _logger;
 
-    /// <summary>Per-agent timeout for the fan-out phase.</summary>
-    private static readonly TimeSpan AgentTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>Per-agent timeout for the fan-out phase. Must be long enough for
+    /// agents to complete tool calls (MCP server round-trips + LLM reasoning).
+    /// 30s balances responsiveness against the 75s overall request timeout.</summary>
+    private static readonly TimeSpan AgentTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>Agent keys eligible to participate in the council.</summary>
     private static readonly HashSet<string> CouncilParticipants = new(StringComparer.OrdinalIgnoreCase)

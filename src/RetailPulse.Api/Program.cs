@@ -598,13 +598,14 @@ if (string.IsNullOrWhiteSpace(openAiApiKey))
     }
 }
 
-// NetworkTimeout caps a single HTTP attempt to the AI Gateway. 3 minutes was far
-// too long for an interactive UI — a stalled call would leave the user staring at
-// an infinite spinner. 60s gives slow tool-using chats room to breathe while still
-// failing fast enough that the request-level timeout in /api/chat can recover.
+// NetworkTimeout caps a single HTTP attempt (one LLM roundtrip) to the AI Gateway.
+// With function invocation, there are multiple sequential LLM calls per request:
+// first to decide which tools to call, then to synthesize results. Each call must
+// complete within this window. 90s accommodates large-context synthesis calls while
+// the 120s request-level timeout in /api/chat still provides the overall ceiling.
 var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
 {
-    NetworkTimeout = TimeSpan.FromSeconds(60)
+    NetworkTimeout = TimeSpan.FromSeconds(90)
 };
 
 var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
@@ -614,7 +615,13 @@ var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
 
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDef.Model).AsIChatClient())
-    .UseFunctionInvocation()
+    .UseFunctionInvocation(configure: client =>
+    {
+        // Cap tool-call iterations to prevent infinite loops where the model
+        // keeps requesting tools without producing a final answer. 3 rounds
+        // keeps responses demo-friendly (<60s) while still supporting multi-tool analyses.
+        client.MaximumIterationsPerRequest = 3;
+    })
     // EnableSensitiveData logs prompts, responses, and tool arguments which
     // can include user PII. Only enable in Development.
     .UseOpenTelemetry(configure: c => c.EnableSensitiveData = builder.Environment.IsDevelopment());
