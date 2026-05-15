@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Text, Badge, makeStyles } from '@fluentui/react-components';
 import type { RoutingInfo, IntentCategory } from '../types';
+import { getIntentCategory } from '../types';
 import { AGENT_COLORS, AGENT_EMOJIS, AGENT_LABELS } from '../constants/agentRouting';
 
 interface AgentRoutingPanelProps {
@@ -120,10 +121,11 @@ export function AgentRoutingPanel({ routingHistory }: AgentRoutingPanelProps) {
   const stats = useMemo<AgentStat[]>(() => {
     const map = new Map<IntentCategory, { count: number; totalConf: number }>();
     for (const r of routingHistory) {
-      const entry = map.get(r.intentCategory) ?? { count: 0, totalConf: 0 };
+      const cat = getIntentCategory(r.intent);
+      const entry = map.get(cat) ?? { count: 0, totalConf: 0 };
       entry.count++;
       entry.totalConf += r.confidence;
-      map.set(r.intentCategory, entry);
+      map.set(cat, entry);
     }
     return Array.from(map.entries())
       .map(([category, { count, totalConf }]) => ({
@@ -138,7 +140,7 @@ export function AgentRoutingPanel({ routingHistory }: AgentRoutingPanelProps) {
   const avgConfidence = totalQueries > 0
     ? routingHistory.reduce((sum, r) => sum + r.confidence, 0) / totalQueries
     : 0;
-  const fallbackCount = routingHistory.filter(r => r.intentCategory === 'general').length;
+  const fallbackCount = routingHistory.filter(r => getIntentCategory(r.intent) === 'general').length;
   const fallbackRate = totalQueries > 0 ? fallbackCount / totalQueries : 0;
   const maxCount = stats.length > 0 ? stats[0].count : 1;
 

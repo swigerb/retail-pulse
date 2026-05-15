@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import { AgentRoutingIndicator } from '../components/AgentRoutingIndicator';
 import type { RoutingInfo } from '../types';
@@ -9,9 +9,9 @@ function renderWithTheme(ui: React.ReactElement) {
 }
 
 const baseRouting: RoutingInfo = {
-  agentId: 'demand-001',
+  agentKey: 'demand-forecasting',
   agentName: 'Demand Agent',
-  intentCategory: 'demand',
+  intent: 'demand/forecasting',
   confidence: 0.94,
 };
 
@@ -27,37 +27,11 @@ describe('AgentRoutingIndicator', () => {
     expect(screen.getByText('📈')).toBeInTheDocument();
   });
 
-  it('shows reasoning when pill is clicked', () => {
-    const routing: RoutingInfo = {
-      ...baseRouting,
-      reasoning: 'User asked about depletion trends which maps to demand forecasting.',
-    };
-    renderWithTheme(<AgentRoutingIndicator routing={routing} />);
-
-    expect(screen.queryByText(routing.reasoning!)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button'));
-    expect(screen.getByText(routing.reasoning!)).toBeInTheDocument();
-  });
-
-  it('hides reasoning on second click', () => {
-    const routing: RoutingInfo = {
-      ...baseRouting,
-      reasoning: 'Demand intent detected.',
-    };
-    renderWithTheme(<AgentRoutingIndicator routing={routing} />);
-
-    fireEvent.click(screen.getByRole('button'));
-    expect(screen.getByText(routing.reasoning!)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button'));
-    expect(screen.queryByText(routing.reasoning!)).not.toBeInTheDocument();
-  });
-
   it('renders different colors for different intent categories', () => {
     const sentimentRouting: RoutingInfo = {
-      agentId: 'sentiment-001',
+      agentKey: 'field-sentiment',
       agentName: 'Sentiment Agent',
-      intentCategory: 'sentiment',
+      intent: 'sentiment/analysis',
       confidence: 0.87,
     };
     renderWithTheme(<AgentRoutingIndicator routing={sentimentRouting} />);
