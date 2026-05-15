@@ -179,122 +179,44 @@ builder.Services.AddApiVersioning(options =>
     options.ApiVersionReader = new UrlSegmentApiVersionReader();
 });
 
-// Load prompts from YAML and resolve tenant placeholders
+// Load prompts from YAML and resolve tenant placeholders via PromptTemplateEngine
 var promptsPath = Path.Combine(builder.Environment.ContentRootPath, "prompts.yaml");
 var promptConfig = RetailPulse.Api.Agents.RetailPulseAgent.LoadPrompts(promptsPath);
 var agentDef = promptConfig.Agents["retail-pulse"];
 
 var tenant = tenantProvider.GetTenant();
-agentDef.SystemPrompt = agentDef.SystemPrompt
-    .Replace("{tenant.company}", tenant.Company)
-    .Replace("{tenant.industry}", tenant.Industry)
-    .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-    .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-    .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-    .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-    .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+var promptEngine = new RetailPulse.Api.Prompts.PromptTemplateEngine(tenant);
 
-// Resolve demand-forecast agent prompt with tenant placeholders
+// Hydrate all agent definitions with tenant placeholders
+promptEngine.Hydrate(agentDef);
+
 var demandForecastDef = promptConfig.Agents["demand-forecast"];
-demandForecastDef.SystemPrompt = demandForecastDef.SystemPrompt
-    .Replace("{tenant.company}", tenant.Company)
-    .Replace("{tenant.industry}", tenant.Industry)
-    .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-    .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-    .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-    .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-    .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
+promptEngine.Hydrate(demandForecastDef);
 
 // Router prompt doesn't need tenant placeholders (intent classification is domain-generic)
 var routerDef = promptConfig.Agents["router"];
 
-// Resolve promo-planning agent prompt with tenant placeholders
 var promoPlanningDef = promptConfig.Agents.TryGetValue("promo-planning", out var promoDef) ? promoDef : null;
-if (promoPlanningDef != null)
-{
-    promoPlanningDef.SystemPrompt = promoPlanningDef.SystemPrompt
-        .Replace("{tenant.company}", tenant.Company)
-        .Replace("{tenant.industry}", tenant.Industry)
-        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
-}
+if (promoPlanningDef != null) promptEngine.Hydrate(promoPlanningDef);
 
-// Resolve competitive-intel agent prompt with tenant placeholders
 var competitiveIntelDef = promptConfig.Agents.TryGetValue("competitive-intel", out var compDef) ? compDef : null;
-if (competitiveIntelDef != null)
-{
-    competitiveIntelDef.SystemPrompt = competitiveIntelDef.SystemPrompt
-        .Replace("{tenant.company}", tenant.Company)
-        .Replace("{tenant.industry}", tenant.Industry)
-        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
-}
+if (competitiveIntelDef != null) promptEngine.Hydrate(competitiveIntelDef);
 
-// Resolve supply-chain agent prompt with tenant placeholders
 var supplyChainDef = promptConfig.Agents.TryGetValue("supply-chain", out var scDef) ? scDef : null;
-if (supplyChainDef != null)
-{
-    supplyChainDef.SystemPrompt = supplyChainDef.SystemPrompt
-        .Replace("{tenant.company}", tenant.Company)
-        .Replace("{tenant.industry}", tenant.Industry)
-        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
-}
+if (supplyChainDef != null) promptEngine.Hydrate(supplyChainDef);
 
 // Load council synthesis and vote prompt definitions
 var councilSynthesisDef = promptConfig.Agents.TryGetValue("council-synthesis", out var synthDef) ? synthDef : null;
 var councilVoteDef = promptConfig.Agents.TryGetValue("council-vote", out var vDef) ? vDef : null;
 
-// Resolve store-ops agent prompt with tenant placeholders
 var storeOpsDef = promptConfig.Agents.TryGetValue("store-ops", out var soDef) ? soDef : null;
-if (storeOpsDef != null)
-{
-    storeOpsDef.SystemPrompt = storeOpsDef.SystemPrompt
-        .Replace("{tenant.company}", tenant.Company)
-        .Replace("{tenant.industry}", tenant.Industry)
-        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
-}
+if (storeOpsDef != null) promptEngine.Hydrate(storeOpsDef);
 
-// Resolve planogram agent prompt with tenant placeholders
 var planogramDef = promptConfig.Agents.TryGetValue("planogram", out var pgDef) ? pgDef : null;
-if (planogramDef != null)
-{
-    planogramDef.SystemPrompt = planogramDef.SystemPrompt
-        .Replace("{tenant.company}", tenant.Company)
-        .Replace("{tenant.industry}", tenant.Industry)
-        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
-}
+if (planogramDef != null) promptEngine.Hydrate(planogramDef);
 
-// Resolve margin agent prompt with tenant placeholders
 var marginDef = promptConfig.Agents.TryGetValue("margin", out var mrgDef) ? mrgDef : null;
-if (marginDef != null)
-{
-    marginDef.SystemPrompt = marginDef.SystemPrompt
-        .Replace("{tenant.company}", tenant.Company)
-        .Replace("{tenant.industry}", tenant.Industry)
-        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-        .Replace("{tenant.primary_color}", tenant.Theme?.PrimaryColor ?? "#1A73E8")
-        .Replace("{tenant.accent_color}", tenant.Theme?.AccentColor ?? "#FFC107")
-        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
-}
+if (marginDef != null) promptEngine.Hydrate(marginDef);
 
 // Load scorecard and exec-brief synthesis definitions
 var scorecardSynthesisDef = promptConfig.Agents.TryGetValue("scorecard-synthesis", out var scSynthDef) ? scSynthDef : null;
@@ -302,15 +224,7 @@ var execBriefDef = promptConfig.Agents.TryGetValue("exec-brief", out var ebDef) 
 
 // Load field-sentiment agent definition
 var fieldSentimentDef = promptConfig.Agents.TryGetValue("field-sentiment", out var fsDef) ? fsDef : null;
-if (fieldSentimentDef != null)
-{
-    fieldSentimentDef.SystemPrompt = fieldSentimentDef.SystemPrompt
-        .Replace("{tenant.company}", tenant.Company)
-        .Replace("{tenant.industry}", tenant.Industry)
-        .Replace("{tenant.distribution_model}", tenant.Distribution?.Model ?? "Three-Tier")
-        .Replace("{tenant.brands}", string.Join(", ", tenant.Brands.Select(b => $"{b.Name} ({string.Join(", ", b.Variants)})")))
-        .Replace("{tenant.regions}", string.Join(", ", tenant.Regions));
-}
+if (fieldSentimentDef != null) promptEngine.Hydrate(fieldSentimentDef);
 
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
@@ -996,6 +910,22 @@ app.MapDefaultEndpoints();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    // Scalar API documentation UI at /api/docs
+    app.MapGet("/api/docs", () => Results.Content("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>RetailPulse API Documentation</title>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+        </head>
+        <body>
+            <script id="api-reference" data-url="/openapi/v1.json"></script>
+            <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+        </body>
+        </html>
+        """, "text/html")).ExcludeFromDescription();
 }
 
 // SignalR hubs — require authorization
