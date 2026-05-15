@@ -69,3 +69,44 @@
 - Always set a client-side timeout on long-running POST endpoints. `fetch` has no built-in timeout — a hung backend = a spinner forever.
 - `AbortController` composition pattern: build a wrapper that listens to the caller's signal and forwards aborts to an inner controller, plus a `setTimeout` that aborts with a `TimeoutError` DOMException.
 - `vitest` fake timers + `vi.advanceTimersByTimeAsync` is the cleanest way to test timeout paths without slowing the suite.
+
+---
+
+## 2026-05-15 — Frontend Error Handling & Demo Blocker Session
+
+### Session 1: Fix telemetry panel spacing and Live Spans default state
+**Status:** ✅ Complete — Commit 04a7dd2
+
+**Changes:**
+- Reduced telemetry section margin from 16px to 4px (improved vertical space usage)
+- Set "Live Spans" accordion expanded by default (better visibility of active tracing)
+
+**Impact:** Telemetry drawer now shows more useful information at a glance with better visual hierarchy.
+
+---
+
+### Session 2: Fix demo blocker — suggested-prompt click spins forever
+**Status:** ✅ Complete — Client-side timeout added
+
+**Issue:** Clicking a default suggested prompt on the initial chat screen showed Thinking... spinner that never resolved. No error message appeared. Hard blocker for executive demo.
+
+**Root Cause:** etch('/api/chat') had no client-side timeout. When backend stalled (even momentarily), the UI spinner ran indefinitely.
+
+**Solution:**
+- Added **3-minute (180s) client-side timeout** to all chat fetches in src/services/api.ts
+- Used AbortController composition to cleanly abort stalled requests
+- Friendly error message displayed when timeout occurs: "Request timed out after 180s. The server may be busy — please try again."
+- UI loading state clears immediately upon timeout
+
+**Alignment with Backend:**
+- Costco's Azure OpenAI NetworkTimeout: 60s
+- Costco's /api/chat request-level CancellationToken: 75s
+- Frontend client timeout: 180s (gives backend ample time, prevents infinite spinner)
+
+**Decision Created:**
+- "Default 3-minute client timeout on chat fetches" (2026-05-15) — merged to decisions.md
+  - Service-layer convention: all chat operations must include AbortController timeout
+  - Testable: use i.useFakeTimers() + dvanceTimersByTimeAsync to verify timeout paths
+  - Lockstep with backend: if Costco changes backend timeout, update DEFAULT_TIMEOUT_MS constant
+
+**Validation:** Chat fetch timeout behavior now matches backend expectations; demo no longer hangs.
