@@ -1,0 +1,40 @@
+{
+  "TestSuite": "RetailPulse Load Tests",
+  "BaseUrl": "http://localhost:5000",
+  "Scenarios": {
+    "ChatEndpoint": {
+      "Url": "/api/v1/chat",
+      "Method": "POST",
+      "Headers": {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer {{TOKEN}}"
+      },
+      "Body": {
+        "message": "How is Apex Grill performing in the Southwest this quarter?",
+        "sessionId": "loadtest-session"
+      },
+      "LoadProfile": {
+        "StartRate": 1,
+        "EndRate": 10,
+        "DurationSeconds": 30
+      },
+      "Assertions": {
+        "P95LatencyMs": 5000,
+        "SuccessRatePercent": 95
+      }
+    },
+    "HealthCheck": {
+      "Url": "/health",
+      "Method": "GET",
+      "LoadProfile": {
+        "Rate": 50,
+        "DurationSeconds": 60
+      },
+      "Assertions": {
+        "P99LatencyMs": 200,
+        "SuccessRatePercent": 99.9
+      }
+    }
+  },
+  "ReportFolder": "./load-test-reports"
+}
