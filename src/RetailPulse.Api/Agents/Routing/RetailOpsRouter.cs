@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
+using RetailPulse.Api.Telemetry;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
 
@@ -20,6 +21,7 @@ public class RetailOpsRouter : IAgentRouter
     private readonly AgentDefinition _routerDef;
     private readonly IReadOnlyDictionary<string, ISpecialistAgent> _specialists;
     private readonly ILogger<RetailOpsRouter> _logger;
+    private readonly RetailPulseMetrics? _metrics;
 
     /// <summary>
     /// Minimum confidence threshold. Below this, the router falls back to
@@ -55,11 +57,13 @@ public class RetailOpsRouter : IAgentRouter
         IChatClient chatClient,
         AgentDefinition routerDef,
         IEnumerable<ISpecialistAgent> specialists,
-        ILogger<RetailOpsRouter> logger)
+        ILogger<RetailOpsRouter> logger,
+        RetailPulseMetrics? metrics = null)
     {
         _chatClient = chatClient;
         _routerDef = routerDef;
         _logger = logger;
+        _metrics = metrics;
 
         // Build a lookup: intent → specialist (first specialist that claims it wins)
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase);
@@ -94,6 +98,8 @@ public class RetailOpsRouter : IAgentRouter
             if (keywordResult is not null)
             {
                 _logger.LogInformation("Keyword fast-path matched intent '{Intent}' for message", keywordResult.Intent);
+                _metrics?.RecordIntentClassification(keywordResult.Intent, fastPathHit: true);
+                _metrics?.RecordRoutingDuration(sw.ElapsedMilliseconds);
                 routingActivity?.SetTag("agent.routing.fast_path", true);
                 routingActivity?.SetTag("agent.routing.intent", keywordResult.Intent);
                 routingActivity?.SetTag("agent.routing.confidence", keywordResult.Confidence);
@@ -111,6 +117,8 @@ public class RetailOpsRouter : IAgentRouter
 
             var classification = await ClassifyIntentAsync(message, conversationHistory, ct);
 
+            _metrics?.RecordIntentClassification(classification.Intent, fastPathHit: false);
+            _metrics?.RecordRoutingDuration(sw.ElapsedMilliseconds);
             routingActivity?.SetTag("agent.routing.intent", classification.Intent);
             routingActivity?.SetTag("agent.routing.confidence", classification.Confidence);
             routingActivity?.SetTag("agent.routing.duration_ms", sw.ElapsedMilliseconds);

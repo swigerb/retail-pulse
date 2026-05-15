@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
+using RetailPulse.Api.Telemetry;
 using RetailPulse.Contracts;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
@@ -21,6 +22,7 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly IHubContext<TelemetryHub> _hubContext;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AgentExecutionPipeline> _logger;
+    private readonly RetailPulseMetrics? _metrics;
 
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -28,12 +30,14 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         IChatClient chatClient,
         IHubContext<TelemetryHub> hubContext,
         IConfiguration configuration,
-        ILogger<AgentExecutionPipeline> logger)
+        ILogger<AgentExecutionPipeline> logger,
+        RetailPulseMetrics? metrics = null)
     {
         _chatClient = chatClient;
         _hubContext = hubContext;
         _configuration = configuration;
         _logger = logger;
+        _metrics = metrics;
     }
 
     public async Task<ChatResponse> ExecuteAsync(AgentExecutionContext context, CancellationToken ct = default)
@@ -133,6 +137,8 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         _logger.LogInformation(
             "Agent {AgentName} responded in {DurationMs}ms with {SpanCount} spans, {ChartCount} charts, {TokenCount} tokens",
             context.AgentName, totalDurationMs, collector.Spans.Count, charts.Count, totalTokens);
+
+        _metrics?.RecordAgentExecutionDuration(context.AgentName, totalDurationMs);
 
         return new ChatResponse(
             reply, sessionId, collector.Spans.ToList(),
@@ -296,6 +302,8 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
         thoughtActivity?.SetTag("error.status_code", ex.Status);
 
+        _metrics?.RecordError("rate_limit");
+
         _logger.LogWarning(ex,
             "Agent {AgentName} rate-limited after {DurationMs}ms. Status: {Status}",
             agentName, failureDurationMs, ex.Status);
@@ -313,6 +321,8 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
         thoughtActivity?.SetTag("error.type", "timeout");
 
+        _metrics?.RecordError("timeout");
+
         _logger.LogWarning(ex,
             "Agent {AgentName} timed out after {DurationMs}ms for session {SessionId}",
             agentName, failureDurationMs, sessionId);
@@ -329,6 +339,8 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         var failureDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
         thoughtActivity?.SetTag("error.type", ex.GetType().FullName);
+
+        _metrics?.RecordError("unexpected");
 
         _logger.LogError(ex,
             "Agent {AgentName} failed after {DurationMs}ms for session {SessionId}",
