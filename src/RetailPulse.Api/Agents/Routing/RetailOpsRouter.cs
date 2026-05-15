@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
@@ -25,6 +26,30 @@ public class RetailOpsRouter : IAgentRouter
     /// the General agent regardless of classified intent.
     /// </summary>
     private const double ConfidenceThreshold = 0.6;
+
+    /// <summary>Confidence assigned to keyword fast-path matches.</summary>
+    private const double KeywordMatchConfidence = 0.95;
+
+    private static readonly Regex PerformingRegex = new(
+        @"how is .+ performing", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Keyword patterns mapped to their intent. Each entry has "strong" keywords that match
+    /// unambiguously on their own, regardless of message length or context. Short or generic
+    /// keywords that could fire on ambiguous queries are excluded — the LLM handles those.
+    /// </summary>
+    private static readonly (string Intent, string[] Keywords)[] KeywordPatterns =
+    [
+        (AgentIntent.DemandForecasting, ["demand forecast", "sell-through", "velocity forecast"]),
+        (AgentIntent.SupplyShipments, ["shipment status", "inventory level", "fulfillment", "stockout", "stock out", "supply chain"]),
+        (AgentIntent.CompetitiveMarket, ["pricing pressure", "market share", "price war", "competitor analysis", "competitive landscape"]),
+        (AgentIntent.SentimentField, ["field rep", "field feedback", "distributor feedback", "rep feedback", "sentiment analysis"]),
+        (AgentIntent.PortfolioHealth, ["portfolio health", "overall health", "brand health", "health council"]),
+        (AgentIntent.MarginAnalysis, ["margin analysis", "profitability", "cost structure", "gross margin"]),
+        (AgentIntent.Planogram, ["planogram", "shelf space", "shelf placement"]),
+        (AgentIntent.StoreOps, ["store operations", "store performance", "retail ops"]),
+        (AgentIntent.MemoryManagement, ["remember this", "what do you know about me", "forget about"]),
+    ];
 
     public RetailOpsRouter(
         IChatClient chatClient,
@@ -64,6 +89,26 @@ public class RetailOpsRouter : IAgentRouter
 
         try
         {
+            // Fast-path: skip LLM call if keywords clearly indicate intent
+            var keywordResult = TryKeywordClassify(message);
+            if (keywordResult is not null)
+            {
+                _logger.LogInformation("Keyword fast-path matched intent '{Intent}' for message", keywordResult.Intent);
+                routingActivity?.SetTag("agent.routing.fast_path", true);
+                routingActivity?.SetTag("agent.routing.intent", keywordResult.Intent);
+                routingActivity?.SetTag("agent.routing.confidence", keywordResult.Confidence);
+                routingActivity?.SetTag("agent.routing.duration_ms", sw.ElapsedMilliseconds);
+
+                if (_specialists.TryGetValue(keywordResult.Intent, out var fastPathSpecialist))
+                {
+                    return new RoutingDecision(
+                        fastPathSpecialist.Key, keywordResult.Intent, keywordResult.Confidence,
+                        keywordResult.DetectedIntents);
+                }
+
+                // Keyword matched but no specialist registered — fall through to LLM
+            }
+
             var classification = await ClassifyIntentAsync(message, conversationHistory, ct);
 
             routingActivity?.SetTag("agent.routing.intent", classification.Intent);
@@ -119,6 +164,33 @@ public class RetailOpsRouter : IAgentRouter
 
             return new RoutingDecision("general", AgentIntent.General, 0.0);
         }
+    }
+
+    /// <summary>
+    /// Attempts to classify intent using simple keyword matching.
+    /// Returns null if no confident match is found, allowing fallback to LLM classification.
+    /// </summary>
+    private static IntentClassification? TryKeywordClassify(string message)
+    {
+        // Check regex pattern for PortfolioHealth first
+        if (PerformingRegex.IsMatch(message))
+        {
+            return new IntentClassification(
+                AgentIntent.PortfolioHealth, KeywordMatchConfidence, [AgentIntent.PortfolioHealth]);
+        }
+
+        foreach (var (intent, keywords) in KeywordPatterns)
+        {
+            foreach (var keyword in keywords)
+            {
+                if (message.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new IntentClassification(intent, KeywordMatchConfidence, [intent]);
+                }
+            }
+        }
+
+        return null;
     }
 
     private async Task<IntentClassification> ClassifyIntentAsync(

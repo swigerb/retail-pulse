@@ -23,7 +23,7 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
+        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
             {
@@ -128,6 +128,15 @@ public static class ChatEndpoints
                     enrichedRequest = enrichedRequest with { History = historyWithRag };
                 }
 
+                // Emit progress: routing phase
+                _ = hubContext.Clients.Group(sessionId).SendAsync("progress", new
+                {
+                    sessionId,
+                    phase = "routing",
+                    detail = "Classifying your question...",
+                    timestamp = DateTimeOffset.UtcNow
+                }, ct);
+
                 // Router classification with tracing
                 RoutingDecision decision;
                 {
@@ -197,6 +206,15 @@ public static class ChatEndpoints
                 logger.LogInformation(
                     "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}, traceId: {TraceId}",
                     specialist.Key, specialist.DisplayName, decision.Intent, decision.Confidence, traceId);
+
+                // Emit progress: agent_start phase
+                _ = hubContext.Clients.Group(sessionId).SendAsync("progress", new
+                {
+                    sessionId,
+                    phase = "agent_start",
+                    detail = $"{specialist.DisplayName} is analyzing...",
+                    timestamp = DateTimeOffset.UtcNow
+                }, ct);
 
                 // Council interception: if the router classified as council/health, convene the council
                 if (decision.DetectedIntents?.Any(i => string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true

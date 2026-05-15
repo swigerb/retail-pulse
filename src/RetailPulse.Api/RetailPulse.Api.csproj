@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="RetailPulse.Tests" />
+    <InternalsVisibleTo Include="RetailPulse.Benchmarks" />
   </ItemGroup>
 
   <ItemGroup>

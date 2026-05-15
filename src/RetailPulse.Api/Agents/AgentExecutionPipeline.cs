@@ -53,6 +53,15 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         var sw = Stopwatch.StartNew();
         using var thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
+        // Emit progress: thinking phase
+        _ = _hubContext.Clients.Group(sessionId).SendAsync("progress", new
+        {
+            sessionId,
+            phase = "thinking",
+            detail = $"{context.AgentName} is reasoning...",
+            timestamp = DateTimeOffset.UtcNow
+        }, ct);
+
         Microsoft.Extensions.AI.ChatResponse response;
 
         try
@@ -94,7 +103,16 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
             inputTokens > 0 ? (int?)inputTokens : null,
             outputTokens > 0 ? (int?)outputTokens : null);
 
-        await RecordToolSpansAsync(response, collector, thoughtDurationMs, context.OnToolResult, ct);
+        await RecordToolSpansAsync(response, collector, thoughtDurationMs, context.OnToolResult, _hubContext, sessionId, ct);
+
+        // Emit progress: synthesizing phase
+        _ = _hubContext.Clients.Group(sessionId).SendAsync("progress", new
+        {
+            sessionId,
+            phase = "synthesizing",
+            detail = "Preparing response...",
+            timestamp = DateTimeOffset.UtcNow
+        }, ct);
 
         var postProcessStart = sw.ElapsedMilliseconds;
         var reply = response.Text ?? context.FallbackReply;
@@ -162,6 +180,8 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         TelemetryCollector collector,
         long thoughtDurationMs,
         Func<string, CancellationToken, Task>? onToolResult,
+        IHubContext<TelemetryHub> hubContext,
+        string sessionId,
         CancellationToken ct)
     {
         var callIdToName = new Dictionary<string, string>();
@@ -180,6 +200,15 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         {
             if (content is FunctionCallContent toolCall)
             {
+                // Emit progress: tool_call phase
+                _ = hubContext.Clients.Group(sessionId).SendAsync("progress", new
+                {
+                    sessionId,
+                    phase = "tool_call",
+                    detail = $"Calling {toolCall.Name}...",
+                    timestamp = DateTimeOffset.UtcNow
+                }, ct);
+
                 using var toolActivity = AgentTelemetry.StartToolCall(
                     toolCall.Name,
                     JsonSerializer.Serialize(toolCall.Arguments));

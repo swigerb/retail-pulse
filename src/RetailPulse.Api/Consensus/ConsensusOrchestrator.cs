@@ -26,6 +26,9 @@ public class ConsensusOrchestrator : IConsensusCouncil
     /// 30s balances responsiveness against the 75s overall request timeout.</summary>
     private static readonly TimeSpan AgentTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>Timeout for lightweight voting mode — no tool calls, just LLM reasoning.</summary>
+    private static readonly TimeSpan LightweightVoteTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>Agent keys eligible to participate in the council.</summary>
     private static readonly HashSet<string> CouncilParticipants = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -78,8 +81,10 @@ public class ConsensusOrchestrator : IConsensusCouncil
     }
 
     /// <summary>
-    /// Sends a health assessment prompt to one specialist agent with a 10s timeout.
-    /// Returns null if the agent times out or errors.
+    /// Lightweight voting mode: sends a focused prompt directly to the LLM without
+    /// tool calls. Each voter gets a stripped system prompt and returns a JSON vote
+    /// based on domain knowledge. Temperature 0 for deterministic voting.
+    /// Falls back to full agent execution only if lightweight mode fails.
     /// </summary>
     private async Task<AgentVote?> CollectVoteAsync(
         ISpecialistAgent agent, string brand, string? region, CancellationToken ct)
@@ -90,24 +95,36 @@ public class ConsensusOrchestrator : IConsensusCouncil
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(AgentTimeout);
+            timeoutCts.CancelAfter(LightweightVoteTimeout);
 
-            var request = new ChatRequest(votePrompt, $"council-{Guid.NewGuid():N}");
+            // Lightweight path: direct LLM call with voting system prompt, no tools
+            var messages = new List<ChatMessage>
+            {
+                new(ChatRole.System, _voteDef.SystemPrompt),
+                new(ChatRole.User, $"[{agent.DisplayName}] {votePrompt}")
+            };
 
-            var response = await agent.HandleAsync(request, timeoutCts.Token);
+            var options = new ChatOptions
+            {
+                Temperature = 0f,
+                ResponseFormat = ChatResponseFormat.Json
+            };
+
+            var response = await _chatClient.GetResponseAsync(messages, options, timeoutCts.Token);
             agentSw.Stop();
 
-            return ParseVote(agent.Key, agent.DisplayName, response.Reply, agentSw.Elapsed);
+            var responseText = response.Text ?? "";
+            return ParseVote(agent.Key, agent.DisplayName, responseText, agentSw.Elapsed);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             agentSw.Stop();
-            _logger.LogWarning("Agent {AgentKey} timed out after {Ms}ms during council vote",
+            _logger.LogWarning("Agent {AgentKey} timed out after {Ms}ms during lightweight council vote",
                 agent.Key, agentSw.ElapsedMilliseconds);
 
             return new AgentVote(
                 agent.Key, agent.DisplayName, HealthRating.Yellow,
-                $"Agent timed out after {AgentTimeout.TotalSeconds}s — unable to complete assessment.",
+                $"Agent timed out after {LightweightVoteTimeout.TotalSeconds}s — unable to complete assessment.",
                 0.0, ["timeout"], agentSw.Elapsed);
         }
         catch (Exception ex)

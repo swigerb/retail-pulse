@@ -241,12 +241,13 @@ public class DemoReadinessTests
         };
 
         // Production-order registration: General first, then specialists.
-        // GeneralAgent only claims General + SentimentField; dedicated
-        // specialists own their domain intents (PromotionTrade, SupplyShipments,
-        // CompetitiveMarket, etc.) and are routed to directly.
+        // GeneralAgent only claims General; FieldSentimentAgent owns SentimentField;
+        // other dedicated specialists own their domain intents (PromotionTrade,
+        // SupplyShipments, CompetitiveMarket, etc.) and are routed to directly.
         var specialists = new List<ISpecialistAgent>
         {
             new GeneralAgent(pipeline, def, []),
+            new FieldSentimentAgent(pipeline, def, []),
             new DemandForecastAgent(pipeline, def, []),
             new PromoPlanningAgent(pipeline, def, [], null),
             new CompetitiveIntelAgent(pipeline, def, [], hubContext,

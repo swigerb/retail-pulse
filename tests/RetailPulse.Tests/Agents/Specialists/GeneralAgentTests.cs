@@ -49,15 +49,16 @@ public class GeneralAgentTests
     public void SupportedIntents_CoversFiveDomains()
     {
         var agent = CreateAgent();
-        // GeneralAgent is the fallback — it only claims General + SentimentField.
-        // Dedicated specialists own PromotionTrade, SupplyShipments, CompetitiveMarket.
+        // GeneralAgent is the fallback — it only claims General intent.
+        // FieldSentimentAgent owns SentimentField; other dedicated specialists
+        // own PromotionTrade, SupplyShipments, CompetitiveMarket.
         agent.SupportedIntents.Should().NotContain(AgentIntent.DemandForecasting);
         agent.SupportedIntents.Should().NotContain(AgentIntent.PromotionTrade);
         agent.SupportedIntents.Should().NotContain(AgentIntent.SupplyShipments);
         agent.SupportedIntents.Should().NotContain(AgentIntent.CompetitiveMarket);
-        agent.SupportedIntents.Should().Contain(AgentIntent.SentimentField);
+        agent.SupportedIntents.Should().NotContain(AgentIntent.SentimentField);
         agent.SupportedIntents.Should().Contain(AgentIntent.General);
-        agent.SupportedIntents.Should().HaveCount(2);
+        agent.SupportedIntents.Should().HaveCount(1);
     }
 
     #endregion
