@@ -6,6 +6,14 @@ const HUB_URL = '/hubs/telemetry';
 let connection: signalR.HubConnection | null = null;
 let startPromise: Promise<void> | null = null;
 const joinedSessions = new Set<string>();
+const progressListeners = new Set<(data: ProgressEvent) => void>();
+
+export interface ProgressEvent {
+  sessionId: string;
+  phase: string;
+  detail: string;
+  timestamp: string;
+}
 
 export function connectTelemetryHub(
   onSpan: (span: AgentSpan) => void,
@@ -30,6 +38,10 @@ export function connectTelemetryHub(
 
   connection.on('SpanReceived', (span: AgentSpan) => {
     onSpan(span);
+  });
+
+  connection.on('progress', (data: ProgressEvent) => {
+    progressListeners.forEach(listener => listener(data));
   });
 
   connection.on('Connected', (msg: string) => {
@@ -89,6 +101,15 @@ export async function joinTelemetrySession(sessionId: string): Promise<void> {
   } catch (err) {
     if (import.meta.env.DEV) console.error('JoinSession failed:', err);
   }
+}
+
+/**
+ * Subscribe to real-time progress events from the server.
+ * Returns an unsubscribe function.
+ */
+export function onProgress(listener: (data: ProgressEvent) => void): () => void {
+  progressListeners.add(listener);
+  return () => { progressListeners.delete(listener); };
 }
 
 export async function disconnectTelemetryHub(): Promise<void> {

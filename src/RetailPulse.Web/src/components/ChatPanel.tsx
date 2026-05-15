@@ -15,7 +15,7 @@ import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo } from '../types';
 import type { SendMessageOptions } from '../services/api';
 import { sendMessage } from '../services/api';
-import { joinTelemetrySession } from '../services/telemetryHub';
+import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
 import { BrandLogo } from './BrandLogo';
 import { AgentRoutingIndicator } from './AgentRoutingIndicator';
 import { MemoryIndicator } from './MemoryIndicator';
@@ -464,6 +464,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingText, setLoadingText] = useState<string>('Thinking...');
   const [sessionId] = useState<string>(() => crypto.randomUUID().replace(/-/g, ''));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
@@ -478,9 +479,15 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
     isMountedRef.current = true;
     // Pre-join the SignalR session group so real-time telemetry works from the first message
     joinTelemetrySession(sessionId);
+    const unsubscribe = onProgress((data) => {
+      if (data.sessionId === sessionId && isMountedRef.current) {
+        setLoadingText(data.detail);
+      }
+    });
     return () => {
       isMountedRef.current = false;
       abortControllerRef.current?.abort();
+      unsubscribe();
     };
   }, [sessionId]);
 
@@ -501,6 +508,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
       setMessages(prev => [...prev, { role: 'user', content: trimmed }]);
       onResponseReceived?.({ totalDurationMs: undefined });
       setLoading(true);
+      setLoadingText('Thinking...');
 
       try {
         const history: ChatHistoryMessage[] = messages
@@ -680,7 +688,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
             <div className={styles.messageContent}>
               <div className={styles.loadingContainer}>
                 <Spinner size="tiny" />
-                Thinking...
+                {loadingText}
               </div>
             </div>
           </div>
