@@ -63,6 +63,12 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         {
             return HandleRateLimitError(ex, sw, thoughtActivity, context.AgentName, sessionId);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Caller (e.g. council timeout or request-level timeout) cancelled — propagate
+            // so upstream code can handle it with its own cancellation logic.
+            throw;
+        }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
             return HandleTimeoutError(ex, sw, thoughtActivity, context.AgentName, sessionId);
