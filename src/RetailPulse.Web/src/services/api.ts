@@ -26,9 +26,9 @@ function isRoutingInfo(value: unknown): value is RoutingInfo {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v.agentId === 'string' &&
+    typeof v.agentKey === 'string' &&
     typeof v.agentName === 'string' &&
-    typeof v.intentCategory === 'string' &&
+    typeof v.intent === 'string' &&
     typeof v.confidence === 'number'
   );
 }

@@ -18,11 +18,20 @@ export type IntentCategory =
   | 'general';
 
 export interface RoutingInfo {
-  agentId: string;
+  agentKey: string;
   agentName: string;
-  intentCategory: IntentCategory;
+  intent: string;
   confidence: number;
-  reasoning?: string;
+  durationMs?: number;
+}
+
+/** Extract the top-level intent category from a slash-separated intent string.
+ *  e.g. "demand/forecasting" → "demand", "council/health" → "general" */
+export function getIntentCategory(intent: string | undefined): IntentCategory {
+  if (!intent) return 'general';
+  const prefix = intent.split('/')[0].toLowerCase();
+  const valid: IntentCategory[] = ['demand', 'promotion', 'supply', 'competitive', 'sentiment'];
+  return (valid as string[]).includes(prefix) ? (prefix as IntentCategory) : 'general';
 }
 
 export interface ChatResponse {

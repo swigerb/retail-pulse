@@ -17,9 +17,9 @@ describe('AgentRoutingPanel', () => {
 
   it('renders stats when routing history is provided', () => {
     const history: RoutingInfo[] = [
-      { agentId: 'd1', agentName: 'Demand Agent', intentCategory: 'demand', confidence: 0.9 },
-      { agentId: 'd2', agentName: 'Demand Agent', intentCategory: 'demand', confidence: 0.8 },
-      { agentId: 'g1', agentName: 'General Agent', intentCategory: 'general', confidence: 0.5 },
+      { agentKey: 'demand-forecasting', agentName: 'Demand Agent', intent: 'demand/forecasting', confidence: 0.9 },
+      { agentKey: 'demand-forecasting', agentName: 'Demand Agent', intent: 'demand/forecasting', confidence: 0.8 },
+      { agentKey: 'general', agentName: 'General Agent', intent: 'general', confidence: 0.5 },
     ];
     renderWithTheme(<AgentRoutingPanel routingHistory={history} />);
 
@@ -30,8 +30,8 @@ describe('AgentRoutingPanel', () => {
 
   it('renders bar chart with agent categories', () => {
     const history: RoutingInfo[] = [
-      { agentId: 'd1', agentName: 'Demand Agent', intentCategory: 'demand', confidence: 0.95 },
-      { agentId: 's1', agentName: 'Sentiment Agent', intentCategory: 'sentiment', confidence: 0.88 },
+      { agentKey: 'demand-forecasting', agentName: 'Demand Agent', intent: 'demand/forecasting', confidence: 0.95 },
+      { agentKey: 'field-sentiment', agentName: 'Sentiment Agent', intent: 'sentiment/analysis', confidence: 0.88 },
     ];
     renderWithTheme(<AgentRoutingPanel routingHistory={history} />);
 
@@ -41,10 +41,10 @@ describe('AgentRoutingPanel', () => {
 
   it('sorts agents by query count descending', () => {
     const history: RoutingInfo[] = [
-      { agentId: 's1', agentName: 'Sentiment Agent', intentCategory: 'sentiment', confidence: 0.9 },
-      { agentId: 'd1', agentName: 'Demand Agent', intentCategory: 'demand', confidence: 0.85 },
-      { agentId: 'd2', agentName: 'Demand Agent', intentCategory: 'demand', confidence: 0.92 },
-      { agentId: 'd3', agentName: 'Demand Agent', intentCategory: 'demand', confidence: 0.88 },
+      { agentKey: 'field-sentiment', agentName: 'Sentiment Agent', intent: 'sentiment/analysis', confidence: 0.9 },
+      { agentKey: 'demand-forecasting', agentName: 'Demand Agent', intent: 'demand/forecasting', confidence: 0.85 },
+      { agentKey: 'demand-forecasting', agentName: 'Demand Agent', intent: 'demand/forecasting', confidence: 0.92 },
+      { agentKey: 'demand-forecasting', agentName: 'Demand Agent', intent: 'demand/forecasting', confidence: 0.88 },
     ];
     renderWithTheme(<AgentRoutingPanel routingHistory={history} />);
 

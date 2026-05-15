@@ -1,7 +1,6 @@
-import { useState } from 'react';
-import { Tooltip, Text, makeStyles } from '@fluentui/react-components';
-import { ChevronRight16Regular } from '@fluentui/react-icons';
+import { Tooltip, makeStyles } from '@fluentui/react-components';
 import type { RoutingInfo } from '../types';
+import { getIntentCategory } from '../types';
 import { AGENT_COLORS, AGENT_EMOJIS } from '../constants/agentRouting';
 
 interface AgentRoutingIndicatorProps {
@@ -53,32 +52,14 @@ const useStyles = makeStyles({
     borderRadius: '2px',
     transition: 'width 0.3s ease',
   },
-  reasoning: {
-    marginTop: '6px',
-    padding: '8px 12px',
-    backgroundColor: 'var(--color-surface)',
-    border: '1px solid var(--color-border)',
-    borderRadius: '8px',
-    fontSize: '12px',
-    color: 'var(--color-text-muted)',
-    lineHeight: '1.5',
-    animation: 'messageIn 0.2s ease',
-  },
-  chevron: {
-    fontSize: '9px',
-    transition: 'transform 0.2s ease',
-  },
-  chevronExpanded: {
-    transform: 'rotate(90deg)',
-  },
 });
 
 export function AgentRoutingIndicator({ routing }: AgentRoutingIndicatorProps) {
-  const [expanded, setExpanded] = useState(false);
   const styles = useStyles();
 
-  const color = AGENT_COLORS[routing.intentCategory] ?? AGENT_COLORS.general;
-  const emoji = AGENT_EMOJIS[routing.intentCategory] ?? AGENT_EMOJIS.general;
+  const category = getIntentCategory(routing.intent);
+  const color = AGENT_COLORS[category] ?? AGENT_COLORS.general;
+  const emoji = AGENT_EMOJIS[category] ?? AGENT_EMOJIS.general;
   const pct = Math.round(routing.confidence * 100);
 
   const pillStyle: React.CSSProperties = {
@@ -96,8 +77,6 @@ export function AgentRoutingIndicator({ routing }: AgentRoutingIndicatorProps) {
     <button
       className={styles.pill}
       style={pillStyle}
-      onClick={() => routing.reasoning && setExpanded(!expanded)}
-      aria-expanded={routing.reasoning ? expanded : undefined}
       aria-label={`Routed to ${routing.agentName}, ${pct}% confidence`}
     >
       <span>{emoji}</span>
@@ -108,29 +87,15 @@ export function AgentRoutingIndicator({ routing }: AgentRoutingIndicatorProps) {
         </span>
         {pct}%
       </span>
-      {routing.reasoning && (
-        <span className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ''}`}>
-          <ChevronRight16Regular />
-        </span>
-      )}
     </button>
   );
 
   return (
     <div className={styles.container}>
       <div>
-        {routing.reasoning ? (
-          pillContent
-        ) : (
-          <Tooltip content={`${routing.intentCategory} intent · ${pct}% confidence`} relationship="description">
-            {pillContent}
-          </Tooltip>
-        )}
-        {expanded && routing.reasoning && (
-          <div className={styles.reasoning}>
-            <Text>{routing.reasoning}</Text>
-          </div>
-        )}
+        <Tooltip content={`${category} intent · ${pct}% confidence${routing.durationMs ? ` · ${routing.durationMs}ms` : ''}`} relationship="description">
+          {pillContent}
+        </Tooltip>
       </div>
     </div>
   );
