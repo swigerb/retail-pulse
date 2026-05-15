@@ -84,55 +84,9 @@ public static class ChatEndpoints
                 var traceId = chatActivity?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
                 var traceStartTime = DateTimeOffset.UtcNow;
 
-                // Memory recall with tracing
-                string? memoryContext = null;
-                using (var memoryRecallActivity = AgentTelemetry.StartMemoryRecall(userId))
-                {
-                    var memoryStart = DateTimeOffset.UtcNow;
-                    memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
-                    var memoryEnd = DateTimeOffset.UtcNow;
-                    var memoryDurationMs = (memoryEnd - memoryStart).TotalMilliseconds;
-
-                    memoryRecallActivity?.SetTag("memory.entries_recalled", memoryContext is not null ? "context_found" : "none");
-
-                    traceCollector.CaptureSpan(new TraceSpan(
-                        SpanId: Guid.NewGuid().ToString("N")[..16],
-                        TraceId: traceId,
-                        ParentSpanId: chatActivity?.SpanId.ToString(),
-                        OperationName: "memory.recall",
-                        StartTime: memoryStart,
-                        EndTime: memoryEnd,
-                        DurationMs: memoryDurationMs,
-                        Tags: new Dictionary<string, string>
-                        {
-                            ["memory.user_id"] = userId,
-                            ["memory.entries_recalled"] = memoryContext is not null ? "context_found" : "none"
-                        }));
-                }
-
-                var enrichedRequest = request;
-                if (memoryContext is not null)
-                {
-                    var historyWithMemory = new List<ChatHistoryMessage>
-                    {
-                        new("system", memoryContext)
-                    };
-                    if (request.History is { Count: > 0 })
-                        historyWithMemory.AddRange(request.History);
-
-                    enrichedRequest = request with { History = historyWithMemory };
-                }
-
-                // RAG context injection — search knowledge base for relevant grounding
-                var ragContext = await ragProvider.GetContextAsync(request.Message, ct);
-                if (ragContext is not null)
-                {
-                    var historyWithRag = new List<ChatHistoryMessage>(enrichedRequest.History ?? [])
-                    {
-                        new("system", ragContext)
-                    };
-                    enrichedRequest = enrichedRequest with { History = historyWithRag };
-                }
+                // ── Route FIRST: classify intent before loading context ──────────
+                // This saves ~200ms by not loading memory/RAG for the routing decision.
+                // Routing only needs the raw message + conversation history.
 
                 // Emit progress: routing phase
                 _ = hubContext.Clients.Group(sessionId).SendAsync("progress", new
@@ -147,12 +101,12 @@ public static class ChatEndpoints
                 RoutingDecision decision;
                 {
                     var classifyStart = DateTimeOffset.UtcNow;
-                    using var classifyActivity = AgentTelemetry.StartRouterClassify(enrichedRequest.Message);
+                    using var classifyActivity = AgentTelemetry.StartRouterClassify(request.Message);
 
                     decision = await router.RouteAsync(
-                        enrichedRequest.Message,
-                        enrichedRequest.History,
-                        enrichedRequest.User,
+                        request.Message,
+                        request.History,
+                        request.User,
                         tenantId: null,
                         ct);
 
@@ -212,6 +166,58 @@ public static class ChatEndpoints
                 logger.LogInformation(
                     "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}, traceId: {TraceId}",
                     specialist.Key, specialist.DisplayName, decision.Intent, decision.Confidence, traceId);
+
+                // ── Enrich: now load context relevant to the routed agent ────────
+
+                // Memory recall with tracing
+                string? memoryContext = null;
+                using (var memoryRecallActivity = AgentTelemetry.StartMemoryRecall(userId))
+                {
+                    var memoryStart = DateTimeOffset.UtcNow;
+                    memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+                    var memoryEnd = DateTimeOffset.UtcNow;
+                    var memoryDurationMs = (memoryEnd - memoryStart).TotalMilliseconds;
+
+                    memoryRecallActivity?.SetTag("memory.entries_recalled", memoryContext is not null ? "context_found" : "none");
+
+                    traceCollector.CaptureSpan(new TraceSpan(
+                        SpanId: Guid.NewGuid().ToString("N")[..16],
+                        TraceId: traceId,
+                        ParentSpanId: chatActivity?.SpanId.ToString(),
+                        OperationName: "memory.recall",
+                        StartTime: memoryStart,
+                        EndTime: memoryEnd,
+                        DurationMs: memoryDurationMs,
+                        Tags: new Dictionary<string, string>
+                        {
+                            ["memory.user_id"] = userId,
+                            ["memory.entries_recalled"] = memoryContext is not null ? "context_found" : "none"
+                        }));
+                }
+
+                var enrichedRequest = request;
+                if (memoryContext is not null)
+                {
+                    var historyWithMemory = new List<ChatHistoryMessage>
+                    {
+                        new("system", memoryContext)
+                    };
+                    if (request.History is { Count: > 0 })
+                        historyWithMemory.AddRange(request.History);
+
+                    enrichedRequest = request with { History = historyWithMemory };
+                }
+
+                // RAG context injection — search knowledge base for relevant grounding
+                var ragContext = await ragProvider.GetContextAsync(request.Message, ct);
+                if (ragContext is not null)
+                {
+                    var historyWithRag = new List<ChatHistoryMessage>(enrichedRequest.History ?? [])
+                    {
+                        new("system", ragContext)
+                    };
+                    enrichedRequest = enrichedRequest with { History = historyWithRag };
+                }
 
                 // Emit progress: agent_start phase
                 _ = hubContext.Clients.Group(sessionId).SendAsync("progress", new
@@ -453,6 +459,13 @@ public static class ChatEndpoints
             }
         })
         .WithName("Chat")
+        .WithSummary("Send a chat message to the AI agent pipeline")
+        .WithDescription("Routes the message through guardrails, caching, multi-agent routing, memory recall, RAG enrichment, and specialist agent execution. Returns a structured response with the agent's reply, trace spans, and token usage.")
+        .WithTags("Chat")
+        .Produces<ChatResponse>(StatusCodes.Status200OK)
+        .ProducesValidationProblem()
+        .Produces(StatusCodes.Status429TooManyRequests)
+        .Produces(StatusCodes.Status503ServiceUnavailable)
         .RequireAuthorization()
         .RequireRateLimiting("strict");
 
@@ -556,6 +569,12 @@ public static class ChatEndpoints
             }
         })
         .WithName("ChatStream")
+        .WithSummary("Stream a chat response via Server-Sent Events")
+        .WithDescription("Same pipeline as /api/chat but delivers tokens progressively via SSE for real-time UI rendering.")
+        .WithTags("Chat")
+        .Produces(StatusCodes.Status200OK)
+        .ProducesValidationProblem()
+        .Produces(StatusCodes.Status503ServiceUnavailable)
         .RequireAuthorization()
         .RequireRateLimiting("strict");
 
@@ -570,6 +589,9 @@ public static class ChatEndpoints
             Specialists = specialists.Select(s => new { s.Key, s.DisplayName }).ToList()
         }))
         .WithName("Info")
+        .WithSummary("Get API metadata and available agents")
+        .WithDescription("Returns system info including agent name, registered tools, router type, and all specialist agents with their keys and display names.")
+        .WithTags("System")
         .RequireAuthorization()
         .RequireRateLimiting("relaxed");
 

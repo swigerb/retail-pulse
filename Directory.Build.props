@@ -4,4 +4,13 @@
     Transitive pinning (e.g., Microsoft.Bcl.Memory for CVE fixes) is enabled
     via CentralPackageTransitivePinningEnabled in that file.
   -->
+
+  <PropertyGroup>
+    <!-- Nullable reference types enabled solution-wide -->
+    <Nullable>enable</Nullable>
+
+    <!-- Enforce code style rules during build (warnings, not errors) -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+  </PropertyGroup>
 </Project>
