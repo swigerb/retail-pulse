@@ -164,6 +164,17 @@ public static class ChatEndpoints
                         }));
                 }
 
+                var routingDurationMs = (long)(DateTimeOffset.UtcNow - traceStartTime).TotalMilliseconds;
+                var routingInfo = new RoutingInfo(
+                    specialist.Key,
+                    specialist.DisplayName,
+                    decision.Intent,
+                    decision.Confidence,
+                    routingDurationMs);
+
+                // Emit trace_started with routing metadata for frontend telemetry panel
+                traceCollector.EmitTraceStarted(traceId, traceStartTime, decision.Intent, specialist.DisplayName);
+
                 logger.LogInformation(
                     "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}, traceId: {TraceId}",
                     specialist.Key, specialist.DisplayName, decision.Intent, decision.Confidence, traceId);
@@ -412,6 +423,9 @@ public static class ChatEndpoints
                 {
                     response = response with { Reply = filteredReply };
                 }
+
+                // Attach routing info to the response
+                response = response with { Routing = routingInfo };
 
                 // ── Cache: store response for deterministic queries ──────────────
                 if (CacheHelpers.IsCacheable(request.Message))

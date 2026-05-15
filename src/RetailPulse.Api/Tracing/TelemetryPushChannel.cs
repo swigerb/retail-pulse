@@ -6,7 +6,13 @@ namespace RetailPulse.Api.Tracing;
 /// <summary>
 /// Work item for SignalR telemetry push via bounded channel.
 /// </summary>
-public sealed record TelemetryPushItem(string EventType, TraceSpan? Span = null, string? TraceId = null, DateTimeOffset? Timestamp = null);
+public sealed record TelemetryPushItem(
+    string EventType,
+    TraceSpan? Span = null,
+    string? TraceId = null,
+    DateTimeOffset? Timestamp = null,
+    string? Intent = null,
+    string? AgentName = null);
 
 /// <summary>
 /// Bounded channel for SignalR telemetry push work items.

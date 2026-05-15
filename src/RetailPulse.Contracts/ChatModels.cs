@@ -17,6 +17,17 @@ public record ChatRequest(
 );
 
 /// <summary>
+/// Routing metadata included in the chat response for telemetry display.
+/// </summary>
+public record RoutingInfo(
+    string AgentKey,
+    string AgentName,
+    string? Intent,
+    double? Confidence,
+    long? DurationMs
+);
+
+/// <summary>
 /// Response model for the RetailPulse chat endpoint.
 /// </summary>
 public record ChatResponse(
@@ -25,7 +36,8 @@ public record ChatResponse(
     List<AgentSpan> Spans,
     List<ChartSpec>? Charts = null,
     long? TotalDurationMs = null,
-    TokenUsage? TokenUsage = null
+    TokenUsage? TokenUsage = null,
+    RoutingInfo? Routing = null
 );
 
 /// <summary>
