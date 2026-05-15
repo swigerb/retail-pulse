@@ -1,4 +1,5 @@
 using System.Threading.RateLimiting;
+using Asp.Versioning;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -15,6 +16,7 @@ using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
+using RetailPulse.Api.Security;
 using RetailPulse.Api.Tools;
 using RetailPulse.Api.Tracing;
 using RetailPulse.Contracts;
@@ -35,7 +37,10 @@ using RetailPulse.Api.Cards;
 using RetailPulse.Api.Caching;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Endpoints;
+using RetailPulse.Api.Health;
 using RetailPulse.Api.Observability;
+using RetailPulse.Api.Resilience;
+using RetailPulse.Api.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -44,6 +49,16 @@ builder.AddServiceDefaults();
 
 // In-memory cache (used by MCP response caching handler, etc.)
 builder.Services.AddMemoryCache();
+
+// ── Custom Business Metrics ─────────────────────────────────────────────
+builder.Services.AddSingleton<RetailPulseMetrics>();
+
+// Resilience — dead-letter queue and circuit breaker health check
+builder.Services.AddSingleton<DeadLetterQueue>();
+builder.Services.AddHealthChecks()
+    .AddCheck<CircuitBreakerHealthCheck>("mcp-circuit-breaker")
+    .AddCheck<McpServerHealthCheck>("mcp-server", tags: ["ready"])
+    .AddCheck<AzureOpenAiHealthCheck>("azure-openai", tags: ["ready"]);
 
 // Quota configuration (IOptions pattern)
 builder.Services.Configure<KnowledgeOptions>(builder.Configuration.GetSection(KnowledgeOptions.SectionName));
@@ -56,7 +71,8 @@ builder.Services.AddSingleton<ITenantProvider>(tenantProvider);
 
 // Add our custom ActivitySource to the OTel pipeline
 builder.Services.AddOpenTelemetry()
-    .WithTracing(tracing => tracing.AddSource("RetailPulse.Agent").AddSource("RetailPulse.Alerts"));
+    .WithTracing(tracing => tracing.AddSource("RetailPulse.Agent").AddSource("RetailPulse.Alerts"))
+    .WithMetrics(metrics => metrics.AddMeter(RetailPulseMetrics.MeterName));
 
 // SignalR for real-time telemetry
 builder.Services.AddSignalR()
@@ -152,6 +168,15 @@ builder.Services.AddRateLimiter(options =>
         opt.Window = TimeSpan.FromMinutes(1);
         opt.QueueLimit = 0;
     });
+});
+
+// ── API Versioning ──────────────────────────────────────────────────────
+builder.Services.AddApiVersioning(options =>
+{
+    options.DefaultApiVersion = new ApiVersion(1, 0);
+    options.AssumeDefaultVersionWhenUnspecified = true;
+    options.ReportApiVersions = true;
+    options.ApiVersionReader = new UrlSegmentApiVersionReader();
 });
 
 // Load prompts from YAML and resolve tenant placeholders
@@ -297,7 +322,8 @@ builder.Services.AddTransient<McpResponseCachingHandler>();
 builder.Services.AddHttpClient("McpServer", client =>
 {
     client.BaseAddress = new Uri(mcpBaseUrl);
-}).AddHttpMessageHandler<McpResponseCachingHandler>();
+}).AddHttpMessageHandler<McpResponseCachingHandler>()
+  .AddMcpResilienceHandler();
 
 // Register tools
 builder.Services.AddScoped<DepletionStatsTool>(sp =>
@@ -586,8 +612,9 @@ builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<In
 // Observability Suite — cost tracking, audit log, conversation export
 builder.Services.AddSingleton<InMemoryCostTracker>();
 builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<InMemoryCostTracker>());
-builder.Services.AddSingleton<InMemoryAuditLog>();
-builder.Services.AddSingleton<IAuditLog>(sp => sp.GetRequiredService<InMemoryAuditLog>());
+var auditDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "audit.db");
+builder.Services.AddSingleton<DurableAuditLog>(_ => new DurableAuditLog(auditDbPath));
+builder.Services.AddSingleton<IAuditLog>(sp => sp.GetRequiredService<DurableAuditLog>());
 builder.Services.AddSingleton<ConversationExporter>();
 builder.Services.AddSingleton<IConversationExport>(sp => sp.GetRequiredService<ConversationExporter>());
 
@@ -954,7 +981,10 @@ var app = builder.Build();
 }
 
 // Select CORS policy based on environment
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseCors(app.Environment.IsDevelopment() ? "Development" : "Production");
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseMiddleware<ApiKeyAuthMiddleware>();
 
 app.UseAuthentication();
@@ -986,5 +1016,6 @@ app.MapPromoEndpoints();
 app.MapSupplyEndpoints();
 app.MapStoreEndpoints();
 app.MapMarginEndpoints();
+app.MapDeadLetterEndpoints();
 
 app.Run();
