@@ -1047,3 +1047,75 @@ Get the Teams message extension manifest JSON.
 |-----|------|---------|
 | TelemetryHub | `/hubs/telemetry` | Real-time trace events, approval notifications, card updates |
 | StreamingHub | `/hubs/streaming` | Progressive token delivery for streaming chat |
+
+---
+
+## API Versioning
+
+The API uses URL-based versioning. The current version is `v1`.
+
+### Versioned Endpoint
+
+| Endpoint | Version | Status |
+|----------|---------|--------|
+| `POST /api/v1/chat` | v1 (current) | Active |
+| `POST /api/chat` | Legacy (unversioned) | Deprecated — includes `Sunset` header |
+
+The legacy `/api/chat` endpoint still works but returns a `Sunset` header indicating deprecation. Migrate to `/api/v1/chat`.
+
+---
+
+## Health Endpoints
+
+### GET /health/live
+
+Liveness probe — returns 200 if the process is running.
+
+**Response (200):** `Healthy`
+
+### GET /health/ready
+
+Readiness probe — verifies downstream dependencies (MCP server, Azure OpenAI).
+
+**Response (200):**
+```json
+{
+  "status": "Healthy",
+  "entries": {
+    "mcp-server": { "status": "Healthy" },
+    "azure-openai": { "status": "Healthy" }
+  }
+}
+```
+
+**Response (503):** Service Unavailable — one or more dependencies unhealthy.
+
+---
+
+## API Documentation UI
+
+### GET /api/docs
+
+Interactive API documentation powered by [Scalar](https://scalar.com/). Browse all endpoints, view request/response schemas, and try requests directly.
+
+Available in all environments.
+
+---
+
+## Error Responses
+
+All errors follow [RFC 7807 Problem Details](https://www.rfc-editor.org/rfc/rfc7807):
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc7807",
+  "title": "Validation Error",
+  "status": 400,
+  "detail": "Message exceeds maximum length of 2000 characters",
+  "instance": "/api/v1/chat",
+  "traceId": "abc-123-def",
+  "correlationId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+Every response includes an `X-Correlation-ID` header for request tracing.
