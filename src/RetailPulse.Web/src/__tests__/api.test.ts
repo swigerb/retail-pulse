@@ -93,4 +93,41 @@ describe('api.sendMessage', () => {
 
     await expect(sendMessage({ message: 'hi' })).rejects.toThrow(/Failed to fetch/);
   });
+
+  it('throws a friendly timeout error when the request exceeds timeoutMs', async () => {
+    vi.useFakeTimers();
+    try {
+      globalThis.fetch = vi.fn().mockImplementation(
+        (_input: unknown, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'));
+            });
+          })
+      ) as unknown as typeof fetch;
+
+      const promise = sendMessage({ message: 'hi' }, { timeoutMs: 50 });
+      const assertion = expect(promise).rejects.toThrow(/timed out/i);
+      await vi.advanceTimersByTimeAsync(60);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('respects a caller-provided AbortSignal', async () => {
+    const controller = new AbortController();
+    globalThis.fetch = vi.fn().mockImplementation(
+      (_input: unknown, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        })
+    ) as unknown as typeof fetch;
+
+    const promise = sendMessage({ message: 'hi' }, { signal: controller.signal });
+    controller.abort();
+    await expect(promise).rejects.toThrow(/Aborted|abort/i);
+  });
 });

@@ -52,18 +52,78 @@ function isChatResponse(value: unknown): value is ChatResponse {
 
 export interface SendMessageOptions {
   signal?: AbortSignal;
+  /**
+   * Client-side timeout in milliseconds. If the request exceeds this duration
+   * the fetch is aborted and an Error is thrown so the UI can clear its
+   * loading state instead of spinning forever. Defaults to 180_000 (3 min) to
+   * align with the backend Azure OpenAI network timeout.
+   */
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 180_000;
+
+/**
+ * Combines an optional caller signal with a timeout signal. Returns the
+ * combined AbortSignal, a flag we can read to detect a timeout-driven abort,
+ * and a cleanup callback that clears the timer.
+ */
+function withTimeout(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; didTimeOut: () => boolean; cleanup: () => void } {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const onCallerAbort = () => controller.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      signal.addEventListener('abort', onCallerAbort, { once: true });
+    }
+  }
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException('Request timed out', 'TimeoutError'));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    didTimeOut: () => timedOut,
+    cleanup: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onCallerAbort);
+    },
+  };
 }
 
 export async function sendMessage(
   request: ChatRequest,
   options: SendMessageOptions = {},
 ): Promise<ChatResponse> {
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-    signal: options.signal,
-  });
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const { signal, didTimeOut, cleanup } = withTimeout(options.signal, timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      signal,
+    });
+  } catch (err) {
+    if (didTimeOut()) {
+      throw new Error(
+        `Request timed out after ${Math.round(timeoutMs / 1000)}s. The server may be busy — please try again.`,
+      );
+    }
+    throw err;
+  } finally {
+    cleanup();
+  }
 
   if (!res.ok) {
     const detail = await parseErrorBody(res);
