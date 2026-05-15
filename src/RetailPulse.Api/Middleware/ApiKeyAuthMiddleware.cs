@@ -15,7 +15,7 @@ namespace RetailPulse.Api.Middleware;
 /// </summary>
 public class ApiKeyAuthMiddleware
 {
-    private const string DefaultHeaderName = "X-Api-Key";
+    private const string _defaultHeaderName = "X-Api-Key";
 
     private readonly RequestDelegate _next;
     private readonly bool _enabled;
@@ -31,7 +31,7 @@ public class ApiKeyAuthMiddleware
         _next = next;
         _logger = logger;
         _enabled = configuration.GetValue("ApiKey:Enabled", false);
-        _headerName = configuration["ApiKey:Header"] ?? DefaultHeaderName;
+        _headerName = configuration["ApiKey:Header"] ?? _defaultHeaderName;
         _expectedKey = configuration["ApiKey:Value"];
 
         if (_enabled && string.IsNullOrWhiteSpace(_expectedKey))

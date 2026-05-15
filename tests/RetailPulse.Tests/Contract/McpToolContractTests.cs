@@ -69,7 +69,7 @@ public class McpToolContractTests
                 var toolAttr = method.GetCustomAttribute<McpServerToolAttribute>();
                 toolAttr.Should().NotBeNull();
                 // Tool should have a name
-                var name = toolAttr!.Name ?? method.Name;
+                var name = toolAttr.Name ?? method.Name;
                 name.Should().NotBeNullOrWhiteSpace($"Tool method {type.Name}.{method.Name} has no name");
             }
         }

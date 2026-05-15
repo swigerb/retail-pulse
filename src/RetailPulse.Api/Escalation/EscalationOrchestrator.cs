@@ -22,8 +22,8 @@ public class EscalationOrchestrator
     private readonly AgentDefinition _synthesisDef;
     private readonly ILogger<EscalationOrchestrator> _logger;
 
-    private static readonly TimeSpan L1Timeout = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan L2Timeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan _l1Timeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan _l2Timeout = TimeSpan.FromSeconds(15);
 
     public EscalationOrchestrator(
         IEnumerable<ISpecialistAgent> specialists,
@@ -56,7 +56,7 @@ public class EscalationOrchestrator
         var sw = Stopwatch.StartNew();
 
         // Determine complexity from detected intents
-        var detectedIntents = routing.DetectedIntents ?? new[] { routing.Intent };
+        var detectedIntents = routing.DetectedIntents ?? [routing.Intent];
         var isMultiDomain = detectedIntents.Count > 1;
         var isLowConfidence = routing.Confidence < 0.5;
 
@@ -69,7 +69,7 @@ public class EscalationOrchestrator
             try
             {
                 using var l1Cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                l1Cts.CancelAfter(L1Timeout);
+                l1Cts.CancelAfter(_l1Timeout);
 
                 var response = await primaryAgent.HandleAsync(request, l1Cts.Token);
 
@@ -81,7 +81,7 @@ public class EscalationOrchestrator
 
                     return new EscalationResult(
                         response.Reply, 1,
-                        new[] { primaryAgent.Key },
+                        [primaryAgent.Key],
                         sw.ElapsedMilliseconds);
                 }
             }
@@ -102,14 +102,14 @@ public class EscalationOrchestrator
             .ToList();
 
         if (relevantAgents.Count == 0)
-            relevantAgents = _specialists.Where(s => s.Key == "general").Take(1).ToList();
+            relevantAgents = [.. _specialists.Where(s => s.Key == "general").Take(1)];
 
         if (relevantAgents.Count > 0)
         {
             try
             {
                 using var l2Cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                l2Cts.CancelAfter(L2Timeout);
+                l2Cts.CancelAfter(_l2Timeout);
 
                 var tasks = relevantAgents.Select(async agent =>
                 {
@@ -120,7 +120,7 @@ public class EscalationOrchestrator
                     }
                     catch
                     {
-                        return (agent.Key, Reply: (string?)null, Success: false);
+                        return (agent.Key, Reply: default(string), Success: false);
                     }
                 });
 
@@ -131,7 +131,7 @@ public class EscalationOrchestrator
                 {
                     var synthesized = successful.Length == 1
                         ? successful[0].Reply!
-                        : await SynthesizeL2Async(request.Message, successful, ct);
+                        : await SynthesizeL2Async(request.Message, [.. successful], ct);
 
                     _logger.LogInformation(
                         "L2 handled by {Agents} in {Ms}ms",
@@ -140,7 +140,7 @@ public class EscalationOrchestrator
 
                     return new EscalationResult(
                         synthesized, 2,
-                        successful.Select(s => s.Key).ToArray(),
+                        [.. successful.Select(s => s.Key)],
                         sw.ElapsedMilliseconds);
                 }
             }
@@ -159,7 +159,7 @@ public class EscalationOrchestrator
             "🔄 This query requires additional expertise. It has been flagged for specialist review. " +
             "A team member will follow up shortly with a detailed analysis.",
             3,
-            Array.Empty<string>(),
+            [],
             sw.ElapsedMilliseconds,
             NeedsHumanReview: true,
             EscalationReason: isLowConfidence

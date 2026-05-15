@@ -2,10 +2,10 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Rag;
 using RetailPulse.Contracts.Rag;
-using Moq;
 
 namespace RetailPulse.Tests.Rag;
 
@@ -39,7 +39,7 @@ public class MessageExtensionTests
         var results = await kb.SearchAsync("holiday promotions");
 
         results.Should().NotBeEmpty("search should find matching content");
-        var first = results.First();
+        var first = results[0];
         first.Title.Should().Be("Holiday Planning Guide");
         first.Chunk.Should().NotBeNullOrWhiteSpace();
         first.Score.Should().BeGreaterThan(0);
@@ -186,10 +186,10 @@ public class MessageExtensionTests
     {
         var mockKb = new Mock<IKnowledgeBase>();
         mockKb.Setup(kb => kb.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<SearchResult>
-            {
+            .ReturnsAsync(
+            [
                 new("doc-1", "Holiday Guide", "Holiday promotions drive revenue.", 0.85, "wiki", 0)
-            });
+            ]);
 
         var provider = new RagContextProvider(mockKb.Object,
             NullLoggerFactory.Instance.CreateLogger<RagContextProvider>());
@@ -206,7 +206,7 @@ public class MessageExtensionTests
     {
         var mockKb = new Mock<IKnowledgeBase>();
         mockKb.Setup(kb => kb.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<SearchResult>());
+            .ReturnsAsync([]);
 
         var provider = new RagContextProvider(mockKb.Object,
             NullLoggerFactory.Instance.CreateLogger<RagContextProvider>());

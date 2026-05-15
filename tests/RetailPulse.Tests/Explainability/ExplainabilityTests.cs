@@ -1,6 +1,6 @@
-using FluentAssertions;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using FluentAssertions;
 
 namespace RetailPulse.Tests.Explainability;
 
@@ -26,7 +26,7 @@ public class ExplainabilityTests
         var chain = store.GetChain(traceId);
 
         chain.Should().NotBeNull();
-        chain!.Steps.Should().HaveCount(2);
+        chain.Steps.Should().HaveCount(2);
         chain.Steps[0].ToolName.Should().Be("GetDepletionStats");
         chain.Steps[1].ToolName.Should().Be("CreateChart");
     }
@@ -96,7 +96,7 @@ public class ExplainabilityTests
         var chain = store.GetChain(traceId);
 
         chain.Should().NotBeNull();
-        chain!.TraceId.Should().Be(traceId);
+        chain.TraceId.Should().Be(traceId);
         chain.Steps.Should().HaveCount(2);
     }
 
@@ -256,7 +256,7 @@ public record ExplanationChain(
 /// In-memory explanation store for testing. Thread-safe.
 /// Supports recording steps, finalization (immutability), and retrieval.
 /// </summary>
-internal class InMemoryExplanationStore
+internal sealed class InMemoryExplanationStore
 {
     private readonly ConcurrentDictionary<string, (List<ExplanationStep> Steps, bool Finalized)> _chains = new();
 

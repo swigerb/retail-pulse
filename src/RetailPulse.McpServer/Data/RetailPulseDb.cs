@@ -405,8 +405,8 @@ public class RetailPulseDb
 
                 var regionVariance = (regionRng.NextDouble() - 0.5) * 8.0;
                 var depletionGrowth = Math.Round(baseTrend + regionVariance, 1);
-                var sellThroughGrowth = Math.Round(depletionGrowth + (regionRng.NextDouble() - 0.5) * 4.0, 1);
-                var inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - depletionGrowth * 0.3 + regionRng.NextDouble() * 3.0), 1);
+                var sellThroughGrowth = Math.Round(depletionGrowth + ((regionRng.NextDouble() - 0.5) * 4.0), 1);
+                var inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - (depletionGrowth * 0.3) + (regionRng.NextDouble() * 3.0)), 1);
                 var status = DetermineDepletionStatus(depletionGrowth, sellThroughGrowth, inventoryWeeks);
                 var summary = GenerateDepletionSummary(brand, region, depletionGrowth, sellThroughGrowth, inventoryWeeks, status, regionRng);
 
@@ -451,10 +451,10 @@ public class RetailPulseDb
                 var regionSeed = GetStableHash($"ship|{brand.Name}|{region}");
                 var regionRng = new Random(regionSeed);
 
-                var shipmentGrowth = Math.Round(baseTrend + (regionRng.NextDouble() - 0.3) * 6.0, 1);
-                var sellThroughGrowth = Math.Round(baseTrend + (regionRng.NextDouble() - 0.5) * 5.0, 1);
-                var depletionGrowth = Math.Round(sellThroughGrowth + (regionRng.NextDouble() - 0.5) * 3.0, 1);
-                var inventoryWeeks = Math.Round(Math.Max(2.5, 6.5 - depletionGrowth * 0.25 + regionRng.NextDouble() * 3.0), 1);
+                var shipmentGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.3) * 6.0), 1);
+                var sellThroughGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.5) * 5.0), 1);
+                var depletionGrowth = Math.Round(sellThroughGrowth + ((regionRng.NextDouble() - 0.5) * 3.0), 1);
+                var inventoryWeeks = Math.Round(Math.Max(2.5, 6.5 - (depletionGrowth * 0.25) + (regionRng.NextDouble() * 3.0)), 1);
 
                 var baseCases = brand.PriceSegment switch
                 {
@@ -539,7 +539,7 @@ public class RetailPulseDb
                 var rng = new Random(seed);
 
                 // Generate weights in [0.5, 2.0], normalize to 100% mix
-                var weights = brand.Variants.Select(_ => 0.5 + rng.NextDouble() * 1.5).ToArray();
+                var weights = brand.Variants.Select(_ => 0.5 + (rng.NextDouble() * 1.5)).ToArray();
                 var total = weights.Sum();
 
                 for (int i = 0; i < brand.Variants.Count; i++)
@@ -890,10 +890,10 @@ public class RetailPulseDb
                             ? 1.15 : 1.0;
 
                         // Trend component
-                        var trendFactor = 1.0 + trendSlope * dayOffset;
+                        var trendFactor = 1.0 + (trendSlope * dayOffset);
 
                         // Random noise ±8%
-                        var noise = 0.92 + rng.NextDouble() * 0.16;
+                        var noise = 0.92 + (rng.NextDouble() * 0.16);
 
                         var volume = channelBase * seasonal * dowFactor * trendFactor * noise;
 
@@ -940,53 +940,71 @@ public class RetailPulseDb
         {
             "Spirits" => month switch
             {
-                11 => 1.30, 12 => 1.40,       // Holidays
-                6 => 1.10, 7 => 1.15,          // Summer entertaining
-                1 => 0.85, 2 => 0.90,          // Post-holiday dip
+                11 => 1.30,
+                12 => 1.40,       // Holidays
+                6 => 1.10,
+                7 => 1.15,          // Summer entertaining
+                1 => 0.85,
+                2 => 0.90,          // Post-holiday dip
                 _ => 1.0
             },
             "Grocery" => month switch
             {
-                8 => 1.20, 9 => 1.25,          // Back-to-school
-                11 => 1.25, 12 => 1.30,        // Holidays
-                1 => 0.90, 2 => 0.92,          // Post-holiday
+                8 => 1.20,
+                9 => 1.25,          // Back-to-school
+                11 => 1.25,
+                12 => 1.30,        // Holidays
+                1 => 0.90,
+                2 => 0.92,          // Post-holiday
                 _ => 1.0
             },
             "Quick-Serve Restaurant" => month switch
             {
-                6 => 1.15, 7 => 1.20, 8 => 1.18, // Summer
-                1 => 0.88, 2 => 0.90,             // Winter dip
+                6 => 1.15,
+                7 => 1.20,
+                8 => 1.18, // Summer
+                1 => 0.88,
+                2 => 0.90,             // Winter dip
                 12 => 0.95,                        // Holiday competition
                 _ => 1.0
             },
             "Home Improvement" => month switch
             {
-                3 => 1.20, 4 => 1.30, 5 => 1.35, // Spring projects
+                3 => 1.20,
+                4 => 1.30,
+                5 => 1.35, // Spring projects
                 9 => 1.20,                          // Fall prep
-                1 => 0.80, 2 => 0.82,              // Winter low
+                1 => 0.80,
+                2 => 0.82,              // Winter low
                 12 => 0.85,                         // Winter
                 _ => 1.0
             },
             "Office Supply" => month switch
             {
-                8 => 1.25, 9 => 1.20,          // Back-to-school
+                8 => 1.25,
+                9 => 1.20,          // Back-to-school
                 1 => 1.15,                       // New year office setup
-                6 => 0.90, 7 => 0.88,           // Summer lull
+                6 => 0.90,
+                7 => 0.88,           // Summer lull
                 _ => 1.0
             },
             "Furniture" => month switch
             {
-                3 => 1.15, 4 => 1.10,          // Spring refresh
-                8 => 1.20, 9 => 1.15,          // Back-to-school / dorm
-                11 => 1.25, 12 => 1.10,        // Holiday gifting
-                1 => 0.80, 2 => 0.85,          // Post-holiday
+                3 => 1.15,
+                4 => 1.10,          // Spring refresh
+                8 => 1.20,
+                9 => 1.15,          // Back-to-school / dorm
+                11 => 1.25,
+                12 => 1.10,        // Holiday gifting
+                1 => 0.80,
+                2 => 0.85,          // Post-holiday
                 _ => 1.0
             },
             _ => 1.0
         };
     }
 
-    private void SeedSeasonalFactors(SqliteConnection conn)
+    private static void SeedSeasonalFactors(SqliteConnection conn)
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -1241,9 +1259,9 @@ public class RetailPulseDb
             var seasonal = GetCategorySeasonalMultiplier(category, date.Month);
 
             if (Math.Abs(seasonal - 1.0) > 0.01)
-                seasonalFactorsApplied.Add($"{date.ToString("MMM")} ({seasonal:F2}x)");
+                seasonalFactorsApplied.Add($"{date:MMM} ({seasonal:F2}x)");
 
-            var predicted = trailing30 * seasonal * (1.0 + trendSlope * d);
+            var predicted = trailing30 * seasonal * (1.0 + (trendSlope * d));
             predicted = Math.Max(1.0, predicted);
             var upper = Math.Round(predicted * 1.15, 1);
             var lower = Math.Round(predicted * 0.85, 1);
@@ -1511,7 +1529,7 @@ public class RetailPulseDb
     }
 
     private string[] GetAvailableCategories() =>
-        _tenant.Brands.Select(b => b.Category).Distinct().ToArray();
+        [.. _tenant.Brands.Select(b => b.Category).Distinct()];
 
     // ── Update Methods (for AI-driven mutations) ─────────────────────────
 
@@ -1646,7 +1664,7 @@ public class RetailPulseDb
     // ── Lookup Helpers ───────────────────────────────────────────────────
 
     private string[] GetAvailableBrands() =>
-        _tenant.Brands.Select(b => b.Name).ToArray();
+        [.. _tenant.Brands.Select(b => b.Name)];
 
     private string[] GetAvailableRegions() =>
         [.. _tenant.Regions, "National"];
@@ -1658,14 +1676,14 @@ public class RetailPulseDb
         var rng = new Random(seed);
         var categoryBoost = brand.Category switch
         {
-            "Tequila" => 4.0 + rng.NextDouble() * 4.0,
-            "Mezcal" => 5.0 + rng.NextDouble() * 5.0,
-            "Bourbon" => 3.0 + rng.NextDouble() * 5.0,
-            "Ready-to-Drink" => 2.0 + rng.NextDouble() * 6.0,
-            "Gin" => 1.0 + rng.NextDouble() * 3.0,
-            "Rum" => -2.0 + rng.NextDouble() * 4.0,
-            "Vodka" => -3.0 + rng.NextDouble() * 3.0,
-            _ => -1.0 + rng.NextDouble() * 4.0
+            "Tequila" => 4.0 + (rng.NextDouble() * 4.0),
+            "Mezcal" => 5.0 + (rng.NextDouble() * 5.0),
+            "Bourbon" => 3.0 + (rng.NextDouble() * 5.0),
+            "Ready-to-Drink" => 2.0 + (rng.NextDouble() * 6.0),
+            "Gin" => 1.0 + (rng.NextDouble() * 3.0),
+            "Rum" => -2.0 + (rng.NextDouble() * 4.0),
+            "Vodka" => -3.0 + (rng.NextDouble() * 3.0),
+            _ => -1.0 + (rng.NextDouble() * 4.0)
         };
         var segmentBoost = brand.PriceSegment switch
         {
@@ -1678,10 +1696,11 @@ public class RetailPulseDb
 
     private static string DetermineDepletionStatus(double depletionGrowth, double sellThroughGrowth, double inventoryWeeks)
     {
-        if (inventoryWeeks > 8.5 && sellThroughGrowth < 0) return "Overstocked";
-        if (depletionGrowth > 6.0 && sellThroughGrowth > 4.0) return "Growth Leader";
-        if (depletionGrowth < -1.0 || sellThroughGrowth < -2.0) return "Declining";
-        return "On Track";
+        return inventoryWeeks > 8.5 && sellThroughGrowth < 0
+            ? "Overstocked"
+            : depletionGrowth > 6.0 && sellThroughGrowth > 4.0
+            ? "Growth Leader"
+            : depletionGrowth < -1.0 || sellThroughGrowth < -2.0 ? "Declining" : "On Track";
     }
 
     private static (string AnomalyType, string RiskLevel) DetermineAnomalyType(
@@ -1704,7 +1723,7 @@ public class RetailPulseDb
 
     // ── Narrative Generation ─────────────────────────────────────────────
 
-    private string GenerateDepletionSummary(BrandConfig brand, string region,
+    private static string GenerateDepletionSummary(BrandConfig brand, string region,
         double depletionGrowth, double sellThroughGrowth, double inventoryWeeks, string status, Random rng)
     {
         var variants = brand.Variants.Count > 0 ? brand.Variants[rng.Next(brand.Variants.Count)] : "core";
@@ -1717,10 +1736,10 @@ public class RetailPulseDb
 
             "Overstocked" => $"Distributor warehouses in {region} holding excess {brand.Name} inventory at {inventoryWeeks} weeks on hand. " +
                 $"Sell-through at {FormatPercentage(sellThroughGrowth)} suggests consumer demand softening. " +
-                $"Competitive pressure in the {brand.Category.ToLower()} segment is creating headwinds. Promotional support may be needed to clear pipeline.",
+                $"Competitive pressure in the {brand.Category.ToLower(CultureInfo.CurrentCulture)} segment is creating headwinds. Promotional support may be needed to clear pipeline.",
 
             "Declining" => $"{brand.Name} facing headwinds in {region} with depletions at {FormatPercentage(depletionGrowth)}. " +
-                $"Category dynamics shifting as consumers explore alternatives in the {brand.PriceSegment.ToLower()} {brand.Category.ToLower()} tier. " +
+                $"Category dynamics shifting as consumers explore alternatives in the {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} {brand.Category.ToLower(CultureInfo.CurrentCulture)} tier. " +
                 $"On-premise placements under pressure. Field team recommends targeted activation programs.",
 
             _ => $"{brand.Name} performing steadily in {region} with depletions at {FormatPercentage(depletionGrowth)}. " +
@@ -1756,7 +1775,7 @@ public class RetailPulseDb
                 $"monitoring to ensure new points of distribution convert. Weeks on hand at {inventoryWeeks} within acceptable range.",
 
             "declining_aligned" => $"Shipments and sell-through for {brand.Name} both declining in {region} at similar rates — pipeline is stable but the floor is dropping. " +
-                $"The {brand.Category.ToLower()} segment faces structural headwinds. Volume management is appropriate but category strategy review needed.",
+                $"The {brand.Category.ToLower(CultureInfo.CurrentCulture)} segment faces structural headwinds. Volume management is appropriate but category strategy review needed.",
 
             _ => $"Shipments and sell-through aligned for {brand.Name} in {region}. {casesShipped:N0} cases shipped, {casesDepleted:N0} depleted. " +
                 $"The {model} distribution pipeline is balanced at {inventoryWeeks} weeks on hand. No anomalies detected — healthy flow through the system."
@@ -1771,27 +1790,27 @@ public class RetailPulseDb
         if (baseTrend > 3.0)
         {
             sentences.Add($"Strong positive sentiment for {brand.Name} across {region} distributors.");
-            sentences.Add($"{channel} accounts reporting increased pull. Consumer interest in the {brand.PriceSegment.ToLower()} {brand.Category.ToLower()} segment remains robust.");
+            sentences.Add($"{channel} accounts reporting increased pull. Consumer interest in the {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} {brand.Category.ToLower(CultureInfo.CurrentCulture)} segment remains robust.");
             sentences.Add($"Distributor reps requesting expanded allocation. Retail partners signaling increased shelf space commitment.");
             sentences.Add($"Field team confidence high — brand momentum creating opportunities for menu placement and promotional partnerships.");
         }
         else if (baseTrend > 0)
         {
             sentences.Add($"Generally positive outlook for {brand.Name} in {region}. Steady demand across {channel} accounts.");
-            sentences.Add($"The {brand.Category.ToLower()} category maintaining share in a competitive environment.");
+            sentences.Add($"The {brand.Category.ToLower(CultureInfo.CurrentCulture)} category maintaining share in a competitive environment.");
             sentences.Add($"Distributors note the brand benefits from established consumer loyalty and reliable supply chain execution.");
         }
         else if (baseTrend > -1.0)
         {
             sentences.Add($"{brand.Name} holding flat in {region} with mixed signals from the field.");
-            sentences.Add($"Some {channel} accounts reporting steady velocity while others see softening. The {brand.Category.ToLower()} category overall is under moderate pressure.");
-            sentences.Add($"Price sensitivity increasing among consumers at the {brand.PriceSegment.ToLower()} tier.");
+            sentences.Add($"Some {channel} accounts reporting steady velocity while others see softening. The {brand.Category.ToLower(CultureInfo.CurrentCulture)} category overall is under moderate pressure.");
+            sentences.Add($"Price sensitivity increasing among consumers at the {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} tier.");
             sentences.Add($"Field team recommends targeted promotional support and menu placement programs to defend share.");
         }
         else
         {
             sentences.Add($"{brand.Name} facing headwinds in {region}. Distributor sentiment cautious.");
-            sentences.Add($"The {brand.PriceSegment.ToLower()} {brand.Category.ToLower()} segment is losing occasions to other spirit categories. {channel} placements under pressure.");
+            sentences.Add($"The {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} {brand.Category.ToLower(CultureInfo.CurrentCulture)} segment is losing occasions to other spirit categories. {channel} placements under pressure.");
             sentences.Add($"Competitors gaining shelf space. Consumers migrating to trending categories.");
             sentences.Add($"Need strategic review of the brand's position in {region}. Promotional spend showing diminishing returns — may need positioning refresh.");
         }
@@ -1804,7 +1823,11 @@ public class RetailPulseDb
     private static double GetPeriodMultiplier(string? period) =>
         period?.Trim().ToUpperInvariant() switch
         {
-            "Q1" => 0.85, "Q2" => 1.05, "Q3" => 0.95, "Q4" => 1.15, _ => 1.0
+            "Q1" => 0.85,
+            "Q2" => 1.05,
+            "Q3" => 0.95,
+            "Q4" => 1.15,
+            _ => 1.0
         };
 
     private static double ParsePercentage(string pct) =>
@@ -1829,7 +1852,7 @@ public class RetailPulseDb
         {
             int hash = 17;
             foreach (var c in input)
-                hash = hash * 31 + c;
+                hash = (hash * 31) + c;
             return Math.Abs(hash);
         }
     }
@@ -1876,22 +1899,22 @@ public class RetailPulseDb
                     var durationDays = rng.Next(7, 45);
                     var campaignEnd = campaignStart.AddDays(durationDays);
 
-                    var spend = Math.Round(5000 + rng.NextDouble() * 195000, 2);
-                    var baselineVolume = Math.Round(1000 + rng.NextDouble() * 9000, 0);
+                    var spend = Math.Round(5000 + (rng.NextDouble() * 195000), 2);
+                    var baselineVolume = Math.Round(1000 + (rng.NextDouble() * 9000), 0);
 
                     var baseLift = promoType switch
                     {
-                        "BOGO" => 15.0 + rng.NextDouble() * 25.0,
-                        "Discount" => 8.0 + rng.NextDouble() * 18.0,
-                        "Display" => 5.0 + rng.NextDouble() * 12.0,
-                        "Digital" => 3.0 + rng.NextDouble() * 10.0,
-                        "Bundle" => 10.0 + rng.NextDouble() * 20.0,
-                        _ => 5.0 + rng.NextDouble() * 10.0
+                        "BOGO" => 15.0 + (rng.NextDouble() * 25.0),
+                        "Discount" => 8.0 + (rng.NextDouble() * 18.0),
+                        "Display" => 5.0 + (rng.NextDouble() * 12.0),
+                        "Digital" => 3.0 + (rng.NextDouble() * 10.0),
+                        "Bundle" => 10.0 + (rng.NextDouble() * 20.0),
+                        _ => 5.0 + (rng.NextDouble() * 10.0)
                     };
 
                     var liftPercent = Math.Round(baseLift, 1);
-                    var actualVolume = Math.Round(baselineVolume * (1.0 + liftPercent / 100.0), 0);
-                    var incrementalRevenue = (actualVolume - baselineVolume) * (5.0 + rng.NextDouble() * 15.0);
+                    var actualVolume = Math.Round(baselineVolume * (1.0 + (liftPercent / 100.0)), 0);
+                    var incrementalRevenue = (actualVolume - baselineVolume) * (5.0 + (rng.NextDouble() * 15.0));
                     var roi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 1);
 
                     var ratingIndex = roi switch
@@ -1947,22 +1970,22 @@ public class RetailPulseDb
             {
                 var avgLift = promoType switch
                 {
-                    "BOGO" => 22.0 + rng.NextDouble() * 8.0,
-                    "Discount" => 14.0 + rng.NextDouble() * 6.0,
-                    "Display" => 8.0 + rng.NextDouble() * 5.0,
-                    "Digital" => 5.0 + rng.NextDouble() * 4.0,
-                    "Bundle" => 16.0 + rng.NextDouble() * 6.0,
+                    "BOGO" => 22.0 + (rng.NextDouble() * 8.0),
+                    "Discount" => 14.0 + (rng.NextDouble() * 6.0),
+                    "Display" => 8.0 + (rng.NextDouble() * 5.0),
+                    "Digital" => 5.0 + (rng.NextDouble() * 4.0),
+                    "Bundle" => 16.0 + (rng.NextDouble() * 6.0),
                     _ => 10.0
                 };
 
-                var stdDev = Math.Round(avgLift * (0.15 + rng.NextDouble() * 0.25), 2);
+                var stdDev = Math.Round(avgLift * (0.15 + (rng.NextDouble() * 0.25)), 2);
 
                 pCat.Value = category;
                 pType.Value = promoType;
                 pLift.Value = Math.Round(avgLift, 2);
                 pStd.Value = stdDev;
-                pMin.Value = Math.Round(1000 + rng.NextDouble() * 4000, 0);
-                pMax.Value = Math.Round(150000 + rng.NextDouble() * 350000, 0);
+                pMin.Value = Math.Round(1000 + (rng.NextDouble() * 4000), 0);
+                pMax.Value = Math.Round(150000 + (rng.NextDouble() * 350000), 0);
                 cmd.ExecuteNonQuery();
             }
         }
@@ -2019,19 +2042,19 @@ public class RetailPulseDb
 
                     // Generate 8-12 pricing records over time
                     var recordCount = 8 + rng.Next(5);
-                    var competitorBase = basePrice * (0.85 + rng.NextDouble() * 0.35);
+                    var competitorBase = basePrice * (0.85 + (rng.NextDouble() * 0.35));
 
                     for (int i = 0; i < recordCount; i++)
                     {
-                        var date = baseDate.AddDays(i * 30 + rng.Next(15));
-                        var priceVariation = competitorBase * (0.90 + rng.NextDouble() * 0.20);
-                        var previousPrice = i == 0 ? competitorBase : competitorBase * (0.92 + rng.NextDouble() * 0.16);
+                        var date = baseDate.AddDays((i * 30) + rng.Next(15));
+                        var priceVariation = competitorBase * (0.90 + (rng.NextDouble() * 0.20));
+                        var previousPrice = i == 0 ? competitorBase : competitorBase * (0.92 + (rng.NextDouble() * 0.16));
                         var pctChange = previousPrice > 0 ? Math.Round((priceVariation - previousPrice) / previousPrice * 100, 1) : 0;
 
                         // ~15% chance of dramatic price drop (>10%)
                         if (rng.NextDouble() < 0.15)
                         {
-                            priceVariation = previousPrice * (0.80 + rng.NextDouble() * 0.08);
+                            priceVariation = previousPrice * (0.80 + (rng.NextDouble() * 0.08));
                             pctChange = Math.Round((priceVariation - previousPrice) / previousPrice * 100, 1);
                         }
 
@@ -2085,13 +2108,13 @@ public class RetailPulseDb
                 var rng = new Random(seed);
 
                 // Allocate base shares — our brand gets 15-35%, competitors split the rest
-                var ourBaseShare = 15.0 + rng.NextDouble() * 20.0;
+                var ourBaseShare = 15.0 + (rng.NextDouble() * 20.0);
                 var remainingShare = 100.0 - ourBaseShare;
                 var competitorShares = new double[competitors.Length];
                 double totalComp = 0;
                 for (int c = 0; c < competitors.Length; c++)
                 {
-                    competitorShares[c] = 5 + rng.NextDouble() * 25;
+                    competitorShares[c] = 5 + (rng.NextDouble() * 25);
                     totalComp += competitorShares[c];
                 }
                 // Normalize competitor shares
@@ -2186,19 +2209,19 @@ public class RetailPulseDb
             for (int i = 0; i < activityCount; i++)
             {
                 var competitor = competitors[rng.Next(competitors.Length)];
-                var template = activityTemplates[rng.Next(activityTemplates.Length)];
+                var (type, descTemplate, recTemplate) = activityTemplates[rng.Next(activityTemplates.Length)];
                 var region = _tenant.Regions[rng.Next(_tenant.Regions.Count)];
                 var priceDrop = 8 + rng.Next(20);
                 var date = baseDate.AddDays(rng.Next(300));
 
                 pCompetitor.Value = competitor;
-                pType.Value = template.type;
+                pType.Value = type;
                 pCategory.Value = brand.Category;
                 pRegion.Value = region;
-                pDesc.Value = string.Format(template.descTemplate, competitor, priceDrop, brand.Category, region);
+                pDesc.Value = string.Format(descTemplate, competitor, priceDrop, brand.Category, region);
                 pImpact.Value = ImpactLevels[rng.Next(ImpactLevels.Length)];
                 pDate.Value = date.ToString("yyyy-MM-dd");
-                pRecommendation.Value = template.recTemplate;
+                pRecommendation.Value = recTemplate;
                 cmd.ExecuteNonQuery();
             }
         }
@@ -2413,7 +2436,7 @@ public class RetailPulseDb
         };
     }
 
-    private double GetSeasonalityScore(SqliteConnection conn, string? category, int month)
+    private static double GetSeasonalityScore(SqliteConnection conn, string? category, int month)
     {
         if (string.IsNullOrWhiteSpace(category)) return 0.6;
         using var cmd = conn.CreateCommand();
@@ -2421,8 +2444,7 @@ public class RetailPulseDb
         cmd.Parameters.AddWithValue("@cat", category);
         cmd.Parameters.AddWithValue("@month", month);
         var result = cmd.ExecuteScalar();
-        if (result is null or DBNull) return 0.6;
-        return Math.Min(1.0, Math.Max(0.2, Convert.ToDouble(result) / 1.5));
+        return result is null or DBNull ? 0.6 : Math.Min(1.0, Math.Max(0.2, Convert.ToDouble(result) / 1.5));
     }
 
     public object EstimateROI(string brand, string region, string promoType, double spend, int durationWeeks)
@@ -2477,11 +2499,11 @@ public class RetailPulseDb
         var incrementalRevenue = incrementalUnits * revenuePerUnit;
         var expectedRoi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 2);
 
-        var lowerLift = Math.Max(0, avgLift - 1.96 * stdDev);
-        var upperLift = avgLift + 1.96 * stdDev;
+        var lowerLift = Math.Max(0, avgLift - (1.96 * stdDev));
+        var upperLift = avgLift + (1.96 * stdDev);
 
-        var lowerRoi = Math.Round((totalBaseline * (lowerLift / 100.0) * revenuePerUnit - spend) / spend * 100.0, 2);
-        var upperRoi = Math.Round((totalBaseline * (upperLift / 100.0) * revenuePerUnit - spend) / spend * 100.0, 2);
+        var lowerRoi = Math.Round(((totalBaseline * (lowerLift / 100.0) * revenuePerUnit) - spend) / spend * 100.0, 2);
+        var upperRoi = Math.Round(((totalBaseline * (upperLift / 100.0) * revenuePerUnit) - spend) / spend * 100.0, 2);
 
         var breakeven = Math.Round(spend / revenuePerUnit, 0);
         var varianceFactor = Math.Round(stdDev / Math.Max(avgLift, 1.0), 2);
@@ -3078,21 +3100,21 @@ public class RetailPulseDb
                         status = "critical";
                         safetyStock = 200 + rng.Next(100, 500);
                         currentStock = rng.Next(10, safetyStock / 3);
-                        daysOfSupply = Math.Round(3.0 + rng.NextDouble() * 4.0, 1);
+                        daysOfSupply = Math.Round(3.0 + (rng.NextDouble() * 4.0), 1);
                     }
                     else if (statusRoll < 0.40)
                     {
                         status = "low";
                         safetyStock = 200 + rng.Next(100, 500);
                         currentStock = rng.Next(safetyStock / 3, safetyStock);
-                        daysOfSupply = Math.Round(8.0 + rng.NextDouble() * 7.0, 1);
+                        daysOfSupply = Math.Round(8.0 + (rng.NextDouble() * 7.0), 1);
                     }
                     else
                     {
                         status = "healthy";
                         safetyStock = 200 + rng.Next(100, 500);
                         currentStock = safetyStock + rng.Next(200, 2000);
-                        daysOfSupply = Math.Round(15.0 + rng.NextDouble() * 45.0, 1);
+                        daysOfSupply = Math.Round(15.0 + (rng.NextDouble() * 45.0), 1);
                     }
 
                     pBrand.Value = brand.Name;
@@ -3233,12 +3255,12 @@ public class RetailPulseDb
                 var rng = new Random(seed);
 
                 // Base rates per brand/region
-                var baseFillRate = 90.0 + rng.NextDouble() * 8.0; // 90-98%
-                var baseOnTimeRate = 85.0 + rng.NextDouble() * 10.0; // 85-95%
+                var baseFillRate = 90.0 + (rng.NextDouble() * 8.0); // 90-98%
+                var baseOnTimeRate = 85.0 + (rng.NextDouble() * 10.0); // 85-95%
 
                 // Some brand/region combos have declining trends (for Yellow/Red)
                 var trendDecline = rng.NextDouble() < 0.25; // 25% chance of declining trend
-                var declinePerMonth = trendDecline ? 0.3 + rng.NextDouble() * 0.8 : 0.0;
+                var declinePerMonth = trendDecline ? 0.3 + (rng.NextDouble() * 0.8) : 0.0;
 
                 for (int p = 0; p < periods.Length; p++)
                 {
@@ -3297,11 +3319,11 @@ public class RetailPulseDb
                 var storeId = $"STR-{storeCounter:D4}";
                 var storeType = storeTypes[rng.Next(storeTypes.Length)];
                 var storeName = $"{_tenant.Company} {storeType} #{storeCounter}";
-                var target = Math.Round(800_000 + rng.NextDouble() * 1_200_000, 2);
-                var perfVariance = 0.7 + rng.NextDouble() * 0.6; // 0.7 to 1.3
+                var target = Math.Round(800_000 + (rng.NextDouble() * 1_200_000), 2);
+                var perfVariance = 0.7 + (rng.NextDouble() * 0.6); // 0.7 to 1.3
                 var revenue = Math.Round(target * perfVariance, 2);
                 var footTraffic = 5000 + rng.Next(25000);
-                var conversionRate = Math.Round(0.02 + rng.NextDouble() * 0.08, 4);
+                var conversionRate = Math.Round(0.02 + (rng.NextDouble() * 0.08), 4);
 
                 pStoreId.Value = storeId;
                 pStoreName.Value = storeName;
@@ -3351,7 +3373,7 @@ public class RetailPulseDb
                         var brand = _tenant.Brands[brandIdx];
                         var variantIdx = rng.Next(brand.Variants.Count);
                         var skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{variantIdx + 1:D3}";
-                        var facingWidth = Math.Round(0.3 + rng.NextDouble() * 0.7, 2);
+                        var facingWidth = Math.Round(0.3 + (rng.NextDouble() * 0.7), 2);
 
                         pAisle.Value = aisleId;
                         pStore.Value = storeId;
@@ -3396,7 +3418,7 @@ public class RetailPulseDb
 
                     pSku.Value = skuId;
                     pStore.Value = storeId;
-                    pDaily.Value = Math.Round(2.0 + rng.NextDouble() * 48.0, 1);
+                    pDaily.Value = Math.Round(2.0 + (rng.NextDouble() * 48.0), 1);
                     pSafety.Value = 3 + rng.Next(12);
                     pRestock.Value = today.AddDays(-rng.Next(30)).ToString("yyyy-MM-dd");
                     cmd.ExecuteNonQuery();
@@ -3428,16 +3450,16 @@ public class RetailPulseDb
             var brandSeed = GetStableHash($"fin|{brand.Name}");
             var rng = new Random(brandSeed);
 
-            var baseRevenue = brand.PriceSegment == "Premium" ? 5_000_000 + rng.NextDouble() * 15_000_000 : 3_000_000 + rng.NextDouble() * 10_000_000;
-            var cogsRatio = 0.45 + rng.NextDouble() * 0.2; // 45-65% COGS
+            var baseRevenue = brand.PriceSegment == "Premium" ? 5_000_000 + (rng.NextDouble() * 15_000_000) : 3_000_000 + (rng.NextDouble() * 10_000_000);
+            var cogsRatio = 0.45 + (rng.NextDouble() * 0.2); // 45-65% COGS
 
             foreach (var period in periods)
             {
-                var periodVariance = 0.9 + rng.NextDouble() * 0.2;
+                var periodVariance = 0.9 + (rng.NextDouble() * 0.2);
                 var revenue = Math.Round(baseRevenue * periodVariance, 2);
                 var cogs = Math.Round(revenue * cogsRatio, 2);
-                var marketing = Math.Round(revenue * (0.05 + rng.NextDouble() * 0.1), 2);
-                var distribution = Math.Round(revenue * (0.03 + rng.NextDouble() * 0.05), 2);
+                var marketing = Math.Round(revenue * (0.05 + (rng.NextDouble() * 0.1)), 2);
+                var distribution = Math.Round(revenue * (0.03 + (rng.NextDouble() * 0.05)), 2);
                 var netMargin = Math.Round(revenue - cogs - marketing - distribution, 2);
 
                 pBrand.Value = brand.Name;
@@ -3476,8 +3498,8 @@ public class RetailPulseDb
 
             foreach (var cat in categories)
             {
-                var amount = Math.Round(50_000 + rng.NextDouble() * 500_000, 2);
-                var impact = Math.Round(-5.0 + rng.NextDouble() * 10.0, 2); // -5% to +5%
+                var amount = Math.Round(50_000 + (rng.NextDouble() * 500_000), 2);
+                var impact = Math.Round(-5.0 + (rng.NextDouble() * 10.0), 2); // -5% to +5%
                 var trend = trends[rng.Next(trends.Length)];
 
                 pBrand.Value = brand.Name;
@@ -3744,42 +3766,17 @@ public class RetailPulseDb
         string fillTrend = (string)fulData.summary.trend;
 
         // Calculate inventory health
-        string inventoryHealth;
-        if (oosCount > 0 || criticalCount > 3)
-            inventoryHealth = "Red";
-        else if (criticalCount > 0 || (int)invData.status_breakdown.low > 5)
-            inventoryHealth = "Yellow";
-        else
-            inventoryHealth = "Green";
+        string inventoryHealth = oosCount > 0 || criticalCount > 3 ? "Red" : criticalCount > 0 || (int)invData.status_breakdown.low > 5 ? "Yellow" : "Green";
 
         // Calculate disruption impact
-        string disruptionImpact;
-        if (highSeverity > 1 || totalDisruptions > 5)
-            disruptionImpact = "Red";
-        else if (highSeverity > 0 || totalDisruptions > 2)
-            disruptionImpact = "Yellow";
-        else
-            disruptionImpact = "Green";
+        string disruptionImpact = highSeverity > 1 || totalDisruptions > 5 ? "Red" : highSeverity > 0 || totalDisruptions > 2 ? "Yellow" : "Green";
 
         // Calculate fulfillment health
-        string fulfillmentHealth;
-        if (avgFillRate < 90 || fillTrend == "declining")
-            fulfillmentHealth = "Red";
-        else if (avgFillRate < 95)
-            fulfillmentHealth = "Yellow";
-        else
-            fulfillmentHealth = "Green";
+        string fulfillmentHealth = avgFillRate < 90 || fillTrend == "declining" ? "Red" : avgFillRate < 95 ? "Yellow" : "Green";
 
         // Overall status: worst of the three
         var statuses = new[] { inventoryHealth, disruptionImpact, fulfillmentHealth };
-        string overallStatus;
-        if (statuses.Contains("Red"))
-            overallStatus = "Red";
-        else if (statuses.Contains("Yellow"))
-            overallStatus = "Yellow";
-        else
-            overallStatus = "Green";
-
+        string overallStatus = statuses.Contains("Red") ? "Red" : statuses.Contains("Yellow") ? "Yellow" : "Green";
         return new
         {
             brand,
@@ -3887,7 +3884,7 @@ public class RetailPulseDb
         var seed = GetStableHash($"optimize|{storeId}|{aisleId}");
         var rng = new Random(seed);
 
-        var uplift = Math.Round(2.0 + rng.NextDouble() * 8.0, 1); // 2-10% predicted uplift
+        var uplift = Math.Round(2.0 + (rng.NextDouble() * 8.0), 1); // 2-10% predicted uplift
         var notes = new List<string>();
         if (rng.NextDouble() > 0.5) notes.Add("Move high-velocity SKUs to eye level (shelf 2-3)");
         if (rng.NextDouble() > 0.3) notes.Add("Increase facing width for top performers");
@@ -3938,7 +3935,7 @@ public class RetailPulseDb
             // Estimate remaining stock based on velocity and safety stock
             var stockSeed = GetStableHash($"stock|{sku}|{storeId}");
             var rng = new Random(stockSeed);
-            var currentStock = safetyDays * dailyUnits * (0.3 + rng.NextDouble() * 1.5);
+            var currentStock = safetyDays * dailyUnits * (0.3 + (rng.NextDouble() * 1.5));
             var daysUntilStockout = dailyUnits > 0 ? (int)(currentStock / dailyUnits) : 999;
 
             predictions.Add(new
@@ -4088,7 +4085,7 @@ public class RetailPulseDb
         while (reader.Read())
         {
             var brand = reader.GetString(0);
-            if (!brandData.ContainsKey(brand)) brandData[brand] = new();
+            if (!brandData.ContainsKey(brand)) brandData[brand] = [];
             brandData[brand].Add((reader.GetDouble(2), reader.GetDouble(3), reader.GetDouble(6)));
 
             // Check drivers for increasing cost trends
@@ -4104,7 +4101,7 @@ public class RetailPulseDb
                         riskType = "cost_escalation",
                         severity = "high",
                         detail = $"{reader.GetString(7)} costs increasing with {driverImpact:F1}% margin impact",
-                        recommendation = $"Review {reader.GetString(7).ToLower()} sourcing strategy"
+                        recommendation = $"Review {reader.GetString(7).ToLower(CultureInfo.CurrentCulture)} sourcing strategy"
                     });
                 }
             }
@@ -4114,9 +4111,9 @@ public class RetailPulseDb
         foreach (var (brand, data) in brandData)
         {
             if (data.Count < 2) continue;
-            var recent = data[^1];
+            var (revenue, cogs, net) = data[^1];
             var previous = data[^2];
-            var recentMargin = recent.revenue > 0 ? (recent.revenue - recent.cogs) / recent.revenue * 100 : 0;
+            var recentMargin = revenue > 0 ? (revenue - cogs) / revenue * 100 : 0;
             var prevMargin = previous.revenue > 0 ? (previous.revenue - previous.cogs) / previous.revenue * 100 : 0;
 
             if (recentMargin < prevMargin - 2.0)
@@ -4131,14 +4128,14 @@ public class RetailPulseDb
                 });
             }
 
-            if (recent.net < 0)
+            if (net < 0)
             {
                 risks.Add(new
                 {
                     brand,
                     riskType = "negative_net_margin",
                     severity = "critical",
-                    detail = $"Net margin is negative (${recent.net:N0})",
+                    detail = $"Net margin is negative (${net:N0})",
                     recommendation = "Urgent cost review and potential price adjustment required"
                 });
             }

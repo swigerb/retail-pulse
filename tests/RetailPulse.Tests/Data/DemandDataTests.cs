@@ -1,8 +1,8 @@
+using System.Globalization;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
-using System.Globalization;
 
 namespace RetailPulse.Tests.Data;
 
@@ -173,7 +173,7 @@ public class DemandDataTests : IDisposable
         var minDate = DateOnly.Parse(reader.GetString(0));
         var maxDate = DateOnly.Parse(reader.GetString(1));
 
-        var monthSpan = (maxDate.Year - minDate.Year) * 12 + (maxDate.Month - minDate.Month);
+        var monthSpan = ((maxDate.Year - minDate.Year) * 12) + (maxDate.Month - minDate.Month);
         monthSpan.Should().BeGreaterThanOrEqualTo(11,
             "demand history should span at least 12 months (11+ month difference)");
     }
@@ -353,7 +353,7 @@ public class DemandDataTests : IDisposable
         var peakMonth = reader.GetInt32(0);
         var peakMultiplier = reader.GetDouble(1);
 
-        peakMonth.Should().BeOneOf(new[] { 11, 12 }, "spirits peak should be Nov or Dec");
+        peakMonth.Should().BeOneOf([11, 12], "spirits peak should be Nov or Dec");
         peakMultiplier.Should().BeGreaterThan(1.0, "peak month should boost demand");
     }
 

@@ -176,7 +176,7 @@ public class MarginDataTests : IDisposable
             var cogs = reader.GetDouble(3);
             var grossMargin = revenue - cogs;
 
-            var marginPct = (grossMargin / revenue) * 100;
+            var marginPct = grossMargin / revenue * 100;
             marginPct.Should().BeGreaterThanOrEqualTo(0,
                 $"brand '{brand}' in {period}: gross margin % should be >= 0");
             marginPct.Should().BeLessThanOrEqualTo(100,
@@ -202,7 +202,7 @@ public class MarginDataTests : IDisposable
             var revenue = reader.GetDouble(2);
             var netMargin = reader.GetDouble(3);
 
-            var netPct = (netMargin / revenue) * 100;
+            var netPct = netMargin / revenue * 100;
             // Net margin can be negative (loss) but should be reasonable
             netPct.Should().BeGreaterThanOrEqualTo(-50,
                 $"brand '{brand}' in {period}: net margin % should be > -50% (not catastrophic)");

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -9,8 +11,6 @@ using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
-using System.Diagnostics;
-using System.Text.Json;
 
 namespace RetailPulse.Tests.Scorecard;
 
@@ -251,15 +251,15 @@ public class ScorecardTests
 
         // Verify via reflection to ensure the actual orchestrator weights match
         var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
-            .GetField("ScoringDimensions",
+            .GetField("_scoringDimensions",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         field.Should().NotBeNull("ScoringDimensions field should exist on ScorecardOrchestrator");
 
-        var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
+        var dimensions = field.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
         dimensions.Should().NotBeNull("ScoringDimensions should be castable to tuple array");
         dimensions.Should().HaveCount(5, "there should be exactly 5 scoring dimensions");
 
-        var actualWeights = dimensions!.ToDictionary(d => d.Dimension, d => d.Weight);
+        var actualWeights = dimensions.ToDictionary(d => d.Dimension, d => d.Weight);
 
         foreach (var (name, expectedWeight) in expectedWeights)
         {
@@ -278,7 +278,7 @@ public class ScorecardTests
     public void ScorecardOrchestrator_DimensionWeights_SumToOne()
     {
         var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
-            .GetField("ScoringDimensions",
+            .GetField("_scoringDimensions",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
 
         var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
@@ -292,30 +292,30 @@ public class ScorecardTests
     public void ScorecardOrchestrator_DemandMomentum_HasHighestWeight()
     {
         var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
-            .GetField("ScoringDimensions",
+            .GetField("_scoringDimensions",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
 
         var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        var maxDim = dimensions!.OrderByDescending(d => d.Weight).First();
+        var (Dimension, Weight, AgentKey) = dimensions!.OrderByDescending(d => d.Weight).First();
 
-        maxDim.Dimension.Should().Be("Demand Momentum",
+        Dimension.Should().Be("Demand Momentum",
             "Demand Momentum should have the highest weight (0.25)");
-        maxDim.Weight.Should().Be(0.25);
+        Weight.Should().Be(0.25);
     }
 
     [Fact]
     public void ScorecardOrchestrator_MarginHealth_HasLowestWeight()
     {
         var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
-            .GetField("ScoringDimensions",
+            .GetField("_scoringDimensions",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
 
         var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        var minDim = dimensions!.OrderBy(d => d.Weight).First();
+        var (Dimension, Weight, AgentKey) = dimensions!.OrderBy(d => d.Weight).First();
 
-        minDim.Dimension.Should().Be("Margin Health",
+        Dimension.Should().Be("Margin Health",
             "Margin Health should have the lowest weight (0.15)");
-        minDim.Weight.Should().Be(0.15);
+        Weight.Should().Be(0.15);
     }
 
     #endregion
@@ -354,7 +354,7 @@ public interface IScorecardService
 /// Mock scorecard service for deterministic test behavior.
 /// Generates scores based on brand name hash for reproducibility.
 /// </summary>
-internal class MockScorecardService : IScorecardService
+internal sealed class MockScorecardService : IScorecardService
 {
     private readonly string[] _brands;
     private readonly bool _simulateSlowBrands;
@@ -398,9 +398,9 @@ internal class MockScorecardService : IScorecardService
             var dimensions = new Dictionary<string, double>
             {
                 ["demand"] = 40 + (hash % 60),
-                ["margin"] = 35 + ((hash / 7) % 65),
-                ["competitive"] = 30 + ((hash / 13) % 70),
-                ["supply"] = 45 + ((hash / 19) % 55)
+                ["margin"] = 35 + (hash / 7 % 65),
+                ["competitive"] = 30 + (hash / 13 % 70),
+                ["supply"] = 45 + (hash / 19 % 55)
             };
 
             var healthScore = dimensions.Values.Average();

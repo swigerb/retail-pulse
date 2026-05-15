@@ -20,7 +20,7 @@ public class MemoryExtractionService
     /// <summary>Default TTL for user preference signals.</summary>
     public static readonly TimeSpan PreferenceTtl = TimeSpan.FromDays(90);
 
-    private const string ExtractionPrompt = """
+    private const string _extractionPrompt = """
         You are a memory extraction system. Analyze the user–assistant exchange below
         and return a JSON object with these fields:
 
@@ -64,7 +64,7 @@ public class MemoryExtractionService
 
         try
         {
-            var prompt = ExtractionPrompt
+            var prompt = _extractionPrompt
                 .Replace("{user_message}", Truncate(userMessage, 500))
                 .Replace("{assistant_reply}", Truncate(assistantReply, 500));
 

@@ -11,7 +11,7 @@ namespace RetailPulse.Tests.Alerts;
 /// </summary>
 public class AlertApiTests
 {
-    private InMemoryAlertService CreateService()
+    private static InMemoryAlertService CreateService()
         => new(throttleWindow: TimeSpan.FromMilliseconds(50));
 
     private async Task<InMemoryAlertService> SeedAndFireAlerts()

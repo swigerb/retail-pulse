@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -18,7 +19,7 @@ public class ConversationExporter : IConversationExport
 {
     private readonly ConcurrentDictionary<string, TrackedSession> _sessions = new();
     private readonly ObservabilityOptions _options;
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -66,7 +67,7 @@ public class ConversationExporter : IConversationExport
                     s.SessionId,
                     s.StartedAt,
                     count,
-                    s.AgentsUsed.ToArray());
+                    [.. s.AgentsUsed]);
             })
             .ToList();
 
@@ -122,11 +123,11 @@ public class ConversationExporter : IConversationExport
     private static string ExportMarkdown(TrackedSession session, List<TrackedMessage> messages)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# Conversation Export — Session {session.SessionId}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"# Conversation Export — Session {session.SessionId}");
         sb.AppendLine();
-        sb.AppendLine($"**Started:** {session.StartedAt:yyyy-MM-dd HH:mm:ss UTC}");
-        sb.AppendLine($"**Messages:** {messages.Count}");
-        sb.AppendLine($"**Agents:** {string.Join(", ", session.AgentsUsed)}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"**Started:** {session.StartedAt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"**Messages:** {messages.Count}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"**Agents:** {string.Join(", ", session.AgentsUsed)}");
         sb.AppendLine();
         sb.AppendLine("---");
         sb.AppendLine();
@@ -134,7 +135,7 @@ public class ConversationExporter : IConversationExport
         foreach (var msg in messages)
         {
             var agentLabel = !string.IsNullOrEmpty(msg.AgentId) ? $" [{msg.AgentId}]" : "";
-            sb.AppendLine($"### {msg.Role}{agentLabel} — {msg.Timestamp:HH:mm:ss}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"### {msg.Role}{agentLabel} — {msg.Timestamp.ToString("HH:mm:ss", CultureInfo.InvariantCulture)}");
             sb.AppendLine();
             sb.AppendLine(msg.Content);
             sb.AppendLine();
@@ -144,20 +145,20 @@ public class ConversationExporter : IConversationExport
                 sb.AppendLine("**Tool Calls:**");
                 foreach (var tool in msg.ToolCalls)
                 {
-                    sb.AppendLine($"- `{tool}`");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"- `{tool}`");
                 }
                 sb.AppendLine();
             }
 
             if (!string.IsNullOrEmpty(msg.Reasoning))
             {
-                sb.AppendLine($"> **Reasoning:** {msg.Reasoning}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"> **Reasoning:** {msg.Reasoning}");
                 sb.AppendLine();
             }
 
             if (msg.DurationMs.HasValue)
             {
-                sb.AppendLine($"*Duration: {msg.DurationMs:F0}ms*");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"*Duration: {msg.DurationMs.Value.ToString("F0", CultureInfo.InvariantCulture)}ms*");
                 sb.AppendLine();
             }
 
@@ -186,7 +187,7 @@ public class ConversationExporter : IConversationExport
                 reasoning = m.Reasoning,
                 durationMs = m.DurationMs
             })
-        }, JsonOptions);
+        }, _jsonOptions);
     }
 
     // ── Internal types ──────────────────────────────────────────────────

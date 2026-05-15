@@ -162,7 +162,7 @@ public class AgentPipelineTests
             .ReturnsAsync(nullTextResponse);
 
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(
@@ -185,7 +185,7 @@ public class AgentPipelineTests
     #region Token accounting — model name correctness
 
     [Fact]
-    public async Task BuildTokenUsage_UsesActualModelName_NotHardcoded()
+    public Task BuildTokenUsage_UsesActualModelName_NotHardcoded()
     {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -204,13 +204,14 @@ public class AgentPipelineTests
         usage.TotalTokens.Should().Be(1500);
         usage.EstimatedCostUsd.Should().NotBeNull("pricing config exists for gpt-4.1-mini");
         usage.EstimatedCostUsd.Should().BeGreaterThan(0);
+        return Task.CompletedTask;
     }
 
     [Fact]
     public async Task BuildTokenUsage_ReturnsNullCost_WhenModelNotInConfig()
     {
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = CreatePipeline("Reply.", config: config);
@@ -253,7 +254,7 @@ public class AgentPipelineTests
             Temperature = 0.5f,
             ModelName = "gpt-5.4-mini",
             Request = new ChatRequest("Test"),
-            Tools = Enumerable.Empty<AITool>(),
+            Tools = [],
         };
 
         context.ModelName.Should().Be("gpt-5.4-mini");
@@ -279,7 +280,7 @@ public class AgentPipelineTests
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(responseMsg));
 
         config ??= new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         return new AgentExecutionPipeline(
@@ -301,7 +302,7 @@ public class AgentPipelineTests
             Temperature = 0.7f,
             ModelName = "test-model",
             Request = request ?? new ChatRequest(message),
-            Tools = Enumerable.Empty<AITool>(),
+            Tools = [],
             FallbackReply = fallbackReply,
         };
     }

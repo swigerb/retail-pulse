@@ -159,7 +159,7 @@ public class ToolTests
         await tool.GetPortfolioDepletionStats("Northeast");
 
         capturedUri.Should().NotBeNull();
-        capturedUri!.Query.Should().Contain("period=YTD");
+        capturedUri.Query.Should().Contain("period=YTD");
     }
 
     // -------------------------- FieldSentimentTool --------------------------
@@ -287,7 +287,7 @@ public class ToolTests
         await tool.GetShipmentStats("Sierra Gold Tequila", "Northeast");
 
         capturedUri.Should().NotBeNull();
-        capturedUri!.Query.Should().Contain("period=YTD",
+        capturedUri.Query.Should().Contain("period=YTD",
             "ShipmentStatsTool defaults the period parameter to YTD when none is supplied");
     }
 
@@ -314,7 +314,7 @@ public class ToolTests
         await tool.GetShipmentStats("Brand & Co", "Region/Sub", "Q1");
 
         capturedUri.Should().NotBeNull();
-        capturedUri!.Query.Should().Contain("Brand%20%26%20Co");
+        capturedUri.Query.Should().Contain("Brand%20%26%20Co");
         capturedUri.Query.Should().Contain("Region%2FSub");
     }
 }

@@ -101,7 +101,7 @@ public class DemoReadinessTests
 
         specialist.Should().NotBeNull($"a specialist must be registered for routing key '{decision.AgentKey}'");
 
-        var response = await specialist!.HandleAsync(
+        var response = await specialist.HandleAsync(
             new ChatRequest(prompt, SessionId: "demo-readiness"));
 
         response.Should().NotBeNull();
@@ -224,7 +224,7 @@ public class DemoReadinessTests
     {
         var hubContext = CreateMockHubContext();
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
         var pipeline = new AgentExecutionPipeline(
             MockChatClient("agent reply"),

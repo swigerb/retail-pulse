@@ -71,12 +71,12 @@ public class EndpointRegistrationTests
             mapMethod.Should().NotBeNull(
                 $"{type.Name} should have a public static Map*Endpoints extension method");
 
-            mapMethod!.ReturnType.Should().Be(typeof(WebApplication),
+            mapMethod.ReturnType.Should().Be(typeof(WebApplication),
                 $"{type.Name}.{mapMethod.Name} should return WebApplication for chaining");
 
             var firstParam = mapMethod.GetParameters().FirstOrDefault();
             firstParam.Should().NotBeNull();
-            firstParam!.ParameterType.Should().Be(typeof(WebApplication),
+            firstParam.ParameterType.Should().Be(typeof(WebApplication),
                 $"{type.Name}.{mapMethod.Name} should extend WebApplication");
         }
         await Task.CompletedTask;
@@ -113,7 +113,7 @@ public class EndpointRegistrationTests
         var mapMethod = endpointType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
         mapMethod.Should().NotBeNull($"{endpointType.Name} should have {methodName}");
 
-        var parameters = mapMethod!.GetParameters();
+        var parameters = mapMethod.GetParameters();
         parameters.Should().HaveCount(1,
             $"{methodName} should only take WebApplication (no extra compile-time args)");
         await Task.CompletedTask;

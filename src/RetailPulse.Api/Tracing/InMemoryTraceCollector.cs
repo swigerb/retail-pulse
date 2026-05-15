@@ -15,14 +15,14 @@ public class InMemoryTraceCollector : ITraceCollector
 {
     private readonly ConcurrentDictionary<string, ConcurrentBag<TraceSpan>> _traces = new();
     private readonly ConcurrentQueue<string> _traceOrder = new();
-    private readonly object _evictionLock = new();
+    private readonly Lock _evictionLock = new();
     private readonly IHubContext<TelemetryHub>? _hubContext;
     private readonly IConfiguration? _configuration;
     private readonly TelemetryPushChannel? _pushChannel;
 
     // Default gpt-5.4-mini pricing per million tokens
-    private const decimal DefaultInputPricePerMillion = 0.15m;
-    private const decimal DefaultOutputPricePerMillion = 0.60m;
+    private const decimal _defaultInputPricePerMillion = 0.15m;
+    private const decimal _defaultOutputPricePerMillion = 0.60m;
 
     public int Capacity { get; }
 
@@ -64,21 +64,15 @@ public class InMemoryTraceCollector : ITraceCollector
             _traceOrder.Enqueue(traceId);
 
             // Push via bounded channel (backpressure) instead of fire-and-forget
-            if (_pushChannel is not null)
-            {
-                _pushChannel.TryWrite(new TelemetryPushItem("trace_started", TraceId: traceId, Timestamp: span.StartTime));
-            }
+            _pushChannel?.TryWrite(new TelemetryPushItem("trace_started", TraceId: traceId, Timestamp: span.StartTime));
 
-            return new ConcurrentBag<TraceSpan>();
+            return [];
         });
 
         bag.Add(span);
 
         // Push span via bounded channel instead of fire-and-forget
-        if (_pushChannel is not null)
-        {
-            _pushChannel.TryWrite(new TelemetryPushItem("span_completed", Span: span));
-        }
+        _pushChannel?.TryWrite(new TelemetryPushItem("span_completed", Span: span));
 
         // Ring buffer eviction
         EvictIfNeeded();
@@ -86,10 +80,7 @@ public class InMemoryTraceCollector : ITraceCollector
 
     public IReadOnlyList<TraceSpan>? GetSpans(string traceId)
     {
-        if (!_traces.TryGetValue(traceId, out var bag))
-            return null;
-
-        return bag.OrderBy(s => s.StartTime).ToList();
+        return !_traces.TryGetValue(traceId, out var bag) ? null : [.. bag.OrderBy(s => s.StartTime)];
     }
 
     public TraceSummary? GetSummary(string traceId)
@@ -214,53 +205,10 @@ public class InMemoryTraceCollector : ITraceCollector
         }
     }
 
-    private async Task NotifyTraceStartedAsync(string traceId, DateTimeOffset timestamp)
-    {
-        if (_hubContext is null) return;
-
-        try
-        {
-            await _hubContext.Clients.All.SendAsync("trace_started", new
-            {
-                traceId,
-                timestamp
-            });
-        }
-        catch
-        {
-            // SignalR push is best-effort — don't break span capture
-        }
-    }
-
-    private async Task NotifySpanCompletedAsync(TraceSpan span)
-    {
-        if (_hubContext is null) return;
-
-        try
-        {
-            await _hubContext.Clients.All.SendAsync("span_completed", new
-            {
-                span.TraceId,
-                span.SpanId,
-                span.OperationName,
-                span.DurationMs,
-                span.StartTime,
-                span.EndTime,
-                span.InputTokens,
-                span.OutputTokens,
-                span.Tags
-            });
-        }
-        catch
-        {
-            // SignalR push is best-effort — don't break span capture
-        }
-    }
-
     private decimal CalculateCost(int inputTokens, int outputTokens)
     {
-        decimal inputRate = DefaultInputPricePerMillion;
-        decimal outputRate = DefaultOutputPricePerMillion;
+        decimal inputRate = _defaultInputPricePerMillion;
+        decimal outputRate = _defaultOutputPricePerMillion;
 
         if (_configuration is not null)
         {

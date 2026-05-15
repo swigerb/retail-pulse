@@ -13,7 +13,7 @@ public class InMemoryResponseCache : IResponseCache
 {
     private readonly ConcurrentDictionary<string, CacheItem> _cache = new();
     private readonly LinkedList<string> _lruOrder = new();
-    private readonly object _lruLock = new();
+    private readonly Lock _lruLock = new();
     private readonly TimeSpan _defaultTtl;
     private readonly int _maxEntries;
     private int _hits;
@@ -115,7 +115,7 @@ public class InMemoryResponseCache : IResponseCache
         {
             while (_lruOrder.Count > _maxEntries && _lruOrder.Last is not null)
             {
-                var evictKey = _lruOrder.Last!.Value;
+                var evictKey = _lruOrder.Last.Value;
                 _lruOrder.RemoveLast();
                 _cache.TryRemove(evictKey, out _);
             }

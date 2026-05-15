@@ -59,6 +59,8 @@ public sealed class TelemetryPushBackgroundService : BackgroundService
                             item.Span.Tags
                         }, linkedCts.Token);
                         break;
+                    default:
+                        break;
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

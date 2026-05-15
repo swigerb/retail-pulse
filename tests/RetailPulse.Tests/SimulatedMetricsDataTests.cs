@@ -14,14 +14,14 @@ public class SimulatedMetricsDataTests
         {
             Company = "Test Corp",
             Industry = "Spirits & Beverages",
-            BrandsList = new List<BrandConfig>
-            {
-                new() { Name = "Alpha Tequila", Category = "Tequila", VariantsList = new() { "Blanco", "Reposado" }, PriceSegment = "Premium" },
-                new() { Name = "Beta Vodka", Category = "Vodka", VariantsList = new() { "Original", "Citrus" }, PriceSegment = "Premium" },
-                new() { Name = "Gamma Bourbon", Category = "Bourbon", VariantsList = new() { "Small Batch", "Single Barrel" }, PriceSegment = "Ultra-Premium" },
-            },
-            RegionsList = new List<string> { "Northeast", "Southeast", "West Coast" },
-            ChannelsList = new List<string> { "On-Premise", "Off-Premise" },
+            BrandsList =
+            [
+                new() { Name = "Alpha Tequila", Category = "Tequila", VariantsList = ["Blanco", "Reposado"], PriceSegment = "Premium" },
+                new() { Name = "Beta Vodka", Category = "Vodka", VariantsList = ["Original", "Citrus"], PriceSegment = "Premium" },
+                new() { Name = "Gamma Bourbon", Category = "Bourbon", VariantsList = ["Small Batch", "Single Barrel"], PriceSegment = "Ultra-Premium" },
+            ],
+            RegionsList = ["Northeast", "Southeast", "West Coast"],
+            ChannelsList = ["On-Premise", "Off-Premise"],
             Distribution = new DistributionConfig { Model = "Three-Tier" }
         };
 
@@ -175,7 +175,7 @@ public class SimulatedMetricsDataTests
         var brands = root.GetProperty("brands");
         brands.GetArrayLength().Should().Be(3);
         brands.EnumerateArray().Select(b => b.GetProperty("brand").GetString()).Should()
-            .BeEquivalentTo(new[] { "Alpha Tequila", "Beta Vodka", "Gamma Bourbon" });
+            .BeEquivalentTo(["Alpha Tequila", "Beta Vodka", "Gamma Bourbon"]);
     }
 
     [Fact]

@@ -11,7 +11,7 @@ namespace RetailPulse.Tests;
 /// </summary>
 public class TenantConfigurationTests : IDisposable
 {
-    private readonly List<string> _tempFiles = new();
+    private readonly List<string> _tempFiles = [];
 
     private string WriteTempYaml(string contents)
     {

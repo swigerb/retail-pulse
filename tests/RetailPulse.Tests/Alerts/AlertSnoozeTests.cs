@@ -11,7 +11,7 @@ namespace RetailPulse.Tests.Alerts;
 /// </summary>
 public class AlertSnoozeTests
 {
-    private InMemoryAlertService CreateService(TimeSpan? throttleWindow = null)
+    private static InMemoryAlertService CreateService(TimeSpan? throttleWindow = null)
         => new(throttleWindow ?? TimeSpan.FromMilliseconds(50));
 
     private async Task<InMemoryAlertService> CreateServiceWithAlerts()
@@ -81,7 +81,7 @@ public class AlertSnoozeTests
     {
         var svc = await CreateServiceWithAlerts();
         var allAlerts = await svc.GetActiveAlertsAsync();
-        var alertId = allAlerts.First().Id;
+        var alertId = allAlerts[0].Id;
 
         await svc.DismissAsync(alertId, "user-1");
 
@@ -94,7 +94,7 @@ public class AlertSnoozeTests
     {
         var svc = await CreateServiceWithAlerts();
         var allAlerts = await svc.GetActiveAlertsAsync();
-        var alertId = allAlerts.First().Id;
+        var alertId = allAlerts[0].Id;
 
         await svc.DismissAsync(alertId, "user-1");
 
@@ -140,7 +140,7 @@ public class AlertSnoozeTests
     {
         var svc = await CreateServiceWithAlerts();
         var allAlerts = await svc.GetActiveAlertsAsync();
-        var alertId = allAlerts.First().Id;
+        var alertId = allAlerts[0].Id;
 
         await svc.DismissAsync(alertId, "user-1");
 

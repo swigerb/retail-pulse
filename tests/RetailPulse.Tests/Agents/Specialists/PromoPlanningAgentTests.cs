@@ -1,3 +1,5 @@
+using System.ClientModel;
+using System.ClientModel.Primitives;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -12,8 +14,6 @@ using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Routing;
-using System.ClientModel;
-using System.ClientModel.Primitives;
 
 namespace RetailPulse.Tests.Agents.Specialists;
 
@@ -167,7 +167,7 @@ public class PromoPlanningAgentTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
@@ -185,8 +185,8 @@ public class PromoPlanningAgentTests
 
         captured.Should().NotBeNull();
         // System + history(2) + current = 4 messages
-        captured!.Should().HaveCount(4);
-        captured!.Select(m => m.Role).Should().ContainInOrder(
+        captured.Should().HaveCount(4);
+        captured.Select(m => m.Role).Should().ContainInOrder(
             ChatRole.System, ChatRole.User, ChatRole.Assistant, ChatRole.User);
     }
 
@@ -201,7 +201,7 @@ public class PromoPlanningAgentTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
@@ -215,7 +215,7 @@ public class PromoPlanningAgentTests
 
         captured.Should().NotBeNull();
         // System(1) + capped history(20) + current(1) = 22
-        captured!.Should().HaveCount(22);
+        captured.Should().HaveCount(22);
     }
 
     #endregion
@@ -248,8 +248,8 @@ public class PromoPlanningAgentTests
         await agent.HandleAsync(new ChatRequest("promo?", SessionId: "tool-test"));
 
         capturedOptions.Should().NotBeNull();
-        capturedOptions!.Tools.Should().HaveCount(2);
-        capturedOptions.Tools!.OfType<AIFunction>().Select(t => t.Name)
+        capturedOptions.Tools.Should().HaveCount(2);
+        capturedOptions.Tools.OfType<AIFunction>().Select(t => t.Name)
             .Should().Contain("GetPromoHistory")
             .And.Contain("CalculatePromoLift");
     }
@@ -279,7 +279,7 @@ public class PromoPlanningAgentTests
             spend: 600_000, roi: 15, userId: "user-1", description: "Summer campaign");
 
         result.Should().NotBeNull();
-        result!.Decision.Should().Be(ApprovalDecision.Approved);
+        result.Decision.Should().Be(ApprovalDecision.Approved);
         mockGate.Verify(g => g.RequestApprovalAsync(
             It.Is<ApprovalContext>(c => c.Urgency == "High"),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -295,7 +295,7 @@ public class PromoPlanningAgentTests
             spend: 150_000, roi: 5, userId: "user-2", description: "Low ROI promo");
 
         result.Should().NotBeNull();
-        result!.Decision.Should().Be(ApprovalDecision.Approved);
+        result.Decision.Should().Be(ApprovalDecision.Approved);
         mockGate.Verify(g => g.RequestApprovalAsync(
             It.Is<ApprovalContext>(c => c.Urgency == "Medium"),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -427,7 +427,7 @@ public class PromoPlanningAgentTests
     {
         var hubContext = CreateMockHubContext();
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(

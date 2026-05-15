@@ -122,7 +122,7 @@ public class CardVotingTests
     {
         var card = await _state.CreateAsync(MakeRequest("Default Vote"));
         // No "vote" key in params → default "approve"
-        var action = new CardAction("user-1", "User", CardActionType.Vote, new());
+        var action = new CardAction("user-1", "User", CardActionType.Vote, []);
         var updated = await _state.ActionAsync(card.Id, action);
 
         updated.Votes[0].Vote.Should().Be("approve");
@@ -169,7 +169,7 @@ public class CardVotingTests
     #region Helpers
 
     private static CreateCardRequest MakeRequest(string title)
-        => new(title, CardType.Dashboard, "test-user", new Dictionary<string, object>());
+        => new(title, CardType.Dashboard, "test-user", []);
 
     private static CardAction MakeVoteAction(string userId, string vote)
         => new(userId, $"User {userId}", CardActionType.Vote, new() { ["vote"] = vote });

@@ -28,10 +28,10 @@ public class PersistentAgentProviderTests
         // Client is never invoked when DirectAgentId is set, so a null-forgiving
         // placeholder is acceptable here. We pass a non-null sentinel by
         // constructing through reflection to avoid the network-bound real client.
-            var provider = new PersistentAgentProvider<TestAgent>(
-                options,
-                client: null!,
-                NullLogger<PersistentAgentProvider<TestAgent>>.Instance);
+        var provider = new PersistentAgentProvider<TestAgent>(
+            options,
+            client: null!,
+            NullLogger<PersistentAgentProvider<TestAgent>>.Instance);
 
         var info = await provider.GetAgentInfoAsync();
 

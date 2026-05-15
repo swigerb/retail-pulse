@@ -42,7 +42,7 @@ public class RouterIntegrationTests
         // Create a mock DemandForecastAgent that claims the demand/forecasting intent
         var demandAgent = new Mock<ISpecialistAgent>();
         demandAgent.Setup(a => a.Key).Returns("demand-forecasting");
-        demandAgent.Setup(a => a.SupportedIntents).Returns(new[] { AgentIntent.DemandForecasting });
+        demandAgent.Setup(a => a.SupportedIntents).Returns([AgentIntent.DemandForecasting]);
         demandAgent.Setup(a => a.HandleAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Contracts.ChatResponse("Brand X demand is projected to grow 15% next quarter.", SessionId: "session-1", Spans: []));
 
@@ -179,7 +179,7 @@ public class RouterIntegrationTests
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
         var promptConfig = new PromptConfiguration
         {
-            Agents = new Dictionary<string, AgentDefinition>()
+            Agents = []
         };
 
         var act = () => services.AddAgentRouting(
@@ -332,7 +332,7 @@ public class RouterIntegrationTests
 
         var demandChatClient = MockChatClient("Sierra Gold Tequila demand is projected to grow 8%.");
         var demandHubContext = CreateMockHubContext();
-        var demandConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+        var demandConfig = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
         var demandPipeline = new AgentExecutionPipeline(
             demandChatClient, demandHubContext, demandConfig,
             NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
@@ -362,7 +362,7 @@ public class RouterIntegrationTests
         var mock = new Mock<ISpecialistAgent>();
         mock.Setup(a => a.Key).Returns("demand-forecasting");
         mock.Setup(a => a.DisplayName).Returns("Demand Forecast Agent");
-        mock.Setup(a => a.SupportedIntents).Returns(new[] { AgentIntent.DemandForecasting });
+        mock.Setup(a => a.SupportedIntents).Returns([AgentIntent.DemandForecasting]);
         mock.Setup(a => a.HandleAsync(
                 It.IsAny<ChatRequest>(),
                 It.IsAny<CancellationToken>()))
@@ -423,7 +423,7 @@ public class RouterIntegrationTests
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(
@@ -538,7 +538,7 @@ public class RouterIntegrationTests
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var promoConfig = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var promoPipeline = new AgentExecutionPipeline(
@@ -573,7 +573,7 @@ public class RouterIntegrationTests
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var promoConfig2 = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var promoPipeline2 = new AgentExecutionPipeline(
@@ -638,7 +638,7 @@ public class RouterIntegrationTests
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var compConfig = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var compPipeline = new AgentExecutionPipeline(
@@ -675,7 +675,7 @@ public class RouterIntegrationTests
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var compConfig2 = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var compPipeline2 = new AgentExecutionPipeline(
@@ -758,7 +758,7 @@ public class RouterIntegrationTests
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var supplyAgent = new Agents.Specialists.SupplyChainAgent(
@@ -787,7 +787,7 @@ public class RouterIntegrationTests
         var mock = new Mock<ISpecialistAgent>();
         mock.Setup(a => a.Key).Returns("supply-chain");
         mock.Setup(a => a.DisplayName).Returns("Supply Chain Agent");
-        mock.Setup(a => a.SupportedIntents).Returns(new[] { AgentIntent.SupplyShipments });
+        mock.Setup(a => a.SupportedIntents).Returns([AgentIntent.SupplyShipments]);
         mock.Setup(a => a.HandleAsync(
                 It.IsAny<ChatRequest>(),
                 It.IsAny<CancellationToken>()))

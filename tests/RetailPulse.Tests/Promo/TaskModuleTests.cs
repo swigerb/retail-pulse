@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -12,7 +13,6 @@ using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.McpServer.Data;
-using System.Text.Json;
 
 namespace RetailPulse.Tests.Promo;
 
@@ -53,7 +53,7 @@ public class TaskModuleTests : IDisposable
     {
         var hubContext = CreateMockHubContext();
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(
@@ -113,7 +113,7 @@ public class TaskModuleTests : IDisposable
             spend: 600_000, roi: 50, userId: "user-1", description: "High-budget campaign");
 
         result.Should().NotBeNull();
-        result!.Decision.Should().Be(ApprovalDecision.Approved);
+        result.Decision.Should().Be(ApprovalDecision.Approved);
         gate.Verify(g => g.RequestApprovalAsync(It.IsAny<ApprovalContext>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -212,7 +212,7 @@ public class TaskModuleTests : IDisposable
             spend: 600_000, roi: 50, userId: "user-1", description: "Approved campaign");
 
         result.Should().NotBeNull();
-        result!.Decision.Should().Be(ApprovalDecision.Approved);
+        result.Decision.Should().Be(ApprovalDecision.Approved);
         result.Comment.Should().Be("Looks good");
     }
 
@@ -226,7 +226,7 @@ public class TaskModuleTests : IDisposable
             spend: 600_000, roi: 50, userId: "user-1", description: "Rejected campaign");
 
         result.Should().NotBeNull();
-        result!.Decision.Should().Be(ApprovalDecision.Rejected);
+        result.Decision.Should().Be(ApprovalDecision.Rejected);
         result.Comment.Should().Be("Too risky");
     }
 
@@ -252,7 +252,7 @@ public class TaskModuleTests : IDisposable
             spend: 750_000, roi: 3.5, userId: "analyst-1", description: "Premium launch");
 
         capturedContext.Should().NotBeNull();
-        capturedContext!.AgentId.Should().Be("promo-planning");
+        capturedContext.AgentId.Should().Be("promo-planning");
         capturedContext.UserId.Should().Be("analyst-1");
         capturedContext.Action.Should().Be("Premium launch");
         capturedContext.Impact.Should().Contain("$750,000");

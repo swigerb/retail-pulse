@@ -14,9 +14,6 @@ public static class IdentifyDemandRisksTool
         [Description("Brand name (e.g. 'Sierra Gold Tequila')")] string brand,
         [Description("Region (e.g. 'Northeast', 'National'). Defaults to 'National'.")] string region = "National")
     {
-        if (string.IsNullOrWhiteSpace(brand))
-            return new { error = "Parameter 'brand' is required." };
-
-        return data.IdentifyDemandRisks(brand, region);
+        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.IdentifyDemandRisks(brand, region);
     }
 }

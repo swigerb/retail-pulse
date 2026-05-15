@@ -10,12 +10,12 @@ namespace RetailPulse.Api.Streaming;
 public class InMemoryStreamingSession : IStreamingSession
 {
     private readonly List<StreamingEvent> _events = [];
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     public string SessionId { get; }
     public IReadOnlyList<StreamingEvent> Events
     {
-        get { lock (_lock) return _events.ToList(); }
+        get { lock (_lock) return [.. _events]; }
     }
 
     public InMemoryStreamingSession(string sessionId)

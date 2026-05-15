@@ -1,12 +1,12 @@
+using System.Text.Json;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Builder.App;
 using Microsoft.Agents.Builder.State;
 using Microsoft.Agents.Core.Models;
 using RetailPulse.Contracts;
+using RetailPulse.TeamsBot.Auth;
 using RetailPulse.TeamsBot.Cards;
 using RetailPulse.TeamsBot.Services;
-using RetailPulse.TeamsBot.Auth;
-using System.Text.Json;
 
 namespace RetailPulse.TeamsBot;
 
@@ -109,14 +109,10 @@ public class RetailPulseAgent : AgentApplication
             var chatRequest = new ChatRequest(userMessage, sessionId, userContext);
             var response = await client.PostAsJsonAsync("/api/chat", chatRequest, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var chatResponse = await response.Content.ReadFromJsonAsync<ChatResponse>(cancellationToken);
-
-            if (chatResponse == null)
-                throw new InvalidOperationException("Received null response from API");
-
+            var chatResponse = await response.Content.ReadFromJsonAsync<ChatResponse>(cancellationToken) ?? throw new InvalidOperationException("Received null response from API");
             await _telemetryClient.WaitForSpansAsync(_telemetryWaitMs, cancellationToken);
             var signalRSpans = _telemetryClient.GetSpans(sessionId, clearAfterRead: true);
-            var allSpans = signalRSpans.Any() ? signalRSpans : chatResponse.Spans;
+            var allSpans = signalRSpans.Count != 0 ? signalRSpans : chatResponse.Spans;
             _sessionManager.StoreSpans(sessionId, allSpans);
 
             var card = _cardBuilder.BuildChatResponseCard(chatResponse.Reply, allSpans, chatResponse.Charts, sessionId);
@@ -159,7 +155,7 @@ public class RetailPulseAgent : AgentApplication
                         if (!string.IsNullOrEmpty(sessionId))
                         {
                             var spans = _sessionManager.GetSpans(sessionId);
-                            if (spans != null && spans.Any())
+                            if (spans != null && spans.Count != 0)
                             {
                                 var detailedCard = _cardBuilder.BuildDetailedTelemetryCard(spans);
                                 await turnContext.SendActivityAsync(MessageFactory.Attachment(detailedCard), cancellationToken);

@@ -15,7 +15,7 @@ namespace RetailPulse.Api.Agents.Routing;
 /// appropriate specialist agent. Uses the same IChatClient pipeline
 /// (with OTel + function invocation middleware) for classification.
 /// </summary>
-public class RetailOpsRouter : IAgentRouter
+public partial class RetailOpsRouter : IAgentRouter
 {
     private readonly IChatClient _chatClient;
     private readonly AgentDefinition _routerDef;
@@ -27,20 +27,20 @@ public class RetailOpsRouter : IAgentRouter
     /// Minimum confidence threshold. Below this, the router falls back to
     /// the General agent regardless of classified intent.
     /// </summary>
-    private const double ConfidenceThreshold = 0.6;
+    private const double _confidenceThreshold = 0.6;
 
     /// <summary>Confidence assigned to keyword fast-path matches.</summary>
-    private const double KeywordMatchConfidence = 0.95;
+    private const double _keywordMatchConfidence = 0.95;
 
-    private static readonly Regex PerformingRegex = new(
-        @"how is .+ performing", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"how is .+ performing", RegexOptions.IgnoreCase)]
+    private static partial Regex PerformingRegex();
 
     /// <summary>
     /// Keyword patterns mapped to their intent. Each entry has "strong" keywords that match
     /// unambiguously on their own, regardless of message length or context. Short or generic
     /// keywords that could fire on ambiguous queries are excluded — the LLM handles those.
     /// </summary>
-    private static readonly (string Intent, string[] Keywords)[] KeywordPatterns =
+    private static readonly (string Intent, string[] Keywords)[] _keywordPatterns =
     [
         (AgentIntent.DemandForecasting, ["demand forecast", "sell-through", "velocity forecast"]),
         (AgentIntent.SupplyShipments, ["shipment status", "inventory level", "fulfillment", "stockout", "stock out", "supply chain"]),
@@ -124,11 +124,11 @@ public class RetailOpsRouter : IAgentRouter
             routingActivity?.SetTag("agent.routing.duration_ms", sw.ElapsedMilliseconds);
 
             // Fall back to general if confidence is below threshold
-            if (classification.Confidence < ConfidenceThreshold)
+            if (classification.Confidence < _confidenceThreshold)
             {
                 _logger.LogInformation(
                     "Router confidence {Confidence:F2} below threshold {Threshold:F2} for intent '{Intent}' — falling back to General agent",
-                    classification.Confidence, ConfidenceThreshold, classification.Intent);
+                    classification.Confidence, _confidenceThreshold, classification.Intent);
 
                 routingActivity?.SetTag("agent.routing.fallback", true);
                 routingActivity?.SetTag("agent.routing.fallback_reason", "low_confidence");
@@ -181,19 +181,19 @@ public class RetailOpsRouter : IAgentRouter
     private static IntentClassification? TryKeywordClassify(string message)
     {
         // Check regex pattern for PortfolioHealth first
-        if (PerformingRegex.IsMatch(message))
+        if (PerformingRegex().IsMatch(message))
         {
             return new IntentClassification(
-                AgentIntent.PortfolioHealth, KeywordMatchConfidence, [AgentIntent.PortfolioHealth]);
+                AgentIntent.PortfolioHealth, _keywordMatchConfidence, [AgentIntent.PortfolioHealth]);
         }
 
-        foreach (var (intent, keywords) in KeywordPatterns)
+        foreach (var (intent, keywords) in _keywordPatterns)
         {
             foreach (var keyword in keywords)
             {
                 if (message.Contains(keyword, StringComparison.OrdinalIgnoreCase))
                 {
-                    return new IntentClassification(intent, KeywordMatchConfidence, [intent]);
+                    return new IntentClassification(intent, _keywordMatchConfidence, [intent]);
                 }
             }
         }
@@ -216,7 +216,7 @@ public class RetailOpsRouter : IAgentRouter
         {
             const int maxContextTurns = 4;
             var recentHistory = conversationHistory.Count > maxContextTurns * 2
-                ? conversationHistory.Skip(conversationHistory.Count - (maxContextTurns * 2)).ToList()
+                ? [.. conversationHistory.Skip(conversationHistory.Count - (maxContextTurns * 2))]
                 : conversationHistory;
 
             foreach (var turn in recentHistory)

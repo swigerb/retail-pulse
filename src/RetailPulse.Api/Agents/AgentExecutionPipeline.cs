@@ -24,7 +24,7 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly ILogger<AgentExecutionPipeline> _logger;
     private readonly RetailPulseMetrics? _metrics;
 
-    private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
     public AgentExecutionPipeline(
         IChatClient chatClient,
@@ -49,7 +49,7 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
-            Tools = context.Tools.ToList()
+            Tools = [.. context.Tools]
         };
 
         var messages = BuildMessages(context.SystemPrompt, request);
@@ -104,8 +104,8 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
             context.AgentName, "thought",
             $"Processing: {request.Message[..Math.Min(100, request.Message.Length)]}",
             thoughtDurationMs,
-            inputTokens > 0 ? (int?)inputTokens : null,
-            outputTokens > 0 ? (int?)outputTokens : null);
+            inputTokens > 0 ? inputTokens : null,
+            outputTokens > 0 ? outputTokens : null);
 
         await RecordToolSpansAsync(response, collector, thoughtDurationMs, context.OnToolResult, _hubContext, sessionId, ct);
 
@@ -141,7 +141,7 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         _metrics?.RecordAgentExecutionDuration(context.AgentName, totalDurationMs);
 
         return new ChatResponse(
-            reply, sessionId, collector.Spans.ToList(),
+            reply, sessionId, [.. collector.Spans],
             charts.Count > 0 ? charts : null,
             totalDurationMs, tokenUsage);
     }
@@ -157,7 +157,7 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         {
             const int maxTurns = 10;
             var historyMessages = request.History.Count > maxTurns * 2
-                ? request.History.Skip(request.History.Count - (maxTurns * 2)).ToList()
+                ? [.. request.History.Skip(request.History.Count - (maxTurns * 2))]
                 : request.History;
 
             foreach (var historyMessage in historyMessages)
@@ -192,84 +192,84 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
     {
         var callIdToName = new Dictionary<string, string>();
         foreach (var msg in response.Messages)
-        foreach (var content in msg.Contents)
-        {
-            if (content is FunctionCallContent fc && fc.CallId != null)
-                callIdToName[fc.CallId] = fc.Name;
-        }
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionCallContent fc && fc.CallId != null)
+                    callIdToName[fc.CallId] = fc.Name;
+            }
 
         var toolCount = callIdToName.Count;
         var perToolMs = toolCount > 0 ? thoughtDurationMs / toolCount : 0;
 
         foreach (var msg in response.Messages)
-        foreach (var content in msg.Contents)
-        {
-            if (content is FunctionCallContent toolCall)
+            foreach (var content in msg.Contents)
             {
-                // Emit progress: tool_call phase
-                _ = hubContext.Clients.Group(sessionId).SendAsync("progress", new
+                if (content is FunctionCallContent toolCall)
                 {
-                    sessionId,
-                    phase = "tool_call",
-                    detail = $"Calling {toolCall.Name}...",
-                    timestamp = DateTimeOffset.UtcNow
-                }, ct);
+                    // Emit progress: tool_call phase
+                    _ = hubContext.Clients.Group(sessionId).SendAsync("progress", new
+                    {
+                        sessionId,
+                        phase = "tool_call",
+                        detail = $"Calling {toolCall.Name}...",
+                        timestamp = DateTimeOffset.UtcNow
+                    }, ct);
 
-                using var toolActivity = AgentTelemetry.StartToolCall(
-                    toolCall.Name,
-                    JsonSerializer.Serialize(toolCall.Arguments));
-                await collector.RecordSpanAsync(
-                    toolCall.Name, "tool_call",
-                    $"Calling {toolCall.Name} with {JsonSerializer.Serialize(toolCall.Arguments)}",
-                    perToolMs);
-            }
-            else if (content is FunctionResultContent toolResult)
-            {
-                var toolName = callIdToName.GetValueOrDefault(toolResult.CallId ?? "", toolResult.CallId ?? "unknown");
-                var resultText = toolResult.Result?.ToString() ?? "";
-                using var resultActivity = AgentTelemetry.StartToolResult(toolName, resultText.Length);
-                await collector.RecordSpanAsync(
-                    toolName, "tool_result",
-                    resultText[..Math.Min(200, resultText.Length)],
-                    0);
+                    using var toolActivity = AgentTelemetry.StartToolCall(
+                        toolCall.Name,
+                        JsonSerializer.Serialize(toolCall.Arguments));
+                    await collector.RecordSpanAsync(
+                        toolCall.Name, "tool_call",
+                        $"Calling {toolCall.Name} with {JsonSerializer.Serialize(toolCall.Arguments)}",
+                        perToolMs);
+                }
+                else if (content is FunctionResultContent toolResult)
+                {
+                    var toolName = callIdToName.GetValueOrDefault(toolResult.CallId ?? "", toolResult.CallId ?? "unknown");
+                    var resultText = toolResult.Result?.ToString() ?? "";
+                    using var resultActivity = AgentTelemetry.StartToolResult(toolName, resultText.Length);
+                    await collector.RecordSpanAsync(
+                        toolName, "tool_result",
+                        resultText[..Math.Min(200, resultText.Length)],
+                        0);
 
-                if (onToolResult != null)
-                    await onToolResult(resultText, ct);
+                    if (onToolResult != null)
+                        await onToolResult(resultText, ct);
+                }
             }
-        }
     }
 
     internal static List<ChartSpec> ExtractChartSpecs(Microsoft.Extensions.AI.ChatResponse chatResponse)
     {
         var charts = new List<ChartSpec>();
         foreach (var msg in chatResponse.Messages)
-        foreach (var content in msg.Contents)
-        {
-            if (content is FunctionResultContent toolResult)
+            foreach (var content in msg.Contents)
             {
-                var resultText = toolResult.Result?.ToString();
-                if (!string.IsNullOrEmpty(resultText))
+                if (content is FunctionResultContent toolResult)
                 {
-                    try
+                    var resultText = toolResult.Result?.ToString();
+                    if (!string.IsNullOrEmpty(resultText))
                     {
-                        using var doc = JsonDocument.Parse(resultText);
-                        if (doc.RootElement.TryGetProperty("status", out var status) &&
-                            status.GetString() == "success" &&
-                            doc.RootElement.TryGetProperty("chart", out var chartElement))
+                        try
                         {
-                            var chart = JsonSerializer.Deserialize<ChartSpec>(
-                                chartElement.GetRawText(), CaseInsensitiveOptions);
-                            if (chart != null)
-                                charts.Add(chart);
+                            using var doc = JsonDocument.Parse(resultText);
+                            if (doc.RootElement.TryGetProperty("status", out var status) &&
+                                status.GetString() == "success" &&
+                                doc.RootElement.TryGetProperty("chart", out var chartElement))
+                            {
+                                var chart = JsonSerializer.Deserialize<ChartSpec>(
+                                    chartElement.GetRawText(), _caseInsensitiveOptions);
+                                if (chart != null)
+                                    charts.Add(chart);
+                            }
                         }
-                    }
-                    catch
-                    {
-                        // Not a chart result — skip
+                        catch
+                        {
+                            // Not a chart result — skip
+                        }
                     }
                 }
             }
-        }
         return charts;
     }
 

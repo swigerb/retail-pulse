@@ -1,7 +1,7 @@
+using System.Text.Json;
 using FluentAssertions;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
-using System.Text.Json;
 
 namespace RetailPulse.Tests.Tools;
 
@@ -59,7 +59,7 @@ public class SupplyToolTests : IDisposable
 
         foreach (var item in result.GetProperty("items").EnumerateArray())
         {
-            item.GetProperty("brand").GetString()!.Should().Contain("Sierra Gold Tequila");
+            item.GetProperty("brand").GetString().Should().Contain("Sierra Gold Tequila");
         }
     }
 
@@ -72,7 +72,7 @@ public class SupplyToolTests : IDisposable
 
         foreach (var item in result.GetProperty("items").EnumerateArray())
         {
-            item.GetProperty("status").GetString()!.ToLower().Should().Be("healthy");
+            item.GetProperty("status").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Be("healthy");
         }
     }
 
@@ -115,7 +115,7 @@ public class SupplyToolTests : IDisposable
 
         foreach (var item in result.GetProperty("disruptions").EnumerateArray())
         {
-            item.GetProperty("severity").GetString()!.ToLower().Should().Be("high");
+            item.GetProperty("severity").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Be("high");
         }
     }
 
@@ -126,7 +126,7 @@ public class SupplyToolTests : IDisposable
 
         foreach (var item in result.GetProperty("disruptions").EnumerateArray())
         {
-            item.GetProperty("brand").GetString()!.Should().Contain("Sierra Gold Tequila");
+            item.GetProperty("brand").GetString().Should().Contain("Sierra Gold Tequila");
         }
     }
 
@@ -157,7 +157,7 @@ public class SupplyToolTests : IDisposable
 
         foreach (var item in result.GetProperty("disruptions").EnumerateArray())
         {
-            var severity = item.GetProperty("severity").GetString()!.ToLower();
+            var severity = item.GetProperty("severity").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture);
             severity.Should().BeOneOf(validSeverities,
                 "disruption severity must be a valid level");
         }
@@ -207,7 +207,7 @@ public class SupplyToolTests : IDisposable
 
         foreach (var item in result.GetProperty("rates").EnumerateArray())
         {
-            item.GetProperty("region").GetString()!.Should().Contain("Northeast");
+            item.GetProperty("region").GetString().Should().Contain("Northeast");
         }
     }
 
@@ -257,7 +257,7 @@ public class SupplyToolTests : IDisposable
 
         result.TryGetProperty("overall_status", out var status).Should().BeTrue();
         var validStatuses = new[] { "Green", "Yellow", "Red" };
-        status.GetString()!.Should().BeOneOf(validStatuses);
+        status.GetString().Should().BeOneOf(validStatuses);
     }
 
     [Fact]

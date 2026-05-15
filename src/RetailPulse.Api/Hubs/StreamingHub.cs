@@ -20,10 +20,9 @@ public class StreamingHub : Hub
     /// </summary>
     public Task JoinSession(string sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
-            return Task.CompletedTask;
-
-        return Groups.AddToGroupAsync(Context.ConnectionId, $"stream:{sessionId}");
+        return string.IsNullOrWhiteSpace(sessionId)
+            ? Task.CompletedTask
+            : Groups.AddToGroupAsync(Context.ConnectionId, $"stream:{sessionId}");
     }
 
     /// <summary>
@@ -31,10 +30,9 @@ public class StreamingHub : Hub
     /// </summary>
     public Task LeaveSession(string sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
-            return Task.CompletedTask;
-
-        return Groups.RemoveFromGroupAsync(Context.ConnectionId, $"stream:{sessionId}");
+        return string.IsNullOrWhiteSpace(sessionId)
+            ? Task.CompletedTask
+            : Groups.RemoveFromGroupAsync(Context.ConnectionId, $"stream:{sessionId}");
     }
 }
 

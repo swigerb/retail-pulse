@@ -5,10 +5,10 @@ using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
-using ChatRequest = RetailPulse.Contracts.ChatRequest;
-using ChatResponse = RetailPulse.Contracts.ChatResponse;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using ChatRequest = RetailPulse.Contracts.ChatRequest;
+using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Api.Agents;
 

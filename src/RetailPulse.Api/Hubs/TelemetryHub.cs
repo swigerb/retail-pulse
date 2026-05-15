@@ -16,12 +16,7 @@ public class TelemetryHub : Hub
     /// </summary>
     public Task JoinSession(string sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            return Task.CompletedTask;
-        }
-
-        return Groups.AddToGroupAsync(Context.ConnectionId, sessionId);
+        return string.IsNullOrWhiteSpace(sessionId) ? Task.CompletedTask : Groups.AddToGroupAsync(Context.ConnectionId, sessionId);
     }
 
     /// <summary>
@@ -29,12 +24,7 @@ public class TelemetryHub : Hub
     /// </summary>
     public Task LeaveSession(string sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            return Task.CompletedTask;
-        }
-
-        return Groups.RemoveFromGroupAsync(Context.ConnectionId, sessionId);
+        return string.IsNullOrWhiteSpace(sessionId) ? Task.CompletedTask : Groups.RemoveFromGroupAsync(Context.ConnectionId, sessionId);
     }
 
     /// <summary>
@@ -43,10 +33,7 @@ public class TelemetryHub : Hub
     /// </summary>
     public Task JoinCard(string cardId)
     {
-        if (string.IsNullOrWhiteSpace(cardId))
-            return Task.CompletedTask;
-
-        return Groups.AddToGroupAsync(Context.ConnectionId, $"card:{cardId}");
+        return string.IsNullOrWhiteSpace(cardId) ? Task.CompletedTask : Groups.AddToGroupAsync(Context.ConnectionId, $"card:{cardId}");
     }
 
     /// <summary>
@@ -54,9 +41,6 @@ public class TelemetryHub : Hub
     /// </summary>
     public Task LeaveCard(string cardId)
     {
-        if (string.IsNullOrWhiteSpace(cardId))
-            return Task.CompletedTask;
-
-        return Groups.RemoveFromGroupAsync(Context.ConnectionId, $"card:{cardId}");
+        return string.IsNullOrWhiteSpace(cardId) ? Task.CompletedTask : Groups.RemoveFromGroupAsync(Context.ConnectionId, $"card:{cardId}");
     }
 }

@@ -17,7 +17,7 @@ public class BoundedChannelTests
     /// <summary>
     /// Minimal work item representing a memory extraction or trace push request.
     /// </summary>
-    private record WorkItem(string Id, string Payload);
+    private sealed record WorkItem(string Id, string Payload);
 
     private static Channel<WorkItem> CreateChannel(int capacity = DefaultCapacity) =>
         Channel.CreateBounded<WorkItem>(new BoundedChannelOptions(capacity)

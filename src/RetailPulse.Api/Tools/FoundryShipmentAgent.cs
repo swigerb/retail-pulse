@@ -24,12 +24,12 @@ public class FoundryShipmentAgent
     /// abandoning the call. Polling does not have a built-in timeout, so
     /// this guards against indefinite hangs when the agent gets stuck.
     /// </summary>
-    private static readonly TimeSpan MaxRunTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _maxRunTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Polling interval while waiting for the Foundry run to complete.
     /// </summary>
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(500);
 
     private readonly IAgentProvider<IDistributionAnalysisAgent> _provider;
     private readonly ShipmentStatsTool _shipmentTool;
@@ -58,7 +58,7 @@ public class FoundryShipmentAgent
         // Bound the entire operation by MaxRunTimeout so a stuck Foundry run
         // can never hang an HTTP request indefinitely.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(MaxRunTimeout);
+        timeoutCts.CancelAfter(_maxRunTimeout);
         var ct = timeoutCts.Token;
 
         var collector = new TelemetryCollector(_hubContext);
@@ -136,7 +136,7 @@ public class FoundryShipmentAgent
             var runResult = run.Value;
             while (runResult.Status == RunStatus.Queued || runResult.Status == RunStatus.InProgress)
             {
-                await Task.Delay(PollInterval, ct);
+                await Task.Delay(_pollInterval, ct);
                 runResult = (await agentsClient.Runs.GetRunAsync(threadId, runResult.Id, cancellationToken: ct)).Value;
             }
 
@@ -184,9 +184,9 @@ public class FoundryShipmentAgent
         {
             _logger.LogWarning(
                 "Foundry agent run timed out after {Timeout} for {Brand}/{Region}",
-                MaxRunTimeout, brand, region);
+                _maxRunTimeout, brand, region);
             finalStatus = RunStatus.Expired;
-            analysis = $"Foundry agent timed out after {MaxRunTimeout.TotalSeconds:N0}s. Try again or fall back to local analysis.";
+            analysis = $"Foundry agent timed out after {_maxRunTimeout.TotalSeconds:N0}s. Try again or fall back to local analysis.";
         }
         finally
         {

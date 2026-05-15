@@ -166,7 +166,7 @@ public class Phase4RoutingTests
         // Create a specialist that handles the target intent
         var specialist = new Mock<ISpecialistAgent>();
         specialist.Setup(a => a.Key).Returns(agentKey);
-        specialist.Setup(a => a.SupportedIntents).Returns(new[] { intent });
+        specialist.Setup(a => a.SupportedIntents).Returns([intent]);
         specialist.Setup(a => a.HandleAsync(
                 It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Contracts.ChatResponse("response", "session", []));
@@ -198,7 +198,7 @@ public class Phase4RoutingTests
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(

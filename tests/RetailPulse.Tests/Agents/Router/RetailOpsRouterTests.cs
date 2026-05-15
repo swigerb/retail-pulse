@@ -203,7 +203,7 @@ public class RetailOpsRouterTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant,
                     $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.8}}")));
@@ -221,7 +221,7 @@ public class RetailOpsRouterTests
 
         captured.Should().NotBeNull();
         // System prompt + 2 history + current message = 4
-        captured!.Count.Should().BeGreaterThanOrEqualTo(4);
+        captured.Count.Should().BeGreaterThanOrEqualTo(4);
         captured.Last().Text.Should().Be("Follow up question");
     }
 
@@ -432,12 +432,12 @@ public class RetailOpsRouterTests
         var general = new Mock<ISpecialistAgent>();
         general.Setup(s => s.Key).Returns("general");
         general.Setup(s => s.DisplayName).Returns("General Agent");
-        general.Setup(s => s.SupportedIntents).Returns(new List<string>
-        {
+        general.Setup(s => s.SupportedIntents).Returns(
+        [
             AgentIntent.General, AgentIntent.DemandForecasting,
             AgentIntent.PromotionTrade, AgentIntent.SupplyShipments,
             AgentIntent.CompetitiveMarket, AgentIntent.SentimentField
-        });
+        ]);
 
         return [general.Object];
     }

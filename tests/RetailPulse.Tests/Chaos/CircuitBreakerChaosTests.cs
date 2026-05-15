@@ -119,15 +119,12 @@ public class CircuitBreakerChaosTests
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             _callCount++;
-            if (_callCount <= _failCount)
-            {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
-            }
-
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"source\":\"live-data\",\"brand\":\"Brand\",\"region\":\"Region\"}")
-            });
+            return _callCount <= _failCount
+                ? Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))
+                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"source\":\"live-data\",\"brand\":\"Brand\",\"region\":\"Region\"}")
+                });
         }
     }
 }

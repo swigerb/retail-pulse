@@ -15,7 +15,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     private readonly ILogger<SqliteAlertService> _logger;
     private readonly TimeSpan _defaultThrottleWindow;
 
-    private const string Iso8601 = "yyyy-MM-ddTHH:mm:ss.fffzzz";
+    private const string _iso8601 = "yyyy-MM-ddTHH:mm:ss.fffzzz";
 
     public SqliteAlertService(
         string dbPath,
@@ -75,7 +75,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
             WHERE DetectedAt >= @cutoff
             ORDER BY DetectedAt DESC
             """;
-        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString(Iso8601));
+        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString(_iso8601, CultureInfo.InvariantCulture));
 
         var alerts = ReadAlerts(cmd);
         return Task.FromResult<IReadOnlyList<Alert>>(alerts);
@@ -94,7 +94,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
             """;
         cmd.Parameters.AddWithValue("@userId", userId);
         cmd.Parameters.AddWithValue("@alertType", alertType);
-        cmd.Parameters.AddWithValue("@snoozedUntil", snoozedUntil.ToString(Iso8601));
+        cmd.Parameters.AddWithValue("@snoozedUntil", snoozedUntil.ToString(_iso8601, CultureInfo.InvariantCulture));
         cmd.ExecuteNonQuery();
 
         _logger.LogInformation("User {UserId} snoozed {AlertType} until {SnoozedUntil}", userId, alertType, snoozedUntil);
@@ -112,7 +112,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
             """;
         cmd.Parameters.AddWithValue("@alertId", alertId);
         cmd.Parameters.AddWithValue("@userId", userId);
-        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString(Iso8601));
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString(_iso8601, CultureInfo.InvariantCulture));
         cmd.ExecuteNonQuery();
 
         _logger.LogInformation("User {UserId} dismissed alert {AlertId}", userId, alertId);
@@ -155,13 +155,8 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         cmd.Parameters.AddWithValue("@region", region);
 
         var result = cmd.ExecuteScalar();
-        if (result is string lastFiredStr &&
-            DateTimeOffset.TryParseExact(lastFiredStr, Iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out var lastFired))
-        {
-            return lastFired >= cutoff;
-        }
-
-        return false;
+        return result is string lastFiredStr &&
+            DateTimeOffset.TryParseExact(lastFiredStr, _iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out var lastFired) && lastFired >= cutoff;
     }
 
     /// <summary>Record that an alert of this type was just fired (update throttle).</summary>
@@ -177,7 +172,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         cmd.Parameters.AddWithValue("@type", type);
         cmd.Parameters.AddWithValue("@brand", brand);
         cmd.Parameters.AddWithValue("@region", region);
-        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString(Iso8601));
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString(_iso8601, CultureInfo.InvariantCulture));
         cmd.ExecuteNonQuery();
     }
 
@@ -199,7 +194,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         cmd.Parameters.AddWithValue("@brand", alert.Brand);
         cmd.Parameters.AddWithValue("@region", alert.Region);
         cmd.Parameters.AddWithValue("@action", alert.RecommendedAction);
-        cmd.Parameters.AddWithValue("@detectedAt", alert.DetectedAt.ToString(Iso8601));
+        cmd.Parameters.AddWithValue("@detectedAt", alert.DetectedAt.ToString(_iso8601, CultureInfo.InvariantCulture));
         cmd.Parameters.AddWithValue("@metadata", alert.Metadata is not null ? JsonSerializer.Serialize(alert.Metadata) : DBNull.Value);
         cmd.ExecuteNonQuery();
 
@@ -237,7 +232,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
                 Brand: reader.IsDBNull(5) ? "" : reader.GetString(5),
                 Region: reader.IsDBNull(6) ? "" : reader.GetString(6),
                 RecommendedAction: reader.IsDBNull(7) ? "" : reader.GetString(7),
-                DetectedAt: DateTimeOffset.TryParseExact(reader.GetString(8), Iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
+                DetectedAt: DateTimeOffset.TryParseExact(reader.GetString(8), _iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
                     ? dt : DateTimeOffset.UtcNow,
                 Metadata: metadata
             ));

@@ -50,8 +50,8 @@ public class SessionManagerTests
         var sessionId = "test-session-1";
         var spans = new List<AgentSpan>
         {
-            new AgentSpan("Test Span 1", "thought", "Testing", 100, DateTimeOffset.UtcNow),
-            new AgentSpan("Test Span 2", "tool_call", "Tool execution", 200, DateTimeOffset.UtcNow)
+            new("Test Span 1", "thought", "Testing", 100, DateTimeOffset.UtcNow),
+            new("Test Span 2", "tool_call", "Tool execution", 200, DateTimeOffset.UtcNow)
         };
 
         sessionManager.StoreSpans(sessionId, spans);
@@ -59,7 +59,7 @@ public class SessionManagerTests
 
         retrievedSpans.Should().NotBeNull();
         retrievedSpans.Should().HaveCount(2);
-        retrievedSpans![0].Name.Should().Be("Test Span 1");
+        retrievedSpans[0].Name.Should().Be("Test Span 1");
         retrievedSpans[1].Name.Should().Be("Test Span 2");
     }
 
@@ -81,11 +81,11 @@ public class SessionManagerTests
         var sessionId = "test-session-2";
         var spans1 = new List<AgentSpan>
         {
-            new AgentSpan("Original Span", "thought", "Original", 100, DateTimeOffset.UtcNow)
+            new("Original Span", "thought", "Original", 100, DateTimeOffset.UtcNow)
         };
         var spans2 = new List<AgentSpan>
         {
-            new AgentSpan("Updated Span", "response", "Updated", 200, DateTimeOffset.UtcNow)
+            new("Updated Span", "response", "Updated", 200, DateTimeOffset.UtcNow)
         };
 
         sessionManager.StoreSpans(sessionId, spans1);
@@ -93,7 +93,7 @@ public class SessionManagerTests
         var retrievedSpans = sessionManager.GetSpans(sessionId);
 
         retrievedSpans.Should().HaveCount(1);
-        retrievedSpans![0].Name.Should().Be("Updated Span");
+        retrievedSpans[0].Name.Should().Be("Updated Span");
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public class SessionManagerTests
         var sessionId = sessionManager.GetOrCreateSessionId(conversationId);
         var spans = new List<AgentSpan>
         {
-            new AgentSpan("Test Span", "thought", "Testing", 100, DateTimeOffset.UtcNow)
+            new("Test Span", "thought", "Testing", 100, DateTimeOffset.UtcNow)
         };
         sessionManager.StoreSpans(sessionId, spans);
 

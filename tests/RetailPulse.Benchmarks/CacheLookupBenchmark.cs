@@ -70,6 +70,6 @@ public class CacheLookupBenchmark
     }
 
     [Benchmark(Description = "GenerateCacheKey: key generation")]
-    public string GenerateKey()
+    public static string GenerateKey()
         => InMemoryResponseCache.GenerateCacheKey("demand-forecasting", "What is the demand forecast for Oreos in Q4 2025?");
 }

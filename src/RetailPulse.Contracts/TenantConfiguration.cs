@@ -14,7 +14,7 @@ public class TenantConfiguration
 
     [YamlMember(Alias = "brands")]
     [JsonPropertyName("brands")]
-    public List<BrandConfig> BrandsList { get; init; } = new();
+    public List<BrandConfig> BrandsList { get; init; } = [];
 
     /// <summary>Read-only view of configured brands.</summary>
     [YamlIgnore]
@@ -23,7 +23,7 @@ public class TenantConfiguration
 
     [YamlMember(Alias = "regions")]
     [JsonPropertyName("regions")]
-    public List<string> RegionsList { get; init; } = new();
+    public List<string> RegionsList { get; init; } = [];
 
     /// <summary>Read-only view of configured regions.</summary>
     [YamlIgnore]
@@ -32,7 +32,7 @@ public class TenantConfiguration
 
     [YamlMember(Alias = "channels")]
     [JsonPropertyName("channels")]
-    public List<string> ChannelsList { get; init; } = new();
+    public List<string> ChannelsList { get; init; } = [];
 
     /// <summary>Read-only view of configured channels.</summary>
     [YamlIgnore]
@@ -53,7 +53,7 @@ public class BrandConfig
 
     [YamlMember(Alias = "variants")]
     [JsonPropertyName("variants")]
-    public List<string> VariantsList { get; init; } = new();
+    public List<string> VariantsList { get; init; } = [];
 
     /// <summary>Read-only view of configured variants.</summary>
     [YamlIgnore]
@@ -83,7 +83,7 @@ public class DistributionConfig
 
     [YamlMember(Alias = "distributorTypes")]
     [JsonPropertyName("distributorTypes")]
-    public List<string> DistributorTypesList { get; init; } = new();
+    public List<string> DistributorTypesList { get; init; } = [];
 
     /// <summary>Read-only view of configured distributor types.</summary>
     [YamlIgnore]

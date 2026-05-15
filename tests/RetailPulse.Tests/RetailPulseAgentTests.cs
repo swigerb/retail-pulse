@@ -1,3 +1,5 @@
+using System.ClientModel;
+using System.ClientModel.Primitives;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -8,8 +10,6 @@ using RetailPulse.Api.Agents;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
-using System.ClientModel;
-using System.ClientModel.Primitives;
 
 namespace RetailPulse.Tests;
 
@@ -22,7 +22,7 @@ public class RetailPulseAgentTests
         var chatClient = new Mock<IChatClient>();
         chatClient
             .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((messages, _, _) => capturedMessages = messages.ToList())
+            .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((messages, _, _) => capturedMessages = [.. messages])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(new ChatMessage(ChatRole.Assistant, "done")));
 
         var agent = CreateAgent(chatClient.Object);
@@ -40,7 +40,7 @@ public class RetailPulseAgentTests
 
         response.Reply.Should().Be("done");
         capturedMessages.Should().NotBeNull();
-        capturedMessages!.Select(m => m.Role).Should().ContainInOrder(
+        capturedMessages.Select(m => m.Role).Should().ContainInOrder(
             ChatRole.System,
             ChatRole.User,
             ChatRole.Assistant,
@@ -59,7 +59,7 @@ public class RetailPulseAgentTests
         var chatClient = new Mock<IChatClient>();
         chatClient
             .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((messages, _, _) => capturedMessages = messages.ToList())
+            .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((messages, _, _) => capturedMessages = [.. messages])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(new ChatMessage(ChatRole.Assistant, "done")));
 
         var history = Enumerable.Range(1, 22)
@@ -70,7 +70,7 @@ public class RetailPulseAgentTests
         await agent.ChatAsync(new ChatRequest("current", SessionId: "session-1", History: history));
 
         capturedMessages.Should().NotBeNull();
-        capturedMessages!.Should().HaveCount(22);
+        capturedMessages.Should().HaveCount(22);
         capturedMessages[0].Role.Should().Be(ChatRole.System);
         capturedMessages[1].Text.Should().Be("history-3");
         capturedMessages[20].Text.Should().Be("history-22");
@@ -198,10 +198,10 @@ public class RetailPulseAgentTests
         var response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "cost-test"));
 
         response.TokenUsage.Should().NotBeNull();
-        response.TokenUsage!.InputTokens.Should().Be(10000);
-        response.TokenUsage!.OutputTokens.Should().Be(5000);
+        response.TokenUsage.InputTokens.Should().Be(10000);
+        response.TokenUsage.OutputTokens.Should().Be(5000);
         // Input: 10000 * 0.25 / 1M = 0.0025, Output: 5000 * 2.00 / 1M = 0.01
-        response.TokenUsage!.EstimatedCostUsd.Should().Be(0.0125m);
+        response.TokenUsage.EstimatedCostUsd.Should().Be(0.0125m);
     }
 
     private static RetailPulseAgent CreateAgent(IChatClient chatClient)

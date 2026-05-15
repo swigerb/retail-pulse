@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using RetailPulse.Contracts.Observability;
@@ -28,7 +29,7 @@ public class MarkdownExporter : IConversationExport
 
         // If no session-specific entries found, include all recent entries as fallback
         if (sessionEntries.Count == 0)
-            sessionEntries = entries.OrderBy(e => e.Timestamp).Take(100).ToList();
+            sessionEntries = [.. entries.OrderBy(e => e.Timestamp).Take(100)];
 
         var exportedAt = DateTime.UtcNow;
         string content;
@@ -37,12 +38,12 @@ public class MarkdownExporter : IConversationExport
         if (format == ExportFormat.Markdown)
         {
             content = BuildMarkdown(sessionId, sessionEntries, exportedAt);
-            fileName = $"export-{sessionId}-{exportedAt:yyyyMMdd-HHmmss}.md";
+            fileName = $"export-{sessionId}-{exportedAt.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}.md";
         }
         else
         {
             content = BuildJson(sessionId, sessionEntries, exportedAt);
-            fileName = $"export-{sessionId}-{exportedAt:yyyyMMdd-HHmmss}.json";
+            fileName = $"export-{sessionId}-{exportedAt.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}.json";
         }
 
         return new ExportResult(content, format, fileName, exportedAt);
@@ -60,7 +61,7 @@ public class MarkdownExporter : IConversationExport
                 g.Key,
                 g.Min(e => e.Timestamp),
                 g.Count(),
-                g.Select(e => e.AgentId).Distinct().ToArray()))
+                [.. g.Select(e => e.AgentId).Distinct()]))
             .OrderByDescending(s => s.StartedAt)
             .ToList();
 
@@ -71,7 +72,7 @@ public class MarkdownExporter : IConversationExport
                 "default",
                 allEntries.Min(e => e.Timestamp),
                 allEntries.Count,
-                allEntries.Select(e => e.AgentId).Distinct().ToArray()));
+                [.. allEntries.Select(e => e.AgentId).Distinct()]));
         }
 
         return sessions;
@@ -80,20 +81,20 @@ public class MarkdownExporter : IConversationExport
     private static string BuildMarkdown(string sessionId, List<AuditEntry> entries, DateTime exportedAt)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# Conversation Export — {sessionId}");
-        sb.AppendLine($"**Exported:** {exportedAt:yyyy-MM-dd HH:mm:ss} UTC");
-        sb.AppendLine($"**Entries:** {entries.Count}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"# Conversation Export — {sessionId}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"**Exported:** {exportedAt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"**Entries:** {entries.Count}");
         sb.AppendLine();
         sb.AppendLine("---");
         sb.AppendLine();
 
         foreach (var entry in entries)
         {
-            sb.AppendLine($"### [{entry.Timestamp:HH:mm:ss}] {entry.Action} — {entry.AgentId}");
-            sb.AppendLine($"- **User:** {entry.UserId}");
-            sb.AppendLine($"- **Input:** {entry.InputSummary}");
-            sb.AppendLine($"- **Output:** {entry.OutputSummary}");
-            sb.AppendLine($"- **Tokens:** {entry.TokensUsed} | **Duration:** {entry.Duration.TotalMilliseconds:F0}ms");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"### [{entry.Timestamp.ToString("HH:mm:ss", CultureInfo.InvariantCulture)}] {entry.Action} — {entry.AgentId}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"- **User:** {entry.UserId}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"- **Input:** {entry.InputSummary}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"- **Output:** {entry.OutputSummary}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"- **Tokens:** {entry.TokensUsed} | **Duration:** {entry.Duration.TotalMilliseconds.ToString("F0", CultureInfo.InvariantCulture)}ms");
             sb.AppendLine();
         }
 

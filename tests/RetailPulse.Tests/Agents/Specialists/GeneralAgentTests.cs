@@ -1,3 +1,5 @@
+using System.ClientModel;
+using System.ClientModel.Primitives;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -11,8 +13,6 @@ using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
-using System.ClientModel;
-using System.ClientModel.Primitives;
 
 namespace RetailPulse.Tests.Agents.Specialists;
 
@@ -126,7 +126,7 @@ public class GeneralAgentTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
@@ -143,7 +143,7 @@ public class GeneralAgentTests
         await agent.HandleAsync(request);
 
         captured.Should().NotBeNull();
-        captured!.Select(m => m.Role).Should().ContainInOrder(
+        captured.Select(m => m.Role).Should().ContainInOrder(
             ChatRole.System, ChatRole.User, ChatRole.Assistant, ChatRole.User);
     }
 
@@ -158,7 +158,7 @@ public class GeneralAgentTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
@@ -173,7 +173,7 @@ public class GeneralAgentTests
 
         captured.Should().NotBeNull();
         // System(1) + capped history(20) + current(1) = 22
-        captured!.Should().HaveCount(22);
+        captured.Should().HaveCount(22);
     }
 
     #endregion
@@ -308,9 +308,9 @@ public class GeneralAgentTests
             new ChatRequest("hello", SessionId: "s-cost"));
 
         response.TokenUsage.Should().NotBeNull();
-        response.TokenUsage!.InputTokens.Should().Be(5000);
-        response.TokenUsage!.OutputTokens.Should().Be(2000);
-        response.TokenUsage!.EstimatedCostUsd.Should().NotBeNull();
+        response.TokenUsage.InputTokens.Should().Be(5000);
+        response.TokenUsage.OutputTokens.Should().Be(2000);
+        response.TokenUsage.EstimatedCostUsd.Should().NotBeNull();
     }
 
     [Fact]
@@ -371,7 +371,7 @@ public class GeneralAgentTests
     {
         var hubContext = CreateMockHubContext();
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(

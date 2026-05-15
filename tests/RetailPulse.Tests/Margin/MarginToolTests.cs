@@ -1,7 +1,7 @@
+using System.Text.Json;
 using FluentAssertions;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
-using System.Text.Json;
 
 namespace RetailPulse.Tests.Margin;
 
@@ -168,7 +168,7 @@ public class MarginToolTests : IDisposable
         var periods = new List<string>();
         foreach (var q in trend.EnumerateArray())
         {
-            var period = q.GetProperty("period").GetString()!;
+            var period = q.GetProperty("period").GetString();
             period.Should().NotBeNullOrEmpty();
             periods.Add(period);
         }

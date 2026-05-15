@@ -25,8 +25,9 @@ public static class StoreOpsTools
         [Description("Aisle ID (required, e.g. 'AISLE-STR-0001-01')")] string aisleId)
     {
         if (string.IsNullOrWhiteSpace(storeId)) return new { error = "Parameter 'storeId' is required." };
-        if (string.IsNullOrWhiteSpace(aisleId)) return new { error = "Parameter 'aisleId' is required." };
-        return data.GetShelfLayout(storeId, aisleId);
+        return string.IsNullOrWhiteSpace(aisleId)
+            ? (new { error = "Parameter 'aisleId' is required." })
+            : data.GetShelfLayout(storeId, aisleId);
     }
 
     [McpServerTool(Name = "OptimizePlanogram")]
@@ -37,8 +38,9 @@ public static class StoreOpsTools
         [Description("Aisle ID (required)")] string aisleId)
     {
         if (string.IsNullOrWhiteSpace(storeId)) return new { error = "Parameter 'storeId' is required." };
-        if (string.IsNullOrWhiteSpace(aisleId)) return new { error = "Parameter 'aisleId' is required." };
-        return data.OptimizePlanogram(storeId, aisleId);
+        return string.IsNullOrWhiteSpace(aisleId)
+            ? (new { error = "Parameter 'aisleId' is required." })
+            : data.OptimizePlanogram(storeId, aisleId);
     }
 
     [McpServerTool(Name = "PredictStockout")]
@@ -48,7 +50,6 @@ public static class StoreOpsTools
         [Description("Store ID (required)")] string storeId,
         [Description("Specific SKU ID to check. Omit for all SKUs.")] string? skuId = null)
     {
-        if (string.IsNullOrWhiteSpace(storeId)) return new { error = "Parameter 'storeId' is required." };
-        return data.PredictStockout(storeId, skuId);
+        return string.IsNullOrWhiteSpace(storeId) ? (new { error = "Parameter 'storeId' is required." }) : data.PredictStockout(storeId, skuId);
     }
 }

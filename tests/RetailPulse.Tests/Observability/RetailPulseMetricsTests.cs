@@ -19,11 +19,13 @@ public class RetailPulseMetricsTests : IDisposable
         var meterFactory = provider.GetRequiredService<IMeterFactory>();
         _metrics = new RetailPulseMetrics(meterFactory);
 
-        _listener = new MeterListener();
-        _listener.InstrumentPublished = (instrument, listener) =>
+        _listener = new MeterListener
         {
-            if (instrument.Meter.Name == RetailPulseMetrics.MeterName)
-                listener.EnableMeasurementEvents(instrument);
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == RetailPulseMetrics.MeterName)
+                    listener.EnableMeasurementEvents(instrument);
+            }
         };
         _listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
         {

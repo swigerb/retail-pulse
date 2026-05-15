@@ -1,7 +1,7 @@
+using System.Text.Json;
 using FluentAssertions;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
-using System.Text.Json;
 
 namespace RetailPulse.Tests.Tools;
 
@@ -60,7 +60,7 @@ public class CompetitiveToolTests : IDisposable
 
         foreach (var item in pricing.EnumerateArray())
         {
-            item.GetProperty("category").GetString()!.ToLower().Should().Contain("spirits");
+            item.GetProperty("category").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("spirits");
         }
     }
 
@@ -74,7 +74,7 @@ public class CompetitiveToolTests : IDisposable
 
         foreach (var item in pricing.EnumerateArray())
         {
-            item.GetProperty("region").GetString()!.ToLower().Should().Contain("northeast");
+            item.GetProperty("region").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("northeast");
         }
     }
 
@@ -127,7 +127,7 @@ public class CompetitiveToolTests : IDisposable
 
         foreach (var item in result.GetProperty("pricing").EnumerateArray())
         {
-            item.GetProperty("brand").GetString()!.ToLower().Should().Contain("sierra gold tequila");
+            item.GetProperty("brand").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("sierra gold tequila");
         }
     }
 
@@ -247,10 +247,7 @@ public class CompetitiveToolTests : IDisposable
             if (threat.GetProperty("type").GetString() == "price_drop")
             {
                 var brand = threat.GetProperty("brand").GetString();
-                if (brand != null)
-                {
-                    brand.ToLower().Should().Contain("sierra gold tequila");
-                }
+                brand?.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("sierra gold tequila");
             }
         }
     }
@@ -263,7 +260,7 @@ public class CompetitiveToolTests : IDisposable
         var threats = result.GetProperty("threats");
         foreach (var threat in threats.EnumerateArray())
         {
-            threat.GetProperty("category").GetString()!.ToLower().Should().Contain("spirit");
+            threat.GetProperty("category").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("spirit");
         }
     }
 
@@ -296,7 +293,7 @@ public class CompetitiveToolTests : IDisposable
 
         // Collect distinct periods across all records
         var periods = shareData.EnumerateArray()
-            .Select(r => r.GetProperty("period").GetString()!)
+            .Select(r => r.GetProperty("period").GetString())
             .Distinct()
             .OrderBy(p => p)
             .ToList();
@@ -315,7 +312,7 @@ public class CompetitiveToolTests : IDisposable
 
         foreach (var item in result.GetProperty("share_data").EnumerateArray())
         {
-            var period = item.GetProperty("period").GetString()!;
+            var period = item.GetProperty("period").GetString();
             period.Should().MatchRegex(@"^\d{4}-Q[1-4]$",
                 $"period '{period}' should be in yyyy-Qn format");
         }

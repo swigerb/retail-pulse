@@ -2,7 +2,7 @@ namespace RetailPulse.Api.Models;
 
 public class PromptConfiguration
 {
-    public Dictionary<string, AgentDefinition> Agents { get; set; } = new();
+    public Dictionary<string, AgentDefinition> Agents { get; set; } = [];
 }
 
 public class AgentDefinition
@@ -11,5 +11,5 @@ public class AgentDefinition
     public string Model { get; set; } = "gpt-4o";
     public string SystemPrompt { get; set; } = string.Empty;
     public double Temperature { get; set; } = 0.7;
-    public List<string> Tools { get; set; } = new();
+    public List<string> Tools { get; set; } = [];
 }

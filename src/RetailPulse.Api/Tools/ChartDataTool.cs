@@ -6,7 +6,7 @@ namespace RetailPulse.Api.Tools;
 
 public class ChartDataTool
 {
-    private static readonly JsonSerializerOptions InputOptions = new()
+    private static readonly JsonSerializerOptions _inputOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
@@ -24,7 +24,7 @@ public class ChartDataTool
     {
         try
         {
-            var spec = JsonSerializer.Deserialize<ChartSpec>(chartSpecJson, InputOptions);
+            var spec = JsonSerializer.Deserialize<ChartSpec>(chartSpecJson, _inputOptions);
             if (spec == null)
             {
                 return Task.FromResult(JsonSerializer.Serialize(new { error = "Invalid chart specification" }));

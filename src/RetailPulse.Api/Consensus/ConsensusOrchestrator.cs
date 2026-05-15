@@ -24,13 +24,13 @@ public class ConsensusOrchestrator : IConsensusCouncil
     /// <summary>Per-agent timeout for the fan-out phase. Must be long enough for
     /// agents to complete tool calls (MCP server round-trips + LLM reasoning).
     /// 30s balances responsiveness against the 75s overall request timeout.</summary>
-    private static readonly TimeSpan AgentTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _agentTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>Timeout for lightweight voting mode — no tool calls, just LLM reasoning.</summary>
-    private static readonly TimeSpan LightweightVoteTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _lightweightVoteTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>Agent keys eligible to participate in the council.</summary>
-    private static readonly HashSet<string> CouncilParticipants = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _councilParticipants = new(StringComparer.OrdinalIgnoreCase)
     {
         "demand-forecasting",
         "competitive-intel",
@@ -57,7 +57,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
         var sw = Stopwatch.StartNew();
 
         var participants = _specialists
-            .Where(s => CouncilParticipants.Contains(s.Key))
+            .Where(s => _councilParticipants.Contains(s.Key))
             .ToList();
 
         _logger.LogInformation(
@@ -95,7 +95,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(LightweightVoteTimeout);
+            timeoutCts.CancelAfter(_lightweightVoteTimeout);
 
             // Lightweight path: direct LLM call with voting system prompt, no tools
             var messages = new List<ChatMessage>
@@ -124,7 +124,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
 
             return new AgentVote(
                 agent.Key, agent.DisplayName, HealthRating.Yellow,
-                $"Agent timed out after {LightweightVoteTimeout.TotalSeconds}s — unable to complete assessment.",
+                $"Agent timed out after {_lightweightVoteTimeout.TotalSeconds}s — unable to complete assessment.",
                 0.0, ["timeout"], agentSw.Elapsed);
         }
         catch (Exception ex)
@@ -140,7 +140,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
         }
     }
 
-    private string BuildVotePrompt(string brand, string? region)
+    private static string BuildVotePrompt(string brand, string? region)
     {
         var regionClause = string.IsNullOrWhiteSpace(region) ? "across all regions" : $"in the {region} region";
         return $$"""
@@ -199,7 +199,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
                 }
 
                 return new AgentVote(agentId, agentName, rating, reasoning, confidence,
-                    keyMetrics.ToArray(), elapsed);
+                    [.. keyMetrics], elapsed);
             }
         }
         catch (Exception ex)
@@ -320,7 +320,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
 
                 return new CouncilVerdict(
                     brand, region, overallRating, synthesis, votes,
-                    isUnanimous, disagreements.ToArray(), actionItems.ToArray(),
+                    isUnanimous, [.. disagreements], [.. actionItems],
                     convenedAt, sw.Elapsed);
             }
         }
@@ -345,9 +345,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
 
         var disagreements = isUnanimous
             ? Array.Empty<string>()
-            : votes.GroupBy(v => v.Rating)
-                .Select(g => $"{string.Join(", ", g.Select(v => v.AgentName))} rated {g.Key}")
-                .ToArray();
+            : [.. votes.GroupBy(v => v.Rating).Select(g => $"{string.Join(", ", g.Select(v => v.AgentName))} rated {g.Key}")];
 
         var synthesis = $"Council assessed {brand} with {votes.Length} agent votes. " +
                         $"Overall health: {overallRating}. " +
@@ -355,7 +353,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
 
         return new CouncilVerdict(
             brand, region, overallRating, synthesis, votes,
-            isUnanimous, disagreements, Array.Empty<string>(),
+            isUnanimous, disagreements, [],
             convenedAt, sw.Elapsed);
     }
 }

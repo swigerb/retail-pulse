@@ -10,11 +10,7 @@ public static class TelemetryFormatter
     /// </summary>
     public static string FormatDuration(double durationMs)
     {
-        if (durationMs >= 1000)
-        {
-            return $"{durationMs / 1000:F1}s";
-        }
-        return $"{durationMs:F0}ms";
+        return durationMs >= 1000 ? $"{durationMs / 1000:F1}s" : $"{durationMs:F0}ms";
     }
 
     /// <summary>
@@ -58,12 +54,7 @@ public static class TelemetryFormatter
     /// </summary>
     public static string TruncateName(string name, int maxLength = 30)
     {
-        if (string.IsNullOrEmpty(name) || name.Length <= maxLength)
-        {
-            return name ?? string.Empty;
-        }
-
-        return name.Substring(0, maxLength - 1) + "…";
+        return string.IsNullOrEmpty(name) || name.Length <= maxLength ? name ?? string.Empty : string.Concat(name.AsSpan(0, maxLength - 1), "…");
     }
 
     /// <summary>
@@ -79,12 +70,7 @@ public static class TelemetryFormatter
         // Replace newlines with spaces
         var singleLine = detail.Replace("\r\n", " ").Replace("\n", " ").Trim();
 
-        if (singleLine.Length <= maxLength)
-        {
-            return singleLine;
-        }
-
-        return singleLine.Substring(0, maxLength - 1) + "…";
+        return singleLine.Length <= maxLength ? singleLine : string.Concat(singleLine.AsSpan(0, maxLength - 1), "…");
     }
 
     /// <summary>
@@ -97,7 +83,7 @@ public static class TelemetryFormatter
             return 0;
         }
 
-        var percentage = (spanDuration / maxDuration) * 100.0;
+        var percentage = spanDuration / maxDuration * 100.0;
         return Math.Max(5, (int)Math.Round(percentage)); // Minimum 5% for visibility
     }
 }

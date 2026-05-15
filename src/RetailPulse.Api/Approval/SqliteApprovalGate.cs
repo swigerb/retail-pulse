@@ -16,7 +16,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
     private readonly ILogger<SqliteApprovalGate> _logger;
     private readonly TimeSpan _defaultTimeout;
 
-    private const string Iso8601 = "yyyy-MM-ddTHH:mm:ss.fffzzz";
+    private const string _iso8601 = "yyyy-MM-ddTHH:mm:ss.fffzzz";
 
     // Exponential backoff parameters for WaitForApprovalAsync
     internal static readonly TimeSpan InitialBackoff = TimeSpan.FromMilliseconds(250);
@@ -96,8 +96,8 @@ public sealed class SqliteApprovalGate : IApprovalGate
         cmd.Parameters.AddWithValue("@impact", (object?)context.Impact ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@urgency", context.Urgency);
         cmd.Parameters.AddWithValue("@reasoning", (object?)context.Reasoning ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@createdAt", now.ToString(Iso8601));
-        cmd.Parameters.AddWithValue("@expiresAt", expiresAt.ToString(Iso8601));
+        cmd.Parameters.AddWithValue("@createdAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
+        cmd.Parameters.AddWithValue("@expiresAt", expiresAt.ToString(_iso8601, CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);
 
         _logger.LogInformation(
@@ -175,7 +175,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         cmd.Parameters.AddWithValue("@id", requestId);
         cmd.Parameters.AddWithValue("@decision", decision.ToString());
         cmd.Parameters.AddWithValue("@comment", (object?)comment ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@respondedAt", now.ToString(Iso8601));
+        cmd.Parameters.AddWithValue("@respondedAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
 
         var affected = await cmd.ExecuteNonQueryAsync(ct);
         if (affected == 0)
@@ -232,9 +232,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         cmd.Parameters.AddWithValue("@id", requestId);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return null;
-
-        return MapRow(reader);
+        return !await reader.ReadAsync(ct) ? null : MapRow(reader);
     }
 
     private static async Task<List<ApprovalRequest>> ReadAllAsync(SqliteCommand cmd, CancellationToken ct = default)

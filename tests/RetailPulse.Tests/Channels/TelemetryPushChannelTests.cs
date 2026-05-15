@@ -10,17 +10,18 @@ namespace RetailPulse.Tests.Channels;
 public class TelemetryPushChannelTests
 {
     [Fact]
-    public async Task TryWrite_WithinCapacity_ReturnsTrue()
+    public Task TryWrite_WithinCapacity_ReturnsTrue()
     {
         var channel = new TelemetryPushChannel();
         var item = new TelemetryPushItem("trace_started", TraceId: "t1", Timestamp: DateTimeOffset.UtcNow);
 
         channel.TryWrite(item).Should().BeTrue();
         channel.DroppedCount.Should().Be(0);
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task TryWrite_WhenFull_ReturnsFalse_IncrementsDropped()
+    public Task TryWrite_WhenFull_ReturnsFalse_IncrementsDropped()
     {
         var channel = new TelemetryPushChannel(capacity: 2);
 
@@ -29,10 +30,11 @@ public class TelemetryPushChannelTests
         channel.TryWrite(new TelemetryPushItem("trace_started", TraceId: "t3")).Should().BeFalse();
 
         channel.DroppedCount.Should().Be(1);
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task DroppedCount_AccumulatesCorrectly()
+    public Task DroppedCount_AccumulatesCorrectly()
     {
         var channel = new TelemetryPushChannel(capacity: 1);
         channel.TryWrite(new TelemetryPushItem("trace_started", TraceId: "t1"));
@@ -41,12 +43,14 @@ public class TelemetryPushChannelTests
             channel.TryWrite(new TelemetryPushItem("span_completed"));
 
         channel.DroppedCount.Should().Be(10);
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task DefaultCapacity_Is1000()
+    public Task DefaultCapacity_Is1000()
     {
         TelemetryPushChannel.DefaultCapacity.Should().Be(1000);
+        return Task.CompletedTask;
     }
 
     [Fact]
@@ -62,7 +66,7 @@ public class TelemetryPushChannelTests
         var read = await channel.Reader.ReadAsync();
         read.EventType.Should().Be("span_completed");
         read.Span.Should().NotBeNull();
-        read.Span!.OperationName.Should().Be("test.op");
+        read.Span.OperationName.Should().Be("test.op");
     }
 
     [Fact]

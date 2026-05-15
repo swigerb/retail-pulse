@@ -31,7 +31,7 @@ public class CacheTests
         var result = await cache.GetAsync("key-1");
 
         result.Should().NotBeNull();
-        result!.Response.Should().Be("Hello world");
+        result.Response.Should().Be("Hello world");
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public class CacheTests
         var result = await cache.GetAsync("key-1");
 
         result.Should().NotBeNull();
-        result!.Response.Should().Be("second");
+        result.Response.Should().Be("second");
     }
 
     #endregion
@@ -82,7 +82,7 @@ public class CacheTests
         var result = await cache.GetAsync("key-1");
 
         result.Should().NotBeNull();
-        result!.Response.Should().Be("fresh");
+        result.Response.Should().Be("fresh");
     }
 
     [Fact]

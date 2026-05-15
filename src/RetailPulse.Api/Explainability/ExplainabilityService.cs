@@ -41,7 +41,7 @@ public class ExplainabilityService
         DateTime StartedAt,
         long TotalDurationMs)
     {
-        public ToolStep[] DataSources => ToolSteps.ToArray();
+        public ToolStep[] DataSources => [.. ToolSteps];
         public int ToolCallCount => ToolSteps.Count;
     }
 
@@ -51,7 +51,7 @@ public class ExplainabilityService
         var traceId = $"{sessionId}-{Guid.NewGuid():N}"[..32];
         var trace = new ExplanationTrace(
             sessionId, query,
-            new List<ToolStep>(), new List<ReasoningStep>(),
+            [], [],
             null, DateTime.UtcNow, 0);
 
         _traces[traceId] = trace;
@@ -109,10 +109,9 @@ public class ExplainabilityService
     /// <summary>Get all traces for a session.</summary>
     public IReadOnlyList<ExplanationTrace> GetSessionTraces(string sessionId)
     {
-        return _traces.Values
+        return [.. _traces.Values
             .Where(t => t.SessionId == sessionId)
-            .OrderByDescending(t => t.StartedAt)
-            .ToList();
+            .OrderByDescending(t => t.StartedAt)];
     }
 
     /// <summary>

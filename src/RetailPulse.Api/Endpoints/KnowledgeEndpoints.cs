@@ -1,3 +1,4 @@
+using System.Globalization;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Rag;
 using RetailPulse.Contracts.Routing;
@@ -84,7 +85,7 @@ public static class KnowledgeEndpoints
                 contextBuilder.AppendLine("--- Reference Context (from knowledge base) ---");
                 foreach (var result in searchResults.Take(3))
                 {
-                    contextBuilder.AppendLine($"[Source: {result.Title}, chunk {result.ChunkIndex}]");
+                    contextBuilder.AppendLine(CultureInfo.InvariantCulture, $"[Source: {result.Title}, chunk {result.ChunkIndex}]");
                     contextBuilder.AppendLine(result.Chunk);
                     contextBuilder.AppendLine();
                 }

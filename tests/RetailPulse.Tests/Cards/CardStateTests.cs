@@ -39,7 +39,7 @@ public class CardStateTests
     [Fact]
     public async Task CreateCard_SetsDashboardTypeToActiveLifecycle()
     {
-        var request = new CreateCardRequest("Dashboard Card", CardType.Dashboard, "user-1", new Dictionary<string, object>());
+        var request = new CreateCardRequest("Dashboard Card", CardType.Dashboard, "user-1", []);
 
         var card = await _state.CreateAsync(request);
 
@@ -49,7 +49,7 @@ public class CardStateTests
     [Fact]
     public async Task CreateCard_SetsVotingTypeToVotingLifecycle()
     {
-        var request = new CreateCardRequest("Voting Card", CardType.Voting, "user-1", new Dictionary<string, object>());
+        var request = new CreateCardRequest("Voting Card", CardType.Voting, "user-1", []);
 
         var card = await _state.CreateAsync(request);
 
@@ -133,8 +133,8 @@ public class CardStateTests
     public async Task ListActiveCards_IncludesAllNonArchivedLifecycles()
     {
         // Create a Dashboard (Active) and a Voting type card (starts as Voting)
-        await _state.CreateAsync(new CreateCardRequest("Active", CardType.Dashboard, "u1", new()));
-        await _state.CreateAsync(new CreateCardRequest("Voting", CardType.Voting, "u1", new()));
+        await _state.CreateAsync(new CreateCardRequest("Active", CardType.Dashboard, "u1", []));
+        await _state.CreateAsync(new CreateCardRequest("Voting", CardType.Voting, "u1", []));
 
         var active = await _state.GetActiveAsync();
 
@@ -217,7 +217,7 @@ public class CardStateTests
     #region Helpers
 
     private static CreateCardRequest MakeRequest(string title, string createdBy = "user-1")
-        => new(title, CardType.Dashboard, createdBy, new Dictionary<string, object>());
+        => new(title, CardType.Dashboard, createdBy, []);
 
     private static IHubContext<TelemetryHub> CreateMockHub()
     {

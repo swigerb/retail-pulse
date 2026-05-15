@@ -19,7 +19,7 @@ public class InMemoryCostTracker : ICostTracker
     private readonly ObservabilityOptions _options;
     private readonly Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)> _modelPricing;
 
-    private static readonly (decimal InputPer1M, decimal OutputPer1M) DefaultPricing = (1.00m, 5.00m);
+    private static readonly (decimal InputPer1M, decimal OutputPer1M) _defaultPricing = (1.00m, 5.00m);
 
     public InMemoryCostTracker(IOptions<ObservabilityOptions> options, IConfiguration configuration)
     {
@@ -75,7 +75,7 @@ public class InMemoryCostTracker : ICostTracker
                 var cost = g.Sum(e => CalculateCost(e));
                 var topTool = g
                     .Where(e => e.ToolName != null)
-                    .GroupBy(e => e.ToolName!)
+                    .GroupBy(e => e.ToolName)
                     .OrderByDescending(tg => tg.Count())
                     .Select(tg => tg.Key)
                     .FirstOrDefault() ?? "none";
@@ -130,14 +130,14 @@ public class InMemoryCostTracker : ICostTracker
             _ => DateTime.MinValue
         };
 
-        return _events.Where(e => e.Timestamp >= cutoff).ToList();
+        return [.. _events.Where(e => e.Timestamp >= cutoff)];
     }
 
     private decimal CalculateCost(UsageEvent e)
     {
-        var pricing = _modelPricing.GetValueOrDefault(e.Model, DefaultPricing);
-        var inputCost = (decimal)e.InputTokens / 1_000_000m * pricing.InputPer1M;
-        var outputCost = (decimal)e.OutputTokens / 1_000_000m * pricing.OutputPer1M;
+        var (InputPer1M, OutputPer1M) = _modelPricing.GetValueOrDefault(e.Model, _defaultPricing);
+        var inputCost = e.InputTokens / 1_000_000m * InputPer1M;
+        var outputCost = e.OutputTokens / 1_000_000m * OutputPer1M;
         return inputCost + outputCost;
     }
 }

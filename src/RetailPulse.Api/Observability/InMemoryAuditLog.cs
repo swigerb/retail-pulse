@@ -10,14 +10,14 @@ namespace RetailPulse.Api.Observability;
 public class InMemoryAuditLog : IAuditLog
 {
     private readonly ConcurrentQueue<AuditEntry> _entries = new();
-    private const int MaxEntries = 5000;
+    private const int _maxEntries = 5000;
 
     public Task LogAsync(AuditEntry entry, CancellationToken ct = default)
     {
         _entries.Enqueue(entry);
 
         // Trim overflow — ring buffer semantics
-        while (_entries.Count > MaxEntries)
+        while (_entries.Count > _maxEntries)
             _entries.TryDequeue(out _);
 
         return Task.CompletedTask;

@@ -55,10 +55,9 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
 
     public Task<AdaptiveCard> GetAsync(string cardId, CancellationToken ct = default)
     {
-        if (!_cards.TryGetValue(cardId, out var state))
-            throw new KeyNotFoundException($"Card '{cardId}' not found.");
-
-        return Task.FromResult(state.ToAdaptiveCard());
+        return !_cards.TryGetValue(cardId, out var state)
+            ? throw new KeyNotFoundException($"Card '{cardId}' not found.")
+            : Task.FromResult(state.ToAdaptiveCard());
     }
 
     public async Task<AdaptiveCard> ActionAsync(string cardId, CardAction action, CancellationToken ct = default)

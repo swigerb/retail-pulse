@@ -27,7 +27,7 @@ public sealed class ProactiveAlertService : BackgroundService
     private readonly ILogger<ProactiveAlertService> _logger;
     private readonly TimeSpan _checkInterval;
 
-    private static readonly ActivitySource ActivitySource = new("RetailPulse.Alerts");
+    private static readonly ActivitySource _activitySource = new("RetailPulse.Alerts");
 
     public ProactiveAlertService(
         SqliteAlertService alertStore,
@@ -65,7 +65,7 @@ public sealed class ProactiveAlertService : BackgroundService
 
     private async Task RunCheckCycleAsync(CancellationToken ct)
     {
-        using var activity = ActivitySource.StartActivity("alert.check_cycle");
+        using var activity = _activitySource.StartActivity("alert.check_cycle");
 
         try
         {
@@ -278,10 +278,8 @@ public sealed class ProactiveAlertService : BackgroundService
             sumX2 += i * i;
         }
 
-        var denominator = n * sumX2 - sumX * sumX;
-        if (Math.Abs(denominator) < 0.0001) return 0;
-
-        return (n * sumXY - sumX * sumY) / denominator;
+        var denominator = (n * sumX2) - (sumX * sumX);
+        return Math.Abs(denominator) < 0.0001 ? 0 : ((n * sumXY) - (sumX * sumY)) / denominator;
     }
 
     // ── Data fetching ────────────────────────────────────────────────────

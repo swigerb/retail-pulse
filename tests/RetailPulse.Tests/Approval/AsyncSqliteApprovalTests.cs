@@ -122,10 +122,11 @@ public class AsyncSqliteApprovalTests : IDisposable
     }
 
     [Fact]
-    public async Task BackoffConstants_AreCorrect()
+    public Task BackoffConstants_AreCorrect()
     {
         SqliteApprovalGate.InitialBackoff.Should().Be(TimeSpan.FromMilliseconds(250));
         SqliteApprovalGate.MaxBackoff.Should().Be(TimeSpan.FromSeconds(4));
         SqliteApprovalGate.BackoffMultiplier.Should().Be(2.0);
+        return Task.CompletedTask;
     }
 }

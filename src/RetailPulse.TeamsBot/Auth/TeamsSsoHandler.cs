@@ -1,9 +1,9 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Text.Json;
 using Microsoft.Agents.Core.Models;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Text.Json;
 
 namespace RetailPulse.TeamsBot.Auth;
 
@@ -77,7 +77,7 @@ public class TeamsSsoHandler
                 ValidateIssuer = true,
                 ValidIssuers = validIssuers,
                 ValidateAudience = true,
-                ValidAudiences = new[] { botClientId },
+                ValidAudiences = [botClientId],
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKeys = oidcConfig.SigningKeys,
                 ClockSkew = TimeSpan.FromMinutes(5)
@@ -140,19 +140,19 @@ public class TeamsSsoHandler
         if (!string.IsNullOrEmpty(_configuredTenantId))
         {
             // Tenant-specific issuers only — no common endpoint
-            return new[]
-            {
+            return
+            [
                 $"https://login.microsoftonline.com/{_configuredTenantId}/v2.0",
                 $"https://sts.windows.net/{_configuredTenantId}/"
-            };
+            ];
         }
 
         // Development fallback with common issuer (no tenant configured)
-        return new[]
-        {
+        return
+        [
             "https://login.microsoftonline.com/common/v2.0",
             "https://sts.windows.net/common/"
-        };
+        ];
     }
 
     /// <summary>

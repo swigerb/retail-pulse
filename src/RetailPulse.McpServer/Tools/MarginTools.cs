@@ -14,8 +14,7 @@ public static class MarginTools
         [Description("Brand name (required, e.g. 'Sierra Gold Tequila')")] string brand,
         [Description("Period filter (e.g. '2026-Q1'). Omit for all periods.")] string? period = null)
     {
-        if (string.IsNullOrWhiteSpace(brand)) return new { error = "Parameter 'brand' is required." };
-        return data.GetMarginByBrand(brand, period);
+        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginByBrand(brand, period);
     }
 
     [McpServerTool(Name = "GetMarginDrivers")]
@@ -24,8 +23,7 @@ public static class MarginTools
         RetailPulseDb data,
         [Description("Brand name (required)")] string brand)
     {
-        if (string.IsNullOrWhiteSpace(brand)) return new { error = "Parameter 'brand' is required." };
-        return data.GetMarginDrivers(brand);
+        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginDrivers(brand);
     }
 
     [McpServerTool(Name = "GetMarginTrend")]
@@ -35,8 +33,7 @@ public static class MarginTools
         [Description("Brand name (required)")] string brand,
         [Description("Number of quarters to show (default 4)")] int quarters = 4)
     {
-        if (string.IsNullOrWhiteSpace(brand)) return new { error = "Parameter 'brand' is required." };
-        return data.GetMarginTrend(brand, quarters);
+        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginTrend(brand, quarters);
     }
 
     [McpServerTool(Name = "DetectMarginRisks")]

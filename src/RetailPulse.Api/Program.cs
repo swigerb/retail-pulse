@@ -7,40 +7,40 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Agents;
-using RetailPulse.Api.Auth;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Agents.Tools;
 using RetailPulse.Api.Alerts;
 using RetailPulse.Api.Approval;
+using RetailPulse.Api.Auth;
+using RetailPulse.Api.Caching;
+using RetailPulse.Api.Cards;
+using RetailPulse.Api.Configuration;
+using RetailPulse.Api.Endpoints;
+using RetailPulse.Api.Health;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
+using RetailPulse.Api.Observability;
+using RetailPulse.Api.Rag;
+using RetailPulse.Api.Resilience;
 using RetailPulse.Api.Security;
+using RetailPulse.Api.Telemetry;
 using RetailPulse.Api.Tools;
 using RetailPulse.Api.Tracing;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Alerts;
 using RetailPulse.Contracts.Approval;
+using RetailPulse.Contracts.Caching;
+using RetailPulse.Contracts.Cards;
+using RetailPulse.Contracts.Guardrails;
 using RetailPulse.Contracts.Memory;
+using RetailPulse.Contracts.Observability;
+using RetailPulse.Contracts.Rag;
 using RetailPulse.Contracts.Routing;
 using RetailPulse.Contracts.Tracing;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
-using RetailPulse.Api.Rag;
-using RetailPulse.Contracts.Caching;
-using RetailPulse.Contracts.Cards;
-using RetailPulse.Contracts.Guardrails;
-using RetailPulse.Contracts.Observability;
-using RetailPulse.Contracts.Rag;
-using RetailPulse.Api.Cards;
-using RetailPulse.Api.Caching;
-using RetailPulse.Api.Configuration;
-using RetailPulse.Api.Endpoints;
-using RetailPulse.Api.Health;
-using RetailPulse.Api.Observability;
-using RetailPulse.Api.Resilience;
-using RetailPulse.Api.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -84,7 +84,7 @@ builder.Services.AddSignalR()
 // ── CORS — split policies for Development vs Production ─────────────────
 var corsDevOrigins = new[] { "http://localhost:5173", "https://localhost:5173" };
 var corsProdOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>()
-    ?? Array.Empty<string>();
+    ?? [];
 
 builder.Services.AddCors(options =>
 {
@@ -548,15 +548,10 @@ var openAiEndpoint = builder.Configuration["OpenAI:Endpoint"]
 var openAiApiKey = builder.Configuration["OpenAI:ApiKey"];
 if (string.IsNullOrWhiteSpace(openAiApiKey))
 {
-    if (builder.Environment.IsDevelopment())
-    {
-        openAiApiKey = "demo-key";
-    }
-    else
-    {
-        throw new InvalidOperationException(
+    openAiApiKey = builder.Environment.IsDevelopment()
+        ? "demo-key"
+        : throw new InvalidOperationException(
             "Configuration value 'OpenAI:ApiKey' is required outside of Development.");
-    }
 }
 
 // NetworkTimeout caps a single HTTP attempt (one LLM roundtrip) to the AI Gateway.
@@ -662,15 +657,15 @@ demandToolsFactory: sp =>
     var chartTool = sp.GetRequiredService<ChartDataTool>();
     var approvalTool = sp.GetRequiredService<ApprovalTool>();
 
-    return new List<AITool>
-    {
+    return
+    [
         AIFunctionFactory.Create(historicalDemandTool.GetHistoricalDemand),
         AIFunctionFactory.Create(forecastTool.GenerateForecast),
         AIFunctionFactory.Create(seasonalityTool.GetSeasonalityFactors),
         AIFunctionFactory.Create(demandRisksTool.IdentifyDemandRisks),
         AIFunctionFactory.Create(chartTool.CreateChart),
         AIFunctionFactory.Create(approvalTool.RequestApproval)
-    };
+    ];
 },
 promoPlanningDef: promoPlanningDef,
 promoToolsFactory: sp =>
@@ -682,15 +677,15 @@ promoToolsFactory: sp =>
     var chartTool = sp.GetRequiredService<ChartDataTool>();
     var approvalTool = sp.GetRequiredService<ApprovalTool>();
 
-    return new List<AITool>
-    {
+    return
+    [
         AIFunctionFactory.Create(promoHistoryTool.GetPromoHistory),
         AIFunctionFactory.Create(calculateLiftTool.CalculateLift),
         AIFunctionFactory.Create(evaluateTimingTool.EvaluateTiming),
         AIFunctionFactory.Create(estimateROITool.EstimateROI),
         AIFunctionFactory.Create(chartTool.CreateChart),
         AIFunctionFactory.Create(approvalTool.RequestApproval)
-    };
+    ];
 },
 competitiveIntelDef: competitiveIntelDef,
 competitiveToolsFactory: sp =>
@@ -701,14 +696,14 @@ competitiveToolsFactory: sp =>
     var competitiveLandscapeTool = sp.GetRequiredService<CompetitiveLandscapeTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
 
-    return new List<AITool>
-    {
+    return
+    [
         AIFunctionFactory.Create(competitorPricingTool.GetCompetitorPricing),
         AIFunctionFactory.Create(marketShareTool.GetMarketShare),
         AIFunctionFactory.Create(detectThreatsTool.DetectThreats),
         AIFunctionFactory.Create(competitiveLandscapeTool.GetCompetitiveLandscape),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    };
+    ];
 },
 supplyChainDef: supplyChainDef,
 supplyToolsFactory: sp =>
@@ -719,14 +714,14 @@ supplyToolsFactory: sp =>
     var supplyHealthTool = sp.GetRequiredService<SupplyHealthTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
 
-    return new List<AITool>
-    {
+    return
+    [
         AIFunctionFactory.Create(inventoryTool.GetInventoryLevels),
         AIFunctionFactory.Create(disruptionsTool.GetSupplyDisruptions),
         AIFunctionFactory.Create(fulfillmentTool.GetFulfillmentRate),
         AIFunctionFactory.Create(supplyHealthTool.GetSupplyHealthSummary),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    };
+    ];
 },
 storeOpsDef: storeOpsDef,
 storeOpsToolsFactory: sp =>
@@ -737,14 +732,14 @@ storeOpsToolsFactory: sp =>
     var predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
 
-    return new List<AITool>
-    {
+    return
+    [
         AIFunctionFactory.Create(storePerformanceTool.GetStorePerformance),
         AIFunctionFactory.Create(shelfLayoutTool.GetShelfLayout),
         AIFunctionFactory.Create(optimizePlanogramTool.OptimizePlanogram),
         AIFunctionFactory.Create(predictStockoutTool.PredictStockout),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    };
+    ];
 },
 planogramDef: planogramDef,
 planogramToolsFactory: sp =>
@@ -754,13 +749,13 @@ planogramToolsFactory: sp =>
     var predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
 
-    return new List<AITool>
-    {
+    return
+    [
         AIFunctionFactory.Create(shelfLayoutTool.GetShelfLayout),
         AIFunctionFactory.Create(optimizePlanogramTool.OptimizePlanogram),
         AIFunctionFactory.Create(predictStockoutTool.PredictStockout),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    };
+    ];
 },
 marginDef: marginDef,
 marginToolsFactory: sp =>
@@ -771,14 +766,14 @@ marginToolsFactory: sp =>
     var detectMarginRisksTool = sp.GetRequiredService<DetectMarginRisksTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
 
-    return new List<AITool>
-    {
+    return
+    [
         AIFunctionFactory.Create(marginByBrandTool.GetMarginByBrand),
         AIFunctionFactory.Create(marginDriversTool.GetMarginDrivers),
         AIFunctionFactory.Create(marginTrendTool.GetMarginTrend),
         AIFunctionFactory.Create(detectMarginRisksTool.DetectMarginRisks),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    };
+    ];
 });
 
 // Register FieldSentimentAgent — dedicated agent with scoped tools (only sentiment + chart)

@@ -1,9 +1,9 @@
+using Microsoft.Extensions.AI;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
-using Microsoft.Extensions.AI;
 
 namespace RetailPulse.Api.Agents;
 
