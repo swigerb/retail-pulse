@@ -4,8 +4,11 @@ using RetailPulse.Contracts.Caching;
 namespace RetailPulse.Api.Startup;
 
 /// <summary>
-/// Background service that pre-populates the MCP response cache with common demo queries
-/// on application startup. Ensures the first demo query is served from cache (fast response).
+/// Background service that validates the response cache infrastructure is operational
+/// on application startup. Performs a write/read/delete cycle to confirm connectivity.
+/// 
+/// The cache is populated organically — the first real request for each query caches
+/// the actual AI response (see ChatEndpoints cache-store logic).
 /// 
 /// Configuration:
 ///   CacheWarming:Enabled = true/false (default: true in Development)
@@ -15,18 +18,6 @@ public class CacheWarmingService : IHostedService
     private readonly IResponseCache _cache;
     private readonly IConfiguration _configuration;
     private readonly ILogger<CacheWarmingService> _logger;
-
-    /// <summary>
-    /// The 5 demo queries that should be pre-warmed in the cache.
-    /// </summary>
-    private static readonly string[] _demoQueries =
-    [
-        "How is Apex Grill performing in the Southwest this quarter?",
-        "What's our competitive pricing position for premium burgers?",
-        "What's the sentiment from field reps about our new Smokehouse line?",
-        "Show me the portfolio health across all regions",
-        "What are the top inventory depletion risks this week?"
-    ];
 
     public CacheWarmingService(
         IResponseCache cache,
@@ -47,59 +38,35 @@ public class CacheWarmingService : IHostedService
             return;
         }
 
-        _logger.LogInformation("Starting cache warming for {Count} demo queries...", _demoQueries.Length);
-        var overallStart = DateTimeOffset.UtcNow;
+        _logger.LogInformation("Validating cache infrastructure...");
 
-        var warmingTasks = _demoQueries.Select(async query =>
+        try
         {
-            var queryStart = DateTimeOffset.UtcNow;
-            try
+            // Perform a write/read/delete cycle to confirm the cache is operational
+            const string healthCheckKey = "__cache_health_check__";
+            var probe = new CachedResponse(
+                Response: "health-check",
+                AgentId: "startup-probe",
+                CachedAt: DateTime.UtcNow,
+                QueryHash: healthCheckKey);
+
+            await _cache.SetAsync(healthCheckKey, probe, TimeSpan.FromSeconds(30), cancellationToken);
+            var readBack = await _cache.GetAsync(healthCheckKey, cancellationToken);
+
+            if (readBack is not null)
             {
-                // Generate cache key using the same logic as the chat endpoint
-                var cacheKey = Middleware.CacheHelpers.BuildCacheKey("pre-route", query);
-
-                // Check if already cached
-                var existing = await _cache.GetAsync(cacheKey, cancellationToken);
-                if (existing is not null)
-                {
-                    _logger.LogDebug("Cache already warm for query: {Query}", TruncateQuery(query));
-                    return;
-                }
-
-                // Pre-populate with a placeholder response indicating this is a warm-up entry.
-                // The actual response will be replaced on first real request, but this ensures
-                // the cache infrastructure is exercised and ready.
-                var warmResponse = new CachedResponse(
-                    Response: "[Cache warming placeholder — will be replaced on first live request]",
-                    AgentId: "cache-warming",
-                    CachedAt: DateTime.UtcNow,
-                    QueryHash: cacheKey);
-
-                await _cache.SetAsync(cacheKey, warmResponse, TimeSpan.FromMinutes(60), cancellationToken);
-
-                var elapsed = DateTimeOffset.UtcNow - queryStart;
-                _logger.LogInformation(
-                    "Warmed cache for query: \"{Query}\" in {ElapsedMs:F0}ms",
-                    TruncateQuery(query),
-                    elapsed.TotalMilliseconds);
+                _logger.LogInformation("Cache infrastructure validated — ready to serve requests");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            else
             {
-                _logger.LogWarning(ex, "Failed to warm cache for query: {Query}", TruncateQuery(query));
+                _logger.LogWarning("Cache write succeeded but read-back returned null — cache may be misconfigured");
             }
-        });
-
-        await Task.WhenAll(warmingTasks);
-
-        var totalElapsed = DateTimeOffset.UtcNow - overallStart;
-        _logger.LogInformation(
-            "Cache warming complete — {Count} queries processed in {ElapsedMs:F0}ms",
-            _demoQueries.Length,
-            totalElapsed.TotalMilliseconds);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Cache infrastructure validation failed — responses will not be cached");
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    private static string TruncateQuery(string query)
-        => query.Length > 60 ? string.Concat(query.AsSpan(0, 57), "...") : query;
 }
