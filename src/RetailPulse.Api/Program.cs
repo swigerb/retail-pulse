@@ -493,6 +493,9 @@ builder.Services.AddSingleton<InMemoryTraceCollector>(sp =>
 builder.Services.AddSingleton<ITraceCollector>(sp => sp.GetRequiredService<InMemoryTraceCollector>());
 builder.Services.AddHostedService<RetailPulse.Api.Tracing.TelemetryPushBackgroundService>();
 
+// ── Pre-demo cache warming (populates MCP response cache on startup) ────
+builder.Services.AddHostedService<RetailPulse.Api.Startup.CacheWarmingService>();
+
 // RAG Knowledge Base — in-memory BM25-based document store (no Azure dependency)
 builder.Services.AddSingleton<InMemoryKnowledgeBase>();
 builder.Services.AddSingleton<IKnowledgeBase>(sp => sp.GetRequiredService<InMemoryKnowledgeBase>());

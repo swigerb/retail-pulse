@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '20'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build & Test (.NET)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore RetailPulse.slnx
+
+      - name: Build
+        run: dotnet build RetailPulse.slnx --no-restore --configuration Release
+
+      - name: Test with coverage
+        run: |
+          dotnet test RetailPulse.slnx \
+            --no-build \
+            --configuration Release \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./test-results \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: ./test-results/**/*.trx
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: ./test-results/**/coverage.opencover.xml
+
+      - name: Install ReportGenerator
+        if: success()
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Generate coverage report
+        if: success()
+        run: |
+          reportgenerator \
+            -reports:"./test-results/**/coverage.opencover.xml" \
+            -targetdir:"./coverage-report" \
+            -reporttypes:"Html;TextSummary"
+
+      - name: Upload HTML coverage report
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: coverage-html
+          path: ./coverage-report
+
+      - name: Check coverage threshold (informational)
+        if: success()
+        run: |
+          if [ -f "./coverage-report/Summary.txt" ]; then
+            echo "=== Coverage Summary ==="
+            cat ./coverage-report/Summary.txt
+            echo ""
+            echo "Note: 70% threshold is aspirational — build does not fail on coverage."
+          fi
+
+  frontend:
+    name: Frontend (React/Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/RetailPulse.Web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/RetailPulse.Web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npx vitest run
+
+  security:
+    name: Security (Vulnerable Packages)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore RetailPulse.slnx
+
+      - name: Check for vulnerable packages
+        run: |
+          echo "=== Checking for known vulnerabilities ==="
+          dotnet list RetailPulse.slnx package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
+          if grep -q "has the following vulnerable packages" vulnerability-report.txt; then
+            echo "::warning::Vulnerable packages detected — review vulnerability-report.txt"
+          else
+            echo "No known vulnerabilities found."
+          fi
+
+      - name: Upload vulnerability report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vulnerability-report
+          path: vulnerability-report.txt
+
+  lint:
+    name: Lint (dotnet format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore RetailPulse.slnx
+
+      - name: Check formatting
+        run: dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic

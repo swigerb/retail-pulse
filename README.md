@@ -9,6 +9,8 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
 [![Aspire 13.3](https://img.shields.io/badge/Aspire-13.3.0-6C3BAA)](https://learn.microsoft.com/dotnet/aspire/)
+[![CI](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-70%25_target-brightgreen)](./coverage-report)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Overview

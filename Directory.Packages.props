@@ -45,6 +45,9 @@
     <!-- Serialization -->
     <PackageVersion Include="System.Threading.RateLimiting" Version="10.0.8" />
     <PackageVersion Include="YamlDotNet" Version="17.0.1" />
+    <!-- Load Testing -->
+    <PackageVersion Include="NBomber" Version="6.0.0" />
+    <PackageVersion Include="NBomber.Http" Version="6.0.0" />
     <!-- Benchmarks -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.14.0" />
     <!-- Test -->
