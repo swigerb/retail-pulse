@@ -625,7 +625,7 @@ export function Dashboard() {
                 <TraceDashboard traces={traces} />
               </CollapsibleSection>
             )}
-            <CollapsibleSection title="Live Spans">
+            <CollapsibleSection title="Live Spans" defaultExpanded>
               <TelemetryPanel
                 connected={connected}
                 liveSpans={liveSpans}
