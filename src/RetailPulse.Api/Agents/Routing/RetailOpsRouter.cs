@@ -32,8 +32,14 @@ public partial class RetailOpsRouter : IAgentRouter
     /// <summary>Confidence assigned to keyword fast-path matches.</summary>
     private const double _keywordMatchConfidence = 0.95;
 
-    [GeneratedRegex(@"how is .+ performing", RegexOptions.IgnoreCase)]
-    private static partial Regex PerformingRegex();
+    /// <summary>
+    /// Matches portfolio-level health queries like "how is the portfolio performing" or
+    /// "how are all brands performing". Does NOT match single-brand+region queries like
+    /// "how is Apex Grill performing in the Southwest" — those are simple data lookups
+    /// that should route to GeneralAgent (1 tool call) instead of the Consensus Council (4+ LLM calls).
+    /// </summary>
+    [GeneratedRegex(@"how is (?:the |our |my )?(portfolio|overall|everything) performing", RegexOptions.IgnoreCase)]
+    private static partial Regex PortfolioPerformingRegex();
 
     /// <summary>
     /// Keyword patterns mapped to their intent. Each entry has "strong" keywords that match
@@ -180,8 +186,11 @@ public partial class RetailOpsRouter : IAgentRouter
     /// </summary>
     private static IntentClassification? TryKeywordClassify(string message)
     {
-        // Check regex pattern for PortfolioHealth first
-        if (PerformingRegex().IsMatch(message))
+        // Portfolio-level "performing" queries → council (multi-agent synthesis)
+        // Single-brand queries like "How is Apex Grill performing in the Southwest?"
+        // intentionally fall through to LLM classification → routes to GeneralAgent
+        // (1 tool call) instead of the Consensus Council (4+ LLM roundtrips).
+        if (PortfolioPerformingRegex().IsMatch(message))
         {
             return new IntentClassification(
                 AgentIntent.PortfolioHealth, _keywordMatchConfidence, [AgentIntent.PortfolioHealth]);

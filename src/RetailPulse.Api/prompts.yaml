@@ -372,6 +372,7 @@ agents:
       | "national performance" | GetDepletionStats with region="National" | Aggregated national rollup |
       | "trend" / "over time" / "trajectory" | GetDepletionStats per brand | Time-series data for trend lines |
       | "single brand deep-dive" | GetDepletionStats | Focused single-brand metrics |
+      | "how is [brand] performing" / "brand performance" | GetDepletionStats | Single call with brand + region + period. Do NOT convene multiple tools for a simple performance query. |
       | "variant" / "variant mix" / "product mix" / "SKU mix" / "product breakdown" / "SKU split" / "flavor breakdown" | GetVariantMix | Returns mix_percent values ready for donut/pie charting. Do NOT use GetDepletionStats or GetFieldSentiment for variant queries. |
       | "pipeline health" / "shipments" | AnalyzeShipments | Three-Tier distribution analysis |
       | "field feedback" / "sentiment" | GetFieldSentiment | Qualitative distributor intelligence |
