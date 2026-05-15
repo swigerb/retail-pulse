@@ -49,14 +49,15 @@ public class GeneralAgentTests
     public void SupportedIntents_CoversFiveDomains()
     {
         var agent = CreateAgent();
-        // DemandForecasting is now owned by DemandForecastAgent
+        // GeneralAgent is the fallback — it only claims General + SentimentField.
+        // Dedicated specialists own PromotionTrade, SupplyShipments, CompetitiveMarket.
         agent.SupportedIntents.Should().NotContain(AgentIntent.DemandForecasting);
-        agent.SupportedIntents.Should().Contain(AgentIntent.PromotionTrade);
-        agent.SupportedIntents.Should().Contain(AgentIntent.SupplyShipments);
-        agent.SupportedIntents.Should().Contain(AgentIntent.CompetitiveMarket);
+        agent.SupportedIntents.Should().NotContain(AgentIntent.PromotionTrade);
+        agent.SupportedIntents.Should().NotContain(AgentIntent.SupplyShipments);
+        agent.SupportedIntents.Should().NotContain(AgentIntent.CompetitiveMarket);
         agent.SupportedIntents.Should().Contain(AgentIntent.SentimentField);
         agent.SupportedIntents.Should().Contain(AgentIntent.General);
-        agent.SupportedIntents.Should().HaveCountGreaterThanOrEqualTo(5);
+        agent.SupportedIntents.Should().HaveCount(2);
     }
 
     #endregion

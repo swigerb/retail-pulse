@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.SignalR;
+using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
@@ -21,12 +23,19 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken ct, IConsensusCouncil? council = null) =>
+        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
             {
                 return Results.BadRequest(new { error = "Field 'message' is required." });
             }
+
+            // Per-request timeout: caps the whole pipeline (router classify + agent execute
+            // + tool calls) so a hung AI Gateway call cannot leave the UI spinning forever.
+            // 75s gives complex multi-tool chats room to finish while still bounding worst-case latency.
+            using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
+            requestCts.CancelAfter(TimeSpan.FromSeconds(75));
+            var ct = requestCts.Token;
 
             try
             {
@@ -385,6 +394,25 @@ public static class ChatEndpoints
 
                 return Results.Ok(response);
             }
+            catch (OperationCanceledException) when (clientCt.IsCancellationRequested)
+            {
+                // Client navigated away or aborted — no response needed.
+                logger.LogInformation("Chat request cancelled by client for session {SessionId}", request.SessionId);
+                return Results.StatusCode(StatusCodes.Status499ClientClosedRequest);
+            }
+            catch (OperationCanceledException)
+            {
+                // Our request-level timeout fired (linked CTS). Surface a friendly 504 so the UI
+                // can stop spinning and show a clear error instead of waiting forever.
+                logger.LogWarning("Chat request timed out for session {SessionId}", request.SessionId);
+                return Results.Json(
+                    new
+                    {
+                        error = "The AI service took too long to respond. Please try again — if it persists, try a simpler question first.",
+                        code = "request_timeout"
+                    },
+                    statusCode: StatusCodes.Status504GatewayTimeout);
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unhandled error from chat agent for session {SessionId}", request.SessionId);
@@ -403,12 +431,17 @@ public static class ChatEndpoints
         .RequireRateLimiting("strict");
 
         // Streaming chat endpoint — SSE/SignalR progressive token delivery
-        app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken ct) =>
+        app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
             {
                 return Results.BadRequest(new { error = "Field 'message' is required." });
             }
+
+            // Per-request timeout (see /api/chat for rationale).
+            using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
+            requestCts.CancelAfter(TimeSpan.FromSeconds(75));
+            var ct = requestCts.Token;
 
             try
             {
@@ -461,6 +494,27 @@ public static class ChatEndpoints
                 memoryChannel.TryWrite(new MemoryWorkItem(userId, request.Message, response.Reply));
 
                 return Results.Ok(response);
+            }
+            catch (OperationCanceledException) when (clientCt.IsCancellationRequested)
+            {
+                logger.LogInformation("Streaming chat cancelled by client for session {SessionId}", request.SessionId);
+                return Results.StatusCode(StatusCodes.Status499ClientClosedRequest);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogWarning("Streaming chat timed out for session {SessionId}", request.SessionId);
+                // Emit a streaming:error event so any connected SignalR client can stop its spinner.
+                try
+                {
+                    var hub = app.Services.GetService<IHubContext<StreamingHub>>();
+                    if (hub is not null && request.SessionId is not null)
+                        await StreamingEvents.SendErrorAsync(hub, request.SessionId, "The AI service took too long to respond.");
+                }
+                catch { /* best-effort notification — don't mask the timeout */ }
+
+                return Results.Json(
+                    new { error = "The AI service took too long to respond.", code = "request_timeout" },
+                    statusCode: StatusCodes.Status504GatewayTimeout);
             }
             catch (Exception ex)
             {

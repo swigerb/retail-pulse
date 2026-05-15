@@ -598,9 +598,13 @@ if (string.IsNullOrWhiteSpace(openAiApiKey))
     }
 }
 
+// NetworkTimeout caps a single HTTP attempt to the AI Gateway. 3 minutes was far
+// too long for an interactive UI — a stalled call would leave the user staring at
+// an infinite spinner. 60s gives slow tool-using chats room to breathe while still
+// failing fast enough that the request-level timeout in /api/chat can recover.
 var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
 {
-    NetworkTimeout = TimeSpan.FromMinutes(3)
+    NetworkTimeout = TimeSpan.FromSeconds(60)
 };
 
 var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(

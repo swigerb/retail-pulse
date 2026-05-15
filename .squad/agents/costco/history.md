@@ -429,3 +429,20 @@ Full Phase 4 implementation across all three sprints: Store Operations & Planogr
 - 2026-05-14 — Key file paths: `src/RetailPulse.Api/Program.cs` (client init ~line 601), `src/RetailPulse.Api/Agents/AgentExecutionPipeline.cs` (execution pipeline try-catch).
 
 **Validation:** Build clean (0 errors), all 1576 tests pass
+
+## Learnings
+
+### 2026-05-15 — Demo blocker: chat endpoint infinite spin
+
+**Symptom:** Clicking default-question buttons in the UI spun forever. Backend never returned, so the FE spinner never cleared.
+
+**Root cause:** The /api/chat pipeline (guardrails -> cache -> RAG -> router classify -> specialist HandleAsync) has *two* sequential IChatClient calls (router + agent) and zero overall request timeout. AzureOpenAIClientOptions.NetworkTimeout was set to 3 minutes per attempt, and Azure SDK retries can stack on top. Worst-case a single hung AI Gateway call could keep the request open well past any user's patience -> 'infinite spin'.
+
+**Fix (src/RetailPulse.Api):**
+- Endpoints/ChatEndpoints.cs: Wrapped both /api/chat and /api/chat/stream in a linked CancellationTokenSource with CancelAfter(75s). Renamed the lambda parameter to clientCt so the existing 'ct' in the body now points at the linked token, propagating timeout through router.RouteAsync, specialist.HandleAsync, RAG, memory, guardrails and the cache. Added explicit catch arms that distinguish client-abort (499) from request-timeout (504) from generic failure (503). Stream endpoint also fires a streaming:error SignalR event on timeout so any connected client can stop its own spinner.
+- Program.cs: Reduced AzureOpenAIClient NetworkTimeout from 3 min to 60 s — interactive UI doesn't tolerate 3-minute hangs and 60s still covers slow tool-using completions.
+
+**Why 75s for the request and 60s for the network:** Network timeout fires first on a single hung HTTP attempt, the Azure SDK can attempt a fast retry, and the request-level cap then ends the whole pipeline cleanly with a 504 instead of letting retries stack.
+
+**Build:** dotnet build RetailPulse.slnx -> 0 errors, 0 warnings.
+
