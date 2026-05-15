@@ -37,6 +37,8 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
             case "access_denial":
                 Interlocked.Increment(ref _accessDenialCount);
                 break;
+            default:
+                break;
         }
 
         // Ring buffer eviction

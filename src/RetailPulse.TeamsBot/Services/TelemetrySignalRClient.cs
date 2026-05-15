@@ -1,6 +1,6 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR.Client;
 using RetailPulse.Contracts;
-using System.Collections.Concurrent;
 
 namespace RetailPulse.TeamsBot.Services;
 
@@ -15,7 +15,6 @@ public class TelemetrySignalRClient : IAsyncDisposable
     private readonly ILogger<TelemetrySignalRClient> _logger;
     private readonly ConcurrentDictionary<string, ConcurrentQueue<AgentSpan>> _spanCollections = new();
     private readonly string _healthMode;
-    private bool _isConnected;
     private int _reconnectAttempts;
 
     // Exponential backoff parameters
@@ -25,10 +24,10 @@ public class TelemetrySignalRClient : IAsyncDisposable
     internal const int MaxReconnectAttempts = 10;
 
     /// <summary>True when the SignalR connection is alive.</summary>
-    public bool IsConnected => _isConnected;
+    public bool IsConnected { get; private set; }
 
     /// <summary>True when the connection is degraded (disconnected but not in fail-fast mode).</summary>
-    public bool IsDegraded => !_isConnected && _healthMode != "fail-fast";
+    public bool IsDegraded => !IsConnected && _healthMode != "fail-fast";
 
     public TelemetrySignalRClient(HubConnection connection, ILogger<TelemetrySignalRClient> logger, string healthMode = "degraded")
     {
@@ -56,14 +55,14 @@ public class TelemetrySignalRClient : IAsyncDisposable
 
     private Task OnConnectionClosed(Exception? ex)
     {
-        _isConnected = false;
+        IsConnected = false;
         _logger.LogWarning(ex, "SignalR telemetry connection closed. HealthMode={HealthMode}", _healthMode);
         return Task.CompletedTask;
     }
 
     private Task OnReconnected(string? connectionId)
     {
-        _isConnected = true;
+        IsConnected = true;
         _reconnectAttempts = 0;
         _logger.LogInformation("SignalR telemetry connection restored. ConnectionId={ConnectionId}", connectionId);
         return Task.CompletedTask;
@@ -75,7 +74,7 @@ public class TelemetrySignalRClient : IAsyncDisposable
     /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-        if (_isConnected) return;
+        if (IsConnected) return;
 
         var delay = InitialReconnectDelay;
 
@@ -84,7 +83,7 @@ public class TelemetrySignalRClient : IAsyncDisposable
             try
             {
                 await _connection.StartAsync(cancellationToken);
-                _isConnected = true;
+                IsConnected = true;
                 _reconnectAttempts = 0;
                 _logger.LogInformation("Connected to telemetry SignalR hub");
                 return;
@@ -132,7 +131,7 @@ public class TelemetrySignalRClient : IAsyncDisposable
     {
         _spanCollections.GetOrAdd(sessionId, _ => new ConcurrentQueue<AgentSpan>());
 
-        if (_isConnected)
+        if (IsConnected)
         {
             try
             {
@@ -167,12 +166,12 @@ public class TelemetrySignalRClient : IAsyncDisposable
             return result;
         }
 
-        return new List<AgentSpan>();
+        return [];
     }
 
     private async Task LeaveSessionAsync(string sessionId)
     {
-        if (!_isConnected) return;
+        if (!IsConnected) return;
         try
         {
             await _connection.InvokeAsync("LeaveSession", sessionId);

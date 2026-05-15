@@ -1,3 +1,4 @@
+using System.Globalization;
 using RetailPulse.Contracts.Rag;
 
 namespace RetailPulse.Api.Rag;
@@ -11,8 +12,8 @@ public class RagContextProvider
 {
     private readonly IKnowledgeBase _knowledgeBase;
     private readonly ILogger<RagContextProvider> _logger;
-    private const int TopK = 3;
-    private const double MinRelevanceScore = 0.3;
+    private const int _topK = 3;
+    private const double _minRelevanceScore = 0.3;
 
     public RagContextProvider(IKnowledgeBase knowledgeBase, ILogger<RagContextProvider> logger)
     {
@@ -28,9 +29,9 @@ public class RagContextProvider
     {
         try
         {
-            var results = await _knowledgeBase.SearchAsync(userMessage, TopK, ct);
+            var results = await _knowledgeBase.SearchAsync(userMessage, _topK, ct);
 
-            var relevant = results.Where(r => r.Score >= MinRelevanceScore).ToList();
+            var relevant = results.Where(r => r.Score >= _minRelevanceScore).ToList();
             if (relevant.Count == 0)
                 return null;
 
@@ -41,7 +42,7 @@ public class RagContextProvider
 
             foreach (var result in relevant)
             {
-                sb.AppendLine($"[Source: {result.Title}, chunk {result.ChunkIndex}] (relevance: {result.Score:F2})");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"[Source: {result.Title}, chunk {result.ChunkIndex}] (relevance: {result.Score.ToString("F2", CultureInfo.InvariantCulture)})");
                 sb.AppendLine(result.Chunk);
                 sb.AppendLine();
             }

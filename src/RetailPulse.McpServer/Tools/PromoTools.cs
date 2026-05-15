@@ -34,10 +34,7 @@ public static class PromoTools
             return new { error = "Parameter 'region' is required." };
         if (string.IsNullOrWhiteSpace(promoType))
             return new { error = "Parameter 'promoType' is required." };
-        if (spend <= 0)
-            return new { error = "Parameter 'spend' must be greater than 0." };
-
-        return data.CalculateLift(brand, region, promoType, spend);
+        return spend <= 0 ? (new { error = "Parameter 'spend' must be greater than 0." }) : data.CalculateLift(brand, region, promoType, spend);
     }
 
     [McpServerTool(Name = "EvaluateTiming")]
@@ -57,10 +54,7 @@ public static class PromoTools
             return new { error = "Parameter 'startDate' must be a valid date (e.g. '2026-06-01')." };
         if (!DateOnly.TryParse(endDate, out var end))
             return new { error = "Parameter 'endDate' must be a valid date (e.g. '2026-06-28')." };
-        if (end <= start)
-            return new { error = "endDate must be after startDate." };
-
-        return data.EvaluateTiming(brand, region, start, end);
+        return end <= start ? (new { error = "endDate must be after startDate." }) : data.EvaluateTiming(brand, region, start, end);
     }
 
     [McpServerTool(Name = "EstimateROI")]
@@ -81,9 +75,8 @@ public static class PromoTools
             return new { error = "Parameter 'promoType' is required." };
         if (spend <= 0)
             return new { error = "Parameter 'spend' must be greater than 0." };
-        if (durationWeeks is < 1 or > 12)
-            return new { error = "Parameter 'durationWeeks' must be between 1 and 12." };
-
-        return data.EstimateROI(brand, region, promoType, spend, durationWeeks);
+        return durationWeeks is < 1 or > 12
+            ? (new { error = "Parameter 'durationWeeks' must be between 1 and 12." })
+            : data.EstimateROI(brand, region, promoType, spend, durationWeeks);
     }
 }

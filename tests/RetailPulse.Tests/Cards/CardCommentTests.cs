@@ -115,7 +115,7 @@ public class CardCommentTests
     #region Helpers
 
     private static CreateCardRequest MakeRequest(string title)
-        => new(title, CardType.Dashboard, "test-user", new Dictionary<string, object>());
+        => new(title, CardType.Dashboard, "test-user", []);
 
     private static CardAction MakeCommentAction(string userId, string text)
         => new(userId, $"User {userId}", CardActionType.Comment, new() { ["text"] = text });

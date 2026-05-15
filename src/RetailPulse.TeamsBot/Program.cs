@@ -1,11 +1,11 @@
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Agents.Builder;
-using Microsoft.Agents.Storage;
 using Microsoft.Agents.Hosting.AspNetCore;
+using Microsoft.Agents.Storage;
+using Microsoft.AspNetCore.SignalR.Client;
 using RetailPulse.TeamsBot;
+using RetailPulse.TeamsBot.Auth;
 using RetailPulse.TeamsBot.Cards;
 using RetailPulse.TeamsBot.Services;
-using RetailPulse.TeamsBot.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 

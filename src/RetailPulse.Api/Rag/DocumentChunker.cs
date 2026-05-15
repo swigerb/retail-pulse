@@ -6,8 +6,8 @@ namespace RetailPulse.Api.Rag;
 /// </summary>
 public static class DocumentChunker
 {
-    private const int TargetTokens = 500;
-    private const int OverlapTokens = 50;
+    private const int _targetTokens = 500;
+    private const int _overlapTokens = 50;
 
     public record DocumentChunk(string Text, int Index, string? SectionHeader);
 
@@ -84,7 +84,7 @@ public static class DocumentChunker
         {
             var tokens = CountTokens(text);
 
-            if (currentText.Length > 0 && CountTokens(currentText.ToString()) + tokens > TargetTokens)
+            if (currentText.Length > 0 && CountTokens(currentText.ToString()) + tokens > _targetTokens)
             {
                 merged.Add((currentText.ToString().Trim(), currentHeader));
                 currentText.Clear();
@@ -114,15 +114,15 @@ public static class DocumentChunker
             var (text, header) = merged[i];
             var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
-            if (words.Length <= TargetTokens + OverlapTokens || i == merged.Count - 1)
+            if (words.Length <= _targetTokens + _overlapTokens || i == merged.Count - 1)
             {
                 // Add overlap from previous chunk
                 string chunkText;
                 if (i > 0 && chunks.Count > 0)
                 {
                     var prevWords = merged[i - 1].Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                    var overlapWords = prevWords.Length > OverlapTokens
-                        ? prevWords[^OverlapTokens..]
+                    var overlapWords = prevWords.Length > _overlapTokens
+                        ? prevWords[^_overlapTokens..]
                         : prevWords;
                     chunkText = string.Join(' ', overlapWords) + " " + text;
                 }
@@ -139,21 +139,21 @@ public static class DocumentChunker
                 var pos = 0;
                 while (pos < words.Length)
                 {
-                    var take = Math.Min(TargetTokens, words.Length - pos);
+                    var take = Math.Min(_targetTokens, words.Length - pos);
                     var chunkWords = words[pos..(pos + take)];
 
                     string chunkText;
                     if (pos > 0)
                     {
-                        var overlapStart = Math.Max(0, pos - OverlapTokens);
+                        var overlapStart = Math.Max(0, pos - _overlapTokens);
                         var overlapWords = words[overlapStart..pos];
                         chunkText = string.Join(' ', overlapWords) + " " + string.Join(' ', chunkWords);
                     }
                     else if (i > 0 && chunks.Count > 0)
                     {
                         var prevWords = merged[i - 1].Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                        var overlapWords = prevWords.Length > OverlapTokens
-                            ? prevWords[^OverlapTokens..]
+                        var overlapWords = prevWords.Length > _overlapTokens
+                            ? prevWords[^_overlapTokens..]
                             : prevWords;
                         chunkText = string.Join(' ', overlapWords) + " " + string.Join(' ', chunkWords);
                     }

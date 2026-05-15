@@ -19,7 +19,7 @@ public class CacheWarmingService : IHostedService
     /// <summary>
     /// The 5 demo queries that should be pre-warmed in the cache.
     /// </summary>
-    private static readonly string[] DemoQueries =
+    private static readonly string[] _demoQueries =
     [
         "How is Apex Grill performing in the Southwest this quarter?",
         "What's our competitive pricing position for premium burgers?",
@@ -47,10 +47,10 @@ public class CacheWarmingService : IHostedService
             return;
         }
 
-        _logger.LogInformation("Starting cache warming for {Count} demo queries...", DemoQueries.Length);
+        _logger.LogInformation("Starting cache warming for {Count} demo queries...", _demoQueries.Length);
         var overallStart = DateTimeOffset.UtcNow;
 
-        var warmingTasks = DemoQueries.Select(async query =>
+        var warmingTasks = _demoQueries.Select(async query =>
         {
             var queryStart = DateTimeOffset.UtcNow;
             try
@@ -94,7 +94,7 @@ public class CacheWarmingService : IHostedService
         var totalElapsed = DateTimeOffset.UtcNow - overallStart;
         _logger.LogInformation(
             "Cache warming complete — {Count} queries processed in {ElapsedMs:F0}ms",
-            DemoQueries.Length,
+            _demoQueries.Length,
             totalElapsed.TotalMilliseconds);
     }
 

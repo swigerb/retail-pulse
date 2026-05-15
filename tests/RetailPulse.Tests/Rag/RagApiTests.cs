@@ -2,10 +2,10 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Rag;
 using RetailPulse.Contracts.Rag;
-using Moq;
 
 namespace RetailPulse.Tests.Rag;
 
@@ -60,7 +60,7 @@ public class RagApiTests
 
         kb.DocumentCount.Should().Be(3);
         var docs = await kb.ListDocumentsAsync();
-        docs.Select(d => d.Title).Should().BeEquivalentTo(new[] { "Doc A", "Doc B", "Doc C" });
+        docs.Select(d => d.Title).Should().BeEquivalentTo(["Doc A", "Doc B", "Doc C"]);
     }
 
     #endregion
@@ -80,8 +80,8 @@ public class RagApiTests
         var results = await kb.SearchAsync("holiday promotions");
 
         results.Should().NotBeEmpty();
-        results.First().Title.Should().Be("Holiday Guide");
-        results.First().Score.Should().BeGreaterThan(0);
+        results[0].Title.Should().Be("Holiday Guide");
+        results[0].Score.Should().BeGreaterThan(0);
     }
 
     [Fact]

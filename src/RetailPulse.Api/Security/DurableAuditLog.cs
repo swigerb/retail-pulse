@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
@@ -64,7 +65,7 @@ public class DurableAuditLog : IAuditLog, IDisposable
         await _writeLock.WaitAsync(ct);
         try
         {
-            var timestampStr = entry.Timestamp.ToString("O");
+            var timestampStr = entry.Timestamp.ToString("O", CultureInfo.InvariantCulture);
             var durationMs = entry.Duration.TotalMilliseconds;
             var entryJson = BuildChecksumPayload(entry.Id, timestampStr, entry.UserId, entry.AgentId,
                 entry.Action, entry.InputSummary, entry.OutputSummary, entry.TokensUsed, durationMs);
@@ -114,12 +115,12 @@ public class DurableAuditLog : IAuditLog, IDisposable
         if (query.From.HasValue)
         {
             sb.Append(" AND timestamp >= @from");
-            parameters.Add(new SqliteParameter("@from", query.From.Value.ToString("O")));
+            parameters.Add(new SqliteParameter("@from", query.From.Value.ToString("O", CultureInfo.InvariantCulture)));
         }
         if (query.To.HasValue)
         {
             sb.Append(" AND timestamp <= @to");
-            parameters.Add(new SqliteParameter("@to", query.To.Value.ToString("O")));
+            parameters.Add(new SqliteParameter("@to", query.To.Value.ToString("O", CultureInfo.InvariantCulture)));
         }
         if (query.Action is not null)
         {
@@ -141,7 +142,7 @@ public class DurableAuditLog : IAuditLog, IDisposable
         {
             results.Add(new AuditEntry(
                 reader.GetString(0),
-                DateTime.Parse(reader.GetString(1)),
+                DateTime.Parse(reader.GetString(1), CultureInfo.InvariantCulture),
                 reader.GetString(2),
                 reader.GetString(3),
                 reader.GetString(4),
@@ -158,7 +159,7 @@ public class DurableAuditLog : IAuditLog, IDisposable
     {
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM audit_log";
-        var total = Convert.ToInt32(cmd.ExecuteScalar());
+        var total = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
 
         var byAgent = new Dictionary<string, int>();
         using (var agentCmd = _connection.CreateCommand())

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Agents.Core.Models;
 using RetailPulse.Contracts;
 
@@ -98,7 +99,7 @@ public class AdaptiveCardBuilder
                     "donut" => "Chart.Donut",
                     "horizontalBar" => "Chart.HorizontalBar",
                     "stackedBar" => "Chart.HorizontalBar.Stacked",
-                    _ => (string?)null
+                    _ => null
                 };
 
                 if (acChartType != null)
@@ -127,7 +128,7 @@ public class AdaptiveCardBuilder
                 else if (chart.Type == "gauge")
                 {
                     // Render gauge as a FactSet (AC doesn't have a native gauge element)
-                    var facts = chart.Data.SelectMany(s => s.Values.Select(v => new { title = v.X, value = v.Y.ToString("N1") })).ToArray();
+                    var facts = chart.Data.SelectMany(s => s.Values.Select(v => new { title = v.X, value = v.Y.ToString("N1", CultureInfo.InvariantCulture) })).ToArray();
                     chartItems.Add(new
                     {
                         type = "TextBlock",
@@ -138,7 +139,7 @@ public class AdaptiveCardBuilder
                     chartItems.Add(new
                     {
                         type = "FactSet",
-                        facts = facts
+                        facts
                     });
                 }
                 else if (chart.Type == "table")
@@ -190,7 +191,7 @@ public class AdaptiveCardBuilder
         if (spans?.Any() == true)
         {
             var sortedSpans = spans.OrderBy(s => s.Timestamp).ToList();
-            
+
             // Show compact rows for each span
             foreach (var span in sortedSpans)
             {
@@ -379,7 +380,7 @@ public class AdaptiveCardBuilder
     /// <summary>
     /// Builds action buttons for the chat response card
     /// </summary>
-    private object[] BuildCardActions(List<AgentSpan>? spans, string? sessionId)
+    private static object[] BuildCardActions(List<AgentSpan>? spans, string? sessionId)
     {
         var actions = new List<object>
         {
@@ -401,12 +402,12 @@ public class AdaptiveCardBuilder
                 data = new
                 {
                     action = "detailed_telemetry",
-                    sessionId = sessionId
+                    sessionId
                 }
             });
         }
 
-        return actions.ToArray();
+        return [.. actions];
     }
 
     /// <summary>
@@ -656,7 +657,7 @@ public class AdaptiveCardBuilder
             }
         };
 
-        if (!spans.Any())
+        if (spans.Count == 0)
         {
             bodyItems.Add(new
             {
@@ -696,7 +697,7 @@ public class AdaptiveCardBuilder
                         facts = new object[]
                         {
                             new { title = "Total Duration", value = TelemetryFormatter.FormatDuration(totalMs) },
-                            new { title = "Total Spans", value = sortedSpans.Count.ToString() },
+                            new { title = "Total Spans", value = sortedSpans.Count.ToString(CultureInfo.InvariantCulture) },
                             new { title = "Average Duration", value = TelemetryFormatter.FormatDuration(avgMs) },
                             new { title = "Slowest Span", value = $"{TelemetryFormatter.TruncateName(slowestSpan.Name, 25)} ({TelemetryFormatter.FormatDuration(slowestSpan.DurationMs)})" }
                         }
@@ -970,7 +971,7 @@ public class AdaptiveCardBuilder
                 "#B8860B" => "categoricalMarigold",
                 "#5F9EA0" => "categoricalLavender",
                 "#D2691E" => "categoricalRed",
-                _ => (string?)null
+                _ => null
             };
             if (mapped != null) return mapped;
         }

@@ -1,7 +1,7 @@
+using System.Text.Json;
 using FluentAssertions;
 using RetailPulse.Api.Observability;
 using RetailPulse.Contracts.Observability;
-using System.Text.Json;
 
 namespace RetailPulse.Tests.Observability;
 
@@ -195,7 +195,7 @@ public class ExportTests
                 DateTime.UtcNow.AddMinutes(-count + i),
                 "user-1", "agent-1", "chat",
                 $"Input message {i}", $"Output response {i}",
-                100 + i * 10, TimeSpan.FromMilliseconds(50 + i * 10));
+                100 + (i * 10), TimeSpan.FromMilliseconds(50 + (i * 10)));
             await _auditLog.LogAsync(entry);
         }
     }

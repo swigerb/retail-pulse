@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.SignalR;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
@@ -125,7 +126,7 @@ public static class ChatEndpoints
                         Tags: new Dictionary<string, string>
                         {
                             ["router.intent"] = decision.Intent,
-                            ["router.confidence"] = decision.Confidence.ToString("F2")
+                            ["router.confidence"] = decision.Confidence.ToString("F2", CultureInfo.InvariantCulture)
                         }));
                 }
 
@@ -319,9 +320,9 @@ public static class ChatEndpoints
                         Tags: new Dictionary<string, string>
                         {
                             ["agent.name"] = specialist.Key,
-                            ["agent.tools_called_count"] = toolsCalledCount.ToString(),
-                            ["agent.token_input"] = inputTokens.ToString(),
-                            ["agent.token_output"] = outputTokens.ToString()
+                            ["agent.tools_called_count"] = toolsCalledCount.ToString(CultureInfo.InvariantCulture),
+                            ["agent.token_input"] = inputTokens.ToString(CultureInfo.InvariantCulture),
+                            ["agent.token_output"] = outputTokens.ToString(CultureInfo.InvariantCulture)
                         }));
                 }
 
@@ -341,7 +342,7 @@ public static class ChatEndpoints
                             Tags: new Dictionary<string, string>
                             {
                                 ["tool.name"] = span.Name,
-                                ["tool.duration_ms"] = span.DurationMs.ToString("F0"),
+                                ["tool.duration_ms"] = span.DurationMs.ToString("F0", CultureInfo.InvariantCulture),
                                 ["tool.result_size"] = span.Detail?.Length > 0 ? $"{span.Detail.Length} chars" : ""
                             }));
                     }
@@ -401,7 +402,7 @@ public static class ChatEndpoints
                         Content = response.Reply,
                         AgentId = specialist.Key,
                         ToolCalls = toolCalls,
-                        DurationMs = response.TotalDurationMs.HasValue ? (double)response.TotalDurationMs.Value : null
+                        DurationMs = response.TotalDurationMs.HasValue ? response.TotalDurationMs.Value : null
                     }, ct);
                 }
 
@@ -584,7 +585,7 @@ public static class ChatEndpoints
             Name = "Retail Pulse API",
             Version = "1.0.0",
             Agent = agentDef.Name,
-            Tools = agentDef.Tools,
+            agentDef.Tools,
             Router = "RetailOpsRouter",
             Specialists = specialists.Select(s => new { s.Key, s.DisplayName }).ToList()
         }))
@@ -662,31 +663,31 @@ public static class ChatEndpoints
 
         // ── Versioned routes (v1) — same logic as legacy, without Sunset header ─
         // Map v1 chat to same handler pipeline (legacy routes above include Sunset deprecation header)
-        app.MapPost("/api/v1/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
+        app.MapPost("/api/v1/chat", (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
         {
             var validation = ChatRequestValidator.Validate(request);
             if (!validation.IsValid)
-                return Results.ValidationProblem(validation.Errors);
+                return Task.FromResult(Results.ValidationProblem(validation.Errors));
 
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
-                return Results.BadRequest(new { error = "Field 'message' is required." });
+                return Task.FromResult(Results.BadRequest(new { error = "Field 'message' is required." }));
 
-            return Results.Ok(new { version = "v1", message = "Versioned endpoint active" });
+            return Task.FromResult(Results.Ok(new { version = "v1", message = "Versioned endpoint active" }));
         })
         .WithName("ChatV1")
         .RequireAuthorization()
         .RequireRateLimiting("strict");
 
-        app.MapPost("/api/v1/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
+        app.MapPost("/api/v1/chat/stream", (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
         {
             var validation = ChatRequestValidator.Validate(request);
             if (!validation.IsValid)
-                return Results.ValidationProblem(validation.Errors);
+                return Task.FromResult(Results.ValidationProblem(validation.Errors));
 
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
-                return Results.BadRequest(new { error = "Field 'message' is required." });
+                return Task.FromResult(Results.BadRequest(new { error = "Field 'message' is required." }));
 
-            return Results.Ok(new { version = "v1", message = "Versioned streaming endpoint active" });
+            return Task.FromResult(Results.Ok(new { version = "v1", message = "Versioned streaming endpoint active" }));
         })
         .WithName("ChatStreamV1")
         .RequireAuthorization()

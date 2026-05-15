@@ -111,7 +111,7 @@ app.MapGet("/api/demand-risks", (HttpContext ctx, string brand, RetailPulseDb da
 .WithName("IdentifyDemandRisks_Legacy");
 
 // ── Current demand routes ────────────────────────────────────────────
-app.MapGet("/api/demand/history",(RetailPulseDb data, string? brand = null, string? region = null, string? channel = null, int months = 12) =>
+app.MapGet("/api/demand/history", (RetailPulseDb data, string? brand = null, string? region = null, string? channel = null, int months = 12) =>
 {
     var result = data.GetHistoricalDemand(brand, region, channel, months);
     return Results.Ok(result);

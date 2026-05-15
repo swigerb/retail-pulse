@@ -13,7 +13,7 @@ public class ExceptionHandlingMiddleware
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
@@ -62,7 +62,7 @@ public class ExceptionHandlingMiddleware
 
         context.Response.StatusCode = (int)statusCode;
         context.Response.ContentType = "application/problem+json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(problemDetails, JsonOptions));
+        await context.Response.WriteAsync(JsonSerializer.Serialize(problemDetails, _jsonOptions));
     }
 
     private static HttpStatusCode MapToStatusCode(ErrorCategory category, Exception ex) => category switch
@@ -70,7 +70,7 @@ public class ExceptionHandlingMiddleware
         ErrorCategory.Transient => HttpStatusCode.ServiceUnavailable,
         ErrorCategory.User => GetUserStatusCode(ex),
         ErrorCategory.External => HttpStatusCode.BadGateway,
-        _ => HttpStatusCode.InternalServerError
+        ErrorCategory.System or _ => HttpStatusCode.InternalServerError
     };
 
     private static HttpStatusCode GetUserStatusCode(Exception ex) => ex switch
@@ -85,7 +85,7 @@ public class ExceptionHandlingMiddleware
         ErrorCategory.Transient => "Service Temporarily Unavailable",
         ErrorCategory.User => "Invalid Request",
         ErrorCategory.External => "External Dependency Failure",
-        _ => "Internal Server Error"
+        ErrorCategory.System or _ => "Internal Server Error"
     };
 
     private static string GetDetail(ErrorCategory category, Exception ex) => category switch
@@ -93,6 +93,6 @@ public class ExceptionHandlingMiddleware
         ErrorCategory.User => ex.Message,
         ErrorCategory.Transient => "The service is temporarily unavailable. Please retry shortly.",
         ErrorCategory.External => "An external dependency is not responding. The request could not be completed.",
-        _ => "An unexpected error occurred. Use the correlationId to report this issue."
+        ErrorCategory.System or _ => "An unexpected error occurred. Use the correlationId to report this issue."
     };
 }

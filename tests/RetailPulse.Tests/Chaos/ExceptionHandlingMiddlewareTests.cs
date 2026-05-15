@@ -98,8 +98,10 @@ public class ExceptionHandlingMiddlewareTests
             next: _ => throw new Exception("boom"),
             logger: NullLogger<ExceptionHandlingMiddleware>.Instance);
 
-        var context = new DefaultHttpContext();
-        context.TraceIdentifier = "test-correlation-123";
+        var context = new DefaultHttpContext
+        {
+            TraceIdentifier = "test-correlation-123"
+        };
         context.Response.Body = new MemoryStream();
 
         await middleware.InvokeAsync(context);

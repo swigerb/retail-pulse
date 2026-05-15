@@ -50,9 +50,8 @@ public static class SupplyTools
         [Description("Brand name (required)")] string brand,
         [Description("Region to scope (e.g. 'Northeast'). Omit for all regions.")] string? region = null)
     {
-        if (string.IsNullOrWhiteSpace(brand))
-            return new { error = "Parameter 'brand' is required." };
-
-        return data.GetSupplyHealthSummary(brand, region);
+        return string.IsNullOrWhiteSpace(brand)
+            ? (new { error = "Parameter 'brand' is required." })
+            : data.GetSupplyHealthSummary(brand, region);
     }
 }

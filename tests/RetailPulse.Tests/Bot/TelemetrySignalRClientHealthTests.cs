@@ -45,12 +45,13 @@ public class TelemetrySignalRClientHealthTests
     }
 
     [Fact]
-    public async Task BackoffConstants_AreReasonable()
+    public Task BackoffConstants_AreReasonable()
     {
         TelemetrySignalRClient.InitialReconnectDelay.Should().Be(TimeSpan.FromSeconds(1));
         TelemetrySignalRClient.MaxReconnectDelay.Should().Be(TimeSpan.FromSeconds(30));
         TelemetrySignalRClient.ReconnectBackoffMultiplier.Should().Be(2.0);
         TelemetrySignalRClient.MaxReconnectAttempts.Should().Be(10);
+        return Task.CompletedTask;
     }
 
     [Fact]

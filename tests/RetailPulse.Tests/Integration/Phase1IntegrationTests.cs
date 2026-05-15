@@ -104,7 +104,7 @@ public class Phase1IntegrationTests : IDisposable
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.3,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
 
         var generalAgent = CreateGeneralAgent(MockChatClient("Can you be more specific?"));
-        var router = CreateRouter(routerClient, new[] { generalAgent });
+        var router = CreateRouter(routerClient, [generalAgent]);
 
         var result = await router.RouteAsync("Tell me stuff", null, null, null);
 
@@ -180,7 +180,7 @@ public class Phase1IntegrationTests : IDisposable
     {
         var chatClient = MockChatClient("Brand X demand is projected to grow 15% next quarter.");
         var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+        var config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
         var pipeline = new AgentExecutionPipeline(
             chatClient, hubContext, config,
             NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
@@ -290,7 +290,7 @@ public class Phase1IntegrationTests : IDisposable
         _traceCollector.CaptureSpan(toolSpan);
         _traceCollector.CaptureSpan(responseSpan);
 
-        var summary = _traceCollector.GetSummary(traceId)!;
+        var summary = _traceCollector.GetSummary(traceId);
 
         summary.Should().NotBeNull();
         summary.Spans.Should().HaveCount(4);
@@ -312,7 +312,7 @@ public class Phase1IntegrationTests : IDisposable
         var generalAgent = CreateGeneralAgent(MockChatClient("fallback"));
         var demandAgent = CreateMockSpecialist("demand-forecasting", AgentIntent.DemandForecasting,
             "Brand X demand is projected to grow 15%.");
-        var router = CreateRouter(routerClient, new[] { demandAgent, generalAgent });
+        var router = CreateRouter(routerClient, [demandAgent, generalAgent]);
 
         var routingResult = await router.RouteAsync("Forecast for Brand X", null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.DemandForecasting);
@@ -371,7 +371,7 @@ public class Phase1IntegrationTests : IDisposable
         var memoryAgent = new MemoryManagementAgent(
             Mock.Of<IConversationMemory>(),
             Mock.Of<ILogger<MemoryManagementAgent>>());
-        var router = CreateRouter(routerClient, new ISpecialistAgent[] { generalAgent, memoryAgent });
+        var router = CreateRouter(routerClient, [generalAgent, memoryAgent]);
 
         var result = await router.RouteAsync("Forget everything about me", null, null, null);
         result.Intent.Should().Be(AgentIntent.MemoryManagement);
@@ -399,7 +399,7 @@ public class Phase1IntegrationTests : IDisposable
         var mock = new Mock<ISpecialistAgent>();
         mock.Setup(a => a.Key).Returns(key);
         mock.Setup(a => a.DisplayName).Returns($"Mock {key}");
-        mock.Setup(a => a.SupportedIntents).Returns(new[] { intent });
+        mock.Setup(a => a.SupportedIntents).Returns([intent]);
         mock.Setup(a => a.HandleAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RetailPulse.Contracts.ChatResponse(response, "session-mock", []));
         return mock.Object;
@@ -418,7 +418,7 @@ public class Phase1IntegrationTests : IDisposable
     private static GeneralAgent CreateGeneralAgent(IChatClient? chatClient = null)
     {
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(

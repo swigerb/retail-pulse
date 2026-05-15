@@ -37,17 +37,11 @@ public class BotHealthTests
             HealthCheckContext context,
             CancellationToken cancellationToken = default)
         {
-            if (_isConnected)
-            {
-                return Task.FromResult(HealthCheckResult.Healthy("SignalR connected"));
-            }
-
-            if (_failFast)
-            {
-                return Task.FromResult(HealthCheckResult.Unhealthy("SignalR disconnected (fail-fast mode)"));
-            }
-
-            return Task.FromResult(HealthCheckResult.Degraded("SignalR disconnected (degraded mode)"));
+            return _isConnected
+                ? Task.FromResult(HealthCheckResult.Healthy("SignalR connected"))
+                : _failFast
+                ? Task.FromResult(HealthCheckResult.Unhealthy("SignalR disconnected (fail-fast mode)"))
+                : Task.FromResult(HealthCheckResult.Degraded("SignalR disconnected (degraded mode)"));
         }
     }
 

@@ -21,7 +21,7 @@ public class GuardrailsMiddleware
     /// <summary>
     /// SQL injection patterns — case-insensitive substring matching.
     /// </summary>
-    private static readonly string[] InjectionPatterns =
+    private static readonly string[] _injectionPatterns =
     [
         "'; drop table", "'; delete from", "' or '1'='1", "' or 1=1--",
         "union select", "<script>", "</script>", "javascript:",
@@ -31,7 +31,7 @@ public class GuardrailsMiddleware
     /// <summary>
     /// Friendly refusal template. Supports {type} placeholder.
     /// </summary>
-    private const string DefaultRefusal =
+    private const string _defaultRefusal =
         "I can't help with that request. My guardrails detected potentially harmful content ({type}). " +
         "Please rephrase your question about retail operations and I'll be happy to assist.";
 
@@ -87,7 +87,7 @@ public class GuardrailsMiddleware
                 _logger.LogWarning("Jailbreak attempt blocked from user {UserId}: patterns [{Patterns}]",
                     userId, string.Join(", ", jailbreakHits));
 
-                return GuardrailResult.Blocked(DefaultRefusal.Replace("{type}", "jailbreak attempt"));
+                return GuardrailResult.Blocked(_defaultRefusal.Replace("{type}", "jailbreak attempt"));
             }
         }
 
@@ -95,7 +95,7 @@ public class GuardrailsMiddleware
         if (_config.JailbreakDetectionEnabled) // injection piggybacks on the jailbreak toggle
         {
             var lower = message.ToLowerInvariant();
-            var injectionMatch = InjectionPatterns.FirstOrDefault(p => lower.Contains(p));
+            var injectionMatch = _injectionPatterns.FirstOrDefault(p => lower.Contains(p));
             if (injectionMatch is not null)
             {
                 activity?.SetTag("guardrails.blocked", true);
@@ -112,7 +112,7 @@ public class GuardrailsMiddleware
                 _logger.LogWarning("Injection attempt blocked from user {UserId}: matched '{Pattern}'",
                     userId, injectionMatch);
 
-                return GuardrailResult.Blocked(DefaultRefusal.Replace("{type}", "potential injection"));
+                return GuardrailResult.Blocked(_defaultRefusal.Replace("{type}", "potential injection"));
             }
         }
 

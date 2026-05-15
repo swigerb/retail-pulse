@@ -29,13 +29,13 @@ public static class KnowledgeBaseSeeder
 
     private static List<(string Title, string Source, string Content)> GetSampleDocuments() =>
     [
-        ("Holiday Planning Guide", "holiday-planning-guide.md", HolidayPlanningGuide),
-        ("Category Management Playbook", "category-management-playbook.md", CategoryManagementPlaybook),
-        ("Promotion Effectiveness Report", "promotion-effectiveness-report.md", PromotionEffectivenessReport),
-        ("Competitive Response Framework", "competitive-response-framework.md", CompetitiveResponseFramework)
+        ("Holiday Planning Guide", "holiday-planning-guide.md", _holidayPlanningGuide),
+        ("Category Management Playbook", "category-management-playbook.md", _categoryManagementPlaybook),
+        ("Promotion Effectiveness Report", "promotion-effectiveness-report.md", _promotionEffectivenessReport),
+        ("Competitive Response Framework", "competitive-response-framework.md", _competitiveResponseFramework)
     ];
 
-    private const string HolidayPlanningGuide = """
+    private const string _holidayPlanningGuide = """
         # Holiday Planning Guide: Seasonal Best Practices for Retail & CPG
 
         ## Planning Timeline
@@ -63,7 +63,7 @@ public static class KnowledgeBaseSeeder
         Schedule training sessions in early October, focusing on: key promotional items, upselling techniques, gift recommendation skills, and return/exchange policies. Role-playing exercises for handling difficult customer situations reduce holiday escalations by 22%.
         """;
 
-    private const string CategoryManagementPlaybook = """
+    private const string _categoryManagementPlaybook = """
         # Category Management Playbook: Fundamentals for Retail Excellence
 
         ## Category Definition and Role Assignment
@@ -91,7 +91,7 @@ public static class KnowledgeBaseSeeder
         Vertical blocking by brand outperforms horizontal layouts for most categories. Shoppers scan shelves vertically first, so stacking brand variants vertically improves findability by 18% and reduces out-of-stock perception by 12%.
         """;
 
-    private const string PromotionEffectivenessReport = """
+    private const string _promotionEffectivenessReport = """
         # Promotion Effectiveness Report: Historical Analysis and Insights
 
         ## Executive Summary
@@ -123,7 +123,7 @@ public static class KnowledgeBaseSeeder
         Avoid running promotions during the first two weeks of January and the last two weeks of August — consumer spending contraction during these periods reduces promotional responsiveness by 20-30%.
         """;
 
-    private const string CompetitiveResponseFramework = """
+    private const string _competitiveResponseFramework = """
         # Competitive Response Framework: Responding to Competitor Moves
 
         ## Response Triage

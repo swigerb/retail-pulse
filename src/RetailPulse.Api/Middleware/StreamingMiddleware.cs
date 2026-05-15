@@ -5,8 +5,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
-using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Caching;
+using RetailPulse.Api.Hubs;
 using RetailPulse.Contracts.Caching;
 
 namespace RetailPulse.Api.Middleware;
@@ -161,12 +161,12 @@ public record StreamingToken(string Token, bool IsComplete);
 /// Static helpers for cache key generation, query normalization, and
 /// deterministic detection — used by the chat pipeline for cache middleware.
 /// </summary>
-public static class CacheHelpers
+public static partial class CacheHelpers
 {
     /// <summary>
     /// Keywords indicating non-deterministic queries — never cache these.
     /// </summary>
-    private static readonly string[] NonDeterministicKeywords =
+    private static readonly string[] _nonDeterministicKeywords =
     [
         "forecast", "predict", "recommend", "suggest", "what should",
         "what would", "what if", "estimate future", "project forward",
@@ -191,10 +191,16 @@ public static class CacheHelpers
     public static string NormalizeQuery(string query)
     {
         var result = query.Trim().ToLowerInvariant();
-        result = Regex.Replace(result, @"[\?\!\.\,\;\:]+$", "");
-        result = Regex.Replace(result, @"\s+", " ");
+        result = TrailingPunctuationRegex().Replace(result, "");
+        result = WhitespaceRegex().Replace(result, " ");
         return result;
     }
+
+    [GeneratedRegex(@"[\?\!\.\,\;\:]+$")]
+    private static partial Regex TrailingPunctuationRegex();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRegex();
 
     /// <summary>
     /// Returns true if the query is deterministic/factual (cacheable).
@@ -203,6 +209,6 @@ public static class CacheHelpers
     public static bool IsCacheable(string query)
     {
         var lower = query.ToLowerInvariant();
-        return !NonDeterministicKeywords.Any(kw => lower.Contains(kw));
+        return !_nonDeterministicKeywords.Any(kw => lower.Contains(kw));
     }
 }

@@ -7,7 +7,7 @@ namespace RetailPulse.Contracts.ValueObjects;
 /// </summary>
 public readonly partial record struct SessionId
 {
-    private static readonly Regex ValidPattern = CreatePattern();
+    private static readonly Regex _validPattern = CreatePattern();
 
     public string Value { get; }
 
@@ -15,7 +15,7 @@ public readonly partial record struct SessionId
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value, nameof(value));
         var trimmed = value.Trim();
-        if (!ValidPattern.IsMatch(trimmed))
+        if (!_validPattern.IsMatch(trimmed))
         {
             throw new ArgumentException(
                 $"SessionId must be alphanumeric with hyphens only. Got: '{trimmed}'",
@@ -25,7 +25,7 @@ public readonly partial record struct SessionId
     }
 
     public static bool IsValid(string? value) =>
-        !string.IsNullOrWhiteSpace(value) && ValidPattern.IsMatch(value.Trim());
+        !string.IsNullOrWhiteSpace(value) && _validPattern.IsMatch(value.Trim());
 
     public static implicit operator SessionId(string value) => new(value);
     public static implicit operator string(SessionId sessionId) => sessionId.Value;

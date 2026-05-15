@@ -1,3 +1,5 @@
+using System.ClientModel;
+using System.ClientModel.Primitives;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -8,8 +10,6 @@ using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
-using System.ClientModel;
-using System.ClientModel.Primitives;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
@@ -219,7 +219,7 @@ public class SupplyChainAgentTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
@@ -237,8 +237,8 @@ public class SupplyChainAgentTests
 
         captured.Should().NotBeNull();
         // System + history(2) + current = 4 messages
-        captured!.Should().HaveCount(4);
-        captured!.Select(m => m.Role).Should().ContainInOrder(
+        captured.Should().HaveCount(4);
+        captured.Select(m => m.Role).Should().ContainInOrder(
             ChatRole.System, ChatRole.User, ChatRole.Assistant, ChatRole.User);
     }
 
@@ -253,7 +253,7 @@ public class SupplyChainAgentTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
@@ -267,7 +267,7 @@ public class SupplyChainAgentTests
 
         captured.Should().NotBeNull();
         // System(1) + capped history(20) + current(1) = 22
-        captured!.Should().HaveCount(22);
+        captured.Should().HaveCount(22);
     }
 
     #endregion
@@ -301,8 +301,8 @@ public class SupplyChainAgentTests
         await agent.HandleAsync(new ChatRequest("supply?", SessionId: "tool-supply-test"));
 
         capturedOptions.Should().NotBeNull();
-        capturedOptions!.Tools.Should().HaveCount(4);
-        capturedOptions.Tools!.OfType<AIFunction>().Select(t => t.Name)
+        capturedOptions.Tools.Should().HaveCount(4);
+        capturedOptions.Tools.OfType<AIFunction>().Select(t => t.Name)
             .Should().Contain("get_inventory_levels")
             .And.Contain("get_supply_disruptions")
             .And.Contain("get_fulfillment_rate")
@@ -454,7 +454,7 @@ public class SupplyChainAgentTests
     {
         var hubContext = CreateMockHubContext();
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         return new SupplyChainAgent(
@@ -541,7 +541,7 @@ public class SupplyChainAgent : ISpecialistAgent
         var chatOptions = new ChatOptions
         {
             Temperature = (float)_agentDef.Temperature,
-            Tools = _tools.ToList()
+            Tools = [.. _tools]
         };
 
         var messages = new List<ChatMessage>
@@ -553,7 +553,7 @@ public class SupplyChainAgent : ISpecialistAgent
         {
             const int maxTurns = 10;
             var historyMessages = request.History.Count > maxTurns * 2
-                ? request.History.Skip(request.History.Count - (maxTurns * 2)).ToList()
+                ? [.. request.History.Skip(request.History.Count - (maxTurns * 2))]
                 : request.History;
 
             foreach (var historyMessage in historyMessages)
@@ -602,8 +602,8 @@ public class SupplyChainAgent : ISpecialistAgent
             _agentDef.Name, "thought",
             $"Processing: {request.Message[..Math.Min(100, request.Message.Length)]}",
             thoughtDurationMs,
-            inputTokens > 0 ? (int?)inputTokens : null,
-            outputTokens > 0 ? (int?)outputTokens : null);
+            inputTokens > 0 ? inputTokens : null,
+            outputTokens > 0 ? outputTokens : null);
 
         var postProcessStart = sw.ElapsedMilliseconds;
         var reply = response.Text ?? "I wasn't able to generate a supply chain analysis.";
@@ -617,7 +617,7 @@ public class SupplyChainAgent : ISpecialistAgent
         var totalDurationMs = sw.ElapsedMilliseconds;
 
         return new ChatResponse(
-            reply, sessionId, collector.Spans.ToList(),
+            reply, sessionId, [.. collector.Spans],
             null, totalDurationMs);
     }
 }

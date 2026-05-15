@@ -11,7 +11,7 @@ namespace RetailPulse.Tests.Alerts;
 /// </summary>
 public class AlertServiceTests
 {
-    private InMemoryAlertService CreateService(TimeSpan? throttleWindow = null)
+    private static InMemoryAlertService CreateService(TimeSpan? throttleWindow = null)
         => new(throttleWindow ?? TimeSpan.FromHours(1));
 
     #region Demand Spike Detection (>20% above baseline)
@@ -245,7 +245,7 @@ public class AlertServiceTests
 
         alerts.Should().HaveCount(3);
         alerts.Select(a => a.Type).Should().BeEquivalentTo(
-            new[] { "demand_spike", "supply_drop", "trend_reversal" });
+            ["demand_spike", "supply_drop", "trend_reversal"]);
     }
 
     [Fact]

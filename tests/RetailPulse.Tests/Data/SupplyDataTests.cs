@@ -131,7 +131,7 @@ public class SupplyDataTests : IDisposable
 
         var statuses = new List<string>();
         using var reader = cmd.ExecuteReader();
-        while (reader.Read()) statuses.Add(reader.GetString(0).ToLower());
+        while (reader.Read()) statuses.Add(reader.GetString(0).ToLower(System.Globalization.CultureInfo.CurrentCulture));
 
         foreach (var status in statuses)
         {
@@ -219,7 +219,7 @@ public class SupplyDataTests : IDisposable
 
         var severities = new List<string>();
         using var reader = cmd.ExecuteReader();
-        while (reader.Read()) severities.Add(reader.GetString(0).ToLower());
+        while (reader.Read()) severities.Add(reader.GetString(0).ToLower(System.Globalization.CultureInfo.CurrentCulture));
 
         foreach (var severity in severities)
         {
@@ -237,7 +237,7 @@ public class SupplyDataTests : IDisposable
 
         var types = new List<string>();
         using var reader = cmd.ExecuteReader();
-        while (reader.Read()) types.Add(reader.GetString(0).ToLower());
+        while (reader.Read()) types.Add(reader.GetString(0).ToLower(System.Globalization.CultureInfo.CurrentCulture));
 
         foreach (var type in types)
         {

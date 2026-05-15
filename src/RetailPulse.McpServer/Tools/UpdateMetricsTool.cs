@@ -25,9 +25,8 @@ public static class UpdateMetricsTool
             return new { error = "Parameter 'region' is required." };
         if (string.IsNullOrWhiteSpace(field))
             return new { error = "Parameter 'field' is required." };
-        if (string.IsNullOrWhiteSpace(value))
-            return new { error = "Parameter 'value' is required." };
-
-        return db.UpdateMetric(table, brand, region, field, value);
+        return string.IsNullOrWhiteSpace(value)
+            ? (new { error = "Parameter 'value' is required." })
+            : db.UpdateMetric(table, brand, region, field, value);
     }
 }

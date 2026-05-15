@@ -199,8 +199,7 @@ public class SimulatedMetricsData
     private Dictionary<(string Brand, string Region), DepletionRecord> GenerateDepletionData()
     {
         var data = new Dictionary<(string Brand, string Region), DepletionRecord>(StringTupleComparer.Instance);
-
-        var statuses = new[] { "On Track", "Growth Leader", "Declining", "Overstocked" };
+        _ = new[] { "On Track", "Growth Leader", "Declining", "Overstocked" };
 
         foreach (var brand in _tenant.Brands)
         {
@@ -215,10 +214,10 @@ public class SimulatedMetricsData
 
                 var regionVariance = (regionRng.NextDouble() - 0.5) * 8.0; // ±4%
                 var depletionGrowth = Math.Round(baseTrend + regionVariance, 1);
-                var sellThroughGrowth = Math.Round(depletionGrowth + (regionRng.NextDouble() - 0.5) * 4.0, 1);
+                var sellThroughGrowth = Math.Round(depletionGrowth + ((regionRng.NextDouble() - 0.5) * 4.0), 1);
 
                 // Inventory weeks inversely correlated with growth
-                var inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - depletionGrowth * 0.3 + regionRng.NextDouble() * 3.0), 1);
+                var inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - (depletionGrowth * 0.3) + (regionRng.NextDouble() * 3.0)), 1);
 
                 // Status based on metrics
                 var status = DetermineDepletionStatus(depletionGrowth, sellThroughGrowth, inventoryWeeks);
@@ -250,11 +249,11 @@ public class SimulatedMetricsData
                 var regionSeed = GetStableHash($"ship|{brand.Name}|{region}");
                 var regionRng = new Random(regionSeed);
 
-                var shipmentGrowth = Math.Round(baseTrend + (regionRng.NextDouble() - 0.3) * 6.0, 1);
-                var sellThroughGrowth = Math.Round(baseTrend + (regionRng.NextDouble() - 0.5) * 5.0, 1);
-                var depletionGrowth = Math.Round(sellThroughGrowth + (regionRng.NextDouble() - 0.5) * 3.0, 1);
+                var shipmentGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.3) * 6.0), 1);
+                var sellThroughGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.5) * 5.0), 1);
+                var depletionGrowth = Math.Round(sellThroughGrowth + ((regionRng.NextDouble() - 0.5) * 3.0), 1);
 
-                var inventoryWeeks = Math.Round(Math.Max(2.5, 6.5 - depletionGrowth * 0.25 + regionRng.NextDouble() * 3.0), 1);
+                var inventoryWeeks = Math.Round(Math.Max(2.5, 6.5 - (depletionGrowth * 0.25) + (regionRng.NextDouble() * 3.0)), 1);
 
                 // Base cases scaled by brand category and price
                 var baseCases = brand.PriceSegment switch
@@ -315,14 +314,14 @@ public class SimulatedMetricsData
         // Categories have different momentum
         var categoryBoost = brand.Category switch
         {
-            "Tequila" => 4.0 + rng.NextDouble() * 4.0,
-            "Mezcal" => 5.0 + rng.NextDouble() * 5.0,
-            "Bourbon" => 3.0 + rng.NextDouble() * 5.0,
-            "Ready-to-Drink" => 2.0 + rng.NextDouble() * 6.0,
-            "Gin" => 1.0 + rng.NextDouble() * 3.0,
-            "Rum" => -2.0 + rng.NextDouble() * 4.0,
-            "Vodka" => -3.0 + rng.NextDouble() * 3.0,
-            _ => -1.0 + rng.NextDouble() * 4.0
+            "Tequila" => 4.0 + (rng.NextDouble() * 4.0),
+            "Mezcal" => 5.0 + (rng.NextDouble() * 5.0),
+            "Bourbon" => 3.0 + (rng.NextDouble() * 5.0),
+            "Ready-to-Drink" => 2.0 + (rng.NextDouble() * 6.0),
+            "Gin" => 1.0 + (rng.NextDouble() * 3.0),
+            "Rum" => -2.0 + (rng.NextDouble() * 4.0),
+            "Vodka" => -3.0 + (rng.NextDouble() * 3.0),
+            _ => -1.0 + (rng.NextDouble() * 4.0)
         };
         // Ultra-Premium tends to outperform within category
         var segmentBoost = brand.PriceSegment switch
@@ -336,10 +335,11 @@ public class SimulatedMetricsData
 
     private static string DetermineDepletionStatus(double depletionGrowth, double sellThroughGrowth, double inventoryWeeks)
     {
-        if (inventoryWeeks > 8.5 && sellThroughGrowth < 0) return "Overstocked";
-        if (depletionGrowth > 6.0 && sellThroughGrowth > 4.0) return "Growth Leader";
-        if (depletionGrowth < -1.0 || sellThroughGrowth < -2.0) return "Declining";
-        return "On Track";
+        return inventoryWeeks > 8.5 && sellThroughGrowth < 0
+            ? "Overstocked"
+            : depletionGrowth > 6.0 && sellThroughGrowth > 4.0
+            ? "Growth Leader"
+            : depletionGrowth < -1.0 || sellThroughGrowth < -2.0 ? "Declining" : "On Track";
     }
 
     private static (string AnomalyType, string RiskLevel) DetermineAnomalyType(
@@ -367,7 +367,7 @@ public class SimulatedMetricsData
 
     // ── Narrative Generation ─────────────────────────────────────────────
 
-    private string GenerateDepletionSummary(BrandConfig brand, string region,
+    private static string GenerateDepletionSummary(BrandConfig brand, string region,
         double depletionGrowth, double sellThroughGrowth, double inventoryWeeks, string status, Random rng)
     {
         var variants = brand.Variants.Count > 0 ? brand.Variants[rng.Next(brand.Variants.Count)] : "core";
@@ -380,10 +380,10 @@ public class SimulatedMetricsData
 
             "Overstocked" => $"Distributor warehouses in {region} holding excess {brand.Name} inventory at {inventoryWeeks} weeks on hand. " +
                 $"Sell-through at {FormatPercentage(sellThroughGrowth)} suggests consumer demand softening. " +
-                $"Competitive pressure in the {brand.Category.ToLower()} segment is creating headwinds. Promotional support may be needed to clear pipeline.",
+                $"Competitive pressure in the {brand.Category.ToLower(CultureInfo.CurrentCulture)} segment is creating headwinds. Promotional support may be needed to clear pipeline.",
 
             "Declining" => $"{brand.Name} facing headwinds in {region} with depletions at {FormatPercentage(depletionGrowth)}. " +
-                $"Category dynamics shifting as consumers explore alternatives in the {brand.PriceSegment.ToLower()} {brand.Category.ToLower()} tier. " +
+                $"Category dynamics shifting as consumers explore alternatives in the {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} {brand.Category.ToLower(CultureInfo.CurrentCulture)} tier. " +
                 $"On-premise placements under pressure. Field team recommends targeted activation programs.",
 
             _ => $"{brand.Name} performing steadily in {region} with depletions at {FormatPercentage(depletionGrowth)}. " +
@@ -420,7 +420,7 @@ public class SimulatedMetricsData
                 $"monitoring to ensure new points of distribution convert. Weeks on hand at {inventoryWeeks} within acceptable range.",
 
             "declining_aligned" => $"Shipments and sell-through for {brand.Name} both declining in {region} at similar rates — pipeline is stable but the floor is dropping. " +
-                $"The {brand.Category.ToLower()} segment faces structural headwinds. Volume management is appropriate but category strategy review needed.",
+                $"The {brand.Category.ToLower(CultureInfo.CurrentCulture)} segment faces structural headwinds. Volume management is appropriate but category strategy review needed.",
 
             _ => $"Shipments and sell-through aligned for {brand.Name} in {region}. {casesShipped:N0} cases shipped, {casesDepleted:N0} depleted. " +
                 $"No pipeline concerns — the market is genuinely consuming what's being shipped. Weeks on hand at {inventoryWeeks} is healthy."
@@ -438,28 +438,28 @@ public class SimulatedMetricsData
         if (baseTrend > 5.0)
         {
             sentences.Add($"{brand.Name} showing exceptional momentum in {region}. Distributor reps report strong pull across {channel} accounts.");
-            sentences.Add($"The {brand.Category.ToLower()} category is a major tailwind — consumers actively seeking out {brand.PriceSegment.ToLower()} options.");
+            sentences.Add($"The {brand.Category.ToLower(CultureInfo.CurrentCulture)} category is a major tailwind — consumers actively seeking out {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} options.");
             sentences.Add($"Key variants ({variantList}) all performing above plan. Retail velocity up significantly vs prior year.");
             sentences.Add($"Field team recommends expanding distribution and securing additional shelf placements before competitors react.");
         }
         else if (baseTrend > 2.0)
         {
             sentences.Add($"Steady performance for {brand.Name} in {region} with positive distributor sentiment.");
-            sentences.Add($"{channel} accounts maintaining consistent reorders. The {brand.PriceSegment.ToLower()} {brand.Category.ToLower()} segment is competitive but {brand.Name} holding its position.");
+            sentences.Add($"{channel} accounts maintaining consistent reorders. The {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} {brand.Category.ToLower(CultureInfo.CurrentCulture)} segment is competitive but {brand.Name} holding its position.");
             sentences.Add($"Consumer engagement with {variantList} expressions is stable. Some competitive pressure from new entrants in the category.");
             sentences.Add($"Distributors note the brand benefits from established consumer loyalty and reliable supply chain execution.");
         }
         else if (baseTrend > -1.0)
         {
             sentences.Add($"{brand.Name} holding flat in {region} with mixed signals from the field.");
-            sentences.Add($"Some {channel} accounts reporting steady velocity while others see softening. The {brand.Category.ToLower()} category overall is under moderate pressure.");
-            sentences.Add($"Price sensitivity increasing among consumers at the {brand.PriceSegment.ToLower()} tier.");
+            sentences.Add($"Some {channel} accounts reporting steady velocity while others see softening. The {brand.Category.ToLower(CultureInfo.CurrentCulture)} category overall is under moderate pressure.");
+            sentences.Add($"Price sensitivity increasing among consumers at the {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} tier.");
             sentences.Add($"Field team recommends targeted promotional support and menu placement programs to defend share.");
         }
         else
         {
             sentences.Add($"{brand.Name} facing headwinds in {region}. Distributor sentiment cautious.");
-            sentences.Add($"The {brand.PriceSegment.ToLower()} {brand.Category.ToLower()} segment is losing occasions to other spirit categories. {channel} placements under pressure.");
+            sentences.Add($"The {brand.PriceSegment.ToLower(CultureInfo.CurrentCulture)} {brand.Category.ToLower(CultureInfo.CurrentCulture)} segment is losing occasions to other spirit categories. {channel} placements under pressure.");
             sentences.Add($"Competitors gaining shelf space. Consumers migrating to trending categories.");
             sentences.Add($"Need strategic review of the brand's position in {region}. Promotional spend showing diminishing returns — may need positioning refresh.");
         }
@@ -479,7 +479,11 @@ public class SimulatedMetricsData
 
         var periodMultiplier = period?.Trim().ToUpperInvariant() switch
         {
-            "Q1" => 0.85, "Q2" => 1.05, "Q3" => 0.95, "Q4" => 1.15, _ => 1.0
+            "Q1" => 0.85,
+            "Q2" => 1.05,
+            "Q3" => 0.95,
+            "Q4" => 1.15,
+            _ => 1.0
         };
 
         var avgDepletions = regionalData.Average(kv => ParsePercentage(kv.Value.DepletionsYoY));
@@ -514,7 +518,7 @@ public class SimulatedMetricsData
     // ── Utility Methods ──────────────────────────────────────────────────
 
     private string[] GetAvailableBrands() =>
-        _tenant.Brands.Select(b => b.Name).ToArray();
+        [.. _tenant.Brands.Select(b => b.Name)];
 
     private string[] GetAvailableRegions() =>
         [.. _tenant.Regions, "National"];
@@ -539,7 +543,7 @@ public class SimulatedMetricsData
         {
             int hash = 17;
             foreach (var c in input)
-                hash = hash * 31 + c;
+                hash = (hash * 31) + c;
             return Math.Abs(hash);
         }
     }

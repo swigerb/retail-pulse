@@ -122,11 +122,16 @@ public class CompetitiveIntelAgent : ISpecialistAgent
                         _alertService.PersistAlert(alert);
                         await _hubContext.Clients.All.SendAsync("alert_fired", new
                         {
-                            id = alert.Id, type = alert.Type, severity = alert.Severity,
-                            title = alert.Title, description = alert.Description,
-                            brand = alert.Brand, region = alert.Region,
+                            id = alert.Id,
+                            type = alert.Type,
+                            severity = alert.Severity,
+                            title = alert.Title,
+                            description = alert.Description,
+                            brand = alert.Brand,
+                            region = alert.Region,
                             recommendedAction = alert.RecommendedAction,
-                            detectedAt = alert.DetectedAt, metadata = alert.Metadata
+                            detectedAt = alert.DetectedAt,
+                            metadata = alert.Metadata
                         }, ct);
 
                         _logger.LogInformation(
@@ -176,11 +181,16 @@ public class CompetitiveIntelAgent : ISpecialistAgent
                         _alertService.PersistAlert(alert);
                         await _hubContext.Clients.All.SendAsync("alert_fired", new
                         {
-                            id = alert.Id, type = alert.Type, severity = alert.Severity,
-                            title = alert.Title, description = alert.Description,
-                            brand = alert.Brand, region = alert.Region,
+                            id = alert.Id,
+                            type = alert.Type,
+                            severity = alert.Severity,
+                            title = alert.Title,
+                            description = alert.Description,
+                            brand = alert.Brand,
+                            region = alert.Region,
                             recommendedAction = alert.RecommendedAction,
-                            detectedAt = alert.DetectedAt, metadata = alert.Metadata
+                            detectedAt = alert.DetectedAt,
+                            metadata = alert.Metadata
                         }, ct);
                     }
                 }

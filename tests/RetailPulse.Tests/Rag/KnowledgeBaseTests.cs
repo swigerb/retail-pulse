@@ -98,7 +98,7 @@ public class KnowledgeBaseTests
         var results = await kb.SearchAsync("holiday");
 
         results.Should().NotBeEmpty("search for 'holiday' should match the holiday planning document");
-        results.First().Title.Should().Be("Holiday Planning Guide");
+        results[0].Title.Should().Be("Holiday Planning Guide");
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public class KnowledgeBaseTests
         var results = await kb.SearchAsync("holiday promotions");
 
         results.Should().NotBeEmpty();
-        results.First().Title.Should().Be("Holiday Guide");
+        results[0].Title.Should().Be("Holiday Guide");
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class KnowledgeBaseTests
         var results = await kb.SearchAsync("pricing");
 
         results.Should().NotBeEmpty();
-        results.First().Score.Should().BeGreaterThan(0,
+        results[0].Score.Should().BeGreaterThan(0,
             "search results should include a positive relevance score");
     }
 
@@ -162,7 +162,7 @@ public class KnowledgeBaseTests
         var results = await kb.SearchAsync("pricing");
 
         results.Should().NotBeEmpty();
-        var r = results.First();
+        var r = results[0];
         r.DocumentId.Should().NotBeNullOrWhiteSpace();
         r.Title.Should().Be("Test Doc");
         r.Chunk.Should().NotBeNullOrWhiteSpace();
@@ -221,7 +221,7 @@ public class KnowledgeBaseTests
         var id1 = await kb.IngestDocumentAsync("Doc A",
             "Pricing analysis pricing optimization pricing strategy pricing models pricing frameworks.",
             "src");
-        var id2 = await kb.IngestDocumentAsync("Doc B",
+        _ = await kb.IngestDocumentAsync("Doc B",
             "Marketing campaigns marketing strategy marketing analytics marketing tools " +
             "marketing automation marketing insights marketing performance.",
             "src");
@@ -270,7 +270,7 @@ public class KnowledgeBaseTests
         var docs = await kb.ListDocumentsAsync();
 
         docs.Should().ContainSingle();
-        var doc = docs.First();
+        var doc = docs[0];
         doc.Id.Should().NotBeNullOrWhiteSpace();
         doc.Title.Should().Be("Metadata Test");
         doc.Source.Should().Be("test-src");
@@ -296,9 +296,8 @@ public class KnowledgeBaseTests
     public async Task Ingest_DuplicateTitle_HandledGracefully()
     {
         var kb = CreateKb();
-
-        var id1 = await kb.IngestDocumentAsync("Same Title", "Content version 1", "src");
-        var id2 = await kb.IngestDocumentAsync("Same Title", "Content version 2", "src");
+        _ = await kb.IngestDocumentAsync("Same Title", "Content version 1", "src");
+        _ = await kb.IngestDocumentAsync("Same Title", "Content version 2", "src");
 
         kb.DocumentCount.Should().BeGreaterThanOrEqualTo(1);
     }

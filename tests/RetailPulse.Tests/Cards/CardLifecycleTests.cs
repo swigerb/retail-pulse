@@ -90,7 +90,7 @@ public class CardLifecycleTests
     [Fact]
     public async Task VotingTypeCard_StartsInVotingLifecycle()
     {
-        var request = new CreateCardRequest("Voting Card", CardType.Voting, "user-1", new());
+        var request = new CreateCardRequest("Voting Card", CardType.Voting, "user-1", []);
         var card = await _state.CreateAsync(request);
 
         card.Lifecycle.Should().Be(CardLifecycle.Voting);
@@ -139,7 +139,7 @@ public class CardLifecycleTests
         (await _state.GetAsync(active.Id)).Lifecycle.Should().Be(CardLifecycle.Archived);
 
         // From Voting
-        var voting = await _state.CreateAsync(new CreateCardRequest("V", CardType.Voting, "u", new()));
+        var voting = await _state.CreateAsync(new CreateCardRequest("V", CardType.Voting, "u", []));
         await _state.ArchiveAsync(voting.Id);
         (await _state.GetAsync(voting.Id)).Lifecycle.Should().Be(CardLifecycle.Archived);
 
@@ -153,7 +153,7 @@ public class CardLifecycleTests
     #region Helpers
 
     private static CreateCardRequest MakeRequest(string title)
-        => new(title, CardType.Dashboard, "test-user", new Dictionary<string, object>());
+        => new(title, CardType.Dashboard, "test-user", []);
 
     private static CardAction MakeVoteAction(string userId, string vote)
         => new(userId, $"User {userId}", CardActionType.Vote, new() { ["vote"] = vote });

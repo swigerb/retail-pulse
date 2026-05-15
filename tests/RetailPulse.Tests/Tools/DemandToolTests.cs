@@ -1,7 +1,7 @@
+using System.Text.Json;
 using FluentAssertions;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
-using System.Text.Json;
 
 namespace RetailPulse.Tests.Tools;
 

@@ -9,7 +9,7 @@ namespace RetailPulse.Tests.Channels;
 public class MemoryExtractionChannelTests
 {
     [Fact]
-    public async Task TryWrite_WithinCapacity_ReturnsTrue()
+    public Task TryWrite_WithinCapacity_ReturnsTrue()
     {
         var channel = new MemoryExtractionChannel();
 
@@ -17,10 +17,11 @@ public class MemoryExtractionChannelTests
 
         result.Should().BeTrue();
         channel.DroppedCount.Should().Be(0);
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task TryWrite_WhenFull_ReturnsFalse_IncrementsDroppedCount()
+    public Task TryWrite_WhenFull_ReturnsFalse_IncrementsDroppedCount()
     {
         var channel = new MemoryExtractionChannel(capacity: 2);
 
@@ -29,10 +30,11 @@ public class MemoryExtractionChannelTests
         channel.TryWrite(new MemoryWorkItem("u3", "m3", "r3")).Should().BeFalse();
 
         channel.DroppedCount.Should().Be(1);
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task DroppedCount_AccumulatesAcrossMultipleDrops()
+    public Task DroppedCount_AccumulatesAcrossMultipleDrops()
     {
         var channel = new MemoryExtractionChannel(capacity: 1);
 
@@ -42,12 +44,14 @@ public class MemoryExtractionChannelTests
             channel.TryWrite(new MemoryWorkItem($"u{i}", $"m{i}", $"r{i}"));
 
         channel.DroppedCount.Should().Be(5);
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task DefaultCapacity_Is1000()
+    public Task DefaultCapacity_Is1000()
     {
         MemoryExtractionChannel.DefaultCapacity.Should().Be(1000);
+        return Task.CompletedTask;
     }
 
     [Fact]

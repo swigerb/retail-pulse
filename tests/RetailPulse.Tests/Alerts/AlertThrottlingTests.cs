@@ -10,7 +10,7 @@ namespace RetailPulse.Tests.Alerts;
 /// </summary>
 public class AlertThrottlingTests
 {
-    private InMemoryAlertService CreateService(TimeSpan? throttleWindow = null)
+    private static InMemoryAlertService CreateService(TimeSpan? throttleWindow = null)
         => new(throttleWindow ?? TimeSpan.FromHours(1));
 
     [Fact]
@@ -51,7 +51,7 @@ public class AlertThrottlingTests
         var alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().HaveCount(2);
-        alerts.Select(a => a.Brand).Should().BeEquivalentTo(new[] { "Brand C", "Brand D" });
+        alerts.Select(a => a.Brand).Should().BeEquivalentTo(["Brand C", "Brand D"]);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class AlertThrottlingTests
         var alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().HaveCount(2);
-        alerts.Select(a => a.Region).Should().BeEquivalentTo(new[] { "West", "East" });
+        alerts.Select(a => a.Region).Should().BeEquivalentTo(["West", "East"]);
     }
 
     [Fact]

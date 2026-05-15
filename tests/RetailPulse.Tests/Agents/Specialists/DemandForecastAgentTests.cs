@@ -1,3 +1,5 @@
+using System.ClientModel;
+using System.ClientModel.Primitives;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -11,8 +13,6 @@ using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
-using System.ClientModel;
-using System.ClientModel.Primitives;
 
 namespace RetailPulse.Tests.Agents.Specialists;
 
@@ -178,7 +178,7 @@ public class DemandForecastAgentTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
@@ -196,8 +196,8 @@ public class DemandForecastAgentTests
 
         captured.Should().NotBeNull();
         // System + history(2) + current = 4 messages
-        captured!.Should().HaveCount(4);
-        captured!.Select(m => m.Role).Should().ContainInOrder(
+        captured.Should().HaveCount(4);
+        captured.Select(m => m.Role).Should().ContainInOrder(
             ChatRole.System, ChatRole.User, ChatRole.Assistant, ChatRole.User);
     }
 
@@ -212,7 +212,7 @@ public class DemandForecastAgentTests
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
@@ -226,7 +226,7 @@ public class DemandForecastAgentTests
 
         captured.Should().NotBeNull();
         // System(1) + capped history(20) + current(1) = 22
-        captured!.Should().HaveCount(22);
+        captured.Should().HaveCount(22);
     }
 
     #endregion
@@ -259,8 +259,8 @@ public class DemandForecastAgentTests
         await agent.HandleAsync(new ChatRequest("forecast?", SessionId: "tool-test"));
 
         capturedOptions.Should().NotBeNull();
-        capturedOptions!.Tools.Should().HaveCount(2);
-        capturedOptions.Tools!.OfType<AIFunction>().Select(t => t.Name)
+        capturedOptions.Tools.Should().HaveCount(2);
+        capturedOptions.Tools.OfType<AIFunction>().Select(t => t.Name)
             .Should().Contain("GetHistoricalDemand")
             .And.Contain("GenerateForecast");
     }
@@ -393,7 +393,7 @@ public class DemandForecastAgentTests
     {
         var hubContext = CreateMockHubContext();
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(

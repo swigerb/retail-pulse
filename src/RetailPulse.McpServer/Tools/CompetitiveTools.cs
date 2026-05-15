@@ -51,9 +51,8 @@ public static class CompetitiveTools
     {
         if (string.IsNullOrWhiteSpace(category))
             return new { error = "Parameter 'category' is required." };
-        if (string.IsNullOrWhiteSpace(region))
-            return new { error = "Parameter 'region' is required." };
-
-        return data.GetCompetitiveLandscape(category, region);
+        return string.IsNullOrWhiteSpace(region)
+            ? (new { error = "Parameter 'region' is required." })
+            : data.GetCompetitiveLandscape(category, region);
     }
 }

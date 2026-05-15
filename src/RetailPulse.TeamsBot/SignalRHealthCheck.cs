@@ -20,12 +20,10 @@ internal sealed class SignalRHealthCheck : IHealthCheck
 
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
-        if (_client.IsConnected)
-            return Task.FromResult(HealthCheckResult.Healthy("SignalR connected"));
-
-        if (_healthMode == "fail-fast")
-            return Task.FromResult(HealthCheckResult.Unhealthy("SignalR disconnected (fail-fast mode)"));
-
-        return Task.FromResult(HealthCheckResult.Degraded("SignalR disconnected (degraded mode)"));
+        return _client.IsConnected
+            ? Task.FromResult(HealthCheckResult.Healthy("SignalR connected"))
+            : _healthMode == "fail-fast"
+            ? Task.FromResult(HealthCheckResult.Unhealthy("SignalR disconnected (fail-fast mode)"))
+            : Task.FromResult(HealthCheckResult.Degraded("SignalR disconnected (degraded mode)"));
     }
 }

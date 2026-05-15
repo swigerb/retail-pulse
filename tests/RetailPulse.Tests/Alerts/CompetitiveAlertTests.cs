@@ -16,7 +16,7 @@ namespace RetailPulse.Tests.Alerts;
 /// </summary>
 public class CompetitiveAlertTests
 {
-    private InMemoryAlertService CreateService(TimeSpan? throttleWindow = null)
+    private static InMemoryAlertService CreateService(TimeSpan? throttleWindow = null)
         => new(throttleWindow ?? TimeSpan.FromHours(1));
 
     #region Competitive Price Pressure → Demand Spike Detection
@@ -225,7 +225,7 @@ public class CompetitiveAlertTests
 
         var alert = alerts.FirstOrDefault(a => a.Type == "supply_drop" && a.Brand == "Foundry Home");
         alert.Should().NotBeNull("25% supply drop is above the 15% threshold");
-        alert!.Severity.Should().BeOneOf("medium", "high",
+        alert.Severity.Should().BeOneOf("medium", "high",
             "25% deviation should be medium or high severity");
     }
 

@@ -210,7 +210,7 @@ public class CostTrackerTests
         // The last day (today) should have 2 events
         var todayEntry = trend.Days.FirstOrDefault(d => d.Date == today);
         todayEntry.Should().NotBeNull();
-        todayEntry!.Tokens.Should().Be(450); // 100+50+200+100
+        todayEntry.Tokens.Should().Be(450); // 100+50+200+100
     }
 
     [Fact]

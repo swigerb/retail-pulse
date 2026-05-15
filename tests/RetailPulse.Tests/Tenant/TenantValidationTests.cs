@@ -9,7 +9,7 @@ namespace RetailPulse.Tests.Tenant;
 /// </summary>
 public class TenantValidationTests : IDisposable
 {
-    private readonly List<string> _tempFiles = new();
+    private readonly List<string> _tempFiles = [];
 
     /// <summary>
     /// Minimal valid YAML that satisfies all validation rules.

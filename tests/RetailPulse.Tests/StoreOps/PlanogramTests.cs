@@ -1,8 +1,8 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
-using System.Text.Json;
 
 namespace RetailPulse.Tests.StoreOps;
 
@@ -264,9 +264,9 @@ public class PlanogramTests : IDisposable
     private string? GetFirstStoreId()
     {
         var result = Parse(_db.GetStorePerformance());
-        if (result.TryGetProperty("stores", out var stores) && stores.GetArrayLength() > 0)
-            return stores[0].GetProperty("storeId").GetString();
-        return null;
+        return result.TryGetProperty("stores", out var stores) && stores.GetArrayLength() > 0
+            ? stores[0].GetProperty("storeId").GetString()
+            : null;
     }
 
     private string? GetFirstAisleId(string storeId)

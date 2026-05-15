@@ -93,6 +93,6 @@ public class DevelopmentAuthHandlerTests
         var result = await handler.AuthenticateAsync();
 
         result.Ticket.Should().NotBeNull();
-        result.Ticket!.AuthenticationScheme.Should().Be(DevelopmentAuthHandler.SchemeName);
+        result.Ticket.AuthenticationScheme.Should().Be(DevelopmentAuthHandler.SchemeName);
     }
 }

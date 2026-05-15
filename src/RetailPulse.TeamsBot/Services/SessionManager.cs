@@ -9,8 +9,8 @@ namespace RetailPulse.TeamsBot.Services;
 /// </summary>
 public class SessionManager : IDisposable
 {
-    private static readonly TimeSpan ExpirationThreshold = TimeSpan.FromHours(2);
-    private static readonly TimeSpan CleanupInterval = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan _expirationThreshold = TimeSpan.FromHours(2);
+    private static readonly TimeSpan _cleanupInterval = TimeSpan.FromMinutes(30);
 
     private readonly ConcurrentDictionary<string, SessionEntry<string>> _conversationToSession = new();
     private readonly ConcurrentDictionary<string, SessionEntry<List<AgentSpan>>> _sessionSpans = new();
@@ -19,7 +19,7 @@ public class SessionManager : IDisposable
 
     public SessionManager()
     {
-        _cleanupTimer = new Timer(_ => EvictExpiredEntries(), null, CleanupInterval, CleanupInterval);
+        _cleanupTimer = new Timer(_ => EvictExpiredEntries(), null, _cleanupInterval, _cleanupInterval);
     }
 
     /// <summary>
@@ -71,7 +71,7 @@ public class SessionManager : IDisposable
 
     private void EvictExpiredEntries()
     {
-        var cutoff = DateTime.UtcNow - ExpirationThreshold;
+        var cutoff = DateTime.UtcNow - _expirationThreshold;
 
         foreach (var kvp in _conversationToSession)
         {

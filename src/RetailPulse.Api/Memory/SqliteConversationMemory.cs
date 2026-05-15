@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using RetailPulse.Contracts.Memory;
 
@@ -93,8 +94,8 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         cmd.Parameters.AddWithValue("@Type", (int)entry.Type);
         cmd.Parameters.AddWithValue("@Content", entry.Content);
         cmd.Parameters.AddWithValue("@EntityKey", (object?)entry.EntityKey ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@CreatedAt", entry.CreatedAt.ToString("o"));
-        cmd.Parameters.AddWithValue("@ExpiresAt", entry.ExpiresAt.ToString("o"));
+        cmd.Parameters.AddWithValue("@CreatedAt", entry.CreatedAt.ToString("o", CultureInfo.InvariantCulture));
+        cmd.Parameters.AddWithValue("@ExpiresAt", entry.ExpiresAt.ToString("o", CultureInfo.InvariantCulture));
         cmd.Parameters.AddWithValue("@Relevance", entry.Relevance);
 
         await cmd.ExecuteNonQueryAsync(ct);
@@ -117,7 +118,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         // Prune expired entries lazily
         await PruneExpiredAsync(conn, ct);
 
-        var now = DateTimeOffset.UtcNow.ToString("o");
+        var now = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture);
 
         // Build query — optionally rank by keyword/entity overlap
         var keywords = ParseKeywords(query);
@@ -167,8 +168,8 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
                 Type: (MemoryType)reader.GetInt32(2),
                 Content: reader.GetString(3),
                 EntityKey: reader.IsDBNull(4) ? null : reader.GetString(4),
-                CreatedAt: DateTimeOffset.Parse(reader.GetString(5)),
-                ExpiresAt: DateTimeOffset.Parse(reader.GetString(6)),
+                CreatedAt: DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture),
+                ExpiresAt: DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
                 Relevance: reader.GetFloat(7)
             ));
         }
@@ -217,7 +218,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM ConversationMemories WHERE ExpiresAt <= @Now";
-        cmd.Parameters.AddWithValue("@Now", DateTimeOffset.UtcNow.ToString("o"));
+        cmd.Parameters.AddWithValue("@Now", DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);
     }
 

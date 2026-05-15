@@ -120,7 +120,7 @@ public class TaskModuleIntegrationTests
 
     #region Helpers — mirrors the validation logic from Program.cs
 
-    private record ValidationResult(bool IsValid, string? Error);
+    private sealed record ValidationResult(bool IsValid, string? Error);
 
     /// <summary>
     /// Mirrors the exact validation logic from POST /api/taskmodule/promo.
@@ -129,18 +129,12 @@ public class TaskModuleIntegrationTests
         string brand, string region, string promoType, double budget,
         string startDate, string endDate)
     {
-        if (string.IsNullOrWhiteSpace(brand) || string.IsNullOrWhiteSpace(region) ||
-            string.IsNullOrWhiteSpace(promoType) || budget <= 0)
-        {
-            return new ValidationResult(false, "Fields brand, region, promoType, and budget (> 0) are required.");
-        }
-
-        if (!DateOnly.TryParse(startDate, out _) || !DateOnly.TryParse(endDate, out _))
-        {
-            return new ValidationResult(false, "startDate and endDate must be valid ISO dates (yyyy-MM-dd).");
-        }
-
-        return new ValidationResult(true, null);
+        return string.IsNullOrWhiteSpace(brand) || string.IsNullOrWhiteSpace(region) ||
+            string.IsNullOrWhiteSpace(promoType) || budget <= 0
+            ? new ValidationResult(false, "Fields brand, region, promoType, and budget (> 0) are required.")
+            : !DateOnly.TryParse(startDate, out _) || !DateOnly.TryParse(endDate, out _)
+            ? new ValidationResult(false, "startDate and endDate must be valid ISO dates (yyyy-MM-dd).")
+            : new ValidationResult(true, null);
     }
 
     private static int CalculateDuration(string startDate, string endDate)

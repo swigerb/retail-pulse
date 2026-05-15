@@ -27,10 +27,9 @@ public static class DemandTools
         [Description("Region to forecast (e.g. 'Southwest'). Omit to forecast across all regions.")] string? region = null,
         [Description("Number of days to forecast (7-365). Default: 90")] int days = 90)
     {
-        if (string.IsNullOrWhiteSpace(brand))
-            return new { error = "Parameter 'brand' is required." };
-
-        return data.GenerateForecast(brand, region, days);
+        return string.IsNullOrWhiteSpace(brand)
+            ? (new { error = "Parameter 'brand' is required." })
+            : data.GenerateForecast(brand, region, days);
     }
 
     [McpServerTool(Name = "GetSeasonalityFactors")]

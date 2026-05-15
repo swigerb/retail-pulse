@@ -85,7 +85,7 @@ public class MemoryMiddlewareTests : IDisposable
         var context = await _middleware.BuildMemoryContextAsync("user-1", "analysis");
 
         context.Should().NotBeNull();
-        context!.Length.Should().BeLessThan(3000, "memory injection should cap at ~2000 chars (~500 tokens)");
+        context.Length.Should().BeLessThan(3000, "memory injection should cap at ~2000 chars (~500 tokens)");
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public class MemoryMiddlewareTests : IDisposable
         var result = MemoryExtractionService.ParseExtraction(json);
 
         result.Summary.Should().Be("Test");
-        result.Entities.Should().BeEquivalentTo(new[] { "Brand X", "Q4" });
+        result.Entities.Should().BeEquivalentTo(["Brand X", "Q4"]);
         result.Preference.Should().Be("Prefers pie charts");
     }
 

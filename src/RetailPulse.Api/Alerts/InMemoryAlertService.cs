@@ -21,11 +21,11 @@ namespace RetailPulse.Api.Alerts;
 /// </summary>
 public class InMemoryAlertService : IAlertService
 {
-    private readonly ConcurrentBag<Alert> _alerts = new();
+    private readonly ConcurrentBag<Alert> _alerts = [];
     private readonly ConcurrentDictionary<string, DateTimeOffset> _throttleMap = new();
-    private readonly ConcurrentBag<SnoozeEntry> _snoozes = new();
-    private readonly ConcurrentBag<DismissEntry> _dismissals = new();
-    private readonly List<AnomalyDataPoint> _dataPoints = new();
+    private readonly ConcurrentBag<SnoozeEntry> _snoozes = [];
+    private readonly ConcurrentBag<DismissEntry> _dismissals = [];
+    private readonly List<AnomalyDataPoint> _dataPoints = [];
     private readonly TimeSpan _throttleWindow;
 
     public InMemoryAlertService(TimeSpan? throttleWindow = null)
@@ -191,7 +191,7 @@ public class InMemoryAlertService : IAlertService
 
     public IReadOnlyList<SnoozeEntry> GetSnoozes(string userId)
     {
-        return _snoozes.Where(s => s.UserId == userId).ToList();
+        return [.. _snoozes.Where(s => s.UserId == userId)];
     }
 
     public int AlertCount => _alerts.Count;

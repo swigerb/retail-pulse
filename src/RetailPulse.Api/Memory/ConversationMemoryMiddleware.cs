@@ -18,7 +18,7 @@ public class ConversationMemoryMiddleware
     private readonly ILogger<ConversationMemoryMiddleware> _logger;
 
     /// <summary>Maximum characters of memory context injected (≈500 tokens).</summary>
-    private const int MaxContextChars = 2000;
+    private const int _maxContextChars = 2000;
 
     public ConversationMemoryMiddleware(
         IConversationMemory memory,
@@ -58,7 +58,7 @@ public class ConversationMemoryMiddleware
                 _ => $"- {mem.Content}"
             };
 
-            if (totalChars + line.Length > MaxContextChars)
+            if (totalChars + line.Length > _maxContextChars)
                 break;
 
             lines.Add(line);
@@ -112,9 +112,10 @@ public class ConversationMemoryMiddleware
     /// </summary>
     internal static string FormatAge(TimeSpan age)
     {
-        if (age.TotalMinutes < 60) return "just now";
-        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
-        if (age.TotalDays < 7) return $"{(int)age.TotalDays}d ago";
-        return $"{(int)(age.TotalDays / 7)}w ago";
+        return age.TotalMinutes < 60
+            ? "just now"
+            : age.TotalHours < 24
+            ? $"{(int)age.TotalHours}h ago"
+            : age.TotalDays < 7 ? $"{(int)age.TotalDays}d ago" : $"{(int)(age.TotalDays / 7)}w ago";
     }
 }

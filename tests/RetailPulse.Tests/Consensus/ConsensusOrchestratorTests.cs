@@ -428,27 +428,27 @@ public class ConsensusOrchestrator : IConsensusCouncil
             {
                 var agentSw = System.Diagnostics.Stopwatch.StartNew();
                 var vote = await agent.VoteAsync(brand, cts.Token);
-                return (Vote: (AgentVote?)vote, TimedOut: false, Key: agent.Key);
+                return (Vote: (AgentVote?)vote, TimedOut: false, agent.Key);
             }
             catch (OperationCanceledException)
             {
-                return (Vote: (AgentVote?)null, TimedOut: true, Key: agent.Key);
+                return (Vote: null, TimedOut: true, agent.Key);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Agent {AgentKey} failed during council vote", agent.Key);
-                return (Vote: (AgentVote?)null, TimedOut: true, Key: agent.Key);
+                return (Vote: null, TimedOut: true, agent.Key);
             }
         }).ToList();
 
         var results = await Task.WhenAll(tasks);
 
-        foreach (var r in results)
+        foreach (var (Vote, TimedOut, Key) in results)
         {
-            if (r.Vote != null)
-                votes.Add(r.Vote);
-            if (r.TimedOut)
-                timedOut.Add(r.Key);
+            if (Vote != null)
+                votes.Add(Vote);
+            if (TimedOut)
+                timedOut.Add(Key);
         }
 
         var disagreements = new List<string>();
@@ -484,12 +484,12 @@ public class ConsensusOrchestrator : IConsensusCouncil
         {
             var grouped = votes.GroupBy(v => v.Rating).ToList();
             foreach (var g1 in grouped)
-            foreach (var g2 in grouped.Where(g => g.Key != g1.Key))
-            {
-                var pair = $"{g1.First().AgentDisplayName} ({g1.Key}) vs {g2.First().AgentDisplayName} ({g2.Key})";
-                if (!disagreements.Contains(pair))
-                    disagreements.Add(pair);
-            }
+                foreach (var g2 in grouped.Where(g => g.Key != g1.Key))
+                {
+                    var pair = $"{g1.First().AgentDisplayName} ({g1.Key}) vs {g2.First().AgentDisplayName} ({g2.Key})";
+                    if (!disagreements.Contains(pair))
+                        disagreements.Add(pair);
+                }
         }
 
         // Generate action items for Red votes

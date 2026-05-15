@@ -121,7 +121,7 @@ public class CardConcurrencyTests
     #region Helpers
 
     private static CreateCardRequest MakeRequest(string title)
-        => new(title, CardType.Dashboard, "test-user", new Dictionary<string, object>());
+        => new(title, CardType.Dashboard, "test-user", []);
 
     private static CardAction MakeVoteAction(string userId, string vote)
         => new(userId, $"User {userId}", CardActionType.Vote, new() { ["vote"] = vote });

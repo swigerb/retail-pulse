@@ -19,17 +19,14 @@ public class AccessControlGuard
     /// </summary>
     public AccessControlResult CheckAccess(UserScope user, string requestedRegion)
     {
-        if (!_enabled)
-            return AccessControlResult.Allowed();
-
-        if (string.Equals(user.Role, "admin", StringComparison.OrdinalIgnoreCase))
-            return AccessControlResult.Allowed();
-
-        if (user.AllowedRegions.Any(r =>
-                string.Equals(r, requestedRegion, StringComparison.OrdinalIgnoreCase)))
-            return AccessControlResult.Allowed();
-
-        return AccessControlResult.Denied(
+        return !_enabled
+            ? AccessControlResult.Allowed()
+            : string.Equals(user.Role, "admin", StringComparison.OrdinalIgnoreCase)
+            ? AccessControlResult.Allowed()
+            : user.AllowedRegions.Any(r =>
+                string.Equals(r, requestedRegion, StringComparison.OrdinalIgnoreCase))
+            ? AccessControlResult.Allowed()
+            : AccessControlResult.Denied(
             $"You don't have access to {requestedRegion} data. " +
             $"Your access is limited to: {string.Join(", ", user.AllowedRegions)}.");
     }

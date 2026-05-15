@@ -21,17 +21,17 @@ public class ScorecardOrchestrator
     private readonly AgentDefinition _synthesisDef;
     private readonly ILogger<ScorecardOrchestrator> _logger;
 
-    private static readonly TimeSpan AgentTimeout = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan _agentTimeout = TimeSpan.FromSeconds(12);
 
     // Scoring dimensions with weights
-    private static readonly (string Dimension, double Weight, string AgentKey)[] ScoringDimensions =
-    {
+    private static readonly (string Dimension, double Weight, string AgentKey)[] _scoringDimensions =
+    [
         ("Demand Momentum", 0.25, "demand-forecasting"),
         ("Competitive Position", 0.20, "competitive-intel"),
         ("Supply Reliability", 0.20, "supply-chain"),
         ("Store Execution", 0.20, "store-ops"),
         ("Margin Health", 0.15, "margin-analysis")
-    };
+    ];
 
     public ScorecardOrchestrator(
         IEnumerable<ISpecialistAgent> specialists,
@@ -108,7 +108,7 @@ public class ScorecardOrchestrator
         var agentLookup = _specialists.ToDictionary(s => s.Key, StringComparer.OrdinalIgnoreCase);
 
         // Evaluate each dimension in parallel
-        var dimTasks = ScoringDimensions.Select(async dim =>
+        var dimTasks = _scoringDimensions.Select(async dim =>
         {
             if (!agentLookup.TryGetValue(dim.AgentKey, out var agent))
             {
@@ -119,7 +119,7 @@ public class ScorecardOrchestrator
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(AgentTimeout);
+                cts.CancelAfter(_agentTimeout);
 
                 var prompt = BuildDimensionPrompt(brand, region, dim.Dimension);
                 var request = new ChatRequest(prompt, $"scorecard-{Guid.NewGuid():N}");

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
@@ -75,7 +76,7 @@ public sealed class DeadLetterQueue : IDisposable
             INSERT INTO dead_letters (timestamp, operation, payload, error, retry_count, status)
             VALUES (@ts, @op, @payload, @err, @retry, 'pending')
             """;
-        cmd.Parameters.AddWithValue("@ts", entry.Timestamp.ToString("O"));
+        cmd.Parameters.AddWithValue("@ts", entry.Timestamp.ToString("O", CultureInfo.InvariantCulture));
         cmd.Parameters.AddWithValue("@op", entry.Operation);
         cmd.Parameters.AddWithValue("@payload", (object?)entry.Payload ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@err", entry.Error);
@@ -96,7 +97,7 @@ public sealed class DeadLetterQueue : IDisposable
             entries.Add(new DeadLetterEntry
             {
                 Id = reader.GetInt64(0),
-                Timestamp = DateTimeOffset.Parse(reader.GetString(1)),
+                Timestamp = DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture),
                 Operation = reader.GetString(2),
                 Payload = reader.IsDBNull(3) ? null : reader.GetString(3),
                 Error = reader.GetString(4),
@@ -128,7 +129,7 @@ public sealed class DeadLetterQueue : IDisposable
         await using var cmd = _db.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM dead_letters WHERE status = 'pending'";
         var result = await cmd.ExecuteScalarAsync(ct);
-        return Convert.ToInt32(result);
+        return Convert.ToInt32(result, CultureInfo.InvariantCulture);
     }
 
     /// <summary>Drain in-memory items (used for testing/diagnostics).</summary>

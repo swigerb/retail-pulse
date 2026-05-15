@@ -48,7 +48,7 @@ public static class AgentTestFixtures
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
-                captured = msgs.ToList())
+                captured = [.. msgs])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, responseText)));
         return (mock.Object, () => captured);
@@ -96,7 +96,7 @@ public static class AgentTestFixtures
         IEnumerable<AITool>? tools = null)
     {
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection([])
             .Build();
 
         var pipeline = new AgentExecutionPipeline(

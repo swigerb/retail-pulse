@@ -29,12 +29,10 @@ public static partial class PiiRedactor
     /// </summary>
     public static bool ContainsPii(string input)
     {
-        if (string.IsNullOrEmpty(input))
-            return false;
-        return SsnPattern().IsMatch(input)
+        return !string.IsNullOrEmpty(input) && (SsnPattern().IsMatch(input)
             || EmailPattern().IsMatch(input)
             || PhonePattern().IsMatch(input)
-            || CreditCardPattern().IsMatch(input);
+            || CreditCardPattern().IsMatch(input));
     }
 
     // SSN: 123-45-6789 or 123 45 6789

@@ -58,7 +58,7 @@ public class TraceCollectorBackpressureTests
     }
 
     [Fact]
-    public async Task CaptureSpan_WhenChannelFull_DoesNotThrow()
+    public Task CaptureSpan_WhenChannelFull_DoesNotThrow()
     {
         var pushChannel = new TelemetryPushChannel(capacity: 1);
         var collector = CreateCollectorWithChannel(pushChannel);
@@ -72,10 +72,11 @@ public class TraceCollectorBackpressureTests
         act.Should().NotThrow();
 
         pushChannel.DroppedCount.Should().BeGreaterThanOrEqualTo(1);
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task CollectorWithoutChannel_StillCapturesSpans()
+    public Task CollectorWithoutChannel_StillCapturesSpans()
     {
         var collector = new InMemoryTraceCollector();
 
@@ -84,10 +85,11 @@ public class TraceCollectorBackpressureTests
         var spans = collector.GetSpans("trace-1");
         spans.Should().NotBeNull();
         spans.Should().HaveCount(1);
+        return Task.CompletedTask;
     }
 
     [Fact]
-    public async Task DroppedTelemetryCount_TracksDroppedItems()
+    public Task DroppedTelemetryCount_TracksDroppedItems()
     {
         var pushChannel = new TelemetryPushChannel(capacity: 2);
         var collector = CreateCollectorWithChannel(pushChannel);
@@ -99,6 +101,7 @@ public class TraceCollectorBackpressureTests
         collector.CaptureSpan(MakeSpan("t3", "op.3"));
 
         pushChannel.DroppedCount.Should().BeGreaterThan(0, "telemetry should be dropped when channel is full");
+        return Task.CompletedTask;
     }
 
     private static InMemoryTraceCollector CreateCollectorWithChannel(TelemetryPushChannel channel)

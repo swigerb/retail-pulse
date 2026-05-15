@@ -1,3 +1,4 @@
+using System.Net;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -5,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
 using RetailPulse.Api.Health;
-using System.Net;
 
 namespace RetailPulse.Tests.Observability;
 

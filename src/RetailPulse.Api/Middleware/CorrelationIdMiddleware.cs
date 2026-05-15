@@ -6,8 +6,8 @@ namespace RetailPulse.Api.Middleware;
 /// </summary>
 public class CorrelationIdMiddleware
 {
-    private const string HeaderName = "X-Correlation-ID";
-    private const string ItemKey = "CorrelationId";
+    private const string _headerName = "X-Correlation-ID";
+    private const string _itemKey = "CorrelationId";
 
     private readonly RequestDelegate _next;
     private readonly ILogger<CorrelationIdMiddleware> _logger;
@@ -20,11 +20,11 @@ public class CorrelationIdMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var correlationId = context.Request.Headers[HeaderName].FirstOrDefault()
+        var correlationId = context.Request.Headers[_headerName].FirstOrDefault()
             ?? Guid.NewGuid().ToString("D");
 
-        context.Items[ItemKey] = correlationId;
-        context.Response.Headers[HeaderName] = correlationId;
+        context.Items[_itemKey] = correlationId;
+        context.Response.Headers[_headerName] = correlationId;
 
         using (_logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
         {

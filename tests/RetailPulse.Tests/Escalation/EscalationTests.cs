@@ -111,11 +111,11 @@ public class EscalationTests
         result.Format.Should().NotBeNull("L3 should specify output format");
 
         // Exec brief format should have expected sections
-        result.Format!.Should().Contain("summary",
+        result.Format.Should().Contain("summary",
             "exec brief should include a summary section");
-        result.Format!.Should().Contain("metrics",
+        result.Format.Should().Contain("metrics",
             "exec brief should include a metrics section");
-        result.Format!.Should().Contain("recommendation",
+        result.Format.Should().Contain("recommendation",
             "exec brief should include a recommendation section");
     }
 
@@ -331,10 +331,8 @@ public class EscalationTests
             return 3;
 
         var multiDimensionKeywords = new[] { "compare", "correlation", "simultaneously", "across all", "and margin", "and competitive", "margin and", "promotional spend", "pricing impact" };
-        var hits = multiDimensionKeywords.Count(k => lower.Contains(k));
-        if (hits >= 2) return 2;
-
-        return 1;
+        var hits = multiDimensionKeywords.Count(lower.Contains);
+        return hits >= 2 ? 2 : 1;
     }
 
     #endregion
@@ -366,7 +364,7 @@ public interface IEscalationService
 /// Mock escalation service for deterministic test behavior.
 /// Classifies based on LLM mock or keyword heuristics.
 /// </summary>
-internal class MockEscalationService : IEscalationService
+internal sealed class MockEscalationService : IEscalationService
 {
     private readonly IChatClient _client;
 

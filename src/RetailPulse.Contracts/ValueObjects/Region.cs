@@ -5,7 +5,7 @@ namespace RetailPulse.Contracts.ValueObjects;
 /// </summary>
 public readonly record struct Region
 {
-    private static readonly HashSet<string> KnownRegions = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _knownRegions = new(StringComparer.OrdinalIgnoreCase)
     {
         "Northeast",
         "Southeast",
@@ -27,9 +27,9 @@ public readonly record struct Region
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value, nameof(value));
         var trimmed = value.Trim();
-        if (!KnownRegions.Contains(trimmed))
+        if (!_knownRegions.Contains(trimmed))
         {
-            throw new ArgumentException($"Unknown region: '{trimmed}'. Known regions: {string.Join(", ", KnownRegions)}", nameof(value));
+            throw new ArgumentException($"Unknown region: '{trimmed}'. Known regions: {string.Join(", ", _knownRegions)}", nameof(value));
         }
         Value = trimmed;
     }
@@ -48,7 +48,7 @@ public readonly record struct Region
         Value = value;
     }
 
-    public static bool IsKnown(string value) => KnownRegions.Contains(value?.Trim() ?? "");
+    public static bool IsKnown(string value) => _knownRegions.Contains(value?.Trim() ?? "");
 
     public static implicit operator Region(string value) => new(value);
     public static implicit operator string(Region region) => region.Value;

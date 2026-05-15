@@ -15,9 +15,6 @@ public static class GenerateForecastTool
         [Description("Region (e.g. 'Northeast', 'National'). Defaults to 'National'.")] string region = "National",
         [Description("Channel (e.g. 'On-Premise', 'Off-Premise', 'E-Commerce', 'All'). Defaults to 'All'.")] string channel = "All")
     {
-        if (string.IsNullOrWhiteSpace(brand))
-            return new { error = "Parameter 'brand' is required." };
-
-        return data.GenerateForecast(brand, region);
+        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GenerateForecast(brand, region);
     }
 }

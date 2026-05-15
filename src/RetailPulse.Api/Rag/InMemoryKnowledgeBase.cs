@@ -13,9 +13,9 @@ namespace RetailPulse.Api.Rag;
 public sealed class InMemoryKnowledgeBase : IKnowledgeBase
 {
     // BM25 parameters (standard values)
-    private const double K1 = 1.2;
-    private const double B = 0.75;
-    private const double MinScoreThreshold = 0.3;
+    private const double _k1 = 1.2;
+    private const double _b = 0.75;
+    private const double _minScoreThreshold = 0.3;
 
     private readonly ConcurrentDictionary<string, IndexedDocument> _documents = new();
     private readonly ConcurrentDictionary<string, IndexedChunk> _chunks = new();
@@ -25,7 +25,7 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
     // Global corpus stats for BM25
     private double _avgDocLength;
     private int _totalChunks;
-    private readonly object _statsLock = new();
+    private readonly Lock _statsLock = new();
 
     public InMemoryKnowledgeBase(ILogger<InMemoryKnowledgeBase> logger, IOptions<KnowledgeOptions> options)
     {
@@ -108,7 +108,7 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         {
             ct.ThrowIfCancellationRequested();
             var docsContaining = _chunks.Values.Count(c => c.TermFrequencies.ContainsKey(term));
-            idfScores[term] = Math.Log((_totalChunks - docsContaining + 0.5) / (docsContaining + 0.5) + 1.0);
+            idfScores[term] = Math.Log(((_totalChunks - docsContaining + 0.5) / (docsContaining + 0.5)) + 1.0);
         }
 
         // Score each chunk via BM25
@@ -124,12 +124,12 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
                     continue;
 
                 var idf = idfScores.GetValueOrDefault(term, 0);
-                var numerator = tf * (K1 + 1);
-                var denominator = tf + K1 * (1 - B + B * chunk.TokenCount / _avgDocLength);
+                var numerator = tf * (_k1 + 1);
+                var denominator = tf + (_k1 * (1 - _b + (_b * chunk.TokenCount / _avgDocLength)));
                 score += idf * (numerator / denominator);
             }
 
-            if (score > MinScoreThreshold)
+            if (score > _minScoreThreshold)
                 scored.Add((chunk, score));
         }
 
@@ -189,11 +189,10 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
     public int ChunkCount => _chunks.Count;
 
     private static string[] Tokenize(string text) =>
-        text.ToLowerInvariant()
+        [.. text.ToLowerInvariant()
             .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
             .Select(t => t.Trim('.', ',', '!', '?', ';', ':', '"', '\'', '(', ')', '[', ']', '-', '—'))
-            .Where(t => t.Length > 1)
-            .ToArray();
+            .Where(t => t.Length > 1)];
 
     private static Dictionary<string, int> BuildTermFrequencies(string[] tokens)
     {

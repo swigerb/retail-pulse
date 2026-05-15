@@ -144,7 +144,7 @@ public class TraceCollectorTests
         collector.CaptureSpan(MakeSpan("trace-1", "step-1", startTime: t1));
         collector.CaptureSpan(MakeSpan("trace-1", "step-2", startTime: t2));
 
-        var spans = collector.GetSpans("trace-1")!;
+        var spans = collector.GetSpans("trace-1");
 
         spans.Should().HaveCount(3);
         spans[0].OperationName.Should().Be("step-1");
@@ -222,7 +222,7 @@ public class TraceCollectorTests
         await Task.WhenAll(tasks);
 
         collector.TraceCount.Should().Be(1);
-        collector.GetSpans("shared-trace")!.Should().HaveCount(50);
+        collector.GetSpans("shared-trace").Should().HaveCount(50);
     }
 
     #endregion

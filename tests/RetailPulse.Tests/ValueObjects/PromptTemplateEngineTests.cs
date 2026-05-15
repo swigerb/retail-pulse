@@ -11,12 +11,12 @@ public class PromptTemplateEngineTests
     {
         Company = "TestCo",
         Industry = "Retail",
-        BrandsList = new List<BrandConfig>
-        {
-            new() { Name = "Brand A", VariantsList = new List<string> { "V1", "V2" } },
-            new() { Name = "Brand B", VariantsList = new List<string> { "V3" } }
-        },
-        RegionsList = new List<string> { "Northeast", "West Coast" },
+        BrandsList =
+        [
+            new() { Name = "Brand A", VariantsList = ["V1", "V2"] },
+            new() { Name = "Brand B", VariantsList = ["V3"] }
+        ],
+        RegionsList = ["Northeast", "West Coast"],
         Theme = new ThemeConfig { PrimaryColor = "#FF0000", AccentColor = "#00FF00" },
         Distribution = new DistributionConfig { Model = "Direct" }
     };
@@ -85,8 +85,8 @@ public class PromptTemplateEngineTests
         {
             Company = "NullCo",
             Industry = "Tech",
-            BrandsList = new List<BrandConfig>(),
-            RegionsList = new List<string>(),
+            BrandsList = [],
+            RegionsList = [],
             Theme = null!,
             Distribution = null!
         };
