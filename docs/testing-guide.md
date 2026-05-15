@@ -399,3 +399,151 @@ Generate coverage and upload to CodeCov:
 ## Questions or Issues?
 
 Contact the development team or file an issue in the repository.
+
+---
+
+## Test Infrastructure Overview
+
+RetailPulse has **1815+ tests** across multiple testing strategies:
+
+| Category | Location | Framework | Count |
+|----------|----------|-----------|-------|
+| Unit tests | tests/RetailPulse.Tests/ | xUnit + FluentAssertions + Moq | ~1700 |
+| Contract tests | tests/RetailPulse.Tests/Contract/ | WebApplicationFactory | ~10 |
+| E2E demo scenarios | tests/RetailPulse.Tests/E2E/ | WebApplicationFactory | 5 |
+| OWASP security | tests/RetailPulse.Tests/Security/ | xUnit | ~20 |
+| Chaos tests | tests/RetailPulse.Tests/Chaos/ | xUnit | ~15 |
+| Value object tests | tests/RetailPulse.Tests/ValueObjects/ | xUnit | 45 |
+| Load tests | tests/RetailPulse.LoadTests/ | NBomber | 2 scenarios |
+| Benchmarks | tests/RetailPulse.Benchmarks/ | BenchmarkDotNet | 3 suites |
+| Frontend | src/RetailPulse.Web/ | Vitest | ~250 |
+
+---
+
+## Running All Tests
+
+```bash
+# Backend (all 1815 tests)
+dotnet test RetailPulse.slnx --verbosity quiet
+
+# Frontend
+cd src/RetailPulse.Web && npx vitest run
+
+# With coverage
+dotnet test RetailPulse.slnx --collect:"XPlat Code Coverage"
+```
+
+---
+
+## Contract Tests
+
+Contract tests verify the API's request/response shape stays stable:
+
+- **ChatEndpointContractTests** — Validates POST /api/v1/chat request schema, response structure, and error format (RFC 7807)
+- **McpToolContractTests** — Validates MCP tool schemas haven't changed (breaking change detection)
+
+These use `WebApplicationFactory<Program>` with mocked external services.
+
+```bash
+dotnet test --filter "Category=Contract"
+```
+
+---
+
+## E2E Demo Scenario Tests
+
+The 5 executive demo queries are tested end-to-end with deterministic mocks:
+
+1. "How is Apex Grill performing in the Southwest this quarter?"
+2. "What's our competitive pricing position for premium burgers?"
+3. "What's the sentiment from field reps about our new Smokehouse line?"
+4. "Show me the portfolio health across all regions"
+5. "What are the top inventory depletion risks this week?"
+
+Each test verifies the full pipeline (routing → agent → tool calls → response) returns a valid response in < 10s with mocked services.
+
+```bash
+dotnet test --filter "Category=E2E"
+```
+
+---
+
+## Load Tests (NBomber)
+
+Two load test scenarios in `tests/RetailPulse.LoadTests/`:
+
+| Scenario | Pattern | Assertion |
+|----------|---------|-----------|
+| ChatEndpointScenario | Ramp 1→10 users over 30s | p95 < 5s |
+| HealthCheckScenario | Sustained 50 req/s for 60s | p99 < 200ms |
+
+```bash
+cd tests/RetailPulse.LoadTests
+dotnet run -c Release
+```
+
+Results are written to `reports/` directory with HTML visualization.
+
+---
+
+## Mutation Testing (Stryker.NET)
+
+Mutation testing validates test effectiveness by injecting bugs:
+
+**Config:** `stryker-config.json` at repo root
+
+| Setting | Value |
+|---------|-------|
+| Target | RetailPulse.Api |
+| Mutate paths | Agents/Routing, Validation, Caching |
+| High threshold | 80% |
+| Low threshold | 60% |
+| Break threshold | 50% |
+
+```bash
+# Install (first time)
+dotnet tool install -g dotnet-stryker
+
+# Run
+dotnet stryker
+```
+
+---
+
+## Benchmarks (BenchmarkDotNet)
+
+Performance regression detection for critical paths:
+
+| Benchmark | What it measures |
+|-----------|-----------------|
+| RouterClassification | Keyword fast-path vs LLM classification latency |
+| CacheLookup | MCP response cache hit/miss overhead |
+| VoteParsing | Consensus council vote JSON parsing |
+
+```bash
+dotnet run -c Release --project tests/RetailPulse.Benchmarks
+```
+
+---
+
+## Cache Warming
+
+`CacheWarmingService` (IHostedService) pre-populates the MCP response cache on startup:
+
+- Fires all 5 demo queries through the cache
+- Ensures first demo query is a cache hit (fast response)
+- Toggle: `CacheWarming:Enabled` (default: true in Development)
+- Logs timing for each warmed query
+
+---
+
+## Chaos Tests
+
+Chaos tests validate resilience under failure conditions:
+
+- Circuit breaker behavior (opens after 5 failures)
+- Retry exhaustion (3 attempts then dead-letter)
+- MCP server unavailability (graceful degradation)
+- Timeout handling (75s → clean error)
+- Concurrent request safety
+- Memory pressure behavior

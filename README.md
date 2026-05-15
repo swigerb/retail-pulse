@@ -224,21 +224,31 @@ retail-pulse/
 │   ├── RetailPulse.AppHost/          # Aspire 13.3.0 orchestrator
 │   ├── RetailPulse.Api/              # Agent API service
 │   │   ├── Agents/                   # MAF agent implementation
+│   │   ├── Caching/                  # MCP response cache (DelegatingHandler)
+│   │   ├── Consensus/                # Multi-agent council orchestration
+│   │   ├── Health/                   # Readiness/liveness health checks
 │   │   ├── Hubs/                     # SignalR telemetry hub (session-scoped groups)
-│   │   ├── Middleware/               # Auth middleware
+│   │   ├── Middleware/               # Exception handling, correlation ID, security headers, auth
+│   │   ├── Prompts/                  # PromptTemplateEngine (tenant hydration)
+│   │   ├── Security/                 # Audit log, security services
+│   │   ├── Telemetry/                # Custom business metrics (OpenTelemetry)
 │   │   ├── Tools/                    # MCP tool wrappers
+│   │   ├── Validation/               # Input validation (ChatRequestValidator)
 │   │   └── prompts.yaml              # Agent prompt configuration (tenant-templated)
 │   ├── RetailPulse.McpServer/        # MCP server (data tools)
 │   │   ├── Tools/                    # MCP tool definitions (parameterized queries)
 │   │   └── Data/                     # SQLite-backed tenant-driven metrics
 │   ├── RetailPulse.Contracts/        # Shared models (immutable config, ChartSpec, etc.)
+│   │   └── ValueObjects/             # BrandName, Region, SessionId
 │   ├── RetailPulse.ServiceDefaults/  # Shared Aspire defaults (OTel, health, resilience)
 │   ├── RetailPulse.TeamsBot/         # Microsoft Teams bot (JWT-validated, Adaptive Cards)
 │   └── RetailPulse.Web/              # React/Vite/TypeScript frontend
 │       ├── src/components/           # ChatPanel, SpanTimeline, Charts, ErrorBoundary
 │       └── src/hooks/                # SignalR connection, telemetry
 ├── tests/
-│   └── RetailPulse.Tests/            # xUnit tests (174 passing)
+│   ├── RetailPulse.Tests/            # xUnit + integration tests (1815 passing)
+│   ├── RetailPulse.LoadTests/        # NBomber load test scenarios
+│   └── RetailPulse.Benchmarks/       # BenchmarkDotNet performance suite
 ├── deploy/                           # Deployment & infrastructure
 │   ├── deploy.ps1 / deploy.sh        # One-click local deployment scripts
 │   ├── apim-ai-gateway/              # APIM AI Gateway Bicep (main.bicep, policy.xml)
@@ -279,6 +289,17 @@ Route all LLM calls through Azure API Management for token metering, rate limiti
 ### Foundry Shipment Agent (Optional)
 
 Deploy a specialist agent to Azure AI Foundry for Three-Tier Distribution pipeline analysis. Disabled by default - the app runs fully without it using a local analyzer. See [Architecture](docs/architecture.md).
+
+### Enterprise Hardening
+
+Retail Pulse implements enterprise-grade patterns:
+
+- **Resilience** — Circuit breaker (5 failures/30s), retry with exponential backoff + jitter, dead-letter queue
+- **Observability** — Correlation IDs, custom OpenTelemetry metrics, SLO/SLI definitions, health checks
+- **Security** — CSP/HSTS/X-Frame-Options headers, input validation, SHA256 hash-chain audit log
+- **Performance** — MCP response cache, keyword fast-path routing, lightweight council voting, cache warming
+- **API Versioning** — `/api/v1/chat` with Sunset header on legacy endpoint
+- **Testing** — 1815+ unit/integration/contract/E2E tests, load tests, mutation testing, benchmarks
 
 ---
 
@@ -338,6 +359,38 @@ This deploys:
 - Bicep outputs do not expose secrets or APIM subscription keys
 - Diagnostic settings (App Insights, Log Analytics) are deployed alongside resources
 - Application Insights connection strings are configured in the AppHost, not checked into `appsettings.json`
+
+---
+
+## CI/CD
+
+[![CI](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml)
+
+The CI pipeline runs on every push and PR to `main`:
+
+| Job | What it does |
+|-----|-------------|
+| **build** | Restore, build, test (.NET 10) with coverage |
+| **frontend** | npm ci, build, vitest |
+| **security** | Check for vulnerable NuGet packages |
+| **lint** | Verify code style (`dotnet format --verify-no-changes`) |
+
+### Run locally
+
+```bash
+# Full backend build + test
+dotnet build RetailPulse.slnx
+dotnet test RetailPulse.slnx --verbosity quiet
+
+# Frontend
+cd src/RetailPulse.Web && npm run build && npx vitest run
+
+# Load tests (optional)
+cd tests/RetailPulse.LoadTests && dotnet run -c Release
+
+# Benchmarks (optional)
+dotnet run -c Release --project tests/RetailPulse.Benchmarks
+```
 
 ---
 
@@ -412,7 +465,7 @@ All tenant configuration lives in `tenant.yaml` at the repo root. Changes take e
 
 ## Tests
 
-**174 tests passing** across xUnit (.NET) and Vitest (frontend). Covers agent telemetry, chart/tool behavior, prompt config, tenant validation, simulated metrics, session management (TTL eviction), SignalR session-group broadcasting, and Teams Adaptive Card builders.
+**1815+ tests passing** across xUnit (.NET), Vitest (frontend), load tests, and benchmarks. Covers agent telemetry, chart/tool behavior, prompt config, tenant validation, simulated metrics, session management (TTL eviction), SignalR session-group broadcasting, Teams Adaptive Card builders, and performance profiling.
 
 ```bash
 # Run all .NET tests

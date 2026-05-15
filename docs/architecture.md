@@ -483,3 +483,125 @@ Endpoint: `GET /api/explain/{traceId}` — returns `ExplanationChain` with order
 ### Azure Production (Target)
 
 ![Azure Production Topology](deployment-azure.png)
+
+---
+
+## Middleware Pipeline (Sprint 2-4)
+
+The API processes requests through a layered middleware pipeline:
+
+```
+Request
+  │
+  ├─→ CorrelationIdMiddleware      Assign/propagate X-Correlation-ID
+  ├─→ SecurityHeadersMiddleware    Add CSP, HSTS, X-Frame-Options
+  ├─→ ExceptionHandlingMiddleware  Catch unhandled → RFC 7807 Problem Details
+  ├─→ Rate Limiter                 4-tier rate limiting (strict/standard/relaxed/upload)
+  ├─→ API Versioning               Route /api/v1/* vs legacy /api/*
+  ├─→ ChatRequestValidator         Input validation (length, XSS, format)
+  │
+  └─→ Endpoint Handler (ChatEndpoints)
+        ├─→ Intent Classification (RetailOpsRouter)
+        │     ├── Keyword fast-path (deterministic, 0.95 confidence)
+        │     └── LLM classification (fallback)
+        ├─→ Context Loading (memory, RAG — only AFTER routing)
+        └─→ Agent Execution (AgentExecutionPipeline)
+              └── SignalR progress events at each phase
+```
+
+---
+
+## Agent Architecture (Sprint 1, 5)
+
+### Specialist Agents
+
+Each agent owns specific intents and has a scoped tool set:
+
+| Agent | Intents | Tools | Purpose |
+|-------|---------|-------|---------|
+| GeneralAgent | General | All 7 MCP tools | Catch-all for unrouted queries |
+| FieldSentimentAgent | SentimentField | GetFieldSentiment, CreateChart | Dedicated sentiment analysis |
+| CompetitiveAgent | CompetitivePricing | GetCompetitivePricing, CreateChart | Pricing analysis |
+| DemandForecastAgent | DemandForecasting | GetDemandForecast, CreateChart | Demand/depletion forecasting |
+| SupplyChainAgent | SupplyChain | GetShipmentAnalysis, CreateChart | Supply chain and shipments |
+| PortfolioHealthAgent | PortfolioHealth | All tools (council) | Multi-agent fan-out voting |
+
+### Keyword Fast-Path Router
+
+Before invoking the LLM for intent classification, `TryKeywordClassify` checks for deterministic keyword patterns:
+
+```
+"sentiment" / "field rep" → SentimentField (0.95)
+"competitive" / "pricing position" → CompetitivePricing (0.95)
+"supply chain" / "shipment" → SupplyChain (0.95)
+"portfolio" / "health" → PortfolioHealth (0.95)
+```
+
+This saves one LLM roundtrip (~1-3s) for ~60% of queries.
+
+### Lightweight Council Voting
+
+The `ConsensusOrchestrator` uses direct LLM calls (not full agent execution) for voting:
+
+- Temperature: 0 (deterministic)
+- Response format: JSON (structured vote)
+- Timeout: 10 seconds per vote
+- No tool execution during voting phase
+- Full agent execution only for the winning specialist
+
+---
+
+## Caching Architecture (Sprint 1)
+
+### MCP Response Cache
+
+`McpResponseCachingHandler` (DelegatingHandler on the MCP HttpClient):
+
+- **Cache key:** HTTP method + full URL
+- **TTL:** 60 seconds
+- **Storage:** IMemoryCache (in-process)
+- **Scope:** Only GET requests (mutations bypass cache)
+- **Header:** `X-MCP-Cache: HIT|MISS` on responses
+
+### Cache Warming
+
+`CacheWarmingService` (IHostedService) fires demo queries on startup to pre-populate the cache, ensuring first-request performance matches subsequent requests.
+
+---
+
+## Prompt Management (Sprint 5)
+
+`PromptTemplateEngine` centralizes all tenant placeholder substitution:
+
+```csharp
+var hydrated = engine.Hydrate(agentDefinition);
+// Replaces {tenant.company}, {tenant.brands}, {tenant.regions}, etc.
+```
+
+This replaced 8 repetitive `.Replace()` chains in Program.cs with a single DRY call. The engine loads `prompts.yaml` and applies tenant configuration from `FileTenantProvider`.
+
+---
+
+## Observability (Sprint 3)
+
+### Custom Metrics
+
+`RetailPulseMetrics` emits business-level OpenTelemetry metrics:
+
+- `retailpulse.intent_classification_total` — Intent classifications (with fast_path_hit dimension)
+- `retailpulse.cache_hit_total` / `cache_miss_total` — MCP cache effectiveness
+- `retailpulse.tool_call_duration_ms` — Per-tool latency histogram
+- `retailpulse.agent_execution_duration_ms` — End-to-end agent timing
+- `retailpulse.request_total` / `request_duration_ms` — SLI metrics
+
+### Structured Logging
+
+All log messages use `[LoggerMessage]` source-generated methods for zero-allocation structured logging with consistent event IDs.
+
+### Progress Events (SignalR)
+
+The frontend receives real-time progress instead of static "Thinking...":
+
+```
+routing → agent_start → thinking → tool_call(name) → synthesizing → complete
+```
