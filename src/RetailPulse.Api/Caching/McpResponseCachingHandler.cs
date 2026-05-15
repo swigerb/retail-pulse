@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Caching.Memory;
+using RetailPulse.Api.Telemetry;
 
 namespace RetailPulse.Api.Caching;
 
@@ -12,15 +13,18 @@ public class McpResponseCachingHandler : DelegatingHandler
     private readonly IMemoryCache _cache;
     private readonly ILogger<McpResponseCachingHandler> _logger;
     private readonly TimeSpan _ttl;
+    private readonly RetailPulseMetrics? _metrics;
 
     public McpResponseCachingHandler(
         IMemoryCache cache,
         ILogger<McpResponseCachingHandler> logger,
-        TimeSpan? ttl = null)
+        TimeSpan? ttl = null,
+        RetailPulseMetrics? metrics = null)
     {
         _cache = cache;
         _logger = logger;
         _ttl = ttl ?? TimeSpan.FromSeconds(60);
+        _metrics = metrics;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
@@ -37,6 +41,7 @@ public class McpResponseCachingHandler : DelegatingHandler
         if (_cache.TryGetValue(cacheKey, out CachedMcpResponse? cached) && cached is not null)
         {
             _logger.LogDebug("MCP cache hit for {Uri}", request.RequestUri);
+            _metrics?.RecordCacheHit();
             var cachedResponse = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
                 Content = new StringContent(cached.Body, System.Text.Encoding.UTF8, cached.ContentType)
@@ -45,6 +50,7 @@ public class McpResponseCachingHandler : DelegatingHandler
             return cachedResponse;
         }
 
+        _metrics?.RecordCacheMiss();
         var response = await base.SendAsync(request, cancellationToken);
 
         if (response.IsSuccessStatusCode)
