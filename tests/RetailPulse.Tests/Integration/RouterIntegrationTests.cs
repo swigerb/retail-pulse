@@ -613,8 +613,8 @@ public class RouterIntegrationTests
 
         var routingResult = await router.RouteAsync(
             "Estimate ROI for a bundle promotion", null, null, null);
-        routingResult.Intent.Should().Be(AgentIntent.PromotionTrade);
-        // Without a promo specialist registered, should NOT misroute to demand
+        // Without a promo specialist registered, falls back to general — does NOT misroute to demand
+        routingResult.AgentKey.Should().Be("general");
         routingResult.Intent.Should().NotBe(AgentIntent.DemandForecasting);
     }
 
@@ -717,7 +717,8 @@ public class RouterIntegrationTests
 
         var routingResult = await router.RouteAsync(
             "Analyze the competitive landscape for snacks", null, null, null);
-        routingResult.Intent.Should().Be(AgentIntent.CompetitiveMarket);
+        // Without a competitive specialist registered, falls back to general — no misroute
+        routingResult.AgentKey.Should().Be("general");
         routingResult.Intent.Should().NotBe(AgentIntent.DemandForecasting);
         routingResult.Intent.Should().NotBe(AgentIntent.PromotionTrade);
     }

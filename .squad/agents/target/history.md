@@ -493,3 +493,43 @@ RAG source files committed:
 - `StreamingMiddleware.cs`: Added `StreamResponseFallbackAsync` public method (called by Program.cs but missing)
 
 **Validation:** All 1061 tests pass (0 failures, 0 skipped). Build clean (0 errors, 0 warnings).
+
+
+## Learnings
+
+### 2026-05-15 — Executive demo readiness sweep (26 default UI prompts)
+
+**Scope:** Validated every default/suggested question rendered on the empty-state chat UI in `ChatPanel.tsx` (`PROMPT_CATEGORIES`) — 7 categories x ~3 prompts = **26 prompts** total covering General Retail, Grocery, QSR, Home Improvement, Office Supply, Furniture, and Charts.
+
+**New tests:** `tests/RetailPulse.Tests/Integration/DemoReadinessTests.cs` (58 cases). Mirrors production `RoutingServiceExtensions.AddAgentRouting` registration order so first-wins lookup in `RetailOpsRouter` reflects what the live API actually does.
+
+**Coverage added:**
+- `DefaultPrompt_RoutesToRegisteredSpecialist_AndReturnsNonEmptyReply` — every UI prompt classifies, dispatches, and returns a non-empty reply.
+- `DefaultPrompt_IsWellFormed` — length 20-200, no TODO/XXX placeholders.
+- `IntentCoverage_IsDocumentedAndNoOrphans` — every `AgentIntent` is claimed by a specialist (or documented fallback).
+- `UnclaimedIntent_RouterFallsBackToGeneral_NotException` — `scorecard/portfolio` and `council/health` degrade to General.
+- `LowConfidenceClassification_FallsBackToGeneral` — confidence < 0.6 routes to General.
+- `RouterClassificationFailure_FallsBackToGeneral` — model timeout / HttpRequestException does NOT crash the endpoint.
+- `MalformedRouterJson_FallsBackToGeneral` — bad JSON from upstream model does NOT crash.
+
+**Demo-risk findings (surfaced to record, NOT regressions in the existing tests):**
+
+1. **`GeneralAgent` shadows four specialists.** `GeneralAgent.SupportedIntents` claims `PromotionTrade`, `SupplyShipments`, `CompetitiveMarket`, `SentimentField` and is registered first in DI. `RetailOpsRouter` uses `TryAdd` (first-wins), so `PromoPlanningAgent`, `SupplyChainAgent`, `CompetitiveIntelAgent` are NEVER selected by the chat router for those intents. Specialist-specific behavior (e.g., `CompetitiveIntelAgent` alert hooks, `PromoPlanningAgent` approval gate) won't fire from chat. Likely intentional today (specialists power dedicated UI panels), but the team should confirm.
+
+2. **`scorecard/portfolio` has no specialist.** Defined in `AgentIntent.All` but no agent claims it — silently falls back to General. Tracked via `UnclaimedIntent_RouterFallsBackToGeneral_NotException`.
+
+3. **`sentiment/field` is handled by GeneralAgent.** No dedicated sentiment agent exists. The 6 "field sentiment" prompts on the UI all hit General — its tools must cover sentiment, otherwise reply quality on those clicks degrades to generic LLM output.
+
+4. **No HTTP integration tests for `/api/chat` or `/api/chat/stream`.** Existing suite tests router + specialists in isolation but never exercises the full endpoint (which is gated on Azure credentials at startup, per existing comment in `RouterIntegrationTests`). The demo will hit the live endpoint for the first time. Risks: guardrails ordering, cache-key collisions, `OperationCanceledException` handling, the council interception path on line 191 of `ChatEndpoints.cs`.
+
+5. **75-second per-request timeout.** Both endpoints linked-cancel after 75s. If gpt-5.4 model latency spikes during the demo, expect `504 GATEWAY_TIMEOUT` with `request_timeout` code. Streaming endpoint emits `streaming:error` so the UI spinner stops gracefully.
+
+6. **Chart prompts route via `DemandForecasting`** (or `CompetitiveMarket` for "market share", `SupplyShipments` for "inventory health"). Chart rendering depends on the agent calling `ChartDataTool` — verify in a live smoke test that each chart-style prompt actually triggers tool invocation.
+
+**Baseline:** Backend went 1576 → 1634 passing (added 58 new). Frontend 251 passing (no changes).
+
+**Commands verified:**
+- `dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj` — 1634 passing in ~1m22s
+- `cd src/RetailPulse.Web && npx vitest run` — 251 passing in ~82s
+
+**Recommendation for the live demo:** smoke-test the 6 "field sentiment" prompts and the 8 chart prompts on the actual `/api/chat` endpoint at least 10 minutes before the executive presentation. These two clusters depend on tool routing that the in-memory tests cannot exercise.

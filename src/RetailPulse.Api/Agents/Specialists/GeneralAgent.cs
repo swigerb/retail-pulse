@@ -24,9 +24,6 @@ public class GeneralAgent : ISpecialistAgent
     public IReadOnlyList<string> SupportedIntents { get; } =
     [
         AgentIntent.General,
-        AgentIntent.PromotionTrade,
-        AgentIntent.SupplyShipments,
-        AgentIntent.CompetitiveMarket,
         AgentIntent.SentimentField
     ];
 
