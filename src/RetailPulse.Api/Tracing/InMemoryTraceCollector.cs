@@ -78,6 +78,16 @@ public class InMemoryTraceCollector : ITraceCollector
         EvictIfNeeded();
     }
 
+    /// <summary>
+    /// Emits an enriched trace_started event with routing metadata via the push channel.
+    /// Call this after routing completes so the frontend receives intent/agent context.
+    /// This supplements the initial trace_started emitted by CaptureSpan.
+    /// </summary>
+    public void EmitTraceStarted(string traceId, DateTimeOffset startTime, string? intent = null, string? agentName = null)
+    {
+        _pushChannel?.TryWrite(new TelemetryPushItem("trace_started", TraceId: traceId, Timestamp: startTime, Intent: intent, AgentName: agentName));
+    }
+
     public IReadOnlyList<TraceSpan>? GetSpans(string traceId)
     {
         return !_traces.TryGetValue(traceId, out var bag) ? null : [.. bag.OrderBy(s => s.StartTime)];

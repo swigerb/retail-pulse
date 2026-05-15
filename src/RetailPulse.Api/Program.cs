@@ -945,5 +945,6 @@ app.MapSupplyEndpoints();
 app.MapStoreEndpoints();
 app.MapMarginEndpoints();
 app.MapDeadLetterEndpoints();
+app.MapMemoryEndpoints();
 
 app.Run();

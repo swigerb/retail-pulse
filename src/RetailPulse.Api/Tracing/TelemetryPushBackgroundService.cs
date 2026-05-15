@@ -41,22 +41,28 @@ public sealed class TelemetryPushBackgroundService : BackgroundService
                         await _hubContext.Clients.All.SendAsync("trace_started", new
                         {
                             traceId = item.TraceId,
-                            timestamp = item.Timestamp
+                            intent = item.Intent,
+                            agentName = item.AgentName,
+                            startTime = item.Timestamp
                         }, linkedCts.Token);
                         break;
 
                     case "span_completed" when item.Span is not null:
                         await _hubContext.Clients.All.SendAsync("span_completed", new
                         {
-                            item.Span.TraceId,
-                            item.Span.SpanId,
-                            item.Span.OperationName,
-                            item.Span.DurationMs,
-                            item.Span.StartTime,
-                            item.Span.EndTime,
-                            item.Span.InputTokens,
-                            item.Span.OutputTokens,
-                            item.Span.Tags
+                            traceId = item.Span.TraceId,
+                            span = new
+                            {
+                                id = item.Span.SpanId,
+                                name = item.Span.OperationName,
+                                type = item.Span.Tags is not null && item.Span.Tags.TryGetValue("span.type", out var spanType) ? spanType : "generic",
+                                durationMs = item.Span.DurationMs,
+                                startTime = item.Span.StartTime,
+                                endTime = item.Span.EndTime,
+                                inputTokens = item.Span.InputTokens,
+                                outputTokens = item.Span.OutputTokens,
+                                tags = item.Span.Tags
+                            }
                         }, linkedCts.Token);
                         break;
                     default:
