@@ -2,6 +2,34 @@
 
 ## Active Decisions
 
+### Default 3-minute client timeout on chat fetches (2026-05-15)
+- **Author:** Chick (Frontend Dev)
+- **Context:** The initial-screen suggested-prompt buttons called sendMessage() with a etch('/api/chat') that had no client-side timeout. When the backend stalled, the chat spinner ran indefinitely with no error surfaced — a hard demo blocker.
+- **Decision:** All chat fetches in services/api.ts now default to a **180s (3 min) client-side timeout**, aligned with the backend Azure OpenAI network timeout established in commit 02bf3f7. On timeout the request is aborted and a friendly error (Request timed out after 180s. The server may be busy — please try again.) is thrown so the UI clears its loading state.
+- **Implications for the team:**
+  - New frontend service-layer functions that call long-running backend endpoints **must** include a client-side timeout via AbortController composition. No more naked etch(...) for chat-class operations.
+  - If Costco bumps the backend Azure OpenAI timeout, the DEFAULT_TIMEOUT_MS constant in src/RetailPulse.Web/src/services/api.ts should move in lock-step.
+  - Tests for any new service should cover both the success and timeout paths (use i.useFakeTimers() + dvanceTimersByTimeAsync).
+### 75s request-level timeout on chat endpoints (2026-05-15)
+- **Author:** Costco (Backend Dev)
+- **Context:** The chat pipeline runs two sequential IChatClient calls (router classify + specialist execute) plus tool calls. With no overall cap and a 3-minute network timeout per attempt, a single stalled AI Gateway hop could leave the UI spinner running long enough that the executive demo broke.
+- **Decision:** /api/chat and /api/chat/stream are now bounded by a 75-second per-request CancellationTokenSource linked to the client's HttpContext.RequestAborted. The Azure OpenAI client's NetworkTimeout was lowered from 3 minutes to 60 seconds.
+- **Rationale:** 75s is comfortably above the p99 happy-path latency for tool-using chats but firmly bounds worst-case so the FE always gets a real response (504 with code: "request_timeout") instead of infinite spin.
+- **Implications for the team:**
+  - **Chick (Frontend):** /api/chat may now return 504 Gateway Timeout with { error, code: "request_timeout" }. Treat it like 503 in error UI, but the message text is more informative and worth surfacing verbatim.
+  - **Target (Tests):** Any test that mocks IChatClient with an indefinite delay should expect cancellation now. New test ideas: assert that /api/chat returns 504 when the chat client takes longer than the request timeout.
+  - **Kroger (Architecture):** If we ever need a longer cap (e.g. async council convene), make it endpoint-specific rather than reverting the chat default.
+### Demo readiness tests for default UI prompts (2026-05-15)
+- **Author:** Target (Tester)
+- **Context:** User (Brian) is presenting Retail Pulse to executive leadership and asked for every default chat prompt to be exercised. The 26 prompts shown on the empty-state UI live in src/RetailPulse.Web/src/components/ChatPanel.tsx (PROMPT_CATEGORIES). They were not covered by any existing test — only individual specialist and router tests existed.
+- **Decision:** Added 	ests/RetailPulse.Tests/Integration/DemoReadinessTests.cs (58 cases) that mirrors production RoutingServiceExtensions.AddAgentRouting registration order and parameterizes over every UI prompt. The test data (DefaultUiPrompts) is the source-of-truth mirror of PROMPT_CATEGORIES.
+- **Convention going forward:** When PROMPT_CATEGORIES in ChatPanel.tsx changes (new prompt added, copy edit, prompt removed), DefaultUiPrompts in DemoReadinessTests.cs must be updated in the same PR. The xUnit [Theory] will fan out and any new prompt automatically gets routing + dispatch coverage.
+- **Findings to address (out of scope for this PR):**
+  1. GeneralAgent shadows PromoPlanning, SupplyChain, and CompetitiveIntel specialists at the router because of first-wins TryAdd lookup combined with DI registration order. Confirm intent.
+  2. scorecard/portfolio is defined in AgentIntent.All but no agent claims it — silently falls back to General. Either register a specialist or remove the intent.
+  3. No HTTP-level integration tests for /api/chat or /api/chat/stream. The endpoints require Azure credentials to start, blocking WebApplicationFactory use. Worth investing in a stub/test harness.
+
+
 ### Multi-Agent Router Architecture (2026-05-13)
 
 - **Context:** The single RetailPulseAgent handled all user queries with one system prompt and all 7 tools. As we add domain-specific specialists, we need a routing layer that classifies user intent and dispatches to the right agent.
@@ -44,24 +72,6 @@
   2. **Richer intent model** — Slash-separated intents (`"demand/forecasting"`) support future sub-categorization
   3. **Cleaner specialist interface** — `Key`/`SupportedIntents`/`HandleAsync(ChatRequest)` is more idiomatic than `AgentId`/`IntentCategories`/`ChatAsync`
 - **Consequences:** Legacy `RetailPulseAgent` kept as thin wrapper for backward compat with existing tests. All new specialist agents must implement `ISpecialistAgent` from `Contracts.Routing`. Router confidence threshold is 0.6 (Kroger's choice, slightly lower than the 0.7 in the original task spec).
-
-### Variant-Level Data in SQLite + GetVariantMix Tool (2026-05-07)
-
-- **Context:** The demo failed on variant-level chart requests (e.g., "donut chart of Apex Grill's variant mix in the Southwest") because the SQLite database only stored brand-level metrics. Variant names existed in tenant.yaml but were not queryable.
-- **Decision:**
-  1. Added `VariantMix` table to the SQLite schema with deterministic seeding from tenant.yaml variant arrays. Mix percentages are normalized random weights per brand×region×variant (seeded via `GetStableHash("variant|{brand}|{region}")`). DepletionsYoY is ±5% range.
-  2. Added `GetVariantMix` MCP tool (brand required, region optional/National). National region averages MixPercent and DepletionsYoY across all regions via SQL GROUP BY.
-  3. Updated `prompts.yaml`: registered `GetVariantMix` in tools array and Available Tools, added "variant mix / product breakdown / SKU split" → GetVariantMix to the Concept-to-Tool Mapping, and rewrote "Always Chart Available Data" to call GetVariantMix FIRST for variant requests and chart real data directly (no "Estimated" label).
-- **Impact:** Variant-level chart requests now resolve to real seeded data. The "Always Chart Available Data" section still handles non-variant estimated breakdowns, but variant queries are now first-class. No breaking changes to existing tools or tables.
-- **Owner:** Costco (Backend Dev)
-
-### Tool Enforcement in System Prompt (2026-05-07)
-
-- **Context:** gpt-5.4-mini was responding to data/visualization requests with text-only responses, skipping available tools (GetPortfolioDepletionStats, CreateChart) entirely. The system prompt described tools but never mandated their use.
-- **Decision:** Added a "Critical: Always Use Tools for Data Requests" section to `prompts.yaml` that (1) mandates tool calls for all data questions, (2) maps common business concepts to specific tools (e.g., "market share" → GetPortfolioDepletionStats), and (3) maps data types to chart types (e.g., proportional breakdown → pie chart). This section is placed BEFORE the visualization guidelines so the model encounters the mandate early.
-- **Impact:** The model should now reliably call data tools first, then CreateChart for visualizations, instead of producing text-only responses. No C# or frontend changes needed — this is prompt engineering only.
-- **Owner:** Costco (Backend Dev)
-
 
 ### Align Demo Store Regions to Tenant.yaml Naming (2026-05-14)
 
@@ -506,9 +516,6 @@ Sprints 1.5 (Proactive Alerts) and 1.6 (Distributed Tracing) introduced new subs
 - **Owner:** Costco (Backend Dev)
 - **Status:** Implemented
 
-
-
-
 ### Stores Page UX Overhaul (2026-05-14)
 - **Context:** Brian reported 3 UX issues on the Stores page: vertical scroll from oversized heatmap, useless Planogram section, and store click doing nothing visible.
 - **Decision:**
@@ -518,7 +525,6 @@ Sprints 1.5 (Proactive Alerts) and 1.6 (Distributed Tracing) introduced new subs
   4. **Layout reordered** — Heatmap → Performance Table → Stockout Risks (was: Heatmap → Stockout → Planogram → Table).
 - **Impact:** All 249 tests pass. Build clean. The PlanogramDiagram component file and its tests remain untouched. Dashboard no longer imports PlanogramDiagram or the PlanogramLayout type.
 - **Owner:** Chick (Frontend Dev)
-
 
 ### Dynamic Planogram — Agent-Driven Shelf Optimization
 
@@ -720,5 +726,3 @@ The key insight: by using **real velocity data from the seeded database**, the o
 1. **Reuse existing `OptimizePlanogram` tool** — Rejected because its response shape (raw slots without brand names/colors) doesn't match the frontend type. A new tool with the right shape is cleaner than adapter logic.
 2. **Render in side panel instead of inline** — Rejected because inline follows the established `ChartSpec` pattern and keeps the demo flow linear (ask → see result).
 3. **Add to Stores page permanently** — Rejected for Phase 1; can be a Phase 2 enhancement where last optimization is cached per store.
-
-
