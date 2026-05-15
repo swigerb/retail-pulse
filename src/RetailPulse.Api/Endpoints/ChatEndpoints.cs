@@ -68,7 +68,7 @@ public static class ChatEndpoints
                 {
                     var cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                     var cached = await responseCache.GetAsync(cacheKey, ct);
-                    if (cached is not null)
+                    if (cached is not null && cached.AgentId != "cache-warming")
                     {
                         logger.LogInformation("Cache hit for session {SessionId}, key {CacheKey}", sessionId, cacheKey[..8]);
                         return Results.Ok(new ChatResponse(
