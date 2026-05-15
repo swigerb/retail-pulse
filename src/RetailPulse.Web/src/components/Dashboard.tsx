@@ -238,21 +238,67 @@ export function Dashboard() {
 
     // Trace events (Sprint 1.6)
     conn.off('trace_started');
-    conn.on('trace_started', (trace: Trace) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    conn.on('trace_started', (data: any) => {
+      const trace: Trace = {
+        traceId: data.traceId || data.id,
+        intent: data.intent || 'Processing...',
+        agentName: data.agentName || 'Unknown',
+        startTime: data.timestamp || data.startTime || new Date().toISOString(),
+        status: 'in_progress',
+        totalDurationMs: data.totalDurationMs || 0,
+        totalTokens: data.totalTokens || 0,
+        totalCostUsd: data.totalCostUsd || 0,
+        spans: data.spans || [],
+      };
       setTraces(prev => {
         if (prev.some(t => t.traceId === trace.traceId)) return prev;
-        const next = [{ ...trace, status: 'in_progress' as const, spans: trace.spans || [] }, ...prev];
+        const next = [trace, ...prev];
         return next.length > MAX_TRACES ? next.slice(0, MAX_TRACES) : next;
       });
     });
 
     conn.off('span_completed');
-    conn.on('span_completed', (data: { traceId: string; span: TraceSpan }) => {
-      if (!data?.span?.id) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    conn.on('span_completed', (data: any) => {
+      // Support both nested shape { traceId, span: {...} } and flat shape { TraceId, SpanId, ... }
+      let traceId: string;
+      let span: TraceSpan;
+
+      if (data?.span?.id) {
+        // New backend shape: nested span object
+        traceId = data.traceId;
+        span = data.span;
+      } else if (data?.TraceId || data?.traceId || data?.SpanId || data?.spanId) {
+        // Current backend shape: flat fields (PascalCase or camelCase)
+        traceId = data.TraceId || data.traceId;
+        span = {
+          id: data.SpanId || data.spanId,
+          name: data.OperationName || data.operationName || 'Unknown',
+          type: (data.SpanType || data.spanType || 'agent') as TraceSpan['type'],
+          durationMs: data.DurationMs || data.durationMs || 0,
+          startTime: data.StartTime || data.startTime || new Date().toISOString(),
+          inputTokens: data.InputTokens || data.inputTokens,
+          outputTokens: data.OutputTokens || data.outputTokens,
+          estimatedCostUsd: data.EstimatedCostUsd || data.estimatedCostUsd,
+          parentId: data.ParentId || data.parentId,
+        };
+      } else {
+        return; // Unrecognized shape, skip
+      }
+
+      if (!traceId || !span.id) return;
+
       setTraces(prev => prev.map(t => {
-        if (t.traceId !== data.traceId) return t;
-        if (t.spans.some(s => s.id === data.span.id)) return t;
-        return { ...t, spans: [...t.spans, data.span] };
+        if (t.traceId !== traceId) return t;
+        if (t.spans.some(s => s.id === span.id)) return t;
+        const tokenCount = (span.inputTokens || 0) + (span.outputTokens || 0);
+        return {
+          ...t,
+          spans: [...t.spans, span],
+          totalDurationMs: t.totalDurationMs + (span.durationMs || 0),
+          totalTokens: t.totalTokens + tokenCount,
+        };
       }));
     });
 

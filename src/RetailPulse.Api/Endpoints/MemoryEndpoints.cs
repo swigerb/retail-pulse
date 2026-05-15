@@ -28,6 +28,7 @@ public static class MemoryEndpoints
                 createdAt = e.CreatedAt.ToString("o"),
                 type = e.Type switch
                 {
+                    MemoryType.ConversationSummary => "fact",
                     MemoryType.UserPreference => "preference",
                     MemoryType.EntityMention => "context",
                     _ => "fact"
