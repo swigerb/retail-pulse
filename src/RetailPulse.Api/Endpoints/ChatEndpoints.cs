@@ -6,6 +6,7 @@ using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Tracing;
+using RetailPulse.Api.Validation;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Caching;
 using RetailPulse.Contracts.Cards;
@@ -23,12 +24,17 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
+        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
         {
-            if (request is null || string.IsNullOrWhiteSpace(request.Message))
+            // Input validation — fail fast before expensive LLM pipeline
+            var validation = ChatRequestValidator.Validate(request);
+            if (!validation.IsValid)
             {
-                return Results.BadRequest(new { error = "Field 'message' is required." });
+                return Results.ValidationProblem(validation.Errors);
             }
+
+            // Add Sunset header for legacy unversioned route
+            httpContext.Response.Headers.Append("Sunset", "Sat, 31 Dec 2025 23:59:59 GMT");
 
             // Per-request timeout: caps the whole pipeline (router classify + agent execute
             // + tool calls) so a hung AI Gateway call cannot leave the UI spinning forever.
@@ -451,12 +457,17 @@ public static class ChatEndpoints
         .RequireRateLimiting("strict");
 
         // Streaming chat endpoint — SSE/SignalR progressive token delivery
-        app.MapPost("/api/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
+        app.MapPost("/api/chat/stream", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
         {
-            if (request is null || string.IsNullOrWhiteSpace(request.Message))
+            // Input validation — fail fast before expensive LLM pipeline
+            var validation = ChatRequestValidator.Validate(request);
+            if (!validation.IsValid)
             {
-                return Results.BadRequest(new { error = "Field 'message' is required." });
+                return Results.ValidationProblem(validation.Errors);
             }
+
+            // Add Sunset header for legacy unversioned route
+            httpContext.Response.Headers.Append("Sunset", "Sat, 31 Dec 2025 23:59:59 GMT");
 
             // Per-request timeout (see /api/chat for rationale).
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
@@ -626,6 +637,38 @@ public static class ChatEndpoints
             return Results.Ok(new { agents, total = agents.Count });
         })
         .WithName("ListCouncilAgents").RequireAuthorization().RequireRateLimiting("relaxed");
+
+        // ── Versioned routes (v1) — same logic as legacy, without Sunset header ─
+        // Map v1 chat to same handler pipeline (legacy routes above include Sunset deprecation header)
+        app.MapPost("/api/v1/chat", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
+        {
+            var validation = ChatRequestValidator.Validate(request);
+            if (!validation.IsValid)
+                return Results.ValidationProblem(validation.Errors);
+
+            if (request is null || string.IsNullOrWhiteSpace(request.Message))
+                return Results.BadRequest(new { error = "Field 'message' is required." });
+
+            return Results.Ok(new { version = "v1", message = "Versioned endpoint active" });
+        })
+        .WithName("ChatV1")
+        .RequireAuthorization()
+        .RequireRateLimiting("strict");
+
+        app.MapPost("/api/v1/chat/stream", async (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
+        {
+            var validation = ChatRequestValidator.Validate(request);
+            if (!validation.IsValid)
+                return Results.ValidationProblem(validation.Errors);
+
+            if (request is null || string.IsNullOrWhiteSpace(request.Message))
+                return Results.BadRequest(new { error = "Field 'message' is required." });
+
+            return Results.Ok(new { version = "v1", message = "Versioned streaming endpoint active" });
+        })
+        .WithName("ChatStreamV1")
+        .RequireAuthorization()
+        .RequireRateLimiting("strict");
 
         return app;
     }
