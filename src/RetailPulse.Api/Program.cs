@@ -312,6 +312,9 @@ builder.Services.AddScoped<DemandRisksTool>(sp =>
 });
 #pragma warning restore CS0618
 
+// Predictive tool prefetch service
+builder.Services.AddScoped<RetailPulse.Api.Prefetch.ToolPrefetchService>();
+
 // Promo planning tools
 builder.Services.AddScoped<PromoHistoryTool>(sp =>
 {

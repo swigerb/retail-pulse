@@ -62,4 +62,11 @@ public record AgentExecutionContext
     /// domain-specific processing on tool results without duplicating the pipeline.
     /// </summary>
     public Func<string, CancellationToken, Task>? OnToolResult { get; init; }
+
+    /// <summary>
+    /// Pre-fetched tool results to inject into the prompt. When provided, the pipeline
+    /// appends these results to the system prompt and the LLM can answer without calling
+    /// those tools again — eliminating one full LLM roundtrip.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? PrefetchedData { get; init; }
 }

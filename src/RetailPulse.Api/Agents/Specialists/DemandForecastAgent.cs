@@ -13,7 +13,7 @@ namespace RetailPulse.Api.Agents.Specialists;
 /// and risk identification. Uses its own tool set and lower temperature (0.3)
 /// for analytical precision.
 /// </summary>
-public class DemandForecastAgent : ISpecialistAgent
+public class DemandForecastAgent : ISpecialistAgent, IPrefetchableAgent
 {
     private readonly IAgentExecutionPipeline _pipeline;
     private readonly AgentDefinition _agentDef;
@@ -39,6 +39,14 @@ public class DemandForecastAgent : ISpecialistAgent
 
     public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
     {
+        return HandleWithPrefetchAsync(request, null, ct);
+    }
+
+    public Task<ChatResponse> HandleWithPrefetchAsync(
+        ChatRequest request,
+        IReadOnlyDictionary<string, string>? prefetchedData,
+        CancellationToken ct = default)
+    {
         var context = new AgentExecutionContext
         {
             AgentName = _agentDef.Name,
@@ -47,7 +55,8 @@ public class DemandForecastAgent : ISpecialistAgent
             ModelName = _agentDef.Model,
             Request = request,
             Tools = _tools,
-            FallbackReply = "I wasn't able to generate a forecast response."
+            FallbackReply = "I wasn't able to generate a forecast response.",
+            PrefetchedData = prefetchedData
         };
 
         return _pipeline.ExecuteAsync(context, ct);

@@ -307,7 +307,26 @@ public static class ChatEndpoints
                     var agentStart = DateTimeOffset.UtcNow;
                     using var agentActivity = AgentTelemetry.StartAgentProcess(specialist.Key);
 
-                    response = await specialist.HandleAsync(enrichedRequest, ct);
+                    // Predictive prefetch: if the specialist supports it, extract entities
+                    // and pre-fetch tool data in parallel to eliminate one LLM roundtrip.
+                    if (specialist is Api.Agents.IPrefetchableAgent prefetchable)
+                    {
+                        var prefetchService = httpContext.RequestServices.GetService<Api.Prefetch.ToolPrefetchService>();
+                        if (prefetchService is not null)
+                        {
+                            var entities = prefetchService.ExtractEntities(enrichedRequest.Message);
+                            var prefetchedData = await prefetchService.PrefetchAsync(decision.Intent, entities, ct);
+                            response = await prefetchable.HandleWithPrefetchAsync(enrichedRequest, prefetchedData, ct);
+                        }
+                        else
+                        {
+                            response = await specialist.HandleAsync(enrichedRequest, ct);
+                        }
+                    }
+                    else
+                    {
+                        response = await specialist.HandleAsync(enrichedRequest, ct);
+                    }
 
                     var agentEnd = DateTimeOffset.UtcNow;
                     var toolsCalledCount = response.Spans?.Count(s => s.Type == "tool_call") ?? 0;
@@ -543,7 +562,28 @@ public static class ChatEndpoints
                 // tool progress via SignalR and streams the final reply token-by-token.
                 // We signal streaming mode by setting the StreamingProgress feature.
                 streamingProgressFeature.Enable(sessionId);
-                var response = await specialist.HandleAsync(enrichedRequest, ct);
+
+                // Predictive prefetch: if the specialist supports it, extract entities
+                // and pre-fetch tool data in parallel to eliminate one LLM roundtrip.
+                ChatResponse response;
+                if (specialist is Api.Agents.IPrefetchableAgent prefetchable)
+                {
+                    var prefetchService = httpContext.RequestServices.GetService<Api.Prefetch.ToolPrefetchService>();
+                    if (prefetchService is not null)
+                    {
+                        var entities = prefetchService.ExtractEntities(enrichedRequest.Message);
+                        var prefetchedData = await prefetchService.PrefetchAsync(decision.Intent, entities, ct);
+                        response = await prefetchable.HandleWithPrefetchAsync(enrichedRequest, prefetchedData, ct);
+                    }
+                    else
+                    {
+                        response = await specialist.HandleAsync(enrichedRequest, ct);
+                    }
+                }
+                else
+                {
+                    response = await specialist.HandleAsync(enrichedRequest, ct);
+                }
 
                 // Stream the response via SignalR only if the pipeline didn't already do it
                 // (ExecuteWithProgressAsync streams inline; fallback covers non-progress paths)
