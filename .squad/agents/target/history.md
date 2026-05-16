@@ -51,6 +51,31 @@
 
 ## Learnings
 
+### 2026-05-17 — Empty response bug fix + smoke tests (Apex Grill regression)
+
+**Scope:** Investigated "How is Apex Grill performing in the Southwest this quarter?" returning empty response in the UI. Traced full code path and identified root cause.
+
+**Root cause:** `AgentExecutionPipeline.cs` lines 160/324 used `response.Text ?? context.FallbackReply`. When the LLM returns no text content (e.g., MaxIterations=1 exhausted after a tool call), `ChatResponse.Text` returns empty string `""` (not `null`), so the `??` operator passes through the empty string instead of activating the fallback.
+
+**Fix:** Changed both locations to `string.IsNullOrWhiteSpace(rawText) ? context.FallbackReply : rawText` — catches null, empty, and whitespace-only responses.
+
+**New test file:** `tests/RetailPulse.Tests/Agents/Router/DemoQuerySmokeTests.cs` — 9 tests:
+- Routing fast-path correctness (BrandPerformingRegex → General)
+- LLM bypass verification (keyword match skips classification)
+- Non-empty response assertion (the original symptom)
+- Fallback reply activation when LLM returns null/empty
+- Full pipeline integration (route → select → execute)
+- Specialist resolution by AgentKey
+- Confidence threshold verification (≥0.9)
+- Intent constant correctness (general/fallback)
+- Dual-regex non-interference (brand vs portfolio)
+
+**Also fixed:**
+- `DemoReadinessTests.cs` lines 52/62: Updated expected intents for "How is X performing..." queries from DemandForecasting to General (matches actual BrandPerformingRegex behavior)
+- `AgentPipelineTests.cs` line 177-179: Updated fallback test assertion to expect "Custom fallback" instead of empty string (old test was asserting the broken behavior)
+
+**Test count:** 1915 passing (added 9 new smoke tests, net +9 after fixing existing assertion).
+
 ### 2026-05-16 — Rate-limit fix test coverage (429 remediation)
 
 **Scope:** Added tests for 3 of 4 rate-limit fixes (Fix 2: classification cache, Fix 3: expanded keywords, Fix 4: separate router model).

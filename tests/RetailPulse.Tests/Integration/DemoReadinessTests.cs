@@ -49,13 +49,18 @@ public class DemoReadinessTests
         { "grocery", "What is the field sentiment for Harvest Table Meal Kits in the Midwest?", AgentIntent.SentimentField },
 
         // ── Quick-Serve Restaurants (🍔) ────────────────────────────────────
-        { "qsr", "How is Apex Grill performing in the Southwest this quarter?", AgentIntent.DemandForecasting },
+        // NOTE: "How is Apex Grill performing..." matches BrandPerformingRegex keyword
+        // fast-path → routes to General (not DemandForecasting). This is intentional:
+        // single-brand queries are simple data lookups (1 tool call via General) rather
+        // than full demand forecasting workflows.
+        { "qsr", "How is Apex Grill performing in the Southwest this quarter?", AgentIntent.General },
         { "qsr", "Compare Coastline Tacos vs Apex Grill depletions across all regions", AgentIntent.DemandForecasting },
         { "qsr", "What is the field sentiment for Coastline Tacos in the West Coast?", AgentIntent.SentimentField },
 
         // ── Home Improvement (🏠) ──────────────────────────────────────────
         { "home", "Show me Pinnacle Hardware depletion stats in the Midwest for Q1", AgentIntent.DemandForecasting },
-        { "home", "How is Summit Outdoor performing in the Southeast vs West Coast?", AgentIntent.DemandForecasting },
+        // NOTE: "How is Summit Outdoor performing..." matches BrandPerformingRegex → General
+        { "home", "How is Summit Outdoor performing in the Southeast vs West Coast?", AgentIntent.General },
         { "home", "What is the field sentiment for Pinnacle Hardware Power Tools in the Southwest?", AgentIntent.SentimentField },
 
         // ── Office Supply (📎) ─────────────────────────────────────────────

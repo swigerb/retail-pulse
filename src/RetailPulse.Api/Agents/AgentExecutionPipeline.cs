@@ -157,7 +157,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         }, ct);
 
         long postProcessStart = sw.ElapsedMilliseconds;
-        string reply = SanitizeReplyText(response.Text ?? context.FallbackReply);
+        string rawText = response.Text;
+        string reply = SanitizeReplyText(string.IsNullOrWhiteSpace(rawText) ? context.FallbackReply : rawText);
 
         List<ChartSpec> charts = ExtractChartSpecs(response);
 
@@ -321,7 +322,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         }, ct);
 
         long postProcessStart = sw.ElapsedMilliseconds;
-        string reply = SanitizeReplyText(response.Text ?? context.FallbackReply);
+        string rawText = response.Text;
+        string reply = SanitizeReplyText(string.IsNullOrWhiteSpace(rawText) ? context.FallbackReply : rawText);
 
         List<ChartSpec> charts = ExtractChartSpecs(response);
 
