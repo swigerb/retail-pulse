@@ -298,15 +298,25 @@ export function Dashboard() {
           spans: [...t.spans, span],
           totalDurationMs: t.totalDurationMs + (span.durationMs || 0),
           totalTokens: t.totalTokens + tokenCount,
+          totalCostUsd: t.totalCostUsd + (span.estimatedCostUsd || 0),
         };
       }));
     });
 
     conn.off('trace_completed');
-    conn.on('trace_completed', (data: { traceId: string; totalDurationMs: number; totalTokens: number; totalCostUsd: number }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    conn.on('trace_completed', (data: any) => {
       setTraces(prev => prev.map(t => {
         if (t.traceId !== data.traceId) return t;
-        return { ...t, status: 'completed' as const, totalDurationMs: data.totalDurationMs, totalTokens: data.totalTokens, totalCostUsd: data.totalCostUsd };
+        return {
+          ...t,
+          status: 'completed' as const,
+          totalDurationMs: data.totalDurationMs || t.totalDurationMs,
+          totalTokens: data.totalTokens || t.totalTokens,
+          totalCostUsd: data.totalCostUsd || t.totalCostUsd,
+          intent: data.intent || (t.intent === 'Processing...' ? 'Completed' : t.intent),
+          agentName: data.agentName || (t.agentName === 'Unknown' ? undefined : t.agentName) || t.agentName,
+        };
       }));
     });
   }, []);

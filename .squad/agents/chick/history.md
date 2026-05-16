@@ -110,3 +110,47 @@
   - Lockstep with backend: if Costco changes backend timeout, update DEFAULT_TIMEOUT_MS constant
 
 **Validation:** Chat fetch timeout behavior now matches backend expectations; demo no longer hangs.
+
+---
+
+## 2026-05-15 — Trace Dashboard & Chat Sanitization Fix
+
+**Status:** ✅ COMPLETE
+
+### Issue 1: Trace Dashboard showing all zeros
+**Root Cause:** Three compounding problems:
+1. `span_completed` handler never accumulated `totalCostUsd` — only duration/tokens were updated
+2. `trace_completed` handler didn't update `intent` or `agentName` — left as "Processing..." / "Unknown"
+3. TraceDashboard checked only `s.type === 'tool'` but backend sends `'tool_call'` — tools count always showed 0
+4. `meaningfulTraces` filter was too aggressive — excluded traces with spans when trace-level totals were 0
+
+**Fixes:**
+- Dashboard.tsx: `span_completed` handler now accumulates `totalCostUsd` from span data
+- Dashboard.tsx: `trace_completed` handler now updates `intent` and `agentName` when available
+- TraceDashboard.tsx: Tool type matching now includes both `'tool'` and `'tool_call'`
+- TraceDashboard.tsx: `meaningfulTraces` filter relaxed — allows traces with spans even if trace-level totals are 0
+- TraceDashboard.tsx: Aggregates now compute from span-level data as fallback when trace-level values are 0
+- TraceDashboard.tsx: Row display derives agent name from agent spans, shows "Completed" vs "Processing..."
+- TraceDashboard.tsx: Badge shows ✓ checkmark for completed traces instead of confusing span count
+- TraceCard.tsx: Tool count also matches `'tool_call'` type
+
+### Issue 2: Garbage tool-call text in chat
+**Root Cause:** No defense-in-depth filtering on the frontend — raw `to=functions.*` patterns from backend leaked into rendered chat.
+
+**Fix:**
+- Created `src/utils/sanitizeMessage.ts` — strips `to=functions.*` prefixes, JSON payloads, and garbled Unicode tool-call artifacts
+- Applied in ChatPanel.tsx to both static and streaming message rendering
+- 8 unit tests covering edge cases
+
+### Issue 3: Confidence badge
+**Finding:** The "Agent ===== 84%" badge is the `AgentRoutingIndicator` component — purely data-driven from `routing.confidence`. Works correctly when backend sends valid data. No frontend fix needed.
+
+**Validation:**
+- `npm run build` — clean
+- `npx vitest run` — 32 files, **263 passed**
+
+### Learnings
+- Trace data flows through two separate systems (Live Spans via `AgentSpan[]` and Trace Dashboard via `Trace[]`) — they are independently populated from different SignalR events
+- Always accumulate ALL computed fields in incremental update handlers — missing `totalCostUsd` in `span_completed` was an easy oversight
+- Backend span types may differ from frontend type enums — defensive matching (`'tool' || 'tool_call'`) is essential
+- Frontend sanitization is defense-in-depth — backend should still fix its output, but the UI should never render raw tool-call internals

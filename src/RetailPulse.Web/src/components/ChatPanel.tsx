@@ -22,6 +22,7 @@ import { MemoryIndicator } from './MemoryIndicator';
 import { ApprovalCard } from './ApprovalCard';
 import { StreamingMessage, CacheIndicator } from './streaming';
 import { BlockedRequestMessage } from './guardrails';
+import { sanitizeMessage } from '../utils';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
 
@@ -636,7 +637,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
                   <BlockedRequestMessage reason={msg.blocked.reason} suggestion={msg.blocked.suggestion} />
                 ) : msg.role === 'assistant' && msg.isStreaming ? (
                   <StreamingMessage
-                    tokens={msg.content}
+                    tokens={sanitizeMessage(msg.content)}
                     isStreaming={true}
                     onComplete={() => {
                       setMessages(prev => prev.map((m, idx) => idx === i ? { ...m, isStreaming: false } : m));
@@ -644,7 +645,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
                   />
                 ) : msg.role === 'assistant' ? (
                   <div className="markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeMessage(msg.content)}</ReactMarkdown>
                   </div>
                 ) : (
                   <div>{msg.content}</div>
