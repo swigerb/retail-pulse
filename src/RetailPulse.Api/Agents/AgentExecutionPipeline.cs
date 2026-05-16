@@ -88,7 +88,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             Tools = [.. context.Tools]
         };
 
-        var messages = BuildMessages(context.SystemPrompt, request);
+        var systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
+        var messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
         using var thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
@@ -182,6 +183,33 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             totalDurationMs, tokenUsage);
     }
 
+    /// <summary>
+    /// Augments the system prompt with pre-fetched tool results so the LLM can
+    /// synthesize directly without calling those tools — saving one full roundtrip.
+    /// </summary>
+    internal static string BuildSystemPromptWithPrefetch(string systemPrompt, IReadOnlyDictionary<string, string>? prefetchedData)
+    {
+        if (prefetchedData is null or { Count: 0 })
+            return systemPrompt;
+
+        var sb = new System.Text.StringBuilder(systemPrompt);
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("## Pre-loaded Data");
+        sb.AppendLine("The following tool results are already available. Use this data directly — do NOT call these tools again.");
+
+        foreach (var (toolName, result) in prefetchedData)
+        {
+            sb.AppendLine();
+            sb.Append("### ").AppendLine(toolName);
+            sb.AppendLine("```json");
+            sb.AppendLine(result);
+            sb.AppendLine("```");
+        }
+
+        return sb.ToString();
+    }
+
     internal static List<ChatMessage> BuildMessages(string systemPrompt, ChatRequest request)
     {
         var messages = new List<ChatMessage>
@@ -225,7 +253,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             Tools = [.. instrumentedTools]
         };
 
-        var messages = BuildMessages(context.SystemPrompt, request);
+        var systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
+        var messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
         using var thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
