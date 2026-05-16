@@ -62,7 +62,8 @@ public class RetailPulseAgent : AgentApplication
             return;
         }
 
-        _logger.LogInformation("User message from {ConversationId}: {Message}", conversationId, userMessage);
+        _logger.LogInformation("User message from {ConversationId}: {Message}",
+            conversationId, PrivacyRedactor.DescribeMessage(userMessage));
 
         // Extract user identity via SSO
         UserContext? userContext = null;
@@ -74,7 +75,8 @@ public class RetailPulseAgent : AgentApplication
             if (userIdentity != null)
             {
                 _logger.LogInformation("Authenticated user: {DisplayName} ({Email})",
-                    userIdentity.DisplayName, userIdentity.Email);
+                    PrivacyRedactor.RedactName(userIdentity.DisplayName),
+                    PrivacyRedactor.RedactEmail(userIdentity.Email));
                 userContext = new UserContext(userIdentity.ObjectId, userIdentity.DisplayName, userIdentity.Email);
             }
             else

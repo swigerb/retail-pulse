@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
 
@@ -28,6 +30,54 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
+// API key gate for REST + MCP endpoints. Enforced outside Development whenever
+// an ApiKey:Value is configured. Comparison uses CryptographicOperations.FixedTimeEquals
+// to avoid leaking the secret through string-equality timing differences.
+string? expectedApiKey = builder.Configuration["ApiKey:Value"];
+bool apiKeyRequired = !app.Environment.IsDevelopment()
+    || builder.Configuration.GetValue("ApiKey:Enabled", false);
+byte[]? expectedKeyBytes = string.IsNullOrWhiteSpace(expectedApiKey)
+    ? null
+    : Encoding.UTF8.GetBytes(expectedApiKey);
+string apiKeyHeader = builder.Configuration["ApiKey:Header"] ?? "X-Api-Key";
+
+if (apiKeyRequired && expectedKeyBytes is null)
+{
+    app.Logger.LogWarning(
+        "MCP server is running in a non-Development environment without ApiKey:Value configured. " +
+        "All /api and /mcp requests will be rejected.");
+}
+
+app.Use(async (context, next) =>
+{
+    PathString path = context.Request.Path;
+    bool needsAuth = apiKeyRequired
+        && (path.StartsWithSegments("/api") || path.StartsWithSegments("/mcp"));
+
+    if (!needsAuth)
+    {
+        await next(context);
+        return;
+    }
+
+    if (expectedKeyBytes is null)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        await context.Response.WriteAsync("API key gate is enabled but no key is configured.");
+        return;
+    }
+
+    if (!context.Request.Headers.TryGetValue(apiKeyHeader, out Microsoft.Extensions.Primitives.StringValues provided)
+        || !ApiKeyMatches(provided.ToString(), expectedKeyBytes))
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsync("Missing or invalid API key.");
+        return;
+    }
+
+    await next(context);
+});
 
 // MCP endpoint (SSE transport)
 app.MapMcp();
@@ -301,3 +351,12 @@ app.MapGet("/api/margin/risks", (RetailPulseDb data, string? brand = null) =>
 .WithName("DetectMarginRisks");
 
 app.Run();
+
+static bool ApiKeyMatches(string provided, byte[] expectedBytes)
+{
+    if (string.IsNullOrEmpty(provided))
+        return false;
+
+    byte[] providedBytes = Encoding.UTF8.GetBytes(provided);
+    return providedBytes.Length == expectedBytes.Length && CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes);
+}

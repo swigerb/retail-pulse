@@ -8,7 +8,7 @@ using RetailPulse.Contracts;
 namespace RetailPulse.Tests.Contract;
 
 /// <summary>
-/// Contract tests for POST /api/v1/chat — validates request/response shapes,
+/// Contract tests for POST /api/chat — validates request/response shapes,
 /// required fields, and RFC 7807 Problem Details error format.
 /// Uses direct validator and model assertions (no WebApplicationFactory needed
 /// since the app requires Azure credentials at startup).

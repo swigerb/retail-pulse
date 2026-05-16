@@ -85,13 +85,14 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
-            Tools = [.. context.Tools]
+            Tools = [.. context.Tools.Select(t => t is AIFunction fn ? new TimedAIFunction(fn) : t)]
         };
 
         string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
         List<ChatMessage> messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
+        using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
@@ -257,6 +258,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         List<ChatMessage> messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
+        using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
@@ -399,9 +401,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             }
         }
 
-        // Tool durations cannot be individually measured when using the auto-invocation
-        // pattern (single GetResponseAsync). The parent "thought" span carries real wall-clock
-        // time. Individual tool_call spans report 0ms to avoid misleading identical timestamps.
+        // Individual tool durations are captured by the TimedAIFunction / InstrumentedAIFunction
+        // wrappers via ToolInvocationTimings (AsyncLocal queue per request). We dequeue here in
+        // call order so each tool_call span gets its true wall-clock duration instead of 0.
 
         foreach (ChatMessage msg in response.Messages)
         {
@@ -422,13 +424,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
                         toolCall.Name,
                         JsonSerializer.Serialize(toolCall.Arguments));
 
-                    // Duration reported as 0 — actual tool timing is not available from the
-                    // auto-invocation SDK pattern. The parent "thought" span carries the real
-                    // wall-clock time for the entire tool-calling loop.
+                    long toolDurationMs = ToolInvocationTimings.TryDequeue(toolCall.Name);
+                    toolActivity?.SetTag("tool.duration_ms", toolDurationMs);
+
                     await collector.RecordSpanAsync(
                         toolCall.Name, "tool_call",
                         $"Calling {toolCall.Name} with {JsonSerializer.Serialize(toolCall.Arguments)}",
-                        0);
+                        toolDurationMs);
                 }
                 else if (content is FunctionResultContent toolResult)
                 {

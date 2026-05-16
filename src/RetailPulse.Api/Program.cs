@@ -88,15 +88,24 @@ builder.Services.AddSignalR()
     .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 
 // ── CORS — split policies for Development vs Production ─────────────────
-string[] corsDevOrigins = ["http://localhost:5173", "https://localhost:5173"];
+// Development CORS is restricted to known local frontend origins (Vite dev server on 5173,
+// alternative dev port 5100). Allowing any origin in dev would let a malicious local site
+// hit the API on behalf of the developer. Production origins come from configuration.
+string[] corsDevOrigins =
+[
+    "http://localhost:5173", "https://localhost:5173",
+    "http://localhost:5100", "https://localhost:5100"
+];
 string[] corsProdOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>()
     ?? [];
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("Development", policy => policy.AllowAnyOrigin()
+    options.AddPolicy("Development", policy => policy
+            .WithOrigins(corsDevOrigins)
             .AllowAnyHeader()
-            .AllowAnyMethod());
+            .AllowAnyMethod()
+            .AllowCredentials());
 
     options.AddPolicy("Production", policy =>
     {
@@ -582,9 +591,12 @@ builder.Services.AddChatClient(
         // synthesizes results. A second iteration risks hitting the 60s request
         // timeout on slow APIM calls and doubles worst-case latency.
         client.MaximumIterationsPerRequest = 1)
-    // EnableSensitiveData logs prompts, responses, and tool arguments which
-    // can include user PII. Only enable in Development.
-    .UseOpenTelemetry(configure: c => c.EnableSensitiveData = builder.Environment.IsDevelopment());
+    // EnableSensitiveData logs full prompts, responses, and tool arguments as span
+    // attributes — these can contain user PII. Default to OFF in every environment
+    // (including Development) and only enable when an operator explicitly opts in via
+    // the Telemetry:EnableSensitiveData config flag for short, deliberate debugging.
+    .UseOpenTelemetry(configure: c =>
+        c.EnableSensitiveData = builder.Configuration.GetValue("Telemetry:EnableSensitiveData", false));
 
 // Foundry agent — optional, controlled by FoundryAgent:Enabled config (default: false)
 bool foundryEnabled = builder.Configuration.GetValue("FoundryAgent:Enabled", false);
@@ -852,49 +864,6 @@ if (scorecardSynthesisDef is not null)
 
 // Register ExplainabilityService (singleton for cross-request trace storage)
 builder.Services.AddSingleton<RetailPulse.Api.Explainability.ExplainabilityService>();
-
-// Keep legacy RetailPulseAgent registration for backward compatibility
-builder.Services.AddScoped(sp =>
-{
-    IChatClient chatClient = sp.GetRequiredService<IChatClient>();
-    IHubContext<TelemetryHub> hubContext = sp.GetRequiredService<IHubContext<TelemetryHub>>();
-    DepletionStatsTool depletionTool = sp.GetRequiredService<DepletionStatsTool>();
-    PortfolioDepletionStatsTool portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
-    FieldSentimentTool sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
-    ShipmentStatsTool shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    VariantMixTool variantMixTool = sp.GetRequiredService<VariantMixTool>();
-    ILogger<RetailPulseAgent> logger = sp.GetRequiredService<ILogger<RetailPulseAgent>>();
-    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
-
-    var tools = new List<AITool>
-    {
-        AIFunctionFactory.Create(depletionTool.GetDepletionStats),
-        AIFunctionFactory.Create(portfolioTool.GetPortfolioDepletionStats),
-        AIFunctionFactory.Create(sentimentTool.GetFieldSentiment),
-        AIFunctionFactory.Create(shipmentTool.GetShipmentStats),
-        AIFunctionFactory.Create(variantMixTool.GetVariantMix),
-        AIFunctionFactory.Create(chartTool.CreateChart)
-    };
-
-    if (foundryEnabled)
-    {
-        FoundryShipmentAgent foundryAgent = sp.GetRequiredService<FoundryShipmentAgent>();
-        tools.Add(AIFunctionFactory.Create(foundryAgent.AnalyzeShipments));
-    }
-    else
-    {
-        LocalShipmentAnalyzer localAnalyzer = sp.GetRequiredService<LocalShipmentAnalyzer>();
-        tools.Add(AIFunctionFactory.Create(localAnalyzer.AnalyzeShipments));
-    }
-
-    // Wrap data-fetching tools with caching (CreateChart and AnalyzeShipments excluded by wrapper)
-    IList<AITool> cachedTools = cachingWrapper.WrapAll(tools);
-
-    IConfiguration configuration = sp.GetRequiredService<IConfiguration>();
-
-    return new RetailPulseAgent(chatClient, agentDef, hubContext, cachedTools, logger, configuration);
-});
 
 builder.Services.AddOpenApi();
 

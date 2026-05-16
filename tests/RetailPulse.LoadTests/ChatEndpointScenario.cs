@@ -8,9 +8,9 @@ using NBomber.Http.CSharp;
 namespace RetailPulse.LoadTests;
 
 /// <summary>
-/// Load test scenario for POST /api/v1/chat endpoint.
+/// Load test scenario for POST /api/chat endpoint.
 /// Ramps from 1 to 10 concurrent users over 30 seconds.
-/// Asserts: p95 latency < 5 seconds.
+/// Asserts: p95 latency &lt; 5 seconds.
 /// </summary>
 public class ChatEndpointScenario
 {
@@ -28,7 +28,7 @@ public class ChatEndpointScenario
 
         return Scenario.Create("chat_endpoint", async context =>
             {
-                HttpRequestMessage request = Http.CreateRequest("POST", $"{BaseUrl}/api/v1/chat")
+                HttpRequestMessage request = Http.CreateRequest("POST", $"{BaseUrl}/api/chat")
                     .WithHeader("Content-Type", "application/json")
                     .WithBody(new StringContent(chatPayload, Encoding.UTF8, "application/json"));
 

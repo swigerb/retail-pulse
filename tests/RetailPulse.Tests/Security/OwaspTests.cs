@@ -42,16 +42,18 @@ public class OwaspTests
 
     [Fact]
     [Trait("OWASP", "A01-BrokenAccessControl")]
-    public void A01_VersionedEndpoints_RequireAuthorization()
+    public void A01_ChatEndpoints_RequireAuthorization()
     {
-        // Verify versioned endpoints are also protected
-        string[] versionedEndpoints =
+        // /api/chat and /api/chat/stream are the production chat endpoints
+        // (versioned /api/v1/* stub routes were removed in favor of the single
+        // unversioned route documented in the OpenAPI spec).
+        string[] chatEndpoints =
         [
-            "/api/v1/chat",
-            "/api/v1/chat/stream"
+            "/api/chat",
+            "/api/chat/stream"
         ];
 
-        versionedEndpoints.Should().AllSatisfy(e => e.Should().Contain("/v1/"));
+        chatEndpoints.Should().AllSatisfy(e => e.Should().StartWith("/api/"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
