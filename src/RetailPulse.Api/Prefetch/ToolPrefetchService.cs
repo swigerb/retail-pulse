@@ -261,7 +261,7 @@ public partial class ToolPrefetchService
             {
                 ["category"] = entities.Category
             },
-            _ => new Dictionary<string, object?>()
+            _ => []
         };
 
     private static bool ShouldPrefetch(string intent, PrefetchEntities entities) =>
