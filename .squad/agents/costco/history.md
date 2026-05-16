@@ -2,6 +2,18 @@
 
 ## Recent Work (2026-05-15)
 
+## Learnings
+
+### 2026-05-15 — Response sanitization and telemetry accuracy
+
+1. **response.Text leakage:** Microsoft.Extensions.AI's `ChatResponse.Text` returns raw text content from the final assistant message. If the model hallucinates function call syntax as text (e.g., `to=functions.ToolName` with garbled characters), it passes straight through to the user. Always sanitize before returning.
+
+2. **Tool call timing was fabricated:** The old `perToolMs = thoughtDurationMs / toolCount` divided total time evenly across tools — producing identical fake numbers (e.g., both tools showing exactly 34273ms). The SDK's auto-invocation pattern (`GetResponseAsync` with tools) doesn't expose individual tool durations. Report 0ms for individual tool_call spans and rely on the parent "thought" span for real wall-clock.
+
+3. **Routing confidence ≠ answer confidence:** `RoutingInfo.Confidence` (the "84%" badge) is the router LLM's self-reported confidence about intent classification, not data quality. It's derived from the JSON response of the classification prompt. Keyword fast-path matches get a fixed 0.95. LLM-classified intents get whatever the model reports. Frontend should clarify this distinction.
+
+4. **68s with 2 tool calls:** Single `GetResponseAsync` handles the full loop (model → request tools → SDK invokes tools → feeds results back → model synthesizes). No parallelization within the SDK pattern. Improvement requires manual tool orchestration (call model, parse tool requests, invoke tools in parallel, feed back results).
+
 ## 2026-05-15 — Demo blocker: chat endpoint infinite spin
 
 **Symptom:** Clicking default-question buttons in the UI spun forever. Backend never returned, so the FE spinner never cleared.

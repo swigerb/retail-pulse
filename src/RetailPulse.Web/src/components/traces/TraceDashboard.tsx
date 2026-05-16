@@ -158,13 +158,17 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
   const styles = useStyles();
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
 
-  // Filter out empty traces (no spans, or no duration AND no tokens)
+  // Filter out empty traces (no spans, or no duration AND no tokens at both trace and span level)
   const meaningfulTraces = useMemo(
     () => traces.filter(t => {
       const spanCount = (t.spans ?? []).length;
       if (spanCount === 0) return false;
-      if (t.totalDurationMs === 0 && t.totalTokens === 0) return false;
-      return true;
+      // Allow through if trace-level totals are present
+      if (t.totalDurationMs > 0 || t.totalTokens > 0) return true;
+      // Fall back: check if any span has duration or token data
+      const spanDuration = (t.spans ?? []).reduce((sum, s) => sum + (s.durationMs ?? 0), 0);
+      const spanTokens = (t.spans ?? []).reduce((sum, s) => sum + (s.inputTokens ?? 0) + (s.outputTokens ?? 0), 0);
+      return spanDuration > 0 || spanTokens > 0 || spanCount > 0;
     }),
     [traces],
   );
@@ -178,11 +182,19 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
 
   const aggregates = useMemo(() => {
     if (meaningfulTraces.length === 0) return { avgDuration: 0, avgCost: 0, toolUsage: new Map<string, number>() };
-    const durations = meaningfulTraces.map(t => t.totalDurationMs ?? 0);
-    const costs = meaningfulTraces.map(t => t.totalCostUsd ?? 0);
+    const durations = meaningfulTraces.map(t => {
+      // Use trace-level totalDurationMs, but fall back to sum of span durations
+      if (t.totalDurationMs > 0) return t.totalDurationMs;
+      return (t.spans ?? []).reduce((sum, s) => sum + (s.durationMs ?? 0), 0);
+    });
+    const costs = meaningfulTraces.map(t => {
+      // Use trace-level totalCostUsd, but fall back to sum of span costs
+      if (t.totalCostUsd > 0) return t.totalCostUsd;
+      return (t.spans ?? []).reduce((sum, s) => sum + (s.estimatedCostUsd ?? 0), 0);
+    });
     const toolUsage = new Map<string, number>();
     meaningfulTraces.forEach(t => (t.spans ?? []).forEach(s => {
-      if (s?.type === 'tool') {
+      if (s?.type === 'tool' || s?.type === 'tool_call' as string) {
         toolUsage.set(s.name, (toolUsage.get(s.name) ?? 0) + 1);
       }
     }));
@@ -251,27 +263,43 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
       )}
 
       <div className={styles.list}>
-        {recentTraces.map(trace => (
-          <div
-            key={trace.traceId}
-            className={`${styles.traceItem} ${selectedTraceId === trace.traceId ? styles.traceItemSelected : ''}`}
-            onClick={() => setSelectedTraceId(prev => prev === trace.traceId ? null : trace.traceId)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={e => { if (e.key === 'Enter') setSelectedTraceId(prev => prev === trace.traceId ? null : trace.traceId); }}
-          >
-            <span className={styles.traceTime}>
-              {new Date(trace.startTime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-            </span>
-            <span className={styles.traceIntent}>{trace.intent || 'Unknown intent'}</span>
-            <span className={styles.traceAgent}>{trace.agentName}</span>
-            <span className={styles.traceDuration}>{formatDuration(trace.totalDurationMs)}</span>
-            <span className={styles.traceCost}>{formatCost(trace.totalCostUsd)}</span>
-            <Badge appearance="filled" color={trace.status === 'completed' ? 'success' : trace.status === 'error' ? 'danger' : 'warning'} style={{ fontSize: '9px' }}>
-              {(trace.spans ?? []).length}
-            </Badge>
-          </div>
-        ))}
+        {recentTraces.map(trace => {
+          // Compute display values with span-level fallback
+          const displayDuration = trace.totalDurationMs > 0
+            ? trace.totalDurationMs
+            : (trace.spans ?? []).reduce((sum, s) => sum + (s.durationMs ?? 0), 0);
+          const displayCost = trace.totalCostUsd > 0
+            ? trace.totalCostUsd
+            : (trace.spans ?? []).reduce((sum, s) => sum + (s.estimatedCostUsd ?? 0), 0);
+          const displayIntent = trace.status === 'completed' && trace.intent === 'Processing...'
+            ? 'Completed'
+            : trace.intent || 'Unknown intent';
+          const displayAgent = trace.agentName === 'Unknown'
+            ? (trace.spans ?? []).find(s => s.type === 'agent')?.name || trace.agentName
+            : trace.agentName;
+
+          return (
+            <div
+              key={trace.traceId}
+              className={`${styles.traceItem} ${selectedTraceId === trace.traceId ? styles.traceItemSelected : ''}`}
+              onClick={() => setSelectedTraceId(prev => prev === trace.traceId ? null : trace.traceId)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => { if (e.key === 'Enter') setSelectedTraceId(prev => prev === trace.traceId ? null : trace.traceId); }}
+            >
+              <span className={styles.traceTime}>
+                {new Date(trace.startTime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+              <span className={styles.traceIntent}>{displayIntent}</span>
+              <span className={styles.traceAgent}>{displayAgent}</span>
+              <span className={styles.traceDuration}>{formatDuration(displayDuration)}</span>
+              <span className={styles.traceCost}>{formatCost(displayCost)}</span>
+              <Badge appearance="filled" color={trace.status === 'completed' ? 'success' : trace.status === 'error' ? 'danger' : 'warning'} style={{ fontSize: '9px' }}>
+                {trace.status === 'completed' ? '✓' : (trace.spans ?? []).length}
+              </Badge>
+            </div>
+          );
+        })}
       </div>
 
       {selectedTrace && (
