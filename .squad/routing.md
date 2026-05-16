@@ -10,7 +10,7 @@ How to decide who handles what.
 | Frontend UI | Chick | React components, Vite config, TypeScript UI, styling, dashboards |
 | Backend APIs | Costco | .NET 10 APIs, C# services, APIM, AI Gateway, Aspire integration, tenant services |
 | Code review | Kroger | Review PRs, check quality, architectural alignment |
-| Testing | Target | Write tests, find edge cases, verify fixes, quality gates |
+| Testing | Publix | Write tests, find edge cases, verify fixes, quality gates, demo validation |
 | Scope & priorities | Kroger | What to build next, trade-offs, decisions |
 | Session logging | Scribe | Automatic — never needs routing |
 
@@ -22,7 +22,7 @@ How to decide who handles what.
 | `squad:kroger` | Pick up issue and complete the work | Kroger |
 | `squad:chick` | Pick up issue and complete the work | Chick |
 | `squad:costco` | Pick up issue and complete the work | Costco |
-| `squad:target` | Pick up issue and complete the work | Target |
+| `squad:publix` | Pick up issue and complete the work | Publix |
 
 ### How Issue Assignment Works
 

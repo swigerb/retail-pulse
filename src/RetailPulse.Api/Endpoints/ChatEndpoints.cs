@@ -43,11 +43,10 @@ public static class ChatEndpoints
 
             // Per-request timeout: caps the whole pipeline (router classify + agent execute
             // + tool calls) so a hung AI Gateway call cannot leave the UI spinning forever.
-            // 60s is firm: with MaxIterations=1 and 30s NetworkTimeout, the pipeline
-            // has headroom for routing + one LLM call + tool calls. If it can't finish
-            // in 60s, fail fast with a clear error instead of making the user wait.
+            // 90s accommodates MaxIterations=3 × ~20-30s per iteration. Typical requests
+            // complete in 15-40s; this ceiling catches only pathological cases.
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
-            requestCts.CancelAfter(TimeSpan.FromSeconds(60));
+            requestCts.CancelAfter(TimeSpan.FromSeconds(90));
             CancellationToken ct = requestCts.Token;
 
             try
@@ -557,7 +556,7 @@ public static class ChatEndpoints
 
             // Per-request timeout (see /api/chat for rationale).
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
-            requestCts.CancelAfter(TimeSpan.FromSeconds(60));
+            requestCts.CancelAfter(TimeSpan.FromSeconds(90));
             CancellationToken ct = requestCts.Token;
 
             try

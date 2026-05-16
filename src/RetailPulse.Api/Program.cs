@@ -571,10 +571,10 @@ if (string.IsNullOrWhiteSpace(openAiApiKey))
 
 // NetworkTimeout caps a single HTTP attempt (one LLM roundtrip) to the AI Gateway.
 // 45s accommodates complex reasoning chains and tool-augmented responses that
-// legitimately take 15-30s. The 60s request-level timeout in /api/chat is the ceiling.
+// legitimately take 15-30s. The 90s request-level timeout in /api/chat is the ceiling.
 // RetryPolicy: 1 retry handles genuine transient 429s (APIM bursts that clear in
 // seconds) without burning the full request budget. With 3 retries, exponential
-// backoff + Retry-After delays consumed the entire 60s budget on persistent rate
+// backoff + Retry-After delays consumed the entire budget on persistent rate
 // limits, producing misleading 504 timeouts instead of fast 429 errors.
 var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
 {
@@ -590,11 +590,16 @@ var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDef.Model).AsIChatClient())
     .UseFunctionInvocation(configure: client =>
-        // Cap tool-call iterations to prevent the model from looping tool calls.
-        // 1 iteration keeps latency predictable: the model calls tools once and
-        // synthesizes results. A second iteration risks hitting the 60s request
-        // timeout on slow APIM calls and doubles worst-case latency.
-        client.MaximumIterationsPerRequest = 1)
+        // Cap tool-call iterations: 3 allows the full tool-calling lifecycle:
+        //   Iteration 1 — LLM decides to call tools (fast, ~5-10s).
+        //   Iteration 2 — LLM sees tool results, may call more tools OR synthesize text.
+        //   Iteration 3 — Safety margin for multi-step reasoning chains.
+        // Why not 1: the LLM needs a SECOND turn after tools execute to synthesize
+        // results into a natural-language response. With 1, response.Text is always
+        // empty after tool calls → the fallback fires → wasted tokens.
+        // Why not unlimited: prevents runaway loops; the 90s request-level timeout
+        // is the hard ceiling regardless.
+        client.MaximumIterationsPerRequest = 3)
     // EnableSensitiveData logs full prompts, responses, and tool arguments as span
     // attributes — these can contain user PII. Default to OFF in every environment
     // (including Development) and only enable when an operator explicitly opts in via

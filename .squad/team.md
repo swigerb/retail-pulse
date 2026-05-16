@@ -15,7 +15,7 @@
 | Kroger | Lead | `.squad/agents/kroger/charter.md` | ✅ Active |
 | Chick | Frontend Dev | `.squad/agents/chick/charter.md` | ✅ Active |
 | Costco | Backend Dev | `.squad/agents/costco/charter.md` | ✅ Active |
-| Target | Tester | `.squad/agents/target/charter.md` | ✅ Active |
+| Publix | Tester | `.squad/agents/publix/charter.md` | ✅ Active |
 | Scribe | Session Logger | `.squad/agents/scribe/charter.md` | 📋 Silent |
 | Ralph | Work Monitor | `.squad/agents/ralph/charter.md` | 🔄 Monitor |
 
