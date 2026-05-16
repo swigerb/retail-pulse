@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { sendMessage } from '../services/api';
+import { sendMessage, isErrorReply } from '../services/api';
 
 const originalFetch = globalThis.fetch;
 
@@ -129,5 +129,35 @@ describe('api.sendMessage', () => {
     const promise = sendMessage({ message: 'hi' }, { signal: controller.signal });
     controller.abort();
     await expect(promise).rejects.toThrow(/Aborted|abort/i);
+  });
+
+  it('throws a friendly message for 429 rate-limit responses', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('Too Many Requests', { status: 429 })
+    ) as unknown as typeof fetch;
+
+    await expect(sendMessage({ message: 'hi' })).rejects.toThrow(
+      'The AI service is busy. Please wait a moment and try again.'
+    );
+  });
+
+  it('does not use the friendly 429 message for other 4xx errors', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('bad', { status: 400 })
+    ) as unknown as typeof fetch;
+
+    await expect(sendMessage({ message: 'hi' })).rejects.toThrow(/API error 400/);
+  });
+});
+
+describe('isErrorReply', () => {
+  it('returns true for backend error replies starting with ⏳', () => {
+    expect(isErrorReply('⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.')).toBe(true);
+    expect(isErrorReply('⏳ The request took too long to complete.')).toBe(true);
+  });
+
+  it('returns false for normal replies', () => {
+    expect(isErrorReply('Here is the demand forecast for Q2.')).toBe(false);
+    expect(isErrorReply('')).toBe(false);
   });
 });
