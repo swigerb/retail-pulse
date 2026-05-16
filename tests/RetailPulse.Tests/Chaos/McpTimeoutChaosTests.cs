@@ -21,10 +21,10 @@ public class McpTimeoutChaosTests
     {
         // Simulate a 10s delay which will exceed a typical timeout
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-        var client = CreateTimeoutClient(TimeSpan.FromSeconds(30));
+        HttpClient client = CreateTimeoutClient(TimeSpan.FromSeconds(30));
         var tool = new FieldSentimentTool(client, NullLogger<FieldSentimentTool>.Instance);
 
-        var result = await tool.GetFieldSentiment("TestBrand", "TestRegion", cts.Token);
+        string result = await tool.GetFieldSentiment("TestBrand", "TestRegion", cts.Token);
 
         result.Should().Contain("fallback");
         result.Should().Contain("TestBrand");
@@ -34,10 +34,10 @@ public class McpTimeoutChaosTests
     public async Task DepletionStatsTool_McpTimeout_ReturnsFallback()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-        var client = CreateTimeoutClient(TimeSpan.FromSeconds(30));
+        HttpClient client = CreateTimeoutClient(TimeSpan.FromSeconds(30));
         var tool = new DepletionStatsTool(client, NullLogger<DepletionStatsTool>.Instance);
 
-        var result = await tool.GetDepletionStats("TestBrand", "TestRegion", "YTD", cts.Token);
+        string result = await tool.GetDepletionStats("TestBrand", "TestRegion", "YTD", cts.Token);
 
         result.Should().Contain("MCP server not reachable");
         result.Should().Contain("TestBrand");
@@ -47,10 +47,10 @@ public class McpTimeoutChaosTests
     public async Task ShipmentStatsTool_McpTimeout_ReturnsFallback()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-        var client = CreateTimeoutClient(TimeSpan.FromSeconds(30));
+        HttpClient client = CreateTimeoutClient(TimeSpan.FromSeconds(30));
         var tool = new ShipmentStatsTool(client, NullLogger<ShipmentStatsTool>.Instance);
 
-        var result = await tool.GetShipmentStats("TestBrand", "TestRegion", "YTD", cts.Token);
+        string result = await tool.GetShipmentStats("TestBrand", "TestRegion", "YTD", cts.Token);
 
         result.Should().Contain("MCP server not reachable");
         result.Should().Contain("TestBrand");
@@ -60,10 +60,10 @@ public class McpTimeoutChaosTests
     public async Task CompetitiveLandscapeTool_McpTimeout_ReturnsFallback()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-        var client = CreateTimeoutClient(TimeSpan.FromSeconds(30));
+        HttpClient client = CreateTimeoutClient(TimeSpan.FromSeconds(30));
         var tool = new CompetitiveLandscapeTool(client, NullLogger<CompetitiveLandscapeTool>.Instance);
 
-        var result = await tool.GetCompetitiveLandscape("Spirits", "Northeast", cts.Token);
+        string result = await tool.GetCompetitiveLandscape("Spirits", "Northeast", cts.Token);
 
         result.Should().Contain("MCP server not reachable");
     }
@@ -75,7 +75,10 @@ public class McpTimeoutChaosTests
     {
         private readonly TimeSpan _delay;
 
-        public DelayedHttpMessageHandler(TimeSpan delay) => _delay = delay;
+        public DelayedHttpMessageHandler(TimeSpan delay)
+        {
+            _delay = delay;
+        }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)

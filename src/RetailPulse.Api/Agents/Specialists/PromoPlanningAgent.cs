@@ -64,13 +64,13 @@ public class PromoPlanningAgent : ISpecialistAgent
     {
         if (_approvalGate == null) return null;
 
-        var requiresApproval = spend > 500_000 || (spend > 100_000 && roi < 10);
+        bool requiresApproval = spend > 500_000 || (spend > 100_000 && roi < 10);
         if (!requiresApproval) return null;
 
-        var urgency = spend > 500_000 ? "High" : "Medium";
-        var impact = $"Campaign spend: ${spend:N0}, Expected ROI: {roi:F1}%";
+        string urgency = spend > 500_000 ? "High" : "Medium";
+        string impact = $"Campaign spend: ${spend:N0}, Expected ROI: {roi:F1}%";
 
-        var request = await _approvalGate.RequestApprovalAsync(new ApprovalContext(
+        ApprovalRequest request = await _approvalGate.RequestApprovalAsync(new ApprovalContext(
             AgentId: Key,
             UserId: userId,
             Action: description,

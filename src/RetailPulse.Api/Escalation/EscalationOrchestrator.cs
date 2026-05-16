@@ -56,12 +56,12 @@ public class EscalationOrchestrator
         var sw = Stopwatch.StartNew();
 
         // Determine complexity from detected intents
-        var detectedIntents = routing.DetectedIntents ?? [routing.Intent];
-        var isMultiDomain = detectedIntents.Count > 1;
-        var isLowConfidence = routing.Confidence < 0.5;
+        IReadOnlyList<string> detectedIntents = routing.DetectedIntents ?? [routing.Intent];
+        bool isMultiDomain = detectedIntents.Count > 1;
+        bool isLowConfidence = routing.Confidence < 0.5;
 
         // L1: Try primary specialist
-        var primaryAgent = _specialists.FirstOrDefault(s =>
+        ISpecialistAgent? primaryAgent = _specialists.FirstOrDefault(s =>
             s.SupportedIntents.Contains(routing.Intent));
 
         if (primaryAgent != null && !isMultiDomain && !isLowConfidence)
@@ -71,7 +71,7 @@ public class EscalationOrchestrator
                 using var l1Cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 l1Cts.CancelAfter(_l1Timeout);
 
-                var response = await primaryAgent.HandleAsync(request, l1Cts.Token);
+                ChatResponse response = await primaryAgent.HandleAsync(request, l1Cts.Token);
 
                 if (!string.IsNullOrWhiteSpace(response.Reply) && !response.Reply.Contains("⚠️"))
                 {
@@ -111,11 +111,11 @@ public class EscalationOrchestrator
                 using var l2Cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 l2Cts.CancelAfter(_l2Timeout);
 
-                var tasks = relevantAgents.Select(async agent =>
+                IEnumerable<Task<(string Key, string? Reply, bool Success)>> tasks = relevantAgents.Select(async agent =>
                 {
                     try
                     {
-                        var response = await agent.HandleAsync(request, l2Cts.Token);
+                        ChatResponse response = await agent.HandleAsync(request, l2Cts.Token);
                         return (agent.Key, response.Reply, Success: true);
                     }
                     catch
@@ -124,12 +124,12 @@ public class EscalationOrchestrator
                     }
                 });
 
-                var results = await Task.WhenAll(tasks);
-                var successful = results.Where(r => r.Success && !string.IsNullOrWhiteSpace(r.Reply)).ToArray();
+                (string Key, string? Reply, bool Success)[] results = await Task.WhenAll(tasks);
+                (string Key, string? Reply, bool Success)[] successful = [.. results.Where(r => r.Success && !string.IsNullOrWhiteSpace(r.Reply))];
 
                 if (successful.Length > 0)
                 {
-                    var synthesized = successful.Length == 1
+                    string synthesized = successful.Length == 1
                         ? successful[0].Reply!
                         : await SynthesizeL2Async(request.Message, [.. successful], ct);
 
@@ -174,10 +174,10 @@ public class EscalationOrchestrator
         (string Key, string? Reply, bool Success)[] agentResults,
         CancellationToken ct)
     {
-        var perspectives = string.Join("\n\n", agentResults.Select(r =>
+        string perspectives = string.Join("\n\n", agentResults.Select(r =>
             $"**{r.Key}**:\n{r.Reply}"));
 
-        var prompt = $"""
+        string prompt = $"""
             The user asked: "{originalQuestion}"
 
             Multiple specialist agents provided these perspectives:
@@ -202,7 +202,7 @@ public class EscalationOrchestrator
             };
 
             var options = new ChatOptions { Temperature = (float)_synthesisDef.Temperature };
-            var response = await _chatClient.GetResponseAsync(messages, options, ct);
+            Microsoft.Extensions.AI.ChatResponse response = await _chatClient.GetResponseAsync(messages, options, ct);
             return response.Text ?? perspectives;
         }
         catch (Exception ex)

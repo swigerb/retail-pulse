@@ -39,21 +39,21 @@ public class DemoScenarioTests
     [InlineData(4, "supply")]
     public async Task DemoQuery_ProducesValidResponse(int queryIndex, string expectedDomain)
     {
-        var query = DemoQueries[queryIndex];
+        string query = DemoQueries[queryIndex];
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         // Arrange: mock router to classify correctly
-        var routerResponse = $"{{\"intent\":\"{expectedDomain}\",\"confidence\":0.95,\"intents\":[\"{expectedDomain}\"]}}";
-        var routerClient = CreateMockChatClient(routerResponse);
+        string routerResponse = $"{{\"intent\":\"{expectedDomain}\",\"confidence\":0.95,\"intents\":[\"{expectedDomain}\"]}}";
+        IChatClient routerClient = CreateMockChatClient(routerResponse);
 
-        var specialist = CreateMockSpecialist(expectedDomain, $"Response for {expectedDomain}");
-        var generalAgent = CreateMockSpecialist("general", "General fallback response");
+        ISpecialistAgent specialist = CreateMockSpecialist(expectedDomain, $"Response for {expectedDomain}");
+        ISpecialistAgent generalAgent = CreateMockSpecialist("general", "General fallback response");
         var specialists = new List<ISpecialistAgent> { specialist, generalAgent };
 
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
         // Act
-        var decision = await router.RouteAsync(query, null, null, null);
+        RoutingDecision decision = await router.RouteAsync(query, null, null, null);
 
         sw.Stop();
 
@@ -75,7 +75,7 @@ public class DemoScenarioTests
     [InlineData(4)]
     public void DemoQuery_SpecialistReturnsStructuredResponse(int queryIndex)
     {
-        var query = DemoQueries[queryIndex];
+        string query = DemoQueries[queryIndex];
 
         // Mock specialist that returns a ChatResponse
         var mockResponse = new ChatResponse(
@@ -101,14 +101,15 @@ public class DemoScenarioTests
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var tasks = new List<Task>();
 
-        foreach (var query in DemoQueries)
+        foreach (string query in DemoQueries)
         {
             tasks.Add(Task.Run(async () =>
             {
-                var routerClient = CreateMockChatClient(
-                    "{\"intent\":\"general\",\"confidence\":0.9,\"intents\":[\"general\"]}");
-                var specialist = CreateMockSpecialist("general", $"Response for: {query}");
-                var router = CreateRouter(routerClient, [specialist]);
+                IChatClient routerClient = CreateMockChatClient(
+                                         /*lang=json,strict*/
+                                         "{\"intent\":\"general\",\"confidence\":0.9,\"intents\":[\"general\"]}");
+                ISpecialistAgent specialist = CreateMockSpecialist("general", $"Response for: {query}");
+                RetailOpsRouter router = CreateRouter(routerClient, [specialist]);
 
                 await router.RouteAsync(query, null, null, null);
             }));
@@ -135,7 +136,7 @@ public class DemoScenarioTests
             Spans: [new AgentSpan("test", "response", "ok", 10, DateTimeOffset.UtcNow)],
             TotalDurationMs: 100);
 
-        var json = System.Text.Json.JsonSerializer.Serialize(response);
+        string json = System.Text.Json.JsonSerializer.Serialize(response);
         json.Should().NotBeNullOrEmpty();
         json.Should().Contain("Reply");
         json.Should().Contain("SessionId");

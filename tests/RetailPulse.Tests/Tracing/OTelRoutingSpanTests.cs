@@ -47,7 +47,7 @@ public class OTelRoutingSpanTests : IDisposable
             Temperature = 0.1
         };
 
-        var specList = specialists ?? [];
+        IEnumerable<ISpecialistAgent> specList = specialists ?? [];
         return new RetailOpsRouter(
             routerClient, agentDef, specList,
             new Mock<ILogger<RetailOpsRouter>>().Object);
@@ -69,36 +69,36 @@ public class OTelRoutingSpanTests : IDisposable
     [Fact]
     public async Task RoutingSpan_EmitsIntentTag()
     {
-        var client = MockChatClient(
+        IChatClient client = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.92}}");
-        var router = CreateRouter(client);
+        RetailOpsRouter router = CreateRouter(client);
 
         await router.RouteAsync("What is the demand forecast?", null, null, null);
 
-        var routingActivity = _capturedActivities
+        Activity? routingActivity = _capturedActivities
             .LastOrDefault(a => a.OperationName == "agent.routing"
                 && (a.GetTagItem("agent.router") as string) == "RetailOpsRouter");
         routingActivity.Should().NotBeNull("router should emit an agent.routing span");
 
-        var intentTag = routingActivity.GetTagItem("agent.routing.intent");
+        object? intentTag = routingActivity.GetTagItem("agent.routing.intent");
         intentTag.Should().Be(AgentIntent.DemandForecasting);
     }
 
     [Fact]
     public async Task RoutingSpan_EmitsConfidenceTag()
     {
-        var client = MockChatClient(
+        IChatClient client = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.87}}");
-        var router = CreateRouter(client);
+        RetailOpsRouter router = CreateRouter(client);
 
         await router.RouteAsync("How is the competitive landscape?", null, null, null);
 
-        var routingActivity = _capturedActivities
+        Activity? routingActivity = _capturedActivities
             .LastOrDefault(a => a.OperationName == "agent.routing"
                 && (a.GetTagItem("agent.router") as string) == "RetailOpsRouter");
         routingActivity.Should().NotBeNull();
 
-        var confidenceTag = routingActivity.GetTagItem("agent.routing.confidence");
+        object? confidenceTag = routingActivity.GetTagItem("agent.routing.confidence");
         confidenceTag.Should().NotBeNull("routing span should include confidence tag");
         Convert.ToDouble(confidenceTag).Should().BeApproximately(0.87, 0.01);
     }
@@ -106,7 +106,7 @@ public class OTelRoutingSpanTests : IDisposable
     [Fact]
     public async Task RoutingSpan_EmitsFallbackTag_WhenLowConfidence()
     {
-        var client = MockChatClient(
+        IChatClient client = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.3}}");
 
         // Need a general agent registered for fallback
@@ -114,43 +114,43 @@ public class OTelRoutingSpanTests : IDisposable
         generalAgent.Setup(a => a.Key).Returns("general");
         generalAgent.Setup(a => a.SupportedIntents).Returns([AgentIntent.General]);
 
-        var router = CreateRouter(client, [generalAgent.Object]);
+        RetailOpsRouter router = CreateRouter(client, [generalAgent.Object]);
 
         await router.RouteAsync("Something vague", null, null, null);
 
-        var routingActivity = _capturedActivities
+        Activity? routingActivity = _capturedActivities
             .LastOrDefault(a => a.OperationName == "agent.routing"
                 && (a.GetTagItem("agent.router") as string) == "RetailOpsRouter");
         routingActivity.Should().NotBeNull();
 
-        var fallbackTag = routingActivity.GetTagItem("agent.routing.fallback");
+        object? fallbackTag = routingActivity.GetTagItem("agent.routing.fallback");
         fallbackTag.Should().Be(true, "low confidence should set fallback=true");
 
-        var fallbackReason = routingActivity.GetTagItem("agent.routing.fallback_reason");
+        object? fallbackReason = routingActivity.GetTagItem("agent.routing.fallback_reason");
         fallbackReason.Should().Be("low_confidence");
     }
 
     [Fact]
     public async Task RoutingSpan_NoFallbackTag_WhenHighConfidence()
     {
-        var client = MockChatClient(
+        IChatClient client = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.95}}");
 
         var demandAgent = new Mock<ISpecialistAgent>();
         demandAgent.Setup(a => a.Key).Returns("demand-forecasting");
         demandAgent.Setup(a => a.SupportedIntents).Returns([AgentIntent.DemandForecasting]);
 
-        var router = CreateRouter(client, [demandAgent.Object]);
+        RetailOpsRouter router = CreateRouter(client, [demandAgent.Object]);
 
         await router.RouteAsync("What is the demand forecast?", null, null, null);
 
-        var routingActivity = _capturedActivities
+        Activity? routingActivity = _capturedActivities
             .LastOrDefault(a => a.OperationName == "agent.routing"
                 && (a.GetTagItem("agent.router") as string) == "RetailOpsRouter");
         routingActivity.Should().NotBeNull();
 
         // High confidence → no fallback tag set (or false)
-        var fallbackTag = routingActivity.GetTagItem("agent.routing.fallback");
+        object? fallbackTag = routingActivity.GetTagItem("agent.routing.fallback");
         fallbackTag.Should().BeNull("high confidence routes should not set fallback tag");
     }
 
@@ -158,21 +158,21 @@ public class OTelRoutingSpanTests : IDisposable
     public async Task RoutingSpan_EmitsFallbackTag_WhenNoSpecialist()
     {
         // Return a valid intent but register no specialists
-        var client = MockChatClient(
+        IChatClient client = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.95}}");
-        var router = CreateRouter(client); // no specialists registered
+        RetailOpsRouter router = CreateRouter(client); // no specialists registered
 
         await router.RouteAsync("Demand forecast?", null, null, null);
 
-        var routingActivity = _capturedActivities
+        Activity? routingActivity = _capturedActivities
             .LastOrDefault(a => a.OperationName == "agent.routing"
                 && (a.GetTagItem("agent.router") as string) == "RetailOpsRouter");
         routingActivity.Should().NotBeNull();
 
-        var fallbackTag = routingActivity.GetTagItem("agent.routing.fallback");
+        object? fallbackTag = routingActivity.GetTagItem("agent.routing.fallback");
         fallbackTag.Should().Be(true, "missing specialist should trigger fallback");
 
-        var fallbackReason = routingActivity.GetTagItem("agent.routing.fallback_reason");
+        object? fallbackReason = routingActivity.GetTagItem("agent.routing.fallback_reason");
         fallbackReason.Should().Be("no_specialist");
     }
 

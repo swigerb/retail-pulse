@@ -30,9 +30,9 @@ public class Phase4RoutingTests
     [InlineData("How are our stores performing this quarter?")]
     public async Task StorePerformanceQueries_RouteToStoreOpsAgent(string message)
     {
-        var router = CreateRouterForIntent(AgentIntent.StoreOps, "store-ops");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.StoreOps, "store-ops");
 
-        var result = await router.RouteAsync(message, null, null, null);
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
 
         result.Intent.Should().Be(AgentIntent.StoreOps);
         result.AgentKey.Should().Be("store-ops");
@@ -45,9 +45,9 @@ public class Phase4RoutingTests
     [InlineData("What's the best planogram for our spirits section?")]
     public async Task PlanogramQueries_RouteToPlanogramAgent(string message)
     {
-        var router = CreateRouterForIntent(AgentIntent.Planogram, "planogram");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.Planogram, "planogram");
 
-        var result = await router.RouteAsync(message, null, null, null);
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
 
         result.Intent.Should().Be(AgentIntent.Planogram);
         result.AgentKey.Should().Be("planogram");
@@ -60,9 +60,9 @@ public class Phase4RoutingTests
     [InlineData("Analyze margin trends across the portfolio")]
     public async Task MarginQueries_RouteToMarginAgent(string message)
     {
-        var router = CreateRouterForIntent(AgentIntent.MarginAnalysis, "margin");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.MarginAnalysis, "margin");
 
-        var result = await router.RouteAsync(message, null, null, null);
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
 
         result.Intent.Should().Be(AgentIntent.MarginAnalysis);
         result.AgentKey.Should().Be("margin");
@@ -75,9 +75,9 @@ public class Phase4RoutingTests
     [InlineData("Portfolio health dashboard with trend analysis")]
     public async Task ScorecardQueries_RouteToScorecard(string message)
     {
-        var router = CreateRouterForIntent(AgentIntent.Scorecard, "scorecard");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.Scorecard, "scorecard");
 
-        var result = await router.RouteAsync(message, null, null, null);
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
 
         result.Intent.Should().Be(AgentIntent.Scorecard);
         result.AgentKey.Should().Be("scorecard");
@@ -91,9 +91,9 @@ public class Phase4RoutingTests
     [Fact]
     public async Task DemandIntents_StillRouteCorrectly()
     {
-        var router = CreateRouterForIntent(AgentIntent.DemandForecasting, "demand-forecasting");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.DemandForecasting, "demand-forecasting");
 
-        var result = await router.RouteAsync("What's the demand forecast?", null, null, null);
+        RoutingDecision result = await router.RouteAsync("What's the demand forecast?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.DemandForecasting);
         result.AgentKey.Should().Be("demand-forecasting");
@@ -102,9 +102,9 @@ public class Phase4RoutingTests
     [Fact]
     public async Task PromoIntents_StillRouteCorrectly()
     {
-        var router = CreateRouterForIntent(AgentIntent.PromotionTrade, "promo-planning");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.PromotionTrade, "promo-planning");
 
-        var result = await router.RouteAsync("Plan a promotion for next quarter", null, null, null);
+        RoutingDecision result = await router.RouteAsync("Plan a promotion for next quarter", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.PromotionTrade);
         result.AgentKey.Should().Be("promo-planning");
@@ -113,9 +113,9 @@ public class Phase4RoutingTests
     [Fact]
     public async Task SupplyIntents_StillRouteCorrectly()
     {
-        var router = CreateRouterForIntent(AgentIntent.SupplyShipments, "supply-chain");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.SupplyShipments, "supply-chain");
 
-        var result = await router.RouteAsync("Check supply chain status", null, null, null);
+        RoutingDecision result = await router.RouteAsync("Check supply chain status", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.SupplyShipments);
         result.AgentKey.Should().Be("supply-chain");
@@ -124,9 +124,9 @@ public class Phase4RoutingTests
     [Fact]
     public async Task CompetitiveIntents_StillRouteCorrectly()
     {
-        var router = CreateRouterForIntent(AgentIntent.CompetitiveMarket, "competitive-intel");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.CompetitiveMarket, "competitive-intel");
 
-        var result = await router.RouteAsync("Analyze competitor pricing", null, null, null);
+        RoutingDecision result = await router.RouteAsync("Analyze competitor pricing", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.CompetitiveMarket);
         result.AgentKey.Should().Be("competitive-intel");
@@ -135,9 +135,9 @@ public class Phase4RoutingTests
     [Fact]
     public async Task GeneralIntents_StillRouteCorrectly()
     {
-        var router = CreateRouterForIntent(AgentIntent.General, "general");
+        RetailOpsRouter router = CreateRouterForIntent(AgentIntent.General, "general");
 
-        var result = await router.RouteAsync("Hello, what can you do?", null, null, null);
+        RoutingDecision result = await router.RouteAsync("Hello, what can you do?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.General);
         result.AgentKey.Should().Be("general");
@@ -153,7 +153,7 @@ public class Phase4RoutingTests
     /// </summary>
     private static RetailOpsRouter CreateRouterForIntent(string intent, string agentKey)
     {
-        var json = $"{{\"intent\":\"{intent}\",\"confidence\":0.92,\"intents\":[\"{intent}\"]}}";
+        string json = $"{{\"intent\":\"{intent}\",\"confidence\":0.92,\"intents\":[\"{intent}\"]}}";
         var mockClient = new Mock<IChatClient>();
         mockClient
             .Setup(x => x.GetResponseAsync(
@@ -172,7 +172,7 @@ public class Phase4RoutingTests
             .ReturnsAsync(new Contracts.ChatResponse("response", "session", []));
 
         // Also include a general fallback agent
-        var generalAgent = CreateGeneralAgent();
+        GeneralAgent generalAgent = CreateGeneralAgent();
 
         var specialists = new List<ISpecialistAgent> { specialist.Object, generalAgent };
 
@@ -197,7 +197,7 @@ public class Phase4RoutingTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 

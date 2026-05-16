@@ -14,7 +14,7 @@ public readonly partial record struct SessionId
     public SessionId(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value, nameof(value));
-        var trimmed = value.Trim();
+        string trimmed = value.Trim();
         if (!_validPattern.IsMatch(trimmed))
         {
             throw new ArgumentException(

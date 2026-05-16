@@ -21,13 +21,13 @@ public class DeadLetterQueueTests : IDisposable
     [Fact]
     public async Task Enqueue_PersistsEntry()
     {
-        await _queue.EnqueueAsync("test-operation", "{\"key\":\"value\"}", "Something failed");
+        await _queue.EnqueueAsync("test-operation", /*lang=json,strict*/ "{\"key\":\"value\"}", "Something failed");
 
-        var pending = await _queue.GetPendingAsync();
+        IReadOnlyList<DeadLetterEntry> pending = await _queue.GetPendingAsync();
         pending.Should().HaveCount(1);
         pending[0].Operation.Should().Be("test-operation");
         pending[0].Error.Should().Be("Something failed");
-        pending[0].Payload.Should().Be("{\"key\":\"value\"}");
+        pending[0].Payload.Should().Be(/*lang=json,strict*/ "{\"key\":\"value\"}");
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public class DeadLetterQueueTests : IDisposable
         await _queue.EnqueueAsync("op2", null, "err2");
         await _queue.EnqueueAsync("op3", null, "err3");
 
-        var count = await _queue.GetPendingCountAsync();
+        int count = await _queue.GetPendingCountAsync();
         count.Should().Be(3);
     }
 
@@ -45,12 +45,12 @@ public class DeadLetterQueueTests : IDisposable
     public async Task MarkReplayed_RemovesFromPending()
     {
         await _queue.EnqueueAsync("op1", null, "err1");
-        var pending = await _queue.GetPendingAsync();
+        IReadOnlyList<DeadLetterEntry> pending = await _queue.GetPendingAsync();
         pending.Should().HaveCount(1);
 
         await _queue.MarkReplayedAsync(pending[0].Id);
 
-        var afterReplay = await _queue.GetPendingAsync();
+        IReadOnlyList<DeadLetterEntry> afterReplay = await _queue.GetPendingAsync();
         afterReplay.Should().BeEmpty();
     }
 
@@ -58,12 +58,12 @@ public class DeadLetterQueueTests : IDisposable
     public async Task MarkFailed_IncrementsRetryCount()
     {
         await _queue.EnqueueAsync("op1", null, "err1");
-        var pending = await _queue.GetPendingAsync();
+        IReadOnlyList<DeadLetterEntry> pending = await _queue.GetPendingAsync();
 
         await _queue.MarkFailedAsync(pending[0].Id);
         await _queue.MarkFailedAsync(pending[0].Id);
 
-        var updated = await _queue.GetPendingAsync();
+        IReadOnlyList<DeadLetterEntry> updated = await _queue.GetPendingAsync();
         updated[0].RetryCount.Should().Be(2);
     }
 
@@ -72,7 +72,7 @@ public class DeadLetterQueueTests : IDisposable
     {
         await _queue.EnqueueAsync("null-payload-op", null, "error msg");
 
-        var pending = await _queue.GetPendingAsync();
+        IReadOnlyList<DeadLetterEntry> pending = await _queue.GetPendingAsync();
         pending.Should().HaveCount(1);
         pending[0].Payload.Should().BeNull();
     }
@@ -83,7 +83,7 @@ public class DeadLetterQueueTests : IDisposable
         for (int i = 0; i < 10; i++)
             await _queue.EnqueueAsync($"op-{i}", null, "err");
 
-        var limited = await _queue.GetPendingAsync(limit: 3);
+        IReadOnlyList<DeadLetterEntry> limited = await _queue.GetPendingAsync(limit: 3);
         limited.Should().HaveCount(3);
     }
 

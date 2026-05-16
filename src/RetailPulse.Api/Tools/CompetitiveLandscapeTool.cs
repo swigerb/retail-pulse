@@ -25,9 +25,9 @@ public class CompetitiveLandscapeTool
             if (string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(region))
                 return JsonSerializer.Serialize(new { error = "Both 'category' and 'region' parameters are required." });
 
-            var url = $"/api/competitive/landscape?category={Uri.EscapeDataString(category)}&region={Uri.EscapeDataString(region)}";
+            string url = $"/api/competitive/landscape?category={Uri.EscapeDataString(category)}&region={Uri.EscapeDataString(region)}";
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

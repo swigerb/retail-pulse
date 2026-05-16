@@ -27,28 +27,28 @@ public class GeneralAgentTests
     [Fact]
     public void Key_IsGeneral()
     {
-        var agent = CreateAgent();
+        GeneralAgent agent = CreateAgent();
         agent.Key.Should().Be("general");
     }
 
     [Fact]
     public void DisplayName_IsNotEmpty()
     {
-        var agent = CreateAgent();
+        GeneralAgent agent = CreateAgent();
         agent.DisplayName.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
     public void SupportedIntents_IncludesGeneralFallback()
     {
-        var agent = CreateAgent();
+        GeneralAgent agent = CreateAgent();
         agent.SupportedIntents.Should().Contain(AgentIntent.General);
     }
 
     [Fact]
     public void SupportedIntents_CoversFiveDomains()
     {
-        var agent = CreateAgent();
+        GeneralAgent agent = CreateAgent();
         // GeneralAgent is the fallback — it only claims General intent.
         // FieldSentimentAgent owns SentimentField; other dedicated specialists
         // own PromotionTrade, SupplyShipments, CompetitiveMarket.
@@ -68,11 +68,11 @@ public class GeneralAgentTests
     [Fact]
     public async Task HandleAsync_ReturnsReplyFromModel()
     {
-        var chatClient = MockChatClient("Here is the analysis.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Here is the analysis.");
+        GeneralAgent agent = CreateAgent(chatClient);
 
         var request = new ChatRequest("Show me portfolio", SessionId: "session-1");
-        var response = await agent.HandleAsync(request);
+        Contracts.ChatResponse response = await agent.HandleAsync(request);
 
         response.Reply.Should().Be("Here is the analysis.");
         response.SessionId.Should().Be("session-1");
@@ -81,10 +81,10 @@ public class GeneralAgentTests
     [Fact]
     public async Task HandleAsync_GeneratesSessionIdWhenMissing()
     {
-        var chatClient = MockChatClient("ok");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("ok");
+        GeneralAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(new ChatRequest("hello"));
+        Contracts.ChatResponse response = await agent.HandleAsync(new ChatRequest("hello"));
 
         response.SessionId.Should().NotBeNullOrWhiteSpace();
     }
@@ -92,10 +92,10 @@ public class GeneralAgentTests
     [Fact]
     public async Task HandleAsync_IncludesSpans()
     {
-        var chatClient = MockChatClient("Analysis complete");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Analysis complete");
+        GeneralAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Run analysis", SessionId: "session-1"));
 
         response.Spans.Should().NotBeEmpty();
@@ -106,10 +106,10 @@ public class GeneralAgentTests
     [Fact]
     public async Task HandleAsync_PropagatesSessionId()
     {
-        var chatClient = MockChatClient("ok");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("ok");
+        GeneralAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("hello", SessionId: "my-session-42"));
 
         response.SessionId.Should().Be("my-session-42");
@@ -130,7 +130,7 @@ public class GeneralAgentTests
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
-        var agent = CreateAgent(mockClient.Object);
+        GeneralAgent agent = CreateAgent(mockClient.Object);
         var request = new ChatRequest(
             "Follow up",
             SessionId: "s-1",
@@ -167,7 +167,7 @@ public class GeneralAgentTests
             .Select(i => new ChatHistoryMessage(i % 2 == 0 ? "assistant" : "user", $"h-{i}"))
             .ToList();
 
-        var agent = CreateAgent(mockClient.Object);
+        GeneralAgent agent = CreateAgent(mockClient.Object);
         await agent.HandleAsync(
             new ChatRequest("current", SessionId: "s-1", History: history));
 
@@ -185,10 +185,10 @@ public class GeneralAgentTests
     {
         // The agent extracts chart specs from FunctionResultContent
         // Test that the extraction works (even without actual tool calls)
-        var chatClient = MockChatClient("Here's a chart");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Here's a chart");
+        GeneralAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Show chart", SessionId: "chart-test"));
 
         // Without tool calls in mock, charts should be null
@@ -198,10 +198,10 @@ public class GeneralAgentTests
     [Fact]
     public async Task HandleAsync_IncludesTotalDurationMs()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        GeneralAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("hello", SessionId: "dur-test"));
 
         response.TotalDurationMs.Should().NotBeNull();
@@ -211,10 +211,10 @@ public class GeneralAgentTests
     [Fact]
     public async Task HandleAsync_SpansHaveSessionId()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        GeneralAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "span-test"));
 
         response.Spans.Should().OnlyContain(s => s.SessionId == "span-test");
@@ -223,10 +223,10 @@ public class GeneralAgentTests
     [Fact]
     public async Task HandleAsync_SpansHaveTimestamps()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        GeneralAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "ts-test"));
 
         response.Spans.Should().OnlyContain(s => s.Timestamp > DateTimeOffset.MinValue);
@@ -250,8 +250,8 @@ public class GeneralAgentTests
                 CreatePipelineResponse(429),
                 null));
 
-        var agent = CreateAgent(mockClient.Object);
-        var response = await agent.HandleAsync(
+        GeneralAgent agent = CreateAgent(mockClient.Object);
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("hello", SessionId: "s-429"));
 
         response.Reply.Should().Contain("rate-limited");
@@ -270,8 +270,8 @@ public class GeneralAgentTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        var agent = CreateAgent(mockClient.Object);
-        var response = await agent.HandleAsync(
+        GeneralAgent agent = CreateAgent(mockClient.Object);
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("hello", SessionId: "s-err"));
 
         response.Reply.Should().Contain("Something went wrong");
@@ -303,8 +303,8 @@ public class GeneralAgentTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(chatResponse);
 
-        var agent = CreateAgentWithPricing(mockClient.Object);
-        var response = await agent.HandleAsync(
+        GeneralAgent agent = CreateAgentWithPricing(mockClient.Object);
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("hello", SessionId: "s-cost"));
 
         response.TokenUsage.Should().NotBeNull();
@@ -316,8 +316,8 @@ public class GeneralAgentTests
     [Fact]
     public void BuildTokenUsage_WithKnownModel_CalculatesCost()
     {
-        var (pipeline, _) = CreateAgentWithPricingParts();
-        var usage = pipeline.BuildTokenUsage(10000, 5000, 15000, "gpt-5.4-mini");
+        (AgentExecutionPipeline? pipeline, AgentDefinition _) = CreateAgentWithPricingParts();
+        TokenUsage usage = pipeline.BuildTokenUsage(10000, 5000, 15000, "gpt-5.4-mini");
 
         usage.InputTokens.Should().Be(10000);
         usage.OutputTokens.Should().Be(5000);
@@ -328,16 +328,16 @@ public class GeneralAgentTests
     [Fact]
     public void BuildTokenUsage_WithUnknownModel_ReturnsNullCost()
     {
-        var (pipeline, _) = CreateAgentParts();
-        var usage = pipeline.BuildTokenUsage(1000, 500, 1500, "gpt-4o");
+        (AgentExecutionPipeline? pipeline, AgentDefinition _) = CreateAgentParts();
+        TokenUsage usage = pipeline.BuildTokenUsage(1000, 500, 1500, "gpt-4o");
         usage.EstimatedCostUsd.Should().BeNull();
     }
 
     [Fact]
     public void BuildTokenUsage_WithZeroTokens_ReturnsZeroCost()
     {
-        var (pipeline, _) = CreateAgentWithPricingParts();
-        var usage = pipeline.BuildTokenUsage(0, 0, 0, "gpt-5.4-mini");
+        (AgentExecutionPipeline? pipeline, AgentDefinition _) = CreateAgentWithPricingParts();
+        TokenUsage usage = pipeline.BuildTokenUsage(0, 0, 0, "gpt-5.4-mini");
         usage.EstimatedCostUsd.Should().Be(0m);
     }
 
@@ -360,7 +360,7 @@ public class GeneralAgentTests
 
     private static GeneralAgent CreateAgent(IChatClient? chatClient = null)
     {
-        var (pipeline, _) = CreateAgentParts(chatClient);
+        (AgentExecutionPipeline? pipeline, AgentDefinition _) = CreateAgentParts(chatClient);
         return new GeneralAgent(
             pipeline,
             new AgentDefinition { Name = "General", Model = "gpt-4o", SystemPrompt = "You are a retail analyst.", Temperature = 0.7 },
@@ -369,8 +369,8 @@ public class GeneralAgentTests
 
     private static (AgentExecutionPipeline Pipeline, AgentDefinition AgentDef) CreateAgentParts(IChatClient? chatClient = null)
     {
-        var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder()
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -387,14 +387,14 @@ public class GeneralAgentTests
 
     private static GeneralAgent CreateAgentWithPricing(IChatClient? chatClient = null)
     {
-        var (pipeline, agentDef) = CreateAgentWithPricingParts(chatClient);
+        (AgentExecutionPipeline? pipeline, AgentDefinition? agentDef) = CreateAgentWithPricingParts(chatClient);
         return new GeneralAgent(pipeline, agentDef, []);
     }
 
     private static (AgentExecutionPipeline Pipeline, AgentDefinition AgentDef) CreateAgentWithPricingParts(IChatClient? chatClient = null)
     {
-        var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder()
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["TokenPricing:gpt-5.4-mini:InputPerMillion"] = "0.25",

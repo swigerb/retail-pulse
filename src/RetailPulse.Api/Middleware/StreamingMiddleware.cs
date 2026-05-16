@@ -41,7 +41,7 @@ public class StreamingMiddleware
         string agentId,
         CancellationToken ct = default)
     {
-        using var activity = AgentTelemetry.Source.StartActivity("streaming.response", ActivityKind.Internal);
+        using Activity? activity = AgentTelemetry.Source.StartActivity("streaming.response", ActivityKind.Internal);
         activity?.SetTag("streaming.session_id", sessionId);
         activity?.SetTag("streaming.agent_id", agentId);
 
@@ -51,9 +51,9 @@ public class StreamingMiddleware
             await StreamingEvents.SendStartAsync(_hubContext, sessionId, agentId);
 
             var fullResponse = new StringBuilder();
-            var tokenIndex = 0;
+            int tokenIndex = 0;
 
-            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options, ct))
+            await foreach (ChatResponseUpdate update in chatClient.GetStreamingResponseAsync(messages, options, ct))
             {
                 if (update.Text is { Length: > 0 })
                 {
@@ -62,7 +62,7 @@ public class StreamingMiddleware
                 }
             }
 
-            var responseText = fullResponse.ToString();
+            string responseText = fullResponse.ToString();
             await StreamingEvents.SendCompleteAsync(_hubContext, sessionId, responseText, fromCache: false);
 
             activity?.SetTag("streaming.tokens_emitted", tokenIndex);
@@ -96,9 +96,9 @@ public class StreamingMiddleware
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         await StreamingEvents.SendStartAsync(_hubContext, sessionId, agentId);
-        var tokenIndex = 0;
+        int tokenIndex = 0;
 
-        await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options, ct))
+        await foreach (ChatResponseUpdate update in chatClient.GetStreamingResponseAsync(messages, options, ct))
         {
             if (update.Text is { Length: > 0 })
             {
@@ -118,8 +118,8 @@ public class StreamingMiddleware
         string sessionId,
         CancellationToken ct)
     {
-        var response = await chatClient.GetResponseAsync(messages, options, ct);
-        var text = response.Text ?? "";
+        ChatResponse response = await chatClient.GetResponseAsync(messages, options, ct);
+        string text = response.Text ?? "";
 
         await StreamingEvents.SendCompleteAsync(_hubContext, sessionId, text, fromCache: false);
         return text;
@@ -139,12 +139,12 @@ public class StreamingMiddleware
         await StreamingEvents.SendStartAsync(_hubContext, sessionId, agentId);
 
         // Emit the full response in word-boundary chunks for a streaming UX
-        var words = fullResponse.Split(' ');
-        var tokenIndex = 0;
-        foreach (var word in words)
+        string[] words = fullResponse.Split(' ');
+        int tokenIndex = 0;
+        foreach (string word in words)
         {
             ct.ThrowIfCancellationRequested();
-            var token = tokenIndex == 0 ? word : " " + word;
+            string token = tokenIndex == 0 ? word : " " + word;
             await StreamingEvents.SendTokenAsync(_hubContext, sessionId, token, tokenIndex++);
         }
 
@@ -179,9 +179,9 @@ public static partial class CacheHelpers
     /// </summary>
     public static string BuildCacheKey(string agentId, string query)
     {
-        var normalized = NormalizeQuery(query);
-        var raw = $"{agentId}|{normalized}";
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
+        string normalized = NormalizeQuery(query);
+        string raw = $"{agentId}|{normalized}";
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexStringLower(hash);
     }
 
@@ -190,7 +190,7 @@ public static partial class CacheHelpers
     /// </summary>
     public static string NormalizeQuery(string query)
     {
-        var result = query.Trim().ToLowerInvariant();
+        string result = query.Trim().ToLowerInvariant();
         result = TrailingPunctuationRegex().Replace(result, "");
         result = WhitespaceRegex().Replace(result, " ");
         return result;
@@ -208,7 +208,7 @@ public static partial class CacheHelpers
     /// </summary>
     public static bool IsCacheable(string query)
     {
-        var lower = query.ToLowerInvariant();
+        string lower = query.ToLowerInvariant();
         return !_nonDeterministicKeywords.Any(kw => lower.Contains(kw));
     }
 }

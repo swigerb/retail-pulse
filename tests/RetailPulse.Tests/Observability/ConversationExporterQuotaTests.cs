@@ -39,13 +39,13 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task TrackMessage_WithinLimit_AllMessagesRetained()
     {
-        var exporter = CreateExporter(maxMessagesPerSession: 10);
-        var sessionId = "session-1";
+        ConversationExporter exporter = CreateExporter(maxMessagesPerSession: 10);
+        string sessionId = "session-1";
 
         for (int i = 0; i < 10; i++)
             await exporter.TrackMessageAsync(sessionId, MakeMessage($"msg-{i}"));
 
-        var sessions = await exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await exporter.ListSessionsAsync();
         sessions.Should().ContainSingle(s => s.SessionId == sessionId);
         sessions[0].MessageCount.Should().Be(10);
     }
@@ -53,13 +53,13 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task TrackMessage_ExceedingLimit_SilentlyDropsExcessMessages()
     {
-        var exporter = CreateExporter(maxMessagesPerSession: 5);
-        var sessionId = "session-limited";
+        ConversationExporter exporter = CreateExporter(maxMessagesPerSession: 5);
+        string sessionId = "session-limited";
 
         for (int i = 0; i < 20; i++)
             await exporter.TrackMessageAsync(sessionId, MakeMessage($"msg-{i}"));
 
-        var sessions = await exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await exporter.ListSessionsAsync();
         sessions.Should().ContainSingle(s => s.SessionId == sessionId);
         sessions[0].MessageCount.Should().Be(5, "messages beyond limit are silently dropped");
     }
@@ -67,13 +67,13 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task TrackMessage_Default200Limit_Enforced()
     {
-        var exporter = CreateExporter(maxMessagesPerSession: 200);
-        var sessionId = "session-default";
+        ConversationExporter exporter = CreateExporter(maxMessagesPerSession: 200);
+        string sessionId = "session-default";
 
         for (int i = 0; i < 250; i++)
             await exporter.TrackMessageAsync(sessionId, MakeMessage($"msg-{i}"));
 
-        var sessions = await exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await exporter.ListSessionsAsync();
         sessions[0].MessageCount.Should().Be(200);
     }
 
@@ -82,7 +82,7 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task TrackMessage_ExceedingSessionLimit_EvictsOldestSession()
     {
-        var exporter = CreateExporter(maxSessions: 3);
+        ConversationExporter exporter = CreateExporter(maxSessions: 3);
 
         // Create 3 sessions
         for (int i = 1; i <= 3; i++)
@@ -95,7 +95,7 @@ public class ConversationExporterQuotaTests
         // Add a 4th session — should evict the oldest (session-1)
         await exporter.TrackMessageAsync("session-4", MakeMessage("msg from session 4"));
 
-        var sessions = await exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await exporter.ListSessionsAsync();
         sessions.Should().HaveCountLessThanOrEqualTo(3);
         sessions.Select(s => s.SessionId).Should().Contain("session-4");
     }
@@ -103,7 +103,7 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task TrackMessage_LruEviction_KeepsMostRecentSessions()
     {
-        var exporter = CreateExporter(maxSessions: 2);
+        ConversationExporter exporter = CreateExporter(maxSessions: 2);
 
         await exporter.TrackMessageAsync("old-session", MakeMessage("old"));
         await Task.Delay(20);
@@ -113,7 +113,7 @@ public class ConversationExporterQuotaTests
         // Adding a 3rd session should trigger eviction of the oldest
         await exporter.TrackMessageAsync("new-session", MakeMessage("new"));
 
-        var sessions = await exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await exporter.ListSessionsAsync();
         sessions.Should().HaveCountLessThanOrEqualTo(2);
         sessions.Select(s => s.SessionId).Should().Contain("new-session");
     }
@@ -123,17 +123,16 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task TrackMessage_ConcurrentWrites_NoExceptionsThrown()
     {
-        var exporter = CreateExporter(maxSessions: 100, maxMessagesPerSession: 1000);
-        var sessionId = "concurrent-session";
+        ConversationExporter exporter = CreateExporter(maxSessions: 100, maxMessagesPerSession: 1000);
+        string sessionId = "concurrent-session";
 
-        var tasks = Enumerable.Range(0, 50)
+        Task[] tasks = [.. Enumerable.Range(0, 50)
             .Select(i => Task.Run(() =>
-                exporter.TrackMessageAsync(sessionId, MakeMessage($"concurrent-msg-{i}"))))
-            .ToArray();
+                exporter.TrackMessageAsync(sessionId, MakeMessage($"concurrent-msg-{i}"))))];
 
         await Task.WhenAll(tasks);
 
-        var sessions = await exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await exporter.ListSessionsAsync();
         sessions.Should().ContainSingle(s => s.SessionId == sessionId);
         sessions[0].MessageCount.Should().BeGreaterThan(0);
     }
@@ -141,16 +140,15 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task TrackMessage_ConcurrentSessions_NoExceptionsThrown()
     {
-        var exporter = CreateExporter(maxSessions: 200, maxMessagesPerSession: 100);
+        ConversationExporter exporter = CreateExporter(maxSessions: 200, maxMessagesPerSession: 100);
 
-        var tasks = Enumerable.Range(0, 100)
+        Task[] tasks = [.. Enumerable.Range(0, 100)
             .Select(i => Task.Run(() =>
-                exporter.TrackMessageAsync($"session-{i}", MakeMessage($"msg-{i}"))))
-            .ToArray();
+                exporter.TrackMessageAsync($"session-{i}", MakeMessage($"msg-{i}"))))];
 
         await Task.WhenAll(tasks);
 
-        var sessions = await exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await exporter.ListSessionsAsync();
         sessions.Should().HaveCountGreaterThan(0);
     }
 
@@ -159,12 +157,12 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task Export_ExistingSession_ReturnsContent()
     {
-        var exporter = CreateExporter();
-        var sessionId = "export-session";
+        ConversationExporter exporter = CreateExporter();
+        string sessionId = "export-session";
 
         await exporter.TrackMessageAsync(sessionId, MakeMessage("Hello from test"));
 
-        var result = await exporter.ExportAsync(sessionId, ExportFormat.Markdown);
+        ExportResult result = await exporter.ExportAsync(sessionId, ExportFormat.Markdown);
 
         result.Content.Should().Contain("Hello from test");
         result.Format.Should().Be(ExportFormat.Markdown);
@@ -174,9 +172,9 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task Export_NonExistentSession_ThrowsKeyNotFound()
     {
-        var exporter = CreateExporter();
+        ConversationExporter exporter = CreateExporter();
 
-        var act = () => exporter.ExportAsync("nonexistent", ExportFormat.Json);
+        Func<Task<ExportResult>> act = () => exporter.ExportAsync("nonexistent", ExportFormat.Json);
 
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
@@ -184,12 +182,12 @@ public class ConversationExporterQuotaTests
     [Fact]
     public async Task Export_JsonFormat_ReturnsValidJson()
     {
-        var exporter = CreateExporter();
-        var sessionId = "json-session";
+        ConversationExporter exporter = CreateExporter();
+        string sessionId = "json-session";
 
         await exporter.TrackMessageAsync(sessionId, MakeMessage("JSON test message"));
 
-        var result = await exporter.ExportAsync(sessionId, ExportFormat.Json);
+        ExportResult result = await exporter.ExportAsync(sessionId, ExportFormat.Json);
 
         result.Content.Should().Contain("\"sessionId\"");
         result.Content.Should().Contain("JSON test message");

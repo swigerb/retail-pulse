@@ -38,7 +38,7 @@ public class TenantValidationTests : IDisposable
 
     private string WriteTempYaml(string contents)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"tenant-val-{Guid.NewGuid():N}.yaml");
+        string path = Path.Combine(Path.GetTempPath(), $"tenant-val-{Guid.NewGuid():N}.yaml");
         File.WriteAllText(path, contents);
         _tempFiles.Add(path);
         return path;
@@ -46,7 +46,7 @@ public class TenantValidationTests : IDisposable
 
     public void Dispose()
     {
-        foreach (var f in _tempFiles)
+        foreach (string f in _tempFiles)
         {
             try { File.Delete(f); } catch { /* best effort */ }
         }
@@ -55,10 +55,10 @@ public class TenantValidationTests : IDisposable
     [Fact]
     public async Task MissingIndustry_FailsStartupValidation()
     {
-        var yaml = ValidYaml.Replace("industry: \"Retail\"", "industry: \"\"");
-        var path = WriteTempYaml(yaml);
+        string yaml = ValidYaml.Replace("industry: \"Retail\"", "industry: \"\"");
+        string path = WriteTempYaml(yaml);
 
-        var act = () => new FileTenantProvider(path);
+        Func<FileTenantProvider> act = () => new FileTenantProvider(path);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*industry*");
@@ -68,12 +68,12 @@ public class TenantValidationTests : IDisposable
     [Fact]
     public async Task MissingChannels_FailsStartupValidation()
     {
-        var yaml = ValidYaml
+        string yaml = ValidYaml
             .Replace("channels:", "# channels removed:")
             .Replace("  - \"E-Commerce\"", "  # removed");
-        var path = WriteTempYaml(yaml);
+        string path = WriteTempYaml(yaml);
 
-        var act = () => new FileTenantProvider(path);
+        Func<FileTenantProvider> act = () => new FileTenantProvider(path);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*channels*");
@@ -83,14 +83,14 @@ public class TenantValidationTests : IDisposable
     [Fact]
     public async Task MissingDistributionModel_FailsStartupValidation()
     {
-        var yaml = ValidYaml
+        string yaml = ValidYaml
             .Replace("distribution:", "# distribution removed:")
             .Replace("  model: \"Direct\"", "  # removed")
             .Replace("  distributorTypes:", "  # removed")
             .Replace("    - \"Retailer\"", "  # removed");
-        var path = WriteTempYaml(yaml);
+        string path = WriteTempYaml(yaml);
 
-        var act = () => new FileTenantProvider(path);
+        Func<FileTenantProvider> act = () => new FileTenantProvider(path);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*distribution.model*");
@@ -100,13 +100,13 @@ public class TenantValidationTests : IDisposable
     [Fact]
     public async Task MissingThemePrimaryColor_FailsStartupValidation()
     {
-        var yaml = ValidYaml
+        string yaml = ValidYaml
             .Replace("theme:", "# theme removed:")
             .Replace("  primaryColor: \"#ABCDEF\"", "  # removed")
             .Replace("  accentColor: \"#123456\"", "  # removed");
-        var path = WriteTempYaml(yaml);
+        string path = WriteTempYaml(yaml);
 
-        var act = () => new FileTenantProvider(path);
+        Func<FileTenantProvider> act = () => new FileTenantProvider(path);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*primaryColor*");
@@ -116,10 +116,10 @@ public class TenantValidationTests : IDisposable
     [Fact]
     public async Task ValidTenantYaml_PassesValidation()
     {
-        var path = WriteTempYaml(ValidYaml);
+        string path = WriteTempYaml(ValidYaml);
 
         var provider = new FileTenantProvider(path);
-        var tenant = provider.GetTenant();
+        TenantConfiguration tenant = provider.GetTenant();
 
         tenant.Should().NotBeNull();
         tenant.Company.Should().Be("Test Corp");

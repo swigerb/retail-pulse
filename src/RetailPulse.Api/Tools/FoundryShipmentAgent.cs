@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
+using Azure;
 using Azure.AI.Agents.Persistent;
 using Microsoft.AspNetCore.SignalR;
 using RetailPulse.Api.Agents;
@@ -59,13 +60,13 @@ public class FoundryShipmentAgent
         // can never hang an HTTP request indefinitely.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(_maxRunTimeout);
-        var ct = timeoutCts.Token;
+        CancellationToken ct = timeoutCts.Token;
 
         var collector = new TelemetryCollector(_hubContext);
-        var agentInfo = await _provider.GetAgentInfoAsync(ct);
-        var agentsClient = _provider.GetAgentsClient();
+        AgentInfo agentInfo = await _provider.GetAgentInfoAsync(ct);
+        PersistentAgentsClient agentsClient = _provider.GetAgentsClient();
 
-        using var delegationActivity = AgentTelemetry.Source.StartActivity("agent.delegation", ActivityKind.Client);
+        using Activity? delegationActivity = AgentTelemetry.Source.StartActivity("agent.delegation", ActivityKind.Client);
         delegationActivity?.SetTag("agent.source", "Retail Pulse Agent");
         delegationActivity?.SetTag("agent.target", "Foundry Shipment Specialist");
         delegationActivity?.SetTag("agent.target_name", agentInfo.FriendlyName);
@@ -81,10 +82,10 @@ public class FoundryShipmentAgent
             sw.ElapsedMilliseconds);
 
         // Step 1: Fetch shipment data from MCP
-        var stepStart = sw.ElapsedMilliseconds;
-        using var fetchActivity = AgentTelemetry.Source.StartActivity("tool.GetShipmentStats", ActivityKind.Client);
+        long stepStart = sw.ElapsedMilliseconds;
+        using Activity? fetchActivity = AgentTelemetry.Source.StartActivity("tool.GetShipmentStats", ActivityKind.Client);
         fetchActivity?.SetTag("tool.name", "GetShipmentStats");
-        var shipmentData = await _shipmentTool.GetShipmentStats(brand, region, period, ct);
+        string shipmentData = await _shipmentTool.GetShipmentStats(brand, region, period, ct);
         fetchActivity?.SetTag("tool.result_length", shipmentData.Length);
 
         await collector.RecordSpanAsync(
@@ -93,7 +94,7 @@ public class FoundryShipmentAgent
             sw.ElapsedMilliseconds - stepStart);
 
         // Step 2: Send to real Foundry agent for analysis
-        var foundryPrompt = $"""
+        string foundryPrompt = $"""
             Analyze the following shipment data for {brand} in {region} ({period}):
 
             {shipmentData}
@@ -104,7 +105,7 @@ public class FoundryShipmentAgent
             3. Specific recommendations for the brand team
             """;
 
-        using var foundryActivity = AgentTelemetry.Source.StartActivity("agent.foundry_call", ActivityKind.Client);
+        using Activity? foundryActivity = AgentTelemetry.Source.StartActivity("agent.foundry_call", ActivityKind.Client);
         foundryActivity?.SetTag("agent.name", agentInfo.FriendlyName);
         foundryActivity?.SetTag("agent.id", agentInfo.Id);
         foundryActivity?.SetTag("agent.runtime", agentInfo.Runtime);
@@ -114,8 +115,8 @@ public class FoundryShipmentAgent
         // Create a thread, post the message, run the agent, poll for completion,
         // and ALWAYS clean up the thread (try/finally) even if the run fails or
         // the request is cancelled mid-flight.
-        var thread = await agentsClient.Threads.CreateThreadAsync(cancellationToken: ct);
-        var threadId = thread.Value.Id;
+        Response<PersistentAgentThread> thread = await agentsClient.Threads.CreateThreadAsync(cancellationToken: ct);
+        string threadId = thread.Value.Id;
 
         string analysis;
         RunStatus finalStatus;
@@ -127,13 +128,13 @@ public class FoundryShipmentAgent
                 foundryPrompt,
                 cancellationToken: ct);
 
-            var run = await agentsClient.Runs.CreateRunAsync(
+            Response<ThreadRun> run = await agentsClient.Runs.CreateRunAsync(
                 threadId,
                 agentInfo.Id,
                 cancellationToken: ct);
 
             // Poll until the run completes, the timeout fires, or the caller cancels.
-            var runResult = run.Value;
+            ThreadRun runResult = run.Value;
             while (runResult.Status == RunStatus.Queued || runResult.Status == RunStatus.InProgress)
             {
                 await Task.Delay(_pollInterval, ct);
@@ -141,7 +142,7 @@ public class FoundryShipmentAgent
             }
 
             finalStatus = runResult.Status;
-            var foundryCallDurationMs = sw.ElapsedMilliseconds - stepStart;
+            long foundryCallDurationMs = sw.ElapsedMilliseconds - stepStart;
             foundryActivity?.SetTag("agent.duration_ms", foundryCallDurationMs);
             foundryActivity?.SetTag("agent.run_status", runResult.Status.ToString());
 
@@ -153,14 +154,14 @@ public class FoundryShipmentAgent
             analysis = "Foundry agent could not generate analysis.";
             if (runResult.Status == RunStatus.Completed)
             {
-                var messages = agentsClient.Messages.GetMessagesAsync(
+                AsyncPageable<PersistentThreadMessage> messages = agentsClient.Messages.GetMessagesAsync(
                     threadId: threadId, order: ListSortOrder.Descending, cancellationToken: ct);
 
-                await foreach (var msg in messages.WithCancellation(ct))
+                await foreach (PersistentThreadMessage? msg in messages.WithCancellation(ct))
                 {
                     if (msg.Role == MessageRole.Agent)
                     {
-                        foreach (var content in msg.ContentItems)
+                        foreach (MessageContent? content in msg.ContentItems)
                         {
                             if (content is MessageTextContent textContent)
                             {
@@ -203,7 +204,7 @@ public class FoundryShipmentAgent
             }
         }
 
-        var responseDurationMs = 0L; // post-processing already accounted for above
+        long responseDurationMs = 0L; // post-processing already accounted for above
         sw.Stop();
 
         await collector.RecordSpanAsync(

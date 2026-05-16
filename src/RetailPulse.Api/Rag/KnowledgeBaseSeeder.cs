@@ -8,10 +8,10 @@ public static class KnowledgeBaseSeeder
 {
     public static async Task SeedAsync(InMemoryKnowledgeBase kb, ILogger logger, CancellationToken ct = default)
     {
-        var sampleDocs = GetSampleDocuments();
-        var ingested = 0;
+        List<(string Title, string Source, string Content)> sampleDocs = GetSampleDocuments();
+        int ingested = 0;
 
-        foreach (var (title, source, content) in sampleDocs)
+        foreach ((string? title, string? source, string? content) in sampleDocs)
         {
             if (kb.HasDocument(title))
             {

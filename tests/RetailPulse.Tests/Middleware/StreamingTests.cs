@@ -20,7 +20,7 @@ public class StreamingTests
 
         await session.StreamResponseAsync("general", "Hello world");
 
-        var events = session.Events;
+        IReadOnlyList<StreamingEvent> events = session.Events;
         events.Should().HaveCountGreaterThan(1);
         events[0].Type.Should().Be("start");
     }
@@ -90,16 +90,16 @@ public class StreamingTests
         var session = new InMemoryStreamingSession("session-1");
         await session.StreamResponseAsync("general", "Hello world");
 
-        var events = session.Events;
-        var lastToken = events.LastOrDefault(e => e.Type == "token");
-        var complete = events.LastOrDefault(e => e.Type == "complete");
+        IReadOnlyList<StreamingEvent> events = session.Events;
+        StreamingEvent? lastToken = events.LastOrDefault(e => e.Type == "token");
+        StreamingEvent? complete = events.LastOrDefault(e => e.Type == "complete");
 
         complete.Should().NotBeNull();
         complete!.FullResponse.Should().Be("Hello world");
 
         var eventsList = events.ToList();
-        var tokenIndex = eventsList.IndexOf(lastToken!);
-        var completeIndex = eventsList.IndexOf(complete);
+        int tokenIndex = eventsList.IndexOf(lastToken!);
+        int completeIndex = eventsList.IndexOf(complete);
         completeIndex.Should().BeGreaterThan(tokenIndex, "complete must follow last token");
     }
 
@@ -126,7 +126,7 @@ public class StreamingTests
         await session.EmitStartAsync("general");
         await session.EmitErrorAsync("LLM timeout: request failed");
 
-        var events = session.Events;
+        IReadOnlyList<StreamingEvent> events = session.Events;
         events.Should().HaveCount(2);
         events[1].Type.Should().Be("error");
         events[1].Error.Should().Contain("timeout");
@@ -152,7 +152,7 @@ public class StreamingTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => session.StreamResponseAsync("general", "A B C D E", cts.Token);
+        Func<Task> act = () => session.StreamResponseAsync("general", "A B C D E", cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -164,8 +164,8 @@ public class StreamingTests
     [Fact]
     public void NonStreamingFallback_ReturnsFullResponse()
     {
-        var response = "This is the complete response from the agent.";
-        var result = InMemoryStreamingSession.GetNonStreamingResponse(response);
+        string response = "This is the complete response from the agent.";
+        string result = InMemoryStreamingSession.GetNonStreamingResponse(response);
 
         result.Should().Be(response);
     }
@@ -173,7 +173,7 @@ public class StreamingTests
     [Fact]
     public void NonStreamingFallback_EmptyResponse_ReturnsEmpty()
     {
-        var result = InMemoryStreamingSession.GetNonStreamingResponse("");
+        string result = InMemoryStreamingSession.GetNonStreamingResponse("");
         result.Should().BeEmpty();
     }
 

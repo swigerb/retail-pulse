@@ -60,11 +60,11 @@ public class MemoryExtractionService
         CancellationToken ct = default)
     {
         var entries = new List<MemoryEntry>();
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
         try
         {
-            var prompt = _extractionPrompt
+            string prompt = _extractionPrompt
                 .Replace("{user_message}", Truncate(userMessage, 500))
                 .Replace("{assistant_reply}", Truncate(assistantReply, 500));
 
@@ -80,10 +80,10 @@ public class MemoryExtractionService
                 ResponseFormat = ChatResponseFormat.Json
             };
 
-            var response = await _chatClient.GetResponseAsync(messages, options, ct);
-            var json = response.Text ?? "";
+            ChatResponse response = await _chatClient.GetResponseAsync(messages, options, ct);
+            string json = response.Text ?? "";
 
-            var extraction = ParseExtraction(json, _logger);
+            ExtractionResult extraction = ParseExtraction(json, _logger);
 
             // 1. Conversation summary
             if (!string.IsNullOrWhiteSpace(extraction.Summary))
@@ -100,7 +100,7 @@ public class MemoryExtractionService
             }
 
             // 2. Entity mentions
-            foreach (var entity in extraction.Entities)
+            foreach (string entity in extraction.Entities)
             {
                 entries.Add(new MemoryEntry(
                     Id: Guid.NewGuid().ToString("N"),
@@ -149,22 +149,22 @@ public class MemoryExtractionService
         try
         {
             using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
+            JsonElement root = doc.RootElement;
 
-            var summary = root.TryGetProperty("summary", out var sp) ? sp.GetString() : null;
+            string? summary = root.TryGetProperty("summary", out JsonElement sp) ? sp.GetString() : null;
 
             var entities = new List<string>();
-            if (root.TryGetProperty("entities", out var ep) && ep.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty("entities", out JsonElement ep) && ep.ValueKind == JsonValueKind.Array)
             {
-                foreach (var item in ep.EnumerateArray())
+                foreach (JsonElement item in ep.EnumerateArray())
                 {
-                    var val = item.GetString();
+                    string? val = item.GetString();
                     if (!string.IsNullOrWhiteSpace(val))
                         entities.Add(val);
                 }
             }
 
-            var preference = root.TryGetProperty("preference", out var pp) && pp.ValueKind != JsonValueKind.Null
+            string? preference = root.TryGetProperty("preference", out JsonElement pp) && pp.ValueKind != JsonValueKind.Null
                 ? pp.GetString()
                 : null;
 

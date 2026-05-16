@@ -16,23 +16,17 @@ public class SecurityHeadersMiddlewareTests
     [Fact]
     public async Task AllSecurityHeaders_ArePresentInResponse()
     {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder.UseTestServer()
+        using IHost host = await new HostBuilder()
+            .ConfigureWebHost(webBuilder => webBuilder.UseTestServer()
                     .Configure(app =>
                     {
                         app.UseMiddleware<SecurityHeadersMiddleware>();
-                        app.Run(async context =>
-                        {
-                            await context.Response.WriteAsync("OK");
-                        });
-                    });
-            })
+                        app.Run(async context => await context.Response.WriteAsync("OK"));
+                    }))
             .StartAsync();
 
-        var client = host.GetTestClient();
-        var response = await client.GetAsync("/any-path");
+        HttpClient client = host.GetTestClient();
+        HttpResponseMessage response = await client.GetAsync("/any-path");
 
         // X-Content-Type-Options
         response.Headers.GetValues("X-Content-Type-Options")
@@ -51,7 +45,7 @@ public class SecurityHeadersMiddlewareTests
             .Should().Contain("camera=(), microphone=(), geolocation=()");
 
         // Content-Security-Policy
-        var csp = response.Headers.GetValues("Content-Security-Policy").Single();
+        string csp = response.Headers.GetValues("Content-Security-Policy").Single();
         csp.Should().Contain("default-src 'self'");
         csp.Should().Contain("style-src 'self' 'unsafe-inline'");
         csp.Should().Contain("script-src 'self'");
@@ -61,23 +55,17 @@ public class SecurityHeadersMiddlewareTests
     [Fact]
     public async Task HSTS_NotSentOnHttp()
     {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder.UseTestServer()
+        using IHost host = await new HostBuilder()
+            .ConfigureWebHost(webBuilder => webBuilder.UseTestServer()
                     .Configure(app =>
                     {
                         app.UseMiddleware<SecurityHeadersMiddleware>();
-                        app.Run(async context =>
-                        {
-                            await context.Response.WriteAsync("OK");
-                        });
-                    });
-            })
+                        app.Run(async context => await context.Response.WriteAsync("OK"));
+                    }))
             .StartAsync();
 
-        var client = host.GetTestClient();
-        var response = await client.GetAsync("http://localhost/test");
+        HttpClient client = host.GetTestClient();
+        HttpResponseMessage response = await client.GetAsync("http://localhost/test");
 
         response.Headers.Contains("Strict-Transport-Security").Should().BeFalse();
     }
@@ -85,10 +73,8 @@ public class SecurityHeadersMiddlewareTests
     [Fact]
     public async Task ExistingHeaders_AreNotOverwritten()
     {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder.UseTestServer()
+        using IHost host = await new HostBuilder()
+            .ConfigureWebHost(webBuilder => webBuilder.UseTestServer()
                     .Configure(app =>
                     {
                         app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -97,12 +83,11 @@ public class SecurityHeadersMiddlewareTests
                             context.Response.Headers["X-Frame-Options"] = "SAMEORIGIN";
                             await context.Response.WriteAsync("OK");
                         });
-                    });
-            })
+                    }))
             .StartAsync();
 
-        var client = host.GetTestClient();
-        var response = await client.GetAsync("/");
+        HttpClient client = host.GetTestClient();
+        HttpResponseMessage response = await client.GetAsync("/");
 
         // TryAdd should preserve the existing header
         response.Headers.GetValues("X-Frame-Options")

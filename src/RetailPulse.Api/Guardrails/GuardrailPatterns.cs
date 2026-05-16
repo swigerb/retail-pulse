@@ -72,7 +72,7 @@ public static partial class GuardrailPatterns
     public static IReadOnlyList<string> DetectPii(string input)
     {
         var detections = new List<string>();
-        foreach (var (name, pattern) in PiiPatterns)
+        foreach ((string? name, Regex? pattern) in PiiPatterns)
         {
             if (pattern.IsMatch(input))
                 detections.Add(name);
@@ -86,7 +86,7 @@ public static partial class GuardrailPatterns
     public static IReadOnlyList<string> DetectJailbreak(string input)
     {
         var detections = new List<string>();
-        foreach (var (name, pattern) in JailbreakPatterns)
+        foreach ((string? name, Regex? pattern) in JailbreakPatterns)
         {
             if (pattern.IsMatch(input))
                 detections.Add(name);

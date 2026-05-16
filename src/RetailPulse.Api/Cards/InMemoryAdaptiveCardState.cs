@@ -28,8 +28,8 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
 
     public async Task<AdaptiveCard> CreateAsync(CreateCardRequest request, CancellationToken ct = default)
     {
-        var id = $"card-{Guid.NewGuid():N}";
-        var lifecycle = request.Type == CardType.Voting ? CardLifecycle.Voting : CardLifecycle.Active;
+        string id = $"card-{Guid.NewGuid():N}";
+        CardLifecycle lifecycle = request.Type == CardType.Voting ? CardLifecycle.Voting : CardLifecycle.Active;
 
         var state = new CardState
         {
@@ -55,14 +55,14 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
 
     public Task<AdaptiveCard> GetAsync(string cardId, CancellationToken ct = default)
     {
-        return !_cards.TryGetValue(cardId, out var state)
+        return !_cards.TryGetValue(cardId, out CardState? state)
             ? throw new KeyNotFoundException($"Card '{cardId}' not found.")
             : Task.FromResult(state.ToAdaptiveCard());
     }
 
     public async Task<AdaptiveCard> ActionAsync(string cardId, CardAction action, CancellationToken ct = default)
     {
-        if (!_cards.TryGetValue(cardId, out var state))
+        if (!_cards.TryGetValue(cardId, out CardState? state))
             throw new KeyNotFoundException($"Card '{cardId}' not found.");
 
         AdaptiveCard updatedCard;
@@ -174,14 +174,14 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
             "council-orchestrator",
             data);
 
-        var card = await CreateAsync(request, ct);
+        AdaptiveCard card = await CreateAsync(request, ct);
 
         // Map council agent votes to card votes
-        if (_cards.TryGetValue(card.Id, out var state))
+        if (_cards.TryGetValue(card.Id, out CardState? state))
         {
             lock (state)
             {
-                foreach (var agentVote in verdict.Votes)
+                foreach (AgentVote agentVote in verdict.Votes)
                 {
                     state.Votes.Add(new CardVote(
                         agentVote.AgentId,
@@ -196,17 +196,17 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
             "Voting card created from council verdict: {CardId} brand={Brand} rating={Rating}",
             card.Id, verdict.Brand, verdict.OverallRating);
 
-        return _cards.TryGetValue(card.Id, out var updated)
+        return _cards.TryGetValue(card.Id, out CardState? updated)
             ? updated.ToAdaptiveCard()
             : card;
     }
 
     public async Task ArchiveAsync(string cardId, CancellationToken ct = default)
     {
-        if (!_cards.TryGetValue(cardId, out var state))
+        if (!_cards.TryGetValue(cardId, out CardState? state))
             throw new KeyNotFoundException($"Card '{cardId}' not found.");
 
-        var oldState = state.Lifecycle;
+        CardLifecycle oldState = state.Lifecycle;
 
         lock (state)
         {
@@ -225,7 +225,7 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
 
     private static void ProcessVote(CardState state, CardAction action)
     {
-        var voteValue = action.Params.GetValueOrDefault("vote", "approve");
+        string voteValue = action.Params.GetValueOrDefault("vote", "approve");
 
         // Replace existing vote from the same user
         state.Votes.RemoveAll(v => v.UserId == action.UserId);
@@ -253,7 +253,7 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
             // Once escalated, only explicit escalation action or archive can resolve
             if (state.EscalationReason == null)
             {
-                var majority = groups.OrderByDescending(g => g.Count()).First();
+                IGrouping<string, CardVote> majority = groups.OrderByDescending(g => g.Count()).First();
                 if (majority.Count() > state.Votes.Count / 2.0)
                 {
                     state.Lifecycle = CardLifecycle.Decided;
@@ -264,7 +264,7 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
 
     private static void ProcessComment(CardState state, CardAction action)
     {
-        var text = action.Params.GetValueOrDefault("text", "");
+        string text = action.Params.GetValueOrDefault("text", "");
         if (!string.IsNullOrWhiteSpace(text))
         {
             state.Comments.Add(new CardComment(action.UserId, action.UserName, text, DateTime.UtcNow));
@@ -273,13 +273,13 @@ public class InMemoryAdaptiveCardState : IAdaptiveCardState
 
     private static void ProcessDrillDown(CardState state, CardAction action)
     {
-        var field = action.Params.GetValueOrDefault("field", "detail");
+        string field = action.Params.GetValueOrDefault("field", "detail");
         state.Data[$"drilldown:{field}"] = $"Drill-down requested by {action.UserName} at {DateTime.UtcNow:O}";
     }
 
     private static void ProcessEscalation(CardState state, CardAction action)
     {
-        var reason = action.Params.GetValueOrDefault("reason", "Manual escalation requested.");
+        string reason = action.Params.GetValueOrDefault("reason", "Manual escalation requested.");
         state.EscalationReason = reason;
         state.Lifecycle = CardLifecycle.Decided;
     }

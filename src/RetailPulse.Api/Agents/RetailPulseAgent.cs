@@ -33,7 +33,7 @@ public class RetailPulseAgent
         StreamingProgressFeature? streamingFeature = null)
     {
         _agentDef = agentDef;
-        var pipelineLogger = LoggerFactory.Create(b => { }).CreateLogger<AgentExecutionPipeline>();
+        ILogger<AgentExecutionPipeline> pipelineLogger = LoggerFactory.Create(b => { }).CreateLogger<AgentExecutionPipeline>();
         _pipeline = new AgentExecutionPipeline(
             chatClient,
             hubContext,
@@ -52,8 +52,8 @@ public class RetailPulseAgent
 
     public static PromptConfiguration LoadPrompts(string yamlPath)
     {
-        var yaml = File.ReadAllText(yamlPath);
-        var deserializer = new DeserializerBuilder()
+        string yaml = File.ReadAllText(yamlPath);
+        IDeserializer deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .Build();
         return deserializer.Deserialize<PromptConfiguration>(yaml);

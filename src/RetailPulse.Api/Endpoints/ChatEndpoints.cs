@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.AspNetCore.SignalR;
 using RetailPulse.Api.Agents;
@@ -6,6 +7,7 @@ using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
+using RetailPulse.Api.Prefetch;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Tracing;
 using RetailPulse.Api.Validation;
@@ -29,7 +31,7 @@ public static class ChatEndpoints
         app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
-            var validation = ChatRequestValidator.Validate(request);
+            ValidationResult validation = ChatRequestValidator.Validate(request);
             if (!validation.IsValid)
             {
                 return Results.ValidationProblem(validation.Errors);
@@ -45,15 +47,15 @@ public static class ChatEndpoints
             // is the outer safety net.
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
             requestCts.CancelAfter(TimeSpan.FromSeconds(150));
-            var ct = requestCts.Token;
+            CancellationToken ct = requestCts.Token;
 
             try
             {
-                var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
-                var userId = request.User?.ObjectId ?? "anonymous";
+                string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+                string userId = request.User?.ObjectId ?? "anonymous";
 
                 // ── Guardrails: input check ──────────────────────────────────────
-                var guardrailResult = await guardrails.CheckInputAsync(request, ct);
+                GuardrailResult guardrailResult = await guardrails.CheckInputAsync(request, ct);
                 if (guardrailResult.IsBlocked)
                 {
                     return Results.Ok(new ChatResponse(
@@ -67,8 +69,8 @@ public static class ChatEndpoints
                 // ── Cache: check for cached response ─────────────────────────────
                 if (CacheHelpers.IsCacheable(request.Message))
                 {
-                    var cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
-                    var cached = await responseCache.GetAsync(cacheKey, ct);
+                    string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
+                    CachedResponse? cached = await responseCache.GetAsync(cacheKey, ct);
                     if (cached is not null && cached.AgentId != "cache-warming")
                     {
                         logger.LogInformation("Cache hit for session {SessionId}, key {CacheKey}", sessionId, cacheKey[..8]);
@@ -82,9 +84,9 @@ public static class ChatEndpoints
                 }
 
                 // Start root trace span: chat_request
-                using var chatActivity = AgentTelemetry.StartChatRequest(sessionId, request.Message);
-                var traceId = chatActivity?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
-                var traceStartTime = DateTimeOffset.UtcNow;
+                using Activity? chatActivity = AgentTelemetry.StartChatRequest(sessionId, request.Message);
+                string traceId = chatActivity?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+                DateTimeOffset traceStartTime = DateTimeOffset.UtcNow;
 
                 // ── Route FIRST: classify intent before loading context ──────────
                 // This saves ~200ms by not loading memory/RAG for the routing decision.
@@ -102,8 +104,8 @@ public static class ChatEndpoints
                 // Router classification with tracing
                 RoutingDecision decision;
                 {
-                    var classifyStart = DateTimeOffset.UtcNow;
-                    using var classifyActivity = AgentTelemetry.StartRouterClassify(request.Message);
+                    DateTimeOffset classifyStart = DateTimeOffset.UtcNow;
+                    using Activity? classifyActivity = AgentTelemetry.StartRouterClassify(request.Message);
 
                     decision = await router.RouteAsync(
                         request.Message,
@@ -112,7 +114,7 @@ public static class ChatEndpoints
                         tenantId: null,
                         ct);
 
-                    var classifyEnd = DateTimeOffset.UtcNow;
+                    DateTimeOffset classifyEnd = DateTimeOffset.UtcNow;
                     classifyActivity?.SetTag("router.intent", decision.Intent);
                     classifyActivity?.SetTag("router.confidence", decision.Confidence);
 
@@ -134,8 +136,8 @@ public static class ChatEndpoints
                 // Agent selection with tracing
                 ISpecialistAgent? specialist;
                 {
-                    var selectStart = DateTimeOffset.UtcNow;
-                    using var selectActivity = AgentTelemetry.StartRouterSelectAgent();
+                    DateTimeOffset selectStart = DateTimeOffset.UtcNow;
+                    using Activity? selectActivity = AgentTelemetry.StartRouterSelectAgent();
 
                     specialist = specialists.FirstOrDefault(s =>
                         string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase));
@@ -146,7 +148,7 @@ public static class ChatEndpoints
                         specialist = specialists.First(s => s.Key == "general");
                     }
 
-                    var selectEnd = DateTimeOffset.UtcNow;
+                    DateTimeOffset selectEnd = DateTimeOffset.UtcNow;
                     selectActivity?.SetTag("router.selected_agent", specialist.Key);
                     selectActivity?.SetTag("router.selected_agent_name", specialist.DisplayName);
 
@@ -165,7 +167,7 @@ public static class ChatEndpoints
                         }));
                 }
 
-                var routingDurationMs = (long)(DateTimeOffset.UtcNow - traceStartTime).TotalMilliseconds;
+                long routingDurationMs = (long)(DateTimeOffset.UtcNow - traceStartTime).TotalMilliseconds;
                 var routingInfo = new RoutingInfo(
                     specialist.Key,
                     specialist.DisplayName,
@@ -184,12 +186,12 @@ public static class ChatEndpoints
 
                 // Memory recall with tracing
                 string? memoryContext = null;
-                using (var memoryRecallActivity = AgentTelemetry.StartMemoryRecall(userId))
+                using (Activity? memoryRecallActivity = AgentTelemetry.StartMemoryRecall(userId))
                 {
-                    var memoryStart = DateTimeOffset.UtcNow;
+                    DateTimeOffset memoryStart = DateTimeOffset.UtcNow;
                     memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
-                    var memoryEnd = DateTimeOffset.UtcNow;
-                    var memoryDurationMs = (memoryEnd - memoryStart).TotalMilliseconds;
+                    DateTimeOffset memoryEnd = DateTimeOffset.UtcNow;
+                    double memoryDurationMs = (memoryEnd - memoryStart).TotalMilliseconds;
 
                     memoryRecallActivity?.SetTag("memory.entries_recalled", memoryContext is not null ? "context_found" : "none");
 
@@ -208,7 +210,7 @@ public static class ChatEndpoints
                         }));
                 }
 
-                var enrichedRequest = request;
+                ChatRequest enrichedRequest = request;
                 if (memoryContext is not null)
                 {
                     var historyWithMemory = new List<ChatHistoryMessage>
@@ -222,7 +224,7 @@ public static class ChatEndpoints
                 }
 
                 // RAG context injection — search knowledge base for relevant grounding
-                var ragContext = await ragProvider.GetContextAsync(request.Message, ct);
+                string? ragContext = await ragProvider.GetContextAsync(request.Message, ct);
                 if (ragContext is not null)
                 {
                     var historyWithRag = new List<ChatHistoryMessage>(enrichedRequest.History ?? [])
@@ -247,11 +249,11 @@ public static class ChatEndpoints
                 {
                     if (council is not null)
                     {
-                        var tenant = tenantProvider.GetTenant();
-                        var brand = ExtractBrand(enrichedRequest.Message, tenant);
-                        var verdict = await council.ConveneAsync(brand, null, ct);
+                        TenantConfiguration tenant = tenantProvider.GetTenant();
+                        string brand = ExtractBrand(enrichedRequest.Message, tenant);
+                        CouncilVerdict verdict = await council.ConveneAsync(brand, null, ct);
 
-                        var councilReply = $"## Portfolio Health Council — {verdict.Brand}\n\n" +
+                        string councilReply = $"## Portfolio Health Council — {verdict.Brand}\n\n" +
                             $"**Overall Rating: {verdict.OverallRating}** {(verdict.IsUnanimous ? "(unanimous)" : "(split decision)")}\n\n" +
                             $"{verdict.Synthesis}\n\n" +
                             (verdict.ActionItems.Length > 0
@@ -274,7 +276,7 @@ public static class ChatEndpoints
                         await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, councilReply, ct);
 
                         // Auto-create a Voting card from the council verdict
-                        var cardState = app.Services.GetRequiredService<IAdaptiveCardState>();
+                        IAdaptiveCardState cardState = app.Services.GetRequiredService<IAdaptiveCardState>();
                         var cardData = new Dictionary<string, object>
                         {
                             ["brand"] = verdict.Brand,
@@ -282,7 +284,7 @@ public static class ChatEndpoints
                             ["synthesis"] = verdict.Synthesis,
                             ["isUnanimous"] = verdict.IsUnanimous
                         };
-                        var votingCard = await cardState.CreateAsync(
+                        AdaptiveCard votingCard = await cardState.CreateAsync(
                             new CreateCardRequest(
                                 $"Health Assessment: {verdict.Brand}",
                                 CardType.Voting,
@@ -290,7 +292,7 @@ public static class ChatEndpoints
                                 cardData), ct);
 
                         // Seed initial votes from council agent votes
-                        foreach (var vote in verdict.Votes)
+                        foreach (AgentVote vote in verdict.Votes)
                         {
                             await cardState.ActionAsync(votingCard.Id, new CardAction(
                                 vote.AgentId, vote.AgentName, CardActionType.Vote,
@@ -304,18 +306,18 @@ public static class ChatEndpoints
                 // Agent execution with tracing
                 ChatResponse response;
                 {
-                    var agentStart = DateTimeOffset.UtcNow;
-                    using var agentActivity = AgentTelemetry.StartAgentProcess(specialist.Key);
+                    DateTimeOffset agentStart = DateTimeOffset.UtcNow;
+                    using Activity? agentActivity = AgentTelemetry.StartAgentProcess(specialist.Key);
 
                     // Predictive prefetch: if the specialist supports it, extract entities
                     // and pre-fetch tool data in parallel to eliminate one LLM roundtrip.
-                    if (specialist is Api.Agents.IPrefetchableAgent prefetchable)
+                    if (specialist is IPrefetchableAgent prefetchable)
                     {
-                        var prefetchService = httpContext.RequestServices.GetService<Api.Prefetch.ToolPrefetchService>();
+                        ToolPrefetchService? prefetchService = httpContext.RequestServices.GetService<ToolPrefetchService>();
                         if (prefetchService is not null)
                         {
-                            var entities = prefetchService.ExtractEntities(enrichedRequest.Message);
-                            var prefetchedData = await prefetchService.PrefetchAsync(decision.Intent, entities, ct);
+                            PrefetchEntities entities = prefetchService.ExtractEntities(enrichedRequest.Message);
+                            IReadOnlyDictionary<string, string> prefetchedData = await prefetchService.PrefetchAsync(decision.Intent, entities, ct);
                             response = await prefetchable.HandleWithPrefetchAsync(enrichedRequest, prefetchedData, ct);
                         }
                         else
@@ -328,10 +330,10 @@ public static class ChatEndpoints
                         response = await specialist.HandleAsync(enrichedRequest, ct);
                     }
 
-                    var agentEnd = DateTimeOffset.UtcNow;
-                    var toolsCalledCount = response.Spans?.Count(s => s.Type == "tool_call") ?? 0;
-                    var inputTokens = response.TokenUsage?.InputTokens ?? 0;
-                    var outputTokens = response.TokenUsage?.OutputTokens ?? 0;
+                    DateTimeOffset agentEnd = DateTimeOffset.UtcNow;
+                    int toolsCalledCount = response.Spans?.Count(s => s.Type == "tool_call") ?? 0;
+                    int inputTokens = response.TokenUsage?.InputTokens ?? 0;
+                    int outputTokens = response.TokenUsage?.OutputTokens ?? 0;
 
                     agentActivity?.SetTag("agent.name", specialist.Key);
                     agentActivity?.SetTag("agent.tools_called_count", toolsCalledCount);
@@ -360,7 +362,7 @@ public static class ChatEndpoints
                 // Record individual tool spans from agent response
                 if (response.Spans is { Count: > 0 })
                 {
-                    foreach (var span in response.Spans.Where(s => s.Type is "tool_call" or "tool_result"))
+                    foreach (AgentSpan? span in response.Spans.Where(s => s.Type is "tool_call" or "tool_result"))
                     {
                         traceCollector.CaptureSpan(new TraceSpan(
                             SpanId: Guid.NewGuid().ToString("N")[..16],
@@ -395,9 +397,9 @@ public static class ChatEndpoints
 
                 // ── Observability: cost tracking + audit log ─────────────────────
                 {
-                    var inputTokens = response.TokenUsage?.InputTokens ?? 0;
-                    var outputTokens = response.TokenUsage?.OutputTokens ?? 0;
-                    var agentDuration = response.TotalDurationMs.HasValue
+                    int inputTokens = response.TokenUsage?.InputTokens ?? 0;
+                    int outputTokens = response.TokenUsage?.OutputTokens ?? 0;
+                    TimeSpan agentDuration = response.TotalDurationMs.HasValue
                         ? TimeSpan.FromMilliseconds(response.TotalDurationMs.Value)
                         : TimeSpan.Zero;
 
@@ -438,7 +440,7 @@ public static class ChatEndpoints
                 }
 
                 // ── Guardrails: output PII redaction ─────────────────────────────
-                var filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
+                string filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
                 if (filteredReply != response.Reply)
                 {
                     response = response with { Reply = filteredReply };
@@ -450,7 +452,7 @@ public static class ChatEndpoints
                 // ── Cache: store response for deterministic queries ──────────────
                 if (CacheHelpers.IsCacheable(request.Message))
                 {
-                    var cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
+                    string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                     await responseCache.SetAsync(cacheKey,
                         new CachedResponse(response.Reply, specialist.Key, DateTime.UtcNow, cacheKey),
                         TimeSpan.FromMinutes(5), ct);
@@ -508,7 +510,7 @@ public static class ChatEndpoints
         app.MapPost("/api/chat/stream", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, StreamingProgressFeature streamingProgressFeature, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
-            var validation = ChatRequestValidator.Validate(request);
+            ValidationResult validation = ChatRequestValidator.Validate(request);
             if (!validation.IsValid)
             {
                 return Results.ValidationProblem(validation.Errors);
@@ -520,15 +522,15 @@ public static class ChatEndpoints
             // Per-request timeout (see /api/chat for rationale).
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
             requestCts.CancelAfter(TimeSpan.FromSeconds(150));
-            var ct = requestCts.Token;
+            CancellationToken ct = requestCts.Token;
 
             try
             {
-                var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
-                var userId = request.User?.ObjectId ?? "anonymous";
+                string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+                string userId = request.User?.ObjectId ?? "anonymous";
 
                 // Guardrails input check
-                var guardrailResult = await guardrails.CheckInputAsync(request, ct);
+                GuardrailResult guardrailResult = await guardrails.CheckInputAsync(request, ct);
                 if (guardrailResult.IsBlocked)
                 {
                     return Results.Ok(new ChatResponse(
@@ -540,8 +542,8 @@ public static class ChatEndpoints
                 }
 
                 // Memory recall
-                var memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
-                var enrichedRequest = request;
+                string? memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+                ChatRequest enrichedRequest = request;
                 if (memoryContext is not null)
                 {
                     var historyWithMemory = new List<ChatHistoryMessage> { new("system", memoryContext) };
@@ -551,8 +553,8 @@ public static class ChatEndpoints
                 }
 
                 // Route to specialist
-                var decision = await router.RouteAsync(enrichedRequest.Message, enrichedRequest.History, enrichedRequest.User, null, ct);
-                var specialist = specialists.FirstOrDefault(s =>
+                RoutingDecision decision = await router.RouteAsync(enrichedRequest.Message, enrichedRequest.History, enrichedRequest.User, null, ct);
+                ISpecialistAgent specialist = specialists.FirstOrDefault(s =>
                     string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase))
                     ?? specialists.First(s => s.Key == "general");
 
@@ -566,13 +568,13 @@ public static class ChatEndpoints
                 // Predictive prefetch: if the specialist supports it, extract entities
                 // and pre-fetch tool data in parallel to eliminate one LLM roundtrip.
                 ChatResponse response;
-                if (specialist is Api.Agents.IPrefetchableAgent prefetchable)
+                if (specialist is IPrefetchableAgent prefetchable)
                 {
-                    var prefetchService = httpContext.RequestServices.GetService<Api.Prefetch.ToolPrefetchService>();
+                    ToolPrefetchService? prefetchService = httpContext.RequestServices.GetService<ToolPrefetchService>();
                     if (prefetchService is not null)
                     {
-                        var entities = prefetchService.ExtractEntities(enrichedRequest.Message);
-                        var prefetchedData = await prefetchService.PrefetchAsync(decision.Intent, entities, ct);
+                        PrefetchEntities entities = prefetchService.ExtractEntities(enrichedRequest.Message);
+                        IReadOnlyDictionary<string, string> prefetchedData = await prefetchService.PrefetchAsync(decision.Intent, entities, ct);
                         response = await prefetchable.HandleWithPrefetchAsync(enrichedRequest, prefetchedData, ct);
                     }
                     else
@@ -591,7 +593,7 @@ public static class ChatEndpoints
                     await streaming.StreamResponseFallbackAsync(sessionId, specialist.Key, response.Reply, ct);
 
                 // PII redaction on output
-                var filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
+                string filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);
                 if (filteredReply != response.Reply)
                     response = response with { Reply = filteredReply };
 
@@ -611,7 +613,7 @@ public static class ChatEndpoints
                 // Emit a streaming:error event so any connected SignalR client can stop its spinner.
                 try
                 {
-                    var hub = app.Services.GetService<IHubContext<StreamingHub>>();
+                    IHubContext<StreamingHub>? hub = app.Services.GetService<IHubContext<StreamingHub>>();
                     if (hub is not null && request.SessionId is not null)
                         await StreamingEvents.SendErrorAsync(hub, request.SessionId, "The AI service took too long to respond.");
                 }
@@ -671,7 +673,7 @@ public static class ChatEndpoints
             logger.LogInformation("Council convening for brand={Brand}, region={Region}",
                 body.Brand, body.Region ?? "All");
 
-            var verdict = await council.ConveneAsync(body.Brand, body.Region, ct);
+            CouncilVerdict verdict = await council.ConveneAsync(body.Brand, body.Region, ct);
 
             return Results.Ok(new
             {
@@ -725,7 +727,7 @@ public static class ChatEndpoints
         // Map v1 chat to same handler pipeline (legacy routes above include Sunset deprecation header)
         app.MapPost("/api/v1/chat", (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
         {
-            var validation = ChatRequestValidator.Validate(request);
+            ValidationResult validation = ChatRequestValidator.Validate(request);
             if (!validation.IsValid)
                 return Task.FromResult(Results.ValidationProblem(validation.Errors));
 
@@ -740,7 +742,7 @@ public static class ChatEndpoints
 
         app.MapPost("/api/v1/chat/stream", (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
         {
-            var validation = ChatRequestValidator.Validate(request);
+            ValidationResult validation = ChatRequestValidator.Validate(request);
             if (!validation.IsValid)
                 return Task.FromResult(Results.ValidationProblem(validation.Errors));
 
@@ -758,7 +760,7 @@ public static class ChatEndpoints
 
     private static string ExtractBrand(string message, TenantConfiguration tenant)
     {
-        foreach (var brand in tenant.Brands)
+        foreach (BrandConfig brand in tenant.Brands)
         {
             if (message.Contains(brand.Name, StringComparison.OrdinalIgnoreCase))
                 return brand.Name;

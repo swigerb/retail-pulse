@@ -22,7 +22,7 @@ public class DevelopmentAuthHandlerTests
         options.Setup(o => o.Get(DevelopmentAuthHandler.SchemeName))
             .Returns(new AuthenticationSchemeOptions());
 
-        var loggerFactory = Mock.Of<ILoggerFactory>(
+        ILoggerFactory loggerFactory = Mock.Of<ILoggerFactory>(
             f => f.CreateLogger(It.IsAny<string>()) == Mock.Of<ILogger>());
 
         var handler = new DevelopmentAuthHandler(
@@ -51,9 +51,9 @@ public class DevelopmentAuthHandlerTests
     [Fact]
     public async Task Authenticate_AlwaysSucceeds()
     {
-        var handler = await CreateAndInitializeHandler();
+        DevelopmentAuthHandler handler = await CreateAndInitializeHandler();
 
-        var result = await handler.AuthenticateAsync();
+        AuthenticateResult result = await handler.AuthenticateAsync();
 
         result.Succeeded.Should().BeTrue();
         result.Failure.Should().BeNull();
@@ -62,9 +62,9 @@ public class DevelopmentAuthHandlerTests
     [Fact]
     public async Task Authenticate_ProducesSyntheticIdentity()
     {
-        var handler = await CreateAndInitializeHandler();
+        DevelopmentAuthHandler handler = await CreateAndInitializeHandler();
 
-        var result = await handler.AuthenticateAsync();
+        AuthenticateResult result = await handler.AuthenticateAsync();
 
         result.Principal.Should().NotBeNull();
         result.Principal!.Identity!.IsAuthenticated.Should().BeTrue();
@@ -74,9 +74,9 @@ public class DevelopmentAuthHandlerTests
     [Fact]
     public async Task Authenticate_ContainsDevUserClaims()
     {
-        var handler = await CreateAndInitializeHandler();
+        DevelopmentAuthHandler handler = await CreateAndInitializeHandler();
 
-        var result = await handler.AuthenticateAsync();
+        AuthenticateResult result = await handler.AuthenticateAsync();
 
         var claims = result.Principal!.Claims.ToList();
         claims.Should().Contain(c => c.Type == ClaimTypes.NameIdentifier && c.Value == "dev-user");
@@ -88,9 +88,9 @@ public class DevelopmentAuthHandlerTests
     [Fact]
     public async Task Authenticate_TicketHasCorrectScheme()
     {
-        var handler = await CreateAndInitializeHandler();
+        DevelopmentAuthHandler handler = await CreateAndInitializeHandler();
 
-        var result = await handler.AuthenticateAsync();
+        AuthenticateResult result = await handler.AuthenticateAsync();
 
         result.Ticket.Should().NotBeNull();
         result.Ticket.AuthenticationScheme.Should().Be(DevelopmentAuthHandler.SchemeName);

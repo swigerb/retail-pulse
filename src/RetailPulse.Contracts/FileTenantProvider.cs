@@ -27,8 +27,8 @@ public class FileTenantProvider : ITenantProvider
                 configPath);
         }
 
-        var yaml = File.ReadAllText(configPath);
-        var deserializer = new DeserializerBuilder()
+        string yaml = File.ReadAllText(configPath);
+        IDeserializer deserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
             .Build();
@@ -72,7 +72,7 @@ public class FileTenantProvider : ITenantProvider
         }
         else
         {
-            for (var i = 0; i < tenant.Brands.Count; i++)
+            for (int i = 0; i < tenant.Brands.Count; i++)
             {
                 if (string.IsNullOrWhiteSpace(tenant.Brands[i].Name))
                 {

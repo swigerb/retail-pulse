@@ -45,12 +45,12 @@ public static class AgentServiceExtensions
             new Uri(options.ProjectEndpoint),
             new DefaultAzureCredential());
 
-        var persistentAgentsClient = projectClient.GetPersistentAgentsClient();
+        PersistentAgentsClient persistentAgentsClient = projectClient.GetPersistentAgentsClient();
 
         // Register the provider as a singleton (resolution is lazy + cached)
         services.AddSingleton<IAgentProvider<TAgent>>(sp =>
         {
-            var logger = sp.GetRequiredService<ILogger<PersistentAgentProvider<TAgent>>>();
+            ILogger<PersistentAgentProvider<TAgent>> logger = sp.GetRequiredService<ILogger<PersistentAgentProvider<TAgent>>>();
             return new PersistentAgentProvider<TAgent>(options, persistentAgentsClient, logger);
         });
 

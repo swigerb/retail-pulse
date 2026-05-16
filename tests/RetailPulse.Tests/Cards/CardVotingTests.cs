@@ -24,10 +24,10 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_AddsVoteToCard()
     {
-        var card = await _state.CreateAsync(MakeRequest("Vote Card"));
-        var action = MakeVoteAction("user-1", "approve");
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Vote Card"));
+        CardAction action = MakeVoteAction("user-1", "approve");
 
-        var updated = await _state.ActionAsync(card.Id, action);
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, action);
 
         updated.Votes.Should().HaveCount(1);
         updated.Votes[0].UserId.Should().Be("user-1");
@@ -37,9 +37,9 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_SameUserTwice_ReplacesVote()
     {
-        var card = await _state.CreateAsync(MakeRequest("Idempotent Vote"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Idempotent Vote"));
         await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "approve"));
-        var updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "reject"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "reject"));
 
         // Should replace, not duplicate
         updated.Votes.Should().HaveCount(1);
@@ -49,10 +49,10 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_ChangesLifecycleFromActiveToVoting()
     {
-        var card = await _state.CreateAsync(MakeRequest("Lifecycle Vote"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Lifecycle Vote"));
         card.Lifecycle.Should().Be(CardLifecycle.Active);
 
-        var updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "approve"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "approve"));
 
         updated.Lifecycle.Should().Be(CardLifecycle.Voting);
     }
@@ -60,10 +60,10 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_ClearMajority_TransitionsToDecided()
     {
-        var card = await _state.CreateAsync(MakeRequest("Majority"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Majority"));
         await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "approve"));
         await _state.ActionAsync(card.Id, MakeVoteAction("user-2", "approve"));
-        var updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-3", "reject"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-3", "reject"));
 
         // 2 approve vs 1 reject → clear majority → Decided
         updated.Lifecycle.Should().Be(CardLifecycle.Decided);
@@ -72,9 +72,9 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_SplitVote_TriggersEscalation()
     {
-        var card = await _state.CreateAsync(MakeRequest("Split"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Split"));
         await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "approve"));
-        var updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-2", "reject"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-2", "reject"));
 
         // 1 approve vs 1 reject → 50/50 split → escalation
         updated.EscalationReason.Should().NotBeNullOrEmpty();
@@ -84,15 +84,15 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_TallyIsAccurate()
     {
-        var card = await _state.CreateAsync(MakeRequest("Tally"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Tally"));
         await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "approve"));
         await _state.ActionAsync(card.Id, MakeVoteAction("user-2", "approve"));
         await _state.ActionAsync(card.Id, MakeVoteAction("user-3", "reject"));
 
-        var updated = await _state.GetAsync(card.Id);
+        AdaptiveCard updated = await _state.GetAsync(card.Id);
 
-        var approves = updated.Votes.Count(v => v.Vote == "approve");
-        var rejects = updated.Votes.Count(v => v.Vote == "reject");
+        int approves = updated.Votes.Count(v => v.Vote == "approve");
+        int rejects = updated.Votes.Count(v => v.Vote == "reject");
 
         approves.Should().Be(2);
         rejects.Should().Be(1);
@@ -101,8 +101,8 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_SetsTimestamp()
     {
-        var card = await _state.CreateAsync(MakeRequest("Timestamp"));
-        var updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "approve"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Timestamp"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeVoteAction("user-1", "approve"));
 
         updated.Votes[0].Timestamp.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
     }
@@ -110,9 +110,9 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_PreservesUserName()
     {
-        var card = await _state.CreateAsync(MakeRequest("UserName"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("UserName"));
         var action = new CardAction("user-1", "Alice Smith", CardActionType.Vote, new() { ["vote"] = "approve" });
-        var updated = await _state.ActionAsync(card.Id, action);
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, action);
 
         updated.Votes[0].UserName.Should().Be("Alice Smith");
     }
@@ -120,10 +120,10 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_DefaultVoteValue_IsApprove()
     {
-        var card = await _state.CreateAsync(MakeRequest("Default Vote"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Default Vote"));
         // No "vote" key in params → default "approve"
         var action = new CardAction("user-1", "User", CardActionType.Vote, []);
-        var updated = await _state.ActionAsync(card.Id, action);
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, action);
 
         updated.Votes[0].Vote.Should().Be("approve");
     }
@@ -131,12 +131,12 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_SplitDetected_EscalationReasonSet()
     {
-        var card = await _state.CreateAsync(MakeRequest("split-detect"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("split-detect"));
 
         // 1st vote
         await _state.ActionAsync(card.Id, MakeVoteAction("u1", "approve"));
         // 2nd vote → split
-        var split = await _state.ActionAsync(card.Id, MakeVoteAction("u2", "reject"));
+        AdaptiveCard split = await _state.ActionAsync(card.Id, MakeVoteAction("u2", "reject"));
 
         split.EscalationReason.Should().NotBeNullOrEmpty("a 50/50 split should trigger escalation");
         split.EscalationReason.Should().Contain("Split vote");
@@ -145,12 +145,12 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_AfterSplit_ThirdVoteRecorded()
     {
-        var card = await _state.CreateAsync(MakeRequest("post-split"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("post-split"));
         await _state.ActionAsync(card.Id, MakeVoteAction("u1", "approve"));
         await _state.ActionAsync(card.Id, MakeVoteAction("u2", "reject"));
 
         // Third vote should still be recorded
-        var updated = await _state.ActionAsync(card.Id, MakeVoteAction("u3", "approve"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeVoteAction("u3", "approve"));
 
         updated.Votes.Should().HaveCount(3);
         updated.Votes.Count(v => v.Vote == "approve").Should().Be(2);
@@ -160,8 +160,8 @@ public class CardVotingTests
     [Fact]
     public async Task Vote_OnNonExistentCard_ThrowsKeyNotFound()
     {
-        var action = MakeVoteAction("user-1", "approve");
-        var act = () => _state.ActionAsync("nonexistent", action);
+        CardAction action = MakeVoteAction("user-1", "approve");
+        Func<Task<AdaptiveCard>> act = () => _state.ActionAsync("nonexistent", action);
 
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }

@@ -36,20 +36,24 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
     public Task<string> IngestDocumentAsync(string title, string content, string source, CancellationToken ct = default)
     {
         // Validate document size (UTF-8 byte count)
-        var sizeBytes = (long)System.Text.Encoding.UTF8.GetByteCount(content);
+        long sizeBytes = System.Text.Encoding.UTF8.GetByteCount(content);
         if (sizeBytes > _options.MaxDocumentSizeBytes)
+        {
             throw new InvalidOperationException(
                 $"Document '{title}' is {sizeBytes:N0} bytes, which exceeds the {_options.MaxDocumentSizeBytes:N0}-byte limit.");
+        }
 
         // Validate document count
         if (_documents.Count >= _options.MaxDocuments)
+        {
             throw new InvalidOperationException(
                 $"Knowledge base is full ({_options.MaxDocuments} documents). Delete a document before uploading more.");
+        }
 
         ct.ThrowIfCancellationRequested();
 
-        var documentId = Guid.NewGuid().ToString("N")[..12];
-        var chunks = DocumentChunker.Chunk(content);
+        string documentId = Guid.NewGuid().ToString("N")[..12];
+        IReadOnlyList<DocumentChunker.DocumentChunk> chunks = DocumentChunker.Chunk(content);
 
         if (chunks.Count == 0)
         {
@@ -59,20 +63,22 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
 
         // Validate chunk count (check before ingesting)
         if (_chunks.Count + chunks.Count > _options.MaxChunks)
+        {
             throw new InvalidOperationException(
                 $"Ingesting '{title}' would produce {chunks.Count} chunks, exceeding the {_options.MaxChunks} chunk limit " +
                 $"(current: {_chunks.Count}). Delete documents to free space.");
+        }
 
         var doc = new IndexedDocument(documentId, title, source, DateTime.UtcNow, chunks.Count);
         _documents[documentId] = doc;
 
-        foreach (var chunk in chunks)
+        foreach (DocumentChunker.DocumentChunk chunk in chunks)
         {
             ct.ThrowIfCancellationRequested();
 
-            var chunkId = $"{documentId}:{chunk.Index}";
-            var tokens = Tokenize(chunk.Text);
-            var termFrequencies = BuildTermFrequencies(tokens);
+            string chunkId = $"{documentId}:{chunk.Index}";
+            string[] tokens = Tokenize(chunk.Text);
+            Dictionary<string, int> termFrequencies = BuildTermFrequencies(tokens);
 
             _chunks[chunkId] = new IndexedChunk(
                 chunkId, documentId, title, source,
@@ -98,34 +104,34 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         if (_chunks.IsEmpty)
             return Task.FromResult<IReadOnlyList<SearchResult>>([]);
 
-        var queryTerms = Tokenize(query);
+        string[] queryTerms = Tokenize(query);
         if (queryTerms.Length == 0)
             return Task.FromResult<IReadOnlyList<SearchResult>>([]);
 
         // Compute IDF for each query term
         var idfScores = new Dictionary<string, double>();
-        foreach (var term in queryTerms.Distinct())
+        foreach (string? term in queryTerms.Distinct())
         {
             ct.ThrowIfCancellationRequested();
-            var docsContaining = _chunks.Values.Count(c => c.TermFrequencies.ContainsKey(term));
+            int docsContaining = _chunks.Values.Count(c => c.TermFrequencies.ContainsKey(term));
             idfScores[term] = Math.Log(((_totalChunks - docsContaining + 0.5) / (docsContaining + 0.5)) + 1.0);
         }
 
         // Score each chunk via BM25
         var scored = new List<(IndexedChunk Chunk, double Score)>();
-        foreach (var chunk in _chunks.Values)
+        foreach (IndexedChunk chunk in _chunks.Values)
         {
             ct.ThrowIfCancellationRequested();
 
-            var score = 0.0;
-            foreach (var term in queryTerms)
+            double score = 0.0;
+            foreach (string term in queryTerms)
             {
-                if (!chunk.TermFrequencies.TryGetValue(term, out var tf))
+                if (!chunk.TermFrequencies.TryGetValue(term, out int tf))
                     continue;
 
-                var idf = idfScores.GetValueOrDefault(term, 0);
-                var numerator = tf * (_k1 + 1);
-                var denominator = tf + (_k1 * (1 - _b + (_b * chunk.TokenCount / _avgDocLength)));
+                double idf = idfScores.GetValueOrDefault(term, 0);
+                double numerator = tf * (_k1 + 1);
+                double denominator = tf + (_k1 * (1 - _b + (_b * chunk.TokenCount / _avgDocLength)));
                 score += idf * (numerator / denominator);
             }
 
@@ -134,7 +140,7 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         }
 
         // Normalize scores to 0-1 range
-        var maxScore = scored.Count > 0 ? scored.Max(s => s.Score) : 1.0;
+        double maxScore = scored.Count > 0 ? scored.Max(s => s.Score) : 1.0;
         var results = scored
             .OrderByDescending(s => s.Score)
             .Take(topK)
@@ -165,7 +171,7 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         _documents.TryRemove(documentId, out _);
 
         var chunkKeys = _chunks.Keys.Where(k => k.StartsWith(documentId + ":")).ToList();
-        foreach (var key in chunkKeys)
+        foreach (string? key in chunkKeys)
             _chunks.TryRemove(key, out _);
 
         // Update corpus stats
@@ -197,9 +203,9 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
     private static Dictionary<string, int> BuildTermFrequencies(string[] tokens)
     {
         var tf = new Dictionary<string, int>();
-        foreach (var token in tokens)
+        foreach (string token in tokens)
         {
-            tf.TryGetValue(token, out var count);
+            tf.TryGetValue(token, out int count);
             tf[token] = count + 1;
         }
         return tf;

@@ -87,25 +87,13 @@ public sealed class RetailPulseMetrics
 
     public void RecordCacheMiss() => _cacheMissTotal.Add(1);
 
-    public void RecordError(string category)
-    {
-        _errorTotal.Add(1, new TagList { { "category", category } });
-    }
+    public void RecordError(string category) => _errorTotal.Add(1, new TagList { { "category", category } });
 
-    public void RecordToolCallDuration(string toolName, double durationMs)
-    {
-        _toolCallDurationMs.Record(durationMs, new TagList { { "tool_name", toolName } });
-    }
+    public void RecordToolCallDuration(string toolName, double durationMs) => _toolCallDurationMs.Record(durationMs, new TagList { { "tool_name", toolName } });
 
-    public void RecordAgentExecutionDuration(string agentKey, double durationMs)
-    {
-        _agentExecutionDurationMs.Record(durationMs, new TagList { { "agent_key", agentKey } });
-    }
+    public void RecordAgentExecutionDuration(string agentKey, double durationMs) => _agentExecutionDurationMs.Record(durationMs, new TagList { { "agent_key", agentKey } });
 
-    public void RecordRoutingDuration(double durationMs)
-    {
-        _routingDurationMs.Record(durationMs);
-    }
+    public void RecordRoutingDuration(double durationMs) => _routingDurationMs.Record(durationMs);
 
     public void RecordRequest(double durationMs, bool isError)
     {

@@ -22,9 +22,9 @@ public class MarginByBrandTool
     {
         try
         {
-            var url = $"/api/margin/{Uri.EscapeDataString(brandId)}?";
+            string url = $"/api/margin/{Uri.EscapeDataString(brandId)}?";
             if (!string.IsNullOrWhiteSpace(period)) url += $"&period={Uri.EscapeDataString(period)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -54,8 +54,8 @@ public class MarginDriversTool
     {
         try
         {
-            var url = $"/api/margin/drivers/{Uri.EscapeDataString(brandId)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/margin/drivers/{Uri.EscapeDataString(brandId)}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -86,8 +86,8 @@ public class MarginTrendTool
     {
         try
         {
-            var url = $"/api/margin/trend/{Uri.EscapeDataString(brandId)}?quarters={quarters}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/margin/trend/{Uri.EscapeDataString(brandId)}?quarters={quarters}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -117,9 +117,9 @@ public class DetectMarginRisksTool
     {
         try
         {
-            var url = "/api/margin/risks?";
+            string url = "/api/margin/risks?";
             if (!string.IsNullOrWhiteSpace(brandId)) url += $"&brandId={Uri.EscapeDataString(brandId)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

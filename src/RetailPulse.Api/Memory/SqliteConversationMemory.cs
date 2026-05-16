@@ -18,7 +18,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
     {
         _logger = logger;
 
-        var dir = Path.GetDirectoryName(dbPath);
+        string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
@@ -39,7 +39,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         using var conn = new SqliteConnection(_connectionString);
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             PRAGMA journal_mode=WAL;
 
@@ -81,7 +81,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO ConversationMemories
                 (Id, UserId, Type, Content, EntityKey, CreatedAt, ExpiresAt, Relevance)
@@ -118,16 +118,16 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         // Prune expired entries lazily
         await PruneExpiredAsync(conn, ct);
 
-        var now = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+        string now = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture);
 
         // Build query — optionally rank by keyword/entity overlap
-        var keywords = ParseKeywords(query);
+        List<string> keywords = ParseKeywords(query);
         string sql;
 
         if (keywords.Count > 0)
         {
             // Score = sum of keyword hits in Content + EntityKey, weighted by Relevance
-            var caseClauses = string.Join(" + ",
+            string caseClauses = string.Join(" + ",
                 keywords.Select((_, i) => $"(CASE WHEN Content LIKE @kw{i} THEN 1 ELSE 0 END + CASE WHEN EntityKey LIKE @kw{i} THEN 2 ELSE 0 END)"));
 
             sql = $"""
@@ -149,7 +149,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
                 """;
         }
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.Parameters.AddWithValue("@UserId", userId);
         cmd.Parameters.AddWithValue("@Now", now);
@@ -159,7 +159,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
             cmd.Parameters.AddWithValue($"@kw{i}", $"%{keywords[i]}%");
 
         var results = new List<MemoryEntry>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using SqliteDataReader reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
             results.Add(new MemoryEntry(
@@ -187,11 +187,11 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM ConversationMemories WHERE UserId = @UserId";
         cmd.Parameters.AddWithValue("@UserId", userId);
 
-        var deleted = await cmd.ExecuteNonQueryAsync(ct);
+        int deleted = await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogInformation("Purged {Count} memory entries for user {UserId}", deleted, userId);
     }
 
@@ -203,7 +203,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM ConversationMemories WHERE UserId = @UserId AND Id = @Id";
         cmd.Parameters.AddWithValue("@UserId", userId);
         cmd.Parameters.AddWithValue("@Id", memoryId);
@@ -216,7 +216,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
 
     private static async Task PruneExpiredAsync(SqliteConnection conn, CancellationToken ct)
     {
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM ConversationMemories WHERE ExpiresAt <= @Now";
         cmd.Parameters.AddWithValue("@Now", DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);
@@ -257,7 +257,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
 
         // Include the full trimmed query as a phrase keyword for exact-match boosting
         // Only if we already have individual tokens (avoids pure stop-word queries)
-        var trimmed = query.Trim();
+        string trimmed = query.Trim();
         if (tokens.Count > 0 && trimmed.Contains(' ') && !tokens.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
             tokens.Insert(0, trimmed);
 

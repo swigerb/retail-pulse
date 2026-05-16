@@ -26,7 +26,7 @@ public class ToolPrefetchServiceTests
                 ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"data\":\"mock\"}")
+                Content = new StringContent(/*lang=json,strict*/ "{\"data\":\"mock\"}")
             });
 
         var httpClient = new HttpClient(_httpHandler.Object) { BaseAddress = new Uri("http://localhost") };
@@ -62,7 +62,7 @@ public class ToolPrefetchServiceTests
     [InlineData("Mountain Trail Granola sales breakdown", "Mountain Trail Granola")]
     public void ExtractEntities_DetectsBrand(string message, string expectedBrand)
     {
-        var entities = _sut.ExtractEntities(message);
+        PrefetchEntities entities = _sut.ExtractEntities(message);
         Assert.Equal(expectedBrand, entities.Brand);
     }
 
@@ -73,7 +73,7 @@ public class ToolPrefetchServiceTests
     [InlineData("Pacific Northwest growth", "Pacific Northwest")]
     public void ExtractEntities_DetectsRegion(string message, string expectedRegion)
     {
-        var entities = _sut.ExtractEntities(message);
+        PrefetchEntities entities = _sut.ExtractEntities(message);
         Assert.Equal(expectedRegion, entities.Region);
     }
 
@@ -83,7 +83,7 @@ public class ToolPrefetchServiceTests
     [InlineData("E-Commerce sales are growing", "E-Commerce")]
     public void ExtractEntities_DetectsChannel(string message, string expectedChannel)
     {
-        var entities = _sut.ExtractEntities(message);
+        PrefetchEntities entities = _sut.ExtractEntities(message);
         Assert.Equal(expectedChannel, entities.Channel);
     }
 
@@ -94,14 +94,14 @@ public class ToolPrefetchServiceTests
     [InlineData("Pinnacle Hardware forecast", "Home Improvement")]
     public void ExtractEntities_DerivesCategory_FromBrand(string message, string expectedCategory)
     {
-        var entities = _sut.ExtractEntities(message);
+        PrefetchEntities entities = _sut.ExtractEntities(message);
         Assert.Equal(expectedCategory, entities.Category);
     }
 
     [Fact]
     public void ExtractEntities_DetectsExplicitCategory_WhenNoBrand()
     {
-        var entities = _sut.ExtractEntities("What are the Spirits category trends?");
+        PrefetchEntities entities = _sut.ExtractEntities("What are the Spirits category trends?");
         Assert.Null(entities.Brand);
         Assert.Equal("Spirits", entities.Category);
     }
@@ -109,7 +109,7 @@ public class ToolPrefetchServiceTests
     [Fact]
     public void ExtractEntities_ExtractsMultipleEntities()
     {
-        var entities = _sut.ExtractEntities(
+        PrefetchEntities entities = _sut.ExtractEntities(
             "How is Sierra Gold Tequila performing in the Southwest On-Premise channel?");
 
         Assert.Equal("Sierra Gold Tequila", entities.Brand);
@@ -124,14 +124,14 @@ public class ToolPrefetchServiceTests
     [InlineData("Hello world, what's up?")]
     public void ExtractEntities_ReturnsEmpty_WhenNoEntitiesFound(string message)
     {
-        var entities = _sut.ExtractEntities(message);
+        PrefetchEntities entities = _sut.ExtractEntities(message);
         Assert.False(entities.HasAny);
     }
 
     [Fact]
     public void ExtractEntities_IsCaseInsensitive()
     {
-        var entities = _sut.ExtractEntities("SIERRA GOLD TEQUILA in the SOUTHWEST");
+        PrefetchEntities entities = _sut.ExtractEntities("SIERRA GOLD TEQUILA in the SOUTHWEST");
         Assert.Equal("Sierra Gold Tequila", entities.Brand);
         Assert.Equal("Southwest", entities.Region);
     }
@@ -145,7 +145,7 @@ public class ToolPrefetchServiceTests
     {
         var entities = new PrefetchEntities("Sierra Gold Tequila", "Southwest", null, "Spirits");
 
-        var results = await _sut.PrefetchAsync(AgentIntent.DemandForecasting, entities);
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(AgentIntent.DemandForecasting, entities);
 
         Assert.NotEmpty(results);
         Assert.True(results.ContainsKey("GetHistoricalDemand"));
@@ -157,7 +157,7 @@ public class ToolPrefetchServiceTests
     {
         var entities = new PrefetchEntities(null, null, null, "Spirits");
 
-        var results = await _sut.PrefetchAsync(AgentIntent.DemandForecasting, entities);
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(AgentIntent.DemandForecasting, entities);
 
         Assert.Single(results);
         Assert.True(results.ContainsKey("GetSeasonalityFactors"));
@@ -166,7 +166,7 @@ public class ToolPrefetchServiceTests
     [Fact]
     public async Task PrefetchAsync_ReturnsEmpty_WhenNoEntities()
     {
-        var results = await _sut.PrefetchAsync(AgentIntent.DemandForecasting, PrefetchEntities.Empty);
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(AgentIntent.DemandForecasting, PrefetchEntities.Empty);
 
         Assert.Empty(results);
     }
@@ -176,7 +176,7 @@ public class ToolPrefetchServiceTests
     {
         var entities = new PrefetchEntities("Sierra Gold Tequila", null, null, "Spirits");
 
-        var results = await _sut.PrefetchAsync(AgentIntent.SupplyShipments, entities);
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(AgentIntent.SupplyShipments, entities);
 
         Assert.Empty(results);
     }
@@ -185,7 +185,7 @@ public class ToolPrefetchServiceTests
     public async Task PrefetchAsync_ReturnsPartialResults_WhenOneToolFails()
     {
         // Set up handler to fail only for seasonality calls
-        var callCount = 0;
+        int callCount = 0;
         _httpHandler.Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",
@@ -198,13 +198,13 @@ public class ToolPrefetchServiceTests
                     ? throw new HttpRequestException("Connection refused")
                     : new HttpResponseMessage(HttpStatusCode.OK)
                     {
-                        Content = new StringContent("{\"data\":\"ok\"}")
+                        Content = new StringContent(/*lang=json,strict*/ "{\"data\":\"ok\"}")
                     };
             });
 
         var entities = new PrefetchEntities("Sierra Gold Tequila", null, null, "Spirits");
 
-        var results = await _sut.PrefetchAsync(AgentIntent.DemandForecasting, entities);
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(AgentIntent.DemandForecasting, entities);
 
         // Should have at least partial results (the tool that didn't fail returns a fallback JSON)
         Assert.True(results.Count >= 1);
@@ -217,16 +217,16 @@ public class ToolPrefetchServiceTests
     [Fact]
     public void BuildSystemPromptWithPrefetch_ReturnsOriginal_WhenNullData()
     {
-        var original = "You are a demand forecasting agent.";
-        var result = RetailPulse.Api.Agents.AgentExecutionPipeline.BuildSystemPromptWithPrefetch(original, null);
+        string original = "You are a demand forecasting agent.";
+        string result = Api.Agents.AgentExecutionPipeline.BuildSystemPromptWithPrefetch(original, null);
         Assert.Equal(original, result);
     }
 
     [Fact]
     public void BuildSystemPromptWithPrefetch_ReturnsOriginal_WhenEmptyData()
     {
-        var original = "You are a demand forecasting agent.";
-        var result = RetailPulse.Api.Agents.AgentExecutionPipeline.BuildSystemPromptWithPrefetch(
+        string original = "You are a demand forecasting agent.";
+        string result = Api.Agents.AgentExecutionPipeline.BuildSystemPromptWithPrefetch(
             original, new Dictionary<string, string>());
         Assert.Equal(original, result);
     }
@@ -234,14 +234,14 @@ public class ToolPrefetchServiceTests
     [Fact]
     public void BuildSystemPromptWithPrefetch_AppendsData()
     {
-        var original = "You are a demand forecasting agent.";
+        string original = "You are a demand forecasting agent.";
         var data = new Dictionary<string, string>
         {
-            ["GetHistoricalDemand"] = "{\"brand\":\"Sierra Gold\",\"data\":[]}",
-            ["GetSeasonalityFactors"] = "{\"category\":\"Spirits\",\"factors\":[]}"
+            ["GetHistoricalDemand"] = /*lang=json,strict*/ "{\"brand\":\"Sierra Gold\",\"data\":[]}",
+            ["GetSeasonalityFactors"] = /*lang=json,strict*/ "{\"category\":\"Spirits\",\"factors\":[]}"
         };
 
-        var result = RetailPulse.Api.Agents.AgentExecutionPipeline.BuildSystemPromptWithPrefetch(original, data);
+        string result = Api.Agents.AgentExecutionPipeline.BuildSystemPromptWithPrefetch(original, data);
 
         Assert.Contains("## Pre-loaded Data", result);
         Assert.Contains("### GetHistoricalDemand", result);

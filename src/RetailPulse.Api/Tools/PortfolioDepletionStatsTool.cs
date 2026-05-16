@@ -22,7 +22,7 @@ public class PortfolioDepletionStatsTool
     {
         try
         {
-            var response = await _httpClient.GetAsync(
+            HttpResponseMessage response = await _httpClient.GetAsync(
                 $"/api/portfolio-depletion-stats?region={Uri.EscapeDataString(region)}&period={Uri.EscapeDataString(period)}",
                 cancellationToken);
             response.EnsureSuccessStatusCode();

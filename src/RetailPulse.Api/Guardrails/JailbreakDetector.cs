@@ -43,7 +43,7 @@ public class JailbreakDetector
         if (string.IsNullOrWhiteSpace(input))
             return false;
 
-        var lower = input.ToLowerInvariant();
+        string lower = input.ToLowerInvariant();
         return _patterns.Any(p => lower.Contains(p.ToLowerInvariant()));
     }
 
@@ -55,7 +55,7 @@ public class JailbreakDetector
         if (string.IsNullOrWhiteSpace(input))
             return null;
 
-        var lower = input.ToLowerInvariant();
+        string lower = input.ToLowerInvariant();
         return _patterns.FirstOrDefault(p => lower.Contains(p.ToLowerInvariant()));
     }
 }

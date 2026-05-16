@@ -24,8 +24,8 @@ public class EvaluateTimingTool
     {
         try
         {
-            var url = $"/api/promo/evaluate-timing?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&startDate={Uri.EscapeDataString(startDate)}&endDate={Uri.EscapeDataString(endDate)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/promo/evaluate-timing?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&startDate={Uri.EscapeDataString(startDate)}&endDate={Uri.EscapeDataString(endDate)}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

@@ -37,14 +37,14 @@ public class McpToolContractTests
     [Fact]
     public void McpServer_ToolNames_AreStable()
     {
-        var toolTypes = GetMcpToolTypes();
+        IEnumerable<Type> toolTypes = GetMcpToolTypes();
         var actualNames = toolTypes
             .Select(GetToolName)
             .Where(n => n is not null)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // All expected tools should still exist (no breaking removals)
-        foreach (var expected in ExpectedToolNames)
+        foreach (string expected in ExpectedToolNames)
         {
             actualNames.Should().Contain(expected,
                 $"Tool '{expected}' was removed — this is a breaking change for MCP clients.");
@@ -54,22 +54,22 @@ public class McpToolContractTests
     [Fact]
     public void McpServer_AllTools_HaveDescriptions()
     {
-        var toolTypes = GetMcpToolTypes();
+        IEnumerable<Type> toolTypes = GetMcpToolTypes();
 
-        foreach (var type in toolTypes)
+        foreach (Type type in toolTypes)
         {
-            var attr = type.GetCustomAttribute<McpServerToolTypeAttribute>();
+            McpServerToolTypeAttribute? attr = type.GetCustomAttribute<McpServerToolTypeAttribute>();
             if (attr is null) continue;
 
-            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
+            IEnumerable<MethodInfo> methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
                 .Where(m => m.GetCustomAttribute<McpServerToolAttribute>() is not null);
 
-            foreach (var method in methods)
+            foreach (MethodInfo? method in methods)
             {
-                var toolAttr = method.GetCustomAttribute<McpServerToolAttribute>();
+                McpServerToolAttribute? toolAttr = method.GetCustomAttribute<McpServerToolAttribute>();
                 toolAttr.Should().NotBeNull();
                 // Tool should have a name
-                var name = toolAttr.Name ?? method.Name;
+                string name = toolAttr.Name ?? method.Name;
                 name.Should().NotBeNullOrWhiteSpace($"Tool method {type.Name}.{method.Name} has no name");
             }
         }
@@ -78,26 +78,26 @@ public class McpToolContractTests
     [Fact]
     public void McpServer_Tools_HaveValidParameterTypes()
     {
-        var toolTypes = GetMcpToolTypes();
+        IEnumerable<Type> toolTypes = GetMcpToolTypes();
 
-        foreach (var type in toolTypes)
+        foreach (Type type in toolTypes)
         {
-            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
+            IEnumerable<MethodInfo> methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
                 .Where(m => m.GetCustomAttribute<McpServerToolAttribute>() is not null);
 
-            foreach (var method in methods)
+            foreach (MethodInfo? method in methods)
             {
                 // Only check user-facing parameters (those with [Description] attribute)
                 // DI-injected parameters (like RetailPulseDb) don't have [Description]
-                var parameters = method.GetParameters()
+                IEnumerable<ParameterInfo> parameters = method.GetParameters()
                     .Where(p => p.ParameterType != typeof(CancellationToken))
                     .Where(p => p.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>() is not null);
 
-                foreach (var param in parameters)
+                foreach (ParameterInfo? param in parameters)
                 {
                     // Parameters should be JSON-serializable primitives or simple types
-                    var paramType = Nullable.GetUnderlyingType(param.ParameterType) ?? param.ParameterType;
-                    var isSimpleType = paramType.IsPrimitive
+                    Type paramType = Nullable.GetUnderlyingType(param.ParameterType) ?? param.ParameterType;
+                    bool isSimpleType = paramType.IsPrimitive
                         || paramType == typeof(string)
                         || paramType == typeof(decimal)
                         || paramType.IsEnum
@@ -116,8 +116,8 @@ public class McpToolContractTests
     [Fact]
     public void McpServer_ToolCount_HasNotDecreased()
     {
-        var toolTypes = GetMcpToolTypes();
-        var toolMethods = toolTypes
+        IEnumerable<Type> toolTypes = GetMcpToolTypes();
+        IEnumerable<MethodInfo> toolMethods = toolTypes
             .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
                 .Where(m => m.GetCustomAttribute<McpServerToolAttribute>() is not null));
 
@@ -128,18 +128,18 @@ public class McpToolContractTests
 
     private static IEnumerable<Type> GetMcpToolTypes()
     {
-        var assembly = typeof(RetailPulse.McpServer.Data.RetailPulseDb).Assembly;
+        Assembly assembly = typeof(McpServer.Data.RetailPulseDb).Assembly;
         return assembly.GetTypes()
             .Where(t => t.GetCustomAttribute<McpServerToolTypeAttribute>() is not null);
     }
 
     private static string? GetToolName(Type type)
     {
-        var method = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
+        MethodInfo? method = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance)
             .FirstOrDefault(m => m.GetCustomAttribute<McpServerToolAttribute>() is not null);
 
         if (method is null) return null;
-        var attr = method.GetCustomAttribute<McpServerToolAttribute>();
+        McpServerToolAttribute? attr = method.GetCustomAttribute<McpServerToolAttribute>();
         return attr?.Name ?? method.Name;
     }
 }

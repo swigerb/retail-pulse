@@ -24,12 +24,12 @@ public class PromoHistoryTool
     {
         try
         {
-            var url = $"/api/promo/history?months={months}";
+            string url = $"/api/promo/history?months={months}";
             if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
             if (!string.IsNullOrWhiteSpace(promoType)) url += $"&promoType={Uri.EscapeDataString(promoType)}";
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

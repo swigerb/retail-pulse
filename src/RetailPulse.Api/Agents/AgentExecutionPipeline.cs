@@ -78,8 +78,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             return await ExecuteWithProgressAsync(context, ct);
         }
 
-        var request = context.Request;
-        var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+        ChatRequest request = context.Request;
+        string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
         var collector = new TelemetryCollector(_hubContext, sessionId);
 
         var chatOptions = new ChatOptions
@@ -88,11 +88,11 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             Tools = [.. context.Tools]
         };
 
-        var systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
-        var messages = BuildMessages(systemPrompt, request);
+        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
+        List<ChatMessage> messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
-        using var thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
+        using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
         _ = _hubContext.Clients.Group(sessionId).SendAsync("progress", new
@@ -132,10 +132,10 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             return HandleUnexpectedError(ex, sw, thoughtActivity, context.AgentName, sessionId);
         }
 
-        var thoughtDurationMs = sw.ElapsedMilliseconds;
+        long thoughtDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", thoughtDurationMs);
 
-        var (inputTokens, outputTokens, totalTokens) = ExtractTokenCounts(response);
+        (int inputTokens, int outputTokens, int totalTokens) = ExtractTokenCounts(response);
 
         await collector.RecordSpanAsync(
             context.AgentName, "thought",
@@ -155,21 +155,21 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             timestamp = DateTimeOffset.UtcNow
         }, ct);
 
-        var postProcessStart = sw.ElapsedMilliseconds;
-        var reply = SanitizeReplyText(response.Text ?? context.FallbackReply);
+        long postProcessStart = sw.ElapsedMilliseconds;
+        string reply = SanitizeReplyText(response.Text ?? context.FallbackReply);
 
-        var charts = ExtractChartSpecs(response);
+        List<ChartSpec> charts = ExtractChartSpecs(response);
 
-        using var responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
-        var responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
+        using Activity? responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
+        long responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
         await collector.RecordSpanAsync(
             context.AgentName, "response",
             reply[..Math.Min(200, reply.Length)],
             responseDurationMs);
 
-        var totalDurationMs = sw.ElapsedMilliseconds;
+        long totalDurationMs = sw.ElapsedMilliseconds;
 
-        var tokenUsage = BuildTokenUsage(inputTokens, outputTokens, totalTokens, context.ModelName);
+        TokenUsage tokenUsage = BuildTokenUsage(inputTokens, outputTokens, totalTokens, context.ModelName);
 
         _logger.LogInformation(
             "Agent {AgentName} responded in {DurationMs}ms with {SpanCount} spans, {ChartCount} charts, {TokenCount} tokens",
@@ -198,7 +198,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         sb.AppendLine("## Pre-loaded Data");
         sb.AppendLine("The following tool results are already available. Use this data directly — do NOT call these tools again.");
 
-        foreach (var (toolName, result) in prefetchedData)
+        foreach ((string? toolName, string? result) in prefetchedData)
         {
             sb.AppendLine();
             sb.Append("### ").AppendLine(toolName);
@@ -220,13 +220,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         if (request.History is { Count: > 0 })
         {
             const int maxTurns = 10;
-            var historyMessages = request.History.Count > maxTurns * 2
+            List<ChatHistoryMessage> historyMessages = request.History.Count > maxTurns * 2
                 ? [.. request.History.Skip(request.History.Count - (maxTurns * 2))]
                 : request.History;
 
-            foreach (var historyMessage in historyMessages)
+            foreach (ChatHistoryMessage historyMessage in historyMessages)
             {
-                var role = string.Equals(historyMessage.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                ChatRole role = string.Equals(historyMessage.Role, "assistant", StringComparison.OrdinalIgnoreCase)
                     ? ChatRole.Assistant
                     : ChatRole.User;
                 messages.Add(new ChatMessage(role, historyMessage.Content));
@@ -239,13 +239,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
     public async Task<ChatResponse> ExecuteWithProgressAsync(AgentExecutionContext context, CancellationToken ct = default)
     {
-        var request = context.Request;
-        var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+        ChatRequest request = context.Request;
+        string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
         var collector = new TelemetryCollector(_hubContext, sessionId);
 
         // Wrap tools with instrumentation for real-time per-tool progress events
         var instrumentedToolMiddleware = new InstrumentedToolMiddleware(_hubContext);
-        var instrumentedTools = instrumentedToolMiddleware.WrapTools(context.Tools, sessionId);
+        IReadOnlyList<AITool> instrumentedTools = instrumentedToolMiddleware.WrapTools(context.Tools, sessionId);
 
         var chatOptions = new ChatOptions
         {
@@ -253,11 +253,11 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             Tools = [.. instrumentedTools]
         };
 
-        var systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
-        var messages = BuildMessages(systemPrompt, request);
+        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
+        List<ChatMessage> messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
-        using var thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
+        using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
         await _hubContext.Clients.Group(sessionId).SendAsync("progress", new
@@ -295,10 +295,10 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             return HandleUnexpectedError(ex, sw, thoughtActivity, context.AgentName, sessionId);
         }
 
-        var thoughtDurationMs = sw.ElapsedMilliseconds;
+        long thoughtDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", thoughtDurationMs);
 
-        var (inputTokens, outputTokens, totalTokens) = ExtractTokenCounts(response);
+        (int inputTokens, int outputTokens, int totalTokens) = ExtractTokenCounts(response);
 
         await collector.RecordSpanAsync(
             context.AgentName, "thought",
@@ -318,24 +318,24 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             timestamp = DateTimeOffset.UtcNow
         }, ct);
 
-        var postProcessStart = sw.ElapsedMilliseconds;
-        var reply = SanitizeReplyText(response.Text ?? context.FallbackReply);
+        long postProcessStart = sw.ElapsedMilliseconds;
+        string reply = SanitizeReplyText(response.Text ?? context.FallbackReply);
 
-        var charts = ExtractChartSpecs(response);
+        List<ChartSpec> charts = ExtractChartSpecs(response);
 
         // Stream the reply token-by-token via StreamingHub for progressive rendering
         await StreamReplyAsync(sessionId, context.AgentName, reply, ct);
 
-        using var responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
-        var responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
+        using Activity? responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
+        long responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
         await collector.RecordSpanAsync(
             context.AgentName, "response",
             reply[..Math.Min(200, reply.Length)],
             responseDurationMs);
 
-        var totalDurationMs = sw.ElapsedMilliseconds;
+        long totalDurationMs = sw.ElapsedMilliseconds;
 
-        var tokenUsage = BuildTokenUsage(inputTokens, outputTokens, totalTokens, context.ModelName);
+        TokenUsage tokenUsage = BuildTokenUsage(inputTokens, outputTokens, totalTokens, context.ModelName);
 
         _logger.LogInformation(
             "Agent {AgentName} responded (streaming) in {DurationMs}ms with {SpanCount} spans, {ChartCount} charts, {TokenCount} tokens",
@@ -360,12 +360,12 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         await StreamingEvents.SendStartAsync(_streamingHubContext, sessionId, agentName);
 
         // Split on whitespace boundaries and emit word-by-word
-        var words = reply.Split(' ');
-        var tokenIndex = 0;
-        foreach (var word in words)
+        string[] words = reply.Split(' ');
+        int tokenIndex = 0;
+        foreach (string word in words)
         {
             ct.ThrowIfCancellationRequested();
-            var token = tokenIndex == 0 ? word : " " + word;
+            string token = tokenIndex == 0 ? word : " " + word;
             await StreamingEvents.SendTokenAsync(_streamingHubContext, sessionId, token, tokenIndex++);
         }
 
@@ -374,9 +374,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
     private static (int input, int output, int total) ExtractTokenCounts(Microsoft.Extensions.AI.ChatResponse response)
     {
-        var input = (int)(response.Usage?.InputTokenCount ?? 0);
-        var output = (int)(response.Usage?.OutputTokenCount ?? 0);
-        var total = (int)(response.Usage?.TotalTokenCount ?? (input + output));
+        int input = (int)(response.Usage?.InputTokenCount ?? 0);
+        int output = (int)(response.Usage?.OutputTokenCount ?? 0);
+        int total = (int)(response.Usage?.TotalTokenCount ?? (input + output));
         return (input, output, total);
     }
 
@@ -390,19 +390,22 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         CancellationToken ct)
     {
         var callIdToName = new Dictionary<string, string>();
-        foreach (var msg in response.Messages)
-            foreach (var content in msg.Contents)
+        foreach (ChatMessage msg in response.Messages)
+        {
+            foreach (AIContent content in msg.Contents)
             {
                 if (content is FunctionCallContent fc && fc.CallId != null)
                     callIdToName[fc.CallId] = fc.Name;
             }
+        }
 
         // Tool durations cannot be individually measured when using the auto-invocation
         // pattern (single GetResponseAsync). The parent "thought" span carries real wall-clock
         // time. Individual tool_call spans report 0ms to avoid misleading identical timestamps.
 
-        foreach (var msg in response.Messages)
-            foreach (var content in msg.Contents)
+        foreach (ChatMessage msg in response.Messages)
+        {
+            foreach (AIContent content in msg.Contents)
             {
                 if (content is FunctionCallContent toolCall)
                 {
@@ -415,7 +418,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
                         timestamp = DateTimeOffset.UtcNow
                     }, ct);
 
-                    using var toolActivity = AgentTelemetry.StartToolCall(
+                    using Activity? toolActivity = AgentTelemetry.StartToolCall(
                         toolCall.Name,
                         JsonSerializer.Serialize(toolCall.Arguments));
 
@@ -429,9 +432,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
                 }
                 else if (content is FunctionResultContent toolResult)
                 {
-                    var toolName = callIdToName.GetValueOrDefault(toolResult.CallId ?? "", toolResult.CallId ?? "unknown");
-                    var resultText = toolResult.Result?.ToString() ?? "";
-                    using var resultActivity = AgentTelemetry.StartToolResult(toolName, resultText.Length);
+                    string toolName = callIdToName.GetValueOrDefault(toolResult.CallId ?? "", toolResult.CallId ?? "unknown");
+                    string resultText = toolResult.Result?.ToString() ?? "";
+                    using Activity? resultActivity = AgentTelemetry.StartToolResult(toolName, resultText.Length);
                     await collector.RecordSpanAsync(
                         toolName, "tool_result",
                         resultText[..Math.Min(200, resultText.Length)],
@@ -441,27 +444,29 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
                         await onToolResult(resultText, ct);
                 }
             }
+        }
     }
 
     internal static List<ChartSpec> ExtractChartSpecs(Microsoft.Extensions.AI.ChatResponse chatResponse)
     {
         var charts = new List<ChartSpec>();
-        foreach (var msg in chatResponse.Messages)
-            foreach (var content in msg.Contents)
+        foreach (ChatMessage msg in chatResponse.Messages)
+        {
+            foreach (AIContent content in msg.Contents)
             {
                 if (content is FunctionResultContent toolResult)
                 {
-                    var resultText = toolResult.Result?.ToString();
+                    string? resultText = toolResult.Result?.ToString();
                     if (!string.IsNullOrEmpty(resultText))
                     {
                         try
                         {
                             using var doc = JsonDocument.Parse(resultText);
-                            if (doc.RootElement.TryGetProperty("status", out var status) &&
+                            if (doc.RootElement.TryGetProperty("status", out JsonElement status) &&
                                 status.GetString() == "success" &&
-                                doc.RootElement.TryGetProperty("chart", out var chartElement))
+                                doc.RootElement.TryGetProperty("chart", out JsonElement chartElement))
                             {
-                                var chart = JsonSerializer.Deserialize<ChartSpec>(
+                                ChartSpec? chart = JsonSerializer.Deserialize<ChartSpec>(
                                     chartElement.GetRawText(), _caseInsensitiveOptions);
                                 if (chart != null)
                                     charts.Add(chart);
@@ -474,18 +479,20 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
                     }
                 }
             }
+        }
+
         return charts;
     }
 
     internal TokenUsage BuildTokenUsage(int inputTokens, int outputTokens, int totalTokens, string modelName)
     {
         decimal? cost = null;
-        var pricingSection = _configuration.GetSection($"TokenPricing:{modelName}");
+        IConfigurationSection pricingSection = _configuration.GetSection($"TokenPricing:{modelName}");
 
         if (pricingSection.Exists())
         {
-            var inputRate = pricingSection.GetValue<decimal>("InputPerMillion");
-            var outputRate = pricingSection.GetValue<decimal>("OutputPerMillion");
+            decimal inputRate = pricingSection.GetValue<decimal>("InputPerMillion");
+            decimal outputRate = pricingSection.GetValue<decimal>("OutputPerMillion");
             cost = (inputTokens * inputRate / 1_000_000m) + (outputTokens * outputRate / 1_000_000m);
         }
         else
@@ -510,7 +517,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             return reply;
 
         // Remove "to=functions.*" lines (OpenAI-style function call leakage)
-        var sanitized = FunctionCallLeakagePattern().Replace(reply, "");
+        string sanitized = FunctionCallLeakagePattern().Replace(reply, "");
 
         // Remove lines with CJK characters adjacent to function/json patterns (corrupted output)
         sanitized = CorruptedTextPattern().Replace(sanitized, "");
@@ -528,7 +535,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         ClientResultException ex, Stopwatch sw, Activity? thoughtActivity,
         string agentName, string sessionId)
     {
-        var failureDurationMs = sw.ElapsedMilliseconds;
+        long failureDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
         thoughtActivity?.SetTag("error.status_code", ex.Status);
 
@@ -547,7 +554,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         Exception ex, Stopwatch sw, Activity? thoughtActivity,
         string agentName, string sessionId)
     {
-        var failureDurationMs = sw.ElapsedMilliseconds;
+        long failureDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
         thoughtActivity?.SetTag("error.type", "timeout");
 
@@ -566,7 +573,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         Exception ex, Stopwatch sw, Activity? thoughtActivity,
         string agentName, string sessionId)
     {
-        var failureDurationMs = sw.ElapsedMilliseconds;
+        long failureDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
         thoughtActivity?.SetTag("error.type", ex.GetType().FullName);
 

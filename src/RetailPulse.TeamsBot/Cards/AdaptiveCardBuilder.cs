@@ -88,9 +88,9 @@ public class AdaptiveCardBuilder
                 }
             };
 
-            foreach (var chart in charts)
+            foreach (ChartSpec chart in charts)
             {
-                var acChartType = chart.Type switch
+                string? acChartType = chart.Type switch
                 {
                     "line" => "Chart.Line",
                     "bar" => "Chart.VerticalBar",
@@ -152,9 +152,9 @@ public class AdaptiveCardBuilder
                         weight = "bolder",
                         size = "small"
                     });
-                    foreach (var series in chart.Data)
+                    foreach (ChartSeries series in chart.Data)
                     {
-                        var rows = string.Join("\n", series.Values.Select(v => $"- {v.X}: {v.Y:N0}"));
+                        string rows = string.Join("\n", series.Values.Select(v => $"- {v.X}: {v.Y:N0}"));
                         chartItems.Add(new
                         {
                             type = "TextBlock",
@@ -193,13 +193,13 @@ public class AdaptiveCardBuilder
             var sortedSpans = spans.OrderBy(s => s.Timestamp).ToList();
 
             // Show compact rows for each span
-            foreach (var span in sortedSpans)
+            foreach (AgentSpan? span in sortedSpans)
             {
-                var icon = TelemetryFormatter.GetSpanIcon(span.Type);
-                var typeBadge = TelemetryFormatter.GetTypeBadge(span.Type);
-                var truncatedName = TelemetryFormatter.TruncateName(span.Name, 35);
-                var truncatedDetail = TelemetryFormatter.TruncateDetail(span.Detail, 50);
-                var formattedDuration = TelemetryFormatter.FormatDuration(span.DurationMs);
+                string icon = TelemetryFormatter.GetSpanIcon(span.Type);
+                string typeBadge = TelemetryFormatter.GetTypeBadge(span.Type);
+                string truncatedName = TelemetryFormatter.TruncateName(span.Name, 35);
+                string truncatedDetail = TelemetryFormatter.TruncateDetail(span.Detail, 50);
+                string formattedDuration = TelemetryFormatter.FormatDuration(span.DurationMs);
 
                 var spanItems = new List<object>
                 {
@@ -290,9 +290,9 @@ public class AdaptiveCardBuilder
             }
 
             // Summary row with total duration and span count
-            var totalMs = sortedSpans.Sum(s => s.DurationMs);
-            var formattedTotal = TelemetryFormatter.FormatDuration(totalMs);
-            var spanCount = sortedSpans.Count;
+            double totalMs = sortedSpans.Sum(s => s.DurationMs);
+            string formattedTotal = TelemetryFormatter.FormatDuration(totalMs);
+            int spanCount = sortedSpans.Count;
 
             telemetryItems.Add(new
             {
@@ -415,9 +415,9 @@ public class AdaptiveCardBuilder
     /// </summary>
     public Attachment BuildWelcomeCard(bool isReset, UserContext? userContext)
     {
-        var userName = userContext?.DisplayName ?? "there";
-        var title = isReset ? "✨ Chat Reset" : $"👋 Welcome to Retail Pulse, {userName}!";
-        var intro = isReset
+        string userName = userContext?.DisplayName ?? "there";
+        string title = isReset ? "✨ Chat Reset" : $"👋 Welcome to Retail Pulse, {userName}!";
+        string intro = isReset
             ? "Your conversation has been reset. Start a new chat below!"
             : "I'm your AI-powered brand analytics assistant. Ask me about brand performance, market trends, or request visualizations!";
 
@@ -671,10 +671,10 @@ public class AdaptiveCardBuilder
         else
         {
             var sortedSpans = spans.OrderBy(s => s.Timestamp).ToList();
-            var totalMs = sortedSpans.Sum(s => s.DurationMs);
-            var avgMs = totalMs / sortedSpans.Count;
-            var slowestSpan = sortedSpans.OrderByDescending(s => s.DurationMs).First();
-            var maxDuration = slowestSpan.DurationMs;
+            double totalMs = sortedSpans.Sum(s => s.DurationMs);
+            double avgMs = totalMs / sortedSpans.Count;
+            AgentSpan slowestSpan = sortedSpans.OrderByDescending(s => s.DurationMs).First();
+            double maxDuration = slowestSpan.DurationMs;
 
             // Summary statistics
             bodyItems.Add(new
@@ -723,11 +723,11 @@ public class AdaptiveCardBuilder
                 }
             });
 
-            foreach (var span in sortedSpans)
+            foreach (AgentSpan? span in sortedSpans)
             {
-                var icon = TelemetryFormatter.GetSpanIcon(span.Type);
-                var formattedDuration = TelemetryFormatter.FormatDuration(span.DurationMs);
-                var widthPercent = TelemetryFormatter.CalculateWaterfallWidth(span.DurationMs, maxDuration);
+                string icon = TelemetryFormatter.GetSpanIcon(span.Type);
+                string formattedDuration = TelemetryFormatter.FormatDuration(span.DurationMs);
+                int widthPercent = TelemetryFormatter.CalculateWaterfallWidth(span.DurationMs, maxDuration);
 
                 bodyItems.Add(new
                 {
@@ -803,7 +803,7 @@ public class AdaptiveCardBuilder
                                     // widthPercent is a 0–100 number, so emit it as a weight
                                     // (e.g. width = "37") rather than "37px" — pixel widths
                                     // here would render an off-screen waterfall on most clients.
-                                    width = widthPercent.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                    width = widthPercent.ToString(CultureInfo.InvariantCulture),
                                     items = new object[]
                                     {
                                         new
@@ -838,11 +838,11 @@ public class AdaptiveCardBuilder
                 }
             });
 
-            foreach (var span in sortedSpans)
+            foreach (AgentSpan? span in sortedSpans)
             {
-                var icon = TelemetryFormatter.GetSpanIcon(span.Type);
-                var typeBadge = TelemetryFormatter.GetTypeBadge(span.Type);
-                var formattedDuration = TelemetryFormatter.FormatDuration(span.DurationMs);
+                string icon = TelemetryFormatter.GetSpanIcon(span.Type);
+                string typeBadge = TelemetryFormatter.GetTypeBadge(span.Type);
+                string formattedDuration = TelemetryFormatter.FormatDuration(span.DurationMs);
 
                 var spanDetailItems = new List<object>
                 {
@@ -961,7 +961,7 @@ public class AdaptiveCardBuilder
     {
         if (!string.IsNullOrEmpty(hexColor))
         {
-            var mapped = hexColor.ToUpperInvariant() switch
+            string? mapped = hexColor.ToUpperInvariant() switch
             {
                 "#1B4D7A" => "categoricalBlue",
                 "#E8A838" => "categoricalMarigold",
@@ -976,11 +976,11 @@ public class AdaptiveCardBuilder
             if (mapped != null) return mapped;
         }
 
-        var defaultColors = new[]
-        {
+        string[] defaultColors =
+        [
             "categoricalBlue", "categoricalRed", "categoricalTeal", "categoricalMarigold",
             "categoricalPeach", "categoricalLavender", "categoricalSteel", "categoricalPumpkin"
-        };
+        ];
         return defaultColors[index % defaultColors.Length];
     }
 }

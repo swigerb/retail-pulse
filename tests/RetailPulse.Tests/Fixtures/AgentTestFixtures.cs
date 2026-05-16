@@ -71,7 +71,7 @@ public static class AgentTestFixtures
         mock.Setup(a => a.HandleAsync(
                 It.IsAny<ChatRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RetailPulse.Contracts.ChatResponse("Mock response", "session-mock", []));
+            .ReturnsAsync(new Contracts.ChatResponse("Mock response", "session-mock", []));
         return mock.Object;
     }
 
@@ -95,7 +95,7 @@ public static class AgentTestFixtures
         IChatClient? chatClient = null,
         IEnumerable<AITool>? tools = null)
     {
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 

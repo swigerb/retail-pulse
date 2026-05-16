@@ -8,10 +8,10 @@ public static class GuardrailEndpoints
     {
         app.MapGet("/api/guardrails/log", async (ISuspiciousRequestLog log, HttpContext http, CancellationToken ct) =>
         {
-            var countStr = http.Request.Query["count"].FirstOrDefault();
-            var count = int.TryParse(countStr, out var c) ? c : 50;
+            string? countStr = http.Request.Query["count"].FirstOrDefault();
+            int count = int.TryParse(countStr, out int c) ? c : 50;
 
-            var recent = await log.GetRecentAsync(count, ct);
+            IReadOnlyList<SuspiciousRequest> recent = await log.GetRecentAsync(count, ct);
             return Results.Ok(recent.Select(r => new
             {
                 id = r.Id,
@@ -26,7 +26,7 @@ public static class GuardrailEndpoints
 
         app.MapGet("/api/guardrails/stats", async (ISuspiciousRequestLog log, CancellationToken ct) =>
         {
-            var stats = await log.GetStatsAsync(ct);
+            GuardrailsStats stats = await log.GetStatsAsync(ct);
             return Results.Ok(new
             {
                 totalBlocked = stats.TotalBlocked,
@@ -38,18 +38,15 @@ public static class GuardrailEndpoints
         })
         .WithName("GetGuardrailsStats").RequireAuthorization().RequireRateLimiting("relaxed");
 
-        app.MapGet("/api/guardrails/config", (GuardrailsConfig config) =>
+        app.MapGet("/api/guardrails/config", (GuardrailsConfig config) => Results.Ok(new
         {
-            return Results.Ok(new
-            {
-                piiDetectionEnabled = config.PiiDetectionEnabled,
-                jailbreakDetectionEnabled = config.JailbreakDetectionEnabled,
-                autoRedactPii = config.AutoRedactPii,
-                maxInputLength = config.MaxInputLength,
-                piiPatterns = RetailPulse.Api.Guardrails.GuardrailPatterns.PiiPatterns.Select(p => p.Name).ToList(),
-                jailbreakPatterns = RetailPulse.Api.Guardrails.GuardrailPatterns.JailbreakPatterns.Select(p => p.Name).ToList()
-            });
-        })
+            piiDetectionEnabled = config.PiiDetectionEnabled,
+            jailbreakDetectionEnabled = config.JailbreakDetectionEnabled,
+            autoRedactPii = config.AutoRedactPii,
+            maxInputLength = config.MaxInputLength,
+            piiPatterns = Guardrails.GuardrailPatterns.PiiPatterns.Select(p => p.Name).ToList(),
+            jailbreakPatterns = Guardrails.GuardrailPatterns.JailbreakPatterns.Select(p => p.Name).ToList()
+        }))
         .WithName("GetGuardrailsConfig").RequireAuthorization().RequireRateLimiting("relaxed");
 
         app.MapPut("/api/guardrails/config", (GuardrailsConfigUpdateDto body, GuardrailsConfig config) =>

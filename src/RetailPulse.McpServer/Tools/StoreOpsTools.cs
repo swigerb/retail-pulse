@@ -12,10 +12,7 @@ public static class StoreOpsTools
     public static object GetStorePerformance(
         RetailPulseDb data,
         [Description("Region to filter (e.g. 'Northeast'). Omit for all regions.")] string? region = null,
-        [Description("Specific store ID (e.g. 'STR-0001'). Omit for all stores.")] string? storeId = null)
-    {
-        return data.GetStorePerformance(region, storeId);
-    }
+        [Description("Specific store ID (e.g. 'STR-0001'). Omit for all stores.")] string? storeId = null) => data.GetStorePerformance(region, storeId);
 
     [McpServerTool(Name = "GetShelfLayout")]
     [Description("Get the current planogram/shelf layout for a specific aisle in a store. Returns SKU positions, shelf levels, and facing widths.")]
@@ -48,8 +45,5 @@ public static class StoreOpsTools
     public static object PredictStockout(
         RetailPulseDb data,
         [Description("Store ID (required)")] string storeId,
-        [Description("Specific SKU ID to check. Omit for all SKUs.")] string? skuId = null)
-    {
-        return string.IsNullOrWhiteSpace(storeId) ? (new { error = "Parameter 'storeId' is required." }) : data.PredictStockout(storeId, skuId);
-    }
+        [Description("Specific SKU ID to check. Omit for all SKUs.")] string? skuId = null) => string.IsNullOrWhiteSpace(storeId) ? (new { error = "Parameter 'storeId' is required." }) : data.PredictStockout(storeId, skuId);
 }

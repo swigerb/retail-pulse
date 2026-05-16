@@ -31,7 +31,7 @@ public class VoteParsingBenchmark
 
         _elapsed = TimeSpan.FromMilliseconds(150);
 
-        _validVoteJson = """
+        _validVoteJson = /*lang=json,strict*/ """
             {
               "rating": "Green",
               "reasoning": "Strong sell-through rates across all SKUs. Inventory turns are healthy at 4.2x. No stockout risk detected in the next 14-day window.",
@@ -55,7 +55,7 @@ public class VoteParsingBenchmark
 
         _malformedJson = "This is not valid JSON at all, just plain text about the brand being Red flagged.";
 
-        _minimalJson = """{"rating":"Red","reasoning":"Critical stockout.","confidence":0.99,"key_metrics":[]}""";
+        _minimalJson = /*lang=json,strict*/ """{"rating":"Red","reasoning":"Critical stockout.","confidence":0.99,"key_metrics":[]}""";
     }
 
     [Benchmark(Description = "Parse: valid structured JSON vote")]

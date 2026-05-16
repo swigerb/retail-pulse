@@ -1,5 +1,6 @@
 using System.Net;
 using FluentAssertions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging.Abstractions;
 using RetailPulse.Api.Resilience;
 using RetailPulse.Api.Tools;
@@ -15,7 +16,7 @@ public class CircuitBreakerChaosTests
     public void ErrorClassifier_Timeout_ClassifiesAsTransient()
     {
         var ex = new TaskCanceledException("Request timed out");
-        var category = ErrorClassifier.Classify(ex);
+        ErrorCategory category = ErrorClassifier.Classify(ex);
         category.Should().Be(ErrorCategory.Transient);
     }
 
@@ -23,7 +24,7 @@ public class CircuitBreakerChaosTests
     public void ErrorClassifier_429Response_ClassifiesAsTransient()
     {
         var ex = new HttpRequestException("Too many requests", null, HttpStatusCode.TooManyRequests);
-        var category = ErrorClassifier.Classify(ex);
+        ErrorCategory category = ErrorClassifier.Classify(ex);
         category.Should().Be(ErrorCategory.Transient);
     }
 
@@ -31,7 +32,7 @@ public class CircuitBreakerChaosTests
     public void ErrorClassifier_503Response_ClassifiesAsTransient()
     {
         var ex = new HttpRequestException("Service unavailable", null, HttpStatusCode.ServiceUnavailable);
-        var category = ErrorClassifier.Classify(ex);
+        ErrorCategory category = ErrorClassifier.Classify(ex);
         category.Should().Be(ErrorCategory.Transient);
     }
 
@@ -39,7 +40,7 @@ public class CircuitBreakerChaosTests
     public void ErrorClassifier_NullRef_ClassifiesAsSystem()
     {
         var ex = new NullReferenceException("Object reference not set");
-        var category = ErrorClassifier.Classify(ex);
+        ErrorCategory category = ErrorClassifier.Classify(ex);
         category.Should().Be(ErrorCategory.System);
     }
 
@@ -47,7 +48,7 @@ public class CircuitBreakerChaosTests
     public void ErrorClassifier_ArgumentException_ClassifiesAsUser()
     {
         var ex = new ArgumentException("Invalid parameter");
-        var category = ErrorClassifier.Classify(ex);
+        ErrorCategory category = ErrorClassifier.Classify(ex);
         category.Should().Be(ErrorCategory.User);
     }
 
@@ -55,7 +56,7 @@ public class CircuitBreakerChaosTests
     public void ErrorClassifier_HttpRequestException_NoStatusCode_ClassifiesAsExternal()
     {
         var ex = new HttpRequestException("Connection refused");
-        var category = ErrorClassifier.Classify(ex);
+        ErrorCategory category = ErrorClassifier.Classify(ex);
         category.Should().Be(ErrorCategory.External);
     }
 
@@ -69,7 +70,7 @@ public class CircuitBreakerChaosTests
         // All requests during failure period should degrade gracefully
         for (int i = 0; i < 10; i++)
         {
-            var result = await tool.GetFieldSentiment("Brand", "Region");
+            string result = await tool.GetFieldSentiment("Brand", "Region");
             result.Should().Contain("fallback");
         }
     }
@@ -82,13 +83,13 @@ public class CircuitBreakerChaosTests
         var tool = new FieldSentimentTool(client, NullLogger<FieldSentimentTool>.Instance);
 
         // First 2 calls fail
-        var fail1 = await tool.GetFieldSentiment("Brand", "Region");
+        string fail1 = await tool.GetFieldSentiment("Brand", "Region");
         fail1.Should().Contain("fallback");
-        var fail2 = await tool.GetFieldSentiment("Brand", "Region");
+        string fail2 = await tool.GetFieldSentiment("Brand", "Region");
         fail2.Should().Contain("fallback");
 
         // Third call succeeds
-        var success = await tool.GetFieldSentiment("Brand", "Region");
+        string success = await tool.GetFieldSentiment("Brand", "Region");
         success.Should().Contain("live-data");
     }
 
@@ -97,15 +98,15 @@ public class CircuitBreakerChaosTests
     {
         CircuitBreakerHealthCheck.ReportState(CircuitBreakerState.Open);
         var check = new CircuitBreakerHealthCheck();
-        var result = check.CheckHealthAsync(null!).Result;
+        HealthCheckResult result = check.CheckHealthAsync(null!).Result;
 
-        result.Status.Should().Be(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy);
+        result.Status.Should().Be(HealthStatus.Unhealthy);
         result.Description.Should().Contain("open");
 
         // Reset
         CircuitBreakerHealthCheck.ReportState(CircuitBreakerState.Closed);
-        var result2 = check.CheckHealthAsync(null!).Result;
-        result2.Status.Should().Be(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy);
+        HealthCheckResult result2 = check.CheckHealthAsync(null!).Result;
+        result2.Status.Should().Be(HealthStatus.Healthy);
     }
 
     private sealed class FailingThenRecoveringHandler : HttpMessageHandler
@@ -113,7 +114,10 @@ public class CircuitBreakerChaosTests
         private int _callCount;
         private readonly int _failCount;
 
-        public FailingThenRecoveringHandler(int failCount) => _failCount = failCount;
+        public FailingThenRecoveringHandler(int failCount)
+        {
+            _failCount = failCount;
+        }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
@@ -123,7 +127,7 @@ public class CircuitBreakerChaosTests
                 ? Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable))
                 : Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent("{\"source\":\"live-data\",\"brand\":\"Brand\",\"region\":\"Region\"}")
+                    Content = new StringContent(/*lang=json,strict*/ "{\"source\":\"live-data\",\"brand\":\"Brand\",\"region\":\"Region\"}")
                 });
         }
     }

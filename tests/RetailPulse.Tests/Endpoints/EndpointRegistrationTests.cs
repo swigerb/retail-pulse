@@ -52,7 +52,7 @@ public class EndpointRegistrationTests
     [Fact]
     public async Task AllExtensionTypes_AreStaticClasses()
     {
-        foreach (var type in EndpointExtensionTypes)
+        foreach (Type type in EndpointExtensionTypes)
         {
             type.IsAbstract.Should().BeTrue($"{type.Name} should be a static class");
             type.IsSealed.Should().BeTrue($"{type.Name} should be a static class");
@@ -63,9 +63,9 @@ public class EndpointRegistrationTests
     [Fact]
     public async Task AllExtensionTypes_HaveMapMethod_ReturningWebApplication()
     {
-        foreach (var type in EndpointExtensionTypes)
+        foreach (Type type in EndpointExtensionTypes)
         {
-            var mapMethod = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+            MethodInfo? mapMethod = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .FirstOrDefault(m => m.Name.StartsWith("Map") && m.Name.EndsWith("Endpoints"));
 
             mapMethod.Should().NotBeNull(
@@ -74,7 +74,7 @@ public class EndpointRegistrationTests
             mapMethod.ReturnType.Should().Be(typeof(WebApplication),
                 $"{type.Name}.{mapMethod.Name} should return WebApplication for chaining");
 
-            var firstParam = mapMethod.GetParameters().FirstOrDefault();
+            ParameterInfo? firstParam = mapMethod.GetParameters().FirstOrDefault();
             firstParam.Should().NotBeNull();
             firstParam.ParameterType.Should().Be(typeof(WebApplication),
                 $"{type.Name}.{mapMethod.Name} should extend WebApplication");
@@ -85,10 +85,10 @@ public class EndpointRegistrationTests
     [Fact]
     public async Task ChatEndpoints_MapMethodAcceptsAgentDefinition()
     {
-        var mapMethod = typeof(ChatEndpoints).GetMethods(BindingFlags.Public | BindingFlags.Static)
+        MethodInfo mapMethod = typeof(ChatEndpoints).GetMethods(BindingFlags.Public | BindingFlags.Static)
             .First(m => m.Name == "MapChatEndpoints");
 
-        var parameters = mapMethod.GetParameters();
+        ParameterInfo[] parameters = mapMethod.GetParameters();
         parameters.Should().HaveCount(2,
             "MapChatEndpoints should accept (WebApplication, AgentDefinition)");
         parameters[1].ParameterType.Should().Be(typeof(AgentDefinition));
@@ -110,10 +110,10 @@ public class EndpointRegistrationTests
     [InlineData(typeof(MarginEndpoints), "MapMarginEndpoints")]
     public async Task NonChatEndpoints_MapMethodTakesOnlyWebApplication(Type endpointType, string methodName)
     {
-        var mapMethod = endpointType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+        MethodInfo? mapMethod = endpointType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
         mapMethod.Should().NotBeNull($"{endpointType.Name} should have {methodName}");
 
-        var parameters = mapMethod.GetParameters();
+        ParameterInfo[] parameters = mapMethod.GetParameters();
         parameters.Should().HaveCount(1,
             $"{methodName} should only take WebApplication (no extra compile-time args)");
         await Task.CompletedTask;
@@ -122,7 +122,7 @@ public class EndpointRegistrationTests
     [Fact]
     public async Task AllEndpointTypes_AreInEndpointsNamespace()
     {
-        foreach (var type in EndpointExtensionTypes)
+        foreach (Type type in EndpointExtensionTypes)
         {
             type.Namespace.Should().Be("RetailPulse.Api.Endpoints",
                 $"{type.Name} should be in the RetailPulse.Api.Endpoints namespace");
@@ -134,7 +134,7 @@ public class EndpointRegistrationTests
     public async Task EndpointsNamespace_ContainsAtLeastExpectedExtensionCount()
     {
         // Verify no endpoint extension was accidentally deleted
-        var endpointAssembly = typeof(ChatEndpoints).Assembly;
+        Assembly endpointAssembly = typeof(ChatEndpoints).Assembly;
         var staticEndpointClasses = endpointAssembly.GetTypes()
             .Where(t => t.Namespace == "RetailPulse.Api.Endpoints"
                      && t.IsClass
@@ -167,7 +167,7 @@ public class EndpointRegistrationTests
         // Verify key routes exist by scanning the Map method IL for string references.
         // We use a simpler approach: check that the endpoint type is loadable and has
         // a Map method (confirming the class wasn't gutted).
-        var mapMethod = endpointType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+        MethodInfo? mapMethod = endpointType.GetMethods(BindingFlags.Public | BindingFlags.Static)
             .FirstOrDefault(m => m.Name.StartsWith("Map") && m.Name.EndsWith("Endpoints"));
 
         mapMethod.Should().NotBeNull(

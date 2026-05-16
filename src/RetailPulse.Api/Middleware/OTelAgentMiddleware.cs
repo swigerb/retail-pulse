@@ -14,7 +14,7 @@ public static class AgentTelemetry
 
     public static Activity? StartChatRequest(string sessionId, string message)
     {
-        var activity = Source.StartActivity("chat_request", ActivityKind.Server);
+        Activity? activity = Source.StartActivity("chat_request", ActivityKind.Server);
         activity?.SetTag("session.id", sessionId);
         activity?.SetTag("message.length", message.Length);
         return activity;
@@ -24,14 +24,14 @@ public static class AgentTelemetry
 
     public static Activity? StartRouterClassify(string message)
     {
-        var activity = Source.StartActivity("router.classify", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity("router.classify", ActivityKind.Internal);
         activity?.SetTag("message.length", message.Length);
         return activity;
     }
 
     public static Activity? StartRouterSelectAgent()
     {
-        var activity = Source.StartActivity("router.select_agent", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity("router.select_agent", ActivityKind.Internal);
         return activity;
     }
 
@@ -39,14 +39,14 @@ public static class AgentTelemetry
 
     public static Activity? StartAgentProcess(string agentName)
     {
-        var activity = Source.StartActivity($"agent.{agentName}.process", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity($"agent.{agentName}.process", ActivityKind.Internal);
         activity?.SetTag("agent.name", agentName);
         return activity;
     }
 
     public static Activity? StartAgentThought(string agentName, string prompt)
     {
-        var activity = Source.StartActivity("agent.thought", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity("agent.thought", ActivityKind.Internal);
         activity?.SetTag("agent.name", agentName);
         activity?.SetTag("agent.prompt_length", prompt.Length);
         return activity;
@@ -56,7 +56,7 @@ public static class AgentTelemetry
 
     public static Activity? StartToolCall(string toolName, string arguments)
     {
-        var activity = Source.StartActivity($"tool.{toolName}", ActivityKind.Client);
+        Activity? activity = Source.StartActivity($"tool.{toolName}", ActivityKind.Client);
         activity?.SetTag("tool.name", toolName);
         activity?.SetTag("tool.arguments", arguments);
         return activity;
@@ -64,7 +64,7 @@ public static class AgentTelemetry
 
     public static Activity? StartToolResult(string toolName, int resultLength)
     {
-        var activity = Source.StartActivity($"tool.{toolName}.result", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity($"tool.{toolName}.result", ActivityKind.Internal);
         activity?.SetTag("tool.name", toolName);
         activity?.SetTag("tool.result_length", resultLength);
         return activity;
@@ -74,14 +74,14 @@ public static class AgentTelemetry
 
     public static Activity? StartMemoryRecall(string userId)
     {
-        var activity = Source.StartActivity("memory.recall", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity("memory.recall", ActivityKind.Internal);
         activity?.SetTag("memory.user_id", userId);
         return activity;
     }
 
     public static Activity? StartMemoryStore(string userId)
     {
-        var activity = Source.StartActivity("memory.store", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity("memory.store", ActivityKind.Internal);
         activity?.SetTag("memory.user_id", userId);
         return activity;
     }
@@ -90,7 +90,7 @@ public static class AgentTelemetry
 
     public static Activity? StartApprovalRequest(string agentId, string action)
     {
-        var activity = Source.StartActivity("approval.request", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity("approval.request", ActivityKind.Internal);
         activity?.SetTag("approval.agent_id", agentId);
         activity?.SetTag("approval.action", action);
         return activity;
@@ -98,7 +98,7 @@ public static class AgentTelemetry
 
     public static Activity? StartApprovalWait(string requestId)
     {
-        var activity = Source.StartActivity("approval.wait", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity("approval.wait", ActivityKind.Internal);
         activity?.SetTag("approval.request_id", requestId);
         return activity;
     }
@@ -107,7 +107,7 @@ public static class AgentTelemetry
 
     public static Activity? StartAgentResponse(string agentName)
     {
-        var activity = Source.StartActivity("agent.response", ActivityKind.Internal);
+        Activity? activity = Source.StartActivity("agent.response", ActivityKind.Internal);
         activity?.SetTag("agent.name", agentName);
         return activity;
     }

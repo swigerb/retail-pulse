@@ -27,7 +27,7 @@ public class InMemoryResponseCache : IResponseCache
 
     public Task<CachedResponse?> GetAsync(string cacheKey, CancellationToken ct = default)
     {
-        if (_cache.TryGetValue(cacheKey, out var item))
+        if (_cache.TryGetValue(cacheKey, out CacheItem? item))
         {
             if (item.ExpiresAt > DateTime.UtcNow)
             {
@@ -45,7 +45,7 @@ public class InMemoryResponseCache : IResponseCache
 
     public Task SetAsync(string cacheKey, CachedResponse response, TimeSpan? ttl = null, CancellationToken ct = default)
     {
-        var expiry = DateTime.UtcNow.Add(ttl ?? _defaultTtl);
+        DateTime expiry = DateTime.UtcNow.Add(ttl ?? _defaultTtl);
         var item = new CacheItem(response, expiry);
 
         _cache.AddOrUpdate(cacheKey, item, (_, _) => item);
@@ -67,7 +67,7 @@ public class InMemoryResponseCache : IResponseCache
             var keysToRemove = _cache.Keys
                 .Where(k => k.Contains(pattern, StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            foreach (var key in keysToRemove)
+            foreach (string? key in keysToRemove)
             {
                 _cache.TryRemove(key, out _);
                 RemoveFromLru(key);
@@ -78,9 +78,9 @@ public class InMemoryResponseCache : IResponseCache
 
     public Task<CacheStats> GetStatsAsync(CancellationToken ct = default)
     {
-        var total = _hits + _misses;
-        var hitRate = total > 0 ? (double)_hits / total : 0.0;
-        var memEstimate = _cache.Count * 1024L; // rough estimate
+        int total = _hits + _misses;
+        double hitRate = total > 0 ? (double)_hits / total : 0.0;
+        long memEstimate = _cache.Count * 1024L; // rough estimate
         return Task.FromResult(new CacheStats(_cache.Count, _hits, _misses, hitRate, memEstimate));
     }
 
@@ -89,9 +89,9 @@ public class InMemoryResponseCache : IResponseCache
     /// </summary>
     public static string GenerateCacheKey(string agentId, string query)
     {
-        var normalized = query.Trim().ToLowerInvariant();
-        var input = $"{agentId}:{normalized}";
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        string normalized = query.Trim().ToLowerInvariant();
+        string input = $"{agentId}:{normalized}";
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
@@ -115,7 +115,7 @@ public class InMemoryResponseCache : IResponseCache
         {
             while (_lruOrder.Count > _maxEntries && _lruOrder.Last is not null)
             {
-                var evictKey = _lruOrder.Last.Value;
+                string evictKey = _lruOrder.Last.Value;
                 _lruOrder.RemoveLast();
                 _cache.TryRemove(evictKey, out _);
             }

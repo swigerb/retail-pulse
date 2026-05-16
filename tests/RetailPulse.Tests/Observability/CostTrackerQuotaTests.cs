@@ -48,12 +48,12 @@ public class CostTrackerQuotaTests
     [Fact]
     public async Task TrackUsage_WithinCap_AllEventsRetained()
     {
-        var tracker = CreateTracker(maxEvents: 100);
+        InMemoryCostTracker tracker = CreateTracker(maxEvents: 100);
 
         for (int i = 0; i < 50; i++)
             await tracker.TrackUsageAsync(MakeEvent($"agent-{i}"));
 
-        var summary = await tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await tracker.GetSummaryAsync(CostPeriod.All);
         summary.RequestCount.Should().Be(50);
     }
 
@@ -62,25 +62,25 @@ public class CostTrackerQuotaTests
     [Fact]
     public async Task TrackUsage_ExceedingCap_EvictsOldestEvents()
     {
-        var tracker = CreateTracker(maxEvents: 10);
+        InMemoryCostTracker tracker = CreateTracker(maxEvents: 10);
 
         // Add 15 events — oldest 5 should be evicted
         for (int i = 0; i < 15; i++)
             await tracker.TrackUsageAsync(MakeEvent($"agent-{i}"));
 
-        var summary = await tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await tracker.GetSummaryAsync(CostPeriod.All);
         summary.RequestCount.Should().BeLessThanOrEqualTo(10);
     }
 
     [Fact]
     public async Task TrackUsage_AtExactCap_AcceptsEvent()
     {
-        var tracker = CreateTracker(maxEvents: 5);
+        InMemoryCostTracker tracker = CreateTracker(maxEvents: 5);
 
         for (int i = 0; i < 5; i++)
             await tracker.TrackUsageAsync(MakeEvent($"agent-{i}"));
 
-        var summary = await tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await tracker.GetSummaryAsync(CostPeriod.All);
         summary.RequestCount.Should().Be(5);
     }
 
@@ -89,13 +89,13 @@ public class CostTrackerQuotaTests
     [Fact]
     public async Task TrackUsage_Default10KCap_EnforcedAfterOverflow()
     {
-        var tracker = CreateTracker(); // default 10K
-        var batchSize = 10_050;
+        InMemoryCostTracker tracker = CreateTracker(); // default 10K
+        int batchSize = 10_050;
 
         for (int i = 0; i < batchSize; i++)
             await tracker.TrackUsageAsync(MakeEvent($"agent-{i % 100}"));
 
-        var summary = await tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await tracker.GetSummaryAsync(CostPeriod.All);
         summary.RequestCount.Should().BeLessThanOrEqualTo(10_000);
     }
 
@@ -104,33 +104,33 @@ public class CostTrackerQuotaTests
     [Fact]
     public async Task TrackUsage_StaleEvents_EvictedOnNextWrite()
     {
-        var tracker = CreateTracker(maxEvents: 1000, ttlHours: 1);
+        InMemoryCostTracker tracker = CreateTracker(maxEvents: 1000, ttlHours: 1);
 
         // Add events with timestamps 2 hours ago (stale)
-        var staleTime = DateTime.UtcNow.AddHours(-2);
+        DateTime staleTime = DateTime.UtcNow.AddHours(-2);
         for (int i = 0; i < 5; i++)
             await tracker.TrackUsageAsync(MakeEvent($"stale-{i}", staleTime));
 
         // Now add a fresh event — stale events should be evicted
         await tracker.TrackUsageAsync(MakeEvent("fresh-agent"));
 
-        var summary = await tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await tracker.GetSummaryAsync(CostPeriod.All);
         summary.RequestCount.Should().Be(1, "stale events should be evicted, leaving only the fresh one");
     }
 
     [Fact]
     public async Task TrackUsage_EventsWithin24HourTtl_Retained()
     {
-        var tracker = CreateTracker(ttlHours: 24);
+        InMemoryCostTracker tracker = CreateTracker(ttlHours: 24);
 
-        var recentTime = DateTime.UtcNow.AddHours(-12);
+        DateTime recentTime = DateTime.UtcNow.AddHours(-12);
         for (int i = 0; i < 5; i++)
             await tracker.TrackUsageAsync(MakeEvent($"recent-{i}", recentTime));
 
         // Trigger eviction check with a fresh write
         await tracker.TrackUsageAsync(MakeEvent("fresh"));
 
-        var summary = await tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await tracker.GetSummaryAsync(CostPeriod.All);
         summary.RequestCount.Should().Be(6, "12-hour-old events are within 24h TTL");
     }
 
@@ -139,21 +139,21 @@ public class CostTrackerQuotaTests
     [Fact]
     public async Task GetSummary_CalculatesTotalTokensCorrectly()
     {
-        var tracker = CreateTracker();
+        InMemoryCostTracker tracker = CreateTracker();
 
         await tracker.TrackUsageAsync(new UsageEvent("agent-1", "gpt-5.4-mini", 1000, 500, null, DateTime.UtcNow));
         await tracker.TrackUsageAsync(new UsageEvent("agent-2", "gpt-5.4-mini", 2000, 1000, null, DateTime.UtcNow));
 
-        var summary = await tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await tracker.GetSummaryAsync(CostPeriod.All);
         summary.TotalTokens.Should().Be(4500); // (1000+500) + (2000+1000)
     }
 
     [Fact]
     public async Task GetSummary_EmptyTracker_ReturnsZeros()
     {
-        var tracker = CreateTracker();
+        InMemoryCostTracker tracker = CreateTracker();
 
-        var summary = await tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.TotalTokens.Should().Be(0);
         summary.TotalCost.Should().Be(0);

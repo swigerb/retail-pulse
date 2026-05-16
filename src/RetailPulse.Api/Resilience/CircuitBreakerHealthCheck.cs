@@ -28,7 +28,7 @@ public class CircuitBreakerHealthCheck : IHealthCheck
             ["lastStateChange"] = _lastStateChange.ToString("O")
         };
 
-        var result = _state switch
+        HealthCheckResult result = _state switch
         {
             CircuitBreakerState.Closed => HealthCheckResult.Healthy("Circuit breaker is closed (healthy).", data),
             CircuitBreakerState.HalfOpen => HealthCheckResult.Degraded("Circuit breaker is half-open (testing recovery).", data: data),

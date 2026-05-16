@@ -41,7 +41,7 @@ public sealed class ProactiveAlertService : BackgroundService
         _mcpClient = httpClientFactory.CreateClient("McpServer");
         _logger = logger;
 
-        var intervalMinutes = configuration.GetValue("Alerts:CheckIntervalMinutes", 5);
+        int intervalMinutes = configuration.GetValue("Alerts:CheckIntervalMinutes", 5);
         _checkInterval = TimeSpan.FromMinutes(intervalMinutes);
     }
 
@@ -65,18 +65,18 @@ public sealed class ProactiveAlertService : BackgroundService
 
     private async Task RunCheckCycleAsync(CancellationToken ct)
     {
-        using var activity = _activitySource.StartActivity("alert.check_cycle");
+        using Activity? activity = _activitySource.StartActivity("alert.check_cycle");
 
         try
         {
-            var alerts = await DetectAnomaliesAsync(ct);
+            List<Alert> alerts = await DetectAnomaliesAsync(ct);
             activity?.SetTag("alerts.detected", alerts.Count);
 
             if (alerts.Count > 0)
             {
                 _logger.LogInformation("Detected {Count} new alert(s)", alerts.Count);
 
-                foreach (var alert in alerts)
+                foreach (Alert alert in alerts)
                 {
                     // Persist and push
                     _alertStore.PersistAlert(alert);
@@ -120,7 +120,7 @@ public sealed class ProactiveAlertService : BackgroundService
 
     private async Task<List<Alert>> DetectAnomaliesAsync(CancellationToken ct)
     {
-        var demandData = await FetchDemandDataAsync(ct);
+        Dictionary<string, List<(DateOnly Date, double Volume)>>? demandData = await FetchDemandDataAsync(ct);
         if (demandData is null || demandData.Count == 0)
         {
             _logger.LogDebug("No demand data available for anomaly detection");
@@ -128,41 +128,41 @@ public sealed class ProactiveAlertService : BackgroundService
         }
 
         var alerts = new List<Alert>();
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        foreach (var (key, points) in demandData)
+        foreach ((string? key, List<(DateOnly Date, double Volume)>? points) in demandData)
         {
-            var parts = key.Split('|');
+            string[] parts = key.Split('|');
             if (parts.Length < 2) continue;
-            var brand = parts[0];
-            var region = parts[1];
+            string brand = parts[0];
+            string region = parts[1];
 
             if (points.Count < 14) continue; // need at least 2 weeks of data
 
             // Split into current (last 7 days) and baseline (8-37 days ago)
             var sortedPoints = points.OrderBy(p => p.Date).ToList();
-            var maxDate = sortedPoints[^1].Date;
-            var currentStart = maxDate.AddDays(-6);
-            var baselineEnd = maxDate.AddDays(-7);
-            var baselineStart = maxDate.AddDays(-37);
+            DateOnly maxDate = sortedPoints[^1].Date;
+            DateOnly currentStart = maxDate.AddDays(-6);
+            DateOnly baselineEnd = maxDate.AddDays(-7);
+            DateOnly baselineStart = maxDate.AddDays(-37);
 
             var currentPoints = sortedPoints.Where(p => p.Date >= currentStart).ToList();
             var baselinePoints = sortedPoints.Where(p => p.Date >= baselineStart && p.Date <= baselineEnd).ToList();
 
             if (currentPoints.Count == 0 || baselinePoints.Count == 0) continue;
 
-            var currentAvg = currentPoints.Average(p => p.Volume);
-            var baselineAvg = baselinePoints.Average(p => p.Volume);
+            double currentAvg = currentPoints.Average(p => p.Volume);
+            double baselineAvg = baselinePoints.Average(p => p.Volume);
 
             if (baselineAvg <= 0) continue;
 
-            var pctChange = (currentAvg - baselineAvg) / baselineAvg * 100;
+            double pctChange = (currentAvg - baselineAvg) / baselineAvg * 100;
 
             // Demand spike: > 20% above baseline
             if (pctChange > 20)
             {
-                var severity = pctChange > 40 ? "high" : "medium";
-                var alertType = "demand_spike";
+                string severity = pctChange > 40 ? "high" : "medium";
+                string alertType = "demand_spike";
 
                 if (!_alertStore.IsThrottled(alertType, brand, region))
                 {
@@ -193,8 +193,8 @@ public sealed class ProactiveAlertService : BackgroundService
             // Supply drop: > 15% below baseline
             if (pctChange < -15)
             {
-                var severity = pctChange < -30 ? "high" : "medium";
-                var alertType = "supply_drop";
+                string severity = pctChange < -30 ? "high" : "medium";
+                string alertType = "supply_drop";
 
                 if (!_alertStore.IsThrottled(alertType, brand, region))
                 {
@@ -223,17 +223,17 @@ public sealed class ProactiveAlertService : BackgroundService
             // Trend reversal: 7-day trend sign differs from 30-day trend sign + magnitude > 10%
             if (currentPoints.Count >= 3 && baselinePoints.Count >= 7)
             {
-                var trend7 = CalculateLinearTrend(currentPoints);
-                var trend30 = CalculateLinearTrend(baselinePoints);
+                double trend7 = CalculateLinearTrend(currentPoints);
+                double trend30 = CalculateLinearTrend(baselinePoints);
 
                 if (Math.Sign(trend7) != Math.Sign(trend30) && Math.Abs(pctChange) > 10)
                 {
-                    var alertType = "trend_reversal";
+                    string alertType = "trend_reversal";
 
                     if (!_alertStore.IsThrottled(alertType, brand, region))
                     {
-                        var direction = trend7 > 0 ? "upward" : "downward";
-                        var previousDirection = trend30 > 0 ? "upward" : "downward";
+                        string direction = trend7 > 0 ? "upward" : "downward";
+                        string previousDirection = trend30 > 0 ? "upward" : "downward";
 
                         alerts.Add(new Alert(
                             Id: $"alert-{Guid.NewGuid():N}",
@@ -267,7 +267,7 @@ public sealed class ProactiveAlertService : BackgroundService
     {
         if (points.Count < 2) return 0;
 
-        var n = points.Count;
+        int n = points.Count;
         double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
 
         for (int i = 0; i < n; i++)
@@ -278,7 +278,7 @@ public sealed class ProactiveAlertService : BackgroundService
             sumX2 += i * i;
         }
 
-        var denominator = (n * sumX2) - (sumX * sumX);
+        double denominator = (n * sumX2) - (sumX * sumX);
         return Math.Abs(denominator) < 0.0001 ? 0 : ((n * sumXY) - (sumX * sumY)) / denominator;
     }
 
@@ -293,14 +293,14 @@ public sealed class ProactiveAlertService : BackgroundService
         try
         {
             // Fetch historical demand for all brands — the API returns weekly aggregated data
-            var response = await _mcpClient.GetAsync("/api/demand-risks?brand=&region=", ct);
+            HttpResponseMessage response = await _mcpClient.GetAsync("/api/demand-risks?brand=&region=", ct);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failed to fetch demand data from MCP server: {StatusCode}", response.StatusCode);
                 return null;
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
+            string json = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
 
             var seriesData = new Dictionary<string, List<(DateOnly Date, double Volume)>>();
@@ -308,30 +308,30 @@ public sealed class ProactiveAlertService : BackgroundService
             // The demand-risks endpoint returns { risks: [...] } — but we need raw data.
             // Instead, call the historical-demand endpoint which returns weekly data.
             // Let's use the generic endpoint without filters to get all data.
-            var histResponse = await _mcpClient.GetAsync("/api/historical-demand?brand=&region=National&channel=All", ct);
+            HttpResponseMessage histResponse = await _mcpClient.GetAsync("/api/historical-demand?brand=&region=National&channel=All", ct);
             if (!histResponse.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failed to fetch historical demand: {StatusCode}", histResponse.StatusCode);
                 return null;
             }
 
-            var histJson = await histResponse.Content.ReadAsStringAsync(ct);
+            string histJson = await histResponse.Content.ReadAsStringAsync(ct);
             using var histDoc = JsonDocument.Parse(histJson);
 
             // Parse the weekly data from the historical demand response
-            if (histDoc.RootElement.TryGetProperty("weekly_data", out var weeklyData) && weeklyData.ValueKind == JsonValueKind.Array)
+            if (histDoc.RootElement.TryGetProperty("weekly_data", out JsonElement weeklyData) && weeklyData.ValueKind == JsonValueKind.Array)
             {
-                foreach (var week in weeklyData.EnumerateArray())
+                foreach (JsonElement week in weeklyData.EnumerateArray())
                 {
-                    var brand = week.TryGetProperty("brand", out var bProp) ? bProp.GetString() : null;
-                    var region = week.TryGetProperty("region", out var rProp) ? rProp.GetString() : null;
-                    var weekStart = week.TryGetProperty("weekStart", out var dProp) ? dProp.GetString() : null;
-                    var volume = week.TryGetProperty("volume", out var vProp) ? vProp.GetDouble() : 0;
+                    string? brand = week.TryGetProperty("brand", out JsonElement bProp) ? bProp.GetString() : null;
+                    string? region = week.TryGetProperty("region", out JsonElement rProp) ? rProp.GetString() : null;
+                    string? weekStart = week.TryGetProperty("weekStart", out JsonElement dProp) ? dProp.GetString() : null;
+                    double volume = week.TryGetProperty("volume", out JsonElement vProp) ? vProp.GetDouble() : 0;
 
                     if (brand is null || region is null || weekStart is null) continue;
-                    if (!DateOnly.TryParse(weekStart, out var date)) continue;
+                    if (!DateOnly.TryParse(weekStart, out DateOnly date)) continue;
 
-                    var key = $"{brand}|{region}";
+                    string key = $"{brand}|{region}";
                     if (!seriesData.ContainsKey(key))
                         seriesData[key] = [];
                     seriesData[key].Add((date, volume));
@@ -339,22 +339,22 @@ public sealed class ProactiveAlertService : BackgroundService
             }
 
             // If the weekly_data format didn't work, try parsing as per-brand data sections
-            if (seriesData.Count == 0 && histDoc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+            if (seriesData.Count == 0 && histDoc.RootElement.TryGetProperty("data", out JsonElement data) && data.ValueKind == JsonValueKind.Array)
             {
-                foreach (var item in data.EnumerateArray())
+                foreach (JsonElement item in data.EnumerateArray())
                 {
-                    var brand = item.TryGetProperty("brand", out var bProp) ? bProp.GetString() : null;
-                    var region = item.TryGetProperty("region", out var rProp) ? rProp.GetString() : null;
-                    var dateStr = item.TryGetProperty("weekStart", out var dProp) ? dProp.GetString()
-                                : item.TryGetProperty("date", out var d2Prop) ? d2Prop.GetString() : null;
-                    var volume = item.TryGetProperty("volume", out var vProp) ? vProp.GetDouble()
-                               : item.TryGetProperty("avgVolume", out var v2Prop) ? v2Prop.GetDouble() : 0;
+                    string? brand = item.TryGetProperty("brand", out JsonElement bProp) ? bProp.GetString() : null;
+                    string? region = item.TryGetProperty("region", out JsonElement rProp) ? rProp.GetString() : null;
+                    string? dateStr = item.TryGetProperty("weekStart", out JsonElement dProp) ? dProp.GetString()
+                                : item.TryGetProperty("date", out JsonElement d2Prop) ? d2Prop.GetString() : null;
+                    double volume = item.TryGetProperty("volume", out JsonElement vProp) ? vProp.GetDouble()
+                               : item.TryGetProperty("avgVolume", out JsonElement v2Prop) ? v2Prop.GetDouble() : 0;
 
                     if (brand is null || dateStr is null) continue;
                     region ??= "National";
-                    if (!DateOnly.TryParse(dateStr, out var date)) continue;
+                    if (!DateOnly.TryParse(dateStr, out DateOnly date)) continue;
 
-                    var key = $"{brand}|{region}";
+                    string key = $"{brand}|{region}";
                     if (!seriesData.ContainsKey(key))
                         seriesData[key] = [];
                     seriesData[key].Add((date, volume));

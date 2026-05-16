@@ -18,12 +18,12 @@ public class ExplainabilityTests
     public void Explanation_CapturesToolCallsInOrder()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
-        store.RecordStep(traceId, new ExplanationStep("GetDepletionStats", "{\"brand\":\"Sierra Gold\"}", "{\"depletions\":1200}", "Fetching depletion data for the requested brand"));
-        store.RecordStep(traceId, new ExplanationStep("CreateChart", "{\"type\":\"bar\"}", "{\"chartUrl\":\"/charts/123\"}", "Visualizing the depletion data as a bar chart"));
+        store.RecordStep(traceId, new ExplanationStep("GetDepletionStats", /*lang=json,strict*/ "{\"brand\":\"Sierra Gold\"}", /*lang=json,strict*/ "{\"depletions\":1200}", "Fetching depletion data for the requested brand"));
+        store.RecordStep(traceId, new ExplanationStep("CreateChart", /*lang=json,strict*/ "{\"type\":\"bar\"}", /*lang=json,strict*/ "{\"chartUrl\":\"/charts/123\"}", "Visualizing the depletion data as a bar chart"));
 
-        var chain = store.GetChain(traceId);
+        ExplanationChain? chain = store.GetChain(traceId);
 
         chain.Should().NotBeNull();
         chain.Steps.Should().HaveCount(2);
@@ -35,15 +35,15 @@ public class ExplainabilityTests
     public void Explanation_StepsAreInInsertionOrder()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
-        var toolNames = new[] { "ToolA", "ToolB", "ToolC", "ToolD" };
-        foreach (var name in toolNames)
+        string[] toolNames = ["ToolA", "ToolB", "ToolC", "ToolD"];
+        foreach (string? name in toolNames)
         {
             store.RecordStep(traceId, new ExplanationStep(name, "{}", "{}", "reasoning"));
         }
 
-        var chain = store.GetChain(traceId);
+        ExplanationChain? chain = store.GetChain(traceId);
         chain!.Steps.Select(s => s.ToolName).Should().BeEquivalentTo(
             toolNames, opts => opts.WithStrictOrdering());
     }
@@ -56,16 +56,18 @@ public class ExplainabilityTests
     public void Explanation_EachStepHasToolNameInputOutputReasoning()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
         store.RecordStep(traceId, new ExplanationStep(
             "GetMarginByBrand",
-            "{\"brand\":\"Ridgeline Bourbon\"}",
-            "{\"revenue\":5000000,\"gross_margin\":2000000}",
+                                 /*lang=json,strict*/
+                                 "{\"brand\":\"Ridgeline Bourbon\"}",
+                                 /*lang=json,strict*/
+                                 "{\"revenue\":5000000,\"gross_margin\":2000000}",
             "Retrieving P&L breakdown for margin analysis"));
 
-        var chain = store.GetChain(traceId);
-        var step = chain!.Steps.Single();
+        ExplanationChain? chain = store.GetChain(traceId);
+        ExplanationStep step = chain!.Steps.Single();
 
         step.ToolName.Should().Be("GetMarginByBrand");
         step.Input.Should().NotBeNullOrEmpty("step should have input");
@@ -88,12 +90,12 @@ public class ExplainabilityTests
     public void GetExplanation_ValidTraceId_ReturnsValidChain()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
         store.RecordStep(traceId, new ExplanationStep("Tool1", "{}", "{}", "step 1"));
         store.RecordStep(traceId, new ExplanationStep("Tool2", "{}", "{}", "step 2"));
 
-        var chain = store.GetChain(traceId);
+        ExplanationChain? chain = store.GetChain(traceId);
 
         chain.Should().NotBeNull();
         chain.TraceId.Should().Be(traceId);
@@ -105,7 +107,7 @@ public class ExplainabilityTests
     {
         var store = new InMemoryExplanationStore();
 
-        var chain = store.GetChain("nonexistent-trace-id");
+        ExplanationChain? chain = store.GetChain("nonexistent-trace-id");
 
         chain.Should().BeNull("unknown traceId should return null (maps to 404 in API)");
     }
@@ -118,11 +120,11 @@ public class ExplainabilityTests
     public void Explanation_IncludesConfidenceScore()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
         store.RecordStep(traceId, new ExplanationStep("Tool1", "{}", "{}", "reasoning", 0.92));
 
-        var chain = store.GetChain(traceId);
+        ExplanationChain? chain = store.GetChain(traceId);
         chain!.Steps[0].Confidence.Should().Be(0.92);
     }
 
@@ -130,15 +132,15 @@ public class ExplainabilityTests
     public void Explanation_ConfidenceScoreRange_0To1()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
         store.RecordStep(traceId, new ExplanationStep("HighConf", "{}", "{}", "very sure", 0.99));
         store.RecordStep(traceId, new ExplanationStep("LowConf", "{}", "{}", "uncertain", 0.15));
         store.RecordStep(traceId, new ExplanationStep("MedConf", "{}", "{}", "moderate", 0.55));
 
-        var chain = store.GetChain(traceId);
+        ExplanationChain? chain = store.GetChain(traceId);
 
-        foreach (var step in chain!.Steps)
+        foreach (ExplanationStep step in chain!.Steps)
         {
             step.Confidence.Should().BeGreaterThanOrEqualTo(0.0,
                 $"step '{step.ToolName}' confidence should be >= 0");
@@ -155,7 +157,7 @@ public class ExplainabilityTests
     public void Explanation_MultipleToolCalls_CreateMultipleSteps()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
         for (int i = 1; i <= 5; i++)
         {
@@ -163,7 +165,7 @@ public class ExplainabilityTests
                 $"Tool{i}", $"{{\"param\":{i}}}", $"{{\"result\":{i}}}", $"Step {i} reasoning"));
         }
 
-        var chain = store.GetChain(traceId);
+        ExplanationChain? chain = store.GetChain(traceId);
         chain!.Steps.Should().HaveCount(5, "5 tool calls should create 5 steps");
     }
 
@@ -171,15 +173,15 @@ public class ExplainabilityTests
     public void Explanation_DifferentTraces_AreIsolated()
     {
         var store = new InMemoryExplanationStore();
-        var traceA = Guid.NewGuid().ToString("N");
-        var traceB = Guid.NewGuid().ToString("N");
+        string traceA = Guid.NewGuid().ToString("N");
+        string traceB = Guid.NewGuid().ToString("N");
 
         store.RecordStep(traceA, new ExplanationStep("ToolA", "{}", "{}", "trace A"));
         store.RecordStep(traceA, new ExplanationStep("ToolB", "{}", "{}", "trace A"));
         store.RecordStep(traceB, new ExplanationStep("ToolX", "{}", "{}", "trace B"));
 
-        var chainA = store.GetChain(traceA);
-        var chainB = store.GetChain(traceB);
+        ExplanationChain? chainA = store.GetChain(traceA);
+        ExplanationChain? chainB = store.GetChain(traceB);
 
         chainA!.Steps.Should().HaveCount(2);
         chainB!.Steps.Should().HaveCount(1);
@@ -195,7 +197,7 @@ public class ExplainabilityTests
     public void Explanation_ChainIsImmutableAfterCreation()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
         store.RecordStep(traceId, new ExplanationStep("Tool1", "{}", "{}", "step 1"));
         store.RecordStep(traceId, new ExplanationStep("Tool2", "{}", "{}", "step 2"));
@@ -204,7 +206,7 @@ public class ExplainabilityTests
         store.FinalizeChain(traceId);
 
         // Attempting to add more steps after finalization should fail or be ignored
-        var act = () => store.RecordStep(traceId, new ExplanationStep("Tool3", "{}", "{}", "too late"));
+        Action act = () => store.RecordStep(traceId, new ExplanationStep("Tool3", "{}", "{}", "too late"));
 
         act.Should().Throw<InvalidOperationException>(
             "should not allow adding steps to a finalized explanation chain");
@@ -214,12 +216,12 @@ public class ExplainabilityTests
     public void Explanation_RetrievedChainIsSnapshot()
     {
         var store = new InMemoryExplanationStore();
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
 
         store.RecordStep(traceId, new ExplanationStep("Tool1", "{}", "{}", "step 1"));
 
-        var chain1 = store.GetChain(traceId);
-        var count1 = chain1!.Steps.Count;
+        ExplanationChain? chain1 = store.GetChain(traceId);
+        int count1 = chain1!.Steps.Count;
 
         // Add another step
         store.RecordStep(traceId, new ExplanationStep("Tool2", "{}", "{}", "step 2"));
@@ -275,7 +277,7 @@ internal sealed class InMemoryExplanationStore
 
     public ExplanationChain? GetChain(string traceId)
     {
-        if (!_chains.TryGetValue(traceId, out var data))
+        if (!_chains.TryGetValue(traceId, out (List<ExplanationStep> Steps, bool Finalized) data))
             return null;
 
         // Return immutable snapshot
@@ -284,7 +286,7 @@ internal sealed class InMemoryExplanationStore
 
     public void FinalizeChain(string traceId)
     {
-        if (_chains.TryGetValue(traceId, out var data))
+        if (_chains.TryGetValue(traceId, out (List<ExplanationStep> Steps, bool Finalized) data))
         {
             _chains[traceId] = (data.Steps, true);
         }

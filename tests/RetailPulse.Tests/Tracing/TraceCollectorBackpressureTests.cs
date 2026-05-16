@@ -17,15 +17,15 @@ public class TraceCollectorBackpressureTests
     public async Task CaptureSpan_WritesToTelemetryPushChannel()
     {
         var pushChannel = new TelemetryPushChannel();
-        var collector = CreateCollectorWithChannel(pushChannel);
+        InMemoryTraceCollector collector = CreateCollectorWithChannel(pushChannel);
 
-        var span = MakeSpan("trace-1", "op.test");
+        TraceSpan span = MakeSpan("trace-1", "op.test");
         collector.CaptureSpan(span);
 
         pushChannel.Complete();
 
         var items = new List<TelemetryPushItem>();
-        await foreach (var item in pushChannel.Reader.ReadAllAsync())
+        await foreach (TelemetryPushItem item in pushChannel.Reader.ReadAllAsync())
             items.Add(item);
 
         // Should have trace_started + span_completed
@@ -41,7 +41,7 @@ public class TraceCollectorBackpressureTests
     public async Task CaptureSpan_SameTrace_OnlyOneTraceStarted()
     {
         var pushChannel = new TelemetryPushChannel();
-        var collector = CreateCollectorWithChannel(pushChannel);
+        InMemoryTraceCollector collector = CreateCollectorWithChannel(pushChannel);
 
         collector.CaptureSpan(MakeSpan("trace-1", "op.first"));
         collector.CaptureSpan(MakeSpan("trace-1", "op.second"));
@@ -49,7 +49,7 @@ public class TraceCollectorBackpressureTests
         pushChannel.Complete();
 
         var items = new List<TelemetryPushItem>();
-        await foreach (var item in pushChannel.Reader.ReadAllAsync())
+        await foreach (TelemetryPushItem item in pushChannel.Reader.ReadAllAsync())
             items.Add(item);
 
         // 1 trace_started + 2 span_completed
@@ -61,10 +61,10 @@ public class TraceCollectorBackpressureTests
     public Task CaptureSpan_WhenChannelFull_DoesNotThrow()
     {
         var pushChannel = new TelemetryPushChannel(capacity: 1);
-        var collector = CreateCollectorWithChannel(pushChannel);
+        InMemoryTraceCollector collector = CreateCollectorWithChannel(pushChannel);
 
         // This fills the channel (trace_started), then span_completed should be dropped
-        var act = () => collector.CaptureSpan(MakeSpan("trace-1", "op.test"));
+        Action act = () => collector.CaptureSpan(MakeSpan("trace-1", "op.test"));
         act.Should().NotThrow();
 
         // Second span — more drops but no crash
@@ -82,7 +82,7 @@ public class TraceCollectorBackpressureTests
 
         collector.CaptureSpan(MakeSpan("trace-1", "op.test"));
 
-        var spans = collector.GetSpans("trace-1");
+        IReadOnlyList<TraceSpan>? spans = collector.GetSpans("trace-1");
         spans.Should().NotBeNull();
         spans.Should().HaveCount(1);
         return Task.CompletedTask;
@@ -92,7 +92,7 @@ public class TraceCollectorBackpressureTests
     public Task DroppedTelemetryCount_TracksDroppedItems()
     {
         var pushChannel = new TelemetryPushChannel(capacity: 2);
-        var collector = CreateCollectorWithChannel(pushChannel);
+        InMemoryTraceCollector collector = CreateCollectorWithChannel(pushChannel);
 
         // Each CaptureSpan for a new trace produces 2 items (trace_started + span_completed)
         // With capacity 2, the first call fills the channel, subsequent calls drop
@@ -119,7 +119,7 @@ public class TraceCollectorBackpressureTests
 
     private static TraceSpan MakeSpan(string traceId, string operation)
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         return new TraceSpan(
             SpanId: Guid.NewGuid().ToString("N")[..16],
             TraceId: traceId,

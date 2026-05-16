@@ -25,7 +25,7 @@ public class InMemoryAuditLog : IAuditLog
 
     public Task<IReadOnlyList<AuditEntry>> QueryAsync(AuditQuery query, CancellationToken ct = default)
     {
-        var results = _entries.AsEnumerable();
+        IEnumerable<AuditEntry> results = _entries.AsEnumerable();
 
         if (query.AgentId is not null)
             results = results.Where(e => e.AgentId.Equals(query.AgentId, StringComparison.OrdinalIgnoreCase));
@@ -52,7 +52,7 @@ public class InMemoryAuditLog : IAuditLog
 
     public Task<AuditStats> GetStatsAsync(CancellationToken ct = default)
     {
-        var entries = _entries.ToArray();
+        AuditEntry[] entries = [.. _entries];
 
         var byAgent = entries
             .GroupBy(e => e.AgentId)

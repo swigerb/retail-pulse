@@ -13,8 +13,8 @@ public class ChartDataToolTests
     [Fact]
     public async Task CreateChart_ValidJson_ReturnsSuccess()
     {
-        var tool = CreateTool();
-        var spec = """
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
             {
                 "type": "bar",
                 "title": "Monthly Sales",
@@ -33,11 +33,11 @@ public class ChartDataToolTests
             }
             """;
 
-        var result = await tool.CreateChart(spec);
+        string result = await tool.CreateChart(spec);
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.GetProperty("status").GetString().Should().Be("success");
-        var chart = doc.RootElement.GetProperty("chart");
+        JsonElement chart = doc.RootElement.GetProperty("chart");
         chart.GetProperty("Type").GetString().Should().Be("bar");
         chart.GetProperty("Title").GetString().Should().Be("Monthly Sales");
         chart.GetProperty("Data").GetArrayLength().Should().Be(1);
@@ -46,12 +46,12 @@ public class ChartDataToolTests
     [Fact]
     public async Task CreateChart_InvalidJson_ReturnsStructuredError()
     {
-        var tool = CreateTool();
+        ChartDataTool tool = CreateTool();
 
-        var result = await tool.CreateChart("{ this is : not valid json");
+        string result = await tool.CreateChart("{ this is : not valid json");
 
         var doc = JsonDocument.Parse(result);
-        doc.RootElement.TryGetProperty("error", out var err).Should().BeTrue();
+        doc.RootElement.TryGetProperty("error", out JsonElement err).Should().BeTrue();
         err.GetString().Should().NotBeNullOrEmpty();
         doc.RootElement.GetProperty("message").GetString().Should().NotBeNullOrEmpty();
     }
@@ -59,9 +59,9 @@ public class ChartDataToolTests
     [Fact]
     public async Task CreateChart_MissingRequiredFields_ReturnsError()
     {
-        var tool = CreateTool();
+        ChartDataTool tool = CreateTool();
         // Missing required "type" and "title" fields
-        var result = await tool.CreateChart("""{"data":[]}""");
+        string result = await tool.CreateChart(/*lang=json,strict*/ """{"data":[]}""");
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.TryGetProperty("error", out _).Should().BeTrue(
@@ -71,10 +71,10 @@ public class ChartDataToolTests
     [Fact]
     public async Task CreateChart_EmptyDataArray_StillSucceeds()
     {
-        var tool = CreateTool();
-        var spec = """{"type":"bar","title":"Empty","data":[]}""";
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """{"type":"bar","title":"Empty","data":[]}""";
 
-        var result = await tool.CreateChart(spec);
+        string result = await tool.CreateChart(spec);
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.GetProperty("status").GetString().Should().Be("success");
@@ -87,8 +87,8 @@ public class ChartDataToolTests
     [InlineData("line")]
     public async Task CreateChart_TypePropertyIsCaseInsensitive(string typeValue)
     {
-        var tool = CreateTool();
-        var spec = $$"""
+        ChartDataTool tool = CreateTool();
+        string spec = $$"""
             {
                 "TYPE": "{{typeValue}}",
                 "TITLE": "Mixed Case Keys",
@@ -98,7 +98,7 @@ public class ChartDataToolTests
             }
             """;
 
-        var result = await tool.CreateChart(spec);
+        string result = await tool.CreateChart(spec);
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.GetProperty("status").GetString().Should().Be("success",
@@ -109,9 +109,9 @@ public class ChartDataToolTests
     [Fact]
     public async Task CreateChart_NullLiteralJson_ReturnsError()
     {
-        var tool = CreateTool();
+        ChartDataTool tool = CreateTool();
 
-        var result = await tool.CreateChart("null");
+        string result = await tool.CreateChart("null");
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.TryGetProperty("error", out _).Should().BeTrue();

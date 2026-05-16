@@ -39,18 +39,18 @@ public class ConversationMemoryMiddleware
         string currentMessage,
         CancellationToken ct = default)
     {
-        var memories = await _memory.RecallAsync(userId, currentMessage, maxResults: 5, ct);
+        IReadOnlyList<MemoryEntry> memories = await _memory.RecallAsync(userId, currentMessage, maxResults: 5, ct);
 
         if (memories.Count == 0)
             return null;
 
         var lines = new List<string>();
-        var totalChars = 0;
+        int totalChars = 0;
 
-        foreach (var mem in memories)
+        foreach (MemoryEntry mem in memories)
         {
-            var age = FormatAge(DateTimeOffset.UtcNow - mem.CreatedAt);
-            var line = mem.Type switch
+            string age = FormatAge(DateTimeOffset.UtcNow - mem.CreatedAt);
+            string line = mem.Type switch
             {
                 MemoryType.ConversationSummary => $"- You previously discussed: {mem.Content} ({age})",
                 MemoryType.UserPreference => $"- User preference: {mem.Content}",
@@ -68,7 +68,7 @@ public class ConversationMemoryMiddleware
         if (lines.Count == 0)
             return null;
 
-        var block = $"""
+        string block = $"""
 
             ## User Context (from memory)
             {string.Join("\n", lines)}
@@ -92,9 +92,9 @@ public class ConversationMemoryMiddleware
     {
         try
         {
-            var entries = await _extraction.ExtractAsync(userId, userMessage, assistantReply, ct);
+            IReadOnlyList<MemoryEntry> entries = await _extraction.ExtractAsync(userId, userMessage, assistantReply, ct);
 
-            foreach (var entry in entries)
+            foreach (MemoryEntry entry in entries)
             {
                 await _memory.StoreAsync(userId, entry, ct);
             }

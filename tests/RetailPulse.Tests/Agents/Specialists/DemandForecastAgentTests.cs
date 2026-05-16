@@ -28,21 +28,21 @@ public class DemandForecastAgentTests
     [Fact]
     public void Key_IsDemandForecasting()
     {
-        var agent = CreateAgent();
+        DemandForecastAgent agent = CreateAgent();
         agent.Key.Should().Be("demand-forecasting");
     }
 
     [Fact]
     public void DisplayName_IsNotEmpty()
     {
-        var agent = CreateAgent();
+        DemandForecastAgent agent = CreateAgent();
         agent.DisplayName.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
     public void SupportedIntents_ContainsDemandForecasting()
     {
-        var agent = CreateAgent();
+        DemandForecastAgent agent = CreateAgent();
         agent.SupportedIntents.Should().Contain(AgentIntent.DemandForecasting);
     }
 
@@ -50,14 +50,14 @@ public class DemandForecastAgentTests
     public void SupportedIntents_DoesNotContainGeneralFallback()
     {
         // Demand agent is a specialist — should NOT claim general/fallback
-        var agent = CreateAgent();
+        DemandForecastAgent agent = CreateAgent();
         agent.SupportedIntents.Should().NotContain(AgentIntent.General);
     }
 
     [Fact]
     public void SupportedIntents_DoesNotContainOtherSpecialistIntents()
     {
-        var agent = CreateAgent();
+        DemandForecastAgent agent = CreateAgent();
         agent.SupportedIntents.Should().NotContain(AgentIntent.PromotionTrade);
         agent.SupportedIntents.Should().NotContain(AgentIntent.SupplyShipments);
         agent.SupportedIntents.Should().NotContain(AgentIntent.CompetitiveMarket);
@@ -67,7 +67,7 @@ public class DemandForecastAgentTests
     [Fact]
     public void SupportedIntents_OnlyDemand()
     {
-        var agent = CreateAgent();
+        DemandForecastAgent agent = CreateAgent();
         agent.SupportedIntents.Should().HaveCount(1);
         agent.SupportedIntents.Should().ContainSingle(i => i == AgentIntent.DemandForecasting);
     }
@@ -79,11 +79,11 @@ public class DemandForecastAgentTests
     [Fact]
     public async Task HandleAsync_ReturnsReplyFromModel()
     {
-        var chatClient = MockChatClient("Sierra Gold Tequila demand is projected to grow 8% next quarter.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Sierra Gold Tequila demand is projected to grow 8% next quarter.");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
         var request = new ChatRequest("What's the demand forecast for Sierra Gold Tequila?", SessionId: "session-demand-1");
-        var response = await agent.HandleAsync(request);
+        Contracts.ChatResponse response = await agent.HandleAsync(request);
 
         response.Reply.Should().Contain("Sierra Gold Tequila");
         response.SessionId.Should().Be("session-demand-1");
@@ -92,10 +92,10 @@ public class DemandForecastAgentTests
     [Fact]
     public async Task HandleAsync_GeneratesSessionIdWhenMissing()
     {
-        var chatClient = MockChatClient("Forecast ready");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Forecast ready");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(new ChatRequest("Forecast demand"));
+        Contracts.ChatResponse response = await agent.HandleAsync(new ChatRequest("Forecast demand"));
 
         response.SessionId.Should().NotBeNullOrWhiteSpace();
     }
@@ -103,10 +103,10 @@ public class DemandForecastAgentTests
     [Fact]
     public async Task HandleAsync_IncludesSpans()
     {
-        var chatClient = MockChatClient("Forecast analysis complete");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Forecast analysis complete");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Generate forecast for Ridgeline Bourbon", SessionId: "span-test"));
 
         response.Spans.Should().NotBeEmpty();
@@ -117,10 +117,10 @@ public class DemandForecastAgentTests
     [Fact]
     public async Task HandleAsync_PropagatesSessionId()
     {
-        var chatClient = MockChatClient("ok");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("ok");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("demand?", SessionId: "my-demand-session-42"));
 
         response.SessionId.Should().Be("my-demand-session-42");
@@ -129,10 +129,10 @@ public class DemandForecastAgentTests
     [Fact]
     public async Task HandleAsync_IncludesTotalDurationMs()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("forecast?", SessionId: "dur-test"));
 
         response.TotalDurationMs.Should().NotBeNull();
@@ -142,10 +142,10 @@ public class DemandForecastAgentTests
     [Fact]
     public async Task HandleAsync_SpansHaveCorrectSessionId()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "span-session-test"));
 
         response.Spans.Should().OnlyContain(s => s.SessionId == "span-session-test");
@@ -154,10 +154,10 @@ public class DemandForecastAgentTests
     [Fact]
     public async Task HandleAsync_SpansHaveTimestamps()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "ts-test"));
 
         response.Spans.Should().OnlyContain(s => s.Timestamp > DateTimeOffset.MinValue);
@@ -182,7 +182,7 @@ public class DemandForecastAgentTests
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
-        var agent = CreateAgent(mockClient.Object);
+        DemandForecastAgent agent = CreateAgent(mockClient.Object);
         var request = new ChatRequest(
             "Now forecast next quarter",
             SessionId: "hist-1",
@@ -220,7 +220,7 @@ public class DemandForecastAgentTests
             .Select(i => new ChatHistoryMessage(i % 2 == 0 ? "assistant" : "user", $"h-{i}"))
             .ToList();
 
-        var agent = CreateAgent(mockClient.Object);
+        DemandForecastAgent agent = CreateAgent(mockClient.Object);
         await agent.HandleAsync(
             new ChatRequest("current", SessionId: "cap-test", History: history));
 
@@ -255,7 +255,7 @@ public class DemandForecastAgentTests
             AIFunctionFactory.Create(() => "forecast", "GenerateForecast")
         };
 
-        var agent = CreateAgent(mockClient.Object, demandTools);
+        DemandForecastAgent agent = CreateAgent(mockClient.Object, demandTools);
         await agent.HandleAsync(new ChatRequest("forecast?", SessionId: "tool-test"));
 
         capturedOptions.Should().NotBeNull();
@@ -268,8 +268,8 @@ public class DemandForecastAgentTests
     [Fact]
     public void DemandAgent_KeyDiffersFromGeneral()
     {
-        var demandAgent = CreateAgent();
-        var generalAgent = Fixtures.AgentTestFixtures.CreateGeneralAgent();
+        DemandForecastAgent demandAgent = CreateAgent();
+        GeneralAgent generalAgent = Fixtures.AgentTestFixtures.CreateGeneralAgent();
 
         demandAgent.Key.Should().NotBe(generalAgent.Key);
         demandAgent.Key.Should().Be("demand-forecasting");
@@ -283,10 +283,10 @@ public class DemandForecastAgentTests
     [Fact]
     public async Task HandleAsync_MissingBrand_ReturnsFriendlyMessage()
     {
-        var chatClient = MockChatClient("I don't have data for that brand. The available brands are Sierra Gold Tequila, Ridgeline Bourbon, and Summit Vodka.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("I don't have data for that brand. The available brands are Sierra Gold Tequila, Ridgeline Bourbon, and Summit Vodka.");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("What's the demand for NonExistent Brand?", SessionId: "missing-brand"));
 
         response.Reply.Should().NotBeNullOrWhiteSpace();
@@ -312,8 +312,8 @@ public class DemandForecastAgentTests
                 CreatePipelineResponse(429),
                 null));
 
-        var agent = CreateAgent(mockClient.Object);
-        var response = await agent.HandleAsync(
+        DemandForecastAgent agent = CreateAgent(mockClient.Object);
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("forecast?", SessionId: "s-429"));
 
         response.Reply.Should().Contain("rate-limited");
@@ -332,8 +332,8 @@ public class DemandForecastAgentTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        var agent = CreateAgent(mockClient.Object);
-        var response = await agent.HandleAsync(
+        DemandForecastAgent agent = CreateAgent(mockClient.Object);
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("forecast?", SessionId: "s-err"));
 
         response.Reply.Should().Contain("Something went wrong");
@@ -359,10 +359,10 @@ public class DemandForecastAgentTests
     [InlineData("Foundry Home")]
     public async Task HandleAsync_AllTenantBrands_ProcessWithoutError(string brand)
     {
-        var chatClient = MockChatClient($"Forecast for {brand}: moderate growth expected.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient($"Forecast for {brand}: moderate growth expected.");
+        DemandForecastAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest($"What's the demand forecast for {brand}?", SessionId: $"brand-{brand}"));
 
         response.Reply.Should().NotBeNullOrWhiteSpace();
@@ -391,8 +391,8 @@ public class DemandForecastAgentTests
         IChatClient? chatClient = null,
         IEnumerable<AITool>? tools = null)
     {
-        var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder()
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 

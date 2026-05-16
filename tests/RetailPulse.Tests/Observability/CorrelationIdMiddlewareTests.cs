@@ -13,7 +13,7 @@ public class CorrelationIdMiddlewareTests
     [Fact]
     public async Task InvokeAsync_WithExistingHeader_UsesProvidedCorrelationId()
     {
-        var expectedId = "test-correlation-123";
+        string expectedId = "test-correlation-123";
         var context = new DefaultHttpContext();
         context.Request.Headers["X-Correlation-ID"] = expectedId;
 
@@ -38,7 +38,7 @@ public class CorrelationIdMiddlewareTests
 
         await middleware.InvokeAsync(context);
 
-        var correlationId = context.Items["CorrelationId"] as string;
+        string? correlationId = context.Items["CorrelationId"] as string;
         correlationId.Should().NotBeNullOrEmpty();
         Guid.TryParse(correlationId, out _).Should().BeTrue();
         context.Response.Headers["X-Correlation-ID"].ToString().Should().Be(correlationId);
@@ -48,7 +48,7 @@ public class CorrelationIdMiddlewareTests
     public async Task InvokeAsync_CallsNextMiddleware()
     {
         var context = new DefaultHttpContext();
-        var nextCalled = false;
+        bool nextCalled = false;
 
         var middleware = new CorrelationIdMiddleware(
             next: _ => { nextCalled = true; return Task.CompletedTask; },

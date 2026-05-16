@@ -17,7 +17,7 @@ public class AzureOpenAiThrottleChaosTests
         using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5200") };
         var tool = new FieldSentimentTool(client, NullLogger<FieldSentimentTool>.Instance);
 
-        var result = await tool.GetFieldSentiment("TestBrand", "Florida");
+        string result = await tool.GetFieldSentiment("TestBrand", "Florida");
 
         result.Should().Contain("fallback");
         result.Should().Contain("TestBrand");
@@ -30,7 +30,7 @@ public class AzureOpenAiThrottleChaosTests
         using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5200") };
         var tool = new DepletionStatsTool(client, NullLogger<DepletionStatsTool>.Instance);
 
-        var result = await tool.GetDepletionStats("TestBrand", "Texas", "Q1");
+        string result = await tool.GetDepletionStats("TestBrand", "Texas", "Q1");
 
         result.Should().Contain("MCP server not reachable");
     }
@@ -43,10 +43,10 @@ public class AzureOpenAiThrottleChaosTests
         var tool = new MarketShareTool(client, NullLogger<MarketShareTool>.Instance);
 
         // Simulate burst of requests that all get throttled
-        var tasks = Enumerable.Range(0, 10)
+        IEnumerable<Task<string>> tasks = Enumerable.Range(0, 10)
             .Select(_ => tool.GetMarketShare(brand: "TestBrand"));
 
-        var results = await Task.WhenAll(tasks);
+        string[] results = await Task.WhenAll(tasks);
 
         results.Should().AllSatisfy(r => r.Should().Contain("MCP server not reachable"));
     }
@@ -58,7 +58,7 @@ public class AzureOpenAiThrottleChaosTests
         using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5200") };
         var tool = new CompetitorPricingTool(client, NullLogger<CompetitorPricingTool>.Instance);
 
-        var result = await tool.GetCompetitorPricing(brand: "TestBrand");
+        string result = await tool.GetCompetitorPricing(brand: "TestBrand");
 
         result.Should().Contain("MCP server not reachable");
     }
@@ -67,7 +67,10 @@ public class AzureOpenAiThrottleChaosTests
     {
         private readonly HttpStatusCode _statusCode;
 
-        public ThrottlingHttpMessageHandler(HttpStatusCode statusCode) => _statusCode = statusCode;
+        public ThrottlingHttpMessageHandler(HttpStatusCode statusCode)
+        {
+            _statusCode = statusCode;
+        }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)

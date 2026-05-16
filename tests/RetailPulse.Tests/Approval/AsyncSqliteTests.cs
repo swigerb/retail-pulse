@@ -32,7 +32,7 @@ public class AsyncSqliteTests : IDisposable
     public void Dispose()
     {
         _memory.Dispose();
-        foreach (var path in new[] { _approvalDbPath, _memoryDbPath })
+        foreach (string? path in new[] { _approvalDbPath, _memoryDbPath })
         {
             try { File.Delete(path); } catch { }
             try { File.Delete(path + "-wal"); } catch { }
@@ -58,11 +58,11 @@ public class AsyncSqliteTests : IDisposable
     [Fact]
     public async Task ApprovalWait_CancelledToken_ThrowsOperationCanceledException()
     {
-        var request = await _gate.RequestApprovalAsync(MakeContext());
+        ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => _gate.WaitForApprovalAsync(request.RequestId, TimeSpan.FromSeconds(30), cts.Token);
+        Func<Task<ApprovalResult>> act = () => _gate.WaitForApprovalAsync(request.RequestId, TimeSpan.FromSeconds(30), cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -73,7 +73,7 @@ public class AsyncSqliteTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => _memory.StoreAsync("user-1", MakeMemoryEntry(), cts.Token);
+        Func<Task> act = () => _memory.StoreAsync("user-1", MakeMemoryEntry(), cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -84,7 +84,7 @@ public class AsyncSqliteTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => _memory.RecallAsync("user-1", "test query", ct: cts.Token);
+        Func<Task<IReadOnlyList<MemoryEntry>>> act = () => _memory.RecallAsync("user-1", "test query", ct: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -95,7 +95,7 @@ public class AsyncSqliteTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => _memory.ForgetAsync("user-1", cts.Token);
+        Func<Task> act = () => _memory.ForgetAsync("user-1", cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -105,11 +105,9 @@ public class AsyncSqliteTests : IDisposable
     [Fact]
     public async Task ApprovalStore_ConcurrentRequests_DoNotDeadlock()
     {
-        var tasks = Enumerable.Range(0, 20)
-            .Select(i => _gate.RequestApprovalAsync(MakeContext($"user-{i}")))
-            .ToArray();
+        Task<ApprovalRequest>[] tasks = [.. Enumerable.Range(0, 20).Select(i => _gate.RequestApprovalAsync(MakeContext($"user-{i}")))];
 
-        var completed = await Task.WhenAll(tasks);
+        ApprovalRequest[] completed = await Task.WhenAll(tasks);
 
         completed.Should().HaveCount(20);
         completed.Select(r => r.RequestId).Distinct().Should().HaveCount(20);
@@ -118,16 +116,14 @@ public class AsyncSqliteTests : IDisposable
     [Fact]
     public async Task MemoryStore_ConcurrentWrites_DoNotDeadlock()
     {
-        var tasks = Enumerable.Range(0, 20)
-            .Select(i => _memory.StoreAsync($"user-{i}", MakeMemoryEntry($"user-{i}")))
-            .ToArray();
+        Task[] tasks = [.. Enumerable.Range(0, 20).Select(i => _memory.StoreAsync($"user-{i}", MakeMemoryEntry($"user-{i}")))];
 
         await Task.WhenAll(tasks);
 
         // Verify all writes succeeded by recalling for each user
         for (int i = 0; i < 20; i++)
         {
-            var recalled = await _memory.RecallAsync($"user-{i}");
+            IReadOnlyList<MemoryEntry> recalled = await _memory.RecallAsync($"user-{i}");
             recalled.Should().HaveCount(1);
         }
     }
@@ -148,7 +144,7 @@ public class AsyncSqliteTests : IDisposable
         }
 
         var allTasks = Task.WhenAll(tasks);
-        var completedInTime = await Task.WhenAny(allTasks, Task.Delay(TimeSpan.FromSeconds(10)));
+        Task completedInTime = await Task.WhenAny(allTasks, Task.Delay(TimeSpan.FromSeconds(10)));
 
         completedInTime.Should().Be(allTasks, "concurrent read/write should not deadlock");
     }
@@ -158,12 +154,12 @@ public class AsyncSqliteTests : IDisposable
     [Fact]
     public async Task ApprovalRequestAndRespond_CompletesSuccessfully()
     {
-        var request = await _gate.RequestApprovalAsync(MakeContext());
+        ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
         request.Decision.Should().Be(ApprovalDecision.Pending);
 
         await _gate.RespondAsync(request.RequestId, ApprovalDecision.Approved, "Looks good");
 
-        var result = await _gate.GetResultAsync(request.RequestId);
+        ApprovalResult result = await _gate.GetResultAsync(request.RequestId);
         result.Decision.Should().Be(ApprovalDecision.Approved);
         result.Comment.Should().Be("Looks good");
     }
@@ -171,10 +167,10 @@ public class AsyncSqliteTests : IDisposable
     [Fact]
     public async Task MemoryStoreAndRecall_CompletesSuccessfully()
     {
-        var entry = MakeMemoryEntry();
+        MemoryEntry entry = MakeMemoryEntry();
         await _memory.StoreAsync("user-1", entry);
 
-        var recalled = await _memory.RecallAsync("user-1");
+        IReadOnlyList<MemoryEntry> recalled = await _memory.RecallAsync("user-1");
 
         recalled.Should().HaveCount(1);
         recalled[0].Content.Should().Be("Test memory content");
@@ -186,7 +182,7 @@ public class AsyncSqliteTests : IDisposable
         await _memory.StoreAsync("user-1", MakeMemoryEntry());
         await _memory.ForgetAsync("user-1");
 
-        var recalled = await _memory.RecallAsync("user-1");
+        IReadOnlyList<MemoryEntry> recalled = await _memory.RecallAsync("user-1");
 
         recalled.Should().BeEmpty();
     }

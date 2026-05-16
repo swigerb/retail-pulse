@@ -23,7 +23,7 @@ public class ShipmentStatsTool
     {
         try
         {
-            var response = await _httpClient.GetAsync(
+            HttpResponseMessage response = await _httpClient.GetAsync(
                 $"/api/shipment-stats?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&period={Uri.EscapeDataString(period)}",
                 cancellationToken);
             response.EnsureSuccessStatusCode();

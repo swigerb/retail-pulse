@@ -1,3 +1,4 @@
+using Azure;
 using Azure.AI.Agents.Persistent;
 
 namespace RetailPulse.Api.Agents;
@@ -89,8 +90,8 @@ public sealed class PersistentAgentProvider<TAgent> : IAgentProvider<TAgent>
 
         // Name-based resolution: list all persistent agents, match by name
         string? resolvedId = null;
-        var agents = _client.Administration.GetAgents(cancellationToken: ct);
-        foreach (var agent in agents)
+        Pageable<PersistentAgent> agents = _client.Administration.GetAgents(cancellationToken: ct);
+        foreach (PersistentAgent agent in agents)
         {
             if (string.Equals(agent.Name, _options.FriendlyName, StringComparison.OrdinalIgnoreCase))
             {

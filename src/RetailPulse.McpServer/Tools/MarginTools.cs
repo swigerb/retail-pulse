@@ -12,36 +12,24 @@ public static class MarginTools
     public static object GetMarginByBrand(
         RetailPulseDb data,
         [Description("Brand name (required, e.g. 'Sierra Gold Tequila')")] string brand,
-        [Description("Period filter (e.g. '2026-Q1'). Omit for all periods.")] string? period = null)
-    {
-        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginByBrand(brand, period);
-    }
+        [Description("Period filter (e.g. '2026-Q1'). Omit for all periods.")] string? period = null) => string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginByBrand(brand, period);
 
     [McpServerTool(Name = "GetMarginDrivers")]
     [Description("Identify what's driving margin up or down for a brand. Returns cost categories, amounts, impact percentages, and trends.")]
     public static object GetMarginDrivers(
         RetailPulseDb data,
-        [Description("Brand name (required)")] string brand)
-    {
-        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginDrivers(brand);
-    }
+        [Description("Brand name (required)")] string brand) => string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginDrivers(brand);
 
     [McpServerTool(Name = "GetMarginTrend")]
     [Description("Get margin trajectory over time for a brand. Shows gross and net margin trends across quarters.")]
     public static object GetMarginTrend(
         RetailPulseDb data,
         [Description("Brand name (required)")] string brand,
-        [Description("Number of quarters to show (default 4)")] int quarters = 4)
-    {
-        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginTrend(brand, quarters);
-    }
+        [Description("Number of quarters to show (default 4)")] int quarters = 4) => string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GetMarginTrend(brand, quarters);
 
     [McpServerTool(Name = "DetectMarginRisks")]
     [Description("Identify margin-destructive patterns: cost escalation, margin compression, negative net margins. Returns ranked risks with recommendations.")]
     public static object DetectMarginRisks(
         RetailPulseDb data,
-        [Description("Brand name to scope. Omit for all brands.")] string? brand = null)
-    {
-        return data.DetectMarginRisks(brand);
-    }
+        [Description("Brand name to scope. Omit for all brands.")] string? brand = null) => data.DetectMarginRisks(brand);
 }

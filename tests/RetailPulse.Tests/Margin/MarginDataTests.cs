@@ -29,8 +29,8 @@ public class MarginDataTests : IDisposable
 
     public MarginDataTests()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
         _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_margindata_test_{Guid.NewGuid():N}.db");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
@@ -66,16 +66,16 @@ public class MarginDataTests : IDisposable
     [Fact]
     public void MarginData_AllBrandsHaveFinancialData()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT BrandId FROM BrandFinancials";
 
         var brands = new HashSet<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
             brands.Add(reader.GetString(0));
 
-        foreach (var expected in ExpectedBrands)
+        foreach (string expected in ExpectedBrands)
         {
             brands.Should().Contain(expected,
                 $"brand '{expected}' should have financial data in BrandFinancials");
@@ -85,14 +85,14 @@ public class MarginDataTests : IDisposable
     [Fact]
     public void MarginData_EachBrandHasRequiredColumns()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT BrandId, Revenue, Cogs, Marketing, Distribution, NetMargin
             FROM BrandFinancials
             LIMIT 1";
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         reader.Read().Should().BeTrue("BrandFinancials should have at least one row");
 
         // Validate column accessibility (throws if column doesn't exist)
@@ -108,14 +108,14 @@ public class MarginDataTests : IDisposable
     [Fact]
     public void MarginData_FourQuartersPerBrand()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT BrandId, COUNT(DISTINCT Period) as period_count
             FROM BrandFinancials
             GROUP BY BrandId";
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         var brandPeriods = new Dictionary<string, int>();
 
         while (reader.Read())
@@ -125,7 +125,7 @@ public class MarginDataTests : IDisposable
 
         brandPeriods.Should().NotBeEmpty("should have period data");
 
-        foreach (var (brand, pCount) in brandPeriods)
+        foreach ((string? brand, int pCount) in brandPeriods)
         {
             pCount.Should().BeGreaterThanOrEqualTo(1,
                 $"brand '{brand}' should have at least 1 period of history");
@@ -135,18 +135,18 @@ public class MarginDataTests : IDisposable
     [Fact]
     public void MarginData_QuarterLabelsAreValid()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Period FROM BrandFinancials ORDER BY Period";
 
         var periods = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
             periods.Add(reader.GetString(0));
 
         periods.Should().NotBeEmpty("should have period labels");
 
-        foreach (var p in periods)
+        foreach (string p in periods)
         {
             p.Should().NotBeNullOrEmpty("period label should not be empty");
             p.Length.Should().BeGreaterThan(2, "period label should be descriptive");
@@ -160,23 +160,23 @@ public class MarginDataTests : IDisposable
     [Fact]
     public void MarginData_GrossMarginPercentagesAreReasonable()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT BrandId, Period, Revenue, Cogs
             FROM BrandFinancials
             WHERE Revenue > 0";
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var brand = reader.GetString(0);
-            var period = reader.GetString(1);
-            var revenue = reader.GetDouble(2);
-            var cogs = reader.GetDouble(3);
-            var grossMargin = revenue - cogs;
+            string brand = reader.GetString(0);
+            string period = reader.GetString(1);
+            double revenue = reader.GetDouble(2);
+            double cogs = reader.GetDouble(3);
+            double grossMargin = revenue - cogs;
 
-            var marginPct = grossMargin / revenue * 100;
+            double marginPct = grossMargin / revenue * 100;
             marginPct.Should().BeGreaterThanOrEqualTo(0,
                 $"brand '{brand}' in {period}: gross margin % should be >= 0");
             marginPct.Should().BeLessThanOrEqualTo(100,
@@ -187,22 +187,22 @@ public class MarginDataTests : IDisposable
     [Fact]
     public void MarginData_NetMarginPercentagesAreReasonable()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT BrandId, Period, Revenue, NetMargin
             FROM BrandFinancials
             WHERE Revenue > 0";
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var brand = reader.GetString(0);
-            var period = reader.GetString(1);
-            var revenue = reader.GetDouble(2);
-            var netMargin = reader.GetDouble(3);
+            string brand = reader.GetString(0);
+            string period = reader.GetString(1);
+            double revenue = reader.GetDouble(2);
+            double netMargin = reader.GetDouble(3);
 
-            var netPct = netMargin / revenue * 100;
+            double netPct = netMargin / revenue * 100;
             // Net margin can be negative (loss) but should be reasonable
             netPct.Should().BeGreaterThanOrEqualTo(-50,
                 $"brand '{brand}' in {period}: net margin % should be > -50% (not catastrophic)");
@@ -218,21 +218,21 @@ public class MarginDataTests : IDisposable
     [Fact]
     public void MarginData_RevenueExceedsCogs_ForHealthyBrands()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT BrandId, Period, Revenue, Cogs
             FROM BrandFinancials";
 
-        using var reader = cmd.ExecuteReader();
-        var positiveMarginCount = 0;
-        var totalCount = 0;
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        int positiveMarginCount = 0;
+        int totalCount = 0;
 
         while (reader.Read())
         {
             totalCount++;
-            var revenue = reader.GetDouble(2);
-            var cogs = reader.GetDouble(3);
+            double revenue = reader.GetDouble(2);
+            double cogs = reader.GetDouble(3);
 
             if (revenue > cogs) positiveMarginCount++;
         }
@@ -240,7 +240,7 @@ public class MarginDataTests : IDisposable
         totalCount.Should().BeGreaterThan(0, "should have margin data rows");
 
         // At least 80% of brand-quarters should have positive gross margin (healthy)
-        var positiveRate = (double)positiveMarginCount / totalCount;
+        double positiveRate = (double)positiveMarginCount / totalCount;
         positiveRate.Should().BeGreaterThan(0.8,
             "at least 80% of brand-quarters should have revenue > COGS (positive margin)");
     }

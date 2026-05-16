@@ -1,4 +1,5 @@
 using FluentAssertions;
+using FluentAssertions.Specialized;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -28,8 +29,8 @@ public class EscalationTests
     [InlineData("Get inventory levels for FreshMart")]
     public async Task SimpleQuery_StaysAtL1_NoEscalation(string query)
     {
-        var escalator = CreateEscalationService();
-        var result = await escalator.ClassifyAndEscalateAsync(query);
+        IEscalationService escalator = CreateEscalationService();
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(query);
 
         result.Level.Should().Be(1, "simple single-dimension query should stay at L1");
         result.AgentKey.Should().NotBeNullOrEmpty();
@@ -39,8 +40,8 @@ public class EscalationTests
     [Fact]
     public async Task L1Query_HasMinimalContext()
     {
-        var escalator = CreateEscalationService();
-        var result = await escalator.ClassifyAndEscalateAsync("What are my depletions?");
+        IEscalationService escalator = CreateEscalationService();
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync("What are my depletions?");
 
         result.Level.Should().Be(1);
         result.Context.Should().NotBeNull();
@@ -57,8 +58,8 @@ public class EscalationTests
     [InlineData("Show me competitive pricing impact on our margin and market share simultaneously")]
     public async Task ComplexMultiDimensionalQuery_EscalatesToL2(string query)
     {
-        var escalator = CreateEscalationService();
-        var result = await escalator.ClassifyAndEscalateAsync(query);
+        IEscalationService escalator = CreateEscalationService();
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(query);
 
         result.Level.Should().BeGreaterThanOrEqualTo(2,
             "complex multi-dimensional query should escalate to L2+");
@@ -67,17 +68,17 @@ public class EscalationTests
     [Fact]
     public async Task L2Query_HasMoreContextThanL1()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
 
-        var l1Result = await escalator.ClassifyAndEscalateAsync("Show me depletions");
-        var l2Result = await escalator.ClassifyAndEscalateAsync(
+        EscalationResult l1Result = await escalator.ClassifyAndEscalateAsync("Show me depletions");
+        EscalationResult l2Result = await escalator.ClassifyAndEscalateAsync(
             "Compare demand and margin trends across all regions with competitive analysis");
 
         l2Result.Level.Should().BeGreaterThan(l1Result.Level);
 
         // L2 should have richer context
-        var l2ContextSize = System.Text.Json.JsonSerializer.Serialize(l2Result.Context).Length;
-        var l1ContextSize = System.Text.Json.JsonSerializer.Serialize(l1Result.Context).Length;
+        int l2ContextSize = System.Text.Json.JsonSerializer.Serialize(l2Result.Context).Length;
+        int l1ContextSize = System.Text.Json.JsonSerializer.Serialize(l1Result.Context).Length;
 
         l2ContextSize.Should().BeGreaterThanOrEqualTo(l1ContextSize,
             "L2 context should be at least as rich as L1 context");
@@ -93,8 +94,8 @@ public class EscalationTests
     [InlineData("Board-level summary of portfolio performance with risk assessment and action plan")]
     public async Task StrategicExecutiveQuery_EscalatesToL3(string query)
     {
-        var escalator = CreateEscalationService();
-        var result = await escalator.ClassifyAndEscalateAsync(query);
+        IEscalationService escalator = CreateEscalationService();
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(query);
 
         result.Level.Should().Be(3,
             "strategic/executive query should escalate to L3");
@@ -103,8 +104,8 @@ public class EscalationTests
     [Fact]
     public async Task L3_ProducesExecBriefFormat()
     {
-        var escalator = CreateEscalationService();
-        var result = await escalator.ClassifyAndEscalateAsync(
+        IEscalationService escalator = CreateEscalationService();
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(
             "Executive briefing on portfolio health with strategic recommendations");
 
         result.Level.Should().Be(3);
@@ -126,12 +127,12 @@ public class EscalationTests
     [Fact]
     public async Task EachLevel_AddsContext()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
 
-        var l1 = await escalator.ClassifyAndEscalateAsync("Show me depletions");
-        var l2 = await escalator.ClassifyAndEscalateAsync(
+        EscalationResult l1 = await escalator.ClassifyAndEscalateAsync("Show me depletions");
+        EscalationResult l2 = await escalator.ClassifyAndEscalateAsync(
             "Compare demand, margin, and competitive landscape across all regions");
-        var l3 = await escalator.ClassifyAndEscalateAsync(
+        EscalationResult l3 = await escalator.ClassifyAndEscalateAsync(
             "Executive strategy briefing with full portfolio assessment and 3-year outlook");
 
         // Context should grow with each level
@@ -139,12 +140,12 @@ public class EscalationTests
         l2.Level.Should().BeGreaterThanOrEqualTo(2);
         l3.Level.Should().Be(3);
 
-        var sizes = new[]
-        {
+        int[] sizes =
+        [
             System.Text.Json.JsonSerializer.Serialize(l1.Context).Length,
             System.Text.Json.JsonSerializer.Serialize(l2.Context).Length,
             System.Text.Json.JsonSerializer.Serialize(l3.Context).Length
-        };
+        ];
 
         // Each successive level should have at least as much context
         sizes[1].Should().BeGreaterThanOrEqualTo(sizes[0], "L2 context >= L1");
@@ -158,10 +159,10 @@ public class EscalationTests
     [Fact]
     public async Task ForceLevel_OverridesAutoDetection()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
 
         // Simple query force-escalated to L3
-        var result = await escalator.ClassifyAndEscalateAsync(
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(
             "Show me depletions", forceLevel: 3);
 
         result.Level.Should().Be(3,
@@ -171,9 +172,9 @@ public class EscalationTests
     [Fact]
     public async Task ForceLevel_L1_DowngradesComplexQuery()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
 
-        var result = await escalator.ClassifyAndEscalateAsync(
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(
             "Executive portfolio strategy briefing", forceLevel: 1);
 
         result.Level.Should().Be(1,
@@ -183,21 +184,21 @@ public class EscalationTests
     [Fact]
     public async Task InvalidForceLevel_HandledGracefully()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
 
         // Force level outside valid range
         Func<Task> act = () => escalator.ClassifyAndEscalateAsync(
             "Show me depletions", forceLevel: 99);
 
         // Should either clamp to valid range or throw a clear error
-        var exception = await act.Should().ThrowAsync<ArgumentException>()
+        ExceptionAssertions<ArgumentException> exception = await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*level*");
     }
 
     [Fact]
     public async Task ForceLevel_Zero_HandledGracefully()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
 
         Func<Task> act = () => escalator.ClassifyAndEscalateAsync(
             "Show me depletions", forceLevel: 0);
@@ -212,10 +213,10 @@ public class EscalationTests
     [Fact]
     public async Task L2FanOut_CompletesWithin15Seconds()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var result = await escalator.ClassifyAndEscalateAsync(
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(
             "Compare demand and margin trends across all regions with competitive analysis");
 
         sw.Stop();
@@ -227,9 +228,9 @@ public class EscalationTests
     [Fact]
     public async Task L2FanOut_ReturnsResultsNotNull()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
 
-        var result = await escalator.ClassifyAndEscalateAsync(
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(
             "Compare demand and margin trends across all regions with competitive analysis");
 
         result.Level.Should().BeGreaterThanOrEqualTo(2);
@@ -240,14 +241,14 @@ public class EscalationTests
     [Fact]
     public async Task L2FanOut_CancellationRespected()
     {
-        var escalator = CreateEscalationService();
+        IEscalationService escalator = CreateEscalationService();
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
         // The mock service is fast, so it should complete before cancellation.
         // This verifies the CancellationToken is threaded through correctly.
         try
         {
-            var result = await escalator.ClassifyAndEscalateAsync(
+            EscalationResult result = await escalator.ClassifyAndEscalateAsync(
                 "Compare demand and margin trends across all regions", ct: cts.Token);
             // If it completes, that's fine — mock is fast
             result.Should().NotBeNull();
@@ -265,10 +266,10 @@ public class EscalationTests
     [Fact]
     public async Task Escalation_PreservesOriginalQuestion()
     {
-        var escalator = CreateEscalationService();
-        var originalQuestion = "Compare demand trends with margin performance";
+        IEscalationService escalator = CreateEscalationService();
+        string originalQuestion = "Compare demand trends with margin performance";
 
-        var result = await escalator.ClassifyAndEscalateAsync(originalQuestion);
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(originalQuestion);
 
         result.OriginalQuestion.Should().Be(originalQuestion,
             "escalation result should preserve the original user question");
@@ -280,10 +281,10 @@ public class EscalationTests
     [InlineData(3)]
     public async Task Escalation_PreservesOriginalQuestion_AtEveryLevel(int level)
     {
-        var escalator = CreateEscalationService();
-        var question = "Test question for preservation";
+        IEscalationService escalator = CreateEscalationService();
+        string question = "Test question for preservation";
 
-        var result = await escalator.ClassifyAndEscalateAsync(question, forceLevel: level);
+        EscalationResult result = await escalator.ClassifyAndEscalateAsync(question, forceLevel: level);
 
         result.OriginalQuestion.Should().Be(question,
             $"original question should be preserved at level {level}");
@@ -309,9 +310,9 @@ public class EscalationTests
                 It.IsAny<CancellationToken>()))
             .Returns<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((msgs, _, _) =>
             {
-                var userMsg = msgs.LastOrDefault(m => m.Role == ChatRole.User)?.Text ?? "";
-                var level = ClassifyComplexity(userMsg);
-                var json = $"{{\"level\":{level},\"reasoning\":\"auto-classified\"}}";
+                string userMsg = msgs.LastOrDefault(m => m.Role == ChatRole.User)?.Text ?? "";
+                int level = ClassifyComplexity(userMsg);
+                string json = $"{{\"level\":{level},\"reasoning\":\"auto-classified\"}}";
                 return Task.FromResult(new Microsoft.Extensions.AI.ChatResponse(
                     new ChatMessage(ChatRole.Assistant, json)));
             });
@@ -324,14 +325,16 @@ public class EscalationTests
     /// </summary>
     private static int ClassifyComplexity(string query)
     {
-        var lower = query.ToLowerInvariant();
+        string lower = query.ToLowerInvariant();
         if (lower.Contains("executive") || lower.Contains("strategic") ||
             lower.Contains("board") || lower.Contains("briefing") ||
             lower.Contains("3-year") || lower.Contains("strategy"))
+        {
             return 3;
+        }
 
-        var multiDimensionKeywords = new[] { "compare", "correlation", "simultaneously", "across all", "and margin", "and competitive", "margin and", "promotional spend", "pricing impact" };
-        var hits = multiDimensionKeywords.Count(lower.Contains);
+        string[] multiDimensionKeywords = ["compare", "correlation", "simultaneously", "across all", "and margin", "and competitive", "margin and", "promotional spend", "pricing impact"];
+        int hits = multiDimensionKeywords.Count(lower.Contains);
         return hits >= 2 ? 2 : 1;
     }
 
@@ -386,14 +389,14 @@ internal sealed class MockEscalationService : IEscalationService
         }
         else
         {
-            var response = await _client.GetResponseAsync(
+            Microsoft.Extensions.AI.ChatResponse response = await _client.GetResponseAsync(
                 [new ChatMessage(ChatRole.User, query)], cancellationToken: ct);
             var json = System.Text.Json.JsonDocument.Parse(response.Text ?? "{}");
             level = json.RootElement.GetProperty("level").GetInt32();
         }
 
-        var context = BuildContext(level, query);
-        var format = level == 3 ? "summary,metrics,recommendation" : null;
+        object context = BuildContext(level, query);
+        string? format = level == 3 ? "summary,metrics,recommendation" : null;
 
         return new EscalationResult(level, $"l{level}-agent", context, query, format);
     }

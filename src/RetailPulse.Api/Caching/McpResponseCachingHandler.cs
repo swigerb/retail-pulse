@@ -36,7 +36,7 @@ public class McpResponseCachingHandler : DelegatingHandler
             return await base.SendAsync(request, cancellationToken);
         }
 
-        var cacheKey = $"mcp:{request.RequestUri}";
+        string cacheKey = $"mcp:{request.RequestUri}";
 
         if (_cache.TryGetValue(cacheKey, out CachedMcpResponse? cached) && cached is not null)
         {
@@ -51,12 +51,12 @@ public class McpResponseCachingHandler : DelegatingHandler
         }
 
         _metrics?.RecordCacheMiss();
-        var response = await base.SendAsync(request, cancellationToken);
+        HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
 
         if (response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/json";
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            string contentType = response.Content.Headers.ContentType?.MediaType ?? "application/json";
 
             _cache.Set(cacheKey, new CachedMcpResponse(body, contentType), _ttl);
             _logger.LogDebug("MCP cache set for {Uri}, TTL={Ttl}s", request.RequestUri, _ttl.TotalSeconds);
@@ -67,7 +67,7 @@ public class McpResponseCachingHandler : DelegatingHandler
                 Content = new StringContent(body, System.Text.Encoding.UTF8, contentType)
             };
             // Copy relevant headers
-            foreach (var header in response.Headers)
+            foreach (KeyValuePair<string, IEnumerable<string>> header in response.Headers)
                 freshResponse.Headers.TryAddWithoutValidation(header.Key, header.Value);
             freshResponse.Headers.Add("X-MCP-Cache", "miss");
             return freshResponse;

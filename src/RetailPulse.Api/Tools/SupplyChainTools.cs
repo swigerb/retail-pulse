@@ -24,13 +24,13 @@ public class InventoryLevelsTool
     {
         try
         {
-            var url = "/api/supply/inventory?";
+            string url = "/api/supply/inventory?";
             if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
             if (!string.IsNullOrWhiteSpace(category)) url += $"&category={Uri.EscapeDataString(category)}";
             if (!string.IsNullOrWhiteSpace(status)) url += $"&status={Uri.EscapeDataString(status)}";
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -63,12 +63,12 @@ public class SupplyDisruptionsTool
     {
         try
         {
-            var url = $"/api/supply/disruptions?activeOnly={activeOnly}";
+            string url = $"/api/supply/disruptions?activeOnly={activeOnly}";
             if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
             if (!string.IsNullOrWhiteSpace(severity)) url += $"&severity={Uri.EscapeDataString(severity)}";
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -101,12 +101,12 @@ public class FulfillmentRateTool
     {
         try
         {
-            var url = $"/api/supply/fulfillment?minPeriods={minPeriods}";
+            string url = $"/api/supply/fulfillment?minPeriods={minPeriods}";
             if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
             if (!string.IsNullOrWhiteSpace(period)) url += $"&period={Uri.EscapeDataString(period)}";
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -137,10 +137,10 @@ public class SupplyHealthTool
     {
         try
         {
-            var url = $"/api/supply/health?brand={Uri.EscapeDataString(brand)}";
+            string url = $"/api/supply/health?brand={Uri.EscapeDataString(brand)}";
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

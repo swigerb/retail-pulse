@@ -60,7 +60,7 @@ internal sealed class InstrumentedAIFunction : AIFunction
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        var toolName = _inner.Name;
+        string toolName = _inner.Name;
 
         // Emit tool_call started
         await _hubContext.Clients.Group(_sessionId).SendAsync("progress", new

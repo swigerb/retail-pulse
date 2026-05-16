@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using RetailPulse.Api.Validation;
 using RetailPulse.Contracts;
 
 namespace RetailPulse.Tests.Contract;
@@ -28,7 +29,7 @@ public class ChatEndpointContractTests
         // ChatRequest with null/empty message should fail validation
         var request = new ChatRequest(Message: "", SessionId: "test-session");
 
-        var result = Api.Validation.ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("message");
@@ -37,7 +38,7 @@ public class ChatEndpointContractTests
     [Fact]
     public void Request_NullBody_ReturnsValidationError()
     {
-        var result = Api.Validation.ChatRequestValidator.Validate(null);
+        ValidationResult result = ChatRequestValidator.Validate(null);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("request");
@@ -50,7 +51,7 @@ public class ChatEndpointContractTests
             Message: "How is Apex Grill performing?",
             SessionId: "abc123");
 
-        var result = Api.Validation.ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeTrue();
         result.Errors.Should().BeEmpty();
@@ -63,7 +64,7 @@ public class ChatEndpointContractTests
             Message: "test",
             SessionId: "invalid session id with spaces!");
 
-        var result = Api.Validation.ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("sessionId");
@@ -72,10 +73,10 @@ public class ChatEndpointContractTests
     [Fact]
     public void Request_MessageExceedsMaxLength_Fails()
     {
-        var longMessage = new string('x', Api.Validation.ChatRequestValidator.MaxMessageLength + 1);
+        string longMessage = new('x', ChatRequestValidator.MaxMessageLength + 1);
         var request = new ChatRequest(Message: longMessage);
 
-        var result = Api.Validation.ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("message");
@@ -113,9 +114,9 @@ public class ChatEndpointContractTests
             Charts: null,
             TotalDurationMs: 200);
 
-        var json = JsonSerializer.Serialize(response, JsonOptions);
+        string json = JsonSerializer.Serialize(response, JsonOptions);
         var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
 
         root.GetProperty("reply").GetString().Should().Be("Brand performance is strong");
         root.GetProperty("sessionId").GetString().Should().Be("sess-123");
@@ -136,9 +137,9 @@ public class ChatEndpointContractTests
             InputTokens: 150,
             OutputTokens: 300);
 
-        var json = JsonSerializer.Serialize(span, JsonOptions);
+        string json = JsonSerializer.Serialize(span, JsonOptions);
         var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
 
         root.GetProperty("name").GetString().Should().Be("demand-agent.execute");
         root.GetProperty("type").GetString().Should().Be("tool_call");
@@ -175,7 +176,7 @@ public class ChatEndpointContractTests
             Message: "",
             SessionId: "!!!invalid!!!");
 
-        var result = Api.Validation.ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().HaveCountGreaterThanOrEqualTo(2);

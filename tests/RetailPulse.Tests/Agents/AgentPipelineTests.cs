@@ -24,7 +24,7 @@ public class AgentPipelineTests
     public async Task BuildMessages_NoHistory_ReturnsTwoMessages()
     {
         var request = new ChatRequest("What are today's sales?");
-        var messages = AgentExecutionPipeline.BuildMessages("You are a test agent.", request);
+        List<ChatMessage> messages = AgentExecutionPipeline.BuildMessages("You are a test agent.", request);
 
         messages.Should().HaveCount(2);
         messages[0].Role.Should().Be(ChatRole.System);
@@ -44,7 +44,7 @@ public class AgentPipelineTests
         };
 
         var request = new ChatRequest("Follow-up", History: history);
-        var messages = AgentExecutionPipeline.BuildMessages("System prompt.", request);
+        List<ChatMessage> messages = AgentExecutionPipeline.BuildMessages("System prompt.", request);
 
         // System + 2 history + user = 4
         messages.Should().HaveCount(4);
@@ -71,7 +71,7 @@ public class AgentPipelineTests
             .ToList();
 
         var request = new ChatRequest("Latest question", History: history);
-        var messages = AgentExecutionPipeline.BuildMessages("System.", request);
+        List<ChatMessage> messages = AgentExecutionPipeline.BuildMessages("System.", request);
 
         // System (1) + truncated history (20) + user (1) = 22
         messages.Should().HaveCount(22);
@@ -90,7 +90,7 @@ public class AgentPipelineTests
             .ToList();
 
         var request = new ChatRequest("Current", History: history);
-        var messages = AgentExecutionPipeline.BuildMessages("Sys.", request);
+        List<ChatMessage> messages = AgentExecutionPipeline.BuildMessages("Sys.", request);
 
         // System (1) + 20 history + user (1) = 22
         messages.Should().HaveCount(22);
@@ -110,7 +110,7 @@ public class AgentPipelineTests
         };
 
         var request = new ChatRequest("E", History: history);
-        var messages = AgentExecutionPipeline.BuildMessages("Sys.", request);
+        List<ChatMessage> messages = AgentExecutionPipeline.BuildMessages("Sys.", request);
 
         messages.Should().HaveCount(6); // 1 system + 4 history + 1 user
         await Task.CompletedTask;
@@ -123,10 +123,10 @@ public class AgentPipelineTests
     [Fact]
     public async Task ExecuteAsync_ReturnsNonNullResponse()
     {
-        var pipeline = CreatePipeline("Test reply.");
+        AgentExecutionPipeline pipeline = CreatePipeline("Test reply.");
 
-        var context = CreateContext("What's up?");
-        var response = await pipeline.ExecuteAsync(context);
+        AgentExecutionContext context = CreateContext("What's up?");
+        Contracts.ChatResponse response = await pipeline.ExecuteAsync(context);
 
         response.Should().NotBeNull();
         response.Reply.Should().Be("Test reply.");
@@ -136,11 +136,11 @@ public class AgentPipelineTests
     [Fact]
     public async Task ExecuteAsync_UsesProvidedSessionId()
     {
-        var pipeline = CreatePipeline("Reply.");
+        AgentExecutionPipeline pipeline = CreatePipeline("Reply.");
         var request = new ChatRequest("Hi", SessionId: "my-session-123");
-        var context = CreateContext(request: request);
+        AgentExecutionContext context = CreateContext(request: request);
 
-        var response = await pipeline.ExecuteAsync(context);
+        Contracts.ChatResponse response = await pipeline.ExecuteAsync(context);
 
         response.SessionId.Should().Be("my-session-123");
     }
@@ -161,7 +161,7 @@ public class AgentPipelineTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(nullTextResponse);
 
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -171,12 +171,12 @@ public class AgentPipelineTests
             config,
             NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
 
-        var context = CreateContext("Question", fallbackReply: "Custom fallback");
-        var response = await pipeline.ExecuteAsync(context);
+        AgentExecutionContext context = CreateContext("Question", fallbackReply: "Custom fallback");
+        Contracts.ChatResponse response = await pipeline.ExecuteAsync(context);
 
         // The pipeline uses: response.Text ?? context.FallbackReply
         // If Text is null, fallback is used. If Text is empty string, it passes through.
-        var expectedReply = nullTextResponse.Text ?? "Custom fallback";
+        string expectedReply = nullTextResponse.Text ?? "Custom fallback";
         response.Reply.Should().Be(expectedReply);
     }
 
@@ -187,7 +187,7 @@ public class AgentPipelineTests
     [Fact]
     public Task BuildTokenUsage_UsesActualModelName_NotHardcoded()
     {
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["TokenPricing:gpt-4.1-mini:InputPerMillion"] = "0.40",
@@ -195,9 +195,9 @@ public class AgentPipelineTests
             })
             .Build();
 
-        var pipeline = CreatePipeline("Reply.", config: config);
+        AgentExecutionPipeline pipeline = CreatePipeline("Reply.", config: config);
 
-        var usage = pipeline.BuildTokenUsage(1000, 500, 1500, "gpt-4.1-mini");
+        TokenUsage usage = pipeline.BuildTokenUsage(1000, 500, 1500, "gpt-4.1-mini");
 
         usage.InputTokens.Should().Be(1000);
         usage.OutputTokens.Should().Be(500);
@@ -210,13 +210,13 @@ public class AgentPipelineTests
     [Fact]
     public async Task BuildTokenUsage_ReturnsNullCost_WhenModelNotInConfig()
     {
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
-        var pipeline = CreatePipeline("Reply.", config: config);
+        AgentExecutionPipeline pipeline = CreatePipeline("Reply.", config: config);
 
-        var usage = pipeline.BuildTokenUsage(100, 50, 150, "unknown-model");
+        TokenUsage usage = pipeline.BuildTokenUsage(100, 50, 150, "unknown-model");
 
         usage.EstimatedCostUsd.Should().BeNull(
             "no pricing config for 'unknown-model' — cost should be null, not a hardcoded value");
@@ -226,7 +226,7 @@ public class AgentPipelineTests
     [Fact]
     public async Task BuildTokenUsage_CalculatesCorrectCost()
     {
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["TokenPricing:test-model:InputPerMillion"] = "2.00",
@@ -234,9 +234,9 @@ public class AgentPipelineTests
             })
             .Build();
 
-        var pipeline = CreatePipeline("Reply.", config: config);
+        AgentExecutionPipeline pipeline = CreatePipeline("Reply.", config: config);
 
-        var usage = pipeline.BuildTokenUsage(1_000_000, 500_000, 1_500_000, "test-model");
+        TokenUsage usage = pipeline.BuildTokenUsage(1_000_000, 500_000, 1_500_000, "test-model");
 
         // Expected: (1M * 2.00 / 1M) + (500K * 8.00 / 1M) = 2.00 + 4.00 = 6.00
         usage.EstimatedCostUsd.Should().Be(6.00m);
@@ -314,8 +314,8 @@ public class AgentPipelineTests
     [Fact]
     public void SanitizeReplyText_RemovesFunctionCallLeakage()
     {
-        var dirty = "to=functions.IdentifyDemandRisks 天天中彩票提現 福利彩票天天彩json {\"brand\":\"Apex Grill\",\"region\":\"Southwest\",\"channel\":\"All\"}\nApex Grill is performing well in the Southwest.";
-        var clean = AgentExecutionPipeline.SanitizeReplyText(dirty);
+        string dirty = "to=functions.IdentifyDemandRisks 天天中彩票提現 福利彩票天天彩json {\"brand\":\"Apex Grill\",\"region\":\"Southwest\",\"channel\":\"All\"}\nApex Grill is performing well in the Southwest.";
+        string clean = AgentExecutionPipeline.SanitizeReplyText(dirty);
         clean.Should().NotContain("to=functions");
         clean.Should().Contain("Apex Grill is performing well");
     }
@@ -323,8 +323,8 @@ public class AgentPipelineTests
     [Fact]
     public void SanitizeReplyText_RemovesCorruptedCjkLines()
     {
-        var dirty = "天天中彩票提現 福利彩票天天彩json garbage\nActual response content here.";
-        var clean = AgentExecutionPipeline.SanitizeReplyText(dirty);
+        string dirty = "天天中彩票提現 福利彩票天天彩json garbage\nActual response content here.";
+        string clean = AgentExecutionPipeline.SanitizeReplyText(dirty);
         clean.Should().NotContain("天天");
         clean.Should().Contain("Actual response content here.");
     }
@@ -332,15 +332,15 @@ public class AgentPipelineTests
     [Fact]
     public void SanitizeReplyText_PreservesCleanContent()
     {
-        var clean = "Here's the demand forecast for Apex Grill in Q2.";
+        string clean = "Here's the demand forecast for Apex Grill in Q2.";
         AgentExecutionPipeline.SanitizeReplyText(clean).Should().Be(clean);
     }
 
     [Fact]
     public void SanitizeReplyText_ReturnsGracefulMessage_WhenEntireReplyIsGarbage()
     {
-        var garbage = "to=functions.Foo blah blah";
-        var result = AgentExecutionPipeline.SanitizeReplyText(garbage);
+        string garbage = "to=functions.Foo blah blah";
+        string result = AgentExecutionPipeline.SanitizeReplyText(garbage);
         result.Should().Contain("unable to generate a response");
     }
 

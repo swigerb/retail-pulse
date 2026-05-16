@@ -6,12 +6,12 @@ public static class DeadLetterEndpoints
 {
     public static void MapDeadLetterEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/api/admin/dead-letter")
+        RouteGroupBuilder group = app.MapGroup("/api/admin/dead-letter")
             .RequireAuthorization();
 
         group.MapGet("/", async (DeadLetterQueue queue, CancellationToken ct) =>
         {
-            var pending = await queue.GetPendingAsync(ct: ct);
+            IReadOnlyList<DeadLetterEntry> pending = await queue.GetPendingAsync(ct: ct);
             return Results.Ok(new
             {
                 count = pending.Count,
@@ -21,10 +21,10 @@ public static class DeadLetterEndpoints
 
         group.MapPost("/replay", async (DeadLetterQueue queue, ILogger<DeadLetterQueue> logger, CancellationToken ct) =>
         {
-            var pending = await queue.GetPendingAsync(ct: ct);
-            var replayed = 0;
+            IReadOnlyList<DeadLetterEntry> pending = await queue.GetPendingAsync(ct: ct);
+            int replayed = 0;
 
-            foreach (var entry in pending)
+            foreach (DeadLetterEntry entry in pending)
             {
                 // Mark as replayed — in a real system, we'd re-dispatch the operation.
                 // For now, we mark them replayed and log for manual follow-up.
@@ -40,7 +40,7 @@ public static class DeadLetterEndpoints
 
         group.MapGet("/count", async (DeadLetterQueue queue, CancellationToken ct) =>
         {
-            var count = await queue.GetPendingCountAsync(ct);
+            int count = await queue.GetPendingCountAsync(ct);
             return Results.Ok(new { pendingCount = count });
         });
     }

@@ -24,7 +24,7 @@ public class MemoryMiddlewareTests : IDisposable
         _memory = new SqliteConversationMemory(_dbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
 
         _extractionClient = new Mock<IChatClient>();
-        SetupExtractionResponse("""{"summary":"Test summary","entities":[],"preference":null}""");
+        SetupExtractionResponse(/*lang=json,strict*/ """{"summary":"Test summary","entities":[],"preference":null}""");
 
         var extraction = new MemoryExtractionService(
             _extractionClient.Object,
@@ -48,13 +48,13 @@ public class MemoryMiddlewareTests : IDisposable
                 It.IsAny<IEnumerable<ChatMessage>>(),
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+            .ReturnsAsync(new ChatResponse(
                 new ChatMessage(ChatRole.Assistant, json)));
     }
 
     private static MemoryEntry MakeEntry(MemoryType type, string content, string? entityKey = null)
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         return new MemoryEntry(Guid.NewGuid().ToString("N"), "u", type, content, entityKey,
             now, now.AddDays(30));
     }
@@ -67,7 +67,7 @@ public class MemoryMiddlewareTests : IDisposable
         await _memory.StoreAsync("user-1", MakeEntry(MemoryType.UserPreference, "Prefers bar charts"));
         await _memory.StoreAsync("user-1", MakeEntry(MemoryType.ConversationSummary, "Discussed Q3 trends"));
 
-        var context = await _middleware.BuildMemoryContextAsync("user-1", "Show me sales");
+        string? context = await _middleware.BuildMemoryContextAsync("user-1", "Show me sales");
 
         context.Should().NotBeNull();
         context.Should().Contain("User Context");
@@ -79,10 +79,12 @@ public class MemoryMiddlewareTests : IDisposable
     {
         // Inject many memories — context block should not exceed ~2000 chars
         for (int i = 0; i < 50; i++)
+        {
             await _memory.StoreAsync("user-1", MakeEntry(MemoryType.ConversationSummary,
                 $"Detailed conversation summary entry {i} about brand performance metrics and regional distribution."));
+        }
 
-        var context = await _middleware.BuildMemoryContextAsync("user-1", "analysis");
+        string? context = await _middleware.BuildMemoryContextAsync("user-1", "analysis");
 
         context.Should().NotBeNull();
         context.Length.Should().BeLessThan(3000, "memory injection should cap at ~2000 chars (~500 tokens)");
@@ -91,14 +93,14 @@ public class MemoryMiddlewareTests : IDisposable
     [Fact]
     public async Task BuildMemoryContext_FirstTimeUser_ReturnsNull()
     {
-        var context = await _middleware.BuildMemoryContextAsync("new-user", "Hello");
+        string? context = await _middleware.BuildMemoryContextAsync("new-user", "Hello");
         context.Should().BeNull();
     }
 
     [Fact]
     public async Task BuildMemoryContext_EmptyMemories_ReturnsNull()
     {
-        var context = await _middleware.BuildMemoryContextAsync("user-1", "Hello");
+        string? context = await _middleware.BuildMemoryContextAsync("user-1", "Hello");
         context.Should().BeNull();
     }
 
@@ -107,7 +109,7 @@ public class MemoryMiddlewareTests : IDisposable
     {
         await _memory.StoreAsync("user-1", MakeEntry(MemoryType.UserPreference, "Prefers pie charts"));
 
-        var context = await _middleware.BuildMemoryContextAsync("user-1", "data");
+        string? context = await _middleware.BuildMemoryContextAsync("user-1", "data");
         context.Should().Contain("preference");
     }
 
@@ -118,22 +120,22 @@ public class MemoryMiddlewareTests : IDisposable
     [Fact]
     public async Task ExtractAndStore_StoresConversationSummary()
     {
-        SetupExtractionResponse("""{"summary":"User asked about Q3 demand trends","entities":[],"preference":null}""");
+        SetupExtractionResponse(/*lang=json,strict*/ """{"summary":"User asked about Q3 demand trends","entities":[],"preference":null}""");
 
         await _middleware.ExtractAndStoreAsync("user-1", "What are Q3 trends?", "Q3 demand increased 15%.");
 
-        var memories = await _memory.RecallAsync("user-1");
+        IReadOnlyList<MemoryEntry> memories = await _memory.RecallAsync("user-1");
         memories.Should().Contain(m => m.Type == MemoryType.ConversationSummary);
     }
 
     [Fact]
     public async Task ExtractAndStore_StoresEntityMentions()
     {
-        SetupExtractionResponse("""{"summary":"Discussed Brand X","entities":["Brand X","Southwest"],"preference":null}""");
+        SetupExtractionResponse(/*lang=json,strict*/ """{"summary":"Discussed Brand X","entities":["Brand X","Southwest"],"preference":null}""");
 
         await _middleware.ExtractAndStoreAsync("user-1", "Tell me about Brand X", "Brand X grew 10% in Southwest.");
 
-        var memories = await _memory.RecallAsync("user-1", maxResults: 10);
+        IReadOnlyList<MemoryEntry> memories = await _memory.RecallAsync("user-1", maxResults: 10);
         memories.Should().Contain(m => m.Type == MemoryType.EntityMention && m.EntityKey == "Brand X");
         memories.Should().Contain(m => m.Type == MemoryType.EntityMention && m.EntityKey == "Southwest");
     }
@@ -141,22 +143,22 @@ public class MemoryMiddlewareTests : IDisposable
     [Fact]
     public async Task ExtractAndStore_StoresUserPreference()
     {
-        SetupExtractionResponse("""{"summary":"User preferences","entities":[],"preference":"User prefers bar charts for data"}""");
+        SetupExtractionResponse(/*lang=json,strict*/ """{"summary":"User preferences","entities":[],"preference":"User prefers bar charts for data"}""");
 
         await _middleware.ExtractAndStoreAsync("user-1", "I prefer bar charts", "I'll use bar charts.");
 
-        var memories = await _memory.RecallAsync("user-1", maxResults: 10);
+        IReadOnlyList<MemoryEntry> memories = await _memory.RecallAsync("user-1", maxResults: 10);
         memories.Should().Contain(m => m.Type == MemoryType.UserPreference);
     }
 
     [Fact]
     public async Task ExtractAndStore_ShortExchange_StillExtractsSummary()
     {
-        SetupExtractionResponse("""{"summary":"Greeting exchange","entities":[],"preference":null}""");
+        SetupExtractionResponse(/*lang=json,strict*/ """{"summary":"Greeting exchange","entities":[],"preference":null}""");
 
         await _middleware.ExtractAndStoreAsync("user-1", "Hi", "Hello! How can I help?");
 
-        var memories = await _memory.RecallAsync("user-1");
+        IReadOnlyList<MemoryEntry> memories = await _memory.RecallAsync("user-1");
         memories.Should().Contain(m => m.Type == MemoryType.ConversationSummary);
     }
 
@@ -169,7 +171,7 @@ public class MemoryMiddlewareTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("LLM down"));
 
-        var act = () => _middleware.ExtractAndStoreAsync("user-1", "msg", "reply");
+        Func<Task> act = () => _middleware.ExtractAndStoreAsync("user-1", "msg", "reply");
         await act.Should().NotThrowAsync("extraction failures should be swallowed");
     }
 
@@ -180,8 +182,8 @@ public class MemoryMiddlewareTests : IDisposable
     [Fact]
     public void ParseExtraction_ValidJson_ReturnsCorrectFields()
     {
-        var json = """{"summary":"Test","entities":["Brand X","Q4"],"preference":"Prefers pie charts"}""";
-        var result = MemoryExtractionService.ParseExtraction(json);
+        string json = /*lang=json,strict*/ """{"summary":"Test","entities":["Brand X","Q4"],"preference":"Prefers pie charts"}""";
+        MemoryExtractionService.ExtractionResult result = MemoryExtractionService.ParseExtraction(json);
 
         result.Summary.Should().Be("Test");
         result.Entities.Should().BeEquivalentTo(["Brand X", "Q4"]);
@@ -191,7 +193,7 @@ public class MemoryMiddlewareTests : IDisposable
     [Fact]
     public void ParseExtraction_MalformedJson_ReturnsEmpty()
     {
-        var result = MemoryExtractionService.ParseExtraction("not json at all");
+        MemoryExtractionService.ExtractionResult result = MemoryExtractionService.ParseExtraction("not json at all");
 
         result.Summary.Should().BeEmpty();
         result.Entities.Should().BeEmpty();
@@ -201,8 +203,8 @@ public class MemoryMiddlewareTests : IDisposable
     [Fact]
     public void ParseExtraction_NullPreference_ReturnsNull()
     {
-        var json = """{"summary":"Test","entities":[],"preference":null}""";
-        var result = MemoryExtractionService.ParseExtraction(json);
+        string json = /*lang=json,strict*/ """{"summary":"Test","entities":[],"preference":null}""";
+        MemoryExtractionService.ExtractionResult result = MemoryExtractionService.ParseExtraction(json);
 
         result.Preference.Should().BeNull();
     }
@@ -210,8 +212,8 @@ public class MemoryMiddlewareTests : IDisposable
     [Fact]
     public void ParseExtraction_EmptyEntities_ReturnsEmptyList()
     {
-        var json = """{"summary":"Test","entities":[],"preference":null}""";
-        var result = MemoryExtractionService.ParseExtraction(json);
+        string json = /*lang=json,strict*/ """{"summary":"Test","entities":[],"preference":null}""";
+        MemoryExtractionService.ExtractionResult result = MemoryExtractionService.ParseExtraction(json);
 
         result.Entities.Should().BeEmpty();
     }
@@ -227,7 +229,7 @@ public class MemoryMiddlewareTests : IDisposable
     [InlineData(10080, "1w ago")]        // 1 week
     public void FormatAge_ReturnsHumanReadable(int minutes, string expected)
     {
-        var result = ConversationMemoryMiddleware.FormatAge(TimeSpan.FromMinutes(minutes));
+        string result = ConversationMemoryMiddleware.FormatAge(TimeSpan.FromMinutes(minutes));
         result.Should().Be(expected);
     }
 

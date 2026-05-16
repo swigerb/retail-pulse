@@ -41,10 +41,10 @@ public class MemoryCancellationTests : IDisposable
     public async Task MemoryRecall_ReceivesCancellationToken()
     {
         using var cts = new CancellationTokenSource();
-        var middleware = CreateMiddleware(CreatePassthroughChatClient());
+        ConversationMemoryMiddleware middleware = CreateMiddleware(CreatePassthroughChatClient());
 
         // Non-cancelled token should complete normally
-        var result = await middleware.BuildMemoryContextAsync("user-1", "test query", cts.Token);
+        string? result = await middleware.BuildMemoryContextAsync("user-1", "test query", cts.Token);
 
         // Should complete without throwing (no memories stored yet, returns null)
         result.Should().BeNull();
@@ -54,12 +54,12 @@ public class MemoryCancellationTests : IDisposable
     public async Task MemoryStore_ReceivesCancellationToken()
     {
         using var cts = new CancellationTokenSource();
-        var entry = MakeEntry();
+        MemoryEntry entry = MakeEntry();
 
         // Store should accept the token and complete
         await _memory.StoreAsync("user-1", entry, cts.Token);
 
-        var recalled = await _memory.RecallAsync("user-1", ct: cts.Token);
+        IReadOnlyList<MemoryEntry> recalled = await _memory.RecallAsync("user-1", ct: cts.Token);
         recalled.Should().HaveCount(1);
     }
 
@@ -72,10 +72,10 @@ public class MemoryCancellationTests : IDisposable
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             parentCts.Token, requestCts.Token);
 
-        var middleware = CreateMiddleware(CreatePassthroughChatClient());
+        ConversationMemoryMiddleware middleware = CreateMiddleware(CreatePassthroughChatClient());
 
         // Both tokens active — should work
-        var result = await middleware.BuildMemoryContextAsync("user-1", "test", linked.Token);
+        string? result = await middleware.BuildMemoryContextAsync("user-1", "test", linked.Token);
         result.Should().BeNull(); // No memories yet
 
         // Cancel parent — linked token should be cancelled
@@ -91,7 +91,7 @@ public class MemoryCancellationTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => _memory.RecallAsync("user-1", "test", ct: cts.Token);
+        Func<Task<IReadOnlyList<MemoryEntry>>> act = () => _memory.RecallAsync("user-1", "test", ct: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -102,7 +102,7 @@ public class MemoryCancellationTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => _memory.StoreAsync("user-1", MakeEntry(), cts.Token);
+        Func<Task> act = () => _memory.StoreAsync("user-1", MakeEntry(), cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -123,7 +123,7 @@ public class MemoryCancellationTests : IDisposable
         var extraction = new MemoryExtractionService(chatClient.Object, _extractionLogger.Object);
 
         // ExtractAsync catches exceptions and logs them — it doesn't rethrow
-        var result = await extraction.ExtractAsync("user-1", "hello", "world", cts.Token);
+        IReadOnlyList<MemoryEntry> result = await extraction.ExtractAsync("user-1", "hello", "world", cts.Token);
 
         // Should return empty (exception caught), but the chat client was called with the token
         result.Should().BeEmpty();
@@ -144,7 +144,7 @@ public class MemoryCancellationTests : IDisposable
         // Cancel via request scope
         requestCts.Cancel();
 
-        var act = () => _memory.ForgetAsync("user-1", linked.Token);
+        Func<Task> act = () => _memory.ForgetAsync("user-1", linked.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -164,7 +164,7 @@ public class MemoryCancellationTests : IDisposable
         var extraction = new MemoryExtractionService(chatClient.Object, _extractionLogger.Object);
 
         // Should not throw — returns empty list
-        var result = await extraction.ExtractAsync("user-1", "hello", "world");
+        IReadOnlyList<MemoryEntry> result = await extraction.ExtractAsync("user-1", "hello", "world");
 
         result.Should().BeEmpty();
 
@@ -215,7 +215,7 @@ public class MemoryCancellationTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => _memory.RecallAsync("user-1", "test", ct: cts.Token);
+        Func<Task<IReadOnlyList<MemoryEntry>>> act = () => _memory.RecallAsync("user-1", "test", ct: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>(
             "even with data present, cancellation should be respected");
@@ -247,7 +247,8 @@ public class MemoryCancellationTests : IDisposable
                 It.IsAny<ChatOptions?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant,
-                """{"summary": "test", "entities": [], "preference": null}""")));
+                                     /*lang=json,strict*/
+                                     """{"summary": "test", "entities": [], "preference": null}""")));
         return mock.Object;
     }
 }

@@ -20,7 +20,7 @@ public class MarkdownExporter : IConversationExport
 
     public async Task<ExportResult> ExportAsync(string sessionId, ExportFormat format, CancellationToken ct = default)
     {
-        var entries = await _auditLog.QueryAsync(new AuditQuery(Limit: 500), ct);
+        IReadOnlyList<AuditEntry> entries = await _auditLog.QueryAsync(new AuditQuery(Limit: 500), ct);
         var sessionEntries = entries
             .Where(e => e.InputSummary.Contains(sessionId, StringComparison.OrdinalIgnoreCase)
                      || e.Id.StartsWith(sessionId, StringComparison.OrdinalIgnoreCase))
@@ -31,7 +31,7 @@ public class MarkdownExporter : IConversationExport
         if (sessionEntries.Count == 0)
             sessionEntries = [.. entries.OrderBy(e => e.Timestamp).Take(100)];
 
-        var exportedAt = DateTime.UtcNow;
+        DateTime exportedAt = DateTime.UtcNow;
         string content;
         string fileName;
 
@@ -51,7 +51,7 @@ public class MarkdownExporter : IConversationExport
 
     public async Task<IReadOnlyList<ExportableSession>> ListSessionsAsync(CancellationToken ct = default)
     {
-        var allEntries = await _auditLog.QueryAsync(new AuditQuery(Limit: 5000), ct);
+        IReadOnlyList<AuditEntry> allEntries = await _auditLog.QueryAsync(new AuditQuery(Limit: 5000), ct);
 
         // Group by session hints in the audit entries
         var sessions = allEntries
@@ -88,7 +88,7 @@ public class MarkdownExporter : IConversationExport
         sb.AppendLine("---");
         sb.AppendLine();
 
-        foreach (var entry in entries)
+        foreach (AuditEntry entry in entries)
         {
             sb.AppendLine(CultureInfo.InvariantCulture, $"### [{entry.Timestamp.ToString("HH:mm:ss", CultureInfo.InvariantCulture)}] {entry.Action} — {entry.AgentId}");
             sb.AppendLine(CultureInfo.InvariantCulture, $"- **User:** {entry.UserId}");
@@ -130,7 +130,7 @@ public class MarkdownExporter : IConversationExport
         // Try to extract session ID from the entry ID (format: "session-xxx-...")
         if (entry.Id.Contains('-') && entry.Id.Length > 8)
         {
-            var parts = entry.Id.Split('-');
+            string[] parts = entry.Id.Split('-');
             if (parts.Length >= 2)
                 return parts[0];
         }

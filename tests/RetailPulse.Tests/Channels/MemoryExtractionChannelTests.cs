@@ -13,7 +13,7 @@ public class MemoryExtractionChannelTests
     {
         var channel = new MemoryExtractionChannel();
 
-        var result = channel.TryWrite(new MemoryWorkItem("user-1", "hello", "world"));
+        bool result = channel.TryWrite(new MemoryWorkItem("user-1", "hello", "world"));
 
         result.Should().BeTrue();
         channel.DroppedCount.Should().Be(0);
@@ -64,7 +64,7 @@ public class MemoryExtractionChannelTests
         channel.Complete();
 
         var items = new List<MemoryWorkItem>();
-        await foreach (var item in channel.Reader.ReadAllAsync())
+        await foreach (MemoryWorkItem item in channel.Reader.ReadAllAsync())
             items.Add(item);
 
         items.Should().HaveCount(2);
@@ -81,7 +81,7 @@ public class MemoryExtractionChannelTests
         channel.TryWrite(item).Should().BeTrue();
         channel.Complete();
 
-        var read = await channel.Reader.ReadAsync();
+        MemoryWorkItem read = await channel.Reader.ReadAsync();
         read.TraceId.Should().Be("trace-123");
         read.ParentSpanId.Should().Be("span-456");
     }
@@ -96,7 +96,7 @@ public class MemoryExtractionChannelTests
             channel.TryWrite(new MemoryWorkItem($"fill-{i}", "m", "r"));
 
         // Concurrent overflow writes
-        var tasks = Enumerable.Range(0, 100).Select(i => Task.Run(() =>
+        IEnumerable<Task<bool>> tasks = Enumerable.Range(0, 100).Select(i => Task.Run(() =>
             channel.TryWrite(new MemoryWorkItem($"overflow-{i}", "m", "r"))
         ));
         await Task.WhenAll(tasks);

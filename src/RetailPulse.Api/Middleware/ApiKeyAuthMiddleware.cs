@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Primitives;
+
 namespace RetailPulse.Api.Middleware;
 
 /// <summary>
@@ -56,7 +58,7 @@ public class ApiKeyAuthMiddleware
             return;
         }
 
-        if (!context.Request.Headers.TryGetValue(_headerName, out var provided)
+        if (!context.Request.Headers.TryGetValue(_headerName, out StringValues provided)
             || !string.Equals(provided.ToString(), _expectedKey, StringComparison.Ordinal))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;

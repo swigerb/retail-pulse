@@ -27,7 +27,7 @@ public class SessionManager : IDisposable
     /// </summary>
     public string GetOrCreateSessionId(string conversationId)
     {
-        var entry = _conversationToSession.AddOrUpdate(
+        SessionEntry<string> entry = _conversationToSession.AddOrUpdate(
             conversationId,
             _ => new SessionEntry<string>(Guid.NewGuid().ToString()),
             (_, existing) => { existing.Touch(); return existing; });
@@ -50,7 +50,7 @@ public class SessionManager : IDisposable
     /// </summary>
     public List<AgentSpan>? GetSpans(string sessionId)
     {
-        if (_sessionSpans.TryGetValue(sessionId, out var entry))
+        if (_sessionSpans.TryGetValue(sessionId, out SessionEntry<List<AgentSpan>>? entry))
         {
             entry.Touch();
             return entry.Value;
@@ -63,7 +63,7 @@ public class SessionManager : IDisposable
     /// </summary>
     public void ClearSession(string conversationId)
     {
-        if (_conversationToSession.TryRemove(conversationId, out var sessionEntry))
+        if (_conversationToSession.TryRemove(conversationId, out SessionEntry<string>? sessionEntry))
         {
             _sessionSpans.TryRemove(sessionEntry.Value, out _);
         }
@@ -71,18 +71,18 @@ public class SessionManager : IDisposable
 
     private void EvictExpiredEntries()
     {
-        var cutoff = DateTime.UtcNow - _expirationThreshold;
+        DateTime cutoff = DateTime.UtcNow - _expirationThreshold;
 
-        foreach (var kvp in _conversationToSession)
+        foreach (KeyValuePair<string, SessionEntry<string>> kvp in _conversationToSession)
         {
             if (kvp.Value.LastAccessed < cutoff)
             {
-                if (_conversationToSession.TryRemove(kvp.Key, out var removed))
+                if (_conversationToSession.TryRemove(kvp.Key, out SessionEntry<string>? removed))
                     _sessionSpans.TryRemove(removed.Value, out _);
             }
         }
 
-        foreach (var kvp in _sessionSpans)
+        foreach (KeyValuePair<string, SessionEntry<List<AgentSpan>>> kvp in _sessionSpans)
         {
             if (kvp.Value.LastAccessed < cutoff)
                 _sessionSpans.TryRemove(kvp.Key, out _);

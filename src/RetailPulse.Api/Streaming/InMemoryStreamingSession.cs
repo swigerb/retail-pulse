@@ -59,7 +59,7 @@ public class InMemoryStreamingSession : IStreamingSession
     {
         await EmitStartAsync(agentId, ct);
 
-        var tokens = fullResponse.Split(' ');
+        string[] tokens = fullResponse.Split(' ');
         for (int i = 0; i < tokens.Length; i++)
         {
             ct.ThrowIfCancellationRequested();

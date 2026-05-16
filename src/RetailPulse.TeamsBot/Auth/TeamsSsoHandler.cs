@@ -23,7 +23,7 @@ public class TeamsSsoHandler
         _environment = environment;
 
         _configuredTenantId = _configuration["MicrosoftEntra:TenantId"];
-        var isDevelopment = _environment.IsDevelopment();
+        bool isDevelopment = _environment.IsDevelopment();
 
         // Require explicit tenant config outside Development
         if (string.IsNullOrEmpty(_configuredTenantId) && !isDevelopment)
@@ -33,13 +33,13 @@ public class TeamsSsoHandler
         }
 
         // Strict validation defaults to true in Production, false in Development
-        var strictConfigValue = _configuration["MicrosoftEntra:StrictTenantValidation"];
+        string? strictConfigValue = _configuration["MicrosoftEntra:StrictTenantValidation"];
         _strictTenantValidation = strictConfigValue != null
             ? bool.Parse(strictConfigValue)
             : !isDevelopment;
 
-        var metadataTenantId = _configuredTenantId ?? "common";
-        var metadataAddress = $"https://login.microsoftonline.com/{metadataTenantId}/v2.0/.well-known/openid-configuration";
+        string metadataTenantId = _configuredTenantId ?? "common";
+        string metadataAddress = $"https://login.microsoftonline.com/{metadataTenantId}/v2.0/.well-known/openid-configuration";
         _oidcConfigManager = new ConfigurationManager<OpenIdConnectConfiguration>(
             metadataAddress,
             new OpenIdConnectConfigurationRetriever(),
@@ -55,7 +55,7 @@ public class TeamsSsoHandler
         try
         {
             // Extract SSO token from Teams activity
-            var token = GetSsoTokenFromActivity(activity);
+            string? token = GetSsoTokenFromActivity(activity);
 
             if (string.IsNullOrEmpty(token))
             {
@@ -63,12 +63,12 @@ public class TeamsSsoHandler
                 return null;
             }
 
-            var botClientId = _configuration["MicrosoftEntra:ClientId"]
+            string botClientId = _configuration["MicrosoftEntra:ClientId"]
                 ?? throw new InvalidOperationException("MicrosoftEntra:ClientId must be configured for token validation.");
 
-            var oidcConfig = await _oidcConfigManager.GetConfigurationAsync(CancellationToken.None);
+            OpenIdConnectConfiguration oidcConfig = await _oidcConfigManager.GetConfigurationAsync(CancellationToken.None);
 
-            var validIssuers = BuildValidIssuers();
+            string[] validIssuers = BuildValidIssuers();
 
             var handler = new JwtSecurityTokenHandler();
             var validationParams = new TokenValidationParameters
@@ -97,16 +97,16 @@ public class TeamsSsoHandler
             var jwtToken = (JwtSecurityToken)validatedToken;
 
             // Validate tid claim against configured tenant
-            var userTenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
+            string? userTenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
             if (!ValidateTenantClaim(userTenantId))
             {
                 return null;
             }
 
             // Extract claims
-            var oid = jwtToken.Claims.FirstOrDefault(c => c.Type == "oid")?.Value;
-            var name = jwtToken.Claims.FirstOrDefault(c => c.Type == "name")?.Value;
-            var email = jwtToken.Claims.FirstOrDefault(c => c.Type == "preferred_username" || c.Type == "upn")?.Value;
+            string? oid = jwtToken.Claims.FirstOrDefault(c => c.Type == "oid")?.Value;
+            string? name = jwtToken.Claims.FirstOrDefault(c => c.Type == "name")?.Value;
+            string? email = jwtToken.Claims.FirstOrDefault(c => c.Type is "preferred_username" or "upn")?.Value;
 
             if (string.IsNullOrEmpty(oid))
             {
@@ -200,15 +200,15 @@ public class TeamsSsoHandler
         // metadata, conversation routing data, and occasionally bearer tokens.
         if (activity.Value != null)
         {
-            var valueJson = activity.Value.ToString();
+            string? valueJson = activity.Value.ToString();
             if (!string.IsNullOrEmpty(valueJson))
             {
                 try
                 {
                     using var doc = JsonDocument.Parse(valueJson);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("authentication", out var authElement) &&
-                        authElement.TryGetProperty("token", out var tokenElement))
+                    JsonElement root = doc.RootElement;
+                    if (root.TryGetProperty("authentication", out JsonElement authElement) &&
+                        authElement.TryGetProperty("token", out JsonElement tokenElement))
                     {
                         return tokenElement.GetString();
                     }

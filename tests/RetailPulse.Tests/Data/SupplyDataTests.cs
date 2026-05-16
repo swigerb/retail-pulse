@@ -50,8 +50,8 @@ public class SupplyDataTests : IDisposable
 
     public SupplyDataTests()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
         _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_supplydata_test_{Guid.NewGuid():N}.db");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
@@ -87,35 +87,35 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void InventoryLevels_TableExists()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='InventoryLevels'";
-        var result = cmd.ExecuteScalar();
+        object? result = cmd.ExecuteScalar();
         result.Should().NotBeNull("InventoryLevels table should exist in seeded database");
     }
 
     [Fact]
     public void InventoryLevels_HasRows()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM InventoryLevels";
-        var count = Convert.ToInt64(cmd.ExecuteScalar());
+        long count = Convert.ToInt64(cmd.ExecuteScalar());
         count.Should().BeGreaterThan(0, "InventoryLevels should have seeded data");
     }
 
     [Fact]
     public void InventoryLevels_CoversAllTenantBrands()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Brand FROM InventoryLevels ORDER BY Brand";
 
         var brands = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read()) brands.Add(reader.GetString(0));
 
-        foreach (var expectedBrand in ExpectedBrands)
+        foreach (string expectedBrand in ExpectedBrands)
         {
             brands.Should().Contain(expectedBrand,
                 $"InventoryLevels should have data for {expectedBrand}");
@@ -125,15 +125,15 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void InventoryLevels_StatusesAreValid()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Status FROM InventoryLevels";
 
         var statuses = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read()) statuses.Add(reader.GetString(0).ToLower(System.Globalization.CultureInfo.CurrentCulture));
 
-        foreach (var status in statuses)
+        foreach (string status in statuses)
         {
             status.Should().BeOneOf(ValidInventoryStatuses,
                 $"'{status}' is not a valid inventory status");
@@ -143,20 +143,20 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void InventoryLevels_DaysOfSupplyIsPositive()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM InventoryLevels WHERE DaysOfSupply < 0";
-        var negativeCount = Convert.ToInt64(cmd.ExecuteScalar());
+        long negativeCount = Convert.ToInt64(cmd.ExecuteScalar());
         negativeCount.Should().Be(0, "days of supply values must not be negative");
     }
 
     [Fact]
     public void InventoryLevels_SafetyStockReasonable()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT MAX(SafetyStock) FROM InventoryLevels";
-        var maxSafetyStock = Convert.ToInt64(cmd.ExecuteScalar());
+        long maxSafetyStock = Convert.ToInt64(cmd.ExecuteScalar());
         maxSafetyStock.Should().BeLessThanOrEqualTo(100000,
             "safety stock should not exceed 100,000 units — unrealistic threshold");
     }
@@ -164,12 +164,12 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void InventoryLevels_CoversAllRegions()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Region FROM InventoryLevels ORDER BY Region";
 
         var regions = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read()) regions.Add(reader.GetString(0));
 
         regions.Should().HaveCountGreaterThanOrEqualTo(ExpectedRegions.Length,
@@ -179,10 +179,10 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void InventoryLevels_CurrentStockNonNegative()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM InventoryLevels WHERE CurrentStock < 0";
-        var negativeCount = Convert.ToInt64(cmd.ExecuteScalar());
+        long negativeCount = Convert.ToInt64(cmd.ExecuteScalar());
         negativeCount.Should().Be(0, "current stock cannot be negative");
     }
 
@@ -193,35 +193,35 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void SupplyDisruptions_TableExists()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='SupplyDisruptions'";
-        var result = cmd.ExecuteScalar();
+        object? result = cmd.ExecuteScalar();
         result.Should().NotBeNull("SupplyDisruptions table should exist in seeded database");
     }
 
     [Fact]
     public void SupplyDisruptions_HasRows()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM SupplyDisruptions";
-        var count = Convert.ToInt64(cmd.ExecuteScalar());
+        long count = Convert.ToInt64(cmd.ExecuteScalar());
         count.Should().BeGreaterThan(0, "SupplyDisruptions should have seeded data");
     }
 
     [Fact]
     public void SupplyDisruptions_SeveritiesAreValid()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Severity FROM SupplyDisruptions";
 
         var severities = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read()) severities.Add(reader.GetString(0).ToLower(System.Globalization.CultureInfo.CurrentCulture));
 
-        foreach (var severity in severities)
+        foreach (string severity in severities)
         {
             severity.Should().BeOneOf(ValidDisruptionSeverities,
                 $"'{severity}' is not a valid disruption severity");
@@ -231,15 +231,15 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void SupplyDisruptions_TypesAreValid()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT DisruptionType FROM SupplyDisruptions";
 
         var types = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read()) types.Add(reader.GetString(0).ToLower(System.Globalization.CultureInfo.CurrentCulture));
 
-        foreach (var type in types)
+        foreach (string type in types)
         {
             type.Should().BeOneOf(ValidDisruptionTypes,
                 $"'{type}' is not a valid disruption type");
@@ -249,10 +249,10 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void SupplyDisruptions_HasStartDate()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM SupplyDisruptions WHERE StartDate IS NULL OR StartDate = ''";
-        var nullCount = Convert.ToInt64(cmd.ExecuteScalar());
+        long nullCount = Convert.ToInt64(cmd.ExecuteScalar());
         nullCount.Should().Be(0, "all disruptions must have a start date");
     }
 
@@ -263,35 +263,35 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void FulfillmentRates_TableExists()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='FulfillmentRates'";
-        var result = cmd.ExecuteScalar();
+        object? result = cmd.ExecuteScalar();
         result.Should().NotBeNull("FulfillmentRates table should exist in seeded database");
     }
 
     [Fact]
     public void FulfillmentRates_HasRows()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM FulfillmentRates";
-        var count = Convert.ToInt64(cmd.ExecuteScalar());
+        long count = Convert.ToInt64(cmd.ExecuteScalar());
         count.Should().BeGreaterThan(0, "FulfillmentRates should have seeded data");
     }
 
     [Fact]
     public void FulfillmentRates_CoversAllBrands()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Brand FROM FulfillmentRates ORDER BY Brand";
 
         var brands = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read()) brands.Add(reader.GetString(0));
 
-        foreach (var expectedBrand in ExpectedBrands)
+        foreach (string expectedBrand in ExpectedBrands)
         {
             brands.Should().Contain(expectedBrand,
                 $"FulfillmentRates should have data for {expectedBrand}");
@@ -301,13 +301,13 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void FulfillmentRates_RatesBetween0And100()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT MIN(FillRate), MAX(FillRate) FROM FulfillmentRates";
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         reader.Read();
-        var min = reader.GetDouble(0);
-        var max = reader.GetDouble(1);
+        double min = reader.GetDouble(0);
+        double max = reader.GetDouble(1);
 
         min.Should().BeGreaterThanOrEqualTo(0, "fulfillment rate cannot be negative");
         max.Should().BeLessThanOrEqualTo(100, "fulfillment rate cannot exceed 100%");
@@ -316,14 +316,14 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void FulfillmentRates_MostAbove80Percent()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = @"
             SELECT
                 CAST(SUM(CASE WHEN FillRate >= 80 THEN 1 ELSE 0 END) AS REAL) /
                 CAST(COUNT(*) AS REAL) * 100.0
             FROM FulfillmentRates";
-        var aboveThreshold = Convert.ToDouble(cmd.ExecuteScalar());
+        double aboveThreshold = Convert.ToDouble(cmd.ExecuteScalar());
 
         aboveThreshold.Should().BeGreaterThanOrEqualTo(60,
             "at least 60% of fulfillment rates should be >=80% for realistic data");
@@ -332,10 +332,10 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void FulfillmentRates_FillRatesRealistic()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT AVG(FillRate) FROM FulfillmentRates";
-        var avgRate = Convert.ToDouble(cmd.ExecuteScalar());
+        double avgRate = Convert.ToDouble(cmd.ExecuteScalar());
 
         avgRate.Should().BeGreaterThanOrEqualTo(70, "average fill rate should be realistic (>=70%)");
         avgRate.Should().BeLessThanOrEqualTo(99, "average fill rate should be realistic (<=99%)");
@@ -344,12 +344,12 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void FulfillmentRates_CoversAllRegions()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Region FROM FulfillmentRates ORDER BY Region";
 
         var regions = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read()) regions.Add(reader.GetString(0));
 
         regions.Should().HaveCountGreaterThanOrEqualTo(ExpectedRegions.Length,
@@ -363,13 +363,13 @@ public class SupplyDataTests : IDisposable
     [Fact]
     public void AllSupplyTables_ShareSameBrandSet()
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
 
-        var inventoryBrands = GetDistinctValues(conn, "InventoryLevels", "Brand");
-        var fulfillmentBrands = GetDistinctValues(conn, "FulfillmentRates", "Brand");
+        List<string> inventoryBrands = GetDistinctValues(conn, "InventoryLevels", "Brand");
+        List<string> fulfillmentBrands = GetDistinctValues(conn, "FulfillmentRates", "Brand");
 
         // All fulfillment brands should also have inventory data
-        foreach (var brand in fulfillmentBrands)
+        foreach (string brand in fulfillmentBrands)
         {
             inventoryBrands.Should().Contain(brand,
                 $"brand '{brand}' in FulfillmentRates should also appear in InventoryLevels");
@@ -378,10 +378,10 @@ public class SupplyDataTests : IDisposable
 
     private static List<string> GetDistinctValues(SqliteConnection conn, string table, string column)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = $"SELECT DISTINCT {column} FROM {table} ORDER BY {column}";
         var values = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read()) values.Add(reader.GetString(0));
         return values;
     }

@@ -24,14 +24,14 @@ public class CardConcurrencyTests
     [Fact]
     public async Task ConcurrentVotes_10Voters_AllRecordedNoCorruption()
     {
-        var card = await _state.CreateAsync(MakeRequest("Concurrent Vote"));
-        var tasks = Enumerable.Range(1, 10).Select(i =>
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Concurrent Vote"));
+        IEnumerable<Task<AdaptiveCard>> tasks = Enumerable.Range(1, 10).Select(i =>
             _state.ActionAsync(card.Id, MakeVoteAction($"user-{i}", i % 2 == 0 ? "approve" : "reject"))
         );
 
         await Task.WhenAll(tasks);
 
-        var result = await _state.GetAsync(card.Id);
+        AdaptiveCard result = await _state.GetAsync(card.Id);
         result.Votes.Should().HaveCount(10);
         result.Votes.Select(v => v.UserId).Should().OnlyHaveUniqueItems();
     }
@@ -39,9 +39,9 @@ public class CardConcurrencyTests
     [Fact]
     public async Task ConcurrentVoteAndArchive_NoExceptionOrCorruption()
     {
-        var card = await _state.CreateAsync(MakeRequest("Vote+Archive Race"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Vote+Archive Race"));
 
-        var voteTasks = Enumerable.Range(1, 5).Select(i =>
+        IEnumerable<Task> voteTasks = Enumerable.Range(1, 5).Select(i =>
             Task.Run(async () =>
             {
                 try
@@ -63,7 +63,7 @@ public class CardConcurrencyTests
 
         await Task.WhenAll(voteTasks.Append(archiveTask));
 
-        var result = await _state.GetAsync(card.Id);
+        AdaptiveCard result = await _state.GetAsync(card.Id);
         result.Lifecycle.Should().Be(CardLifecycle.Archived);
         // Some votes may have succeeded before archive — that's fine
         result.Votes.Should().HaveCountGreaterThanOrEqualTo(0);
@@ -72,14 +72,14 @@ public class CardConcurrencyTests
     [Fact]
     public async Task ConcurrentComments_AllPreserved()
     {
-        var card = await _state.CreateAsync(MakeRequest("Concurrent Comments"));
-        var tasks = Enumerable.Range(1, 10).Select(i =>
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Concurrent Comments"));
+        IEnumerable<Task<AdaptiveCard>> tasks = Enumerable.Range(1, 10).Select(i =>
             _state.ActionAsync(card.Id, MakeCommentAction($"user-{i}", $"Comment #{i}"))
         );
 
         await Task.WhenAll(tasks);
 
-        var result = await _state.GetAsync(card.Id);
+        AdaptiveCard result = await _state.GetAsync(card.Id);
         result.Comments.Should().HaveCount(10);
         result.Comments.Select(c => c.UserId).Should().OnlyHaveUniqueItems();
     }
@@ -87,11 +87,11 @@ public class CardConcurrencyTests
     [Fact]
     public async Task ConcurrentCreates_AllSucceed()
     {
-        var tasks = Enumerable.Range(1, 20).Select(i =>
+        IEnumerable<Task<AdaptiveCard>> tasks = Enumerable.Range(1, 20).Select(i =>
             _state.CreateAsync(MakeRequest($"Card #{i}"))
         );
 
-        var results = await Task.WhenAll(tasks);
+        AdaptiveCard[] results = await Task.WhenAll(tasks);
 
         results.Should().HaveCount(20);
         results.Select(c => c.Id).Should().OnlyHaveUniqueItems();
@@ -100,12 +100,12 @@ public class CardConcurrencyTests
     [Fact]
     public async Task ConcurrentMixedActions_NoDeadlock()
     {
-        var card = await _state.CreateAsync(MakeRequest("Mixed Actions"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Mixed Actions"));
 
         var tasks = new List<Task>();
         for (int i = 0; i < 5; i++)
         {
-            var idx = i;
+            int idx = i;
             tasks.Add(_state.ActionAsync(card.Id, MakeVoteAction($"voter-{idx}", "approve")));
             tasks.Add(_state.ActionAsync(card.Id, MakeCommentAction($"commenter-{idx}", $"Text {idx}")));
         }
@@ -113,7 +113,7 @@ public class CardConcurrencyTests
         // Should not deadlock — completes within timeout
         var completed = Task.WhenAll(tasks);
         var timeoutTask = Task.Delay(TimeSpan.FromSeconds(10));
-        var first = await Task.WhenAny(completed, timeoutTask);
+        Task first = await Task.WhenAny(completed, timeoutTask);
 
         first.Should().BeSameAs(completed, "all actions should complete without deadlock");
     }

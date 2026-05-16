@@ -22,8 +22,8 @@ public class SeasonalityFactorsTool
     {
         try
         {
-            var url = $"/api/seasonality-factors?category={Uri.EscapeDataString(category)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/seasonality-factors?category={Uri.EscapeDataString(category)}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

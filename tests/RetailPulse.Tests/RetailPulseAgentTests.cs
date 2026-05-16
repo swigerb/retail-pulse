@@ -25,7 +25,7 @@ public class RetailPulseAgentTests
             .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((messages, _, _) => capturedMessages = [.. messages])
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(new ChatMessage(ChatRole.Assistant, "done")));
 
-        var agent = CreateAgent(chatClient.Object);
+        RetailPulseAgent agent = CreateAgent(chatClient.Object);
         var request = new ChatRequest(
             "rank them by sell-through growth",
             SessionId: "session-1",
@@ -36,7 +36,7 @@ public class RetailPulseAgentTests
                 new ChatHistoryMessage("assistant", "FreshMart and Harvest Table are leading growth.")
             ]);
 
-        var response = await agent.ChatAsync(request);
+        Contracts.ChatResponse response = await agent.ChatAsync(request);
 
         response.Reply.Should().Be("done");
         capturedMessages.Should().NotBeNull();
@@ -66,7 +66,7 @@ public class RetailPulseAgentTests
             .Select(i => new ChatHistoryMessage(i % 2 == 0 ? "assistant" : "user", $"history-{i}"))
             .ToList();
 
-        var agent = CreateAgent(chatClient.Object);
+        RetailPulseAgent agent = CreateAgent(chatClient.Object);
         await agent.ChatAsync(new ChatRequest("current", SessionId: "session-1", History: history));
 
         capturedMessages.Should().NotBeNull();
@@ -85,9 +85,9 @@ public class RetailPulseAgentTests
             .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ClientResultException("Too Many Requests", CreatePipelineResponse(429), null));
 
-        var agent = CreateAgent(chatClient.Object);
+        RetailPulseAgent agent = CreateAgent(chatClient.Object);
 
-        var response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-429"));
+        Contracts.ChatResponse response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-429"));
 
         response.Reply.Should().Be("⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.");
         response.SessionId.Should().Be("session-429");
@@ -104,9 +104,9 @@ public class RetailPulseAgentTests
             .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        var agent = CreateAgent(chatClient.Object);
+        RetailPulseAgent agent = CreateAgent(chatClient.Object);
 
-        var response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-error"));
+        Contracts.ChatResponse response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-error"));
 
         response.Reply.Should().Be("⚠️ Something went wrong while contacting the AI service. Please try again in a moment.");
         response.SessionId.Should().Be("session-error");
@@ -128,13 +128,13 @@ public class RetailPulseAgentTests
     [Fact]
     public void BuildTokenUsage_WithMatchingModel_CalculatesCost()
     {
-        var agent = CreateAgentWithModel("gpt-5.4-mini", new Dictionary<string, string?>
+        RetailPulseAgent agent = CreateAgentWithModel("gpt-5.4-mini", new Dictionary<string, string?>
         {
             ["TokenPricing:gpt-5.4-mini:InputPerMillion"] = "0.25",
             ["TokenPricing:gpt-5.4-mini:OutputPerMillion"] = "2.00",
         });
 
-        var usage = agent.BuildTokenUsage(5000, 2000, 7000);
+        TokenUsage usage = agent.BuildTokenUsage(5000, 2000, 7000);
 
         usage.InputTokens.Should().Be(5000);
         usage.OutputTokens.Should().Be(2000);
@@ -146,13 +146,13 @@ public class RetailPulseAgentTests
     [Fact]
     public void BuildTokenUsage_WithUnknownModel_ReturnsNullCost()
     {
-        var agent = CreateAgentWithModel("unknown-model", new Dictionary<string, string?>
+        RetailPulseAgent agent = CreateAgentWithModel("unknown-model", new Dictionary<string, string?>
         {
             ["TokenPricing:gpt-4o:InputPerMillion"] = "2.50",
             ["TokenPricing:gpt-4o:OutputPerMillion"] = "10.00",
         });
 
-        var usage = agent.BuildTokenUsage(1000, 500, 1500);
+        TokenUsage usage = agent.BuildTokenUsage(1000, 500, 1500);
 
         usage.EstimatedCostUsd.Should().BeNull();
     }
@@ -160,13 +160,13 @@ public class RetailPulseAgentTests
     [Fact]
     public void BuildTokenUsage_WithZeroTokens_ReturnsZeroCost()
     {
-        var agent = CreateAgentWithModel("gpt-4o", new Dictionary<string, string?>
+        RetailPulseAgent agent = CreateAgentWithModel("gpt-4o", new Dictionary<string, string?>
         {
             ["TokenPricing:gpt-4o:InputPerMillion"] = "2.50",
             ["TokenPricing:gpt-4o:OutputPerMillion"] = "10.00",
         });
 
-        var usage = agent.BuildTokenUsage(0, 0, 0);
+        TokenUsage usage = agent.BuildTokenUsage(0, 0, 0);
 
         usage.EstimatedCostUsd.Should().Be(0m);
     }
@@ -189,13 +189,13 @@ public class RetailPulseAgentTests
             .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(chatResponse);
 
-        var agent = CreateAgentWithModel("gpt-5.4-mini", new Dictionary<string, string?>
+        RetailPulseAgent agent = CreateAgentWithModel("gpt-5.4-mini", new Dictionary<string, string?>
         {
             ["TokenPricing:gpt-5.4-mini:InputPerMillion"] = "0.25",
             ["TokenPricing:gpt-5.4-mini:OutputPerMillion"] = "2.00",
         }, chatClient.Object);
 
-        var response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "cost-test"));
+        Contracts.ChatResponse response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "cost-test"));
 
         response.TokenUsage.Should().NotBeNull();
         response.TokenUsage.InputTokens.Should().Be(10000);
@@ -224,7 +224,7 @@ public class RetailPulseAgentTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var configuration = new ConfigurationBuilder()
+        IConfigurationRoot configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(pricingConfig)
             .Build();
 

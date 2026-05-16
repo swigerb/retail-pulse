@@ -36,19 +36,16 @@ public class InMemoryAlertService : IAlertService
     /// <summary>
     /// Seeds anomaly data points for testing.
     /// </summary>
-    public void SeedDataPoint(string brand, string region, string type, double baseline, double current)
-    {
-        _dataPoints.Add(new AnomalyDataPoint(brand, region, type, baseline, current));
-    }
+    public void SeedDataPoint(string brand, string region, string type, double baseline, double current) => _dataPoints.Add(new AnomalyDataPoint(brand, region, type, baseline, current));
 
     public Task<IReadOnlyList<Alert>> CheckForAlertsAsync(CancellationToken ct = default)
     {
         var newAlerts = new List<Alert>();
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        foreach (var dp in _dataPoints)
+        foreach (AnomalyDataPoint dp in _dataPoints)
         {
-            var deviation = dp.Type switch
+            double deviation = dp.Type switch
             {
                 "demand_spike" => (dp.Current - dp.Baseline) / dp.Baseline * 100,
                 "supply_drop" => (dp.Baseline - dp.Current) / dp.Baseline * 100,
@@ -56,7 +53,7 @@ public class InMemoryAlertService : IAlertService
                 _ => 0
             };
 
-            var threshold = dp.Type switch
+            double threshold = dp.Type switch
             {
                 "demand_spike" => 20.0,
                 "supply_drop" => 15.0,
@@ -68,12 +65,14 @@ public class InMemoryAlertService : IAlertService
                 continue;
 
             // Throttle check
-            var throttleKey = $"{dp.Type}|{dp.Brand}|{dp.Region}";
-            if (_throttleMap.TryGetValue(throttleKey, out var lastFired) &&
+            string throttleKey = $"{dp.Type}|{dp.Brand}|{dp.Region}";
+            if (_throttleMap.TryGetValue(throttleKey, out DateTimeOffset lastFired) &&
                 now - lastFired < _throttleWindow)
+            {
                 continue;
+            }
 
-            var severity = ClassifySeverity(deviation);
+            string severity = ClassifySeverity(deviation);
             var alert = new Alert(
                 Id: Guid.NewGuid().ToString("N"),
                 Type: dp.Type,
@@ -100,10 +99,7 @@ public class InMemoryAlertService : IAlertService
         return Task.FromResult<IReadOnlyList<Alert>>(newAlerts);
     }
 
-    public Task SnoozeAsync(string alertType, string userId, TimeSpan duration, CancellationToken ct = default)
-    {
-        return SnoozeWithDetailsAsync(alertType, userId, duration, null, null, ct);
-    }
+    public Task SnoozeAsync(string alertType, string userId, TimeSpan duration, CancellationToken ct = default) => SnoozeWithDetailsAsync(alertType, userId, duration, null, null, ct);
 
     /// <summary>
     /// Snooze with optional brand/region specificity.
@@ -147,7 +143,7 @@ public class InMemoryAlertService : IAlertService
     public Task<IReadOnlyList<Alert>> GetActiveForUserAsync(string userId, CancellationToken ct = default)
     {
         var dismissed = _dismissals.Where(d => d.UserId == userId).Select(d => d.AlertId).ToHashSet();
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         var activeSnoozesForUser = _snoozes
             .Where(s => s.UserId == userId && s.ExpiresAt > now)
             .ToList();
@@ -166,8 +162,8 @@ public class InMemoryAlertService : IAlertService
     /// </summary>
     public bool IsThrottled(string type, string brand, string region)
     {
-        var key = $"{type}|{brand}|{region}";
-        return _throttleMap.TryGetValue(key, out var lastFired) &&
+        string key = $"{type}|{brand}|{region}";
+        return _throttleMap.TryGetValue(key, out DateTimeOffset lastFired) &&
                DateTimeOffset.UtcNow - lastFired < _throttleWindow;
     }
 
@@ -176,7 +172,7 @@ public class InMemoryAlertService : IAlertService
     /// </summary>
     public void ResetThrottle(string type, string brand, string region)
     {
-        var key = $"{type}|{brand}|{region}";
+        string key = $"{type}|{brand}|{region}";
         _throttleMap.TryRemove(key, out _);
     }
 
@@ -185,14 +181,11 @@ public class InMemoryAlertService : IAlertService
     /// </summary>
     public void SetThrottleTimestamp(string type, string brand, string region, DateTimeOffset timestamp)
     {
-        var key = $"{type}|{brand}|{region}";
+        string key = $"{type}|{brand}|{region}";
         _throttleMap[key] = timestamp;
     }
 
-    public IReadOnlyList<SnoozeEntry> GetSnoozes(string userId)
-    {
-        return [.. _snoozes.Where(s => s.UserId == userId)];
-    }
+    public IReadOnlyList<SnoozeEntry> GetSnoozes(string userId) => [.. _snoozes.Where(s => s.UserId == userId)];
 
     public int AlertCount => _alerts.Count;
 

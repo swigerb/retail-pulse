@@ -25,7 +25,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         _logger = logger;
         _defaultThrottleWindow = defaultThrottleWindow ?? TimeSpan.FromHours(1);
 
-        var dir = Path.GetDirectoryName(dbPath);
+        string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
@@ -43,9 +43,9 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
 
     private void InitializeSchema()
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = AlertDbSchema.CreateTables;
         cmd.ExecuteNonQuery();
     }
@@ -57,18 +57,15 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     /// does its own anomaly detection and calls <see cref="PersistAlertAsync"/> directly.
     /// This implementation returns active alerts from the last 24 hours.
     /// </summary>
-    public async Task<IReadOnlyList<Alert>> CheckForAlertsAsync(CancellationToken ct = default)
-    {
-        return await GetActiveAlertsAsync(ct);
-    }
+    public async Task<IReadOnlyList<Alert>> CheckForAlertsAsync(CancellationToken ct = default) => await GetActiveAlertsAsync(ct);
 
     public Task<IReadOnlyList<Alert>> GetActiveAlertsAsync(CancellationToken ct = default)
     {
-        var cutoff = DateTimeOffset.UtcNow.AddHours(-24);
+        DateTimeOffset cutoff = DateTimeOffset.UtcNow.AddHours(-24);
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata
             FROM Alerts
@@ -77,17 +74,17 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
             """;
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString(_iso8601, CultureInfo.InvariantCulture));
 
-        var alerts = ReadAlerts(cmd);
+        List<Alert> alerts = ReadAlerts(cmd);
         return Task.FromResult<IReadOnlyList<Alert>>(alerts);
     }
 
     public Task SnoozeAsync(string alertType, string userId, TimeSpan duration, CancellationToken ct = default)
     {
-        var snoozedUntil = DateTimeOffset.UtcNow.Add(duration);
+        DateTimeOffset snoozedUntil = DateTimeOffset.UtcNow.Add(duration);
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO AlertSnoozes (UserId, AlertType, Brand, Region, SnoozedUntil)
             VALUES (@userId, @alertType, NULL, NULL, @snoozedUntil)
@@ -103,9 +100,9 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
 
     public Task DismissAsync(string alertId, string userId, CancellationToken ct = default)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO AlertDismissals (AlertId, UserId, DismissedAt)
             VALUES (@alertId, @userId, @now)
@@ -121,9 +118,9 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
 
     public Task<IReadOnlyList<Alert>> GetHistoryAsync(string userId, int limit = 50, CancellationToken ct = default)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata
             FROM Alerts
@@ -132,7 +129,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
             """;
         cmd.Parameters.AddWithValue("@limit", limit);
 
-        var alerts = ReadAlerts(cmd);
+        List<Alert> alerts = ReadAlerts(cmd);
         return Task.FromResult<IReadOnlyList<Alert>>(alerts);
     }
 
@@ -141,11 +138,11 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     /// <summary>Check if a (type, brand, region) combination was fired within the throttle window.</summary>
     internal bool IsThrottled(string type, string brand, string region)
     {
-        var cutoff = DateTimeOffset.UtcNow.Subtract(_defaultThrottleWindow);
+        DateTimeOffset cutoff = DateTimeOffset.UtcNow.Subtract(_defaultThrottleWindow);
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT LastFiredAt FROM AlertThrottles
             WHERE Type = @type AND Brand = @brand AND Region = @region
@@ -154,17 +151,17 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         cmd.Parameters.AddWithValue("@brand", brand);
         cmd.Parameters.AddWithValue("@region", region);
 
-        var result = cmd.ExecuteScalar();
+        object? result = cmd.ExecuteScalar();
         return result is string lastFiredStr &&
-            DateTimeOffset.TryParseExact(lastFiredStr, _iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out var lastFired) && lastFired >= cutoff;
+            DateTimeOffset.TryParseExact(lastFiredStr, _iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset lastFired) && lastFired >= cutoff;
     }
 
     /// <summary>Record that an alert of this type was just fired (update throttle).</summary>
     internal void UpdateThrottle(string type, string brand, string region)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO AlertThrottles (Type, Brand, Region, LastFiredAt)
             VALUES (@type, @brand, @region, @now)
@@ -179,9 +176,9 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     /// <summary>Persist a new alert and update its throttle entry.</summary>
     internal void PersistAlert(Alert alert)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR IGNORE INTO Alerts (Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata)
             VALUES (@id, @type, @severity, @title, @description, @brand, @region, @action, @detectedAt, @metadata)
@@ -206,10 +203,10 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     private static List<Alert> ReadAlerts(SqliteCommand cmd)
     {
         var alerts = new List<Alert>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var metadataStr = reader.IsDBNull(9) ? null : reader.GetString(9);
+            string? metadataStr = reader.IsDBNull(9) ? null : reader.GetString(9);
             Dictionary<string, object>? metadata = null;
             if (metadataStr is not null)
             {
@@ -232,7 +229,7 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
                 Brand: reader.IsDBNull(5) ? "" : reader.GetString(5),
                 Region: reader.IsDBNull(6) ? "" : reader.GetString(6),
                 RecommendedAction: reader.IsDBNull(7) ? "" : reader.GetString(7),
-                DetectedAt: DateTimeOffset.TryParseExact(reader.GetString(8), _iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
+                DetectedAt: DateTimeOffset.TryParseExact(reader.GetString(8), _iso8601, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset dt)
                     ? dt : DateTimeOffset.UtcNow,
                 Metadata: metadata
             ));

@@ -52,7 +52,7 @@ public class BotHealthTests
     {
         var check = new SignalRHealthCheck(failFast: false) { IsConnected = true };
 
-        var result = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult result = await check.CheckHealthAsync(CreateContext());
 
         result.Status.Should().Be(HealthStatus.Healthy);
         result.Description.Should().Contain("connected");
@@ -63,7 +63,7 @@ public class BotHealthTests
     {
         var check = new SignalRHealthCheck(failFast: true) { IsConnected = true };
 
-        var result = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult result = await check.CheckHealthAsync(CreateContext());
 
         result.Status.Should().Be(HealthStatus.Healthy);
     }
@@ -75,7 +75,7 @@ public class BotHealthTests
     {
         var check = new SignalRHealthCheck(failFast: false) { IsConnected = false };
 
-        var result = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult result = await check.CheckHealthAsync(CreateContext());
 
         result.Status.Should().Be(HealthStatus.Degraded);
         result.Description.Should().Contain("disconnected");
@@ -86,7 +86,7 @@ public class BotHealthTests
     {
         var check = new SignalRHealthCheck(failFast: false) { IsConnected = false };
 
-        var result = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult result = await check.CheckHealthAsync(CreateContext());
 
         result.Status.Should().NotBe(HealthStatus.Unhealthy,
             "degraded mode should not report Unhealthy");
@@ -99,7 +99,7 @@ public class BotHealthTests
     {
         var check = new SignalRHealthCheck(failFast: true) { IsConnected = false };
 
-        var result = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult result = await check.CheckHealthAsync(CreateContext());
 
         result.Status.Should().Be(HealthStatus.Unhealthy);
         result.Description.Should().Contain("fail-fast");
@@ -110,7 +110,7 @@ public class BotHealthTests
     {
         var check = new SignalRHealthCheck(failFast: true) { IsConnected = false };
 
-        var result = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult result = await check.CheckHealthAsync(CreateContext());
 
         result.Status.Should().NotBe(HealthStatus.Degraded,
             "fail-fast mode should report Unhealthy, not Degraded");
@@ -123,11 +123,11 @@ public class BotHealthTests
     {
         var check = new SignalRHealthCheck(failFast: false) { IsConnected = true };
 
-        var healthy = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult healthy = await check.CheckHealthAsync(CreateContext());
         healthy.Status.Should().Be(HealthStatus.Healthy);
 
         check.IsConnected = false;
-        var degraded = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult degraded = await check.CheckHealthAsync(CreateContext());
         degraded.Status.Should().Be(HealthStatus.Degraded);
     }
 
@@ -136,11 +136,11 @@ public class BotHealthTests
     {
         var check = new SignalRHealthCheck(failFast: true) { IsConnected = false };
 
-        var unhealthy = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult unhealthy = await check.CheckHealthAsync(CreateContext());
         unhealthy.Status.Should().Be(HealthStatus.Unhealthy);
 
         check.IsConnected = true;
-        var healthy = await check.CheckHealthAsync(CreateContext());
+        HealthCheckResult healthy = await check.CheckHealthAsync(CreateContext());
         healthy.Status.Should().Be(HealthStatus.Healthy);
     }
 
@@ -151,7 +151,7 @@ public class BotHealthTests
         using var cts = new CancellationTokenSource();
 
         // Non-cancelled token should work
-        var result = await check.CheckHealthAsync(CreateContext(), cts.Token);
+        HealthCheckResult result = await check.CheckHealthAsync(CreateContext(), cts.Token);
         result.Status.Should().Be(HealthStatus.Healthy);
     }
 

@@ -32,28 +32,16 @@ public class ErrorClassifierTests
     }
 
     [Fact]
-    public void Classify_TimeoutException_ReturnsTransient()
-    {
-        ErrorClassifier.Classify(new TimeoutException()).Should().Be(ErrorCategory.Transient);
-    }
+    public void Classify_TimeoutException_ReturnsTransient() => ErrorClassifier.Classify(new TimeoutException()).Should().Be(ErrorCategory.Transient);
 
     [Fact]
-    public void Classify_SocketException_ReturnsTransient()
-    {
-        ErrorClassifier.Classify(new System.Net.Sockets.SocketException()).Should().Be(ErrorCategory.Transient);
-    }
+    public void Classify_SocketException_ReturnsTransient() => ErrorClassifier.Classify(new System.Net.Sockets.SocketException()).Should().Be(ErrorCategory.Transient);
 
     [Fact]
-    public void Classify_FormatException_ReturnsUser()
-    {
-        ErrorClassifier.Classify(new FormatException("bad format")).Should().Be(ErrorCategory.User);
-    }
+    public void Classify_FormatException_ReturnsUser() => ErrorClassifier.Classify(new FormatException("bad format")).Should().Be(ErrorCategory.User);
 
     [Fact]
-    public void Classify_InvalidOperationException_ReturnsSystem()
-    {
-        ErrorClassifier.Classify(new InvalidOperationException()).Should().Be(ErrorCategory.System);
-    }
+    public void Classify_InvalidOperationException_ReturnsSystem() => ErrorClassifier.Classify(new InvalidOperationException()).Should().Be(ErrorCategory.System);
 
     [Fact]
     public void Classify_HttpRequestException_401_ReturnsExternal()

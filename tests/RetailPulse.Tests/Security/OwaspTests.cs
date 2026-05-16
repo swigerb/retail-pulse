@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Hosting;
 using RetailPulse.Api.Middleware;
+using RetailPulse.Api.Validation;
 
 namespace RetailPulse.Tests.Security;
 
@@ -22,8 +23,8 @@ public class OwaspTests
     public void A01_AdminEndpoints_AreRegisteredWithAuthorizationRequirement()
     {
         // Verify that sensitive endpoints are documented as requiring auth
-        var authorizedEndpoints = new[]
-        {
+        string[] authorizedEndpoints =
+        [
             "/api/chat",
             "/api/chat/stream",
             "/api/alerts/active",
@@ -33,7 +34,7 @@ public class OwaspTests
             "/api/council/convene",
             "/api/scorecard",
             "/api/escalate"
-        };
+        ];
 
         authorizedEndpoints.Should().NotBeEmpty();
         authorizedEndpoints.Should().AllSatisfy(e => e.Should().StartWith("/api"));
@@ -44,11 +45,11 @@ public class OwaspTests
     public void A01_VersionedEndpoints_RequireAuthorization()
     {
         // Verify versioned endpoints are also protected
-        var versionedEndpoints = new[]
-        {
+        string[] versionedEndpoints =
+        [
             "/api/v1/chat",
             "/api/v1/chat/stream"
-        };
+        ];
 
         versionedEndpoints.Should().AllSatisfy(e => e.Should().Contain("/v1/"));
     }
@@ -68,9 +69,9 @@ public class OwaspTests
     {
         // The validator should handle XSS/injection payloads gracefully
         // (accept them as valid input for the chat model, which has its own guardrails)
-        var request = new RetailPulse.Contracts.ChatRequest(maliciousInput, "abc123");
+        var request = new Contracts.ChatRequest(maliciousInput, "abc123");
 
-        var result = RetailPulse.Api.Validation.ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         // Chat messages containing injection payloads should pass basic validation
         // (the guardrails middleware handles content safety separately)
@@ -82,10 +83,10 @@ public class OwaspTests
     [Trait("OWASP", "A03-Injection")]
     public void A03_OversizedMessage_IsRejected()
     {
-        var oversizedMessage = new string('A', 4001);
-        var request = new RetailPulse.Contracts.ChatRequest(oversizedMessage, "session1");
+        string oversizedMessage = new('A', 4001);
+        var request = new Contracts.ChatRequest(oversizedMessage, "session1");
 
-        var result = RetailPulse.Api.Validation.ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("message");
@@ -95,11 +96,11 @@ public class OwaspTests
     [Trait("OWASP", "A03-Injection")]
     public void A03_MaliciousSessionId_IsRejected()
     {
-        var request = new RetailPulse.Contracts.ChatRequest(
+        var request = new Contracts.ChatRequest(
             "Normal message",
             "'; DROP TABLE sessions; --");
 
-        var result = RetailPulse.Api.Validation.ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("sessionId");
@@ -113,23 +114,17 @@ public class OwaspTests
     [Trait("OWASP", "A05-SecurityMisconfiguration")]
     public async Task A05_SecurityHeaders_ArePresent()
     {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder.UseTestServer()
+        using IHost host = await new HostBuilder()
+            .ConfigureWebHost(webBuilder => webBuilder.UseTestServer()
                     .Configure(app =>
                     {
                         app.UseMiddleware<SecurityHeadersMiddleware>();
-                        app.Run(async context =>
-                        {
-                            await context.Response.WriteAsync("OK");
-                        });
-                    });
-            })
+                        app.Run(async context => await context.Response.WriteAsync("OK"));
+                    }))
             .StartAsync();
 
-        var client = host.GetTestClient();
-        var response = await client.GetAsync("/");
+        HttpClient client = host.GetTestClient();
+        HttpResponseMessage response = await client.GetAsync("/");
 
         response.Headers.GetValues("X-Content-Type-Options").Should().Contain("nosniff");
         response.Headers.GetValues("X-Frame-Options").Should().Contain("DENY");
@@ -143,24 +138,18 @@ public class OwaspTests
     [Trait("OWASP", "A05-SecurityMisconfiguration")]
     public async Task A05_SecurityHeaders_IncludeHSTS_WhenHttps()
     {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder.UseTestServer()
+        using IHost host = await new HostBuilder()
+            .ConfigureWebHost(webBuilder => webBuilder.UseTestServer()
                     .Configure(app =>
                     {
                         app.UseMiddleware<SecurityHeadersMiddleware>();
-                        app.Run(async context =>
-                        {
-                            await context.Response.WriteAsync("OK");
-                        });
-                    });
-            })
+                        app.Run(async context => await context.Response.WriteAsync("OK"));
+                    }))
             .StartAsync();
 
-        var client = host.GetTestClient();
+        HttpClient client = host.GetTestClient();
         // TestServer uses http by default, so HSTS won't be added
-        var response = await client.GetAsync("http://localhost/");
+        HttpResponseMessage response = await client.GetAsync("http://localhost/");
 
         // HSTS should NOT be present on HTTP requests
         response.Headers.Contains("Strict-Transport-Security").Should().BeFalse(
@@ -176,7 +165,7 @@ public class OwaspTests
     public void A07_RateLimiting_IsConfigured()
     {
         // Verify that the rate limiting policy names used in the app are correct
-        var expectedPolicies = new[] { "strict", "moderate", "relaxed", "upload" };
+        string[] expectedPolicies = ["strict", "moderate", "relaxed", "upload"];
         expectedPolicies.Should().Contain("strict",
             "chat endpoints should use the strict rate limiter");
     }
@@ -187,7 +176,7 @@ public class OwaspTests
     {
         // Documented requirement: /api/chat and /api/chat/stream use "strict" policy
         // (10 requests/min per window)
-        var strictPolicyPermitLimit = 10;
+        int strictPolicyPermitLimit = 10;
         strictPolicyPermitLimit.Should().BeLessThanOrEqualTo(20,
             "chat endpoints should have aggressive rate limiting to prevent abuse");
     }

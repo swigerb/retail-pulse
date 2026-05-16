@@ -20,8 +20,8 @@ public static class DocumentChunker
         if (string.IsNullOrWhiteSpace(content))
             return [];
 
-        var paragraphs = SplitIntoParagraphs(content);
-        var merged = MergeParagraphs(paragraphs);
+        List<(string Text, string? Header)> paragraphs = SplitIntoParagraphs(content);
+        List<(string Text, string? Header)> merged = MergeParagraphs(paragraphs);
         return CreateOverlappingChunks(merged);
     }
 
@@ -30,14 +30,14 @@ public static class DocumentChunker
 
     private static List<(string Text, string? Header)> SplitIntoParagraphs(string content)
     {
-        var lines = content.Split('\n');
+        string[] lines = content.Split('\n');
         var paragraphs = new List<(string Text, string? Header)>();
         string? currentHeader = null;
         var currentParagraph = new System.Text.StringBuilder();
 
-        foreach (var line in lines)
+        foreach (string line in lines)
         {
-            var trimmed = line.TrimStart();
+            string trimmed = line.TrimStart();
 
             // Detect markdown headers
             if (trimmed.StartsWith('#'))
@@ -80,9 +80,9 @@ public static class DocumentChunker
         var currentText = new System.Text.StringBuilder();
         string? currentHeader = null;
 
-        foreach (var (text, header) in paragraphs)
+        foreach ((string? text, string? header) in paragraphs)
         {
-            var tokens = CountTokens(text);
+            int tokens = CountTokens(text);
 
             if (currentText.Length > 0 && CountTokens(currentText.ToString()) + tokens > _targetTokens)
             {
@@ -109,10 +109,10 @@ public static class DocumentChunker
     {
         var chunks = new List<DocumentChunk>();
 
-        for (var i = 0; i < merged.Count; i++)
+        for (int i = 0; i < merged.Count; i++)
         {
-            var (text, header) = merged[i];
-            var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            (string? text, string? header) = merged[i];
+            string[] words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
             if (words.Length <= _targetTokens + _overlapTokens || i == merged.Count - 1)
             {
@@ -120,8 +120,8 @@ public static class DocumentChunker
                 string chunkText;
                 if (i > 0 && chunks.Count > 0)
                 {
-                    var prevWords = merged[i - 1].Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                    var overlapWords = prevWords.Length > _overlapTokens
+                    string[] prevWords = merged[i - 1].Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                    string[] overlapWords = prevWords.Length > _overlapTokens
                         ? prevWords[^_overlapTokens..]
                         : prevWords;
                     chunkText = string.Join(' ', overlapWords) + " " + text;
@@ -136,23 +136,23 @@ public static class DocumentChunker
             else
             {
                 // Split large merged block into multiple chunks
-                var pos = 0;
+                int pos = 0;
                 while (pos < words.Length)
                 {
-                    var take = Math.Min(_targetTokens, words.Length - pos);
-                    var chunkWords = words[pos..(pos + take)];
+                    int take = Math.Min(_targetTokens, words.Length - pos);
+                    string[] chunkWords = words[pos..(pos + take)];
 
                     string chunkText;
                     if (pos > 0)
                     {
-                        var overlapStart = Math.Max(0, pos - _overlapTokens);
-                        var overlapWords = words[overlapStart..pos];
+                        int overlapStart = Math.Max(0, pos - _overlapTokens);
+                        string[] overlapWords = words[overlapStart..pos];
                         chunkText = string.Join(' ', overlapWords) + " " + string.Join(' ', chunkWords);
                     }
                     else if (i > 0 && chunks.Count > 0)
                     {
-                        var prevWords = merged[i - 1].Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                        var overlapWords = prevWords.Length > _overlapTokens
+                        string[] prevWords = merged[i - 1].Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                        string[] overlapWords = prevWords.Length > _overlapTokens
                             ? prevWords[^_overlapTokens..]
                             : prevWords;
                         chunkText = string.Join(' ', overlapWords) + " " + string.Join(' ', chunkWords);

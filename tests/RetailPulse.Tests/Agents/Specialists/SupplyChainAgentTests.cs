@@ -28,35 +28,35 @@ public class SupplyChainAgentTests
     [Fact]
     public void Key_IsSupplyChain()
     {
-        var agent = CreateAgent();
+        SupplyChainAgent agent = CreateAgent();
         agent.Key.Should().Be("supply-chain");
     }
 
     [Fact]
     public void DisplayName_IsNotEmpty()
     {
-        var agent = CreateAgent();
+        SupplyChainAgent agent = CreateAgent();
         agent.DisplayName.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
     public void SupportedIntents_ContainsSupplyShipments()
     {
-        var agent = CreateAgent();
+        SupplyChainAgent agent = CreateAgent();
         agent.SupportedIntents.Should().Contain(AgentIntent.SupplyShipments);
     }
 
     [Fact]
     public void SupportedIntents_DoesNotContainGeneralFallback()
     {
-        var agent = CreateAgent();
+        SupplyChainAgent agent = CreateAgent();
         agent.SupportedIntents.Should().NotContain(AgentIntent.General);
     }
 
     [Fact]
     public void SupportedIntents_DoesNotContainOtherSpecialistIntents()
     {
-        var agent = CreateAgent();
+        SupplyChainAgent agent = CreateAgent();
         agent.SupportedIntents.Should().NotContain(AgentIntent.DemandForecasting);
         agent.SupportedIntents.Should().NotContain(AgentIntent.PromotionTrade);
         agent.SupportedIntents.Should().NotContain(AgentIntent.CompetitiveMarket);
@@ -66,7 +66,7 @@ public class SupplyChainAgentTests
     [Fact]
     public void SupportedIntents_OnlySupplyShipments()
     {
-        var agent = CreateAgent();
+        SupplyChainAgent agent = CreateAgent();
         agent.SupportedIntents.Should().HaveCount(1);
         agent.SupportedIntents.Should().ContainSingle(i => i == AgentIntent.SupplyShipments);
     }
@@ -78,11 +78,11 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_ReturnsReplyFromModel()
     {
-        var chatClient = MockChatClient("Inventory levels for Sierra Gold Tequila are healthy across all regions.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Inventory levels for Sierra Gold Tequila are healthy across all regions.");
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
         var request = new ChatRequest("What's the supply situation for Sierra Gold?", SessionId: "session-supply-1");
-        var response = await agent.HandleAsync(request);
+        ChatResponse response = await agent.HandleAsync(request);
 
         response.Reply.Should().Contain("Inventory");
         response.SessionId.Should().Be("session-supply-1");
@@ -91,10 +91,10 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_GeneratesSessionIdWhenMissing()
     {
-        var chatClient = MockChatClient("Supply chain status report ready.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Supply chain status report ready.");
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(new ChatRequest("Supply status"));
+        ChatResponse response = await agent.HandleAsync(new ChatRequest("Supply status"));
 
         response.SessionId.Should().NotBeNullOrWhiteSpace();
     }
@@ -102,10 +102,10 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_IncludesSpans()
     {
-        var chatClient = MockChatClient("Supply analysis complete.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Supply analysis complete.");
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Show supply health for Ridgeline Bourbon", SessionId: "span-test-supply"));
 
         response.Spans.Should().NotBeEmpty();
@@ -116,10 +116,10 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_PropagatesSessionId()
     {
-        var chatClient = MockChatClient("ok");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("ok");
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("supply?", SessionId: "my-supply-session-42"));
 
         response.SessionId.Should().Be("my-supply-session-42");
@@ -128,10 +128,10 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_IncludesTotalDurationMs()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("supply health?", SessionId: "dur-supply-test"));
 
         response.TotalDurationMs.Should().NotBeNull();
@@ -141,10 +141,10 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_SpansHaveCorrectSessionId()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "span-session-supply-test"));
 
         response.Spans.Should().OnlyContain(s => s.SessionId == "span-session-supply-test");
@@ -153,10 +153,10 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_SpansHaveTimestamps()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "ts-supply-test"));
 
         response.Spans.Should().OnlyContain(s => s.Timestamp > DateTimeOffset.MinValue);
@@ -169,16 +169,16 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_SupplyQuery_ReturnsStructuredAssessment()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             "## Supply Health Assessment\n" +
             "**Overall Status:** Healthy\n" +
             "**Inventory Coverage:** 14 days of supply\n" +
             "**Active Disruptions:** None\n" +
             "**Fulfillment Rate:** 96.2%\n" +
             "**Recommendation:** MAINTAIN — current supply levels are adequate");
-        var agent = CreateAgent(chatClient);
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("What's the supply health for Sierra Gold Tequila?", SessionId: "assess-supply-1"));
 
         response.Reply.Should().NotBeNullOrWhiteSpace();
@@ -188,18 +188,18 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_DisruptionDetected_ReturnsCriticalAssessment()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             "## Supply Health Assessment\n" +
             "**Overall Status:** Critical\n" +
             "**Active Disruptions:** 2 high-severity disruptions in Northeast\n" +
             "**Fulfillment Rate:** 72.1% (below 80% threshold)\n" +
             "**Recommendation:** ESCALATE — immediate action required for supply restoration");
-        var agent = CreateAgent(chatClient);
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Any supply disruptions for FreshMart?", SessionId: "disruption-1"));
 
-        var reply = response.Reply;
+        string reply = response.Reply;
         (reply.Contains("Critical") || reply.Contains("disruption") || reply.Contains("ESCALATE"))
             .Should().BeTrue("response should reference supply disruption severity");
     }
@@ -223,7 +223,7 @@ public class SupplyChainAgentTests
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
-        var agent = CreateAgent(mockClient.Object);
+        SupplyChainAgent agent = CreateAgent(mockClient.Object);
         var request = new ChatRequest(
             "Now show me disruptions for that region",
             SessionId: "hist-supply-1",
@@ -261,7 +261,7 @@ public class SupplyChainAgentTests
             .Select(i => new ChatHistoryMessage(i % 2 == 0 ? "assistant" : "user", $"h-{i}"))
             .ToList();
 
-        var agent = CreateAgent(mockClient.Object);
+        SupplyChainAgent agent = CreateAgent(mockClient.Object);
         await agent.HandleAsync(
             new ChatRequest("current", SessionId: "cap-supply-test", History: history));
 
@@ -297,7 +297,7 @@ public class SupplyChainAgentTests
             AIFunctionFactory.Create(() => "health summary", "get_supply_health_summary")
         };
 
-        var agent = CreateAgent(mockClient.Object, supplyTools);
+        SupplyChainAgent agent = CreateAgent(mockClient.Object, supplyTools);
         await agent.HandleAsync(new ChatRequest("supply?", SessionId: "tool-supply-test"));
 
         capturedOptions.Should().NotBeNull();
@@ -312,8 +312,8 @@ public class SupplyChainAgentTests
     [Fact]
     public void SupplyAgent_KeyDiffersFromGeneral()
     {
-        var supplyAgent = CreateAgent();
-        var generalAgent = Fixtures.AgentTestFixtures.CreateGeneralAgent();
+        SupplyChainAgent supplyAgent = CreateAgent();
+        Api.Agents.Specialists.GeneralAgent generalAgent = Fixtures.AgentTestFixtures.CreateGeneralAgent();
 
         supplyAgent.Key.Should().NotBe(generalAgent.Key);
         supplyAgent.Key.Should().Be("supply-chain");
@@ -331,7 +331,7 @@ public class SupplyChainAgentTests
     [InlineData("What's the fulfillment rate in the Northeast?")]
     public void SupplyAgent_RespondsToSupplyIntent(string _)
     {
-        var agent = CreateAgent();
+        SupplyChainAgent agent = CreateAgent();
         agent.SupportedIntents.Should().Contain(AgentIntent.SupplyShipments);
     }
 
@@ -342,12 +342,12 @@ public class SupplyChainAgentTests
     [Fact]
     public async Task HandleAsync_UnknownBrand_ReturnsFriendlyMessage()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             "I don't have supply data for that brand. The known brands in the portfolio " +
             "include Sierra Gold Tequila, Ridgeline Bourbon, Summit Vodka, and others.");
-        var agent = CreateAgent(chatClient);
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("What's the supply status for NonExistentBrand?", SessionId: "unknown-supply"));
 
         response.Reply.Should().NotBeNullOrWhiteSpace();
@@ -373,8 +373,8 @@ public class SupplyChainAgentTests
                 CreatePipelineResponse(429),
                 null));
 
-        var agent = CreateAgent(mockClient.Object);
-        var response = await agent.HandleAsync(
+        SupplyChainAgent agent = CreateAgent(mockClient.Object);
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("supply?", SessionId: "s-429-supply"));
 
         response.Reply.Should().Contain("rate-limited");
@@ -393,8 +393,8 @@ public class SupplyChainAgentTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        var agent = CreateAgent(mockClient.Object);
-        var response = await agent.HandleAsync(
+        SupplyChainAgent agent = CreateAgent(mockClient.Object);
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest("supply?", SessionId: "s-err-supply"));
 
         response.Reply.Should().Contain("Something went wrong");
@@ -420,10 +420,10 @@ public class SupplyChainAgentTests
     [InlineData("Foundry Home")]
     public async Task HandleAsync_AllTenantBrands_ProcessWithoutError(string brand)
     {
-        var chatClient = MockChatClient($"Supply analysis for {brand}: inventory healthy, no disruptions.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient($"Supply analysis for {brand}: inventory healthy, no disruptions.");
+        SupplyChainAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        ChatResponse response = await agent.HandleAsync(
             new ChatRequest($"What's the supply health for {brand}?", SessionId: $"brand-supply-{brand}"));
 
         response.Reply.Should().NotBeNullOrWhiteSpace();
@@ -452,8 +452,8 @@ public class SupplyChainAgentTests
         IChatClient? chatClient = null,
         IEnumerable<AITool>? tools = null)
     {
-        var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder()
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -535,7 +535,7 @@ public class SupplyChainAgent : ISpecialistAgent
 
     public async Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
     {
-        var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+        string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
         var collector = new Api.Middleware.TelemetryCollector(_hubContext, sessionId);
 
         var chatOptions = new ChatOptions
@@ -552,13 +552,13 @@ public class SupplyChainAgent : ISpecialistAgent
         if (request.History is { Count: > 0 })
         {
             const int maxTurns = 10;
-            var historyMessages = request.History.Count > maxTurns * 2
+            List<ChatHistoryMessage> historyMessages = request.History.Count > maxTurns * 2
                 ? [.. request.History.Skip(request.History.Count - (maxTurns * 2))]
                 : request.History;
 
-            foreach (var historyMessage in historyMessages)
+            foreach (ChatHistoryMessage historyMessage in historyMessages)
             {
-                var role = string.Equals(historyMessage.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                ChatRole role = string.Equals(historyMessage.Role, "assistant", StringComparison.OrdinalIgnoreCase)
                     ? ChatRole.Assistant
                     : ChatRole.User;
                 messages.Add(new ChatMessage(role, historyMessage.Content));
@@ -577,7 +577,7 @@ public class SupplyChainAgent : ISpecialistAgent
         }
         catch (ClientResultException ex) when (ex.Status == 429)
         {
-            var failureDurationMs = sw.ElapsedMilliseconds;
+            long failureDurationMs = sw.ElapsedMilliseconds;
             _logger.LogWarning(ex, "Supply chain agent rate-limited after {DurationMs}ms", failureDurationMs);
             return new ChatResponse(
                 "⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.",
@@ -585,7 +585,7 @@ public class SupplyChainAgent : ISpecialistAgent
         }
         catch (Exception ex)
         {
-            var failureDurationMs = sw.ElapsedMilliseconds;
+            long failureDurationMs = sw.ElapsedMilliseconds;
             _logger.LogError(ex, "Supply chain agent failed after {DurationMs}ms for session {SessionId}",
                 failureDurationMs, sessionId);
             return new ChatResponse(
@@ -593,10 +593,10 @@ public class SupplyChainAgent : ISpecialistAgent
                 sessionId, [], null, failureDurationMs);
         }
 
-        var thoughtDurationMs = sw.ElapsedMilliseconds;
+        long thoughtDurationMs = sw.ElapsedMilliseconds;
 
-        var inputTokens = (int)(response.Usage?.InputTokenCount ?? 0);
-        var outputTokens = (int)(response.Usage?.OutputTokenCount ?? 0);
+        int inputTokens = (int)(response.Usage?.InputTokenCount ?? 0);
+        int outputTokens = (int)(response.Usage?.OutputTokenCount ?? 0);
 
         await collector.RecordSpanAsync(
             _agentDef.Name, "thought",
@@ -605,16 +605,16 @@ public class SupplyChainAgent : ISpecialistAgent
             inputTokens > 0 ? inputTokens : null,
             outputTokens > 0 ? outputTokens : null);
 
-        var postProcessStart = sw.ElapsedMilliseconds;
-        var reply = response.Text ?? "I wasn't able to generate a supply chain analysis.";
+        long postProcessStart = sw.ElapsedMilliseconds;
+        string reply = response.Text ?? "I wasn't able to generate a supply chain analysis.";
 
-        var responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
+        long responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
         await collector.RecordSpanAsync(
             _agentDef.Name, "response",
             reply[..Math.Min(200, reply.Length)],
             responseDurationMs);
 
-        var totalDurationMs = sw.ElapsedMilliseconds;
+        long totalDurationMs = sw.ElapsedMilliseconds;
 
         return new ChatResponse(
             reply, sessionId, [.. collector.Spans],

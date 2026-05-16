@@ -39,15 +39,15 @@ public class ExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception ex)
     {
-        var correlationId = context.TraceIdentifier;
-        var category = ErrorClassifier.Classify(ex);
-        var path = context.Request.Path.Value ?? "/";
+        string correlationId = context.TraceIdentifier;
+        ErrorCategory category = ErrorClassifier.Classify(ex);
+        string path = context.Request.Path.Value ?? "/";
 
         _logger.LogError(ex,
             "Unhandled exception | CorrelationId={CorrelationId} Category={ErrorCategory} ExceptionType={ExceptionType} Path={RequestPath}",
             correlationId, category, ex.GetType().Name, path);
 
-        var statusCode = MapToStatusCode(category, ex);
+        HttpStatusCode statusCode = MapToStatusCode(category, ex);
 
         var problemDetails = new
         {

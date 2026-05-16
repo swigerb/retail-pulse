@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Agents.Core.Models;
 using RetailPulse.Contracts;
 using RetailPulse.TeamsBot.Cards;
 
@@ -17,14 +18,14 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildChatResponseCard_TextOnly_CreatesValidCard()
     {
-        var reply = "This is a test reply from the AI agent.";
+        string reply = "This is a test reply from the AI agent.";
 
-        var attachment = _builder.BuildChatResponseCard(reply, null, null);
+        Attachment attachment = _builder.BuildChatResponseCard(reply, null, null);
 
         attachment.Should().NotBeNull();
         attachment.ContentType.Should().Be("application/vnd.microsoft.card.adaptive");
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Pulse"); // Check for "Pulse" without special chars
         cardJson.Should().Contain(reply);
     }
@@ -32,11 +33,11 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildChatResponseCard_HasCorrectVersion()
     {
-        var reply = "Test reply";
+        string reply = "Test reply";
 
-        var attachment = _builder.BuildChatResponseCard(reply, null, null);
+        Attachment attachment = _builder.BuildChatResponseCard(reply, null, null);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         var cardObject = JsonDocument.Parse(cardJson);
 
         cardObject.RootElement.GetProperty("version").GetString().Should().Be("1.8");
@@ -45,16 +46,16 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildChatResponseCard_WithSpans_IncludesTelemetrySection()
     {
-        var reply = "Test reply with telemetry";
+        string reply = "Test reply with telemetry";
         var spans = new List<AgentSpan>
         {
             new("Thinking", "thought", "Analyzing request", 150, DateTimeOffset.UtcNow),
             new("Tool Call", "tool_call", "Fetching data", 250, DateTimeOffset.UtcNow)
         };
 
-        var attachment = _builder.BuildChatResponseCard(reply, spans, null);
+        Attachment attachment = _builder.BuildChatResponseCard(reply, spans, null);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Telemetry Summary");
         cardJson.Should().Contain("Thinking");
         cardJson.Should().Contain("Tool Call");
@@ -64,7 +65,7 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildChatResponseCard_WithCharts_IncludesChartSection()
     {
-        var reply = "Here's your chart";
+        string reply = "Here's your chart";
         var charts = new List<ChartSpec>
         {
             new() {
@@ -87,9 +88,9 @@ public class AdaptiveCardBuilderTests
             }
         };
 
-        var attachment = _builder.BuildChatResponseCard(reply, null, charts);
+        Attachment attachment = _builder.BuildChatResponseCard(reply, null, charts);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Charts");
         cardJson.Should().Contain("Sales by Region");
         cardJson.Should().Contain("Chart.VerticalBar");
@@ -98,7 +99,7 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildChatResponseCard_WithSpansAndCharts_IncludesBothSections()
     {
-        var reply = "Complete response with everything";
+        string reply = "Complete response with everything";
         var spans = new List<AgentSpan>
         {
             new("Generate Chart", "tool_call", "Creating visualization", 500, DateTimeOffset.UtcNow)
@@ -122,9 +123,9 @@ public class AdaptiveCardBuilderTests
             }
         };
 
-        var attachment = _builder.BuildChatResponseCard(reply, spans, charts);
+        Attachment attachment = _builder.BuildChatResponseCard(reply, spans, charts);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Charts");
         cardJson.Should().Contain("Telemetry Summary");
         cardJson.Should().Contain("Generate Chart");
@@ -134,16 +135,16 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildChatResponseCard_WithSessionId_IncludesFullTelemetryButton()
     {
-        var reply = "Test with session";
-        var sessionId = "test-session-123";
+        string reply = "Test with session";
+        string sessionId = "test-session-123";
         var spans = new List<AgentSpan>
         {
             new("Test", "thought", "Testing", 100, DateTimeOffset.UtcNow)
         };
 
-        var attachment = _builder.BuildChatResponseCard(reply, spans, null, sessionId);
+        Attachment attachment = _builder.BuildChatResponseCard(reply, spans, null, sessionId);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Full Telemetry Report");
         cardJson.Should().Contain(sessionId);
     }
@@ -153,12 +154,12 @@ public class AdaptiveCardBuilderTests
     {
         var userContext = new UserContext("user-123", "John Doe", "john@example.com");
 
-        var attachment = _builder.BuildWelcomeCard(false, userContext);
+        Attachment attachment = _builder.BuildWelcomeCard(false, userContext);
 
         attachment.Should().NotBeNull();
         attachment.ContentType.Should().Be("application/vnd.microsoft.card.adaptive");
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Welcome to");
         cardJson.Should().Contain("Pulse");
         cardJson.Should().Contain("John Doe");
@@ -171,9 +172,9 @@ public class AdaptiveCardBuilderTests
     {
         var userContext = new UserContext("user-123", "Jane Doe", "jane@example.com");
 
-        var attachment = _builder.BuildWelcomeCard(true, userContext);
+        Attachment attachment = _builder.BuildWelcomeCard(true, userContext);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Chat Reset");
         cardJson.Should().Contain("conversation has been reset");
     }
@@ -181,9 +182,9 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildWelcomeCard_HasCorrectVersion()
     {
-        var attachment = _builder.BuildWelcomeCard(false, null);
+        Attachment attachment = _builder.BuildWelcomeCard(false, null);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         var cardObject = JsonDocument.Parse(cardJson);
 
         cardObject.RootElement.GetProperty("version").GetString().Should().Be("1.8");
@@ -192,12 +193,12 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildErrorCard_IncludesErrorMessage()
     {
-        var errorMessage = "Connection to API failed";
+        string errorMessage = "Connection to API failed";
 
-        var attachment = _builder.BuildErrorCard(errorMessage);
+        Attachment attachment = _builder.BuildErrorCard(errorMessage);
 
         attachment.Should().NotBeNull();
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Error");
         cardJson.Should().Contain(errorMessage);
     }
@@ -205,9 +206,9 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildErrorCard_HasCorrectVersion()
     {
-        var attachment = _builder.BuildErrorCard("Test error");
+        Attachment attachment = _builder.BuildErrorCard("Test error");
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         var cardObject = JsonDocument.Parse(cardJson);
 
         cardObject.RootElement.GetProperty("version").GetString().Should().Be("1.8");
@@ -218,9 +219,9 @@ public class AdaptiveCardBuilderTests
     {
         var spans = new List<AgentSpan>();
 
-        var attachment = _builder.BuildDetailedTelemetryCard(spans);
+        Attachment attachment = _builder.BuildDetailedTelemetryCard(spans);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Full Telemetry Report");
         cardJson.Should().Contain("No telemetry data available");
     }
@@ -235,9 +236,9 @@ public class AdaptiveCardBuilderTests
             new("Medium Operation", "thought", "Thinking", 300, DateTimeOffset.UtcNow.AddMilliseconds(1550))
         };
 
-        var attachment = _builder.BuildDetailedTelemetryCard(spans);
+        Attachment attachment = _builder.BuildDetailedTelemetryCard(spans);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Summary");
         cardJson.Should().Contain("Total Duration");
         cardJson.Should().Contain("Total Spans");
@@ -258,9 +259,9 @@ public class AdaptiveCardBuilderTests
             new("Slowest", "tool_call", "Very slow", 2000, DateTimeOffset.UtcNow.AddMilliseconds(50))
         };
 
-        var attachment = _builder.BuildDetailedTelemetryCard(spans);
+        Attachment attachment = _builder.BuildDetailedTelemetryCard(spans);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
         cardJson.Should().Contain("Slowest Span");
         cardJson.Should().Contain("Slowest");
     }
@@ -268,16 +269,16 @@ public class AdaptiveCardBuilderTests
     [Fact]
     public void BuildChatResponseCard_ProducesValidJson()
     {
-        var reply = "Valid JSON test";
+        string reply = "Valid JSON test";
         var spans = new List<AgentSpan>
         {
             new("Test Span", "thought", "Testing JSON", 100, DateTimeOffset.UtcNow)
         };
 
-        var attachment = _builder.BuildChatResponseCard(reply, spans, null);
+        Attachment attachment = _builder.BuildChatResponseCard(reply, spans, null);
 
-        var cardJson = JsonSerializer.Serialize(attachment.Content);
-        var parseAction = () => JsonDocument.Parse(cardJson);
+        string cardJson = JsonSerializer.Serialize(attachment.Content);
+        Func<JsonDocument> parseAction = () => JsonDocument.Parse(cardJson);
         parseAction.Should().NotThrow("Card should produce valid JSON");
     }
 }

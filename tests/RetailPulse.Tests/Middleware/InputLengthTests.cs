@@ -39,10 +39,10 @@ public class InputLengthTests
     [Fact]
     public async Task InputLength_ExceedsDefault10000_Blocked()
     {
-        var mw = CreateMiddleware(maxLength: 10_000);
-        var longInput = new string('A', 10_001);
+        GuardrailsMiddleware mw = CreateMiddleware(maxLength: 10_000);
+        string longInput = new('A', 10_001);
 
-        var result = await mw.CheckInputAsync(MakeRequest(longInput));
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(longInput));
 
         result.IsBlocked.Should().BeTrue("input exceeds the 10,000 character limit");
         result.RefusalMessage.Should().Contain("maximum allowed length");
@@ -51,10 +51,10 @@ public class InputLengthTests
     [Fact]
     public async Task InputLength_ExceedsCustomLimit_Blocked()
     {
-        var mw = CreateMiddleware(maxLength: 500);
-        var longInput = new string('B', 501);
+        GuardrailsMiddleware mw = CreateMiddleware(maxLength: 500);
+        string longInput = new('B', 501);
 
-        var result = await mw.CheckInputAsync(MakeRequest(longInput));
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(longInput));
 
         result.IsBlocked.Should().BeTrue("input exceeds the custom 500 character limit");
     }
@@ -62,10 +62,10 @@ public class InputLengthTests
     [Fact]
     public async Task InputLength_WayOverLimit_Blocked()
     {
-        var mw = CreateMiddleware(maxLength: 100);
-        var longInput = new string('X', 50_000);
+        GuardrailsMiddleware mw = CreateMiddleware(maxLength: 100);
+        string longInput = new('X', 50_000);
 
-        var result = await mw.CheckInputAsync(MakeRequest(longInput));
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(longInput));
 
         result.IsBlocked.Should().BeTrue("extremely long input should be blocked");
     }
@@ -77,10 +77,10 @@ public class InputLengthTests
     [Fact]
     public async Task InputLength_ExactlyAtLimit_NotBlocked()
     {
-        var mw = CreateMiddleware(maxLength: 10_000);
-        var input = new string('C', 10_000);
+        GuardrailsMiddleware mw = CreateMiddleware(maxLength: 10_000);
+        string input = new('C', 10_000);
 
-        var result = await mw.CheckInputAsync(MakeRequest(input));
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(input));
 
         result.IsBlocked.Should().BeFalse("input exactly at the limit should pass");
     }
@@ -88,10 +88,10 @@ public class InputLengthTests
     [Fact]
     public async Task InputLength_UnderLimit_NotBlocked()
     {
-        var mw = CreateMiddleware(maxLength: 10_000);
-        var input = "What are Q3 sales for Sierra Gold Tequila?";
+        GuardrailsMiddleware mw = CreateMiddleware(maxLength: 10_000);
+        string input = "What are Q3 sales for Sierra Gold Tequila?";
 
-        var result = await mw.CheckInputAsync(MakeRequest(input));
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(input));
 
         result.IsBlocked.Should().BeFalse("normal-length query should pass");
     }
@@ -99,10 +99,10 @@ public class InputLengthTests
     [Fact]
     public async Task InputLength_OneUnderLimit_NotBlocked()
     {
-        var mw = CreateMiddleware(maxLength: 200);
-        var input = new string('D', 199);
+        GuardrailsMiddleware mw = CreateMiddleware(maxLength: 200);
+        string input = new('D', 199);
 
-        var result = await mw.CheckInputAsync(MakeRequest(input));
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(input));
 
         result.IsBlocked.Should().BeFalse("input one char under limit should pass");
     }

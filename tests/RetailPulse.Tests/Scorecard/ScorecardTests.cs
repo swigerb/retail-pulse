@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
@@ -42,13 +43,13 @@ public class ScorecardTests
     [Fact]
     public async Task Scorecard_ReturnsAllBrandsFromTenantConfig()
     {
-        var service = CreateScorecardService();
-        var scorecard = await service.GenerateAsync();
+        IScorecardService service = CreateScorecardService();
+        ScorecardResult scorecard = await service.GenerateAsync();
 
         scorecard.Brands.Should().NotBeEmpty("scorecard should include brands");
 
         var brandNames = scorecard.Brands.Select(b => b.Name).ToList();
-        foreach (var expected in ExpectedBrands)
+        foreach (string expected in ExpectedBrands)
         {
             brandNames.Should().Contain(expected,
                 $"scorecard should include tenant brand '{expected}'");
@@ -62,10 +63,10 @@ public class ScorecardTests
     [Fact]
     public async Task Scorecard_EachBrandHasHealthScore0To100()
     {
-        var service = CreateScorecardService();
-        var scorecard = await service.GenerateAsync();
+        IScorecardService service = CreateScorecardService();
+        ScorecardResult scorecard = await service.GenerateAsync();
 
-        foreach (var brand in scorecard.Brands)
+        foreach (BrandScore brand in scorecard.Brands)
         {
             brand.HealthScore.Should().BeGreaterThanOrEqualTo(0,
                 $"brand '{brand.Name}' health score should be >= 0");
@@ -81,10 +82,10 @@ public class ScorecardTests
     [Fact]
     public async Task Scorecard_EachBrandHasAllDimensionScores()
     {
-        var service = CreateScorecardService();
-        var scorecard = await service.GenerateAsync();
+        IScorecardService service = CreateScorecardService();
+        ScorecardResult scorecard = await service.GenerateAsync();
 
-        foreach (var brand in scorecard.Brands)
+        foreach (BrandScore brand in scorecard.Brands)
         {
             brand.Dimensions.Should().NotBeNull(
                 $"brand '{brand.Name}' should have dimension scores");
@@ -97,7 +98,7 @@ public class ScorecardTests
             brand.Dimensions.Keys.Should().Contain("supply",
                 $"brand '{brand.Name}' should have supply dimension");
 
-            foreach (var (dim, score) in brand.Dimensions)
+            foreach ((string? dim, double score) in brand.Dimensions)
             {
                 score.Should().BeGreaterThanOrEqualTo(0,
                     $"brand '{brand.Name}' dimension '{dim}' should be >= 0");
@@ -114,10 +115,10 @@ public class ScorecardTests
     [Fact]
     public async Task Scorecard_OverallScore_IsWeightedAverageOfDimensions()
     {
-        var service = CreateScorecardService();
-        var scorecard = await service.GenerateAsync();
+        IScorecardService service = CreateScorecardService();
+        ScorecardResult scorecard = await service.GenerateAsync();
 
-        foreach (var brand in scorecard.Brands)
+        foreach (BrandScore brand in scorecard.Brands)
         {
             if (brand.Dimensions.Count == 0) continue;
 
@@ -130,12 +131,12 @@ public class ScorecardTests
                 ["supply"] = 0.25
             };
 
-            var weightedSum = 0.0;
-            var totalWeight = 0.0;
+            double weightedSum = 0.0;
+            double totalWeight = 0.0;
 
-            foreach (var (dim, score) in brand.Dimensions)
+            foreach ((string? dim, double score) in brand.Dimensions)
             {
-                if (weights.TryGetValue(dim, out var weight))
+                if (weights.TryGetValue(dim, out double weight))
                 {
                     weightedSum += score * weight;
                     totalWeight += weight;
@@ -144,7 +145,7 @@ public class ScorecardTests
 
             if (totalWeight > 0)
             {
-                var expected = weightedSum / totalWeight;
+                double expected = weightedSum / totalWeight;
                 brand.HealthScore.Should().BeApproximately(expected, 2.0,
                     $"brand '{brand.Name}' overall score should be weighted average of dimensions (±2 rounding)");
             }
@@ -158,10 +159,10 @@ public class ScorecardTests
     [Fact]
     public async Task Scorecard_FanOutCompletesWithinTimeout()
     {
-        var service = CreateScorecardService();
+        IScorecardService service = CreateScorecardService();
         var sw = Stopwatch.StartNew();
 
-        var scorecard = await service.GenerateAsync(timeoutSeconds: 15);
+        ScorecardResult scorecard = await service.GenerateAsync(timeoutSeconds: 15);
 
         sw.Stop();
         sw.Elapsed.TotalSeconds.Should().BeLessThan(20,
@@ -173,9 +174,9 @@ public class ScorecardTests
     public async Task Scorecard_PartialResultsOnTimeout()
     {
         // Create a service where some brand calculations are slow
-        var service = CreateScorecardService(simulateSlowBrands: true);
+        IScorecardService service = CreateScorecardService(simulateSlowBrands: true);
 
-        var scorecard = await service.GenerateAsync(timeoutSeconds: 2);
+        ScorecardResult scorecard = await service.GenerateAsync(timeoutSeconds: 2);
 
         // Should get at least some brands even if timeout hit
         scorecard.Brands.Should().NotBeEmpty(
@@ -196,12 +197,12 @@ public class ScorecardTests
     [Fact]
     public async Task Scorecard_TrendDetection_UpDownStable()
     {
-        var service = CreateScorecardService();
-        var scorecard = await service.GenerateAsync();
+        IScorecardService service = CreateScorecardService();
+        ScorecardResult scorecard = await service.GenerateAsync();
 
-        foreach (var brand in scorecard.Brands)
+        foreach (BrandScore brand in scorecard.Brands)
         {
-            var validTrends = new[] { "up", "down", "stable" };
+            string[] validTrends = ["up", "down", "stable"];
             brand.Trend.Should().NotBeNullOrEmpty(
                 $"brand '{brand.Name}' should have a trend indicator");
             validTrends.Should().Contain(brand.Trend.ToLowerInvariant(),
@@ -216,8 +217,8 @@ public class ScorecardTests
     [Fact]
     public async Task Scorecard_GenerationTimeIsTracked()
     {
-        var service = CreateScorecardService();
-        var scorecard = await service.GenerateAsync();
+        IScorecardService service = CreateScorecardService();
+        ScorecardResult scorecard = await service.GenerateAsync();
 
         scorecard.GenerationTimeMs.Should().BeGreaterThan(0,
             "generation time should be tracked and reported");
@@ -250,18 +251,18 @@ public class ScorecardTests
         };
 
         // Verify via reflection to ensure the actual orchestrator weights match
-        var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
+        FieldInfo? field = typeof(Api.Scorecard.ScorecardOrchestrator)
             .GetField("_scoringDimensions",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                BindingFlags.NonPublic | BindingFlags.Static);
         field.Should().NotBeNull("ScoringDimensions field should exist on ScorecardOrchestrator");
 
         var dimensions = field.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
         dimensions.Should().NotBeNull("ScoringDimensions should be castable to tuple array");
         dimensions.Should().HaveCount(5, "there should be exactly 5 scoring dimensions");
 
-        var actualWeights = dimensions.ToDictionary(d => d.Dimension, d => d.Weight);
+        Dictionary<string, double> actualWeights = dimensions.ToDictionary(d => d.Dimension, d => d.Weight);
 
-        foreach (var (name, expectedWeight) in expectedWeights)
+        foreach ((string? name, double expectedWeight) in expectedWeights)
         {
             actualWeights.Should().ContainKey(name, $"dimension '{name}' should exist");
             actualWeights[name].Should().BeApproximately(expectedWeight, 0.001,
@@ -269,7 +270,7 @@ public class ScorecardTests
         }
 
         // Total weights must sum to 1.0
-        var totalWeight = dimensions.Sum(d => d.Weight);
+        double totalWeight = dimensions.Sum(d => d.Weight);
         totalWeight.Should().BeApproximately(1.0, 0.001,
             "all dimension weights must sum to 1.0");
     }
@@ -277,12 +278,12 @@ public class ScorecardTests
     [Fact]
     public void ScorecardOrchestrator_DimensionWeights_SumToOne()
     {
-        var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
+        FieldInfo? field = typeof(Api.Scorecard.ScorecardOrchestrator)
             .GetField("_scoringDimensions",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                BindingFlags.NonPublic | BindingFlags.Static);
 
         var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        var total = dimensions!.Sum(d => d.Weight);
+        double total = dimensions!.Sum(d => d.Weight);
 
         total.Should().BeApproximately(1.0, 0.001,
             "portfolio scorecard dimension weights must sum to exactly 1.0");
@@ -291,12 +292,12 @@ public class ScorecardTests
     [Fact]
     public void ScorecardOrchestrator_DemandMomentum_HasHighestWeight()
     {
-        var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
+        FieldInfo? field = typeof(Api.Scorecard.ScorecardOrchestrator)
             .GetField("_scoringDimensions",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                BindingFlags.NonPublic | BindingFlags.Static);
 
         var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        var (Dimension, Weight, AgentKey) = dimensions!.OrderByDescending(d => d.Weight).First();
+        (string? Dimension, double Weight, string? AgentKey) = dimensions!.OrderByDescending(d => d.Weight).First();
 
         Dimension.Should().Be("Demand Momentum",
             "Demand Momentum should have the highest weight (0.25)");
@@ -306,12 +307,12 @@ public class ScorecardTests
     [Fact]
     public void ScorecardOrchestrator_MarginHealth_HasLowestWeight()
     {
-        var field = typeof(RetailPulse.Api.Scorecard.ScorecardOrchestrator)
+        FieldInfo? field = typeof(Api.Scorecard.ScorecardOrchestrator)
             .GetField("_scoringDimensions",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                BindingFlags.NonPublic | BindingFlags.Static);
 
         var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        var (Dimension, Weight, AgentKey) = dimensions!.OrderBy(d => d.Weight).First();
+        (string? Dimension, double Weight, string? AgentKey) = dimensions!.OrderBy(d => d.Weight).First();
 
         Dimension.Should().Be("Margin Health",
             "Margin Health should have the lowest weight (0.15)");
@@ -322,10 +323,7 @@ public class ScorecardTests
 
     #region Test Infrastructure
 
-    private static IScorecardService CreateScorecardService(bool simulateSlowBrands = false)
-    {
-        return new MockScorecardService(ExpectedBrands, simulateSlowBrands);
-    }
+    private static IScorecardService CreateScorecardService(bool simulateSlowBrands = false) => new MockScorecardService(ExpectedBrands, simulateSlowBrands);
 
     #endregion
 }
@@ -369,11 +367,11 @@ internal sealed class MockScorecardService : IScorecardService
     {
         var sw = Stopwatch.StartNew();
         var brands = new List<BrandScore>();
-        var timedOut = false;
+        bool timedOut = false;
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
-        foreach (var brandName in _brands)
+        foreach (string brandName in _brands)
         {
             if (cts.Token.IsCancellationRequested)
             {
@@ -394,7 +392,7 @@ internal sealed class MockScorecardService : IScorecardService
                 }
             }
 
-            var hash = Math.Abs(brandName.GetHashCode());
+            int hash = Math.Abs(brandName.GetHashCode());
             var dimensions = new Dictionary<string, double>
             {
                 ["demand"] = 40 + (hash % 60),
@@ -403,15 +401,15 @@ internal sealed class MockScorecardService : IScorecardService
                 ["supply"] = 45 + (hash / 19 % 55)
             };
 
-            var healthScore = dimensions.Values.Average();
-            var trends = new[] { "up", "down", "stable" };
-            var trend = trends[hash % 3];
+            double healthScore = dimensions.Values.Average();
+            string[] trends = ["up", "down", "stable"];
+            string trend = trends[hash % 3];
 
             brands.Add(new BrandScore(brandName, healthScore, dimensions, trend));
         }
 
         sw.Stop();
-        var elapsed = Math.Max(sw.ElapsedMilliseconds, 1); // Ensure at least 1ms for tracking
+        long elapsed = Math.Max(sw.ElapsedMilliseconds, 1); // Ensure at least 1ms for tracking
         return new ScorecardResult(brands, elapsed, timedOut);
     }
 }

@@ -16,7 +16,7 @@ public class AlertApiTests
 
     private async Task<InMemoryAlertService> SeedAndFireAlerts()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand A", "West", "demand_spike", baseline: 1000, current: 1400);
         svc.SeedDataPoint("Brand B", "East", "supply_drop", baseline: 1000, current: 700);
         svc.SeedDataPoint("Brand C", "South", "trend_reversal", baseline: 1000, current: 1200);
@@ -29,9 +29,9 @@ public class AlertApiTests
     [Fact]
     public async Task GetActiveAlerts_ReturnsCurrentlyFiring()
     {
-        var svc = await SeedAndFireAlerts();
+        InMemoryAlertService svc = await SeedAndFireAlerts();
 
-        var active = await svc.GetActiveAlertsAsync();
+        IReadOnlyList<Alert> active = await svc.GetActiveAlertsAsync();
 
         active.Should().HaveCount(3);
         active.Should().OnlyContain(a => !string.IsNullOrEmpty(a.Id));
@@ -40,11 +40,11 @@ public class AlertApiTests
     [Fact]
     public async Task GetActiveAlerts_ExcludesDismissed()
     {
-        var svc = await SeedAndFireAlerts();
-        var all = await svc.GetActiveAlertsAsync();
+        InMemoryAlertService svc = await SeedAndFireAlerts();
+        IReadOnlyList<Alert> all = await svc.GetActiveAlertsAsync();
         await svc.DismissAsync(all[0].Id, "user-1");
 
-        var active = await svc.GetActiveAlertsAsync();
+        IReadOnlyList<Alert> active = await svc.GetActiveAlertsAsync();
 
         active.Should().HaveCount(2);
     }
@@ -52,9 +52,9 @@ public class AlertApiTests
     [Fact]
     public async Task GetActiveAlerts_EmptyWhenNoneExist()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
 
-        var active = await svc.GetActiveAlertsAsync();
+        IReadOnlyList<Alert> active = await svc.GetActiveAlertsAsync();
 
         active.Should().BeEmpty();
     }
@@ -66,9 +66,9 @@ public class AlertApiTests
     [Fact]
     public async Task GetHistory_ReturnsChronologicalOrder()
     {
-        var svc = await SeedAndFireAlerts();
+        InMemoryAlertService svc = await SeedAndFireAlerts();
 
-        var history = await svc.GetHistoryAsync("user-1");
+        IReadOnlyList<Alert> history = await svc.GetHistoryAsync("user-1");
 
         history.Should().HaveCount(3);
         history.Should().BeInDescendingOrder(a => a.DetectedAt);
@@ -77,9 +77,9 @@ public class AlertApiTests
     [Fact]
     public async Task GetHistory_RespectsLimit()
     {
-        var svc = await SeedAndFireAlerts();
+        InMemoryAlertService svc = await SeedAndFireAlerts();
 
-        var history = await svc.GetHistoryAsync("user-1", limit: 2);
+        IReadOnlyList<Alert> history = await svc.GetHistoryAsync("user-1", limit: 2);
 
         history.Should().HaveCount(2);
     }
@@ -87,9 +87,9 @@ public class AlertApiTests
     [Fact]
     public async Task GetHistory_EmptyWhenNoAlerts()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
 
-        var history = await svc.GetHistoryAsync("user-1");
+        IReadOnlyList<Alert> history = await svc.GetHistoryAsync("user-1");
 
         history.Should().BeEmpty();
     }
@@ -101,11 +101,11 @@ public class AlertApiTests
     [Fact]
     public async Task Snooze_CreatesSnoozeRecord()
     {
-        var svc = await SeedAndFireAlerts();
+        InMemoryAlertService svc = await SeedAndFireAlerts();
 
         await svc.SnoozeAsync("demand_spike", "user-1", TimeSpan.FromHours(1));
 
-        var snoozes = svc.GetSnoozes("user-1");
+        IReadOnlyList<InMemoryAlertService.SnoozeEntry> snoozes = svc.GetSnoozes("user-1");
         snoozes.Should().ContainSingle();
         snoozes[0].Type.Should().Be("demand_spike");
     }
@@ -117,26 +117,26 @@ public class AlertApiTests
     [Fact]
     public async Task Dismiss_MarksAlertDismissed()
     {
-        var svc = await SeedAndFireAlerts();
-        var alerts = await svc.GetActiveAlertsAsync();
-        var alertId = alerts[0].Id;
+        InMemoryAlertService svc = await SeedAndFireAlerts();
+        IReadOnlyList<Alert> alerts = await svc.GetActiveAlertsAsync();
+        string alertId = alerts[0].Id;
 
         await svc.DismissAsync(alertId, "user-1");
 
-        var active = await svc.GetActiveAlertsAsync();
+        IReadOnlyList<Alert> active = await svc.GetActiveAlertsAsync();
         active.Should().NotContain(a => a.Id == alertId);
     }
 
     [Fact]
     public async Task Dismiss_IdempotentOnSameAlert()
     {
-        var svc = await SeedAndFireAlerts();
-        var alerts = await svc.GetActiveAlertsAsync();
-        var alertId = alerts[0].Id;
+        InMemoryAlertService svc = await SeedAndFireAlerts();
+        IReadOnlyList<Alert> alerts = await svc.GetActiveAlertsAsync();
+        string alertId = alerts[0].Id;
 
         // Dismiss twice — should not throw
         await svc.DismissAsync(alertId, "user-1");
-        var act = () => svc.DismissAsync(alertId, "user-1");
+        Func<Task> act = () => svc.DismissAsync(alertId, "user-1");
 
         await act.Should().NotThrowAsync();
     }

@@ -22,7 +22,7 @@ public class TraceCollectorTests
         double durationMs = 100,
         DateTimeOffset? startTime = null)
     {
-        var start = startTime ?? DateTimeOffset.UtcNow;
+        DateTimeOffset start = startTime ?? DateTimeOffset.UtcNow;
         return new TraceSpan(
             SpanId: Guid.NewGuid().ToString("N"),
             TraceId: traceId,
@@ -43,7 +43,7 @@ public class TraceCollectorTests
     public void CaptureSpan_StoresSpanSuccessfully()
     {
         var collector = new InMemoryTraceCollector();
-        var span = MakeSpan("trace-1", "agent.routing");
+        TraceSpan span = MakeSpan("trace-1", "agent.routing");
 
         collector.CaptureSpan(span);
 
@@ -58,7 +58,7 @@ public class TraceCollectorTests
         collector.CaptureSpan(MakeSpan("trace-1", "tool.call"));
         collector.CaptureSpan(MakeSpan("trace-1", "agent.response"));
 
-        var spans = collector.GetSpans("trace-1");
+        IReadOnlyList<TraceSpan>? spans = collector.GetSpans("trace-1");
 
         spans.Should().HaveCount(3);
         collector.TraceCount.Should().Be(1, "all belong to same trace");
@@ -81,7 +81,7 @@ public class TraceCollectorTests
     {
         var collector = new InMemoryTraceCollector();
 
-        var act = () => collector.CaptureSpan(null!);
+        Action act = () => collector.CaptureSpan(null!);
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -136,15 +136,15 @@ public class TraceCollectorTests
     public void GetSpans_ExistingTrace_ReturnsOrderedByStartTime()
     {
         var collector = new InMemoryTraceCollector();
-        var t1 = DateTimeOffset.UtcNow;
-        var t2 = t1.AddMilliseconds(100);
-        var t3 = t1.AddMilliseconds(200);
+        DateTimeOffset t1 = DateTimeOffset.UtcNow;
+        DateTimeOffset t2 = t1.AddMilliseconds(100);
+        DateTimeOffset t3 = t1.AddMilliseconds(200);
 
         collector.CaptureSpan(MakeSpan("trace-1", "step-3", startTime: t3));
         collector.CaptureSpan(MakeSpan("trace-1", "step-1", startTime: t1));
         collector.CaptureSpan(MakeSpan("trace-1", "step-2", startTime: t2));
 
-        var spans = collector.GetSpans("trace-1");
+        IReadOnlyList<TraceSpan>? spans = collector.GetSpans("trace-1");
 
         spans.Should().HaveCount(3);
         spans[0].OperationName.Should().Be("step-1");
@@ -175,7 +175,7 @@ public class TraceCollectorTests
                 startTime: DateTimeOffset.UtcNow.AddSeconds(i)));
         }
 
-        var recent = collector.GetRecentTraces(20);
+        IReadOnlyList<TraceSummary> recent = collector.GetRecentTraces(20);
 
         recent.Should().HaveCount(20);
         // Most recent first
@@ -189,7 +189,7 @@ public class TraceCollectorTests
         collector.CaptureSpan(MakeSpan("trace-1", "op-1"));
         collector.CaptureSpan(MakeSpan("trace-2", "op-2"));
 
-        var recent = collector.GetRecentTraces(20);
+        IReadOnlyList<TraceSummary> recent = collector.GetRecentTraces(20);
 
         recent.Should().HaveCount(2);
     }
@@ -202,9 +202,9 @@ public class TraceCollectorTests
     public async Task ConcurrentCapture_NoDataLoss()
     {
         var collector = new InMemoryTraceCollector(capacity: 200);
-        var tasks = Enumerable.Range(0, 100).Select(i =>
+        Task[] tasks = [.. Enumerable.Range(0, 100).Select(i =>
             Task.Run(() => collector.CaptureSpan(MakeSpan($"trace-{i}", $"op-{i}")))
-        ).ToArray();
+        )];
 
         await Task.WhenAll(tasks);
 
@@ -215,9 +215,9 @@ public class TraceCollectorTests
     public async Task ConcurrentCapture_SameTrace_AllSpansPresent()
     {
         var collector = new InMemoryTraceCollector();
-        var tasks = Enumerable.Range(0, 50).Select(i =>
+        Task[] tasks = [.. Enumerable.Range(0, 50).Select(i =>
             Task.Run(() => collector.CaptureSpan(MakeSpan("shared-trace", $"op-{i}")))
-        ).ToArray();
+        )];
 
         await Task.WhenAll(tasks);
 
@@ -233,23 +233,23 @@ public class TraceCollectorTests
     public void ParentChild_CorrectRelationships()
     {
         var collector = new InMemoryTraceCollector();
-        var parentSpan = MakeSpan("trace-1", "agent.routing");
-        var childSpan = MakeSpan("trace-1", "tool.call", parentSpanId: parentSpan.SpanId);
-        var grandchildSpan = MakeSpan("trace-1", "tool.result", parentSpanId: childSpan.SpanId);
+        TraceSpan parentSpan = MakeSpan("trace-1", "agent.routing");
+        TraceSpan childSpan = MakeSpan("trace-1", "tool.call", parentSpanId: parentSpan.SpanId);
+        TraceSpan grandchildSpan = MakeSpan("trace-1", "tool.result", parentSpanId: childSpan.SpanId);
 
         collector.CaptureSpan(parentSpan);
         collector.CaptureSpan(childSpan);
         collector.CaptureSpan(grandchildSpan);
 
-        var spans = collector.GetSpans("trace-1")!;
+        IReadOnlyList<TraceSpan> spans = collector.GetSpans("trace-1")!;
 
-        var root = spans.First(s => s.ParentSpanId == null);
+        TraceSpan root = spans.First(s => s.ParentSpanId == null);
         root.OperationName.Should().Be("agent.routing");
 
-        var child = spans.First(s => s.ParentSpanId == root.SpanId);
+        TraceSpan child = spans.First(s => s.ParentSpanId == root.SpanId);
         child.OperationName.Should().Be("tool.call");
 
-        var grandchild = spans.First(s => s.ParentSpanId == child.SpanId);
+        TraceSpan grandchild = spans.First(s => s.ParentSpanId == child.SpanId);
         grandchild.OperationName.Should().Be("tool.result");
     }
 
