@@ -47,8 +47,14 @@ var builder = WebApplication.CreateBuilder(args);
 // Aspire ServiceDefaults (OTel, health checks, service discovery)
 builder.AddServiceDefaults();
 
-// In-memory cache (used by MCP response caching handler, etc.)
+// In-memory cache (used by MCP response caching handler, tool result cache, etc.)
 builder.Services.AddMemoryCache();
+
+// ── Tool Result Cache ────────────────────────────────────────────────────
+builder.Services.Configure<RetailPulse.Api.Caching.ToolCacheOptions>(
+    builder.Configuration.GetSection(RetailPulse.Api.Caching.ToolCacheOptions.SectionName));
+builder.Services.AddSingleton<RetailPulse.Api.Caching.ToolResultCache>();
+builder.Services.AddSingleton<RetailPulse.Api.Caching.CachingToolWrapper>();
 
 // ── Custom Business Metrics ─────────────────────────────────────────────
 builder.Services.AddSingleton<RetailPulseMetrics>();
@@ -659,8 +665,9 @@ demandToolsFactory: sp =>
 #pragma warning restore CS0618
     var chartTool = sp.GetRequiredService<ChartDataTool>();
     var approvalTool = sp.GetRequiredService<ApprovalTool>();
+    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
-    return
+    return cachingWrapper.WrapAll(
     [
         AIFunctionFactory.Create(historicalDemandTool.GetHistoricalDemand),
         AIFunctionFactory.Create(forecastTool.GenerateForecast),
@@ -668,7 +675,7 @@ demandToolsFactory: sp =>
         AIFunctionFactory.Create(demandRisksTool.IdentifyDemandRisks),
         AIFunctionFactory.Create(chartTool.CreateChart),
         AIFunctionFactory.Create(approvalTool.RequestApproval)
-    ];
+    ]);
 },
 promoPlanningDef: promoPlanningDef,
 promoToolsFactory: sp =>
@@ -679,8 +686,9 @@ promoToolsFactory: sp =>
     var estimateROITool = sp.GetRequiredService<EstimateROITool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
     var approvalTool = sp.GetRequiredService<ApprovalTool>();
+    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
-    return
+    return cachingWrapper.WrapAll(
     [
         AIFunctionFactory.Create(promoHistoryTool.GetPromoHistory),
         AIFunctionFactory.Create(calculateLiftTool.CalculateLift),
@@ -688,7 +696,7 @@ promoToolsFactory: sp =>
         AIFunctionFactory.Create(estimateROITool.EstimateROI),
         AIFunctionFactory.Create(chartTool.CreateChart),
         AIFunctionFactory.Create(approvalTool.RequestApproval)
-    ];
+    ]);
 },
 competitiveIntelDef: competitiveIntelDef,
 competitiveToolsFactory: sp =>
@@ -698,15 +706,16 @@ competitiveToolsFactory: sp =>
     var detectThreatsTool = sp.GetRequiredService<DetectThreatsTool>();
     var competitiveLandscapeTool = sp.GetRequiredService<CompetitiveLandscapeTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
-    return
+    return cachingWrapper.WrapAll(
     [
         AIFunctionFactory.Create(competitorPricingTool.GetCompetitorPricing),
         AIFunctionFactory.Create(marketShareTool.GetMarketShare),
         AIFunctionFactory.Create(detectThreatsTool.DetectThreats),
         AIFunctionFactory.Create(competitiveLandscapeTool.GetCompetitiveLandscape),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    ];
+    ]);
 },
 supplyChainDef: supplyChainDef,
 supplyToolsFactory: sp =>
@@ -716,15 +725,16 @@ supplyToolsFactory: sp =>
     var fulfillmentTool = sp.GetRequiredService<FulfillmentRateTool>();
     var supplyHealthTool = sp.GetRequiredService<SupplyHealthTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
-    return
+    return cachingWrapper.WrapAll(
     [
         AIFunctionFactory.Create(inventoryTool.GetInventoryLevels),
         AIFunctionFactory.Create(disruptionsTool.GetSupplyDisruptions),
         AIFunctionFactory.Create(fulfillmentTool.GetFulfillmentRate),
         AIFunctionFactory.Create(supplyHealthTool.GetSupplyHealthSummary),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    ];
+    ]);
 },
 storeOpsDef: storeOpsDef,
 storeOpsToolsFactory: sp =>
@@ -734,15 +744,16 @@ storeOpsToolsFactory: sp =>
     var optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
     var predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
-    return
+    return cachingWrapper.WrapAll(
     [
         AIFunctionFactory.Create(storePerformanceTool.GetStorePerformance),
         AIFunctionFactory.Create(shelfLayoutTool.GetShelfLayout),
         AIFunctionFactory.Create(optimizePlanogramTool.OptimizePlanogram),
         AIFunctionFactory.Create(predictStockoutTool.PredictStockout),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    ];
+    ]);
 },
 planogramDef: planogramDef,
 planogramToolsFactory: sp =>
@@ -751,14 +762,15 @@ planogramToolsFactory: sp =>
     var optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
     var predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
-    return
+    return cachingWrapper.WrapAll(
     [
         AIFunctionFactory.Create(shelfLayoutTool.GetShelfLayout),
         AIFunctionFactory.Create(optimizePlanogramTool.OptimizePlanogram),
         AIFunctionFactory.Create(predictStockoutTool.PredictStockout),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    ];
+    ]);
 },
 marginDef: marginDef,
 marginToolsFactory: sp =>
@@ -768,15 +780,16 @@ marginToolsFactory: sp =>
     var marginTrendTool = sp.GetRequiredService<MarginTrendTool>();
     var detectMarginRisksTool = sp.GetRequiredService<DetectMarginRisksTool>();
     var chartTool = sp.GetRequiredService<ChartDataTool>();
+    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
-    return
+    return cachingWrapper.WrapAll(
     [
         AIFunctionFactory.Create(marginByBrandTool.GetMarginByBrand),
         AIFunctionFactory.Create(marginDriversTool.GetMarginDrivers),
         AIFunctionFactory.Create(marginTrendTool.GetMarginTrend),
         AIFunctionFactory.Create(detectMarginRisksTool.DetectMarginRisks),
         AIFunctionFactory.Create(chartTool.CreateChart)
-    ];
+    ]);
 });
 
 // Register FieldSentimentAgent — dedicated agent with scoped tools (only sentiment + chart)
@@ -787,12 +800,13 @@ if (fieldSentimentDef is not null)
         var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
         var sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
         var chartTool = sp.GetRequiredService<ChartDataTool>();
+        var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
-        var tools = new List<AITool>
-        {
+        var tools = cachingWrapper.WrapAll(
+        [
             AIFunctionFactory.Create(sentimentTool.GetFieldSentiment),
             AIFunctionFactory.Create(chartTool.CreateChart)
-        };
+        ]);
 
         return new FieldSentimentAgent(pipeline, fieldSentimentDef, tools);
     });
@@ -857,6 +871,7 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
     var chartTool = sp.GetRequiredService<ChartDataTool>();
     var variantMixTool = sp.GetRequiredService<VariantMixTool>();
     var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.RetailPulseAgent>>();
+    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
 
     var tools = new List<AITool>
     {
@@ -879,9 +894,12 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
         tools.Add(AIFunctionFactory.Create(localAnalyzer.AnalyzeShipments));
     }
 
+    // Wrap data-fetching tools with caching (CreateChart and AnalyzeShipments excluded by wrapper)
+    var cachedTools = cachingWrapper.WrapAll(tools);
+
     var configuration = sp.GetRequiredService<IConfiguration>();
 
-    return new RetailPulse.Api.Agents.RetailPulseAgent(chatClient, agentDef, hubContext, tools, logger, configuration);
+    return new RetailPulse.Api.Agents.RetailPulseAgent(chatClient, agentDef, hubContext, cachedTools, logger, configuration);
 });
 
 builder.Services.AddOpenApi();
@@ -949,5 +967,6 @@ app.MapStoreEndpoints();
 app.MapMarginEndpoints();
 app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();
+app.MapCacheEndpoints();
 
 app.Run();

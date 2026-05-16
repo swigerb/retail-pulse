@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using RetailPulse.Api.Caching;
 using RetailPulse.Api.Tools;
 using RetailPulse.Contracts.Routing;
 
@@ -16,6 +17,7 @@ public partial class ToolPrefetchService
     private readonly HistoricalDemandTool _historicalDemandTool;
     private readonly SeasonalityFactorsTool _seasonalityTool;
 #pragma warning restore CS0618
+    private readonly ToolResultCache _toolCache;
     private readonly ILogger<ToolPrefetchService> _logger;
 
     // Brand → Category mapping for seasonality lookups
@@ -57,10 +59,12 @@ public partial class ToolPrefetchService
     public ToolPrefetchService(
         HistoricalDemandTool historicalDemandTool,
         SeasonalityFactorsTool seasonalityTool,
+        ToolResultCache toolCache,
         ILogger<ToolPrefetchService> logger)
     {
         _historicalDemandTool = historicalDemandTool;
         _seasonalityTool = seasonalityTool;
+        _toolCache = toolCache;
         _logger = logger;
     }
 #pragma warning restore CS0618
@@ -159,56 +163,106 @@ public partial class ToolPrefetchService
             // Prefetch historical demand when we have at least a brand
             if (entities.Brand is not null)
             {
-                tasks.Add(("GetHistoricalDemand", _historicalDemandTool.GetHistoricalDemand(
-                    entities.Brand,
-                    entities.Region ?? "National",
-                    entities.Channel ?? "All",
-                    ct)));
+                var args = new Dictionary<string, object?>
+                {
+                    ["brand"] = entities.Brand,
+                    ["region"] = entities.Region ?? "National",
+                    ["channel"] = entities.Channel ?? "All"
+                };
+
+                var cached = _toolCache.TryGet("GetHistoricalDemand", args);
+                if (cached is not null)
+                {
+                    results["GetHistoricalDemand"] = cached;
+                }
+                else
+                {
+                    tasks.Add(("GetHistoricalDemand", _historicalDemandTool.GetHistoricalDemand(
+                        entities.Brand,
+                        entities.Region ?? "National",
+                        entities.Channel ?? "All",
+                        ct)));
+                }
             }
 
             // Prefetch seasonality when we have a category
             if (entities.Category is not null)
             {
-                tasks.Add(("GetSeasonalityFactors", _seasonalityTool.GetSeasonalityFactors(
-                    entities.Category,
-                    ct)));
+                var args = new Dictionary<string, object?>
+                {
+                    ["category"] = entities.Category
+                };
+
+                var cached = _toolCache.TryGet("GetSeasonalityFactors", args);
+                if (cached is not null)
+                {
+                    results["GetSeasonalityFactors"] = cached;
+                }
+                else
+                {
+                    tasks.Add(("GetSeasonalityFactors", _seasonalityTool.GetSeasonalityFactors(
+                        entities.Category,
+                        ct)));
+                }
             }
         }
 
-        if (tasks.Count == 0)
+        if (tasks.Count == 0 && results.Count == 0)
             return _emptyResults;
 
         // Execute all prefetch calls in parallel
-        try
+        if (tasks.Count > 0)
         {
-            await Task.WhenAll(tasks.Select(t => t.ResultTask));
-        }
-        catch (Exception ex)
-        {
-            // If any task fails, log and return whatever succeeded
-            _logger.LogWarning(ex, "One or more prefetch tasks failed — returning partial results");
-        }
-
-        foreach (var (toolName, resultTask) in tasks)
-        {
-            if (resultTask.IsCompletedSuccessfully)
+            try
             {
-                results[toolName] = resultTask.Result;
+                await Task.WhenAll(tasks.Select(t => t.ResultTask));
             }
-            else if (resultTask.IsFaulted)
+            catch (Exception ex)
             {
-                _logger.LogWarning(resultTask.Exception?.InnerException,
-                    "Prefetch for {Tool} failed — tool will be called by LLM fallback", toolName);
+                _logger.LogWarning(ex, "One or more prefetch tasks failed — returning partial results");
+            }
+
+            foreach (var (toolName, resultTask) in tasks)
+            {
+                if (resultTask.IsCompletedSuccessfully)
+                {
+                    results[toolName] = resultTask.Result;
+
+                    // Store in tool cache for subsequent LLM tool calls
+                    var cacheArgs = BuildCacheArgs(toolName, entities);
+                    _toolCache.Set(toolName, cacheArgs, resultTask.Result);
+                }
+                else if (resultTask.IsFaulted)
+                {
+                    _logger.LogWarning(resultTask.Exception?.InnerException,
+                        "Prefetch for {Tool} failed — tool will be called by LLM fallback", toolName);
+                }
             }
         }
 
         sw.Stop();
         _logger.LogInformation(
             "Prefetch completed in {ElapsedMs}ms — {SuccessCount}/{TotalCount} tools succeeded for intent={Intent}",
-            sw.ElapsedMilliseconds, results.Count, tasks.Count, intent);
+            sw.ElapsedMilliseconds, results.Count, results.Count + tasks.Count(t => t.ResultTask.IsFaulted), intent);
 
         return results;
     }
+
+    private static Dictionary<string, object?> BuildCacheArgs(string toolName, PrefetchEntities entities) =>
+        toolName switch
+        {
+            "GetHistoricalDemand" => new Dictionary<string, object?>
+            {
+                ["brand"] = entities.Brand,
+                ["region"] = entities.Region ?? "National",
+                ["channel"] = entities.Channel ?? "All"
+            },
+            "GetSeasonalityFactors" => new Dictionary<string, object?>
+            {
+                ["category"] = entities.Category
+            },
+            _ => new Dictionary<string, object?>()
+        };
 
     private static bool ShouldPrefetch(string intent, PrefetchEntities entities) =>
         string.Equals(intent, AgentIntent.DemandForecasting, StringComparison.OrdinalIgnoreCase)
