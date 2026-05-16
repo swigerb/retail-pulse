@@ -1,3 +1,4 @@
+using System.ClientModel;
 using System.Diagnostics;
 using System.Globalization;
 using Microsoft.AspNetCore.SignalR;
@@ -446,8 +447,13 @@ public static class ChatEndpoints
                     response = response with { Reply = filteredReply };
                 }
 
-                // Attach routing info to the response
-                response = response with { Routing = routingInfo };
+                // Attach routing info — but strip it if the pipeline returned an error
+                // (e.g., rate-limit or timeout handled inside AgentExecutionPipeline).
+                // Error replies start with emoji indicators (⏳/⚠️) and shouldn't
+                // show "78% confidence" routing metadata that implies a real answer.
+                bool isErrorResponse = response.Reply.StartsWith('⏳')
+                    || response.Reply.StartsWith("⚠️", StringComparison.Ordinal);
+                response = response with { Routing = isErrorResponse ? null : routingInfo };
 
                 // ── Cache: store response for deterministic queries ──────────────
                 if (CacheHelpers.IsCacheable(request.Message))
@@ -481,6 +487,36 @@ public static class ChatEndpoints
                         code = "request_timeout"
                     },
                     statusCode: StatusCodes.Status504GatewayTimeout);
+            }
+            catch (ClientResultException ex) when (ex.Status == 429)
+            {
+                // APIM or Azure OpenAI rate-limited the request (could happen during
+                // routing classification OR agent execution). Return a proper 429 so
+                // the frontend can show a retry prompt instead of crashing to debugger.
+                logger.LogWarning(ex, "Rate-limited (429) during chat for session {SessionId}", request.SessionId);
+                return Results.Json(
+                    new
+                    {
+                        error = "The AI service is temporarily rate-limited. Please wait a moment and try again.",
+                        code = "rate_limited"
+                    },
+                    statusCode: StatusCodes.Status429TooManyRequests);
+            }
+            catch (ClientResultException ex)
+            {
+                // Other APIM / Azure OpenAI errors (500, 503, etc.) — surface the
+                // status code so it doesn't fall through to a generic 503.
+                logger.LogError(ex, "ClientResultException (HTTP {Status}) during chat for session {SessionId}", ex.Status, request.SessionId);
+                int statusCode = ex.Status >= 400 && ex.Status < 600
+                    ? ex.Status
+                    : StatusCodes.Status503ServiceUnavailable;
+                return Results.Json(
+                    new
+                    {
+                        error = "The AI service encountered an error. Please try again shortly.",
+                        code = "ai_service_error"
+                    },
+                    statusCode: statusCode);
             }
             catch (Exception ex)
             {
@@ -623,6 +659,31 @@ public static class ChatEndpoints
                     new { error = "The AI service took too long to respond.", code = "request_timeout" },
                     statusCode: StatusCodes.Status504GatewayTimeout);
             }
+            catch (ClientResultException ex) when (ex.Status == 429)
+            {
+                logger.LogWarning(ex, "Rate-limited (429) during streaming chat for session {SessionId}", request.SessionId);
+                try
+                {
+                    IHubContext<StreamingHub>? hub = app.Services.GetService<IHubContext<StreamingHub>>();
+                    if (hub is not null && request.SessionId is not null)
+                        await StreamingEvents.SendErrorAsync(hub, request.SessionId, "The AI service is temporarily rate-limited.");
+                }
+                catch { /* best-effort notification */ }
+
+                return Results.Json(
+                    new { error = "The AI service is temporarily rate-limited. Please wait a moment and try again.", code = "rate_limited" },
+                    statusCode: StatusCodes.Status429TooManyRequests);
+            }
+            catch (ClientResultException ex)
+            {
+                logger.LogError(ex, "ClientResultException (HTTP {Status}) during streaming chat for session {SessionId}", ex.Status, request.SessionId);
+                int statusCode = ex.Status >= 400 && ex.Status < 600
+                    ? ex.Status
+                    : StatusCodes.Status503ServiceUnavailable;
+                return Results.Json(
+                    new { error = "The AI service encountered an error. Please try again shortly.", code = "ai_service_error" },
+                    statusCode: statusCode);
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Streaming chat error for session {SessionId}", request.SessionId);
@@ -637,6 +698,7 @@ public static class ChatEndpoints
         .WithTags("Chat")
         .Produces(StatusCodes.Status200OK)
         .ProducesValidationProblem()
+        .Produces(StatusCodes.Status429TooManyRequests)
         .Produces(StatusCodes.Status503ServiceUnavailable)
         .RequireAuthorization()
         .RequireRateLimiting("strict");
