@@ -30,19 +30,16 @@ public class CachingToolWrapper
     /// Wraps a single AITool with caching if eligible.
     /// Tools with side effects are returned unwrapped.
     /// </summary>
-    public AITool Wrap(AITool tool)
-    {
-        if (tool is not AIFunction func || _excludedTools.Contains(func.Name))
-            return tool;
-
-        return new CachedAIFunction(func, _cache, _logger);
-    }
+    public AITool Wrap(AITool tool) =>
+        tool is not AIFunction func || _excludedTools.Contains(func.Name)
+            ? tool
+            : new CachedAIFunction(func, _cache, _logger);
 
     /// <summary>
     /// Wraps all eligible tools in a collection.
     /// </summary>
     public IList<AITool> WrapAll(IEnumerable<AITool> tools) =>
-        tools.Select(Wrap).ToList();
+        [.. tools.Select(Wrap)];
 }
 
 /// <summary>

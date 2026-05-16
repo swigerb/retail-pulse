@@ -143,10 +143,7 @@ public class ToolResultCache
             return false;
 
         // Don't cache placeholder content (protection against cache warming bug)
-        if (result.Contains("placeholder", StringComparison.OrdinalIgnoreCase) &&
-            result.Contains("will be replaced", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        return true;
+        return !result.Contains("placeholder", StringComparison.OrdinalIgnoreCase) ||
+               !result.Contains("will be replaced", StringComparison.OrdinalIgnoreCase);
     }
 }
