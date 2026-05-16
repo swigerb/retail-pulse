@@ -174,10 +174,9 @@ public class AgentPipelineTests
         AgentExecutionContext context = CreateContext("Question", fallbackReply: "Custom fallback");
         Contracts.ChatResponse response = await pipeline.ExecuteAsync(context);
 
-        // The pipeline uses: response.Text ?? context.FallbackReply
-        // If Text is null, fallback is used. If Text is empty string, it passes through.
-        string expectedReply = nullTextResponse.Text ?? "Custom fallback";
-        response.Reply.Should().Be(expectedReply);
+        // The pipeline uses: string.IsNullOrWhiteSpace(response.Text) ? context.FallbackReply : response.Text
+        // When the LLM returns null/empty text, the fallback reply is used.
+        response.Reply.Should().Be("Custom fallback");
     }
 
     #endregion
