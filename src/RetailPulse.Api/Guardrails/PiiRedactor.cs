@@ -16,7 +16,7 @@ public static partial class PiiRedactor
         if (string.IsNullOrEmpty(input))
             return input;
 
-        var result = input;
+        string result = input;
         result = SsnPattern().Replace(result, "[REDACTED:ssn]");
         result = CreditCardPattern().Replace(result, "[REDACTED:credit_card]");
         result = EmailPattern().Replace(result, "[REDACTED:email]");

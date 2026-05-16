@@ -31,19 +31,19 @@ public class BoundedChannelTests
     [Fact]
     public async Task ItemsWithinCapacity_AreProcessed()
     {
-        var channel = CreateChannel();
+        Channel<WorkItem> channel = CreateChannel();
 
         var items = Enumerable.Range(0, 100)
             .Select(i => new WorkItem($"item-{i}", $"payload-{i}"))
             .ToList();
 
-        foreach (var item in items)
+        foreach (WorkItem? item in items)
             channel.Writer.TryWrite(item).Should().BeTrue();
 
         channel.Writer.Complete();
 
         var processed = new List<WorkItem>();
-        await foreach (var item in channel.Reader.ReadAllAsync())
+        await foreach (WorkItem item in channel.Reader.ReadAllAsync())
             processed.Add(item);
 
         processed.Should().HaveCount(100);
@@ -53,13 +53,13 @@ public class BoundedChannelTests
     [Fact]
     public async Task SingleItem_IsWrittenAndRead()
     {
-        var channel = CreateChannel();
+        Channel<WorkItem> channel = CreateChannel();
 
         var item = new WorkItem("single", "data");
-        var written = channel.Writer.TryWrite(item);
+        bool written = channel.Writer.TryWrite(item);
         written.Should().BeTrue();
 
-        var read = await channel.Reader.ReadAsync();
+        WorkItem read = await channel.Reader.ReadAsync();
         read.Id.Should().Be("single");
     }
 
@@ -69,14 +69,14 @@ public class BoundedChannelTests
     public void WhenChannelFull_TryWrite_ReturnsFalse_NotBlocked()
     {
         const int capacity = 10;
-        var channel = CreateChannel(capacity);
+        Channel<WorkItem> channel = CreateChannel(capacity);
 
         // Fill channel to capacity
         for (int i = 0; i < capacity; i++)
             channel.Writer.TryWrite(new WorkItem($"item-{i}", "data")).Should().BeTrue();
 
         // Next TryWrite returns false immediately (non-blocking)
-        var overflowWritten = channel.Writer.TryWrite(new WorkItem("overflow", "data"));
+        bool overflowWritten = channel.Writer.TryWrite(new WorkItem("overflow", "data"));
         overflowWritten.Should().BeFalse("channel is full and TryWrite is non-blocking");
     }
 
@@ -84,7 +84,7 @@ public class BoundedChannelTests
     public void WhenChannelFull_MultipleOverflows_AllReturnFalse()
     {
         const int capacity = 5;
-        var channel = CreateChannel(capacity);
+        Channel<WorkItem> channel = CreateChannel(capacity);
 
         // Fill to capacity
         for (int i = 0; i < capacity; i++)
@@ -108,7 +108,7 @@ public class BoundedChannelTests
     {
         const int capacity = 5;
         long droppedItemCounter = 0;
-        var channel = CreateChannel(capacity);
+        Channel<WorkItem> channel = CreateChannel(capacity);
 
         // Fill channel
         for (int i = 0; i < capacity; i++)
@@ -128,7 +128,7 @@ public class BoundedChannelTests
     public void DroppedItemCounter_StaysZero_WhenWithinCapacity()
     {
         long droppedItemCounter = 0;
-        var channel = CreateChannel();
+        Channel<WorkItem> channel = CreateChannel();
 
         for (int i = 0; i < 100; i++)
         {
@@ -144,14 +144,14 @@ public class BoundedChannelTests
     {
         const int capacity = 10;
         long droppedItemCounter = 0;
-        var channel = CreateChannel(capacity);
+        Channel<WorkItem> channel = CreateChannel(capacity);
 
         // Fill channel first
         for (int i = 0; i < capacity; i++)
             channel.Writer.TryWrite(new WorkItem($"fill-{i}", "data"));
 
         // Concurrent overflow writes
-        var tasks = Enumerable.Range(0, 50).Select(i => Task.Run(() =>
+        IEnumerable<Task> tasks = Enumerable.Range(0, 50).Select(i => Task.Run(() =>
         {
             if (!channel.Writer.TryWrite(new WorkItem($"concurrent-{i}", "data")))
                 Interlocked.Increment(ref droppedItemCounter);
@@ -167,13 +167,13 @@ public class BoundedChannelTests
     [Fact]
     public async Task BackgroundService_ProcessesAllItems_FromChannel()
     {
-        var channel = CreateChannel();
+        Channel<WorkItem> channel = CreateChannel();
         var processedItems = new List<string>();
 
         // Simulate BackgroundService consumer
         var consumerTask = Task.Run(async () =>
         {
-            await foreach (var item in channel.Reader.ReadAllAsync())
+            await foreach (WorkItem item in channel.Reader.ReadAllAsync())
             {
                 processedItems.Add(item.Id);
             }
@@ -192,14 +192,14 @@ public class BoundedChannelTests
     [Fact]
     public async Task BackgroundService_ProcessesItemsInOrder()
     {
-        var channel = CreateChannel();
+        Channel<WorkItem> channel = CreateChannel();
         var processedOrder = new List<int>();
 
         var consumerTask = Task.Run(async () =>
         {
-            await foreach (var item in channel.Reader.ReadAllAsync())
+            await foreach (WorkItem item in channel.Reader.ReadAllAsync())
             {
-                var index = int.Parse(item.Id.Split('-')[1]);
+                int index = int.Parse(item.Id.Split('-')[1]);
                 processedOrder.Add(index);
             }
         });
@@ -218,9 +218,9 @@ public class BoundedChannelTests
     [Fact]
     public async Task Cancellation_StopsChannelProcessing_Gracefully()
     {
-        var channel = CreateChannel();
+        Channel<WorkItem> channel = CreateChannel();
         using var cts = new CancellationTokenSource();
-        var processedCount = 0;
+        int processedCount = 0;
 
         // Fill channel with items
         for (int i = 0; i < 100; i++)
@@ -230,9 +230,9 @@ public class BoundedChannelTests
         {
             try
             {
-                await foreach (var item in channel.Reader.ReadAllAsync(cts.Token))
+                await foreach (WorkItem item in channel.Reader.ReadAllAsync(cts.Token))
                 {
-                    var count = Interlocked.Increment(ref processedCount);
+                    int count = Interlocked.Increment(ref processedCount);
                     if (count >= 5)
                     {
                         // Add a small yield to allow cancellation to propagate
@@ -256,12 +256,12 @@ public class BoundedChannelTests
     [Fact]
     public async Task CancelledToken_PreventsWriteAsync()
     {
-        var channel = CreateChannel();
+        Channel<WorkItem> channel = CreateChannel();
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => channel.Writer.WriteAsync(new WorkItem("cancelled", "data"), cts.Token).AsTask();
+        Func<Task> act = () => channel.Writer.WriteAsync(new WorkItem("cancelled", "data"), cts.Token).AsTask();
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -269,12 +269,12 @@ public class BoundedChannelTests
     [Fact]
     public async Task CancelledToken_PreventsReadAsync()
     {
-        var channel = CreateChannel();
+        Channel<WorkItem> channel = CreateChannel();
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => channel.Reader.ReadAsync(cts.Token).AsTask();
+        Func<Task<WorkItem>> act = () => channel.Reader.ReadAsync(cts.Token).AsTask();
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -282,8 +282,5 @@ public class BoundedChannelTests
     // ── Capacity Enforcement ────────────────────────────────────────────
 
     [Fact]
-    public void DefaultCapacity_Is1000()
-    {
-        DefaultCapacity.Should().Be(1000, "Sprint 3 spec requires 1000 capacity");
-    }
+    public void DefaultCapacity_Is1000() => DefaultCapacity.Should().Be(1000, "Sprint 3 spec requires 1000 capacity");
 }

@@ -21,8 +21,8 @@ public class McpServerHealthCheck : IHealthCheck
     {
         try
         {
-            var client = _httpClientFactory.CreateClient("McpServer");
-            var response = await client.GetAsync("/health", cancellationToken);
+            HttpClient client = _httpClientFactory.CreateClient("McpServer");
+            HttpResponseMessage response = await client.GetAsync("/health", cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {

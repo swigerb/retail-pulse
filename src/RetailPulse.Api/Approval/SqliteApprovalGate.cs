@@ -28,7 +28,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         _logger = logger;
         _defaultTimeout = defaultTimeout ?? TimeSpan.FromMinutes(5);
 
-        var dir = Path.GetDirectoryName(dbPath);
+        string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
@@ -47,7 +47,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync();
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             PRAGMA journal_mode=WAL;
 
@@ -77,14 +77,14 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     public async Task<ApprovalRequest> RequestApprovalAsync(ApprovalContext context, CancellationToken ct = default)
     {
-        var requestId = Guid.NewGuid().ToString("N");
-        var now = DateTimeOffset.UtcNow;
-        var expiresAt = now.Add(_defaultTimeout);
+        string requestId = Guid.NewGuid().ToString("N");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset expiresAt = now.Add(_defaultTimeout);
 
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO ApprovalRequests (RequestId, AgentId, UserId, Action, Impact, Urgency, Reasoning, Decision, CreatedAt, ExpiresAt)
             VALUES (@id, @agentId, @userId, @action, @impact, @urgency, @reasoning, 'Pending', @createdAt, @expiresAt)
@@ -112,7 +112,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        var row = await ReadRowAsync(conn, requestId, ct)
+        ApprovalRequest row = await ReadRowAsync(conn, requestId, ct)
             ?? throw new KeyNotFoundException($"Approval request '{requestId}' not found.");
 
         return new ApprovalResult(
@@ -124,9 +124,9 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     public async Task<ApprovalResult> WaitForApprovalAsync(string requestId, TimeSpan? timeout = null, CancellationToken ct = default)
     {
-        var effectiveTimeout = timeout ?? _defaultTimeout;
-        var deadline = DateTimeOffset.UtcNow.Add(effectiveTimeout);
-        var backoff = InitialBackoff;
+        TimeSpan effectiveTimeout = timeout ?? _defaultTimeout;
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.Add(effectiveTimeout);
+        TimeSpan backoff = InitialBackoff;
 
         _logger.LogInformation(
             "Waiting for approval {RequestId} with timeout {Timeout}",
@@ -137,7 +137,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
             await using var conn = new SqliteConnection(_connectionString);
             await conn.OpenAsync(ct);
 
-            var row = await ReadRowAsync(conn, requestId, ct)
+            ApprovalRequest row = await ReadRowAsync(conn, requestId, ct)
                 ?? throw new KeyNotFoundException($"Approval request '{requestId}' not found.");
 
             if (row.Decision != ApprovalDecision.Pending)
@@ -161,12 +161,12 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     public async Task RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default)
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             UPDATE ApprovalRequests
             SET Decision = @decision, Comment = @comment, RespondedAt = @respondedAt
@@ -177,7 +177,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         cmd.Parameters.AddWithValue("@comment", (object?)comment ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@respondedAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
 
-        var affected = await cmd.ExecuteNonQueryAsync(ct);
+        int affected = await cmd.ExecuteNonQueryAsync(ct);
         if (affected == 0)
         {
             _logger.LogWarning("Approval {RequestId} was not updated — it may already be resolved.", requestId);
@@ -195,7 +195,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT * FROM ApprovalRequests
             WHERE UserId = @userId AND Decision = 'Pending'
@@ -211,7 +211,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         await using var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT * FROM ApprovalRequests
             WHERE Decision != 'Pending'
@@ -227,18 +227,18 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     private static async Task<ApprovalRequest?> ReadRowAsync(SqliteConnection conn, string requestId, CancellationToken ct = default)
     {
-        await using var cmd = conn.CreateCommand();
+        await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT * FROM ApprovalRequests WHERE RequestId = @id";
         cmd.Parameters.AddWithValue("@id", requestId);
 
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using SqliteDataReader reader = await cmd.ExecuteReaderAsync(ct);
         return !await reader.ReadAsync(ct) ? null : MapRow(reader);
     }
 
     private static async Task<List<ApprovalRequest>> ReadAllAsync(SqliteCommand cmd, CancellationToken ct = default)
     {
         var results = new List<ApprovalRequest>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using SqliteDataReader reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
             results.Add(MapRow(reader));
@@ -248,7 +248,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     private static ApprovalRequest MapRow(SqliteDataReader reader)
     {
-        var requestId = reader.GetString(reader.GetOrdinal("RequestId"));
+        string requestId = reader.GetString(reader.GetOrdinal("RequestId"));
         var context = new ApprovalContext(
             AgentId: reader.GetString(reader.GetOrdinal("AgentId")),
             UserId: reader.GetString(reader.GetOrdinal("UserId")),
@@ -258,14 +258,14 @@ public sealed class SqliteApprovalGate : IApprovalGate
             Reasoning: reader.IsDBNull(reader.GetOrdinal("Reasoning")) ? "" : reader.GetString(reader.GetOrdinal("Reasoning"))
         );
 
-        var decisionStr = reader.GetString(reader.GetOrdinal("Decision"));
-        var decision = Enum.TryParse<ApprovalDecision>(decisionStr, true, out var d) ? d : ApprovalDecision.Pending;
+        string decisionStr = reader.GetString(reader.GetOrdinal("Decision"));
+        ApprovalDecision decision = Enum.TryParse(decisionStr, true, out ApprovalDecision d) ? d : ApprovalDecision.Pending;
 
-        var comment = reader.IsDBNull(reader.GetOrdinal("Comment")) ? null : reader.GetString(reader.GetOrdinal("Comment"));
+        string? comment = reader.IsDBNull(reader.GetOrdinal("Comment")) ? null : reader.GetString(reader.GetOrdinal("Comment"));
         var createdAt = DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("CreatedAt")), CultureInfo.InvariantCulture);
         var expiresAt = DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("ExpiresAt")), CultureInfo.InvariantCulture);
-        var respondedAt = reader.IsDBNull(reader.GetOrdinal("RespondedAt"))
-            ? (DateTimeOffset?)null
+        DateTimeOffset? respondedAt = reader.IsDBNull(reader.GetOrdinal("RespondedAt"))
+            ? null
             : DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("RespondedAt")), CultureInfo.InvariantCulture);
 
         return new ApprovalRequest(requestId, context, createdAt, expiresAt, decision, comment, respondedAt);

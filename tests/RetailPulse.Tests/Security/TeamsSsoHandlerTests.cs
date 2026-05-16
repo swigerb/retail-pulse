@@ -28,7 +28,7 @@ public class TeamsSsoHandlerTests
             configData["MicrosoftEntra:StrictTenantValidation"] = strictValidation;
         configData["MicrosoftEntra:ClientId"] = "test-client-id";
 
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection(configData)
             .Build();
 
@@ -46,9 +46,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task ValidateTenantClaim_MatchingTenant_ReturnsTrue()
     {
-        var handler = CreateHandler(TestTenantId, isDevelopment: false);
+        TeamsSsoHandler handler = CreateHandler(TestTenantId, isDevelopment: false);
 
-        var result = handler.ValidateTenantClaim(TestTenantId);
+        bool result = handler.ValidateTenantClaim(TestTenantId);
 
         result.Should().BeTrue();
         await Task.CompletedTask;
@@ -57,9 +57,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task ValidateTenantClaim_MismatchWithStrictMode_ReturnsFalse()
     {
-        var handler = CreateHandler(TestTenantId, isDevelopment: false, strictValidation: "true");
+        TeamsSsoHandler handler = CreateHandler(TestTenantId, isDevelopment: false, strictValidation: "true");
 
-        var result = handler.ValidateTenantClaim(WrongTenantId);
+        bool result = handler.ValidateTenantClaim(WrongTenantId);
 
         result.Should().BeFalse();
         await Task.CompletedTask;
@@ -68,9 +68,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task ValidateTenantClaim_MismatchWithStrictDisabled_ReturnsTrue()
     {
-        var handler = CreateHandler(TestTenantId, isDevelopment: true, strictValidation: "false");
+        TeamsSsoHandler handler = CreateHandler(TestTenantId, isDevelopment: true, strictValidation: "false");
 
-        var result = handler.ValidateTenantClaim(WrongTenantId);
+        bool result = handler.ValidateTenantClaim(WrongTenantId);
 
         result.Should().BeTrue();
         await Task.CompletedTask;
@@ -79,9 +79,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task ValidateTenantClaim_NullTokenTid_WithConfiguredTenant_ReturnsFalse()
     {
-        var handler = CreateHandler(TestTenantId, isDevelopment: false);
+        TeamsSsoHandler handler = CreateHandler(TestTenantId, isDevelopment: false);
 
-        var result = handler.ValidateTenantClaim(null);
+        bool result = handler.ValidateTenantClaim(null);
 
         result.Should().BeFalse();
         await Task.CompletedTask;
@@ -90,9 +90,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task ValidateTenantClaim_EmptyTokenTid_WithConfiguredTenant_ReturnsFalse()
     {
-        var handler = CreateHandler(TestTenantId, isDevelopment: false);
+        TeamsSsoHandler handler = CreateHandler(TestTenantId, isDevelopment: false);
 
-        var result = handler.ValidateTenantClaim(string.Empty);
+        bool result = handler.ValidateTenantClaim(string.Empty);
 
         result.Should().BeFalse();
         await Task.CompletedTask;
@@ -101,9 +101,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task ValidateTenantClaim_NoConfiguredTenant_SkipsValidation()
     {
-        var handler = CreateHandler(tenantId: null, isDevelopment: true);
+        TeamsSsoHandler handler = CreateHandler(tenantId: null, isDevelopment: true);
 
-        var result = handler.ValidateTenantClaim(WrongTenantId);
+        bool result = handler.ValidateTenantClaim(WrongTenantId);
 
         result.Should().BeTrue("no tenant configured = dev-only path, skips tid check");
         await Task.CompletedTask;
@@ -112,9 +112,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task ValidateTenantClaim_CaseInsensitiveMatch_ReturnsTrue()
     {
-        var handler = CreateHandler(TestTenantId.ToLowerInvariant(), isDevelopment: false);
+        TeamsSsoHandler handler = CreateHandler(TestTenantId.ToLowerInvariant(), isDevelopment: false);
 
-        var result = handler.ValidateTenantClaim(TestTenantId.ToUpperInvariant());
+        bool result = handler.ValidateTenantClaim(TestTenantId.ToUpperInvariant());
 
         result.Should().BeTrue();
         await Task.CompletedTask;
@@ -125,9 +125,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task BuildValidIssuers_WithTenant_ReturnsTenantSpecificIssuers()
     {
-        var handler = CreateHandler(TestTenantId, isDevelopment: false);
+        TeamsSsoHandler handler = CreateHandler(TestTenantId, isDevelopment: false);
 
-        var issuers = handler.BuildValidIssuers();
+        string[] issuers = handler.BuildValidIssuers();
 
         issuers.Should().HaveCount(2);
         issuers.Should().Contain($"https://login.microsoftonline.com/{TestTenantId}/v2.0");
@@ -138,9 +138,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task BuildValidIssuers_WithTenant_DoesNotIncludeCommonEndpoint()
     {
-        var handler = CreateHandler(TestTenantId, isDevelopment: false);
+        TeamsSsoHandler handler = CreateHandler(TestTenantId, isDevelopment: false);
 
-        var issuers = handler.BuildValidIssuers();
+        string[] issuers = handler.BuildValidIssuers();
 
         issuers.Should().NotContain(i => i.Contains("common"));
         await Task.CompletedTask;
@@ -149,9 +149,9 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task BuildValidIssuers_WithoutTenant_IncludesCommonEndpoint()
     {
-        var handler = CreateHandler(tenantId: null, isDevelopment: true);
+        TeamsSsoHandler handler = CreateHandler(tenantId: null, isDevelopment: true);
 
-        var issuers = handler.BuildValidIssuers();
+        string[] issuers = handler.BuildValidIssuers();
 
         issuers.Should().Contain(i => i.Contains("common"));
         await Task.CompletedTask;
@@ -162,7 +162,7 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task Constructor_NoTenantInProduction_ThrowsInvalidOperationException()
     {
-        var act = () => CreateHandler(tenantId: null, isDevelopment: false);
+        Func<TeamsSsoHandler> act = () => CreateHandler(tenantId: null, isDevelopment: false);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*TenantId is required*");
@@ -172,7 +172,7 @@ public class TeamsSsoHandlerTests
     [Fact]
     public async Task Constructor_NoTenantInDevelopment_DoesNotThrow()
     {
-        var act = () => CreateHandler(tenantId: null, isDevelopment: true);
+        Func<TeamsSsoHandler> act = () => CreateHandler(tenantId: null, isDevelopment: true);
 
         act.Should().NotThrow();
         await Task.CompletedTask;

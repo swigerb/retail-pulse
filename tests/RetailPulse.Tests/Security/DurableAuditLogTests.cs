@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using RetailPulse.Api.Security;
 using RetailPulse.Contracts.Observability;
 
@@ -21,11 +22,11 @@ public class DurableAuditLogTests : IDisposable
     [Fact]
     public async Task LogAsync_PersistsEntry()
     {
-        var entry = CreateEntry("test-action");
+        AuditEntry entry = CreateEntry("test-action");
 
         await _auditLog.LogAsync(entry);
 
-        var results = await _auditLog.QueryAsync(new AuditQuery(Limit: 10));
+        IReadOnlyList<AuditEntry> results = await _auditLog.QueryAsync(new AuditQuery(Limit: 10));
         results.Should().HaveCount(1);
         results[0].Action.Should().Be("test-action");
     }
@@ -37,7 +38,7 @@ public class DurableAuditLogTests : IDisposable
         await _auditLog.LogAsync(CreateEntry("action-2"));
         await _auditLog.LogAsync(CreateEntry("action-3"));
 
-        var isValid = _auditLog.VerifyIntegrity();
+        bool isValid = _auditLog.VerifyIntegrity();
 
         isValid.Should().BeTrue();
     }
@@ -50,13 +51,13 @@ public class DurableAuditLogTests : IDisposable
         await _auditLog.LogAsync(CreateEntry("action-3"));
 
         // Tamper with the database directly
-        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}");
+        using var connection = new SqliteConnection($"Data Source={_dbPath}");
         connection.Open();
-        using var cmd = connection.CreateCommand();
+        using SqliteCommand cmd = connection.CreateCommand();
         cmd.CommandText = "UPDATE audit_log SET input_summary = 'TAMPERED' WHERE action = 'action-2'";
         cmd.ExecuteNonQuery();
 
-        var isValid = _auditLog.VerifyIntegrity();
+        bool isValid = _auditLog.VerifyIntegrity();
 
         isValid.Should().BeFalse("a tampered entry should break the hash chain");
     }
@@ -68,7 +69,7 @@ public class DurableAuditLogTests : IDisposable
         await _auditLog.LogAsync(CreateEntry("action-2", agentId: "agent-b"));
         await _auditLog.LogAsync(CreateEntry("action-3", agentId: "agent-a"));
 
-        var results = await _auditLog.QueryAsync(new AuditQuery(AgentId: "agent-a"));
+        IReadOnlyList<AuditEntry> results = await _auditLog.QueryAsync(new AuditQuery(AgentId: "agent-a"));
 
         results.Should().HaveCount(2);
         results.Should().AllSatisfy(e => e.AgentId.Should().Be("agent-a"));
@@ -81,7 +82,7 @@ public class DurableAuditLogTests : IDisposable
         await _auditLog.LogAsync(CreateEntry("chat.general", agentId: "general"));
         await _auditLog.LogAsync(CreateEntry("chat.demand", agentId: "demand"));
 
-        var stats = await _auditLog.GetStatsAsync();
+        AuditStats stats = await _auditLog.GetStatsAsync();
 
         stats.TotalActions.Should().Be(3);
         stats.ByAgent["general"].Should().Be(2);
@@ -91,7 +92,7 @@ public class DurableAuditLogTests : IDisposable
     [Fact]
     public async Task EmptyLog_VerifyIntegrity_ReturnsTrue()
     {
-        var isValid = _auditLog.VerifyIntegrity();
+        bool isValid = _auditLog.VerifyIntegrity();
         isValid.Should().BeTrue();
         await Task.CompletedTask;
     }
@@ -99,8 +100,8 @@ public class DurableAuditLogTests : IDisposable
     [Fact]
     public void ComputeChecksum_IsDeterministic()
     {
-        var checksum1 = DurableAuditLog.ComputeChecksum("prev", "data");
-        var checksum2 = DurableAuditLog.ComputeChecksum("prev", "data");
+        string checksum1 = DurableAuditLog.ComputeChecksum("prev", "data");
+        string checksum2 = DurableAuditLog.ComputeChecksum("prev", "data");
 
         checksum1.Should().Be(checksum2);
     }
@@ -108,8 +109,8 @@ public class DurableAuditLogTests : IDisposable
     [Fact]
     public void ComputeChecksum_DifferentInputs_ProduceDifferentHashes()
     {
-        var checksum1 = DurableAuditLog.ComputeChecksum("prev1", "data");
-        var checksum2 = DurableAuditLog.ComputeChecksum("prev2", "data");
+        string checksum1 = DurableAuditLog.ComputeChecksum("prev1", "data");
+        string checksum2 = DurableAuditLog.ComputeChecksum("prev2", "data");
 
         checksum1.Should().NotBe(checksum2);
     }

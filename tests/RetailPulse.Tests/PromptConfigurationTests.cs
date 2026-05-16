@@ -15,7 +15,7 @@ public class PromptConfigurationTests
     [Fact]
     public void ValidYaml_ParsesCorrectly()
     {
-        var yaml = """
+        string yaml = """
             agents:
               test-agent:
                 name: "Test Agent"
@@ -27,10 +27,10 @@ public class PromptConfigurationTests
                   - ToolB
             """;
 
-        var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
+        PromptConfiguration config = Deserializer.Deserialize<PromptConfiguration>(yaml);
 
         config.Agents.Should().ContainKey("test-agent");
-        var agent = config.Agents["test-agent"];
+        AgentDefinition agent = config.Agents["test-agent"];
         agent.Name.Should().Be("Test Agent");
         agent.Model.Should().Be("gpt-4o");
         agent.SystemPrompt.Should().Be("You are a test agent.");
@@ -43,14 +43,14 @@ public class PromptConfigurationTests
     [Fact]
     public void AgentDefinition_MissingFields_UseDefaults()
     {
-        var yaml = """
+        string yaml = """
             agents:
               minimal:
                 name: "Minimal Agent"
             """;
 
-        var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
-        var agent = config.Agents["minimal"];
+        PromptConfiguration config = Deserializer.Deserialize<PromptConfiguration>(yaml);
+        AgentDefinition agent = config.Agents["minimal"];
 
         agent.Name.Should().Be("Minimal Agent");
         agent.Model.Should().Be("gpt-4o");
@@ -80,20 +80,20 @@ public class PromptConfigurationTests
     [Fact]
     public void ActualPromptsYaml_LoadsWithoutErrors()
     {
-        var projectDir = FindProjectRoot();
-        var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
+        string projectDir = FindProjectRoot();
+        string promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
 
         File.Exists(promptsPath).Should().BeTrue(
             $"prompts.yaml must exist at {promptsPath} — silent skip would mask a missing config file");
 
-        var yaml = File.ReadAllText(promptsPath);
-        var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
+        string yaml = File.ReadAllText(promptsPath);
+        PromptConfiguration config = Deserializer.Deserialize<PromptConfiguration>(yaml);
 
         config.Should().NotBeNull();
         config.Agents.Should().NotBeEmpty();
 
         config.Agents.Should().ContainKey("retail-pulse");
-        var agent = config.Agents["retail-pulse"];
+        AgentDefinition agent = config.Agents["retail-pulse"];
         agent.Name.Should().Be("Retail Pulse Agent");
         agent.Model.Should().NotBeNullOrEmpty();
         agent.SystemPrompt.Should().NotBeNullOrEmpty();
@@ -106,15 +106,15 @@ public class PromptConfigurationTests
     [Fact]
     public void ActualPromptsYaml_ContainsTenantPlaceholders()
     {
-        var projectDir = FindProjectRoot();
-        var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
+        string projectDir = FindProjectRoot();
+        string promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
 
         File.Exists(promptsPath).Should().BeTrue(
             $"prompts.yaml must exist at {promptsPath}");
 
-        var yaml = File.ReadAllText(promptsPath);
-        var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
-        var agent = config.Agents["retail-pulse"];
+        string yaml = File.ReadAllText(promptsPath);
+        PromptConfiguration config = Deserializer.Deserialize<PromptConfiguration>(yaml);
+        AgentDefinition agent = config.Agents["retail-pulse"];
 
         // Prompt should contain tenant placeholders before resolution
         agent.SystemPrompt.Should().Contain("{tenant.company}");
@@ -126,25 +126,25 @@ public class PromptConfigurationTests
     [Fact]
     public void TenantPlaceholders_ResolveCorrectly()
     {
-        var projectDir = FindProjectRoot();
-        var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
-        var tenantPath = Path.Combine(projectDir, "tenant.yaml");
+        string projectDir = FindProjectRoot();
+        string promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
+        string tenantPath = Path.Combine(projectDir, "tenant.yaml");
 
         File.Exists(promptsPath).Should().BeTrue($"prompts.yaml must exist at {promptsPath}");
         File.Exists(tenantPath).Should().BeTrue($"tenant.yaml must exist at {tenantPath}");
 
-        var yaml = File.ReadAllText(promptsPath);
-        var config = Deserializer.Deserialize<PromptConfiguration>(yaml);
-        var agent = config.Agents["retail-pulse"];
+        string yaml = File.ReadAllText(promptsPath);
+        PromptConfiguration config = Deserializer.Deserialize<PromptConfiguration>(yaml);
+        AgentDefinition agent = config.Agents["retail-pulse"];
 
         // Load tenant config via the production provider so we exercise the actual
         // deserialization path (CamelCase naming, defaults, etc).
-        var tenant = new RetailPulse.Contracts.FileTenantProvider(tenantPath).GetTenant();
+        TenantConfiguration tenant = new FileTenantProvider(tenantPath).GetTenant();
 
         // Resolve placeholders. Note: the resolution logic mirrors Program.cs —
         // ideally this should be extracted into a reusable helper in source code
         // so tests don't reimplement it. Tracked separately.
-        var resolved = ResolveTenantPlaceholders(agent.SystemPrompt, tenant);
+        string resolved = ResolveTenantPlaceholders(agent.SystemPrompt, tenant);
 
         // Resolved prompt should contain tenant values
         resolved.Should().Contain("Apex Retail Group");
@@ -166,13 +166,13 @@ public class PromptConfigurationTests
     [Fact]
     public void PromptsYaml_NoBacardiReferences()
     {
-        var projectDir = FindProjectRoot();
-        var promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
+        string projectDir = FindProjectRoot();
+        string promptsPath = Path.Combine(projectDir, "src", "RetailPulse.Api", "prompts.yaml");
 
         File.Exists(promptsPath).Should().BeTrue(
             $"prompts.yaml must exist at {promptsPath}");
 
-        var rawYaml = File.ReadAllText(promptsPath);
+        string rawYaml = File.ReadAllText(promptsPath);
 
         rawYaml.Should().NotContain("Bacardi");
         rawYaml.Should().NotContain("Patrón");
@@ -200,7 +200,7 @@ public class PromptConfigurationTests
 
     private static string FindProjectRoot()
     {
-        var dir = Directory.GetCurrentDirectory();
+        string? dir = Directory.GetCurrentDirectory();
         while (dir != null)
         {
             if (File.Exists(Path.Combine(dir, "RetailPulse.slnx")))

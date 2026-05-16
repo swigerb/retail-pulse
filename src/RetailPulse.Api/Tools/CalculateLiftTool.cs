@@ -24,8 +24,8 @@ public class CalculateLiftTool
     {
         try
         {
-            var url = $"/api/promo/calculate-lift?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&promoType={Uri.EscapeDataString(promoType)}&spend={spend}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/promo/calculate-lift?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&promoType={Uri.EscapeDataString(promoType)}&spend={spend}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

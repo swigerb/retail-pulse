@@ -12,7 +12,7 @@ public class ChatRequestValidatorTests
     [Fact]
     public void NullRequest_ReturnsInvalid()
     {
-        var result = ChatRequestValidator.Validate(null);
+        ValidationResult result = ChatRequestValidator.Validate(null);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("request");
@@ -23,7 +23,7 @@ public class ChatRequestValidatorTests
     {
         var request = new ChatRequest("", "session1");
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("message");
@@ -35,7 +35,7 @@ public class ChatRequestValidatorTests
     {
         var request = new ChatRequest("   \t\n  ", "session1");
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("message");
@@ -44,10 +44,10 @@ public class ChatRequestValidatorTests
     [Fact]
     public void MessageExceedsMaxLength_ReturnsInvalid()
     {
-        var longMessage = new string('X', ChatRequestValidator.MaxMessageLength + 1);
+        string longMessage = new('X', ChatRequestValidator.MaxMessageLength + 1);
         var request = new ChatRequest(longMessage, "session1");
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("message");
@@ -57,10 +57,10 @@ public class ChatRequestValidatorTests
     [Fact]
     public void MessageAtMaxLength_IsValid()
     {
-        var maxMessage = new string('X', ChatRequestValidator.MaxMessageLength);
+        string maxMessage = new('X', ChatRequestValidator.MaxMessageLength);
         var request = new ChatRequest(maxMessage, "session1");
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeTrue();
     }
@@ -70,7 +70,7 @@ public class ChatRequestValidatorTests
     {
         var request = new ChatRequest("What are my top depleting brands?", "abc123");
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeTrue();
         result.Errors.Should().BeEmpty();
@@ -81,7 +81,7 @@ public class ChatRequestValidatorTests
     {
         var request = new ChatRequest("Hello", null);
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeTrue();
     }
@@ -94,7 +94,7 @@ public class ChatRequestValidatorTests
     {
         var request = new ChatRequest("Hello", sessionId);
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeTrue();
     }
@@ -108,7 +108,7 @@ public class ChatRequestValidatorTests
     {
         var request = new ChatRequest("Hello", sessionId);
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("sessionId");
@@ -117,10 +117,10 @@ public class ChatRequestValidatorTests
     [Fact]
     public void SessionIdExceeding64Chars_IsRejected()
     {
-        var longSessionId = new string('a', 65);
+        string longSessionId = new('a', 65);
         var request = new ChatRequest("Hello", longSessionId);
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("sessionId");
@@ -135,7 +135,7 @@ public class ChatRequestValidatorTests
         // XSS in messages is handled by the guardrails middleware, not input validation
         var request = new ChatRequest(xssPayload, "session1");
 
-        var result = ChatRequestValidator.Validate(request);
+        ValidationResult result = ChatRequestValidator.Validate(request);
 
         result.IsValid.Should().BeTrue(
             "content safety is enforced by guardrails, not by the format validator");

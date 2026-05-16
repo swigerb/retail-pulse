@@ -45,9 +45,9 @@ public class RetailPulseAgent : AgentApplication
 
     private async Task HandleMessageAsync(ITurnContext turnContext, ITurnState turnState, CancellationToken cancellationToken)
     {
-        var activity = turnContext.Activity;
-        var userMessage = activity.Text?.Trim() ?? string.Empty;
-        var conversationId = activity.Conversation?.Id ?? Guid.NewGuid().ToString();
+        IActivity activity = turnContext.Activity;
+        string userMessage = activity.Text?.Trim() ?? string.Empty;
+        string conversationId = activity.Conversation?.Id ?? Guid.NewGuid().ToString();
 
         // Check if this is an Action.Submit from a card (before input validation)
         if (activity.Value != null)
@@ -66,10 +66,10 @@ public class RetailPulseAgent : AgentApplication
 
         // Extract user identity via SSO
         UserContext? userContext = null;
-        using (var scope = _serviceProvider.CreateScope())
+        using (IServiceScope scope = _serviceProvider.CreateScope())
         {
-            var ssoHandler = scope.ServiceProvider.GetRequiredService<TeamsSsoHandler>();
-            var userIdentity = await ssoHandler.ExtractUserIdentityAsync(activity);
+            TeamsSsoHandler ssoHandler = scope.ServiceProvider.GetRequiredService<TeamsSsoHandler>();
+            UserIdentity? userIdentity = await ssoHandler.ExtractUserIdentityAsync(activity);
 
             if (userIdentity != null)
             {
@@ -93,29 +93,29 @@ public class RetailPulseAgent : AgentApplication
             userMessage.Equals("reset", StringComparison.OrdinalIgnoreCase))
         {
             _sessionManager.ClearSession(conversationId);
-            var welcomeCard = _cardBuilder.BuildWelcomeCard(isReset: true, userContext);
+            Attachment welcomeCard = _cardBuilder.BuildWelcomeCard(isReset: true, userContext);
             await turnContext.SendActivityAsync(MessageFactory.Attachment(welcomeCard), cancellationToken);
             return;
         }
 
         // Get or create session for this conversation
-        var sessionId = _sessionManager.GetOrCreateSessionId(conversationId);
+        string sessionId = _sessionManager.GetOrCreateSessionId(conversationId);
 
         await _telemetryClient.StartCollectingAsync(sessionId, cancellationToken);
 
         try
         {
-            var client = _httpClientFactory.CreateClient("RetailPulseApi");
+            HttpClient client = _httpClientFactory.CreateClient("RetailPulseApi");
             var chatRequest = new ChatRequest(userMessage, sessionId, userContext);
-            var response = await client.PostAsJsonAsync("/api/chat", chatRequest, cancellationToken);
+            HttpResponseMessage response = await client.PostAsJsonAsync("/api/chat", chatRequest, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var chatResponse = await response.Content.ReadFromJsonAsync<ChatResponse>(cancellationToken) ?? throw new InvalidOperationException("Received null response from API");
+            ChatResponse chatResponse = await response.Content.ReadFromJsonAsync<ChatResponse>(cancellationToken) ?? throw new InvalidOperationException("Received null response from API");
             await _telemetryClient.WaitForSpansAsync(_telemetryWaitMs, cancellationToken);
-            var signalRSpans = _telemetryClient.GetSpans(sessionId, clearAfterRead: true);
-            var allSpans = signalRSpans.Count != 0 ? signalRSpans : chatResponse.Spans;
+            List<AgentSpan> signalRSpans = _telemetryClient.GetSpans(sessionId, clearAfterRead: true);
+            List<AgentSpan> allSpans = signalRSpans.Count != 0 ? signalRSpans : chatResponse.Spans;
             _sessionManager.StoreSpans(sessionId, allSpans);
 
-            var card = _cardBuilder.BuildChatResponseCard(chatResponse.Reply, allSpans, chatResponse.Charts, sessionId);
+            Attachment card = _cardBuilder.BuildChatResponseCard(chatResponse.Reply, allSpans, chatResponse.Charts, sessionId);
             await turnContext.SendActivityAsync(MessageFactory.Attachment(card), cancellationToken);
         }
         catch (Exception ex)
@@ -123,7 +123,7 @@ public class RetailPulseAgent : AgentApplication
             _logger.LogError(ex, "Error processing message for session {SessionId}", sessionId);
             // Don't surface raw exception text to end users — could leak internal
             // endpoints, prompts, or stack traces. Show a generic message.
-            var errorCard = _cardBuilder.BuildErrorCard("Something went wrong while processing your request. Please try again in a moment.");
+            Attachment errorCard = _cardBuilder.BuildErrorCard("Something went wrong while processing your request. Please try again in a moment.");
             await turnContext.SendActivityAsync(MessageFactory.Attachment(errorCard), cancellationToken);
         }
     }
@@ -132,37 +132,37 @@ public class RetailPulseAgent : AgentApplication
     {
         try
         {
-            var actionData = JsonSerializer.Deserialize<Dictionary<string, object>>(
+            Dictionary<string, object>? actionData = JsonSerializer.Deserialize<Dictionary<string, object>>(
                 turnContext.Activity.Value?.ToString() ?? "{}",
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
             );
 
-            if (actionData == null || !actionData.TryGetValue("action", out var actionObj))
+            if (actionData == null || !actionData.TryGetValue("action", out object? actionObj))
             {
                 _logger.LogWarning("Card action missing 'action' field");
                 return;
             }
 
-            var actionType = actionObj?.ToString();
+            string? actionType = actionObj?.ToString();
             _logger.LogInformation("Handling card action: {ActionType}", actionType);
 
             switch (actionType)
             {
                 case "detailed_telemetry":
-                    if (actionData.TryGetValue("sessionId", out var sessionIdObj))
+                    if (actionData.TryGetValue("sessionId", out object? sessionIdObj))
                     {
-                        var sessionId = sessionIdObj?.ToString();
+                        string? sessionId = sessionIdObj?.ToString();
                         if (!string.IsNullOrEmpty(sessionId))
                         {
-                            var spans = _sessionManager.GetSpans(sessionId);
+                            List<AgentSpan>? spans = _sessionManager.GetSpans(sessionId);
                             if (spans != null && spans.Count != 0)
                             {
-                                var detailedCard = _cardBuilder.BuildDetailedTelemetryCard(spans);
+                                Attachment detailedCard = _cardBuilder.BuildDetailedTelemetryCard(spans);
                                 await turnContext.SendActivityAsync(MessageFactory.Attachment(detailedCard), cancellationToken);
                             }
                             else
                             {
-                                var errorCard = _cardBuilder.BuildErrorCard("Telemetry data not found for this session.");
+                                Attachment errorCard = _cardBuilder.BuildErrorCard("Telemetry data not found for this session.");
                                 await turnContext.SendActivityAsync(MessageFactory.Attachment(errorCard), cancellationToken);
                             }
                         }
@@ -183,19 +183,19 @@ public class RetailPulseAgent : AgentApplication
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error handling card action");
-            var errorCard = _cardBuilder.BuildErrorCard("Failed to process action.");
+            Attachment errorCard = _cardBuilder.BuildErrorCard("Failed to process action.");
             await turnContext.SendActivityAsync(MessageFactory.Attachment(errorCard), cancellationToken);
         }
     }
 
     private async Task HandleMembersAddedAsync(ITurnContext turnContext, ITurnState turnState, CancellationToken cancellationToken)
     {
-        var activity = turnContext.Activity;
-        var membersAdded = activity.MembersAdded;
+        IActivity activity = turnContext.Activity;
+        IList<ChannelAccount> membersAdded = activity.MembersAdded;
 
         if (membersAdded != null)
         {
-            foreach (var member in membersAdded)
+            foreach (ChannelAccount member in membersAdded)
             {
                 if (member.Id != activity.Recipient?.Id)
                 {
@@ -204,7 +204,7 @@ public class RetailPulseAgent : AgentApplication
                         member.Name ?? "Unknown User",
                         string.Empty
                     );
-                    var welcomeCard = _cardBuilder.BuildWelcomeCard(isReset: false, userContext);
+                    Attachment welcomeCard = _cardBuilder.BuildWelcomeCard(isReset: false, userContext);
                     await turnContext.SendActivityAsync(MessageFactory.Attachment(welcomeCard), cancellationToken);
                     return;
                 }

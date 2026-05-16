@@ -18,8 +18,8 @@ public static class GetHistoricalDemandTool
         if (string.IsNullOrWhiteSpace(brand))
             return new { error = "Parameter 'brand' is required." };
 
-        var effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
-        var effectiveChannel = string.Equals(channel, "All", StringComparison.OrdinalIgnoreCase) ? null : channel;
+        string? effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
+        string? effectiveChannel = string.Equals(channel, "All", StringComparison.OrdinalIgnoreCase) ? null : channel;
 
         return data.GetHistoricalDemand(brand, effectiveRegion, effectiveChannel);
     }

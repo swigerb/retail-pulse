@@ -66,15 +66,15 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task Router_DemandMessage_RoutesToDemandForecastAgent()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.92,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
 
-        var demandAgent = CreateMockSpecialist("demand-forecasting", AgentIntent.DemandForecasting);
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        ISpecialistAgent demandAgent = CreateMockSpecialist("demand-forecasting", AgentIntent.DemandForecasting);
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { demandAgent, generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var result = await router.RouteAsync("What is the demand forecast for Brand X?", null, null, null);
+        RoutingDecision result = await router.RouteAsync("What is the demand forecast for Brand X?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.DemandForecasting);
         result.AgentKey.Should().Be("demand-forecasting");
@@ -84,14 +84,14 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task Router_GeneralMessage_RoutesToGeneralAgent()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.85,\"intents\":[\"{AgentIntent.General}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("Here is the overview."));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("Here is the overview."));
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var result = await router.RouteAsync("Show me the portfolio overview", null, null, null);
+        RoutingDecision result = await router.RouteAsync("Show me the portfolio overview", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.General);
         result.AgentKey.Should().Be("general");
@@ -100,13 +100,13 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task Router_LowConfidence_FallsBackToGeneral()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.3,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("Can you be more specific?"));
-        var router = CreateRouter(routerClient, [generalAgent]);
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("Can you be more specific?"));
+        RetailOpsRouter router = CreateRouter(routerClient, [generalAgent]);
 
-        var result = await router.RouteAsync("Tell me stuff", null, null, null);
+        RoutingDecision result = await router.RouteAsync("Tell me stuff", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.General, "low confidence should fall back to general");
     }
@@ -118,7 +118,7 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task Memory_StoresAndRecallsAcrossTurns()
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         var entry1 = new MemoryEntry(Guid.NewGuid().ToString("N"), "user-1",
             MemoryType.ConversationSummary, "Discussed Q4 demand trends",
             null, now, now.AddDays(30));
@@ -129,7 +129,7 @@ public class Phase1IntegrationTests : IDisposable
         await _memory.StoreAsync("user-1", entry1);
         await _memory.StoreAsync("user-1", entry2);
 
-        var recalled = await _memory.RecallAsync("user-1", maxResults: 10);
+        IReadOnlyList<MemoryEntry> recalled = await _memory.RecallAsync("user-1", maxResults: 10);
 
         recalled.Should().HaveCount(2);
         recalled.Should().Contain(m => m.Content.Contains("Q4 demand"));
@@ -139,7 +139,7 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task Memory_ForgetEverything_ClearsAllEntries()
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         await _memory.StoreAsync("user-forget", new MemoryEntry(
             Guid.NewGuid().ToString("N"), "user-forget",
             MemoryType.ConversationSummary, "Some data",
@@ -147,7 +147,7 @@ public class Phase1IntegrationTests : IDisposable
 
         await _memory.ForgetAsync("user-forget");
 
-        var recalled = await _memory.RecallAsync("user-forget");
+        IReadOnlyList<MemoryEntry> recalled = await _memory.RecallAsync("user-forget");
         recalled.Should().BeEmpty("ForgetAsync should purge all entries");
     }
 
@@ -161,12 +161,12 @@ public class Phase1IntegrationTests : IDisposable
         var context = new ApprovalContext("demand-agent", "user-1",
             "Generate Q4 forecast", "High compute", "Medium", "Quarterly forecast");
 
-        var request = await _approvalGate.RequestApprovalAsync(context);
+        ApprovalRequest request = await _approvalGate.RequestApprovalAsync(context);
         request.Decision.Should().Be(ApprovalDecision.Pending);
 
         await _approvalGate.RespondAsync(request.RequestId, ApprovalDecision.Approved, "OK to proceed");
 
-        var result = await _approvalGate.GetResultAsync(request.RequestId);
+        ApprovalResult result = await _approvalGate.GetResultAsync(request.RequestId);
         result.Decision.Should().Be(ApprovalDecision.Approved);
         result.Comment.Should().Be("OK to proceed");
     }
@@ -178,9 +178,9 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task DemandForecastAgent_HandleAsync_ReturnsValidResponse()
     {
-        var chatClient = MockChatClient("Brand X demand is projected to grow 15% next quarter.");
-        var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        IChatClient chatClient = MockChatClient("Brand X demand is projected to grow 15% next quarter.");
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
         var pipeline = new AgentExecutionPipeline(
             chatClient, hubContext, config,
             NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
@@ -189,7 +189,7 @@ public class Phase1IntegrationTests : IDisposable
             new AgentDefinition { Name = "DemandForecast", Model = "gpt-5.4-mini", SystemPrompt = "Demand specialist", Temperature = 0.3 },
             []);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Forecast for Brand X", SessionId: "demand-test"));
 
         response.Should().NotBeNull();
@@ -205,10 +205,10 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task GeneralAgent_ReturnsValidResponse()
     {
-        var chatClient = MockChatClient("Here are the portfolio depletions for last month.");
-        var agent = CreateGeneralAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Here are the portfolio depletions for last month.");
+        GeneralAgent agent = CreateGeneralAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Show me portfolio depletions", SessionId: "general-test"));
 
         response.Should().NotBeNull();
@@ -221,9 +221,9 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task GeneralAgent_EmitsSpansWithSessionId()
     {
-        var agent = CreateGeneralAgent(MockChatClient("done"));
+        GeneralAgent agent = CreateGeneralAgent(MockChatClient("done"));
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "span-check"));
 
         response.Spans.Should().OnlyContain(s => s.SessionId == "span-check");
@@ -232,9 +232,9 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public async Task GeneralAgent_TotalDurationMs_Populated()
     {
-        var agent = CreateGeneralAgent(MockChatClient("done"));
+        GeneralAgent agent = CreateGeneralAgent(MockChatClient("done"));
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "dur-check"));
 
         response.TotalDurationMs.Should().NotBeNull();
@@ -251,7 +251,7 @@ public class Phase1IntegrationTests : IDisposable
         _alertService.SeedDataPoint("Brand A", "West", "demand_spike", baseline: 1000, current: 1500);
         _alertService.SeedDataPoint("Brand B", "East", "supply_drop", baseline: 1000, current: 700);
 
-        var alerts = await _alertService.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await _alertService.CheckForAlertsAsync();
 
         alerts.Should().HaveCount(2);
         alerts.Should().Contain(a => a.Type == "demand_spike" && a.Brand == "Brand A");
@@ -265,8 +265,8 @@ public class Phase1IntegrationTests : IDisposable
     [Fact]
     public void TraceCollector_CapturesMultiAgentFlow()
     {
-        var traceId = Guid.NewGuid().ToString("N");
-        var t0 = DateTimeOffset.UtcNow;
+        string traceId = Guid.NewGuid().ToString("N");
+        DateTimeOffset t0 = DateTimeOffset.UtcNow;
 
         // Simulate: routing → demand agent → tool call → response
         var routingSpan = new TraceSpan(
@@ -290,7 +290,7 @@ public class Phase1IntegrationTests : IDisposable
         _traceCollector.CaptureSpan(toolSpan);
         _traceCollector.CaptureSpan(responseSpan);
 
-        var summary = _traceCollector.GetSummary(traceId);
+        TraceSummary? summary = _traceCollector.GetSummary(traceId);
 
         summary.Should().NotBeNull();
         summary.Spans.Should().HaveCount(4);
@@ -307,34 +307,34 @@ public class Phase1IntegrationTests : IDisposable
     public async Task FullPipeline_MessageToResponseWithMemoryAndTracing()
     {
         // 1. Route
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.92,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
-        var generalAgent = CreateGeneralAgent(MockChatClient("fallback"));
-        var demandAgent = CreateMockSpecialist("demand-forecasting", AgentIntent.DemandForecasting,
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("fallback"));
+        ISpecialistAgent demandAgent = CreateMockSpecialist("demand-forecasting", AgentIntent.DemandForecasting,
             "Brand X demand is projected to grow 15%.");
-        var router = CreateRouter(routerClient, [demandAgent, generalAgent]);
+        RetailOpsRouter router = CreateRouter(routerClient, [demandAgent, generalAgent]);
 
-        var routingResult = await router.RouteAsync("Forecast for Brand X", null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync("Forecast for Brand X", null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.DemandForecasting);
 
         // 2. Dispatch to specialist
-        var response = await demandAgent.HandleAsync(
+        Contracts.ChatResponse response = await demandAgent.HandleAsync(
             new ChatRequest("Forecast for Brand X", SessionId: "pipeline-test"));
         response.Reply.Should().Contain("Brand X");
 
         // 3. Store memory
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         await _memory.StoreAsync("user-1", new MemoryEntry(
             Guid.NewGuid().ToString("N"), "user-1",
             MemoryType.ConversationSummary, "Discussed Brand X demand forecast",
             "Brand X", now, now.AddDays(30)));
 
         // 4. Verify memory persists
-        var memories = await _memory.RecallAsync("user-1", "Brand X");
+        IReadOnlyList<MemoryEntry> memories = await _memory.RecallAsync("user-1", "Brand X");
         memories.Should().ContainSingle();
 
         // 5. Trace collector captures the flow
-        var traceId = Guid.NewGuid().ToString("N");
+        string traceId = Guid.NewGuid().ToString("N");
         _traceCollector.CaptureSpan(new TraceSpan(
             Guid.NewGuid().ToString("N"), traceId, null,
             "agent.routing", now, now.AddMilliseconds(25), 25));
@@ -351,29 +351,29 @@ public class Phase1IntegrationTests : IDisposable
         // Simulate: data change causes anomaly, alert service detects it
         _alertService.SeedDataPoint("Brand X", "West", "demand_spike", baseline: 1000, current: 1500);
 
-        var alerts = await _alertService.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await _alertService.CheckForAlertsAsync();
         alerts.Should().ContainSingle();
         alerts[0].Severity.Should().Be("high"); // 50% deviation
 
         // User dismisses alert
         await _alertService.DismissAsync(alerts[0].Id, "user-1");
-        var active = await _alertService.GetActiveForUserAsync("user-1");
+        IReadOnlyList<Alert> active = await _alertService.GetActiveForUserAsync("user-1");
         active.Should().BeEmpty();
     }
 
     [Fact]
     public async Task FullPipeline_MemoryManagementRouting()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.MemoryManagement}\",\"confidence\":0.95,\"intents\":[\"{AgentIntent.MemoryManagement}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("Done."));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("Done."));
         var memoryAgent = new MemoryManagementAgent(
             Mock.Of<IConversationMemory>(),
             Mock.Of<ILogger<MemoryManagementAgent>>());
-        var router = CreateRouter(routerClient, [generalAgent, memoryAgent]);
+        RetailOpsRouter router = CreateRouter(routerClient, [generalAgent, memoryAgent]);
 
-        var result = await router.RouteAsync("Forget everything about me", null, null, null);
+        RoutingDecision result = await router.RouteAsync("Forget everything about me", null, null, null);
         result.Intent.Should().Be(AgentIntent.MemoryManagement);
     }
 
@@ -401,7 +401,7 @@ public class Phase1IntegrationTests : IDisposable
         mock.Setup(a => a.DisplayName).Returns($"Mock {key}");
         mock.Setup(a => a.SupportedIntents).Returns([intent]);
         mock.Setup(a => a.HandleAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RetailPulse.Contracts.ChatResponse(response, "session-mock", []));
+            .ReturnsAsync(new Contracts.ChatResponse(response, "session-mock", []));
         return mock.Object;
     }
 
@@ -417,7 +417,7 @@ public class Phase1IntegrationTests : IDisposable
 
     private static GeneralAgent CreateGeneralAgent(IChatClient? chatClient = null)
     {
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 

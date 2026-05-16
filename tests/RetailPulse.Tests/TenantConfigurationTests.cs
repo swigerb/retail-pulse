@@ -15,7 +15,7 @@ public class TenantConfigurationTests : IDisposable
 
     private string WriteTempYaml(string contents)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"tenant-test-{Guid.NewGuid():N}.yaml");
+        string path = Path.Combine(Path.GetTempPath(), $"tenant-test-{Guid.NewGuid():N}.yaml");
         File.WriteAllText(path, contents);
         _tempFiles.Add(path);
         return path;
@@ -23,7 +23,7 @@ public class TenantConfigurationTests : IDisposable
 
     public void Dispose()
     {
-        foreach (var f in _tempFiles)
+        foreach (string f in _tempFiles)
         {
             try { File.Delete(f); } catch { /* best effort */ }
         }
@@ -32,13 +32,13 @@ public class TenantConfigurationTests : IDisposable
     [Fact]
     public void ActualTenantYaml_LoadsSuccessfully()
     {
-        var projectDir = FindProjectRoot();
-        var tenantPath = Path.Combine(projectDir, "tenant.yaml");
+        string projectDir = FindProjectRoot();
+        string tenantPath = Path.Combine(projectDir, "tenant.yaml");
 
         File.Exists(tenantPath).Should().BeTrue("tenant.yaml must exist at the repo root");
 
         var provider = new FileTenantProvider(tenantPath);
-        var tenant = provider.GetTenant();
+        TenantConfiguration tenant = provider.GetTenant();
 
         tenant.Should().NotBeNull();
         tenant.Company.Should().NotBeNullOrWhiteSpace();
@@ -50,7 +50,7 @@ public class TenantConfigurationTests : IDisposable
     [Fact]
     public void ValidYaml_LoadsAllSections()
     {
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test Industry"
             description: "A test"
@@ -75,7 +75,7 @@ public class TenantConfigurationTests : IDisposable
                 - "Distributor"
             """);
 
-        var tenant = new FileTenantProvider(path).GetTenant();
+        TenantConfiguration tenant = new FileTenantProvider(path).GetTenant();
 
         tenant.Company.Should().Be("Test Co");
         tenant.Industry.Should().Be("Test Industry");
@@ -91,7 +91,7 @@ public class TenantConfigurationTests : IDisposable
     [Fact]
     public void MissingTenantYaml_ThrowsFileNotFound()
     {
-        var bogus = Path.Combine(Path.GetTempPath(), $"does-not-exist-{Guid.NewGuid():N}.yaml");
+        string bogus = Path.Combine(Path.GetTempPath(), $"does-not-exist-{Guid.NewGuid():N}.yaml");
 
         Action act = () => new FileTenantProvider(bogus);
 
@@ -101,7 +101,7 @@ public class TenantConfigurationTests : IDisposable
     [Fact]
     public void EmptyBrandsArray_ThrowsValidationError()
     {
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test"
             brands: []
@@ -118,7 +118,7 @@ public class TenantConfigurationTests : IDisposable
     [Fact]
     public void EmptyRegionsArray_ThrowsValidationError()
     {
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test"
             brands:
@@ -141,7 +141,7 @@ public class TenantConfigurationTests : IDisposable
         // The TenantConfiguration model defaults Company to a non-empty string,
         // so simply omitting the key won't fail validation. Passing an empty
         // value, however, triggers the IsNullOrWhiteSpace check.
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: ""
             industry: "Test"
             brands:
@@ -161,7 +161,7 @@ public class TenantConfigurationTests : IDisposable
     [Fact]
     public void BrandWithoutName_ThrowsValidationError()
     {
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test"
             brands:
@@ -180,7 +180,7 @@ public class TenantConfigurationTests : IDisposable
     [Fact]
     public void MissingDistributionSection_ThrowsValidationError()
     {
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test"
             brands:
@@ -203,7 +203,7 @@ public class TenantConfigurationTests : IDisposable
     [Fact]
     public void MissingThemeSection_ThrowsValidationError()
     {
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test"
             brands:
@@ -227,7 +227,7 @@ public class TenantConfigurationTests : IDisposable
     public void CamelCaseKeys_AreRecognized()
     {
         // priceSegment is camelCase; the production deserializer uses CamelCaseNamingConvention
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test"
             brands:
@@ -243,7 +243,7 @@ public class TenantConfigurationTests : IDisposable
               model: "Direct"
             """);
 
-        var tenant = new FileTenantProvider(path).GetTenant();
+        TenantConfiguration tenant = new FileTenantProvider(path).GetTenant();
 
         tenant.Brands[0].PriceSegment.Should().Be("Ultra-Premium");
     }
@@ -253,7 +253,7 @@ public class TenantConfigurationTests : IDisposable
     {
         // Production uses CamelCaseNamingConvention with IgnoreUnmatchedProperties.
         // snake_case keys should be silently ignored, leaving the property at default (empty string).
-        var path = WriteTempYaml("""
+        string path = WriteTempYaml("""
             company: "Test Co"
             industry: "Test"
             brands:
@@ -269,7 +269,7 @@ public class TenantConfigurationTests : IDisposable
               model: "Direct"
             """);
 
-        var tenant = new FileTenantProvider(path).GetTenant();
+        TenantConfiguration tenant = new FileTenantProvider(path).GetTenant();
         tenant.Brands[0].PriceSegment.Should().BeEmpty(
             "snake_case keys are not bound by the CamelCase deserializer used in production");
     }
@@ -292,7 +292,7 @@ public class TenantConfigurationTests : IDisposable
 
     private static string FindProjectRoot()
     {
-        var dir = Directory.GetCurrentDirectory();
+        string? dir = Directory.GetCurrentDirectory();
         while (dir != null)
         {
             if (File.Exists(Path.Combine(dir, "RetailPulse.slnx")))

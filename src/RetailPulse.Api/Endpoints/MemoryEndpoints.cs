@@ -11,15 +11,15 @@ public static class MemoryEndpoints
 {
     public static WebApplication MapMemoryEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/api/memory").WithTags("Memory");
+        RouteGroupBuilder group = app.MapGroup("/api/memory").WithTags("Memory");
 
         group.MapGet("/", async (IConversationMemory memory, HttpContext httpContext, CancellationToken ct) =>
         {
-            var userId = httpContext.User.FindFirst("oid")?.Value
+            string userId = httpContext.User.FindFirst("oid")?.Value
                       ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
                       ?? "anonymous";
 
-            var entries = await memory.RecallAsync(userId, query: null, maxResults: 100, ct);
+            IReadOnlyList<MemoryEntry> entries = await memory.RecallAsync(userId, query: null, maxResults: 100, ct);
 
             var result = entries.Select(e => new
             {
@@ -42,7 +42,7 @@ public static class MemoryEndpoints
 
         group.MapDelete("/{id}", async (string id, IConversationMemory memory, HttpContext httpContext, CancellationToken ct) =>
         {
-            var userId = httpContext.User.FindFirst("oid")?.Value
+            string userId = httpContext.User.FindFirst("oid")?.Value
                       ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
                       ?? "anonymous";
 

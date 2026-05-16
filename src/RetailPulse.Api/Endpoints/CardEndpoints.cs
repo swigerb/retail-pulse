@@ -11,26 +11,26 @@ public static class CardEndpoints
             if (string.IsNullOrWhiteSpace(body.Title))
                 return Results.BadRequest(new { error = "Field 'title' is required." });
 
-            var card = await cardState.CreateAsync(body, ct);
+            AdaptiveCard card = await cardState.CreateAsync(body, ct);
             return Results.Ok(card);
         })
         .WithName("CreateCard").RequireAuthorization().RequireRateLimiting("moderate");
 
         app.MapGet("/api/cards", async (HttpContext http, IAdaptiveCardState cardState, CancellationToken ct) =>
         {
-            var typeStr = http.Request.Query["type"].FirstOrDefault();
-            var lifecycleStr = http.Request.Query["lifecycle"].FirstOrDefault();
+            string? typeStr = http.Request.Query["type"].FirstOrDefault();
+            string? lifecycleStr = http.Request.Query["lifecycle"].FirstOrDefault();
 
-            CardType? typeFilter = Enum.TryParse<CardType>(typeStr, true, out var t) ? t : null;
-            CardLifecycle? lifecycleFilter = Enum.TryParse<CardLifecycle>(lifecycleStr, true, out var l) ? l : null;
+            CardType? typeFilter = Enum.TryParse(typeStr, true, out CardType t) ? t : null;
+            CardLifecycle? lifecycleFilter = Enum.TryParse(lifecycleStr, true, out CardLifecycle l) ? l : null;
 
-            if (cardState is RetailPulse.Api.Cards.InMemoryAdaptiveCardState impl)
+            if (cardState is Cards.InMemoryAdaptiveCardState impl)
             {
-                var cards = await impl.ListAsync(typeFilter, lifecycleFilter, ct);
+                IReadOnlyList<AdaptiveCard> cards = await impl.ListAsync(typeFilter, lifecycleFilter, ct);
                 return Results.Ok(cards);
             }
 
-            var active = await cardState.GetActiveAsync(ct);
+            IReadOnlyList<AdaptiveCard> active = await cardState.GetActiveAsync(ct);
             return Results.Ok(active);
         })
         .WithName("ListCards").RequireAuthorization().RequireRateLimiting("relaxed");
@@ -39,7 +39,7 @@ public static class CardEndpoints
         {
             try
             {
-                var card = await cardState.GetAsync(id, ct);
+                AdaptiveCard card = await cardState.GetAsync(id, ct);
                 return Results.Ok(card);
             }
             catch (KeyNotFoundException)
@@ -53,7 +53,7 @@ public static class CardEndpoints
         {
             try
             {
-                var card = await cardState.ActionAsync(id, body, ct);
+                AdaptiveCard card = await cardState.ActionAsync(id, body, ct);
                 return Results.Ok(card);
             }
             catch (KeyNotFoundException)

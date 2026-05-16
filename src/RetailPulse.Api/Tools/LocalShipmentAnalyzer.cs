@@ -22,7 +22,7 @@ public class LocalShipmentAnalyzer
     {
         _logger.LogInformation("Local shipment analysis for {Brand} in {Region} ({Period})", brand, region, period);
 
-        var shipmentData = await _shipmentTool.GetShipmentStats(brand, region, period);
+        string shipmentData = await _shipmentTool.GetShipmentStats(brand, region, period);
 
         return JsonSerializer.Serialize(new
         {

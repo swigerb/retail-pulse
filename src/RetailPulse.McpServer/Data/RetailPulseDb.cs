@@ -21,7 +21,7 @@ public class RetailPulseDb
         _tenant = tenantProvider.GetTenant();
         _tenantConfigPath = tenantConfigPath;
 
-        var dir = Path.GetDirectoryName(dbPath);
+        string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
@@ -40,10 +40,10 @@ public class RetailPulseDb
 
     private void InitializeSchema()
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             PRAGMA journal_mode=WAL;
 
@@ -314,23 +314,23 @@ public class RetailPulseDb
 
     private void SeedIfNeeded()
     {
-        var currentHash = ComputeTenantHash();
+        string currentHash = ComputeTenantHash();
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         // Check stored hash
-        using var checkCmd = conn.CreateCommand();
+        using SqliteCommand checkCmd = conn.CreateCommand();
         checkCmd.CommandText = "SELECT Value FROM SeedMetadata WHERE Key = 'tenant_hash'";
-        var storedHash = checkCmd.ExecuteScalar() as string;
+        string? storedHash = checkCmd.ExecuteScalar() as string;
 
         if (storedHash == currentHash)
             return; // DB is current, preserve mutations
 
         // Re-seed: clear and regenerate
-        using var tx = conn.BeginTransaction();
+        using SqliteTransaction tx = conn.BeginTransaction();
 
-        using var clearCmd = conn.CreateCommand();
+        using SqliteCommand clearCmd = conn.CreateCommand();
         clearCmd.CommandText = "DELETE FROM Depletions; DELETE FROM Shipments; DELETE FROM Sentiment; DELETE FROM VariantMix; DELETE FROM DemandHistory; DELETE FROM SeasonalFactors; DELETE FROM PromoHistory; DELETE FROM LiftCoefficients; DELETE FROM CompetitorPricing; DELETE FROM MarketShare; DELETE FROM CompetitorActivity; DELETE FROM InventoryLevels; DELETE FROM SupplyDisruptions; DELETE FROM FulfillmentRates; DELETE FROM StoreMetrics; DELETE FROM ShelfLayouts; DELETE FROM SkuVelocity; DELETE FROM BrandFinancials; DELETE FROM MarginDrivers; DELETE FROM SeedMetadata;";
         clearCmd.ExecuteNonQuery();
 
@@ -355,7 +355,7 @@ public class RetailPulseDb
         SeedMarginDrivers(conn);
 
         // Store hash
-        using var hashCmd = conn.CreateCommand();
+        using SqliteCommand hashCmd = conn.CreateCommand();
         hashCmd.CommandText = "INSERT INTO SeedMetadata (Key, Value) VALUES ('tenant_hash', @hash)";
         hashCmd.Parameters.AddWithValue("@hash", currentHash);
         hashCmd.ExecuteNonQuery();
@@ -372,43 +372,43 @@ public class RetailPulseDb
         if (!File.Exists(_tenantConfigPath))
             return "no-file";
 
-        var bytes = File.ReadAllBytes(_tenantConfigPath);
-        var hash = SHA256.HashData(bytes);
+        byte[] bytes = File.ReadAllBytes(_tenantConfigPath);
+        byte[] hash = SHA256.HashData(bytes);
         return $"v{SchemaVersion}:{Convert.ToHexStringLower(hash)}";
     }
 
     private void SeedDepletions(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO Depletions (Brand, Region, DepletionsYoY, SellThroughYoY, InventoryWeeks, Status, SentimentSummary)
             VALUES (@brand, @region, @dep, @sell, @inv, @status, @summary)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pDep = cmd.Parameters.Add("@dep", SqliteType.Text);
-        var pSell = cmd.Parameters.Add("@sell", SqliteType.Text);
-        var pInv = cmd.Parameters.Add("@inv", SqliteType.Real);
-        var pStatus = cmd.Parameters.Add("@status", SqliteType.Text);
-        var pSummary = cmd.Parameters.Add("@summary", SqliteType.Text);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pDep = cmd.Parameters.Add("@dep", SqliteType.Text);
+        SqliteParameter pSell = cmd.Parameters.Add("@sell", SqliteType.Text);
+        SqliteParameter pInv = cmd.Parameters.Add("@inv", SqliteType.Real);
+        SqliteParameter pStatus = cmd.Parameters.Add("@status", SqliteType.Text);
+        SqliteParameter pSummary = cmd.Parameters.Add("@summary", SqliteType.Text);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var brandSeed = GetStableHash(brand.Name);
-            var baseTrend = GetBaseTrend(brand, brandSeed);
+            int brandSeed = GetStableHash(brand.Name);
+            double baseTrend = GetBaseTrend(brand, brandSeed);
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var regionSeed = GetStableHash($"{brand.Name}|{region}");
+                int regionSeed = GetStableHash($"{brand.Name}|{region}");
                 var regionRng = new Random(regionSeed);
 
-                var regionVariance = (regionRng.NextDouble() - 0.5) * 8.0;
-                var depletionGrowth = Math.Round(baseTrend + regionVariance, 1);
-                var sellThroughGrowth = Math.Round(depletionGrowth + ((regionRng.NextDouble() - 0.5) * 4.0), 1);
-                var inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - (depletionGrowth * 0.3) + (regionRng.NextDouble() * 3.0)), 1);
-                var status = DetermineDepletionStatus(depletionGrowth, sellThroughGrowth, inventoryWeeks);
-                var summary = GenerateDepletionSummary(brand, region, depletionGrowth, sellThroughGrowth, inventoryWeeks, status, regionRng);
+                double regionVariance = (regionRng.NextDouble() - 0.5) * 8.0;
+                double depletionGrowth = Math.Round(baseTrend + regionVariance, 1);
+                double sellThroughGrowth = Math.Round(depletionGrowth + ((regionRng.NextDouble() - 0.5) * 4.0), 1);
+                double inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - (depletionGrowth * 0.3) + (regionRng.NextDouble() * 3.0)), 1);
+                string status = DetermineDepletionStatus(depletionGrowth, sellThroughGrowth, inventoryWeeks);
+                string summary = GenerateDepletionSummary(brand, region, depletionGrowth, sellThroughGrowth, inventoryWeeks, status, regionRng);
 
                 pBrand.Value = brand.Name;
                 pRegion.Value = region;
@@ -424,49 +424,49 @@ public class RetailPulseDb
 
     private void SeedShipments(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO Shipments (Brand, Region, ShipmentsYoY, SellThroughYoY, DepletionsYoY, InventoryWeeks, CasesShipped, CasesDepleted, AnomalyType, RiskLevel, Analysis)
             VALUES (@brand, @region, @ship, @sell, @dep, @inv, @casesShip, @casesDep, @anomaly, @risk, @analysis)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pShip = cmd.Parameters.Add("@ship", SqliteType.Text);
-        var pSell = cmd.Parameters.Add("@sell", SqliteType.Text);
-        var pDep = cmd.Parameters.Add("@dep", SqliteType.Text);
-        var pInv = cmd.Parameters.Add("@inv", SqliteType.Real);
-        var pCasesShip = cmd.Parameters.Add("@casesShip", SqliteType.Integer);
-        var pCasesDep = cmd.Parameters.Add("@casesDep", SqliteType.Integer);
-        var pAnomaly = cmd.Parameters.Add("@anomaly", SqliteType.Text);
-        var pRisk = cmd.Parameters.Add("@risk", SqliteType.Text);
-        var pAnalysis = cmd.Parameters.Add("@analysis", SqliteType.Text);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pShip = cmd.Parameters.Add("@ship", SqliteType.Text);
+        SqliteParameter pSell = cmd.Parameters.Add("@sell", SqliteType.Text);
+        SqliteParameter pDep = cmd.Parameters.Add("@dep", SqliteType.Text);
+        SqliteParameter pInv = cmd.Parameters.Add("@inv", SqliteType.Real);
+        SqliteParameter pCasesShip = cmd.Parameters.Add("@casesShip", SqliteType.Integer);
+        SqliteParameter pCasesDep = cmd.Parameters.Add("@casesDep", SqliteType.Integer);
+        SqliteParameter pAnomaly = cmd.Parameters.Add("@anomaly", SqliteType.Text);
+        SqliteParameter pRisk = cmd.Parameters.Add("@risk", SqliteType.Text);
+        SqliteParameter pAnalysis = cmd.Parameters.Add("@analysis", SqliteType.Text);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var baseTrend = GetBaseTrend(brand, GetStableHash(brand.Name));
+            double baseTrend = GetBaseTrend(brand, GetStableHash(brand.Name));
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var regionSeed = GetStableHash($"ship|{brand.Name}|{region}");
+                int regionSeed = GetStableHash($"ship|{brand.Name}|{region}");
                 var regionRng = new Random(regionSeed);
 
-                var shipmentGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.3) * 6.0), 1);
-                var sellThroughGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.5) * 5.0), 1);
-                var depletionGrowth = Math.Round(sellThroughGrowth + ((regionRng.NextDouble() - 0.5) * 3.0), 1);
-                var inventoryWeeks = Math.Round(Math.Max(2.5, 6.5 - (depletionGrowth * 0.25) + (regionRng.NextDouble() * 3.0)), 1);
+                double shipmentGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.3) * 6.0), 1);
+                double sellThroughGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.5) * 5.0), 1);
+                double depletionGrowth = Math.Round(sellThroughGrowth + ((regionRng.NextDouble() - 0.5) * 3.0), 1);
+                double inventoryWeeks = Math.Round(Math.Max(2.5, 6.5 - (depletionGrowth * 0.25) + (regionRng.NextDouble() * 3.0)), 1);
 
-                var baseCases = brand.PriceSegment switch
+                int baseCases = brand.PriceSegment switch
                 {
                     "Ultra-Premium" => 2_000 + regionRng.Next(1_000, 5_000),
                     "Premium" => 5_000 + regionRng.Next(3_000, 15_000),
                     _ => 8_000 + regionRng.Next(5_000, 25_000)
                 };
-                var casesShipped = baseCases + (int)(baseCases * shipmentGrowth / 100.0);
-                var casesDepleted = baseCases + (int)(baseCases * depletionGrowth / 100.0);
+                int casesShipped = baseCases + (int)(baseCases * shipmentGrowth / 100.0);
+                int casesDepleted = baseCases + (int)(baseCases * depletionGrowth / 100.0);
 
-                var (anomalyType, riskLevel) = DetermineAnomalyType(shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks);
-                var analysis = GenerateShipmentAnalysis(brand, region, shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks, casesShipped, casesDepleted, anomalyType);
+                (string? anomalyType, string? riskLevel) = DetermineAnomalyType(shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks);
+                string analysis = GenerateShipmentAnalysis(brand, region, shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks, casesShipped, casesDepleted, anomalyType);
 
                 pBrand.Value = brand.Name;
                 pRegion.Value = region;
@@ -486,26 +486,26 @@ public class RetailPulseDb
 
     private void SeedSentiment(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO Sentiment (Brand, Region, Sentiment)
             VALUES (@brand, @region, @sentiment)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pSentiment = cmd.Parameters.Add("@sentiment", SqliteType.Text);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pSentiment = cmd.Parameters.Add("@sentiment", SqliteType.Text);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var baseTrend = GetBaseTrend(brand, GetStableHash(brand.Name));
+            double baseTrend = GetBaseTrend(brand, GetStableHash(brand.Name));
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var regionSeed = GetStableHash($"sent|{brand.Name}|{region}");
+                int regionSeed = GetStableHash($"sent|{brand.Name}|{region}");
                 var regionRng = new Random(regionSeed);
 
-                var sentiment = GenerateFieldSentiment(brand, region, baseTrend, regionRng);
+                string sentiment = GenerateFieldSentiment(brand, region, baseTrend, regionRng);
 
                 pBrand.Value = brand.Name;
                 pRegion.Value = region;
@@ -517,35 +517,35 @@ public class RetailPulseDb
 
     private void SeedVariantMix(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO VariantMix (Brand, Region, Variant, MixPercent, DepletionsYoY)
             VALUES (@brand, @region, @variant, @mix, @dep)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pVariant = cmd.Parameters.Add("@variant", SqliteType.Text);
-        var pMix = cmd.Parameters.Add("@mix", SqliteType.Real);
-        var pDep = cmd.Parameters.Add("@dep", SqliteType.Real);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pVariant = cmd.Parameters.Add("@variant", SqliteType.Text);
+        SqliteParameter pMix = cmd.Parameters.Add("@mix", SqliteType.Real);
+        SqliteParameter pDep = cmd.Parameters.Add("@dep", SqliteType.Real);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
             if (brand.Variants.Count == 0) continue;
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var seed = GetStableHash($"variant|{brand.Name}|{region}");
+                int seed = GetStableHash($"variant|{brand.Name}|{region}");
                 var rng = new Random(seed);
 
                 // Generate weights in [0.5, 2.0], normalize to 100% mix
-                var weights = brand.Variants.Select(_ => 0.5 + (rng.NextDouble() * 1.5)).ToArray();
-                var total = weights.Sum();
+                double[] weights = [.. brand.Variants.Select(_ => 0.5 + (rng.NextDouble() * 1.5))];
+                double total = weights.Sum();
 
                 for (int i = 0; i < brand.Variants.Count; i++)
                 {
-                    var mixPct = Math.Round(weights[i] / total * 100.0, 1);
-                    var depYoY = Math.Round((rng.NextDouble() - 0.5) * 10.0, 1); // ±5%
+                    double mixPct = Math.Round(weights[i] / total * 100.0, 1);
+                    double depYoY = Math.Round((rng.NextDouble() - 0.5) * 10.0, 1); // ±5%
 
                     pBrand.Value = brand.Name;
                     pRegion.Value = region;
@@ -573,10 +573,10 @@ public class RetailPulseDb
             return GetNationalDepletionStats(brand.Trim(), period);
         }
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Brand, Region, DepletionsYoY, SellThroughYoY, InventoryWeeks, Status, SentimentSummary
             FROM Depletions
@@ -586,19 +586,19 @@ public class RetailPulseDb
         cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
         cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         if (!reader.Read())
             return new { error = $"No data found for brand '{brand}' in region '{region}'.", available_brands = GetAvailableBrands(), available_regions = GetAvailableRegions() };
 
-        var actualBrand = reader.GetString(0);
-        var actualRegion = reader.GetString(1);
-        var depYoY = reader.GetString(2);
-        var sellYoY = reader.GetString(3);
-        var invWeeks = reader.GetDouble(4);
-        var status = reader.GetString(5);
-        var summary = reader.GetString(6);
+        string actualBrand = reader.GetString(0);
+        string actualRegion = reader.GetString(1);
+        string depYoY = reader.GetString(2);
+        string sellYoY = reader.GetString(3);
+        double invWeeks = reader.GetDouble(4);
+        string status = reader.GetString(5);
+        string summary = reader.GetString(6);
 
-        var periodMultiplier = GetPeriodMultiplier(period);
+        double periodMultiplier = GetPeriodMultiplier(period);
 
         return new
         {
@@ -621,11 +621,11 @@ public class RetailPulseDb
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
 
-        var normalizedRegion = region.Trim();
-        var normalizedPeriod = string.IsNullOrWhiteSpace(period) ? "YTD" : period.Trim();
+        string normalizedRegion = region.Trim();
+        string normalizedPeriod = string.IsNullOrWhiteSpace(period) ? "YTD" : period.Trim();
 
         var results = new List<object>();
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
             results.Add(GetDepletionStats(brand.Name, normalizedRegion, normalizedPeriod));
         }
@@ -646,10 +646,10 @@ public class RetailPulseDb
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Brand, Region, ShipmentsYoY, SellThroughYoY, DepletionsYoY, InventoryWeeks, CasesShipped, CasesDepleted, AnomalyType, RiskLevel, Analysis
             FROM Shipments
@@ -659,23 +659,23 @@ public class RetailPulseDb
         cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
         cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         if (!reader.Read())
             return new { error = $"No shipment data for brand '{brand}' in region '{region}'.", available_brands = GetAvailableBrands(), available_regions = GetAvailableRegions() };
 
-        var actualBrand = reader.GetString(0);
-        var actualRegion = reader.GetString(1);
-        var shipYoY = reader.GetString(2);
-        var sellYoY = reader.GetString(3);
-        var depYoY = reader.GetString(4);
-        var invWeeks = reader.GetDouble(5);
-        var casesShipped = reader.GetInt32(6);
-        var casesDepleted = reader.GetInt32(7);
-        var anomalyType = reader.GetString(8);
-        var riskLevel = reader.GetString(9);
-        var analysis = reader.GetString(10);
+        string actualBrand = reader.GetString(0);
+        string actualRegion = reader.GetString(1);
+        string shipYoY = reader.GetString(2);
+        string sellYoY = reader.GetString(3);
+        string depYoY = reader.GetString(4);
+        double invWeeks = reader.GetDouble(5);
+        int casesShipped = reader.GetInt32(6);
+        int casesDepleted = reader.GetInt32(7);
+        string anomalyType = reader.GetString(8);
+        string riskLevel = reader.GetString(9);
+        string analysis = reader.GetString(10);
 
-        var periodMultiplier = GetPeriodMultiplier(period);
+        double periodMultiplier = GetPeriodMultiplier(period);
 
         return new
         {
@@ -709,10 +709,10 @@ public class RetailPulseDb
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Brand, Region, Sentiment
             FROM Sentiment
@@ -722,7 +722,7 @@ public class RetailPulseDb
         cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
         cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         if (!reader.Read())
             return new { error = $"No sentiment data for brand '{brand}' in region '{region}'.", available_brands = GetAvailableBrands(), available_regions = GetAvailableRegions() };
 
@@ -741,9 +741,9 @@ public class RetailPulseDb
         if (string.IsNullOrWhiteSpace(brand))
             return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
 
-        var normalizedRegion = string.IsNullOrWhiteSpace(region) ? "National" : region.Trim();
+        string normalizedRegion = string.IsNullOrWhiteSpace(region) ? "National" : region.Trim();
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         if (normalizedRegion.Equals("National", StringComparison.OrdinalIgnoreCase) ||
@@ -752,7 +752,7 @@ public class RetailPulseDb
             return GetNationalVariantMix(brand.Trim(), conn);
         }
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Brand, Region, Variant, MixPercent, DepletionsYoY
             FROM VariantMix
@@ -765,7 +765,7 @@ public class RetailPulseDb
         var variants = new List<object>();
         string actualBrand = brand, actualRegion = normalizedRegion;
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             actualBrand = reader.GetString(0);
@@ -786,7 +786,7 @@ public class RetailPulseDb
 
     private object GetNationalVariantMix(string brand, SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Brand, Variant, AVG(MixPercent) as AvgMix, AVG(DepletionsYoY) as AvgDep
             FROM VariantMix
@@ -799,7 +799,7 @@ public class RetailPulseDb
         var variants = new List<object>();
         string actualBrand = brand;
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             actualBrand = reader.GetString(0);
@@ -821,46 +821,46 @@ public class RetailPulseDb
 
     private void SeedDemandHistory(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO DemandHistory (Brand, Region, Channel, Date, Volume, Units)
             VALUES (@brand, @region, @channel, @date, @volume, @units)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pChannel = cmd.Parameters.Add("@channel", SqliteType.Text);
-        var pDate = cmd.Parameters.Add("@date", SqliteType.Text);
-        var pVolume = cmd.Parameters.Add("@volume", SqliteType.Real);
-        var pUnits = cmd.Parameters.Add("@units", SqliteType.Integer);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pChannel = cmd.Parameters.Add("@channel", SqliteType.Text);
+        SqliteParameter pDate = cmd.Parameters.Add("@date", SqliteType.Text);
+        SqliteParameter pVolume = cmd.Parameters.Add("@volume", SqliteType.Real);
+        SqliteParameter pUnits = cmd.Parameters.Add("@units", SqliteType.Integer);
 
         // Generate 365 days ending "today" (May 13, 2026)
         var endDate = new DateOnly(2026, 5, 13);
-        var startDate = endDate.AddDays(-364);
+        DateOnly startDate = endDate.AddDays(-364);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var baseVolume = GetBaseVolume(brand);
-            var brandSeed = GetStableHash($"demand|{brand.Name}");
+            double baseVolume = GetBaseVolume(brand);
+            int brandSeed = GetStableHash($"demand|{brand.Name}");
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var regionSeed = GetStableHash($"demand|{brand.Name}|{region}");
+                int regionSeed = GetStableHash($"demand|{brand.Name}|{region}");
 
                 // Inject 1-2 anomalies per brand (shared across regions for visibility)
                 var anomalyRng = new Random(brandSeed + 7);
-                var anomalyDay1 = anomalyRng.Next(60, 300);
-                var anomalyDay2 = anomalyRng.Next(60, 300);
+                int anomalyDay1 = anomalyRng.Next(60, 300);
+                int anomalyDay2 = anomalyRng.Next(60, 300);
                 while (Math.Abs(anomalyDay2 - anomalyDay1) < 30)
                     anomalyDay2 = anomalyRng.Next(60, 300);
-                var anomalyType1 = anomalyRng.NextDouble() > 0.5; // true = spike, false = drop
+                bool anomalyType1 = anomalyRng.NextDouble() > 0.5; // true = spike, false = drop
 
-                foreach (var channel in _tenant.Channels)
+                foreach (string channel in _tenant.Channels)
                 {
-                    var channelSeed = GetStableHash($"demand|{brand.Name}|{region}|{channel}");
+                    int channelSeed = GetStableHash($"demand|{brand.Name}|{region}|{channel}");
                     var rng = new Random(channelSeed);
 
-                    var channelShare = channel switch
+                    double channelShare = channel switch
                     {
                         "Off-Premise" => 0.50,
                         "On-Premise" => 0.30,
@@ -868,34 +868,34 @@ public class RetailPulseDb
                         _ => 0.33
                     };
 
-                    var channelBase = baseVolume * channelShare;
+                    double channelBase = baseVolume * channelShare;
                     // Regional variance ±15%
-                    var regionFactor = 0.85 + (new Random(regionSeed).NextDouble() * 0.30);
+                    double regionFactor = 0.85 + (new Random(regionSeed).NextDouble() * 0.30);
                     channelBase *= regionFactor;
 
                     // Linear trend slope (±0.05% per day)
-                    var trendSlope = (rng.NextDouble() - 0.45) * 0.001;
+                    double trendSlope = (rng.NextDouble() - 0.45) * 0.001;
 
                     for (int dayOffset = 0; dayOffset < 365; dayOffset++)
                     {
-                        var date = startDate.AddDays(dayOffset);
-                        var month = date.Month;
+                        DateOnly date = startDate.AddDays(dayOffset);
+                        int month = date.Month;
 
                         // Seasonal multiplier based on category
-                        var seasonal = GetCategorySeasonalMultiplier(brand.Category, month);
+                        double seasonal = GetCategorySeasonalMultiplier(brand.Category, month);
 
                         // Day-of-week pattern (weekends higher for QSR/Spirits)
-                        var dow = date.DayOfWeek;
-                        var dowFactor = (brand.Category is "Quick-Serve Restaurant" or "Spirits") && (dow is DayOfWeek.Friday or DayOfWeek.Saturday)
+                        DayOfWeek dow = date.DayOfWeek;
+                        double dowFactor = (brand.Category is "Quick-Serve Restaurant" or "Spirits") && (dow is DayOfWeek.Friday or DayOfWeek.Saturday)
                             ? 1.15 : 1.0;
 
                         // Trend component
-                        var trendFactor = 1.0 + (trendSlope * dayOffset);
+                        double trendFactor = 1.0 + (trendSlope * dayOffset);
 
                         // Random noise ±8%
-                        var noise = 0.92 + (rng.NextDouble() * 0.16);
+                        double noise = 0.92 + (rng.NextDouble() * 0.16);
 
-                        var volume = channelBase * seasonal * dowFactor * trendFactor * noise;
+                        double volume = channelBase * seasonal * dowFactor * trendFactor * noise;
 
                         // Apply anomalies
                         if (Math.Abs(dayOffset - anomalyDay1) <= 3)
@@ -904,7 +904,7 @@ public class RetailPulseDb
                             volume *= anomalyType1 ? 0.60 : 1.40;
 
                         volume = Math.Max(1.0, volume);
-                        var units = Math.Max(1, (int)(volume / 28.0)); // ~28 volume per unit (case equivalent)
+                        int units = Math.Max(1, (int)(volume / 28.0)); // ~28 volume per unit (case equivalent)
 
                         pBrand.Value = brand.Name;
                         pRegion.Value = region;
@@ -1006,17 +1006,17 @@ public class RetailPulseDb
 
     private static void SeedSeasonalFactors(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO SeasonalFactors (Category, Month, Multiplier, EventName, Description)
             VALUES (@category, @month, @multiplier, @event, @desc)
             """;
 
-        var pCat = cmd.Parameters.Add("@category", SqliteType.Text);
-        var pMonth = cmd.Parameters.Add("@month", SqliteType.Integer);
-        var pMult = cmd.Parameters.Add("@multiplier", SqliteType.Real);
-        var pEvent = cmd.Parameters.Add("@event", SqliteType.Text);
-        var pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
+        SqliteParameter pCat = cmd.Parameters.Add("@category", SqliteType.Text);
+        SqliteParameter pMonth = cmd.Parameters.Add("@month", SqliteType.Integer);
+        SqliteParameter pMult = cmd.Parameters.Add("@multiplier", SqliteType.Real);
+        SqliteParameter pEvent = cmd.Parameters.Add("@event", SqliteType.Text);
+        SqliteParameter pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
 
         var factors = new (string Category, int Month, double Mult, string? Event, string Desc)[]
         {
@@ -1071,7 +1071,7 @@ public class RetailPulseDb
             ("Furniture", 12, 1.10, "Holiday Sales", "Continued holiday sales momentum; gift card redemption begins"),
         };
 
-        foreach (var (cat, month, mult, evt, desc) in factors)
+        foreach ((string? cat, int month, double mult, string? evt, string? desc) in factors)
         {
             pCat.Value = cat;
             pMonth.Value = month;
@@ -1088,9 +1088,9 @@ public class RetailPulseDb
     {
         months = Math.Clamp(months, 1, 24);
         var endDate = new DateOnly(2026, 5, 13);
-        var startDate = endDate.AddMonths(-months);
+        DateOnly startDate = endDate.AddMonths(-months);
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         var sql = new StringBuilder("""
@@ -1098,7 +1098,7 @@ public class RetailPulseDb
             FROM DemandHistory
             WHERE Date >= @start AND Date <= @end
             """);
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.Parameters.AddWithValue("@start", startDate.ToString("yyyy-MM-dd"));
         cmd.Parameters.AddWithValue("@end", endDate.ToString("yyyy-MM-dd"));
 
@@ -1126,22 +1126,22 @@ public class RetailPulseDb
         cmd.CommandText = sql.ToString();
 
         var rows = new List<object>();
-        var totalVolume = 0.0;
-        var totalUnits = 0;
+        double totalVolume = 0.0;
+        int totalUnits = 0;
         string? firstBrand = null;
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         // Aggregate into weekly buckets for manageable output
         var weekBucket = new Dictionary<string, (string Brand, string Region, string Channel, string WeekStart, double Volume, int Units, int Days)>();
 
         while (reader.Read())
         {
-            var b = reader.GetString(0);
-            var r = reader.GetString(1);
-            var ch = reader.GetString(2);
-            var d = reader.GetString(3);
-            var v = reader.GetDouble(4);
-            var u = reader.GetInt32(5);
+            string b = reader.GetString(0);
+            string r = reader.GetString(1);
+            string ch = reader.GetString(2);
+            string d = reader.GetString(3);
+            double v = reader.GetDouble(4);
+            int u = reader.GetInt32(5);
 
             firstBrand ??= b;
             totalVolume += v;
@@ -1149,11 +1149,11 @@ public class RetailPulseDb
 
             var dateObj = DateOnly.Parse(d);
             // ISO week start (Monday)
-            var daysSinceMonday = ((int)dateObj.DayOfWeek + 6) % 7;
-            var weekStart = dateObj.AddDays(-daysSinceMonday).ToString("yyyy-MM-dd");
-            var key = $"{b}|{r}|{ch}|{weekStart}";
+            int daysSinceMonday = ((int)dateObj.DayOfWeek + 6) % 7;
+            string weekStart = dateObj.AddDays(-daysSinceMonday).ToString("yyyy-MM-dd");
+            string key = $"{b}|{r}|{ch}|{weekStart}";
 
-            if (weekBucket.TryGetValue(key, out var existing))
+            if (weekBucket.TryGetValue(key, out (string Brand, string Region, string Channel, string WeekStart, double Volume, int Units, int Days) existing))
                 weekBucket[key] = (b, r, ch, weekStart, existing.Volume + v, existing.Units + u, existing.Days + 1);
             else
                 weekBucket[key] = (b, r, ch, weekStart, v, u, 1);
@@ -1197,12 +1197,12 @@ public class RetailPulseDb
         var forecastStart = new DateOnly(2026, 5, 14); // Day after "today"
         var historyStart = new DateOnly(2025, 5, 14); // 12 months of history
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         // Get trailing 90 days of actual data for trend calculation
         var trailing90Start = new DateOnly(2026, 2, 12);
-        using var histCmd = conn.CreateCommand();
+        using SqliteCommand histCmd = conn.CreateCommand();
         histCmd.CommandText = """
             SELECT Date, SUM(Volume) as DayVolume, SUM(Units) as DayUnits
             FROM DemandHistory
@@ -1219,7 +1219,7 @@ public class RetailPulseDb
         histCmd.Parameters.AddWithValue("@end", "2026-05-13");
 
         var historicalDays = new List<(DateOnly Date, double Volume)>();
-        using (var reader = histCmd.ExecuteReader())
+        using (SqliteDataReader reader = histCmd.ExecuteReader())
         {
             while (reader.Read())
                 historicalDays.Add((DateOnly.Parse(reader.GetString(0)), reader.GetDouble(1)));
@@ -1229,25 +1229,25 @@ public class RetailPulseDb
             return new { error = $"Insufficient historical data for brand '{brand}'. Need at least 7 days.", available_brands = GetAvailableBrands() };
 
         // Trailing 30-day average
-        var trailing30 = historicalDays.TakeLast(30).Average(d => d.Volume);
+        double trailing30 = historicalDays.TakeLast(30).Average(d => d.Volume);
 
         // Linear regression on 90 days for trend slope
-        var n = historicalDays.Count;
-        var xMean = (n - 1) / 2.0;
-        var yMean = historicalDays.Average(d => d.Volume);
-        var numerator = 0.0;
-        var denominator = 0.0;
+        int n = historicalDays.Count;
+        double xMean = (n - 1) / 2.0;
+        double yMean = historicalDays.Average(d => d.Volume);
+        double numerator = 0.0;
+        double denominator = 0.0;
         for (int i = 0; i < n; i++)
         {
             numerator += (i - xMean) * (historicalDays[i].Volume - yMean);
             denominator += (i - xMean) * (i - xMean);
         }
-        var trendSlope = denominator > 0 ? numerator / denominator / yMean : 0; // Normalized daily slope
+        double trendSlope = denominator > 0 ? numerator / denominator / yMean : 0; // Normalized daily slope
 
         // Determine category for seasonal factors
-        var matchingBrand = _tenant.Brands.FirstOrDefault(b =>
+        BrandConfig? matchingBrand = _tenant.Brands.FirstOrDefault(b =>
             b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
-        var category = matchingBrand?.Category ?? "Other";
+        string category = matchingBrand?.Category ?? "Other";
 
         // Generate forecast
         var forecastData = new List<object>();
@@ -1255,16 +1255,16 @@ public class RetailPulseDb
 
         for (int d = 0; d < days; d++)
         {
-            var date = forecastStart.AddDays(d);
-            var seasonal = GetCategorySeasonalMultiplier(category, date.Month);
+            DateOnly date = forecastStart.AddDays(d);
+            double seasonal = GetCategorySeasonalMultiplier(category, date.Month);
 
             if (Math.Abs(seasonal - 1.0) > 0.01)
                 seasonalFactorsApplied.Add($"{date:MMM} ({seasonal:F2}x)");
 
-            var predicted = trailing30 * seasonal * (1.0 + (trendSlope * d));
+            double predicted = trailing30 * seasonal * (1.0 + (trendSlope * d));
             predicted = Math.Max(1.0, predicted);
-            var upper = Math.Round(predicted * 1.15, 1);
-            var lower = Math.Round(predicted * 0.85, 1);
+            double upper = Math.Round(predicted * 1.15, 1);
+            double lower = Math.Round(predicted * 0.85, 1);
 
             forecastData.Add(new
             {
@@ -1301,10 +1301,10 @@ public class RetailPulseDb
 
     public object GetSeasonalityFactors(string? category)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         if (!string.IsNullOrWhiteSpace(category))
         {
             cmd.CommandText = """
@@ -1325,7 +1325,7 @@ public class RetailPulseDb
         }
 
         var factors = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             factors.Add(new
@@ -1350,7 +1350,7 @@ public class RetailPulseDb
         if (factors.Count == 0 && !string.IsNullOrWhiteSpace(category))
             return new { error = $"No seasonal factors found for category '{category}'.", available_categories = GetAvailableCategories() };
 
-        var categories = factors.Select(f => ((dynamic)f).category as string).Distinct().ToArray();
+        string?[] categories = [.. factors.Select(f => ((dynamic)f).category as string).Distinct()];
         return new
         {
             categories,
@@ -1361,14 +1361,14 @@ public class RetailPulseDb
 
     public object IdentifyDemandRisks(string? brand, string? region = null)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         // Get last 90 days of daily aggregated data
         var endDate = new DateOnly(2026, 5, 13);
-        var startDate = endDate.AddDays(-89);
+        DateOnly startDate = endDate.AddDays(-89);
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         var sql = new StringBuilder("""
             SELECT Brand, Region, Date, SUM(Volume) as DayVolume
             FROM DemandHistory
@@ -1392,15 +1392,15 @@ public class RetailPulseDb
 
         // Load data grouped by brand+region
         var seriesData = new Dictionary<string, List<(DateOnly Date, double Volume)>>();
-        using (var reader = cmd.ExecuteReader())
+        using (SqliteDataReader reader = cmd.ExecuteReader())
         {
             while (reader.Read())
             {
-                var b = reader.GetString(0);
-                var r = reader.GetString(1);
-                var key = $"{b}|{r}";
+                string b = reader.GetString(0);
+                string r = reader.GetString(1);
+                string key = $"{b}|{r}";
                 var date = DateOnly.Parse(reader.GetString(2));
-                var vol = reader.GetDouble(3);
+                double vol = reader.GetDouble(3);
 
                 if (!seriesData.ContainsKey(key))
                     seriesData[key] = [];
@@ -1410,11 +1410,11 @@ public class RetailPulseDb
 
         var risks = new List<object>();
 
-        foreach (var (key, points) in seriesData)
+        foreach ((string? key, List<(DateOnly Date, double Volume)>? points) in seriesData)
         {
-            var parts = key.Split('|');
-            var brandName = parts[0];
-            var regionName = parts[1];
+            string[] parts = key.Split('|');
+            string brandName = parts[0];
+            string regionName = parts[1];
 
             if (points.Count < 14) continue;
 
@@ -1422,18 +1422,18 @@ public class RetailPulseDb
             var rollingAvgs = new List<(DateOnly Date, double Avg)>();
             for (int i = 6; i < points.Count; i++)
             {
-                var avg = points.Skip(i - 6).Take(7).Average(p => p.Volume);
+                double avg = points.Skip(i - 6).Take(7).Average(p => p.Volume);
                 rollingAvgs.Add((points[i].Date, avg));
             }
 
             // Detect sudden drops (>20% week-over-week)
             for (int i = 7; i < rollingAvgs.Count; i++)
             {
-                var prevAvg = rollingAvgs[i - 7].Avg;
-                var curAvg = rollingAvgs[i].Avg;
+                double prevAvg = rollingAvgs[i - 7].Avg;
+                double curAvg = rollingAvgs[i].Avg;
                 if (prevAvg > 0)
                 {
-                    var change = (curAvg - prevAvg) / prevAvg;
+                    double change = (curAvg - prevAvg) / prevAvg;
                     if (change < -0.20)
                     {
                         risks.Add(new
@@ -1454,11 +1454,11 @@ public class RetailPulseDb
             // Detect unusual spikes (>30% above trailing average)
             for (int i = 7; i < rollingAvgs.Count; i++)
             {
-                var prevAvg = rollingAvgs[i - 7].Avg;
-                var curAvg = rollingAvgs[i].Avg;
+                double prevAvg = rollingAvgs[i - 7].Avg;
+                double curAvg = rollingAvgs[i].Avg;
                 if (prevAvg > 0)
                 {
-                    var change = (curAvg - prevAvg) / prevAvg;
+                    double change = (curAvg - prevAvg) / prevAvg;
                     if (change > 0.30)
                     {
                         risks.Add(new
@@ -1479,14 +1479,14 @@ public class RetailPulseDb
             // Detect trend reversal (first half vs second half of 90 days)
             if (rollingAvgs.Count >= 30)
             {
-                var firstHalf = rollingAvgs.Take(rollingAvgs.Count / 2).Average(r => r.Avg);
-                var secondHalf = rollingAvgs.Skip(rollingAvgs.Count / 2).Average(r => r.Avg);
+                double firstHalf = rollingAvgs.Take(rollingAvgs.Count / 2).Average(r => r.Avg);
+                double secondHalf = rollingAvgs.Skip(rollingAvgs.Count / 2).Average(r => r.Avg);
                 if (firstHalf > 0)
                 {
-                    var trendShift = (secondHalf - firstHalf) / firstHalf;
+                    double trendShift = (secondHalf - firstHalf) / firstHalf;
                     if (Math.Abs(trendShift) > 0.15)
                     {
-                        var direction = trendShift > 0 ? "upward" : "downward";
+                        string direction = trendShift > 0 ? "upward" : "downward";
                         risks.Add(new
                         {
                             brand = brandName,
@@ -1549,34 +1549,34 @@ public class RetailPulseDb
 
     public object UpdateMetric(string table, string brand, string region, string field, string value)
     {
-        if (!ValidTableFields.TryGetValue(table, out var validFields))
+        if (!ValidTableFields.TryGetValue(table, out string[]? validFields))
             return new { error = $"Invalid table '{table}'.", valid_tables = ValidTableFields.Keys.ToArray() };
 
         // Case-insensitive field matching
-        var matchedField = validFields.FirstOrDefault(f => f.Equals(field, StringComparison.OrdinalIgnoreCase));
+        string? matchedField = validFields.FirstOrDefault(f => f.Equals(field, StringComparison.OrdinalIgnoreCase));
         if (matchedField is null)
             return new { error = $"Invalid field '{field}' for table '{table}'.", valid_fields = validFields };
 
         // Look up the canonical table name (preserves casing from the dictionary)
-        var canonicalTable = ValidTableFields.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
+        string canonicalTable = ValidTableFields.Keys.First(k => k.Equals(table, StringComparison.OrdinalIgnoreCase));
 
-        if (!CheckStatements.TryGetValue(canonicalTable, out var checkSql))
+        if (!CheckStatements.TryGetValue(canonicalTable, out string? checkSql))
             return new { error = $"Invalid table '{table}'." };
 
-        if (!UpdateStatements.TryGetValue((canonicalTable, matchedField), out var updateSql))
+        if (!UpdateStatements.TryGetValue((canonicalTable, matchedField), out string? updateSql))
             return new { error = $"Invalid field '{field}' for table '{table}'." };
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         // First verify the record exists
-        using var checkCmd = conn.CreateCommand();
+        using SqliteCommand checkCmd = conn.CreateCommand();
         checkCmd.CommandText = checkSql;
         checkCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
         checkCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
 
         string actualBrand, actualRegion;
-        using (var reader = checkCmd.ExecuteReader())
+        using (SqliteDataReader reader = checkCmd.ExecuteReader())
         {
             if (!reader.Read())
                 return new { error = $"No record found for brand '{brand}' in region '{region}' in {table}.", available_brands = GetAvailableBrands(), available_regions = GetAvailableRegions() };
@@ -1585,12 +1585,12 @@ public class RetailPulseDb
         }
 
         // Execute the update using the pre-built SQL and exact brand/region from DB
-        using var updateCmd = conn.CreateCommand();
+        using SqliteCommand updateCmd = conn.CreateCommand();
         updateCmd.CommandText = updateSql;
         updateCmd.Parameters.AddWithValue("@value", value);
         updateCmd.Parameters.AddWithValue("@brand", actualBrand);
         updateCmd.Parameters.AddWithValue("@region", actualRegion);
-        var rows = updateCmd.ExecuteNonQuery();
+        int rows = updateCmd.ExecuteNonQuery();
 
         return new
         {
@@ -1608,10 +1608,10 @@ public class RetailPulseDb
 
     private object GetNationalDepletionStats(string brand, string? period)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Brand, Region, DepletionsYoY, SellThroughYoY, InventoryWeeks, Status
             FROM Depletions
@@ -1620,7 +1620,7 @@ public class RetailPulseDb
         cmd.Parameters.AddWithValue("@brand", $"%{NormalizeDiacritics(brand)}%");
 
         var rows = new List<(string Brand, string Region, string DepYoY, string SellYoY, double InvWeeks, string Status)>();
-        using (var reader = cmd.ExecuteReader())
+        using (SqliteDataReader reader = cmd.ExecuteReader())
         {
             while (reader.Read())
                 rows.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetDouble(4), reader.GetString(5)));
@@ -1629,11 +1629,11 @@ public class RetailPulseDb
         if (rows.Count == 0)
             return new { error = $"No data found for brand '{brand}'.", available_brands = GetAvailableBrands() };
 
-        var periodMultiplier = GetPeriodMultiplier(period);
+        double periodMultiplier = GetPeriodMultiplier(period);
 
-        var avgDepletions = rows.Average(r => ParsePercentage(r.DepYoY));
-        var avgSellThrough = rows.Average(r => ParsePercentage(r.SellYoY));
-        var avgInventory = rows.Average(r => r.InvWeeks);
+        double avgDepletions = rows.Average(r => ParsePercentage(r.DepYoY));
+        double avgSellThrough = rows.Average(r => ParsePercentage(r.SellYoY));
+        double avgInventory = rows.Average(r => r.InvWeeks);
 
         return new
         {
@@ -1674,7 +1674,7 @@ public class RetailPulseDb
     private static double GetBaseTrend(BrandConfig brand, int seed)
     {
         var rng = new Random(seed);
-        var categoryBoost = brand.Category switch
+        double categoryBoost = brand.Category switch
         {
             "Tequila" => 4.0 + (rng.NextDouble() * 4.0),
             "Mezcal" => 5.0 + (rng.NextDouble() * 5.0),
@@ -1685,7 +1685,7 @@ public class RetailPulseDb
             "Vodka" => -3.0 + (rng.NextDouble() * 3.0),
             _ => -1.0 + (rng.NextDouble() * 4.0)
         };
-        var segmentBoost = brand.PriceSegment switch
+        double segmentBoost = brand.PriceSegment switch
         {
             "Ultra-Premium" => 2.0,
             "Premium" => 0.5,
@@ -1706,7 +1706,7 @@ public class RetailPulseDb
     private static (string AnomalyType, string RiskLevel) DetermineAnomalyType(
         double shipmentGrowth, double sellThroughGrowth, double depletionGrowth, double inventoryWeeks)
     {
-        var gap = shipmentGrowth - sellThroughGrowth;
+        double gap = shipmentGrowth - sellThroughGrowth;
 
         if (gap > 6.0 && inventoryWeeks > 8.0)
             return ("pipeline_clog", inventoryWeeks > 10.0 ? "critical" : "high");
@@ -1726,7 +1726,7 @@ public class RetailPulseDb
     private static string GenerateDepletionSummary(BrandConfig brand, string region,
         double depletionGrowth, double sellThroughGrowth, double inventoryWeeks, string status, Random rng)
     {
-        var variants = brand.Variants.Count > 0 ? brand.Variants[rng.Next(brand.Variants.Count)] : "core";
+        string variants = brand.Variants.Count > 0 ? brand.Variants[rng.Next(brand.Variants.Count)] : "core";
 
         return status switch
         {
@@ -1752,8 +1752,8 @@ public class RetailPulseDb
         double shipmentGrowth, double sellThroughGrowth, double depletionGrowth,
         double inventoryWeeks, int casesShipped, int casesDepleted, string anomalyType)
     {
-        var gap = casesShipped - casesDepleted;
-        var model = _tenant.Distribution?.Model ?? "Three-Tier";
+        int gap = casesShipped - casesDepleted;
+        string model = _tenant.Distribution?.Model ?? "Three-Tier";
 
         return anomalyType switch
         {
@@ -1784,7 +1784,7 @@ public class RetailPulseDb
 
     private string GenerateFieldSentiment(BrandConfig brand, string region, double baseTrend, Random rng)
     {
-        var channel = _tenant.Channels[rng.Next(_tenant.Channels.Count)];
+        string channel = _tenant.Channels[rng.Next(_tenant.Channels.Count)];
         var sentences = new List<string>();
 
         if (baseTrend > 3.0)
@@ -1831,16 +1831,16 @@ public class RetailPulseDb
         };
 
     private static double ParsePercentage(string pct) =>
-        double.TryParse(pct.TrimEnd('%').TrimStart('+'), out var val) ? val : 0;
+        double.TryParse(pct.TrimEnd('%').TrimStart('+'), out double val) ? val : 0;
 
     private static string FormatPercentage(double value) =>
         (value >= 0 ? "+" : "") + value.ToString("F1") + "%";
 
     private static string AdjustPercentage(string pct, double multiplier)
     {
-        if (double.TryParse(pct.TrimEnd('%').TrimStart('+'), out var val))
+        if (double.TryParse(pct.TrimEnd('%').TrimStart('+'), out double val))
         {
-            var adjusted = Math.Round(val * multiplier, 1);
+            double adjusted = Math.Round(val * multiplier, 1);
             return (adjusted >= 0 ? "+" : "") + adjusted + "%";
         }
         return pct;
@@ -1851,7 +1851,7 @@ public class RetailPulseDb
         unchecked
         {
             int hash = 17;
-            foreach (var c in input)
+            foreach (char c in input)
                 hash = (hash * 31) + c;
             return Math.Abs(hash);
         }
@@ -1864,45 +1864,45 @@ public class RetailPulseDb
 
     private void SeedPromoHistory(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO PromoHistory (Brand, Region, PromoType, CampaignName, StartDate, EndDate, Spend, BaselineVolume, ActualVolume, LiftPercent, ROI, SuccessRating)
             VALUES (@brand, @region, @type, @name, @start, @end, @spend, @baseline, @actual, @lift, @roi, @rating)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pType = cmd.Parameters.Add("@type", SqliteType.Text);
-        var pName = cmd.Parameters.Add("@name", SqliteType.Text);
-        var pStart = cmd.Parameters.Add("@start", SqliteType.Text);
-        var pEnd = cmd.Parameters.Add("@end", SqliteType.Text);
-        var pSpend = cmd.Parameters.Add("@spend", SqliteType.Real);
-        var pBaseline = cmd.Parameters.Add("@baseline", SqliteType.Real);
-        var pActual = cmd.Parameters.Add("@actual", SqliteType.Real);
-        var pLift = cmd.Parameters.Add("@lift", SqliteType.Real);
-        var pRoi = cmd.Parameters.Add("@roi", SqliteType.Real);
-        var pRating = cmd.Parameters.Add("@rating", SqliteType.Text);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pType = cmd.Parameters.Add("@type", SqliteType.Text);
+        SqliteParameter pName = cmd.Parameters.Add("@name", SqliteType.Text);
+        SqliteParameter pStart = cmd.Parameters.Add("@start", SqliteType.Text);
+        SqliteParameter pEnd = cmd.Parameters.Add("@end", SqliteType.Text);
+        SqliteParameter pSpend = cmd.Parameters.Add("@spend", SqliteType.Real);
+        SqliteParameter pBaseline = cmd.Parameters.Add("@baseline", SqliteType.Real);
+        SqliteParameter pActual = cmd.Parameters.Add("@actual", SqliteType.Real);
+        SqliteParameter pLift = cmd.Parameters.Add("@lift", SqliteType.Real);
+        SqliteParameter pRoi = cmd.Parameters.Add("@roi", SqliteType.Real);
+        SqliteParameter pRating = cmd.Parameters.Add("@rating", SqliteType.Text);
 
         var baseDate = new DateOnly(2025, 1, 1);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var regionSeed = GetStableHash($"promo|{brand.Name}|{region}");
+                int regionSeed = GetStableHash($"promo|{brand.Name}|{region}");
                 var rng = new Random(regionSeed);
 
                 for (int c = 0; c < 5; c++)
                 {
-                    var promoType = PromoTypes[rng.Next(PromoTypes.Length)];
-                    var campaignStart = baseDate.AddDays(rng.Next(0, 300));
-                    var durationDays = rng.Next(7, 45);
-                    var campaignEnd = campaignStart.AddDays(durationDays);
+                    string promoType = PromoTypes[rng.Next(PromoTypes.Length)];
+                    DateOnly campaignStart = baseDate.AddDays(rng.Next(0, 300));
+                    int durationDays = rng.Next(7, 45);
+                    DateOnly campaignEnd = campaignStart.AddDays(durationDays);
 
-                    var spend = Math.Round(5000 + (rng.NextDouble() * 195000), 2);
-                    var baselineVolume = Math.Round(1000 + (rng.NextDouble() * 9000), 0);
+                    double spend = Math.Round(5000 + (rng.NextDouble() * 195000), 2);
+                    double baselineVolume = Math.Round(1000 + (rng.NextDouble() * 9000), 0);
 
-                    var baseLift = promoType switch
+                    double baseLift = promoType switch
                     {
                         "BOGO" => 15.0 + (rng.NextDouble() * 25.0),
                         "Discount" => 8.0 + (rng.NextDouble() * 18.0),
@@ -1912,12 +1912,12 @@ public class RetailPulseDb
                         _ => 5.0 + (rng.NextDouble() * 10.0)
                     };
 
-                    var liftPercent = Math.Round(baseLift, 1);
-                    var actualVolume = Math.Round(baselineVolume * (1.0 + (liftPercent / 100.0)), 0);
-                    var incrementalRevenue = (actualVolume - baselineVolume) * (5.0 + (rng.NextDouble() * 15.0));
-                    var roi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 1);
+                    double liftPercent = Math.Round(baseLift, 1);
+                    double actualVolume = Math.Round(baselineVolume * (1.0 + (liftPercent / 100.0)), 0);
+                    double incrementalRevenue = (actualVolume - baselineVolume) * (5.0 + (rng.NextDouble() * 15.0));
+                    double roi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 1);
 
-                    var ratingIndex = roi switch
+                    int ratingIndex = roi switch
                     {
                         > 100 => 0,
                         > 50 => 1,
@@ -1946,29 +1946,29 @@ public class RetailPulseDb
 
     private void SeedLiftCoefficients(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO LiftCoefficients (Category, PromoType, AvgLiftPercent, StdDev, MinSpend, MaxEffectiveSpend)
             VALUES (@cat, @type, @lift, @std, @min, @max)
             """;
 
-        var pCat = cmd.Parameters.Add("@cat", SqliteType.Text);
-        var pType = cmd.Parameters.Add("@type", SqliteType.Text);
-        var pLift = cmd.Parameters.Add("@lift", SqliteType.Real);
-        var pStd = cmd.Parameters.Add("@std", SqliteType.Real);
-        var pMin = cmd.Parameters.Add("@min", SqliteType.Real);
-        var pMax = cmd.Parameters.Add("@max", SqliteType.Real);
+        SqliteParameter pCat = cmd.Parameters.Add("@cat", SqliteType.Text);
+        SqliteParameter pType = cmd.Parameters.Add("@type", SqliteType.Text);
+        SqliteParameter pLift = cmd.Parameters.Add("@lift", SqliteType.Real);
+        SqliteParameter pStd = cmd.Parameters.Add("@std", SqliteType.Real);
+        SqliteParameter pMin = cmd.Parameters.Add("@min", SqliteType.Real);
+        SqliteParameter pMax = cmd.Parameters.Add("@max", SqliteType.Real);
 
-        var categories = _tenant.Brands.Select(b => b.Category).Distinct();
+        IEnumerable<string> categories = _tenant.Brands.Select(b => b.Category).Distinct();
 
-        foreach (var category in categories)
+        foreach (string category in categories)
         {
-            var catSeed = GetStableHash($"lift|{category}");
+            int catSeed = GetStableHash($"lift|{category}");
             var rng = new Random(catSeed);
 
-            foreach (var promoType in PromoTypes)
+            foreach (string promoType in PromoTypes)
             {
-                var avgLift = promoType switch
+                double avgLift = promoType switch
                 {
                     "BOGO" => 22.0 + (rng.NextDouble() * 8.0),
                     "Discount" => 14.0 + (rng.NextDouble() * 6.0),
@@ -1978,7 +1978,7 @@ public class RetailPulseDb
                     _ => 10.0
                 };
 
-                var stdDev = Math.Round(avgLift * (0.15 + (rng.NextDouble() * 0.25)), 2);
+                double stdDev = Math.Round(avgLift * (0.15 + (rng.NextDouble() * 0.25)), 2);
 
                 pCat.Value = category;
                 pType.Value = promoType;
@@ -2010,46 +2010,46 @@ public class RetailPulseDb
 
     private void SeedCompetitorPricing(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO CompetitorPricing (Competitor, Brand, Category, Region, Price, PreviousPrice, PriceChangePercent, EffectiveDate, Source)
             VALUES (@competitor, @brand, @category, @region, @price, @prevPrice, @pctChange, @date, @source)
             """;
 
-        var pCompetitor = cmd.Parameters.Add("@competitor", SqliteType.Text);
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pPrice = cmd.Parameters.Add("@price", SqliteType.Real);
-        var pPrevPrice = cmd.Parameters.Add("@prevPrice", SqliteType.Real);
-        var pPctChange = cmd.Parameters.Add("@pctChange", SqliteType.Real);
-        var pDate = cmd.Parameters.Add("@date", SqliteType.Text);
-        var pSource = cmd.Parameters.Add("@source", SqliteType.Text);
+        SqliteParameter pCompetitor = cmd.Parameters.Add("@competitor", SqliteType.Text);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pPrice = cmd.Parameters.Add("@price", SqliteType.Real);
+        SqliteParameter pPrevPrice = cmd.Parameters.Add("@prevPrice", SqliteType.Real);
+        SqliteParameter pPctChange = cmd.Parameters.Add("@pctChange", SqliteType.Real);
+        SqliteParameter pDate = cmd.Parameters.Add("@date", SqliteType.Text);
+        SqliteParameter pSource = cmd.Parameters.Add("@source", SqliteType.Text);
 
         var baseDate = new DateOnly(2025, 6, 1);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B", "Generic Competitor C"]);
-            var basePrice = brand.PriceSegment == "Premium" ? 45.0 : 25.0;
+            string[] competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B", "Generic Competitor C"]);
+            double basePrice = brand.PriceSegment == "Premium" ? 45.0 : 25.0;
 
-            foreach (var competitor in competitors)
+            foreach (string? competitor in competitors)
             {
-                foreach (var region in _tenant.Regions)
+                foreach (string region in _tenant.Regions)
                 {
-                    var seed = GetStableHash($"comprice|{competitor}|{brand.Name}|{region}");
+                    int seed = GetStableHash($"comprice|{competitor}|{brand.Name}|{region}");
                     var rng = new Random(seed);
 
                     // Generate 8-12 pricing records over time
-                    var recordCount = 8 + rng.Next(5);
-                    var competitorBase = basePrice * (0.85 + (rng.NextDouble() * 0.35));
+                    int recordCount = 8 + rng.Next(5);
+                    double competitorBase = basePrice * (0.85 + (rng.NextDouble() * 0.35));
 
                     for (int i = 0; i < recordCount; i++)
                     {
-                        var date = baseDate.AddDays((i * 30) + rng.Next(15));
-                        var priceVariation = competitorBase * (0.90 + (rng.NextDouble() * 0.20));
-                        var previousPrice = i == 0 ? competitorBase : competitorBase * (0.92 + (rng.NextDouble() * 0.16));
-                        var pctChange = previousPrice > 0 ? Math.Round((priceVariation - previousPrice) / previousPrice * 100, 1) : 0;
+                        DateOnly date = baseDate.AddDays((i * 30) + rng.Next(15));
+                        double priceVariation = competitorBase * (0.90 + (rng.NextDouble() * 0.20));
+                        double previousPrice = i == 0 ? competitorBase : competitorBase * (0.92 + (rng.NextDouble() * 0.16));
+                        double pctChange = previousPrice > 0 ? Math.Round((priceVariation - previousPrice) / previousPrice * 100, 1) : 0;
 
                         // ~15% chance of dramatic price drop (>10%)
                         if (rng.NextDouble() < 0.15)
@@ -2078,39 +2078,39 @@ public class RetailPulseDb
 
     private void SeedMarketShare(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO MarketShare (Brand, Category, Region, Period, SharePercent, PreviousSharePercent, ShareChangePoints, Source)
             VALUES (@brand, @category, @region, @period, @share, @prevShare, @change, @source)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
-        var pShare = cmd.Parameters.Add("@share", SqliteType.Real);
-        var pPrevShare = cmd.Parameters.Add("@prevShare", SqliteType.Real);
-        var pChange = cmd.Parameters.Add("@change", SqliteType.Real);
-        var pSource = cmd.Parameters.Add("@source", SqliteType.Text);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
+        SqliteParameter pShare = cmd.Parameters.Add("@share", SqliteType.Real);
+        SqliteParameter pPrevShare = cmd.Parameters.Add("@prevShare", SqliteType.Real);
+        SqliteParameter pChange = cmd.Parameters.Add("@change", SqliteType.Real);
+        SqliteParameter pSource = cmd.Parameters.Add("@source", SqliteType.Text);
 
         // 6 quarters of data
-        var quarters = new[] { "2025-Q1", "2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1", "2026-Q2" };
+        string[] quarters = ["2025-Q1", "2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1", "2026-Q2"];
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
+            string[] competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
             var allPlayers = new List<string> { brand.Name };
             allPlayers.AddRange(competitors);
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var seed = GetStableHash($"share|{brand.Category}|{region}");
+                int seed = GetStableHash($"share|{brand.Category}|{region}");
                 var rng = new Random(seed);
 
                 // Allocate base shares — our brand gets 15-35%, competitors split the rest
-                var ourBaseShare = 15.0 + (rng.NextDouble() * 20.0);
-                var remainingShare = 100.0 - ourBaseShare;
-                var competitorShares = new double[competitors.Length];
+                double ourBaseShare = 15.0 + (rng.NextDouble() * 20.0);
+                double remainingShare = 100.0 - ourBaseShare;
+                double[] competitorShares = new double[competitors.Length];
                 double totalComp = 0;
                 for (int c = 0; c < competitors.Length; c++)
                 {
@@ -2122,14 +2122,14 @@ public class RetailPulseDb
                     competitorShares[c] = competitorShares[c] / totalComp * remainingShare;
 
                 double prevOurShare = ourBaseShare;
-                var prevCompShares = (double[])competitorShares.Clone();
+                double[] prevCompShares = (double[])competitorShares.Clone();
 
                 for (int q = 0; q < quarters.Length; q++)
                 {
                     // Our brand: slight random walk
-                    var drift = (rng.NextDouble() - 0.48) * 3.0;  // slight positive bias
-                    var currentShare = Math.Round(Math.Max(5, Math.Min(50, prevOurShare + drift)), 1);
-                    var changePoints = Math.Round(currentShare - prevOurShare, 1);
+                    double drift = (rng.NextDouble() - 0.48) * 3.0;  // slight positive bias
+                    double currentShare = Math.Round(Math.Max(5, Math.Min(50, prevOurShare + drift)), 1);
+                    double changePoints = Math.Round(currentShare - prevOurShare, 1);
 
                     pBrand.Value = brand.Name;
                     pCategory.Value = brand.Category;
@@ -2146,9 +2146,9 @@ public class RetailPulseDb
                     // Competitors
                     for (int c = 0; c < competitors.Length; c++)
                     {
-                        var compDrift = (rng.NextDouble() - 0.52) * 3.0;
-                        var compShare = Math.Round(Math.Max(3, Math.Min(45, prevCompShares[c] + compDrift)), 1);
-                        var compChange = Math.Round(compShare - prevCompShares[c], 1);
+                        double compDrift = (rng.NextDouble() - 0.52) * 3.0;
+                        double compShare = Math.Round(Math.Max(3, Math.Min(45, prevCompShares[c] + compDrift)), 1);
+                        double compChange = Math.Round(compShare - prevCompShares[c], 1);
 
                         pBrand.Value = competitors[c];
                         pCategory.Value = brand.Category;
@@ -2169,20 +2169,20 @@ public class RetailPulseDb
 
     private void SeedCompetitorActivity(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO CompetitorActivity (Competitor, ActivityType, Category, Region, Description, Impact, DetectedDate, ResponseRecommendation)
             VALUES (@competitor, @type, @category, @region, @desc, @impact, @date, @recommendation)
             """;
 
-        var pCompetitor = cmd.Parameters.Add("@competitor", SqliteType.Text);
-        var pType = cmd.Parameters.Add("@type", SqliteType.Text);
-        var pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
-        var pImpact = cmd.Parameters.Add("@impact", SqliteType.Text);
-        var pDate = cmd.Parameters.Add("@date", SqliteType.Text);
-        var pRecommendation = cmd.Parameters.Add("@recommendation", SqliteType.Text);
+        SqliteParameter pCompetitor = cmd.Parameters.Add("@competitor", SqliteType.Text);
+        SqliteParameter pType = cmd.Parameters.Add("@type", SqliteType.Text);
+        SqliteParameter pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
+        SqliteParameter pImpact = cmd.Parameters.Add("@impact", SqliteType.Text);
+        SqliteParameter pDate = cmd.Parameters.Add("@date", SqliteType.Text);
+        SqliteParameter pRecommendation = cmd.Parameters.Add("@recommendation", SqliteType.Text);
 
         var baseDate = new DateOnly(2025, 8, 1);
         var activityTemplates = new (string type, string descTemplate, string recTemplate)[]
@@ -2197,22 +2197,22 @@ public class RetailPulseDb
             ("distribution_change", "{0} partnered with major retailer for exclusive {2} placement in {3}", "MATCH — Negotiate similar exclusive deals with competing retailers"),
         };
 
-        var seed = GetStableHash("competitive_activity_seed");
+        int seed = GetStableHash("competitive_activity_seed");
         var rng = new Random(seed);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
+            string[] competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
 
             // 3-5 activities per category
-            var activityCount = 3 + rng.Next(3);
+            int activityCount = 3 + rng.Next(3);
             for (int i = 0; i < activityCount; i++)
             {
-                var competitor = competitors[rng.Next(competitors.Length)];
-                var (type, descTemplate, recTemplate) = activityTemplates[rng.Next(activityTemplates.Length)];
-                var region = _tenant.Regions[rng.Next(_tenant.Regions.Count)];
-                var priceDrop = 8 + rng.Next(20);
-                var date = baseDate.AddDays(rng.Next(300));
+                string competitor = competitors[rng.Next(competitors.Length)];
+                (string? type, string? descTemplate, string? recTemplate) = activityTemplates[rng.Next(activityTemplates.Length)];
+                string region = _tenant.Regions[rng.Next(_tenant.Regions.Count)];
+                int priceDrop = 8 + rng.Next(20);
+                DateOnly date = baseDate.AddDays(rng.Next(300));
 
                 pCompetitor.Value = competitor;
                 pType.Value = type;
@@ -2232,13 +2232,13 @@ public class RetailPulseDb
     public object GetPromoHistory(string? brand, string? region, string? promoType, int months = 18)
     {
         months = Math.Clamp(months, 1, 24);
-        var cutoff = DateOnly.FromDateTime(DateTime.Today).AddMonths(-months);
+        DateOnly cutoff = DateOnly.FromDateTime(DateTime.Today).AddMonths(-months);
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         var where = new List<string> { "StartDate >= @cutoff" };
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
 
         if (!string.IsNullOrWhiteSpace(brand))
@@ -2266,7 +2266,7 @@ public class RetailPulseDb
             """;
 
         var campaigns = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             campaigns.Add(new
@@ -2303,15 +2303,15 @@ public class RetailPulseDb
         if (string.IsNullOrWhiteSpace(promoType))
             return new { error = "Parameter 'promoType' is required.", available_types = PromoTypes };
 
-        var brandConfig = _tenant.Brands.FirstOrDefault(b =>
+        BrandConfig? brandConfig = _tenant.Brands.FirstOrDefault(b =>
             b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
         if (brandConfig == null)
             return new { error = $"Unknown brand '{brand}'.", available_brands = GetAvailableBrands() };
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var coeffCmd = conn.CreateCommand();
+        using SqliteCommand coeffCmd = conn.CreateCommand();
         coeffCmd.CommandText = """
             SELECT AvgLiftPercent, StdDev, MinSpend, MaxEffectiveSpend
             FROM LiftCoefficients
@@ -2321,17 +2321,17 @@ public class RetailPulseDb
         coeffCmd.Parameters.AddWithValue("@cat", brandConfig.Category);
         coeffCmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
 
-        using var reader = coeffCmd.ExecuteReader();
+        using SqliteDataReader reader = coeffCmd.ExecuteReader();
         if (!reader.Read())
             return new { error = $"No lift data for category '{brandConfig.Category}' and promo type '{promoType}'." };
 
-        var avgLift = reader.GetDouble(0);
-        var stdDev = reader.GetDouble(1);
-        var minSpend = reader.GetDouble(2);
-        var maxEffective = reader.GetDouble(3);
+        double avgLift = reader.GetDouble(0);
+        double stdDev = reader.GetDouble(1);
+        double minSpend = reader.GetDouble(2);
+        double maxEffective = reader.GetDouble(3);
         reader.Close();
 
-        using var countCmd = conn.CreateCommand();
+        using SqliteCommand countCmd = conn.CreateCommand();
         countCmd.CommandText = """
             SELECT COUNT(*) FROM PromoHistory
             WHERE Brand LIKE @brand AND Region LIKE @region AND PromoType LIKE @type
@@ -2339,11 +2339,11 @@ public class RetailPulseDb
         countCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
         countCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
         countCmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
-        var similarCount = Convert.ToInt32(countCmd.ExecuteScalar());
+        int similarCount = Convert.ToInt32(countCmd.ExecuteScalar());
 
-        var spendEfficiency = spend <= maxEffective ? 1.0 : maxEffective / spend;
-        var expectedLift = Math.Round(avgLift * spendEfficiency, 2);
-        var confidence = Math.Round(Math.Max(0.3, 1.0 - (stdDev / avgLift)), 2);
+        double spendEfficiency = spend <= maxEffective ? 1.0 : maxEffective / spend;
+        double expectedLift = Math.Round(avgLift * spendEfficiency, 2);
+        double confidence = Math.Round(Math.Max(0.3, 1.0 - (stdDev / avgLift)), 2);
 
         return new
         {
@@ -2370,10 +2370,10 @@ public class RetailPulseDb
         if (end <= start)
             return new { error = "End date must be after start date." };
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var overlapCmd = conn.CreateCommand();
+        using SqliteCommand overlapCmd = conn.CreateCommand();
         overlapCmd.CommandText = """
             SELECT CampaignName, PromoType, StartDate, EndDate
             FROM PromoHistory
@@ -2387,14 +2387,14 @@ public class RetailPulseDb
         overlapCmd.Parameters.AddWithValue("@end", end.ToString("yyyy-MM-dd"));
 
         var conflicts = new List<object>();
-        using (var reader = overlapCmd.ExecuteReader())
+        using (SqliteDataReader reader = overlapCmd.ExecuteReader())
         {
             while (reader.Read())
                 conflicts.Add(new { campaign = reader.GetString(0), promo_type = reader.GetString(1), start_date = reader.GetString(2), end_date = reader.GetString(3) });
         }
 
-        using var recentCmd = conn.CreateCommand();
-        var lookbackStart = start.AddDays(-60);
+        using SqliteCommand recentCmd = conn.CreateCommand();
+        DateOnly lookbackStart = start.AddDays(-60);
         recentCmd.CommandText = """
             SELECT CampaignName, PromoType, EndDate
             FROM PromoHistory
@@ -2408,18 +2408,18 @@ public class RetailPulseDb
         recentCmd.Parameters.AddWithValue("@start", start.ToString("yyyy-MM-dd"));
 
         var recentPromos = new List<object>();
-        using (var reader = recentCmd.ExecuteReader())
+        using (SqliteDataReader reader = recentCmd.ExecuteReader())
         {
             while (reader.Read())
                 recentPromos.Add(new { campaign = reader.GetString(0), promo_type = reader.GetString(1), ended = reader.GetString(2) });
         }
 
-        var brandConfig = _tenant.Brands.FirstOrDefault(b =>
+        BrandConfig? brandConfig = _tenant.Brands.FirstOrDefault(b =>
             b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
-        var seasonalityScore = GetSeasonalityScore(conn, brandConfig?.Category, start.Month);
+        double seasonalityScore = GetSeasonalityScore(conn, brandConfig?.Category, start.Month);
 
-        var proximityPenalty = recentPromos.Count > 0 ? Math.Min(recentPromos.Count * 0.15, 0.50) : 0.0;
-        var timingScore = Math.Max(0.0, Math.Min(1.0,
+        double proximityPenalty = recentPromos.Count > 0 ? Math.Min(recentPromos.Count * 0.15, 0.50) : 0.0;
+        double timingScore = Math.Max(0.0, Math.Min(1.0,
             seasonalityScore - proximityPenalty - (conflicts.Count > 0 ? 0.30 : 0.0)));
         timingScore = Math.Round(timingScore, 2);
 
@@ -2439,11 +2439,11 @@ public class RetailPulseDb
     private static double GetSeasonalityScore(SqliteConnection conn, string? category, int month)
     {
         if (string.IsNullOrWhiteSpace(category)) return 0.6;
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT Multiplier FROM SeasonalFactors WHERE Category = @cat AND Month = @month LIMIT 1";
         cmd.Parameters.AddWithValue("@cat", category);
         cmd.Parameters.AddWithValue("@month", month);
-        var result = cmd.ExecuteScalar();
+        object? result = cmd.ExecuteScalar();
         return result is null or DBNull ? 0.6 : Math.Min(1.0, Math.Max(0.2, Convert.ToDouble(result) / 1.5));
     }
 
@@ -2458,21 +2458,21 @@ public class RetailPulseDb
         if (durationWeeks is < 1 or > 12)
             return new { error = "Parameter 'durationWeeks' must be between 1 and 12." };
 
-        var brandConfig = _tenant.Brands.FirstOrDefault(b =>
+        BrandConfig? brandConfig = _tenant.Brands.FirstOrDefault(b =>
             b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
         if (brandConfig == null)
             return new { error = $"Unknown brand '{brand}'.", available_brands = GetAvailableBrands() };
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         double avgLift = 10.0, stdDev = 5.0;
-        using (var cmd = conn.CreateCommand())
+        using (SqliteCommand cmd = conn.CreateCommand())
         {
             cmd.CommandText = "SELECT AvgLiftPercent, StdDev FROM LiftCoefficients WHERE Category = @cat AND PromoType LIKE @type LIMIT 1";
             cmd.Parameters.AddWithValue("@cat", brandConfig.Category);
             cmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
-            using var reader = cmd.ExecuteReader();
+            using SqliteDataReader reader = cmd.ExecuteReader();
             if (reader.Read())
             {
                 avgLift = reader.GetDouble(0);
@@ -2481,32 +2481,32 @@ public class RetailPulseDb
         }
 
         double baselineVolume = 5000;
-        using (var cmd = conn.CreateCommand())
+        using (SqliteCommand cmd = conn.CreateCommand())
         {
             cmd.CommandText = "SELECT AVG(BaselineVolume) FROM PromoHistory WHERE Brand LIKE @brand AND Region LIKE @region";
             cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
             cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
-            var result = cmd.ExecuteScalar();
+            object? result = cmd.ExecuteScalar();
             if (result is not null and not DBNull)
                 baselineVolume = Convert.ToDouble(result);
         }
 
-        var weeklyBaseline = baselineVolume / 4.0;
-        var totalBaseline = weeklyBaseline * durationWeeks;
+        double weeklyBaseline = baselineVolume / 4.0;
+        double totalBaseline = weeklyBaseline * durationWeeks;
 
-        var incrementalUnits = totalBaseline * (avgLift / 100.0);
-        var revenuePerUnit = 8.0 + (brandConfig.Category == "Spirits" ? 12.0 : brandConfig.Category == "Grocery" ? 2.0 : 5.0);
-        var incrementalRevenue = incrementalUnits * revenuePerUnit;
-        var expectedRoi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 2);
+        double incrementalUnits = totalBaseline * (avgLift / 100.0);
+        double revenuePerUnit = 8.0 + (brandConfig.Category == "Spirits" ? 12.0 : brandConfig.Category == "Grocery" ? 2.0 : 5.0);
+        double incrementalRevenue = incrementalUnits * revenuePerUnit;
+        double expectedRoi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 2);
 
-        var lowerLift = Math.Max(0, avgLift - (1.96 * stdDev));
-        var upperLift = avgLift + (1.96 * stdDev);
+        double lowerLift = Math.Max(0, avgLift - (1.96 * stdDev));
+        double upperLift = avgLift + (1.96 * stdDev);
 
-        var lowerRoi = Math.Round(((totalBaseline * (lowerLift / 100.0) * revenuePerUnit) - spend) / spend * 100.0, 2);
-        var upperRoi = Math.Round(((totalBaseline * (upperLift / 100.0) * revenuePerUnit) - spend) / spend * 100.0, 2);
+        double lowerRoi = Math.Round(((totalBaseline * (lowerLift / 100.0) * revenuePerUnit) - spend) / spend * 100.0, 2);
+        double upperRoi = Math.Round(((totalBaseline * (upperLift / 100.0) * revenuePerUnit) - spend) / spend * 100.0, 2);
 
-        var breakeven = Math.Round(spend / revenuePerUnit, 0);
-        var varianceFactor = Math.Round(stdDev / Math.Max(avgLift, 1.0), 2);
+        double breakeven = Math.Round(spend / revenuePerUnit, 0);
+        double varianceFactor = Math.Round(stdDev / Math.Max(avgLift, 1.0), 2);
 
         return new
         {
@@ -2528,13 +2528,13 @@ public class RetailPulseDb
     public object GetPromoCalendar(string? brand = null, string? region = null, int months = 6)
     {
         months = Math.Clamp(months, 1, 24);
-        var cutoff = DateOnly.FromDateTime(DateTime.Today).AddMonths(-months);
+        DateOnly cutoff = DateOnly.FromDateTime(DateTime.Today).AddMonths(-months);
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         var where = new List<string> { "StartDate >= @cutoff" };
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
 
         if (!string.IsNullOrWhiteSpace(brand))
@@ -2556,7 +2556,7 @@ public class RetailPulseDb
             """;
 
         var events = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             events.Add(new
@@ -2596,9 +2596,9 @@ public class RetailPulseDb
 
     public object GetCompetitorPricing(string? brand = null, string? category = null, string? region = null, string? competitors = null)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
 
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(brand))
@@ -2618,7 +2618,7 @@ public class RetailPulseDb
         }
         if (!string.IsNullOrWhiteSpace(competitors))
         {
-            var compList = competitors.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            string[] compList = competitors.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var compFilters = new List<string>();
             for (int i = 0; i < compList.Length; i++)
             {
@@ -2628,7 +2628,7 @@ public class RetailPulseDb
             filters.Add($"({string.Join(" OR ", compFilters)})");
         }
 
-        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        string where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
         cmd.CommandText = $"""
             SELECT Competitor, Brand, Category, Region, Price, PreviousPrice, PriceChangePercent, EffectiveDate, Source
             FROM CompetitorPricing
@@ -2637,7 +2637,7 @@ public class RetailPulseDb
             LIMIT 200
             """;
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         var records = new List<object>();
         while (reader.Read())
         {
@@ -2658,7 +2658,7 @@ public class RetailPulseDb
         // Identify dramatic price drops (>10%) as threats
         var threats = records.Where(r =>
         {
-            var pct = ((dynamic)r).price_change_percent;
+            dynamic? pct = ((dynamic)r).price_change_percent;
             return pct != null && (double)pct < -10;
         }).ToList();
 
@@ -2673,9 +2673,9 @@ public class RetailPulseDb
 
     public object GetMarketShare(string? brand = null, string? category = null, string? region = null, string? period = null)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
 
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(brand))
@@ -2699,7 +2699,7 @@ public class RetailPulseDb
             cmd.Parameters.AddWithValue("@period", $"%{period}%");
         }
 
-        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        string where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
         cmd.CommandText = $"""
             SELECT Brand, Category, Region, Period, SharePercent, PreviousSharePercent, ShareChangePoints, Source
             FROM MarketShare
@@ -2708,7 +2708,7 @@ public class RetailPulseDb
             LIMIT 300
             """;
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         var records = new List<object>();
         while (reader.Read())
         {
@@ -2728,7 +2728,7 @@ public class RetailPulseDb
         // Find significant share losses (>2 points)
         var shareLosses = records.Where(r =>
         {
-            var change = ((dynamic)r).share_change_points;
+            dynamic? change = ((dynamic)r).share_change_points;
             return change != null && (double)change < -2.0;
         }).ToList();
 
@@ -2746,11 +2746,11 @@ public class RetailPulseDb
         var threats = new List<object>();
 
         // 1. Price drop threats (competitor dropped >10%)
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         var pricingFilters = new List<string> { "PriceChangePercent < -10" };
-        using var priceCmd = conn.CreateCommand();
+        using SqliteCommand priceCmd = conn.CreateCommand();
         if (!string.IsNullOrWhiteSpace(brand))
         {
             pricingFilters.Add("Brand LIKE @brand");
@@ -2775,13 +2775,13 @@ public class RetailPulseDb
             LIMIT 20
             """;
 
-        using var priceReader = priceCmd.ExecuteReader();
+        using SqliteDataReader priceReader = priceCmd.ExecuteReader();
         while (priceReader.Read())
         {
-            var pctChange = priceReader.GetDouble(6);
-            var severity = pctChange < -20 ? "high" : "medium";
-            var recommendation = pctChange < -20 ? "MATCH" : "DIFFERENTIATE";
-            var reasoning = pctChange < -20
+            double pctChange = priceReader.GetDouble(6);
+            string severity = pctChange < -20 ? "high" : "medium";
+            string recommendation = pctChange < -20 ? "MATCH" : "DIFFERENTIATE";
+            string reasoning = pctChange < -20
                 ? "Significant price undercut threatens market share. Consider matching within 1-2 weeks."
                 : "Moderate price drop. Differentiate on value proposition rather than matching.";
 
@@ -2803,7 +2803,7 @@ public class RetailPulseDb
 
         // 2. Market share threats (>2 point drop)
         var shareFilters = new List<string> { "ShareChangePoints < -2" };
-        using var shareCmd = conn.CreateCommand();
+        using SqliteCommand shareCmd = conn.CreateCommand();
         if (!string.IsNullOrWhiteSpace(brand))
         {
             shareFilters.Add("Brand LIKE @brand");
@@ -2828,11 +2828,11 @@ public class RetailPulseDb
             LIMIT 20
             """;
 
-        using var shareReader = shareCmd.ExecuteReader();
+        using SqliteDataReader shareReader = shareCmd.ExecuteReader();
         while (shareReader.Read())
         {
-            var changePoints = shareReader.GetDouble(6);
-            var severity = changePoints < -4 ? "high" : "medium";
+            double changePoints = shareReader.GetDouble(6);
+            string severity = changePoints < -4 ? "high" : "medium";
 
             threats.Add(new
             {
@@ -2854,7 +2854,7 @@ public class RetailPulseDb
 
         // 3. Competitive activity threats
         var actFilters = new List<string> { "Impact = 'high'" };
-        using var actCmd = conn.CreateCommand();
+        using SqliteCommand actCmd = conn.CreateCommand();
         if (!string.IsNullOrWhiteSpace(category))
         {
             actFilters.Add("Category LIKE @category");
@@ -2874,11 +2874,11 @@ public class RetailPulseDb
             LIMIT 15
             """;
 
-        using var actReader = actCmd.ExecuteReader();
+        using SqliteDataReader actReader = actCmd.ExecuteReader();
         while (actReader.Read())
         {
-            var recText = actReader.IsDBNull(7) ? "IGNORE" : actReader.GetString(7);
-            var recommendation = recText.Contains("MATCH") ? "MATCH"
+            string recText = actReader.IsDBNull(7) ? "IGNORE" : actReader.GetString(7);
+            string recommendation = recText.Contains("MATCH") ? "MATCH"
                 : recText.Contains("PREEMPT") ? "PREEMPT"
                 : recText.Contains("DIFFERENTIATE") ? "DIFFERENTIATE"
                 : "IGNORE";
@@ -2916,11 +2916,11 @@ public class RetailPulseDb
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required." };
 
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         // Get latest market share for all players in this category/region
-        using var shareCmd = conn.CreateCommand();
+        using SqliteCommand shareCmd = conn.CreateCommand();
         shareCmd.CommandText = """
             SELECT Brand, SharePercent, PreviousSharePercent, ShareChangePoints, Period
             FROM MarketShare
@@ -2933,7 +2933,7 @@ public class RetailPulseDb
 
         var players = new List<object>();
         string? latestPeriod = null;
-        using var shareReader = shareCmd.ExecuteReader();
+        using SqliteDataReader shareReader = shareCmd.ExecuteReader();
         while (shareReader.Read())
         {
             latestPeriod ??= shareReader.GetString(4);
@@ -2951,7 +2951,7 @@ public class RetailPulseDb
         }
 
         // Recent competitive activities in this category/region
-        using var actCmd = conn.CreateCommand();
+        using SqliteCommand actCmd = conn.CreateCommand();
         actCmd.CommandText = """
             SELECT Competitor, ActivityType, Description, Impact, DetectedDate, ResponseRecommendation
             FROM CompetitorActivity
@@ -2963,7 +2963,7 @@ public class RetailPulseDb
         actCmd.Parameters.AddWithValue("@region", $"%{region}%");
 
         var activities = new List<object>();
-        using var actReader = actCmd.ExecuteReader();
+        using SqliteDataReader actReader = actCmd.ExecuteReader();
         while (actReader.Read())
         {
             activities.Add(new
@@ -2978,7 +2978,7 @@ public class RetailPulseDb
         }
 
         // Recent pricing moves
-        using var priceCmd = conn.CreateCommand();
+        using SqliteCommand priceCmd = conn.CreateCommand();
         priceCmd.CommandText = """
             SELECT Competitor, Brand, Price, PreviousPrice, PriceChangePercent, EffectiveDate
             FROM CompetitorPricing
@@ -2990,7 +2990,7 @@ public class RetailPulseDb
         priceCmd.Parameters.AddWithValue("@region", $"%{region}%");
 
         var pricingMoves = new List<object>();
-        using var priceReader = priceCmd.ExecuteReader();
+        using SqliteDataReader priceReader = priceCmd.ExecuteReader();
         while (priceReader.Read())
         {
             pricingMoves.Add(new
@@ -3028,9 +3028,9 @@ public class RetailPulseDb
 
     private static string NormalizeDiacritics(string text)
     {
-        var normalized = text.Normalize(NormalizationForm.FormD);
+        string normalized = text.Normalize(NormalizationForm.FormD);
         var sb = new StringBuilder(normalized.Length);
-        foreach (var c in normalized)
+        foreach (char c in normalized)
         {
             if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
                 sb.Append(c);
@@ -3046,43 +3046,43 @@ public class RetailPulseDb
 
     private void SeedInventoryLevels(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO InventoryLevels (Brand, Region, Category, SKU, CurrentStock, SafetyStock, DaysOfSupply, Status, LastUpdated)
             VALUES (@brand, @region, @category, @sku, @current, @safety, @dos, @status, @updated)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
-        var pSku = cmd.Parameters.Add("@sku", SqliteType.Text);
-        var pCurrent = cmd.Parameters.Add("@current", SqliteType.Integer);
-        var pSafety = cmd.Parameters.Add("@safety", SqliteType.Integer);
-        var pDos = cmd.Parameters.Add("@dos", SqliteType.Real);
-        var pStatus = cmd.Parameters.Add("@status", SqliteType.Text);
-        var pUpdated = cmd.Parameters.Add("@updated", SqliteType.Text);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
+        SqliteParameter pSku = cmd.Parameters.Add("@sku", SqliteType.Text);
+        SqliteParameter pCurrent = cmd.Parameters.Add("@current", SqliteType.Integer);
+        SqliteParameter pSafety = cmd.Parameters.Add("@safety", SqliteType.Integer);
+        SqliteParameter pDos = cmd.Parameters.Add("@dos", SqliteType.Real);
+        SqliteParameter pStatus = cmd.Parameters.Add("@status", SqliteType.Text);
+        SqliteParameter pUpdated = cmd.Parameters.Add("@updated", SqliteType.Text);
 
-        var skuCounter = 0;
+        int skuCounter = 0;
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var seed = GetStableHash($"inv|{brand.Name}|{region}");
+                int seed = GetStableHash($"inv|{brand.Name}|{region}");
                 var rng = new Random(seed);
 
                 // Generate 2-3 SKUs per brand/region from their variants
-                var variantCount = Math.Min(brand.Variants.Count, 3);
+                int variantCount = Math.Min(brand.Variants.Count, 3);
                 if (variantCount == 0) variantCount = 2;
 
                 for (int v = 0; v < variantCount; v++)
                 {
                     skuCounter++;
-                    var variant = v < brand.Variants.Count ? brand.Variants[v] : $"SKU-{v + 1}";
-                    var skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{region[..2].ToUpperInvariant()}-{skuCounter:D4}";
+                    string variant = v < brand.Variants.Count ? brand.Variants[v] : $"SKU-{v + 1}";
+                    string skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{region[..2].ToUpperInvariant()}-{skuCounter:D4}";
 
                     // Status distribution: 60% healthy, 20% low, 15% critical, 5% out_of_stock
-                    var statusRoll = rng.NextDouble();
+                    double statusRoll = rng.NextDouble();
                     string status;
                     int safetyStock;
                     int currentStock;
@@ -3134,21 +3134,21 @@ public class RetailPulseDb
 
     private void SeedSupplyDisruptions(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO SupplyDisruptions (Brand, Region, DisruptionType, Severity, Description, StartDate, EstimatedResolution, ImpactedSKUs, IsActive)
             VALUES (@brand, @region, @type, @severity, @desc, @start, @resolution, @impacted, @active)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pType = cmd.Parameters.Add("@type", SqliteType.Text);
-        var pSeverity = cmd.Parameters.Add("@severity", SqliteType.Text);
-        var pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
-        var pStart = cmd.Parameters.Add("@start", SqliteType.Text);
-        var pResolution = cmd.Parameters.Add("@resolution", SqliteType.Text);
-        var pImpacted = cmd.Parameters.Add("@impacted", SqliteType.Integer);
-        var pActive = cmd.Parameters.Add("@active", SqliteType.Integer);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pType = cmd.Parameters.Add("@type", SqliteType.Text);
+        SqliteParameter pSeverity = cmd.Parameters.Add("@severity", SqliteType.Text);
+        SqliteParameter pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
+        SqliteParameter pStart = cmd.Parameters.Add("@start", SqliteType.Text);
+        SqliteParameter pResolution = cmd.Parameters.Add("@resolution", SqliteType.Text);
+        SqliteParameter pImpacted = cmd.Parameters.Add("@impacted", SqliteType.Integer);
+        SqliteParameter pActive = cmd.Parameters.Add("@active", SqliteType.Integer);
 
         var masterRng = new Random(GetStableHash("disruptions_master"));
         var today = new DateOnly(2026, 5, 13);
@@ -3190,26 +3190,26 @@ public class RetailPulseDb
 
         for (int i = 0; i < 18; i++)
         {
-            var brand = brandList[masterRng.Next(brandList.Count)];
-            var region = regionList[masterRng.Next(regionList.Count)];
+            BrandConfig brand = brandList[masterRng.Next(brandList.Count)];
+            string region = regionList[masterRng.Next(regionList.Count)];
 
             // Type distribution: logistics 40%, supplier 25%, weather 20%, demand_surge 15%
-            var typeRoll = masterRng.NextDouble();
-            var disruptionType = typeRoll < 0.40 ? "logistics"
+            double typeRoll = masterRng.NextDouble();
+            string disruptionType = typeRoll < 0.40 ? "logistics"
                 : typeRoll < 0.65 ? "supplier"
                 : typeRoll < 0.85 ? "weather"
                 : "demand_surge";
 
             // Severity distribution: high 20%, medium 50%, low 30%
-            var sevRoll = masterRng.NextDouble();
-            var severity = sevRoll < 0.20 ? "high" : sevRoll < 0.70 ? "medium" : "low";
+            double sevRoll = masterRng.NextDouble();
+            string severity = sevRoll < 0.20 ? "high" : sevRoll < 0.70 ? "medium" : "low";
 
-            var descriptions = disruptionDescriptions[disruptionType];
-            var desc = descriptions[masterRng.Next(descriptions.Length)];
+            string[] descriptions = disruptionDescriptions[disruptionType];
+            string desc = descriptions[masterRng.Next(descriptions.Length)];
 
-            var startDaysAgo = masterRng.Next(1, 21);
-            var resolutionDaysOut = severity == "high" ? masterRng.Next(7, 21) : masterRng.Next(2, 10);
-            var impactedSkus = severity switch
+            int startDaysAgo = masterRng.Next(1, 21);
+            int resolutionDaysOut = severity == "high" ? masterRng.Next(7, 21) : masterRng.Next(2, 10);
+            int impactedSkus = severity switch
             {
                 "high" => masterRng.Next(15, 50),
                 "medium" => masterRng.Next(5, 20),
@@ -3231,43 +3231,43 @@ public class RetailPulseDb
 
     private void SeedFulfillmentRates(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO FulfillmentRates (Brand, Region, Period, FillRate, OnTimeRate, BackorderCount)
             VALUES (@brand, @region, @period, @fill, @ontime, @backorder)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
-        var pFill = cmd.Parameters.Add("@fill", SqliteType.Real);
-        var pOntime = cmd.Parameters.Add("@ontime", SqliteType.Real);
-        var pBackorder = cmd.Parameters.Add("@backorder", SqliteType.Integer);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
+        SqliteParameter pFill = cmd.Parameters.Add("@fill", SqliteType.Real);
+        SqliteParameter pOntime = cmd.Parameters.Add("@ontime", SqliteType.Real);
+        SqliteParameter pBackorder = cmd.Parameters.Add("@backorder", SqliteType.Integer);
 
         // 6 months: Dec 2025 through May 2026
-        var periods = new[] { "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05" };
+        string[] periods = ["2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05"];
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var seed = GetStableHash($"fulfill|{brand.Name}|{region}");
+                int seed = GetStableHash($"fulfill|{brand.Name}|{region}");
                 var rng = new Random(seed);
 
                 // Base rates per brand/region
-                var baseFillRate = 90.0 + (rng.NextDouble() * 8.0); // 90-98%
-                var baseOnTimeRate = 85.0 + (rng.NextDouble() * 10.0); // 85-95%
+                double baseFillRate = 90.0 + (rng.NextDouble() * 8.0); // 90-98%
+                double baseOnTimeRate = 85.0 + (rng.NextDouble() * 10.0); // 85-95%
 
                 // Some brand/region combos have declining trends (for Yellow/Red)
-                var trendDecline = rng.NextDouble() < 0.25; // 25% chance of declining trend
-                var declinePerMonth = trendDecline ? 0.3 + (rng.NextDouble() * 0.8) : 0.0;
+                bool trendDecline = rng.NextDouble() < 0.25; // 25% chance of declining trend
+                double declinePerMonth = trendDecline ? 0.3 + (rng.NextDouble() * 0.8) : 0.0;
 
                 for (int p = 0; p < periods.Length; p++)
                 {
-                    var periodNoise = (rng.NextDouble() - 0.5) * 2.0;
-                    var fillRate = Math.Round(Math.Clamp(baseFillRate - (declinePerMonth * p) + periodNoise, 85.0, 99.5), 1);
-                    var onTimeRate = Math.Round(Math.Clamp(baseOnTimeRate - (declinePerMonth * 1.2 * p) + periodNoise, 80.0, 97.0), 1);
-                    var backorderCount = fillRate < 92
+                    double periodNoise = (rng.NextDouble() - 0.5) * 2.0;
+                    double fillRate = Math.Round(Math.Clamp(baseFillRate - (declinePerMonth * p) + periodNoise, 85.0, 99.5), 1);
+                    double onTimeRate = Math.Round(Math.Clamp(baseOnTimeRate - (declinePerMonth * 1.2 * p) + periodNoise, 80.0, 97.0), 1);
+                    int backorderCount = fillRate < 92
                         ? rng.Next(20, 80)
                         : fillRate < 95
                             ? rng.Next(5, 25)
@@ -3289,41 +3289,41 @@ public class RetailPulseDb
 
     private void SeedStoreMetrics(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO StoreMetrics (StoreId, StoreName, Region, Revenue, Target, FootTraffic, ConversionRate)
             VALUES (@storeId, @storeName, @region, @revenue, @target, @footTraffic, @conversionRate)
             """;
 
-        var pStoreId = cmd.Parameters.Add("@storeId", SqliteType.Text);
-        var pStoreName = cmd.Parameters.Add("@storeName", SqliteType.Text);
-        var pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
-        var pRevenue = cmd.Parameters.Add("@revenue", SqliteType.Real);
-        var pTarget = cmd.Parameters.Add("@target", SqliteType.Real);
-        var pFootTraffic = cmd.Parameters.Add("@footTraffic", SqliteType.Integer);
-        var pConversionRate = cmd.Parameters.Add("@conversionRate", SqliteType.Real);
+        SqliteParameter pStoreId = cmd.Parameters.Add("@storeId", SqliteType.Text);
+        SqliteParameter pStoreName = cmd.Parameters.Add("@storeName", SqliteType.Text);
+        SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
+        SqliteParameter pRevenue = cmd.Parameters.Add("@revenue", SqliteType.Real);
+        SqliteParameter pTarget = cmd.Parameters.Add("@target", SqliteType.Real);
+        SqliteParameter pFootTraffic = cmd.Parameters.Add("@footTraffic", SqliteType.Integer);
+        SqliteParameter pConversionRate = cmd.Parameters.Add("@conversionRate", SqliteType.Real);
 
-        var storeTypes = new[] { "Flagship", "Mall", "Strip Center", "Downtown", "Outlet" };
+        string[] storeTypes = ["Flagship", "Mall", "Strip Center", "Downtown", "Outlet"];
         int storeCounter = 0;
 
-        foreach (var region in _tenant.Regions)
+        foreach (string region in _tenant.Regions)
         {
             // ~3-4 stores per region = ~20 stores across 6 regions
-            var regionSeed = GetStableHash($"store|{region}");
+            int regionSeed = GetStableHash($"store|{region}");
             var rng = new Random(regionSeed);
-            var storesInRegion = 3 + (regionSeed % 2); // 3 or 4
+            int storesInRegion = 3 + (regionSeed % 2); // 3 or 4
 
             for (int i = 0; i < storesInRegion; i++)
             {
                 storeCounter++;
-                var storeId = $"STR-{storeCounter:D4}";
-                var storeType = storeTypes[rng.Next(storeTypes.Length)];
-                var storeName = $"{_tenant.Company} {storeType} #{storeCounter}";
-                var target = Math.Round(800_000 + (rng.NextDouble() * 1_200_000), 2);
-                var perfVariance = 0.7 + (rng.NextDouble() * 0.6); // 0.7 to 1.3
-                var revenue = Math.Round(target * perfVariance, 2);
-                var footTraffic = 5000 + rng.Next(25000);
-                var conversionRate = Math.Round(0.02 + (rng.NextDouble() * 0.08), 4);
+                string storeId = $"STR-{storeCounter:D4}";
+                string storeType = storeTypes[rng.Next(storeTypes.Length)];
+                string storeName = $"{_tenant.Company} {storeType} #{storeCounter}";
+                double target = Math.Round(800_000 + (rng.NextDouble() * 1_200_000), 2);
+                double perfVariance = 0.7 + (rng.NextDouble() * 0.6); // 0.7 to 1.3
+                double revenue = Math.Round(target * perfVariance, 2);
+                int footTraffic = 5000 + rng.Next(25000);
+                double conversionRate = Math.Round(0.02 + (rng.NextDouble() * 0.08), 4);
 
                 pStoreId.Value = storeId;
                 pStoreName.Value = storeName;
@@ -3339,41 +3339,41 @@ public class RetailPulseDb
 
     private void SeedShelfLayouts(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO ShelfLayouts (AisleId, StoreId, ShelfLevel, Position, SkuId, FacingWidth)
             VALUES (@aisleId, @storeId, @shelfLevel, @position, @skuId, @facingWidth)
             """;
 
-        var pAisle = cmd.Parameters.Add("@aisleId", SqliteType.Text);
-        var pStore = cmd.Parameters.Add("@storeId", SqliteType.Text);
-        var pLevel = cmd.Parameters.Add("@shelfLevel", SqliteType.Integer);
-        var pPos = cmd.Parameters.Add("@position", SqliteType.Integer);
-        var pSku = cmd.Parameters.Add("@skuId", SqliteType.Text);
-        var pWidth = cmd.Parameters.Add("@facingWidth", SqliteType.Real);
+        SqliteParameter pAisle = cmd.Parameters.Add("@aisleId", SqliteType.Text);
+        SqliteParameter pStore = cmd.Parameters.Add("@storeId", SqliteType.Text);
+        SqliteParameter pLevel = cmd.Parameters.Add("@shelfLevel", SqliteType.Integer);
+        SqliteParameter pPos = cmd.Parameters.Add("@position", SqliteType.Integer);
+        SqliteParameter pSku = cmd.Parameters.Add("@skuId", SqliteType.Text);
+        SqliteParameter pWidth = cmd.Parameters.Add("@facingWidth", SqliteType.Real);
 
         // Generate shelf layouts for first 5 stores with 3 aisles each
         for (int s = 1; s <= 5; s++)
         {
-            var storeId = $"STR-{s:D4}";
-            var storeSeed = GetStableHash($"shelf|{storeId}");
+            string storeId = $"STR-{s:D4}";
+            int storeSeed = GetStableHash($"shelf|{storeId}");
             var rng = new Random(storeSeed);
 
             for (int a = 1; a <= 3; a++)
             {
-                var aisleId = $"AISLE-{storeId}-{a:D2}";
+                string aisleId = $"AISLE-{storeId}-{a:D2}";
 
                 // 4 shelf levels, ~7 positions each = ~28 slots per aisle
                 for (int level = 1; level <= 4; level++)
                 {
-                    var positionsOnLevel = 5 + rng.Next(5); // 5-9
+                    int positionsOnLevel = 5 + rng.Next(5); // 5-9
                     for (int pos = 1; pos <= positionsOnLevel; pos++)
                     {
-                        var brandIdx = rng.Next(_tenant.Brands.Count);
-                        var brand = _tenant.Brands[brandIdx];
-                        var variantIdx = rng.Next(brand.Variants.Count);
-                        var skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{variantIdx + 1:D3}";
-                        var facingWidth = Math.Round(0.3 + (rng.NextDouble() * 0.7), 2);
+                        int brandIdx = rng.Next(_tenant.Brands.Count);
+                        BrandConfig brand = _tenant.Brands[brandIdx];
+                        int variantIdx = rng.Next(brand.Variants.Count);
+                        string skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{variantIdx + 1:D3}";
+                        double facingWidth = Math.Round(0.3 + (rng.NextDouble() * 0.7), 2);
 
                         pAisle.Value = aisleId;
                         pStore.Value = storeId;
@@ -3390,30 +3390,30 @@ public class RetailPulseDb
 
     private void SeedSkuVelocity(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR IGNORE INTO SkuVelocity (SkuId, StoreId, DailyUnits, SafetyStockDays, LastRestock)
             VALUES (@skuId, @storeId, @dailyUnits, @safetyStockDays, @lastRestock)
             """;
 
-        var pSku = cmd.Parameters.Add("@skuId", SqliteType.Text);
-        var pStore = cmd.Parameters.Add("@storeId", SqliteType.Text);
-        var pDaily = cmd.Parameters.Add("@dailyUnits", SqliteType.Real);
-        var pSafety = cmd.Parameters.Add("@safetyStockDays", SqliteType.Integer);
-        var pRestock = cmd.Parameters.Add("@lastRestock", SqliteType.Text);
+        SqliteParameter pSku = cmd.Parameters.Add("@skuId", SqliteType.Text);
+        SqliteParameter pStore = cmd.Parameters.Add("@storeId", SqliteType.Text);
+        SqliteParameter pDaily = cmd.Parameters.Add("@dailyUnits", SqliteType.Real);
+        SqliteParameter pSafety = cmd.Parameters.Add("@safetyStockDays", SqliteType.Integer);
+        SqliteParameter pRestock = cmd.Parameters.Add("@lastRestock", SqliteType.Text);
 
-        var today = DateTime.UtcNow.Date;
+        DateTime today = DateTime.UtcNow.Date;
 
         for (int s = 1; s <= 5; s++)
         {
-            var storeId = $"STR-{s:D4}";
+            string storeId = $"STR-{s:D4}";
 
-            foreach (var brand in _tenant.Brands)
+            foreach (BrandConfig brand in _tenant.Brands)
             {
                 for (int v = 0; v < brand.Variants.Count; v++)
                 {
-                    var skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{v + 1:D3}";
-                    var seed = GetStableHash($"velocity|{skuId}|{storeId}");
+                    string skuId = $"SKU-{brand.Name[..3].ToUpperInvariant()}-{v + 1:D3}";
+                    int seed = GetStableHash($"velocity|{skuId}|{storeId}");
                     var rng = new Random(seed);
 
                     pSku.Value = skuId;
@@ -3429,38 +3429,38 @@ public class RetailPulseDb
 
     private void SeedBrandFinancials(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO BrandFinancials (BrandId, Period, Revenue, Cogs, Marketing, Distribution, NetMargin)
             VALUES (@brandId, @period, @revenue, @cogs, @marketing, @distribution, @netMargin)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brandId", SqliteType.Text);
-        var pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
-        var pRevenue = cmd.Parameters.Add("@revenue", SqliteType.Real);
-        var pCogs = cmd.Parameters.Add("@cogs", SqliteType.Real);
-        var pMktg = cmd.Parameters.Add("@marketing", SqliteType.Real);
-        var pDist = cmd.Parameters.Add("@distribution", SqliteType.Real);
-        var pNet = cmd.Parameters.Add("@netMargin", SqliteType.Real);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brandId", SqliteType.Text);
+        SqliteParameter pPeriod = cmd.Parameters.Add("@period", SqliteType.Text);
+        SqliteParameter pRevenue = cmd.Parameters.Add("@revenue", SqliteType.Real);
+        SqliteParameter pCogs = cmd.Parameters.Add("@cogs", SqliteType.Real);
+        SqliteParameter pMktg = cmd.Parameters.Add("@marketing", SqliteType.Real);
+        SqliteParameter pDist = cmd.Parameters.Add("@distribution", SqliteType.Real);
+        SqliteParameter pNet = cmd.Parameters.Add("@netMargin", SqliteType.Real);
 
-        var periods = new[] { "2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1" };
+        string[] periods = ["2025-Q2", "2025-Q3", "2025-Q4", "2026-Q1"];
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var brandSeed = GetStableHash($"fin|{brand.Name}");
+            int brandSeed = GetStableHash($"fin|{brand.Name}");
             var rng = new Random(brandSeed);
 
-            var baseRevenue = brand.PriceSegment == "Premium" ? 5_000_000 + (rng.NextDouble() * 15_000_000) : 3_000_000 + (rng.NextDouble() * 10_000_000);
-            var cogsRatio = 0.45 + (rng.NextDouble() * 0.2); // 45-65% COGS
+            double baseRevenue = brand.PriceSegment == "Premium" ? 5_000_000 + (rng.NextDouble() * 15_000_000) : 3_000_000 + (rng.NextDouble() * 10_000_000);
+            double cogsRatio = 0.45 + (rng.NextDouble() * 0.2); // 45-65% COGS
 
-            foreach (var period in periods)
+            foreach (string? period in periods)
             {
-                var periodVariance = 0.9 + (rng.NextDouble() * 0.2);
-                var revenue = Math.Round(baseRevenue * periodVariance, 2);
-                var cogs = Math.Round(revenue * cogsRatio, 2);
-                var marketing = Math.Round(revenue * (0.05 + (rng.NextDouble() * 0.1)), 2);
-                var distribution = Math.Round(revenue * (0.03 + (rng.NextDouble() * 0.05)), 2);
-                var netMargin = Math.Round(revenue - cogs - marketing - distribution, 2);
+                double periodVariance = 0.9 + (rng.NextDouble() * 0.2);
+                double revenue = Math.Round(baseRevenue * periodVariance, 2);
+                double cogs = Math.Round(revenue * cogsRatio, 2);
+                double marketing = Math.Round(revenue * (0.05 + (rng.NextDouble() * 0.1)), 2);
+                double distribution = Math.Round(revenue * (0.03 + (rng.NextDouble() * 0.05)), 2);
+                double netMargin = Math.Round(revenue - cogs - marketing - distribution, 2);
 
                 pBrand.Value = brand.Name;
                 pPeriod.Value = period;
@@ -3476,31 +3476,31 @@ public class RetailPulseDb
 
     private void SeedMarginDrivers(SqliteConnection conn)
     {
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO MarginDrivers (BrandId, Category, Amount, Impact, Trend)
             VALUES (@brandId, @category, @amount, @impact, @trend)
             """;
 
-        var pBrand = cmd.Parameters.Add("@brandId", SqliteType.Text);
-        var pCat = cmd.Parameters.Add("@category", SqliteType.Text);
-        var pAmount = cmd.Parameters.Add("@amount", SqliteType.Real);
-        var pImpact = cmd.Parameters.Add("@impact", SqliteType.Real);
-        var pTrend = cmd.Parameters.Add("@trend", SqliteType.Text);
+        SqliteParameter pBrand = cmd.Parameters.Add("@brandId", SqliteType.Text);
+        SqliteParameter pCat = cmd.Parameters.Add("@category", SqliteType.Text);
+        SqliteParameter pAmount = cmd.Parameters.Add("@amount", SqliteType.Real);
+        SqliteParameter pImpact = cmd.Parameters.Add("@impact", SqliteType.Real);
+        SqliteParameter pTrend = cmd.Parameters.Add("@trend", SqliteType.Text);
 
-        var categories = new[] { "Raw Materials", "Labor", "Logistics", "Marketing", "Packaging", "Overhead" };
-        var trends = new[] { "increasing", "decreasing", "stable", "volatile" };
+        string[] categories = ["Raw Materials", "Labor", "Logistics", "Marketing", "Packaging", "Overhead"];
+        string[] trends = ["increasing", "decreasing", "stable", "volatile"];
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var brandSeed = GetStableHash($"driver|{brand.Name}");
+            int brandSeed = GetStableHash($"driver|{brand.Name}");
             var rng = new Random(brandSeed);
 
-            foreach (var cat in categories)
+            foreach (string? cat in categories)
             {
-                var amount = Math.Round(50_000 + (rng.NextDouble() * 500_000), 2);
-                var impact = Math.Round(-5.0 + (rng.NextDouble() * 10.0), 2); // -5% to +5%
-                var trend = trends[rng.Next(trends.Length)];
+                double amount = Math.Round(50_000 + (rng.NextDouble() * 500_000), 2);
+                double impact = Math.Round(-5.0 + (rng.NextDouble() * 10.0), 2); // -5% to +5%
+                string trend = trends[rng.Next(trends.Length)];
 
                 pBrand.Value = brand.Name;
                 pCat.Value = cat;
@@ -3516,11 +3516,11 @@ public class RetailPulseDb
 
     public object GetInventoryLevels(string? brand, string? region, string? category, string? status)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         var filters = new List<string>();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
 
         if (!string.IsNullOrWhiteSpace(brand))
         {
@@ -3543,7 +3543,7 @@ public class RetailPulseDb
             cmd.Parameters.AddWithValue("@status", status.Trim().ToLowerInvariant());
         }
 
-        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        string where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
         cmd.CommandText = $"""
             SELECT Brand, Region, Category, SKU, CurrentStock, SafetyStock, DaysOfSupply, Status, LastUpdated
             FROM InventoryLevels
@@ -3559,7 +3559,7 @@ public class RetailPulseDb
             """;
 
         var items = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             items.Add(new
@@ -3577,7 +3577,7 @@ public class RetailPulseDb
         }
 
         // Summary stats
-        var total = items.Count;
+        int total = items.Count;
         var statusCounts = items.GroupBy(i => ((dynamic)i).status as string)
             .ToDictionary(g => g.Key!, g => g.Count());
 
@@ -3598,11 +3598,11 @@ public class RetailPulseDb
 
     public object GetSupplyDisruptions(string? brand, string? region, string? severity, bool activeOnly)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         var filters = new List<string>();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
 
         if (!string.IsNullOrWhiteSpace(brand))
         {
@@ -3624,7 +3624,7 @@ public class RetailPulseDb
             filters.Add("IsActive = 1");
         }
 
-        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        string where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
         cmd.CommandText = $"""
             SELECT Id, Brand, Region, DisruptionType, Severity, Description, StartDate, EstimatedResolution, ImpactedSKUs, IsActive
             FROM SupplyDisruptions
@@ -3635,7 +3635,7 @@ public class RetailPulseDb
             """;
 
         var disruptions = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             disruptions.Add(new
@@ -3673,11 +3673,11 @@ public class RetailPulseDb
 
     public object GetFulfillmentRates(string? brand, string? region, string? period, int minPeriods)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         var filters = new List<string>();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
 
         if (!string.IsNullOrWhiteSpace(brand))
         {
@@ -3695,7 +3695,7 @@ public class RetailPulseDb
             cmd.Parameters.AddWithValue("@period", period.Trim());
         }
 
-        var where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+        string where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
         cmd.CommandText = $"""
             SELECT Brand, Region, Period, FillRate, OnTimeRate, BackorderCount
             FROM FulfillmentRates
@@ -3704,7 +3704,7 @@ public class RetailPulseDb
             """;
 
         var rates = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             rates.Add(new
@@ -3719,15 +3719,15 @@ public class RetailPulseDb
         }
 
         // Calculate averages
-        var avgFillRate = rates.Count > 0 ? Math.Round(rates.Average(r => (double)((dynamic)r).fill_rate), 1) : 0;
-        var avgOnTimeRate = rates.Count > 0 ? Math.Round(rates.Average(r => (double)((dynamic)r).on_time_rate), 1) : 0;
+        double avgFillRate = rates.Count > 0 ? Math.Round(rates.Average(r => (double)((dynamic)r).fill_rate), 1) : 0;
+        double avgOnTimeRate = rates.Count > 0 ? Math.Round(rates.Average(r => (double)((dynamic)r).on_time_rate), 1) : 0;
 
         // Detect trend direction (latest vs earliest)
         string trend = "stable";
         if (rates.Count >= 2)
         {
-            var latest = (double)((dynamic)rates.First()).fill_rate;
-            var earliest = (double)((dynamic)rates.Last()).fill_rate;
+            double latest = (double)((dynamic)rates.First()).fill_rate;
+            double earliest = (double)((dynamic)rates.Last()).fill_rate;
             if (latest - earliest > 1.0) trend = "improving";
             else if (earliest - latest > 1.0) trend = "declining";
         }
@@ -3749,9 +3749,9 @@ public class RetailPulseDb
     public object GetSupplyHealthSummary(string brand, string? region)
     {
         // Aggregate from all three supply chain tables
-        var inventory = GetInventoryLevels(brand, region, null, null);
-        var disruptions = GetSupplyDisruptions(brand, region, null, true);
-        var fulfillment = GetFulfillmentRates(brand, region, null, 3);
+        object inventory = GetInventoryLevels(brand, region, null, null);
+        object disruptions = GetSupplyDisruptions(brand, region, null, true);
+        object fulfillment = GetFulfillmentRates(brand, region, null, 3);
 
         // Extract metrics for scoring
         dynamic invData = inventory;
@@ -3775,7 +3775,7 @@ public class RetailPulseDb
         string fulfillmentHealth = avgFillRate < 90 || fillTrend == "declining" ? "Red" : avgFillRate < 95 ? "Yellow" : "Green";
 
         // Overall status: worst of the three
-        var statuses = new[] { inventoryHealth, disruptionImpact, fulfillmentHealth };
+        string[] statuses = [inventoryHealth, disruptionImpact, fulfillmentHealth];
         string overallStatus = statuses.Contains("Red") ? "Red" : statuses.Contains("Yellow") ? "Yellow" : "Green";
         return new
         {
@@ -3802,25 +3802,25 @@ public class RetailPulseDb
 
     public object GetStorePerformance(string? region = null, string? storeId = null)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        var sql = "SELECT StoreId, StoreName, Region, Revenue, Target, FootTraffic, ConversionRate FROM StoreMetrics WHERE 1=1";
+        string sql = "SELECT StoreId, StoreName, Region, Revenue, Target, FootTraffic, ConversionRate FROM StoreMetrics WHERE 1=1";
         if (!string.IsNullOrWhiteSpace(region)) sql += " AND Region = @region";
         if (!string.IsNullOrWhiteSpace(storeId)) sql += " AND StoreId = @storeId";
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         if (!string.IsNullOrWhiteSpace(region)) cmd.Parameters.AddWithValue("@region", region);
         if (!string.IsNullOrWhiteSpace(storeId)) cmd.Parameters.AddWithValue("@storeId", storeId);
 
         var stores = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var rev = reader.GetDouble(3);
-            var target = reader.GetDouble(4);
-            var perfIndex = target > 0 ? Math.Round(rev / target, 3) : 0;
+            double rev = reader.GetDouble(3);
+            double target = reader.GetDouble(4);
+            double perfIndex = target > 0 ? Math.Round(rev / target, 3) : 0;
             var issues = new List<string>();
             if (perfIndex < 0.85) issues.Add("Significantly below target");
             if (perfIndex < 0.95) issues.Add("Below target");
@@ -3846,10 +3846,10 @@ public class RetailPulseDb
 
     public object GetShelfLayout(string storeId, string aisleId)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT sl.ShelfLevel, sl.Position, sl.SkuId, sl.FacingWidth, sv.DailyUnits
             FROM ShelfLayouts sl
@@ -3861,7 +3861,7 @@ public class RetailPulseDb
         cmd.Parameters.AddWithValue("@aisleId", aisleId);
 
         var slots = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             slots.Add(new
@@ -3880,11 +3880,11 @@ public class RetailPulseDb
     public object OptimizePlanogram(string storeId, string aisleId)
     {
         // Get current layout
-        var current = GetShelfLayout(storeId, aisleId);
-        var seed = GetStableHash($"optimize|{storeId}|{aisleId}");
+        object current = GetShelfLayout(storeId, aisleId);
+        int seed = GetStableHash($"optimize|{storeId}|{aisleId}");
         var rng = new Random(seed);
 
-        var uplift = Math.Round(2.0 + (rng.NextDouble() * 8.0), 1); // 2-10% predicted uplift
+        double uplift = Math.Round(2.0 + (rng.NextDouble() * 8.0), 1); // 2-10% predicted uplift
         var notes = new List<string>();
         if (rng.NextDouble() > 0.5) notes.Add("Move high-velocity SKUs to eye level (shelf 2-3)");
         if (rng.NextDouble() > 0.3) notes.Add("Increase facing width for top performers");
@@ -3904,10 +3904,10 @@ public class RetailPulseDb
 
     public object PredictStockout(string storeId, string? skuId = null)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        var sql = """
+        string sql = """
             SELECT sv.SkuId, sv.StoreId, sv.DailyUnits, sv.SafetyStockDays, sv.LastRestock
             FROM SkuVelocity sv
             WHERE sv.StoreId = @storeId
@@ -3915,28 +3915,28 @@ public class RetailPulseDb
         if (!string.IsNullOrWhiteSpace(skuId)) sql += " AND sv.SkuId = @skuId";
         sql += " ORDER BY sv.DailyUnits DESC";
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.Parameters.AddWithValue("@storeId", storeId);
         if (!string.IsNullOrWhiteSpace(skuId)) cmd.Parameters.AddWithValue("@skuId", skuId);
 
         var predictions = new List<object>();
-        using var reader = cmd.ExecuteReader();
-        var today = DateTime.UtcNow.Date;
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        DateTime today = DateTime.UtcNow.Date;
 
         while (reader.Read())
         {
-            var sku = reader.GetString(0);
-            var dailyUnits = reader.GetDouble(2);
-            var safetyDays = reader.GetInt32(3);
-            var lastRestock = DateTime.TryParse(reader.GetString(4), out var lr) ? lr : today.AddDays(-15);
-            var daysSinceRestock = (today - lastRestock).Days;
+            string sku = reader.GetString(0);
+            double dailyUnits = reader.GetDouble(2);
+            int safetyDays = reader.GetInt32(3);
+            DateTime lastRestock = DateTime.TryParse(reader.GetString(4), out DateTime lr) ? lr : today.AddDays(-15);
+            int daysSinceRestock = (today - lastRestock).Days;
 
             // Estimate remaining stock based on velocity and safety stock
-            var stockSeed = GetStableHash($"stock|{sku}|{storeId}");
+            int stockSeed = GetStableHash($"stock|{sku}|{storeId}");
             var rng = new Random(stockSeed);
-            var currentStock = safetyDays * dailyUnits * (0.3 + (rng.NextDouble() * 1.5));
-            var daysUntilStockout = dailyUnits > 0 ? (int)(currentStock / dailyUnits) : 999;
+            double currentStock = safetyDays * dailyUnits * (0.3 + (rng.NextDouble() * 1.5));
+            int daysUntilStockout = dailyUnits > 0 ? (int)(currentStock / dailyUnits) : 999;
 
             predictions.Add(new
             {
@@ -3950,7 +3950,7 @@ public class RetailPulseDb
             });
         }
 
-        var atRisk = predictions.Count(p => ((dynamic)p).riskLevel is "critical" or "high");
+        int atRisk = predictions.Count(p => ((dynamic)p).riskLevel is "critical" or "high");
         return new { storeId, predictions, totalSkus = predictions.Count, atRiskCount = atRisk };
     }
 
@@ -3958,26 +3958,26 @@ public class RetailPulseDb
 
     public object GetMarginByBrand(string brandId, string? period = null)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        var sql = "SELECT BrandId, Period, Revenue, Cogs, Marketing, Distribution, NetMargin FROM BrandFinancials WHERE BrandId = @brandId COLLATE NOCASE";
+        string sql = "SELECT BrandId, Period, Revenue, Cogs, Marketing, Distribution, NetMargin FROM BrandFinancials WHERE BrandId = @brandId COLLATE NOCASE";
         if (!string.IsNullOrWhiteSpace(period)) sql += " AND Period = @period";
         sql += " ORDER BY Period";
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.Parameters.AddWithValue("@brandId", brandId);
         if (!string.IsNullOrWhiteSpace(period)) cmd.Parameters.AddWithValue("@period", period);
 
         var records = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var revenue = reader.GetDouble(2);
-            var cogs = reader.GetDouble(3);
-            var grossMargin = revenue - cogs;
-            var marginPercent = revenue > 0 ? Math.Round(grossMargin / revenue * 100, 2) : 0;
+            double revenue = reader.GetDouble(2);
+            double cogs = reader.GetDouble(3);
+            double grossMargin = revenue - cogs;
+            double marginPercent = revenue > 0 ? Math.Round(grossMargin / revenue * 100, 2) : 0;
 
             records.Add(new
             {
@@ -3998,15 +3998,15 @@ public class RetailPulseDb
 
     public object GetMarginDrivers(string brandId)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT BrandId, Category, Amount, Impact, Trend FROM MarginDrivers WHERE BrandId = @brandId COLLATE NOCASE";
         cmd.Parameters.AddWithValue("@brandId", brandId);
 
         var drivers = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             drivers.Add(new
@@ -4023,10 +4023,10 @@ public class RetailPulseDb
 
     public object GetMarginTrend(string brandId, int quarters = 4)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Period, Revenue, Cogs, NetMargin
             FROM BrandFinancials
@@ -4038,12 +4038,12 @@ public class RetailPulseDb
         cmd.Parameters.AddWithValue("@limit", quarters);
 
         var trend = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var revenue = reader.GetDouble(1);
-            var cogs = reader.GetDouble(2);
-            var grossMargin = revenue - cogs;
+            double revenue = reader.GetDouble(1);
+            double cogs = reader.GetDouble(2);
+            double grossMargin = revenue - cogs;
 
             trend.Add(new
             {
@@ -4061,10 +4061,10 @@ public class RetailPulseDb
 
     public object DetectMarginRisks(string? brandId = null)
     {
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        var sql = """
+        string sql = """
             SELECT bf.BrandId, bf.Period, bf.Revenue, bf.Cogs, bf.Marketing, bf.Distribution, bf.NetMargin,
                    md.Category AS DriverCategory, md.Impact AS DriverImpact, md.Trend AS DriverTrend
             FROM BrandFinancials bf
@@ -4074,25 +4074,25 @@ public class RetailPulseDb
         if (!string.IsNullOrWhiteSpace(brandId)) sql += " AND bf.BrandId = @brandId COLLATE NOCASE";
         sql += " ORDER BY bf.BrandId, bf.Period";
 
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         if (!string.IsNullOrWhiteSpace(brandId)) cmd.Parameters.AddWithValue("@brandId", brandId);
 
         var risks = new List<object>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         var brandData = new Dictionary<string, List<(double revenue, double cogs, double net)>>();
 
         while (reader.Read())
         {
-            var brand = reader.GetString(0);
+            string brand = reader.GetString(0);
             if (!brandData.ContainsKey(brand)) brandData[brand] = [];
             brandData[brand].Add((reader.GetDouble(2), reader.GetDouble(3), reader.GetDouble(6)));
 
             // Check drivers for increasing cost trends
             if (!reader.IsDBNull(7))
             {
-                var driverTrend = reader.GetString(9);
-                var driverImpact = reader.GetDouble(8);
+                string driverTrend = reader.GetString(9);
+                double driverImpact = reader.GetDouble(8);
                 if (driverTrend == "increasing" && driverImpact < -2.0)
                 {
                     risks.Add(new
@@ -4108,13 +4108,13 @@ public class RetailPulseDb
         }
 
         // Detect margin compression across periods
-        foreach (var (brand, data) in brandData)
+        foreach ((string? brand, List<(double revenue, double cogs, double net)>? data) in brandData)
         {
             if (data.Count < 2) continue;
-            var (revenue, cogs, net) = data[^1];
-            var previous = data[^2];
-            var recentMargin = revenue > 0 ? (revenue - cogs) / revenue * 100 : 0;
-            var prevMargin = previous.revenue > 0 ? (previous.revenue - previous.cogs) / previous.revenue * 100 : 0;
+            (double revenue, double cogs, double net) = data[^1];
+            (double revenue, double cogs, double net) previous = data[^2];
+            double recentMargin = revenue > 0 ? (revenue - cogs) / revenue * 100 : 0;
+            double prevMargin = previous.revenue > 0 ? (previous.revenue - previous.cogs) / previous.revenue * 100 : 0;
 
             if (recentMargin < prevMargin - 2.0)
             {

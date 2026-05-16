@@ -40,7 +40,7 @@ public class ToolResultCache
         if (!_options.Enabled)
             return null;
 
-        var key = GenerateKey(toolName, arguments);
+        string key = GenerateKey(toolName, arguments);
 
         if (_cache.TryGetValue(key, out string? cached) && cached is not null)
         {
@@ -68,8 +68,8 @@ public class ToolResultCache
             return;
         }
 
-        var key = GenerateKey(toolName, arguments);
-        var ttl = _options.GetTtl(toolName);
+        string key = GenerateKey(toolName, arguments);
+        TimeSpan ttl = _options.GetTtl(toolName);
 
         var entryOptions = new MemoryCacheEntryOptions
         {
@@ -112,8 +112,8 @@ public class ToolResultCache
             .Select(kv => $"{kv.Key}={SerializeValue(kv.Value)}")
             .ToList();
 
-        var raw = $"{toolName}:{string.Join("|", sortedArgs)}";
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
+        string raw = $"{toolName}:{string.Join("|", sortedArgs)}";
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return $"tool:{toolName}:{Convert.ToHexString(hash).ToLowerInvariant()}";
     }
 
@@ -140,7 +140,9 @@ public class ToolResultCache
         // Don't cache error responses
         if (result.Contains("\"error\"", StringComparison.OrdinalIgnoreCase) &&
             result.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+        {
             return false;
+        }
 
         // Don't cache placeholder content (protection against cache warming bug)
         return !result.Contains("placeholder", StringComparison.OrdinalIgnoreCase) ||

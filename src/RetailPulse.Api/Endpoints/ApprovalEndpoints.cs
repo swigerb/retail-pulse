@@ -10,8 +10,8 @@ public static class ApprovalEndpoints
     {
         app.MapGet("/api/approvals/pending", async (IApprovalGate gate, HttpContext http, CancellationToken ct) =>
         {
-            var userId = http.Request.Query["userId"].FirstOrDefault() ?? "default";
-            var pending = await gate.GetPendingAsync(userId, ct);
+            string userId = http.Request.Query["userId"].FirstOrDefault() ?? "default";
+            IReadOnlyList<ApprovalRequest> pending = await gate.GetPendingAsync(userId, ct);
 
             return Results.Ok(pending.Select(r => new
             {
@@ -36,7 +36,7 @@ public static class ApprovalEndpoints
         {
             try
             {
-                var result = await gate.GetResultAsync(requestId, ct);
+                ApprovalResult result = await gate.GetResultAsync(requestId, ct);
                 return Results.Ok(new
                 {
                     requestId = result.RequestId,
@@ -56,7 +56,7 @@ public static class ApprovalEndpoints
 
         app.MapPost("/api/approvals/{requestId}/respond", async (string requestId, ApprovalResponseDto body, IApprovalGate gate, IHubContext<TelemetryHub> hubContext, CancellationToken ct) =>
         {
-            if (!Enum.TryParse<ApprovalDecision>(body.Decision, true, out var decision) || decision == ApprovalDecision.Pending || decision == ApprovalDecision.TimedOut)
+            if (!Enum.TryParse(body.Decision, true, out ApprovalDecision decision) || decision == ApprovalDecision.Pending || decision == ApprovalDecision.TimedOut)
             {
                 return Results.BadRequest(new { error = "Decision must be 'Approved', 'Rejected', or 'Modified'." });
             }
@@ -87,7 +87,7 @@ public static class ApprovalEndpoints
 
         app.MapGet("/api/approvals/history", async (IApprovalGate gate, CancellationToken ct) =>
         {
-            var history = await gate.GetHistoryAsync(50, ct);
+            IReadOnlyList<ApprovalRequest> history = await gate.GetHistoryAsync(50, ct);
 
             return Results.Ok(history.Select(r => new
             {

@@ -15,7 +15,7 @@ public class BackpressureTests
 
     private static TraceSpan MakeSpan(string traceId, string operationName = "test.op")
     {
-        var start = DateTimeOffset.UtcNow;
+        DateTimeOffset start = DateTimeOffset.UtcNow;
         return new TraceSpan(
             SpanId: Guid.NewGuid().ToString("N"),
             TraceId: traceId,
@@ -78,7 +78,7 @@ public class BackpressureTests
 
         collector.Complete();
 
-        await foreach (var span in collector.Reader.ReadAllAsync())
+        await foreach (TraceSpan span in collector.Reader.ReadAllAsync())
             forwarded.Add(span);
 
         forwarded.Should().HaveCount(50);
@@ -97,7 +97,7 @@ public class BackpressureTests
         collector.Complete();
 
         var forwarded = new List<TraceSpan>();
-        await foreach (var span in collector.Reader.ReadAllAsync())
+        await foreach (TraceSpan span in collector.Reader.ReadAllAsync())
             forwarded.Add(span);
 
         forwarded.Should().HaveCount(capacity);
@@ -157,7 +157,7 @@ public class BackpressureTests
             collector.TryEnqueue(MakeSpan($"fill-{i}"));
 
         // Concurrent overflow writes
-        var tasks = Enumerable.Range(0, 100).Select(i => Task.Run(() =>
+        IEnumerable<Task> tasks = Enumerable.Range(0, 100).Select(i => Task.Run(() =>
         {
             collector.TryEnqueue(MakeSpan($"concurrent-{i}"));
         }));
@@ -178,7 +178,7 @@ public class BackpressureTests
         // Simulate hosted service consumer
         var consumerTask = Task.Run(async () =>
         {
-            await foreach (var span in collector.Reader.ReadAllAsync())
+            await foreach (TraceSpan span in collector.Reader.ReadAllAsync())
                 processed.Add(span.TraceId);
         });
 
@@ -197,7 +197,7 @@ public class BackpressureTests
     {
         var collector = new TraceChannelCollector(capacity: 100);
         using var cts = new CancellationTokenSource();
-        var processedCount = 0;
+        int processedCount = 0;
 
         // Enqueue items
         for (int i = 0; i < 50; i++)
@@ -208,9 +208,9 @@ public class BackpressureTests
         {
             try
             {
-                await foreach (var span in collector.Reader.ReadAllAsync(cts.Token))
+                await foreach (TraceSpan span in collector.Reader.ReadAllAsync(cts.Token))
                 {
-                    var count = Interlocked.Increment(ref processedCount);
+                    int count = Interlocked.Increment(ref processedCount);
                     if (count >= 10)
                     {
                         cts.Cancel();
@@ -238,7 +238,7 @@ public class BackpressureTests
 
         var consumerTask = Task.Run(async () =>
         {
-            await foreach (var span in collector.Reader.ReadAllAsync())
+            await foreach (TraceSpan span in collector.Reader.ReadAllAsync())
                 order.Add(span.TraceId);
         });
 

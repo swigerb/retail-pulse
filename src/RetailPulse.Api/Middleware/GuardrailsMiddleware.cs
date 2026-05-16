@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using RetailPulse.Api.Guardrails;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Guardrails;
@@ -53,9 +54,9 @@ public class GuardrailsMiddleware
     /// </summary>
     public async Task<GuardrailResult> CheckInputAsync(ChatRequest request, CancellationToken ct = default)
     {
-        using var activity = AgentTelemetry.Source.StartActivity("guardrails.input_check", ActivityKind.Internal);
-        var message = request.Message;
-        var userId = request.User?.ObjectId ?? "anonymous";
+        using Activity? activity = AgentTelemetry.Source.StartActivity("guardrails.input_check", ActivityKind.Internal);
+        string message = request.Message;
+        string userId = request.User?.ObjectId ?? "anonymous";
 
         // ── Input length gate ────────────────────────────────────────────
         if (message.Length > _config.MaxInputLength)
@@ -69,7 +70,7 @@ public class GuardrailsMiddleware
         // ── Jailbreak detection (compiled regex patterns) ────────────────
         if (_config.JailbreakDetectionEnabled)
         {
-            var jailbreakHits = GuardrailPatterns.DetectJailbreak(message);
+            IReadOnlyList<string> jailbreakHits = GuardrailPatterns.DetectJailbreak(message);
             if (jailbreakHits.Count > 0)
             {
                 activity?.SetTag("guardrails.blocked", true);
@@ -94,8 +95,8 @@ public class GuardrailsMiddleware
         // ── Injection detection (substring matching) ─────────────────────
         if (_config.JailbreakDetectionEnabled) // injection piggybacks on the jailbreak toggle
         {
-            var lower = message.ToLowerInvariant();
-            var injectionMatch = _injectionPatterns.FirstOrDefault(p => lower.Contains(p));
+            string lower = message.ToLowerInvariant();
+            string? injectionMatch = _injectionPatterns.FirstOrDefault(p => lower.Contains(p));
             if (injectionMatch is not null)
             {
                 activity?.SetTag("guardrails.blocked", true);
@@ -119,7 +120,7 @@ public class GuardrailsMiddleware
         // ── PII in input — log but don't block (redact output instead) ───
         if (_config.PiiDetectionEnabled)
         {
-            var piiHits = GuardrailPatterns.DetectPii(message);
+            IReadOnlyList<string> piiHits = GuardrailPatterns.DetectPii(message);
             if (piiHits.Count > 0)
             {
                 activity?.SetTag("guardrails.pii_in_input", string.Join(",", piiHits));
@@ -140,13 +141,13 @@ public class GuardrailsMiddleware
         if (!_config.PiiDetectionEnabled || !_config.AutoRedactPii)
             return response;
 
-        using var activity = AgentTelemetry.Source.StartActivity("guardrails.output_filter", ActivityKind.Internal);
-        var redacted = response;
-        var redactionCount = 0;
+        using Activity? activity = AgentTelemetry.Source.StartActivity("guardrails.output_filter", ActivityKind.Internal);
+        string redacted = response;
+        int redactionCount = 0;
 
-        foreach (var (name, pattern) in GuardrailPatterns.PiiPatterns)
+        foreach ((string? name, Regex? pattern) in GuardrailPatterns.PiiPatterns)
         {
-            var matches = pattern.Matches(redacted);
+            MatchCollection matches = pattern.Matches(redacted);
             if (matches.Count > 0)
             {
                 redactionCount += matches.Count;

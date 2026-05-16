@@ -15,8 +15,8 @@ public class RetailPulseMetricsTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddMetrics();
-        var provider = services.BuildServiceProvider();
-        var meterFactory = provider.GetRequiredService<IMeterFactory>();
+        ServiceProvider provider = services.BuildServiceProvider();
+        IMeterFactory meterFactory = provider.GetRequiredService<IMeterFactory>();
         _metrics = new RetailPulseMetrics(meterFactory);
 
         _listener = new MeterListener
@@ -27,14 +27,8 @@ public class RetailPulseMetricsTests : IDisposable
                     listener.EnableMeasurementEvents(instrument);
             }
         };
-        _listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
-        {
-            _recordedSimple.Add((instrument.Name, measurement));
-        });
-        _listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, _) =>
-        {
-            _recordedSimple.Add((instrument.Name, measurement));
-        });
+        _listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) => _recordedSimple.Add((instrument.Name, measurement)));
+        _listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, _) => _recordedSimple.Add((instrument.Name, measurement)));
         _listener.Start();
     }
 
@@ -115,8 +109,5 @@ public class RetailPulseMetricsTests : IDisposable
         _recordedSimple.Should().Contain(r => r.Name == "retailpulse.request_duration_ms");
     }
 
-    public void Dispose()
-    {
-        _listener.Dispose();
-    }
+    public void Dispose() => _listener.Dispose();
 }

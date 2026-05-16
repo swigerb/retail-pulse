@@ -8,7 +8,7 @@ public static class AlertEndpoints
     {
         app.MapGet("/api/alerts/active", async (IAlertService alertService, CancellationToken ct) =>
         {
-            var alerts = await alertService.GetActiveAlertsAsync(ct);
+            IReadOnlyList<Alert> alerts = await alertService.GetActiveAlertsAsync(ct);
             return Results.Ok(alerts);
         })
         .WithName("GetActiveAlerts")
@@ -17,11 +17,11 @@ public static class AlertEndpoints
 
         app.MapGet("/api/alerts/history", async (IAlertService alertService, HttpContext http, CancellationToken ct) =>
         {
-            var userId = http.Request.Query["userId"].FirstOrDefault() ?? "default";
-            var limitStr = http.Request.Query["limit"].FirstOrDefault();
-            var limit = int.TryParse(limitStr, out var l) ? l : 50;
+            string userId = http.Request.Query["userId"].FirstOrDefault() ?? "default";
+            string? limitStr = http.Request.Query["limit"].FirstOrDefault();
+            int limit = int.TryParse(limitStr, out int l) ? l : 50;
 
-            var alerts = await alertService.GetHistoryAsync(userId, limit, ct);
+            IReadOnlyList<Alert> alerts = await alertService.GetHistoryAsync(userId, limit, ct);
             return Results.Ok(alerts);
         })
         .WithName("GetAlertHistory")
@@ -33,7 +33,7 @@ public static class AlertEndpoints
             if (string.IsNullOrWhiteSpace(body.UserId))
                 return Results.BadRequest(new { error = "userId is required." });
 
-            var duration = body.DurationHours switch
+            TimeSpan duration = body.DurationHours switch
             {
                 <= 0 => TimeSpan.FromHours(1),
                 _ => TimeSpan.FromHours(body.DurationHours)

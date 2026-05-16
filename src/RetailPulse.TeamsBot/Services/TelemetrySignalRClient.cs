@@ -37,14 +37,14 @@ public class TelemetrySignalRClient : IAsyncDisposable
 
         _connection.On<AgentSpan>("SpanReceived", span =>
         {
-            var sessionId = span.SessionId;
+            string? sessionId = span.SessionId;
             if (string.IsNullOrEmpty(sessionId))
             {
                 _logger.LogDebug("Received span without SessionId; dropping. Type={Type}, Name={Name}", span.Type, span.Name);
                 return;
             }
 
-            var queue = _spanCollections.GetOrAdd(sessionId, _ => new ConcurrentQueue<AgentSpan>());
+            ConcurrentQueue<AgentSpan> queue = _spanCollections.GetOrAdd(sessionId, _ => new ConcurrentQueue<AgentSpan>());
             queue.Enqueue(span);
             _logger.LogDebug("Received span for session {SessionId}: {Type} - {Name}", sessionId, span.Type, span.Name);
         });
@@ -76,7 +76,7 @@ public class TelemetrySignalRClient : IAsyncDisposable
     {
         if (IsConnected) return;
 
-        var delay = InitialReconnectDelay;
+        TimeSpan delay = InitialReconnectDelay;
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -155,7 +155,7 @@ public class TelemetrySignalRClient : IAsyncDisposable
     /// </summary>
     public List<AgentSpan> GetSpans(string sessionId, bool clearAfterRead = true)
     {
-        if (_spanCollections.TryGetValue(sessionId, out var queue))
+        if (_spanCollections.TryGetValue(sessionId, out ConcurrentQueue<AgentSpan>? queue))
         {
             var result = queue.ToList();
             if (clearAfterRead)
@@ -185,10 +185,7 @@ public class TelemetrySignalRClient : IAsyncDisposable
     /// <summary>
     /// Waits briefly for any remaining spans to arrive
     /// </summary>
-    public async Task WaitForSpansAsync(int delayMs = 500, CancellationToken cancellationToken = default)
-    {
-        await Task.Delay(delayMs, cancellationToken);
-    }
+    public async Task WaitForSpansAsync(int delayMs = 500, CancellationToken cancellationToken = default) => await Task.Delay(delayMs, cancellationToken);
 
     public async ValueTask DisposeAsync()
     {

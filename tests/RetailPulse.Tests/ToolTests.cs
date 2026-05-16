@@ -44,7 +44,7 @@ public class ToolTests
     [Fact]
     public async Task DepletionStatsTool_WhenServerReachable_ReturnsData()
     {
-        var expectedResponse = JsonSerializer.Serialize(new
+        string expectedResponse = JsonSerializer.Serialize(new
         {
             brand = "Sierra Gold Tequila",
             region = "Northeast",
@@ -52,10 +52,10 @@ public class ToolTests
             metrics = new { depletions_yoy = "+2.1%", status = "On Track" }
         });
 
-        var httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
+        HttpClient httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
         var tool = new DepletionStatsTool(httpClient);
 
-        var result = await tool.GetDepletionStats("Sierra Gold Tequila", "Northeast", "YTD");
+        string result = await tool.GetDepletionStats("Sierra Gold Tequila", "Northeast", "YTD");
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.GetProperty("brand").GetString().Should().Be("Sierra Gold Tequila");
@@ -65,13 +65,13 @@ public class ToolTests
     [Fact]
     public async Task DepletionStatsTool_WhenServerUnreachable_ReturnsFallback()
     {
-        var httpClient = CreateFailingHttpClient();
+        HttpClient httpClient = CreateFailingHttpClient();
         var tool = new DepletionStatsTool(httpClient);
 
-        var result = await tool.GetDepletionStats("Sierra Gold Tequila", "Northeast", "YTD");
+        string result = await tool.GetDepletionStats("Sierra Gold Tequila", "Northeast", "YTD");
 
         var doc = JsonDocument.Parse(result);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
         root.GetProperty("brand").GetString().Should().Be("Sierra Gold Tequila");
         root.GetProperty("region").GetString().Should().Be("Northeast");
         root.GetProperty("sentiment_summary").GetString().Should().Contain("MCP server not reachable");
@@ -80,10 +80,10 @@ public class ToolTests
     [Fact]
     public async Task DepletionStatsTool_WhenServerReturns500_ReturnsFallback()
     {
-        var httpClient = CreateMockHttpClient(HttpStatusCode.InternalServerError, "Server Error");
+        HttpClient httpClient = CreateMockHttpClient(HttpStatusCode.InternalServerError, "Server Error");
         var tool = new DepletionStatsTool(httpClient);
 
-        var result = await tool.GetDepletionStats("Summit Vodka", "National", "Q1");
+        string result = await tool.GetDepletionStats("Summit Vodka", "National", "Q1");
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.GetProperty("sentiment_summary").GetString()
@@ -95,7 +95,7 @@ public class ToolTests
     [Fact]
     public async Task PortfolioDepletionStatsTool_WhenServerReachable_ReturnsData()
     {
-        var expectedResponse = JsonSerializer.Serialize(new
+        string expectedResponse = JsonSerializer.Serialize(new
         {
             region = "National",
             period = "YTD",
@@ -107,13 +107,13 @@ public class ToolTests
             }
         });
 
-        var httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
+        HttpClient httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
         var tool = new PortfolioDepletionStatsTool(httpClient);
 
-        var result = await tool.GetPortfolioDepletionStats("National", "YTD");
+        string result = await tool.GetPortfolioDepletionStats("National", "YTD");
 
         var doc = JsonDocument.Parse(result);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
         root.GetProperty("region").GetString().Should().Be("National");
         root.GetProperty("brandCount").GetInt32().Should().Be(2);
         root.GetProperty("brands").GetArrayLength().Should().Be(2);
@@ -122,13 +122,13 @@ public class ToolTests
     [Fact]
     public async Task PortfolioDepletionStatsTool_WhenServerUnreachable_ReturnsFallback()
     {
-        var httpClient = CreateFailingHttpClient();
+        HttpClient httpClient = CreateFailingHttpClient();
         var tool = new PortfolioDepletionStatsTool(httpClient);
 
-        var result = await tool.GetPortfolioDepletionStats("West Coast", "Q2");
+        string result = await tool.GetPortfolioDepletionStats("West Coast", "Q2");
 
         var doc = JsonDocument.Parse(result);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
         root.GetProperty("region").GetString().Should().Be("West Coast");
         root.GetProperty("period").GetString().Should().Be("Q2");
         root.GetProperty("brandCount").GetInt32().Should().Be(0);
@@ -167,17 +167,17 @@ public class ToolTests
     [Fact]
     public async Task FieldSentimentTool_WhenServerReachable_ReturnsData()
     {
-        var expectedResponse = JsonSerializer.Serialize(new
+        string expectedResponse = JsonSerializer.Serialize(new
         {
             brand = "Ridgeline Bourbon",
             region = "Northeast",
             sentiment = "Strong pull in Manhattan"
         });
 
-        var httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
+        HttpClient httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
         var tool = new FieldSentimentTool(httpClient);
 
-        var result = await tool.GetFieldSentiment("Ridgeline Bourbon", "Northeast");
+        string result = await tool.GetFieldSentiment("Ridgeline Bourbon", "Northeast");
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.GetProperty("brand").GetString().Should().Be("Ridgeline Bourbon");
@@ -187,13 +187,13 @@ public class ToolTests
     [Fact]
     public async Task FieldSentimentTool_WhenServerUnreachable_ReturnsFallback()
     {
-        var httpClient = CreateFailingHttpClient();
+        HttpClient httpClient = CreateFailingHttpClient();
         var tool = new FieldSentimentTool(httpClient);
 
-        var result = await tool.GetFieldSentiment("Ridgeline Bourbon", "Northeast");
+        string result = await tool.GetFieldSentiment("Ridgeline Bourbon", "Northeast");
 
         var doc = JsonDocument.Parse(result);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
         root.GetProperty("brand").GetString().Should().Be("Ridgeline Bourbon");
         root.GetProperty("region").GetString().Should().Be("Northeast");
         root.GetProperty("sentiment").GetString().Should().Contain("MCP server not reachable");
@@ -205,7 +205,7 @@ public class ToolTests
     [Fact]
     public async Task ShipmentStatsTool_WhenServerReachable_ReturnsData()
     {
-        var expectedResponse = JsonSerializer.Serialize(new
+        string expectedResponse = JsonSerializer.Serialize(new
         {
             brand = "Sierra Gold Tequila",
             region = "Northeast",
@@ -219,13 +219,13 @@ public class ToolTests
             anomaly = new { type = "healthy", risk_level = "low" }
         });
 
-        var httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
+        HttpClient httpClient = CreateMockHttpClient(HttpStatusCode.OK, expectedResponse);
         var tool = new ShipmentStatsTool(httpClient);
 
-        var result = await tool.GetShipmentStats("Sierra Gold Tequila", "Northeast", "YTD");
+        string result = await tool.GetShipmentStats("Sierra Gold Tequila", "Northeast", "YTD");
 
         var doc = JsonDocument.Parse(result);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
         root.GetProperty("brand").GetString().Should().Be("Sierra Gold Tequila");
         root.GetProperty("region").GetString().Should().Be("Northeast");
         root.GetProperty("shipments").GetProperty("cases_shipped").GetInt32().Should().Be(1200);
@@ -235,13 +235,13 @@ public class ToolTests
     [Fact]
     public async Task ShipmentStatsTool_WhenServerUnreachable_ReturnsFallback()
     {
-        var httpClient = CreateFailingHttpClient();
+        HttpClient httpClient = CreateFailingHttpClient();
         var tool = new ShipmentStatsTool(httpClient);
 
-        var result = await tool.GetShipmentStats("Sierra Gold Tequila", "Northeast", "YTD");
+        string result = await tool.GetShipmentStats("Sierra Gold Tequila", "Northeast", "YTD");
 
         var doc = JsonDocument.Parse(result);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
         root.GetProperty("brand").GetString().Should().Be("Sierra Gold Tequila");
         root.GetProperty("region").GetString().Should().Be("Northeast");
         root.GetProperty("period").GetString().Should().Be("YTD");
@@ -252,13 +252,13 @@ public class ToolTests
     [Fact]
     public async Task ShipmentStatsTool_WhenServerReturns500_ReturnsFallback()
     {
-        var httpClient = CreateMockHttpClient(HttpStatusCode.InternalServerError, "Server Error");
+        HttpClient httpClient = CreateMockHttpClient(HttpStatusCode.InternalServerError, "Server Error");
         var tool = new ShipmentStatsTool(httpClient);
 
-        var result = await tool.GetShipmentStats("Summit Vodka", "West Coast", "Q2");
+        string result = await tool.GetShipmentStats("Summit Vodka", "West Coast", "Q2");
 
         var doc = JsonDocument.Parse(result);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
         root.GetProperty("source").GetString().Should().Be("fallback");
         root.GetProperty("error").GetString().Should().Contain("MCP server not reachable");
     }

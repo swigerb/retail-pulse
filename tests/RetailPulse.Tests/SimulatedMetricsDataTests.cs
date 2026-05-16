@@ -36,17 +36,17 @@ public class SimulatedMetricsDataTests
     [InlineData("Gamma Bourbon", "West Coast")]
     public void GetDepletionStats_KnownBrandRegion_ReturnsExpectedStructure(string brand, string region)
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetDepletionStats(brand, region, "YTD");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetDepletionStats(brand, region, "YTD");
+        string json = JsonSerializer.Serialize(result);
         var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
 
         root.GetProperty("brand").GetString().Should().NotBeNullOrEmpty();
         root.GetProperty("region").GetString().Should().NotBeNullOrEmpty();
         root.GetProperty("period").GetString().Should().Be("YTD");
 
-        var metrics = root.GetProperty("metrics");
+        JsonElement metrics = root.GetProperty("metrics");
         metrics.GetProperty("depletions_yoy").GetString().Should().ContainAny("+", "-");
         metrics.GetProperty("sell_through_yoy").GetString().Should().ContainAny("+", "-");
         metrics.GetProperty("inventory_weeks_on_hand").GetDouble().Should().BeGreaterThan(0);
@@ -58,11 +58,11 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetDepletionStats_UnknownBrand_ReturnsErrorWithAvailableBrands()
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetDepletionStats("Unknown Brand", "Northeast", "YTD");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetDepletionStats("Unknown Brand", "Northeast", "YTD");
+        string json = JsonSerializer.Serialize(result);
         var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
 
         root.GetProperty("error").GetString().Should().Contain("No data found");
         root.GetProperty("available_brands").GetArrayLength().Should().BeGreaterThan(0);
@@ -72,16 +72,16 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetDepletionStats_AllBrandRegionCombinations_HaveData()
     {
-        var data = CreateDataWithSampleTenant();
-        var brands = new[] { "Alpha Tequila", "Beta Vodka", "Gamma Bourbon" };
-        var regions = new[] { "Northeast", "Southeast", "West Coast" };
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        string[] brands = ["Alpha Tequila", "Beta Vodka", "Gamma Bourbon"];
+        string[] regions = ["Northeast", "Southeast", "West Coast"];
 
-        foreach (var brand in brands)
+        foreach (string? brand in brands)
         {
-            foreach (var region in regions)
+            foreach (string? region in regions)
             {
-                var result = data.GetDepletionStats(brand, region, "YTD");
-                var json = JsonSerializer.Serialize(result);
+                object result = data.GetDepletionStats(brand, region, "YTD");
+                string json = JsonSerializer.Serialize(result);
                 json.Should().NotContain("error", $"brand '{brand}' in region '{region}' should have data");
             }
         }
@@ -93,9 +93,9 @@ public class SimulatedMetricsDataTests
     [InlineData("Alpha Tequila", "northeast")]
     public void GetDepletionStats_CaseInsensitive_ReturnsData(string brand, string region)
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetDepletionStats(brand, region, "YTD");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetDepletionStats(brand, region, "YTD");
+        string json = JsonSerializer.Serialize(result);
 
         json.Should().NotContain("error");
     }
@@ -103,9 +103,9 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetDepletionStats_DifferentPeriods_ProduceDifferentNumbers()
     {
-        var data = CreateDataWithSampleTenant();
-        var q1 = JsonSerializer.Serialize(data.GetDepletionStats("Alpha Tequila", "Northeast", "Q1"));
-        var q4 = JsonSerializer.Serialize(data.GetDepletionStats("Alpha Tequila", "Northeast", "Q4"));
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        string q1 = JsonSerializer.Serialize(data.GetDepletionStats("Alpha Tequila", "Northeast", "Q1"));
+        string q4 = JsonSerializer.Serialize(data.GetDepletionStats("Alpha Tequila", "Northeast", "Q4"));
 
         q1.Should().NotBe(q4, "different periods should produce different metrics");
     }
@@ -116,11 +116,11 @@ public class SimulatedMetricsDataTests
     [InlineData("Gamma Bourbon", "West Coast")]
     public void GetFieldSentiment_KnownBrandRegion_ReturnsSentimentData(string brand, string region)
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetFieldSentiment(brand, region);
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetFieldSentiment(brand, region);
+        string json = JsonSerializer.Serialize(result);
         var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
 
         root.GetProperty("brand").GetString().Should().NotBeNullOrEmpty();
         root.GetProperty("region").GetString().Should().NotBeNullOrEmpty();
@@ -131,9 +131,9 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetFieldSentiment_UnknownBrand_ReturnsError()
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetFieldSentiment("Nonexistent", "Northeast");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetFieldSentiment("Nonexistent", "Northeast");
+        string json = JsonSerializer.Serialize(result);
 
         json.Should().Contain("error");
         json.Should().Contain("No sentiment data");
@@ -142,9 +142,9 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetFieldSentiment_DifferentRegions_ReturnDifferentSentiment()
     {
-        var data = CreateDataWithSampleTenant();
-        var result1 = JsonSerializer.Serialize(data.GetFieldSentiment("Alpha Tequila", "Northeast"));
-        var result2 = JsonSerializer.Serialize(data.GetFieldSentiment("Alpha Tequila", "West Coast"));
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        string result1 = JsonSerializer.Serialize(data.GetFieldSentiment("Alpha Tequila", "Northeast"));
+        string result2 = JsonSerializer.Serialize(data.GetFieldSentiment("Alpha Tequila", "West Coast"));
 
         result1.Should().NotBe(result2, "different regions should have different sentiment");
     }
@@ -152,9 +152,9 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetDepletionStats_PartialMatch_FindsBrand()
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetDepletionStats("Alpha", "Northeast", "YTD");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetDepletionStats("Alpha", "Northeast", "YTD");
+        string json = JsonSerializer.Serialize(result);
 
         json.Should().NotContain("\"error\"");
     }
@@ -162,17 +162,17 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetPortfolioDepletionStats_ReturnsAllBrandsForRegion()
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetPortfolioDepletionStats("Northeast", "YTD");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetPortfolioDepletionStats("Northeast", "YTD");
+        string json = JsonSerializer.Serialize(result);
         var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
 
         root.GetProperty("region").GetString().Should().Be("Northeast");
         root.GetProperty("period").GetString().Should().Be("YTD");
         root.GetProperty("brandCount").GetInt32().Should().Be(3);
 
-        var brands = root.GetProperty("brands");
+        JsonElement brands = root.GetProperty("brands");
         brands.GetArrayLength().Should().Be(3);
         brands.EnumerateArray().Select(b => b.GetProperty("brand").GetString()).Should()
             .BeEquivalentTo(["Alpha Tequila", "Beta Vodka", "Gamma Bourbon"]);
@@ -181,11 +181,11 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetPortfolioDepletionStats_National_ReturnsAggregatedBrandResults()
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetPortfolioDepletionStats("National", "Q1");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetPortfolioDepletionStats("National", "Q1");
+        string json = JsonSerializer.Serialize(result);
         var doc = JsonDocument.Parse(json);
-        var brands = doc.RootElement.GetProperty("brands");
+        JsonElement brands = doc.RootElement.GetProperty("brands");
 
         brands.GetArrayLength().Should().Be(3);
         brands.EnumerateArray().All(b => b.GetProperty("region").GetString() == "National").Should().BeTrue();
@@ -196,21 +196,21 @@ public class SimulatedMetricsDataTests
     [InlineData("Beta Vodka", "West Coast")]
     public void GetShipmentStats_KnownBrandRegion_ReturnsExpectedStructure(string brand, string region)
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetShipmentStats(brand, region, "YTD");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetShipmentStats(brand, region, "YTD");
+        string json = JsonSerializer.Serialize(result);
         var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        JsonElement root = doc.RootElement;
 
         root.GetProperty("brand").GetString().Should().NotBeNullOrEmpty();
         root.GetProperty("region").GetString().Should().NotBeNullOrEmpty();
 
-        var shipments = root.GetProperty("shipments");
+        JsonElement shipments = root.GetProperty("shipments");
         shipments.GetProperty("shipments_yoy").GetString().Should().ContainAny("+", "-");
         shipments.GetProperty("cases_shipped").GetInt32().Should().BeGreaterThan(0);
         shipments.GetProperty("cases_depleted").GetInt32().Should().BeGreaterThan(0);
 
-        var anomaly = root.GetProperty("anomaly");
+        JsonElement anomaly = root.GetProperty("anomaly");
         anomaly.GetProperty("type").GetString().Should().NotBeNullOrEmpty();
         anomaly.GetProperty("risk_level").GetString().Should().NotBeNullOrEmpty();
 
@@ -220,22 +220,22 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void Constructor_GeneratesDataForAllBrandRegionCombinations()
     {
-        var data = CreateDataWithSampleTenant();
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
         // 3 brands × 3 regions = 9 combinations — all should have depletion, shipment, and sentiment data
-        var brands = new[] { "Alpha Tequila", "Beta Vodka", "Gamma Bourbon" };
-        var regions = new[] { "Northeast", "Southeast", "West Coast" };
+        string[] brands = ["Alpha Tequila", "Beta Vodka", "Gamma Bourbon"];
+        string[] regions = ["Northeast", "Southeast", "West Coast"];
 
-        foreach (var brand in brands)
+        foreach (string? brand in brands)
         {
-            foreach (var region in regions)
+            foreach (string? region in regions)
             {
-                var depJson = JsonSerializer.Serialize(data.GetDepletionStats(brand, region, "YTD"));
+                string depJson = JsonSerializer.Serialize(data.GetDepletionStats(brand, region, "YTD"));
                 depJson.Should().NotContain("error", $"depletion data missing for {brand}/{region}");
 
-                var shipJson = JsonSerializer.Serialize(data.GetShipmentStats(brand, region, "YTD"));
+                string shipJson = JsonSerializer.Serialize(data.GetShipmentStats(brand, region, "YTD"));
                 shipJson.Should().NotContain("error", $"shipment data missing for {brand}/{region}");
 
-                var sentJson = JsonSerializer.Serialize(data.GetFieldSentiment(brand, region));
+                string sentJson = JsonSerializer.Serialize(data.GetFieldSentiment(brand, region));
                 sentJson.Should().NotContain("error", $"sentiment data missing for {brand}/{region}");
             }
         }
@@ -244,11 +244,11 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void Constructor_SeededRandom_ProducesConsistentResults()
     {
-        var data1 = CreateDataWithSampleTenant();
-        var data2 = CreateDataWithSampleTenant();
+        SimulatedMetricsData data1 = CreateDataWithSampleTenant();
+        SimulatedMetricsData data2 = CreateDataWithSampleTenant();
 
-        var result1 = JsonSerializer.Serialize(data1.GetDepletionStats("Alpha Tequila", "Northeast", "YTD"));
-        var result2 = JsonSerializer.Serialize(data2.GetDepletionStats("Alpha Tequila", "Northeast", "YTD"));
+        string result1 = JsonSerializer.Serialize(data1.GetDepletionStats("Alpha Tequila", "Northeast", "YTD"));
+        string result2 = JsonSerializer.Serialize(data2.GetDepletionStats("Alpha Tequila", "Northeast", "YTD"));
 
         result1.Should().Be(result2, "seeded Random should produce identical results");
     }
@@ -261,7 +261,7 @@ public class SimulatedMetricsDataTests
     [InlineData("   ")]
     public void GetDepletionStats_EmptyOrNullBrand_DoesNotThrow(string? brand)
     {
-        var data = CreateDataWithSampleTenant();
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
 
         // Defensive contract: the API must never throw on user-supplied empty/null
         // input. Note: today an empty brand string falls through to a partial match
@@ -278,7 +278,7 @@ public class SimulatedMetricsDataTests
     [InlineData("   ")]
     public void GetDepletionStats_EmptyOrNullRegion_DoesNotThrow(string? region)
     {
-        var data = CreateDataWithSampleTenant();
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
 
         Action act = () => data.GetDepletionStats("Alpha Tequila", region!, "YTD");
         act.Should().NotThrow();
@@ -293,14 +293,14 @@ public class SimulatedMetricsDataTests
     [InlineData("")]
     public void GetDepletionStats_UnknownOrCasingPeriods_AreHandled(string period)
     {
-        var data = CreateDataWithSampleTenant();
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
 
         // Period parsing should be resilient: case-insensitive, whitespace-tolerant,
         // unknown values fall back to the YTD/default multiplier (no throw).
         Action act = () => data.GetDepletionStats("Alpha Tequila", "Northeast", period);
         act.Should().NotThrow();
 
-        var json = JsonSerializer.Serialize(data.GetDepletionStats("Alpha Tequila", "Northeast", period));
+        string json = JsonSerializer.Serialize(data.GetDepletionStats("Alpha Tequila", "Northeast", period));
         json.Should().NotContain("\"error\"");
     }
 
@@ -309,9 +309,9 @@ public class SimulatedMetricsDataTests
     {
         // Sweep all brand/region combinations and verify the full set of anomaly
         // classifications is reachable from the simulated dataset.
-        var data = CreateDataWithSampleTenant();
-        var brands = new[] { "Alpha Tequila", "Beta Vodka", "Gamma Bourbon" };
-        var regions = new[] { "Northeast", "Southeast", "West Coast" };
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        string[] brands = ["Alpha Tequila", "Beta Vodka", "Gamma Bourbon"];
+        string[] regions = ["Northeast", "Southeast", "West Coast"];
         var expectedTypes = new HashSet<string>
         {
             "pipeline_clog", "supply_constraint", "growth_opportunity",
@@ -322,13 +322,13 @@ public class SimulatedMetricsDataTests
         var seenTypes = new HashSet<string>();
         var seenRisks = new HashSet<string>();
 
-        foreach (var brand in brands)
+        foreach (string? brand in brands)
         {
-            foreach (var region in regions)
+            foreach (string? region in regions)
             {
-                var json = JsonSerializer.Serialize(data.GetShipmentStats(brand, region, "YTD"));
+                string json = JsonSerializer.Serialize(data.GetShipmentStats(brand, region, "YTD"));
                 var doc = JsonDocument.Parse(json);
-                var anomaly = doc.RootElement.GetProperty("anomaly");
+                JsonElement anomaly = doc.RootElement.GetProperty("anomaly");
                 seenTypes.Add(anomaly.GetProperty("type").GetString()!);
                 seenRisks.Add(anomaly.GetProperty("risk_level").GetString()!);
             }
@@ -343,9 +343,9 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetShipmentStats_UnknownBrand_ReturnsErrorWithAvailableLists()
     {
-        var data = CreateDataWithSampleTenant();
-        var result = data.GetShipmentStats("No Such Brand", "Northeast", "YTD");
-        var json = JsonSerializer.Serialize(result);
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        object result = data.GetShipmentStats("No Such Brand", "Northeast", "YTD");
+        string json = JsonSerializer.Serialize(result);
 
         json.Should().Contain("error");
         json.Should().Contain("available_brands");
@@ -355,8 +355,8 @@ public class SimulatedMetricsDataTests
     [Fact]
     public void GetDepletionStats_WhitespaceTrimmedFromBrandAndRegion()
     {
-        var data = CreateDataWithSampleTenant();
-        var json = JsonSerializer.Serialize(
+        SimulatedMetricsData data = CreateDataWithSampleTenant();
+        string json = JsonSerializer.Serialize(
             data.GetDepletionStats("  Alpha Tequila  ", "  Northeast  ", "YTD"));
 
         json.Should().NotContain("\"error\"",

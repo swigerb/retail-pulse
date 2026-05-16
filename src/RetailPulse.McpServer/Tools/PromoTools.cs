@@ -14,10 +14,7 @@ public static class PromoTools
         [Description("Brand name to filter (e.g. 'Sierra Gold Tequila', 'FreshMart'). Omit for all brands.")] string? brand = null,
         [Description("Region to filter (e.g. 'Northeast', 'West Coast'). Omit for all regions.")] string? region = null,
         [Description("Promo type to filter ('discount', 'bogo', 'display', 'digital', 'bundle'). Omit for all types.")] string? promoType = null,
-        [Description("Number of months of history to return (1-24). Default: 18")] int months = 18)
-    {
-        return data.GetPromoHistory(brand, region, promoType, months);
-    }
+        [Description("Number of months of history to return (1-24). Default: 18")] int months = 18) => data.GetPromoHistory(brand, region, promoType, months);
 
     [McpServerTool(Name = "CalculateLift")]
     [Description("Estimate expected volume uplift for a promotion based on brand, region, promo type, and spend. Uses historical lift coefficients with diminishing returns for spend beyond optimal levels. Returns expected lift percent, confidence level, and count of similar historical campaigns.")]
@@ -50,9 +47,9 @@ public static class PromoTools
             return new { error = "Parameter 'brand' is required." };
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required." };
-        if (!DateOnly.TryParse(startDate, out var start))
+        if (!DateOnly.TryParse(startDate, out DateOnly start))
             return new { error = "Parameter 'startDate' must be a valid date (e.g. '2026-06-01')." };
-        if (!DateOnly.TryParse(endDate, out var end))
+        if (!DateOnly.TryParse(endDate, out DateOnly end))
             return new { error = "Parameter 'endDate' must be a valid date (e.g. '2026-06-28')." };
         return end <= start ? (new { error = "endDate must be after startDate." }) : data.EvaluateTiming(brand, region, start, end);
     }

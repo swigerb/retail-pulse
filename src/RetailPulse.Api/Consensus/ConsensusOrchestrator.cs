@@ -53,7 +53,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
 
     public async Task<CouncilVerdict> ConveneAsync(string brand, string? region, CancellationToken ct = default)
     {
-        var convenedAt = DateTime.UtcNow;
+        DateTime convenedAt = DateTime.UtcNow;
         var sw = Stopwatch.StartNew();
 
         var participants = _specialists
@@ -66,17 +66,17 @@ public class ConsensusOrchestrator : IConsensusCouncil
             string.Join(", ", participants.Select(p => p.Key)));
 
         // Fan-out: collect votes from all specialists in parallel
-        var voteTasks = participants.Select(agent => CollectVoteAsync(agent, brand, region, ct));
-        var votes = await Task.WhenAll(voteTasks);
+        IEnumerable<Task<AgentVote?>> voteTasks = participants.Select(agent => CollectVoteAsync(agent, brand, region, ct));
+        AgentVote?[] votes = await Task.WhenAll(voteTasks);
 
-        var validVotes = votes.Where(v => v is not null).Cast<AgentVote>().ToArray();
+        AgentVote[] validVotes = [.. votes.Where(v => v is not null).Cast<AgentVote>()];
 
         _logger.LogInformation(
             "Collected {ValidCount}/{TotalCount} votes in {ElapsedMs}ms",
             validVotes.Length, participants.Count, sw.ElapsedMilliseconds);
 
         // Synthesize verdict
-        var verdict = await SynthesizeVerdictAsync(brand, region, validVotes, convenedAt, sw, ct);
+        CouncilVerdict verdict = await SynthesizeVerdictAsync(brand, region, validVotes, convenedAt, sw, ct);
         return verdict;
     }
 
@@ -90,7 +90,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
         ISpecialistAgent agent, string brand, string? region, CancellationToken ct)
     {
         var agentSw = Stopwatch.StartNew();
-        var votePrompt = BuildVotePrompt(brand, region);
+        string votePrompt = BuildVotePrompt(brand, region);
 
         try
         {
@@ -110,10 +110,10 @@ public class ConsensusOrchestrator : IConsensusCouncil
                 ResponseFormat = ChatResponseFormat.Json
             };
 
-            var response = await _chatClient.GetResponseAsync(messages, options, timeoutCts.Token);
+            ChatResponse response = await _chatClient.GetResponseAsync(messages, options, timeoutCts.Token);
             agentSw.Stop();
 
-            var responseText = response.Text ?? "";
+            string responseText = response.Text ?? "";
             return ParseVote(agent.Key, agent.DisplayName, responseText, agentSw.Elapsed);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -142,7 +142,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
 
     private static string BuildVotePrompt(string brand, string? region)
     {
-        var regionClause = string.IsNullOrWhiteSpace(region) ? "across all regions" : $"in the {region} region";
+        string regionClause = string.IsNullOrWhiteSpace(region) ? "across all regions" : $"in the {region} region";
         return $$"""
             Provide a health assessment for the brand "{{brand}}" {{regionClause}}.
 
@@ -173,28 +173,28 @@ public class ConsensusOrchestrator : IConsensusCouncil
         try
         {
             // Try to extract JSON from the response (may have surrounding text)
-            var jsonStart = responseText.IndexOf('{');
-            var jsonEnd = responseText.LastIndexOf('}');
+            int jsonStart = responseText.IndexOf('{');
+            int jsonEnd = responseText.LastIndexOf('}');
 
             if (jsonStart >= 0 && jsonEnd > jsonStart)
             {
-                var json = responseText[jsonStart..(jsonEnd + 1)];
+                string json = responseText[jsonStart..(jsonEnd + 1)];
                 using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
+                JsonElement root = doc.RootElement;
 
-                var ratingStr = root.GetProperty("rating").GetString() ?? "Yellow";
-                var rating = Enum.TryParse<HealthRating>(ratingStr, true, out var parsed)
+                string ratingStr = root.GetProperty("rating").GetString() ?? "Yellow";
+                HealthRating rating = Enum.TryParse(ratingStr, true, out HealthRating parsed)
                     ? parsed : HealthRating.Yellow;
 
-                var reasoning = root.GetProperty("reasoning").GetString() ?? "No reasoning provided.";
+                string reasoning = root.GetProperty("reasoning").GetString() ?? "No reasoning provided.";
 
-                var confidence = root.TryGetProperty("confidence", out var confEl)
+                double confidence = root.TryGetProperty("confidence", out JsonElement confEl)
                     ? confEl.GetDouble() : 0.7;
 
                 var keyMetrics = new List<string>();
-                if (root.TryGetProperty("key_metrics", out var metricsEl) && metricsEl.ValueKind == JsonValueKind.Array)
+                if (root.TryGetProperty("key_metrics", out JsonElement metricsEl) && metricsEl.ValueKind == JsonValueKind.Array)
                 {
-                    foreach (var item in metricsEl.EnumerateArray())
+                    foreach (JsonElement item in metricsEl.EnumerateArray())
                         keyMetrics.Add(item.GetString() ?? "");
                 }
 
@@ -208,7 +208,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
         }
 
         // Heuristic fallback: scan for rating keywords
-        var fallbackRating = responseText.Contains("Red", StringComparison.OrdinalIgnoreCase)
+        HealthRating fallbackRating = responseText.Contains("Red", StringComparison.OrdinalIgnoreCase)
             ? HealthRating.Red
             : responseText.Contains("Yellow", StringComparison.OrdinalIgnoreCase)
                 ? HealthRating.Yellow
@@ -226,7 +226,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
         string brand, string? region, AgentVote[] votes, DateTime convenedAt,
         Stopwatch sw, CancellationToken ct)
     {
-        var voteSummary = string.Join("\n\n", votes.Select(v =>
+        string voteSummary = string.Join("\n\n", votes.Select(v =>
             $"**{v.AgentName}** ({v.AgentId}):\n" +
             $"  Rating: {v.Rating}\n" +
             $"  Confidence: {v.Confidence:F2}\n" +
@@ -234,7 +234,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
             $"  Key Metrics: {string.Join(", ", v.KeyMetrics)}\n" +
             $"  Response Time: {v.ResponseTime.TotalMilliseconds:F0}ms"));
 
-        var synthesisPrompt = $$"""
+        string synthesisPrompt = $$"""
             You are synthesizing a Portfolio Health Council verdict for brand "{{brand}}"{{(region != null ? $" in {region}" : "")}}.
 
             ## Agent Votes
@@ -273,8 +273,8 @@ public class ConsensusOrchestrator : IConsensusCouncil
                 Temperature = (float)_synthesisDef.Temperature
             };
 
-            var response = await _chatClient.GetResponseAsync(messages, options, ct);
-            var responseText = response.Text ?? "";
+            ChatResponse response = await _chatClient.GetResponseAsync(messages, options, ct);
+            string responseText = response.Text ?? "";
 
             return ParseSynthesis(brand, region, votes, responseText, convenedAt, sw);
         }
@@ -291,32 +291,36 @@ public class ConsensusOrchestrator : IConsensusCouncil
     {
         try
         {
-            var jsonStart = responseText.IndexOf('{');
-            var jsonEnd = responseText.LastIndexOf('}');
+            int jsonStart = responseText.IndexOf('{');
+            int jsonEnd = responseText.LastIndexOf('}');
 
             if (jsonStart >= 0 && jsonEnd > jsonStart)
             {
-                var json = responseText[jsonStart..(jsonEnd + 1)];
+                string json = responseText[jsonStart..(jsonEnd + 1)];
                 using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
+                JsonElement root = doc.RootElement;
 
-                var ratingStr = root.GetProperty("overall_rating").GetString() ?? "Yellow";
-                var overallRating = Enum.TryParse<HealthRating>(ratingStr, true, out var parsed)
+                string ratingStr = root.GetProperty("overall_rating").GetString() ?? "Yellow";
+                HealthRating overallRating = Enum.TryParse(ratingStr, true, out HealthRating parsed)
                     ? parsed : HealthRating.Yellow;
 
-                var synthesis = root.GetProperty("synthesis").GetString() ?? "Assessment complete.";
+                string synthesis = root.GetProperty("synthesis").GetString() ?? "Assessment complete.";
 
                 var disagreements = new List<string>();
-                if (root.TryGetProperty("disagreements", out var disagEl) && disagEl.ValueKind == JsonValueKind.Array)
-                    foreach (var item in disagEl.EnumerateArray())
+                if (root.TryGetProperty("disagreements", out JsonElement disagEl) && disagEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement item in disagEl.EnumerateArray())
                         disagreements.Add(item.GetString() ?? "");
+                }
 
                 var actionItems = new List<string>();
-                if (root.TryGetProperty("action_items", out var actionsEl) && actionsEl.ValueKind == JsonValueKind.Array)
-                    foreach (var item in actionsEl.EnumerateArray())
+                if (root.TryGetProperty("action_items", out JsonElement actionsEl) && actionsEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement item in actionsEl.EnumerateArray())
                         actionItems.Add(item.GetString() ?? "");
+                }
 
-                var isUnanimous = votes.Select(v => v.Rating).Distinct().Count() <= 1;
+                bool isUnanimous = votes.Select(v => v.Rating).Distinct().Count() <= 1;
 
                 return new CouncilVerdict(
                     brand, region, overallRating, synthesis, votes,
@@ -337,17 +341,17 @@ public class ConsensusOrchestrator : IConsensusCouncil
         DateTime convenedAt, Stopwatch sw)
     {
         // Conservative fallback: use the worst rating among votes
-        var overallRating = votes.Length > 0
+        HealthRating overallRating = votes.Length > 0
             ? votes.Max(v => v.Rating)
             : HealthRating.Yellow;
 
-        var isUnanimous = votes.Select(v => v.Rating).Distinct().Count() <= 1;
+        bool isUnanimous = votes.Select(v => v.Rating).Distinct().Count() <= 1;
 
-        var disagreements = isUnanimous
-            ? Array.Empty<string>()
+        string[] disagreements = isUnanimous
+            ? []
             : [.. votes.GroupBy(v => v.Rating).Select(g => $"{string.Join(", ", g.Select(v => v.AgentName))} rated {g.Key}")];
 
-        var synthesis = $"Council assessed {brand} with {votes.Length} agent votes. " +
+        string synthesis = $"Council assessed {brand} with {votes.Length} agent votes. " +
                         $"Overall health: {overallRating}. " +
                         (isUnanimous ? "All agents agreed." : "Agents disagreed — see individual votes.");
 

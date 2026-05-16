@@ -20,8 +20,8 @@ public class HealthCheckScenario
 
         return Scenario.Create("health_check", async context =>
             {
-                var request = Http.CreateRequest("GET", $"{BaseUrl}/health");
-                var response = await Http.Send(httpClient, request);
+                HttpRequestMessage request = Http.CreateRequest("GET", $"{BaseUrl}/health");
+                Response<HttpResponseMessage> response = await Http.Send(httpClient, request);
                 return response;
             })
             .WithoutWarmUp()

@@ -29,15 +29,15 @@ public class MemoryManagementAgent : ISpecialistAgent
 
     public async Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
     {
-        var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
-        var userId = request.User?.ObjectId ?? "anonymous";
+        string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+        string userId = request.User?.ObjectId ?? "anonymous";
 
         _logger.LogInformation("Memory management request from user {UserId}: {Message}",
             userId, request.Message);
 
         await _memory.ForgetAsync(userId, ct);
 
-        var reply = "Done — I've cleared all memory of our previous conversations. We're starting fresh.";
+        string reply = "Done — I've cleared all memory of our previous conversations. We're starting fresh.";
 
         return new ChatResponse(
             reply,

@@ -19,7 +19,7 @@ public static class MemoryServiceExtensions
         // Singleton — SQLite WAL mode handles concurrent access
         services.AddSingleton<IConversationMemory>(sp =>
         {
-            var logger = sp.GetRequiredService<ILogger<SqliteConversationMemory>>();
+            ILogger<SqliteConversationMemory> logger = sp.GetRequiredService<ILogger<SqliteConversationMemory>>();
             return new SqliteConversationMemory(dbPath, logger);
         });
 

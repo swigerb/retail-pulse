@@ -23,7 +23,7 @@ public class SessionIdTests
     [InlineData("under_score")]
     public void Constructor_WithInvalidFormat_Throws(string value)
     {
-        var act = () => new SessionId(value);
+        Func<SessionId> act = () => new SessionId(value);
         act.Should().Throw<ArgumentException>().WithMessage("*alphanumeric*");
     }
 
@@ -33,7 +33,7 @@ public class SessionIdTests
     [InlineData("   ")]
     public void Constructor_WithNullOrEmpty_Throws(string? value)
     {
-        var act = () => new SessionId(value!);
+        Func<SessionId> act = () => new SessionId(value!);
         act.Should().Throw<ArgumentException>();
     }
 

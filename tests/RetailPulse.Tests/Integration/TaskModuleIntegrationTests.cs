@@ -19,7 +19,7 @@ public class TaskModuleIntegrationTests
     [Fact]
     public void TaskModule_MissingBrand_ReturnsBadRequest()
     {
-        var result = ValidatePromoRequest("", "Northeast", "price_cut", 50000, "2026-06-01", "2026-06-30");
+        ValidationResult result = ValidatePromoRequest("", "Northeast", "price_cut", 50000, "2026-06-01", "2026-06-30");
         result.IsValid.Should().BeFalse("brand is required");
         result.Error.Should().Contain("brand");
     }
@@ -27,7 +27,7 @@ public class TaskModuleIntegrationTests
     [Fact]
     public void TaskModule_MissingRegion_ReturnsBadRequest()
     {
-        var result = ValidatePromoRequest("Sierra Gold Tequila", "", "price_cut", 50000, "2026-06-01", "2026-06-30");
+        ValidationResult result = ValidatePromoRequest("Sierra Gold Tequila", "", "price_cut", 50000, "2026-06-01", "2026-06-30");
         result.IsValid.Should().BeFalse("region is required");
         result.Error.Should().Contain("region");
     }
@@ -35,7 +35,7 @@ public class TaskModuleIntegrationTests
     [Fact]
     public void TaskModule_MissingPromoType_ReturnsBadRequest()
     {
-        var result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "", 50000, "2026-06-01", "2026-06-30");
+        ValidationResult result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "", 50000, "2026-06-01", "2026-06-30");
         result.IsValid.Should().BeFalse("promoType is required");
         result.Error.Should().Contain("promoType");
     }
@@ -43,7 +43,7 @@ public class TaskModuleIntegrationTests
     [Fact]
     public void TaskModule_ZeroBudget_ReturnsBadRequest()
     {
-        var result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", 0, "2026-06-01", "2026-06-30");
+        ValidationResult result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", 0, "2026-06-01", "2026-06-30");
         result.IsValid.Should().BeFalse("budget must be > 0");
         result.Error.Should().Contain("budget");
     }
@@ -51,14 +51,14 @@ public class TaskModuleIntegrationTests
     [Fact]
     public void TaskModule_NegativeBudget_ReturnsBadRequest()
     {
-        var result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", -1000, "2026-06-01", "2026-06-30");
+        ValidationResult result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", -1000, "2026-06-01", "2026-06-30");
         result.IsValid.Should().BeFalse("negative budget should be rejected");
     }
 
     [Fact]
     public void TaskModule_InvalidStartDate_ReturnsBadRequest()
     {
-        var result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", 50000, "not-a-date", "2026-06-30");
+        ValidationResult result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", 50000, "not-a-date", "2026-06-30");
         result.IsValid.Should().BeFalse("invalid date format should be rejected");
         result.Error.Should().Contain("date");
     }
@@ -66,14 +66,14 @@ public class TaskModuleIntegrationTests
     [Fact]
     public void TaskModule_InvalidEndDate_ReturnsBadRequest()
     {
-        var result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", 50000, "2026-06-01", "invalid");
+        ValidationResult result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", 50000, "2026-06-01", "invalid");
         result.IsValid.Should().BeFalse("invalid end date should be rejected");
     }
 
     [Fact]
     public void TaskModule_ValidRequest_Passes()
     {
-        var result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", 100000, "2026-06-01", "2026-08-31");
+        ValidationResult result = ValidatePromoRequest("Sierra Gold Tequila", "Northeast", "price_cut", 100000, "2026-06-01", "2026-08-31");
         result.IsValid.Should().BeTrue("all required fields are present and valid");
     }
 
@@ -81,7 +81,7 @@ public class TaskModuleIntegrationTests
     public void TaskModule_DurationCalculation_CorrectWeeks()
     {
         // June 1 to August 31 = 91 days / 7 = 13 weeks
-        var result = CalculateDuration("2026-06-01", "2026-08-31");
+        int result = CalculateDuration("2026-06-01", "2026-08-31");
         result.Should().Be(13, "91 days / 7 = 13 weeks");
     }
 
@@ -89,7 +89,7 @@ public class TaskModuleIntegrationTests
     public void TaskModule_DurationCalculation_MinimumOneWeek()
     {
         // Same day: 0 days / 7 = 0 → clamped to 1
-        var result = CalculateDuration("2026-06-01", "2026-06-01");
+        int result = CalculateDuration("2026-06-01", "2026-06-01");
         result.Should().Be(1, "minimum duration should be 1 week");
     }
 
@@ -97,7 +97,7 @@ public class TaskModuleIntegrationTests
     public void TaskModule_HighBudget_TriggersApproval()
     {
         // Budget > $500K requires approval per the endpoint logic
-        var requiresApproval = CheckApprovalRequired(600_000, 5.0);
+        bool requiresApproval = CheckApprovalRequired(600_000, 5.0);
         requiresApproval.Should().BeTrue("budget > $500K requires executive approval");
     }
 
@@ -105,14 +105,14 @@ public class TaskModuleIntegrationTests
     public void TaskModule_LowRoiHighBudget_TriggersApproval()
     {
         // ROI < 2.0 && budget > $100K requires approval
-        var requiresApproval = CheckApprovalRequired(150_000, 1.5);
+        bool requiresApproval = CheckApprovalRequired(150_000, 1.5);
         requiresApproval.Should().BeTrue("low ROI with moderate budget requires approval");
     }
 
     [Fact]
     public void TaskModule_NormalBudgetGoodRoi_NoApproval()
     {
-        var requiresApproval = CheckApprovalRequired(50_000, 3.5);
+        bool requiresApproval = CheckApprovalRequired(50_000, 3.5);
         requiresApproval.Should().BeFalse("normal budget with good ROI doesn't need approval");
     }
 
@@ -144,10 +144,7 @@ public class TaskModuleIntegrationTests
         return Math.Max(1, (end.DayNumber - start.DayNumber) / 7);
     }
 
-    private static bool CheckApprovalRequired(double budget, double expectedRoi)
-    {
-        return budget > 500_000 || (expectedRoi < 2.0 && budget > 100_000);
-    }
+    private static bool CheckApprovalRequired(double budget, double expectedRoi) => budget > 500_000 || (expectedRoi < 2.0 && budget > 100_000);
 
     #endregion
 }

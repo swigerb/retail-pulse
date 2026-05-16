@@ -26,7 +26,7 @@ public readonly record struct Region
     public Region(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value, nameof(value));
-        var trimmed = value.Trim();
+        string trimmed = value.Trim();
         if (!_knownRegions.Contains(trimmed))
         {
             throw new ArgumentException($"Unknown region: '{trimmed}'. Known regions: {string.Join(", ", _knownRegions)}", nameof(value));

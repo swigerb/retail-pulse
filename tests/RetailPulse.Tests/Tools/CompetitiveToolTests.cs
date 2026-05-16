@@ -17,8 +17,8 @@ public class CompetitiveToolTests : IDisposable
 
     public CompetitiveToolTests()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
         _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_comp_test_{Guid.NewGuid():N}.db");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
@@ -44,7 +44,7 @@ public class CompetitiveToolTests : IDisposable
     [InlineData("Quick-Serve Restaurant", "Midwest")]
     public void GetCompetitorPricing_ValidCategoryRegion_ReturnsData(string category, string region)
     {
-        var result = Parse(_db.GetCompetitorPricing(category: category, region: region));
+        JsonElement result = Parse(_db.GetCompetitorPricing(category: category, region: region));
 
         result.GetProperty("total_records").GetInt32().Should().BeGreaterThan(0,
             $"should return pricing data for category '{category}' in region '{region}'");
@@ -53,12 +53,12 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitorPricing_FiltersByCategory()
     {
-        var result = Parse(_db.GetCompetitorPricing(category: "Spirits"));
+        JsonElement result = Parse(_db.GetCompetitorPricing(category: "Spirits"));
 
         result.GetProperty("total_records").GetInt32().Should().BeGreaterThan(0);
-        var pricing = result.GetProperty("pricing");
+        JsonElement pricing = result.GetProperty("pricing");
 
-        foreach (var item in pricing.EnumerateArray())
+        foreach (JsonElement item in pricing.EnumerateArray())
         {
             item.GetProperty("category").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("spirits");
         }
@@ -67,12 +67,12 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitorPricing_FiltersByRegion()
     {
-        var result = Parse(_db.GetCompetitorPricing(category: "Spirits", region: "Northeast"));
+        JsonElement result = Parse(_db.GetCompetitorPricing(category: "Spirits", region: "Northeast"));
 
         result.GetProperty("total_records").GetInt32().Should().BeGreaterThan(0);
-        var pricing = result.GetProperty("pricing");
+        JsonElement pricing = result.GetProperty("pricing");
 
-        foreach (var item in pricing.EnumerateArray())
+        foreach (JsonElement item in pricing.EnumerateArray())
         {
             item.GetProperty("region").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("northeast");
         }
@@ -81,9 +81,9 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitorPricing_AllPricesPositive()
     {
-        var result = Parse(_db.GetCompetitorPricing(category: "Spirits"));
+        JsonElement result = Parse(_db.GetCompetitorPricing(category: "Spirits"));
 
-        foreach (var item in result.GetProperty("pricing").EnumerateArray())
+        foreach (JsonElement item in result.GetProperty("pricing").EnumerateArray())
         {
             item.GetProperty("price").GetDouble().Should().BeGreaterThan(0,
                 "competitor prices must be positive values");
@@ -93,7 +93,7 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitorPricing_UnknownCategory_ReturnsEmptyNotCrash()
     {
-        var result = Parse(_db.GetCompetitorPricing(category: "AlienTechnology", region: "Northeast"));
+        JsonElement result = Parse(_db.GetCompetitorPricing(category: "AlienTechnology", region: "Northeast"));
 
         // Should return zero records, not crash
         result.GetProperty("total_records").GetInt32().Should().Be(0);
@@ -102,9 +102,9 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitorPricing_IncludesCompetitorNames()
     {
-        var result = Parse(_db.GetCompetitorPricing(category: "Spirits"));
+        JsonElement result = Parse(_db.GetCompetitorPricing(category: "Spirits"));
 
-        foreach (var item in result.GetProperty("pricing").EnumerateArray())
+        foreach (JsonElement item in result.GetProperty("pricing").EnumerateArray())
         {
             item.GetProperty("competitor").GetString().Should().NotBeNullOrWhiteSpace();
         }
@@ -114,18 +114,18 @@ public class CompetitiveToolTests : IDisposable
     public void GetCompetitorPricing_IdentifiesPriceDropThreats()
     {
         // The method identifies price drops >10% as threats
-        var result = Parse(_db.GetCompetitorPricing(category: "Spirits"));
+        JsonElement result = Parse(_db.GetCompetitorPricing(category: "Spirits"));
 
-        result.TryGetProperty("price_drop_threats", out var threats).Should().BeTrue();
+        result.TryGetProperty("price_drop_threats", out JsonElement threats).Should().BeTrue();
         threats.GetInt32().Should().BeGreaterThanOrEqualTo(0);
     }
 
     [Fact]
     public void GetCompetitorPricing_FiltersByBrand()
     {
-        var result = Parse(_db.GetCompetitorPricing(brand: "Sierra Gold Tequila"));
+        JsonElement result = Parse(_db.GetCompetitorPricing(brand: "Sierra Gold Tequila"));
 
-        foreach (var item in result.GetProperty("pricing").EnumerateArray())
+        foreach (JsonElement item in result.GetProperty("pricing").EnumerateArray())
         {
             item.GetProperty("brand").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("sierra gold tequila");
         }
@@ -140,7 +140,7 @@ public class CompetitiveToolTests : IDisposable
     [InlineData("Grocery", "Southeast")]
     public void GetMarketShare_ValidCategoryRegion_ReturnsData(string category, string region)
     {
-        var result = Parse(_db.GetMarketShare(category: category, region: region));
+        JsonElement result = Parse(_db.GetMarketShare(category: category, region: region));
 
         result.GetProperty("total_records").GetInt32().Should().BeGreaterThan(0,
             $"should return market share data for category '{category}' in region '{region}'");
@@ -149,11 +149,11 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetMarketShare_SharesInValidRange()
     {
-        var result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast"));
+        JsonElement result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast"));
 
-        foreach (var item in result.GetProperty("share_data").EnumerateArray())
+        foreach (JsonElement item in result.GetProperty("share_data").EnumerateArray())
         {
-            var share = item.GetProperty("share_percent").GetDouble();
+            double share = item.GetProperty("share_percent").GetDouble();
             share.Should().BeGreaterThanOrEqualTo(0, "market share cannot be negative");
             share.Should().BeLessThanOrEqualTo(100, "market share cannot exceed 100%");
         }
@@ -162,9 +162,9 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetMarketShare_IncludesBrandAndCategory()
     {
-        var result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast"));
+        JsonElement result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast"));
 
-        foreach (var item in result.GetProperty("share_data").EnumerateArray())
+        foreach (JsonElement item in result.GetProperty("share_data").EnumerateArray())
         {
             item.GetProperty("brand").GetString().Should().NotBeNullOrWhiteSpace();
             item.GetProperty("category").GetString().Should().NotBeNullOrWhiteSpace();
@@ -174,7 +174,7 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetMarketShare_HandlesMissingPeriod_Gracefully()
     {
-        var result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast", period: "2099-Q4"));
+        JsonElement result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast", period: "2099-Q4"));
 
         // Should not throw — returns empty data for unknown period
         result.GetProperty("total_records").GetInt32().Should().Be(0);
@@ -183,9 +183,9 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetMarketShare_IdentifiesSignificantShareLosses()
     {
-        var result = Parse(_db.GetMarketShare(category: "Spirits"));
+        JsonElement result = Parse(_db.GetMarketShare(category: "Spirits"));
 
-        result.TryGetProperty("significant_share_losses", out var losses).Should().BeTrue();
+        result.TryGetProperty("significant_share_losses", out JsonElement losses).Should().BeTrue();
         losses.GetInt32().Should().BeGreaterThanOrEqualTo(0);
     }
 
@@ -196,12 +196,12 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void DetectCompetitiveThreats_ReturnsThreats()
     {
-        var result = Parse(_db.DetectCompetitiveThreats());
+        JsonElement result = Parse(_db.DetectCompetitiveThreats());
 
         result.GetProperty("total_threats").GetInt32().Should().BeGreaterThanOrEqualTo(0);
-        var threats = result.GetProperty("threats");
+        JsonElement threats = result.GetProperty("threats");
 
-        foreach (var threat in threats.EnumerateArray())
+        foreach (JsonElement threat in threats.EnumerateArray())
         {
             threat.GetProperty("type").GetString().Should().NotBeNullOrWhiteSpace();
         }
@@ -210,12 +210,12 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void DetectCompetitiveThreats_CategorizesBySeverity()
     {
-        var result = Parse(_db.DetectCompetitiveThreats());
+        JsonElement result = Parse(_db.DetectCompetitiveThreats());
 
-        var threats = result.GetProperty("threats");
-        foreach (var threat in threats.EnumerateArray())
+        JsonElement threats = result.GetProperty("threats");
+        foreach (JsonElement threat in threats.EnumerateArray())
         {
-            var severity = threat.GetProperty("severity").GetString();
+            string? severity = threat.GetProperty("severity").GetString();
             severity.Should().BeOneOf("high", "medium",
                 "threat severity should be categorized as high or medium");
         }
@@ -224,12 +224,12 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void DetectCompetitiveThreats_IncludesRecommendation()
     {
-        var result = Parse(_db.DetectCompetitiveThreats());
+        JsonElement result = Parse(_db.DetectCompetitiveThreats());
 
-        var threats = result.GetProperty("threats");
-        foreach (var threat in threats.EnumerateArray())
+        JsonElement threats = result.GetProperty("threats");
+        foreach (JsonElement threat in threats.EnumerateArray())
         {
-            var recommendation = threat.GetProperty("recommendation").GetString();
+            string? recommendation = threat.GetProperty("recommendation").GetString();
             recommendation.Should().BeOneOf("MATCH", "DIFFERENTIATE", "IGNORE", "PREEMPT",
                 "each threat should include a defensive recommendation");
         }
@@ -238,15 +238,15 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void DetectCompetitiveThreats_FiltersByBrand()
     {
-        var result = Parse(_db.DetectCompetitiveThreats(brand: "Sierra Gold Tequila"));
+        JsonElement result = Parse(_db.DetectCompetitiveThreats(brand: "Sierra Gold Tequila"));
 
-        var threats = result.GetProperty("threats");
-        foreach (var threat in threats.EnumerateArray())
+        JsonElement threats = result.GetProperty("threats");
+        foreach (JsonElement threat in threats.EnumerateArray())
         {
             // Price_drop threats have brand; activity threats may have null brand
             if (threat.GetProperty("type").GetString() == "price_drop")
             {
-                var brand = threat.GetProperty("brand").GetString();
+                string? brand = threat.GetProperty("brand").GetString();
                 brand?.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("sierra gold tequila");
             }
         }
@@ -255,10 +255,10 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void DetectCompetitiveThreats_FiltersByCategory()
     {
-        var result = Parse(_db.DetectCompetitiveThreats(category: "Spirits"));
+        JsonElement result = Parse(_db.DetectCompetitiveThreats(category: "Spirits"));
 
-        var threats = result.GetProperty("threats");
-        foreach (var threat in threats.EnumerateArray())
+        JsonElement threats = result.GetProperty("threats");
+        foreach (JsonElement threat in threats.EnumerateArray())
         {
             threat.GetProperty("category").GetString()!.ToLower(System.Globalization.CultureInfo.CurrentCulture).Should().Contain("spirit");
         }
@@ -267,11 +267,11 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void DetectCompetitiveThreats_SeverityCounts_Match()
     {
-        var result = Parse(_db.DetectCompetitiveThreats());
+        JsonElement result = Parse(_db.DetectCompetitiveThreats());
 
-        var high = result.GetProperty("high_severity").GetInt32();
-        var medium = result.GetProperty("medium_severity").GetInt32();
-        var total = result.GetProperty("total_threats").GetInt32();
+        int high = result.GetProperty("high_severity").GetInt32();
+        int medium = result.GetProperty("medium_severity").GetInt32();
+        int total = result.GetProperty("total_threats").GetInt32();
 
         (high + medium).Should().Be(total,
             "high + medium severity counts should equal total threats");
@@ -285,9 +285,9 @@ public class CompetitiveToolTests : IDisposable
     public void GetMarketShare_Returns6QuartersOfData()
     {
         // The DB seeds exactly 6 quarters: 2025-Q1 through 2026-Q2
-        var result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast"));
+        JsonElement result = Parse(_db.GetMarketShare(category: "Spirits", region: "Northeast"));
 
-        var shareData = result.GetProperty("share_data");
+        JsonElement shareData = result.GetProperty("share_data");
         shareData.GetArrayLength().Should().BeGreaterThan(0,
             "should return market share data");
 
@@ -308,11 +308,11 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetMarketShare_PeriodsAreValidQuarterFormat()
     {
-        var result = Parse(_db.GetMarketShare(category: "Spirits"));
+        JsonElement result = Parse(_db.GetMarketShare(category: "Spirits"));
 
-        foreach (var item in result.GetProperty("share_data").EnumerateArray())
+        foreach (JsonElement item in result.GetProperty("share_data").EnumerateArray())
         {
-            var period = item.GetProperty("period").GetString();
+            string? period = item.GetProperty("period").GetString();
             period.Should().MatchRegex(@"^\d{4}-Q[1-4]$",
                 $"period '{period}' should be in yyyy-Qn format");
         }
@@ -325,7 +325,7 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitiveLandscape_ReturnsFullOverview()
     {
-        var result = Parse(_db.GetCompetitiveLandscape("Spirits", "Northeast"));
+        JsonElement result = Parse(_db.GetCompetitiveLandscape("Spirits", "Northeast"));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
 
@@ -339,7 +339,7 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitiveLandscape_MissingCategory_ReturnsError()
     {
-        var result = Parse(_db.GetCompetitiveLandscape("", "Northeast"));
+        JsonElement result = Parse(_db.GetCompetitiveLandscape("", "Northeast"));
 
         result.TryGetProperty("error", out _).Should().BeTrue(
             "empty category should return an error");
@@ -348,7 +348,7 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitiveLandscape_MissingRegion_ReturnsError()
     {
-        var result = Parse(_db.GetCompetitiveLandscape("Spirits", ""));
+        JsonElement result = Parse(_db.GetCompetitiveLandscape("Spirits", ""));
 
         result.TryGetProperty("error", out _).Should().BeTrue(
             "empty region should return an error");
@@ -357,7 +357,7 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitiveLandscape_UnknownCategory_ReturnsEmptyPlayers()
     {
-        var result = Parse(_db.GetCompetitiveLandscape("AlienTechnology", "Northeast"));
+        JsonElement result = Parse(_db.GetCompetitiveLandscape("AlienTechnology", "Northeast"));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
         result.GetProperty("total_players").GetInt32().Should().Be(0);
@@ -366,7 +366,7 @@ public class CompetitiveToolTests : IDisposable
     [Fact]
     public void GetCompetitiveLandscape_IncludesOurBrandsAndCompetitors()
     {
-        var result = Parse(_db.GetCompetitiveLandscape("Spirits", "Northeast"));
+        JsonElement result = Parse(_db.GetCompetitiveLandscape("Spirits", "Northeast"));
 
         result.TryGetProperty("our_brands", out _).Should().BeTrue(
             "landscape should identify our brands");

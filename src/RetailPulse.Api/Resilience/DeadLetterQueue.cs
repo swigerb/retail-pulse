@@ -33,7 +33,7 @@ public sealed class DeadLetterQueue : IDisposable
 
     private void InitializeDatabase()
     {
-        using var cmd = _db.CreateCommand();
+        using SqliteCommand cmd = _db.CreateCommand();
         cmd.CommandText = """
             CREATE TABLE IF NOT EXISTS dead_letters (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +71,7 @@ public sealed class DeadLetterQueue : IDisposable
 
     private async Task PersistAsync(DeadLetterEntry entry, CancellationToken ct)
     {
-        await using var cmd = _db.CreateCommand();
+        await using SqliteCommand cmd = _db.CreateCommand();
         cmd.CommandText = """
             INSERT INTO dead_letters (timestamp, operation, payload, error, retry_count, status)
             VALUES (@ts, @op, @payload, @err, @retry, 'pending')
@@ -87,11 +87,11 @@ public sealed class DeadLetterQueue : IDisposable
     public async Task<IReadOnlyList<DeadLetterEntry>> GetPendingAsync(int limit = 50, CancellationToken ct = default)
     {
         var entries = new List<DeadLetterEntry>();
-        await using var cmd = _db.CreateCommand();
+        await using SqliteCommand cmd = _db.CreateCommand();
         cmd.CommandText = "SELECT id, timestamp, operation, payload, error, retry_count FROM dead_letters WHERE status = 'pending' ORDER BY id LIMIT @limit";
         cmd.Parameters.AddWithValue("@limit", limit);
 
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        await using SqliteDataReader reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
             entries.Add(new DeadLetterEntry
@@ -110,7 +110,7 @@ public sealed class DeadLetterQueue : IDisposable
 
     public async Task MarkReplayedAsync(long id, CancellationToken ct = default)
     {
-        await using var cmd = _db.CreateCommand();
+        await using SqliteCommand cmd = _db.CreateCommand();
         cmd.CommandText = "UPDATE dead_letters SET status = 'replayed' WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", id);
         await cmd.ExecuteNonQueryAsync(ct);
@@ -118,7 +118,7 @@ public sealed class DeadLetterQueue : IDisposable
 
     public async Task MarkFailedAsync(long id, CancellationToken ct = default)
     {
-        await using var cmd = _db.CreateCommand();
+        await using SqliteCommand cmd = _db.CreateCommand();
         cmd.CommandText = "UPDATE dead_letters SET retry_count = retry_count + 1 WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", id);
         await cmd.ExecuteNonQueryAsync(ct);
@@ -126,9 +126,9 @@ public sealed class DeadLetterQueue : IDisposable
 
     public async Task<int> GetPendingCountAsync(CancellationToken ct = default)
     {
-        await using var cmd = _db.CreateCommand();
+        await using SqliteCommand cmd = _db.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM dead_letters WHERE status = 'pending'";
-        var result = await cmd.ExecuteScalarAsync(ct);
+        object? result = await cmd.ExecuteScalarAsync(ct);
         return Convert.ToInt32(result, CultureInfo.InvariantCulture);
     }
 

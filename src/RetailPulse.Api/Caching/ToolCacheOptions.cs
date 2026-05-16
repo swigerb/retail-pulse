@@ -26,7 +26,7 @@ public class ToolCacheOptions
     };
 
     public TimeSpan GetTtl(string toolName) =>
-        ToolTtls.TryGetValue(toolName, out var minutes)
+        ToolTtls.TryGetValue(toolName, out int minutes)
             ? TimeSpan.FromMinutes(minutes)
             : TimeSpan.FromMinutes(DefaultTtlMinutes);
 }

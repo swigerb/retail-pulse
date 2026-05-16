@@ -53,7 +53,7 @@ public class ApprovalTool
         try
         {
             // Create the approval request
-            var request = await _gate.RequestApprovalAsync(context, cancellationToken);
+            ApprovalRequest request = await _gate.RequestApprovalAsync(context, cancellationToken);
 
             _logger.LogInformation(
                 "Approval tool created request {RequestId} for action: {Action}",
@@ -76,7 +76,7 @@ public class ApprovalTool
                 });
 
             // Block until the human responds or timeout
-            var result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: null, cancellationToken);
+            ApprovalResult result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: null, cancellationToken);
 
             // Push resolution notification
             await _hubContext.Clients.All.SendAsync(

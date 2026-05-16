@@ -25,8 +25,8 @@ public class EstimateROITool
     {
         try
         {
-            var url = $"/api/promo/estimate-roi?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&promoType={Uri.EscapeDataString(promoType)}&spend={spend}&durationWeeks={durationWeeks}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/promo/estimate-roi?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&promoType={Uri.EscapeDataString(promoType)}&spend={spend}&durationWeeks={durationWeeks}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

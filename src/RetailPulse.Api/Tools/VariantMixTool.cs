@@ -22,11 +22,11 @@ public class VariantMixTool
     {
         try
         {
-            var url = $"/api/variant-mix?brand={Uri.EscapeDataString(brand)}";
+            string url = $"/api/variant-mix?brand={Uri.EscapeDataString(brand)}";
             if (!string.IsNullOrWhiteSpace(region))
                 url += $"&region={Uri.EscapeDataString(region)}";
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

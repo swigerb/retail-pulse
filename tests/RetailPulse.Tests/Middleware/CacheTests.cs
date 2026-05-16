@@ -24,11 +24,11 @@ public class CacheTests
     [Fact]
     public async Task SetThenGet_ReturnsCachedResponse()
     {
-        var cache = CreateCache();
-        var response = MakeResponse("Hello world");
+        InMemoryResponseCache cache = CreateCache();
+        CachedResponse response = MakeResponse("Hello world");
         await cache.SetAsync("key-1", response);
 
-        var result = await cache.GetAsync("key-1");
+        CachedResponse? result = await cache.GetAsync("key-1");
 
         result.Should().NotBeNull();
         result.Response.Should().Be("Hello world");
@@ -37,9 +37,9 @@ public class CacheTests
     [Fact]
     public async Task Get_NonexistentKey_ReturnsNull()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
 
-        var result = await cache.GetAsync("nonexistent");
+        CachedResponse? result = await cache.GetAsync("nonexistent");
 
         result.Should().BeNull();
     }
@@ -47,11 +47,11 @@ public class CacheTests
     [Fact]
     public async Task Set_OverwritesExistingEntry()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
         await cache.SetAsync("key-1", MakeResponse("first"));
         await cache.SetAsync("key-1", MakeResponse("second"));
 
-        var result = await cache.GetAsync("key-1");
+        CachedResponse? result = await cache.GetAsync("key-1");
 
         result.Should().NotBeNull();
         result.Response.Should().Be("second");
@@ -64,22 +64,22 @@ public class CacheTests
     [Fact]
     public async Task Get_ExpiredEntry_ReturnsNull()
     {
-        var cache = CreateCache(ttl: TimeSpan.FromMilliseconds(1));
+        InMemoryResponseCache cache = CreateCache(ttl: TimeSpan.FromMilliseconds(1));
         await cache.SetAsync("key-1", MakeResponse());
 
         await Task.Delay(50); // ensure TTL has passed
 
-        var result = await cache.GetAsync("key-1");
+        CachedResponse? result = await cache.GetAsync("key-1");
         result.Should().BeNull();
     }
 
     [Fact]
     public async Task Get_NonExpiredEntry_ReturnsValue()
     {
-        var cache = CreateCache(ttl: TimeSpan.FromMinutes(10));
+        InMemoryResponseCache cache = CreateCache(ttl: TimeSpan.FromMinutes(10));
         await cache.SetAsync("key-1", MakeResponse("fresh"));
 
-        var result = await cache.GetAsync("key-1");
+        CachedResponse? result = await cache.GetAsync("key-1");
 
         result.Should().NotBeNull();
         result.Response.Should().Be("fresh");
@@ -88,13 +88,13 @@ public class CacheTests
     [Fact]
     public async Task Set_CustomTtlOverridesDefault()
     {
-        var cache = CreateCache(ttl: TimeSpan.FromMinutes(10));
+        InMemoryResponseCache cache = CreateCache(ttl: TimeSpan.FromMinutes(10));
         // Set with very short TTL override
         await cache.SetAsync("key-1", MakeResponse(), ttl: TimeSpan.FromMilliseconds(1));
 
         await Task.Delay(50);
 
-        var result = await cache.GetAsync("key-1");
+        CachedResponse? result = await cache.GetAsync("key-1");
         result.Should().BeNull();
     }
 
@@ -105,7 +105,7 @@ public class CacheTests
     [Fact]
     public async Task LruEviction_WhenMaxEntriesExceeded_RemovesOldest()
     {
-        var cache = CreateCache(maxEntries: 3);
+        InMemoryResponseCache cache = CreateCache(maxEntries: 3);
 
         await cache.SetAsync("key-1", MakeResponse("first"));
         await cache.SetAsync("key-2", MakeResponse("second"));
@@ -113,8 +113,8 @@ public class CacheTests
         // This should evict key-1 (oldest, least recently used)
         await cache.SetAsync("key-4", MakeResponse("fourth"));
 
-        var evicted = await cache.GetAsync("key-1");
-        var retained = await cache.GetAsync("key-4");
+        CachedResponse? evicted = await cache.GetAsync("key-1");
+        CachedResponse? retained = await cache.GetAsync("key-4");
 
         evicted.Should().BeNull();
         retained.Should().NotBeNull();
@@ -123,7 +123,7 @@ public class CacheTests
     [Fact]
     public async Task LruEviction_AccessPromotesEntry()
     {
-        var cache = CreateCache(maxEntries: 3);
+        InMemoryResponseCache cache = CreateCache(maxEntries: 3);
 
         await cache.SetAsync("key-1", MakeResponse("first"));
         await cache.SetAsync("key-2", MakeResponse("second"));
@@ -135,8 +135,8 @@ public class CacheTests
         // key-2 is now the LRU, should be evicted
         await cache.SetAsync("key-4", MakeResponse("fourth"));
 
-        var promoted = await cache.GetAsync("key-1");
-        var evicted = await cache.GetAsync("key-2");
+        CachedResponse? promoted = await cache.GetAsync("key-1");
+        CachedResponse? evicted = await cache.GetAsync("key-2");
 
         promoted.Should().NotBeNull("key-1 was promoted by access");
         evicted.Should().BeNull("key-2 was LRU and should be evicted");
@@ -149,7 +149,7 @@ public class CacheTests
     [Fact]
     public async Task Invalidate_NullPattern_ClearsAll()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
         await cache.SetAsync("key-1", MakeResponse());
         await cache.SetAsync("key-2", MakeResponse());
 
@@ -162,7 +162,7 @@ public class CacheTests
     [Fact]
     public async Task Invalidate_WithPattern_ClearsMatchingOnly()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
         await cache.SetAsync("agent:general:query1", MakeResponse("gen1"));
         await cache.SetAsync("agent:general:query2", MakeResponse("gen2"));
         await cache.SetAsync("agent:demand:query1", MakeResponse("dem1"));
@@ -177,7 +177,7 @@ public class CacheTests
     [Fact]
     public async Task Invalidate_NoMatchingPattern_LeavesAllIntact()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
         await cache.SetAsync("key-1", MakeResponse());
 
         await cache.InvalidateAsync("nonexistent");
@@ -192,48 +192,48 @@ public class CacheTests
     [Fact]
     public async Task Stats_TracksHitsAccurately()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
         await cache.SetAsync("key-1", MakeResponse());
 
         await cache.GetAsync("key-1"); // hit
         await cache.GetAsync("key-1"); // hit
 
-        var stats = await cache.GetStatsAsync();
+        CacheStats stats = await cache.GetStatsAsync();
         stats.Hits.Should().Be(2);
     }
 
     [Fact]
     public async Task Stats_TracksMissesAccurately()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
 
         await cache.GetAsync("missing-1"); // miss
         await cache.GetAsync("missing-2"); // miss
         await cache.GetAsync("missing-3"); // miss
 
-        var stats = await cache.GetStatsAsync();
+        CacheStats stats = await cache.GetStatsAsync();
         stats.Misses.Should().Be(3);
     }
 
     [Fact]
     public async Task Stats_HitRate_CalculatedCorrectly()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
         await cache.SetAsync("key-1", MakeResponse());
 
         await cache.GetAsync("key-1");   // hit
         await cache.GetAsync("missing"); // miss
 
-        var stats = await cache.GetStatsAsync();
+        CacheStats stats = await cache.GetStatsAsync();
         stats.HitRate.Should().BeApproximately(0.5, 0.01);
     }
 
     [Fact]
     public async Task Stats_EmptyCache_ZeroHitRate()
     {
-        var cache = CreateCache();
+        InMemoryResponseCache cache = CreateCache();
 
-        var stats = await cache.GetStatsAsync();
+        CacheStats stats = await cache.GetStatsAsync();
         stats.HitRate.Should().Be(0);
         stats.TotalEntries.Should().Be(0);
     }
@@ -245,12 +245,12 @@ public class CacheTests
     [Fact]
     public async Task ConcurrentSetGet_DoesNotCorrupt()
     {
-        var cache = CreateCache(maxEntries: 500);
+        InMemoryResponseCache cache = CreateCache(maxEntries: 500);
         var tasks = new List<Task>();
 
         for (int i = 0; i < 100; i++)
         {
-            var key = $"concurrent-{i}";
+            string key = $"concurrent-{i}";
             tasks.Add(cache.SetAsync(key, MakeResponse($"value-{i}")));
         }
         await Task.WhenAll(tasks);
@@ -260,31 +260,28 @@ public class CacheTests
         for (int i = 0; i < 100; i++)
             reads.Add(cache.GetAsync($"concurrent-{i}"));
 
-        var results = await Task.WhenAll(reads);
+        CachedResponse?[] results = await Task.WhenAll(reads);
         results.Count(r => r is not null).Should().Be(100);
     }
 
     [Fact]
     public async Task ConcurrentSetGet_MixedOperations_NoCrash()
     {
-        var cache = CreateCache(maxEntries: 50);
+        InMemoryResponseCache cache = CreateCache(maxEntries: 50);
         var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var tasks = new List<Task>();
 
         // Writers
         for (int i = 0; i < 50; i++)
         {
-            var idx = i;
-            tasks.Add(Task.Run(async () =>
-            {
-                await cache.SetAsync($"key-{idx}", MakeResponse($"val-{idx}"));
-            }, cts.Token));
+            int idx = i;
+            tasks.Add(Task.Run(async () => await cache.SetAsync($"key-{idx}", MakeResponse($"val-{idx}")), cts.Token));
         }
 
         // Readers
         for (int i = 0; i < 50; i++)
         {
-            var idx = i;
+            int idx = i;
             tasks.Add(Task.Run(async () =>
             {
                 await cache.GetAsync($"key-{idx}");
@@ -302,8 +299,8 @@ public class CacheTests
     [Fact]
     public void GenerateCacheKey_SameInput_ProducesSameKey()
     {
-        var key1 = InMemoryResponseCache.GenerateCacheKey("general", "What is brand X?");
-        var key2 = InMemoryResponseCache.GenerateCacheKey("general", "What is brand X?");
+        string key1 = InMemoryResponseCache.GenerateCacheKey("general", "What is brand X?");
+        string key2 = InMemoryResponseCache.GenerateCacheKey("general", "What is brand X?");
 
         key1.Should().Be(key2);
     }
@@ -311,8 +308,8 @@ public class CacheTests
     [Fact]
     public void GenerateCacheKey_DifferentAgents_SameQuery_DifferentKeys()
     {
-        var key1 = InMemoryResponseCache.GenerateCacheKey("general", "What is brand X?");
-        var key2 = InMemoryResponseCache.GenerateCacheKey("demand-forecasting", "What is brand X?");
+        string key1 = InMemoryResponseCache.GenerateCacheKey("general", "What is brand X?");
+        string key2 = InMemoryResponseCache.GenerateCacheKey("demand-forecasting", "What is brand X?");
 
         key1.Should().NotBe(key2);
     }
@@ -320,8 +317,8 @@ public class CacheTests
     [Fact]
     public void GenerateCacheKey_NormalizedCase_ProducesSameKey()
     {
-        var key1 = InMemoryResponseCache.GenerateCacheKey("general", "What Is Brand X?");
-        var key2 = InMemoryResponseCache.GenerateCacheKey("general", "what is brand x?");
+        string key1 = InMemoryResponseCache.GenerateCacheKey("general", "What Is Brand X?");
+        string key2 = InMemoryResponseCache.GenerateCacheKey("general", "what is brand x?");
 
         key1.Should().Be(key2);
     }
@@ -329,8 +326,8 @@ public class CacheTests
     [Fact]
     public void GenerateCacheKey_TrimmedWhitespace_ProducesSameKey()
     {
-        var key1 = InMemoryResponseCache.GenerateCacheKey("general", "  What is brand X?  ");
-        var key2 = InMemoryResponseCache.GenerateCacheKey("general", "What is brand X?");
+        string key1 = InMemoryResponseCache.GenerateCacheKey("general", "  What is brand X?  ");
+        string key2 = InMemoryResponseCache.GenerateCacheKey("general", "What is brand X?");
 
         key1.Should().Be(key2);
     }
@@ -338,7 +335,7 @@ public class CacheTests
     [Fact]
     public void GenerateCacheKey_IsSha256HexString()
     {
-        var key = InMemoryResponseCache.GenerateCacheKey("general", "test query");
+        string key = InMemoryResponseCache.GenerateCacheKey("general", "test query");
 
         // SHA256 produces 64 hex characters
         key.Should().HaveLength(64);

@@ -17,7 +17,7 @@ public class TelemetryFormatterTests
     [InlineData(120500, "120.5s")]
     public void FormatDuration_ReturnsCorrectFormat(double durationMs, string expected)
     {
-        var result = TelemetryFormatter.FormatDuration(durationMs);
+        string result = TelemetryFormatter.FormatDuration(durationMs);
 
         result.Should().Be(expected);
     }
@@ -35,7 +35,7 @@ public class TelemetryFormatterTests
     [InlineData("", "•")]
     public void GetSpanIcon_ReturnsCorrectIcon(string spanType, string expectedIcon)
     {
-        var result = TelemetryFormatter.GetSpanIcon(spanType);
+        string result = TelemetryFormatter.GetSpanIcon(spanType);
 
         result.Should().Be(expectedIcon);
     }
@@ -52,7 +52,7 @@ public class TelemetryFormatterTests
     [InlineData("custom_type", "CUSTOM_TYPE")]
     public void GetTypeBadge_ReturnsCorrectBadge(string spanType, string expected)
     {
-        var result = TelemetryFormatter.GetTypeBadge(spanType);
+        string result = TelemetryFormatter.GetTypeBadge(spanType);
 
         result.Should().Be(expected);
     }
@@ -64,7 +64,7 @@ public class TelemetryFormatterTests
     [InlineData(null, 10, "")]
     public void TruncateName_ShortNames_ReturnsUnchanged(string? name, int maxLength, string expected)
     {
-        var result = TelemetryFormatter.TruncateName(name!, maxLength);
+        string result = TelemetryFormatter.TruncateName(name!, maxLength);
 
         result.Should().Be(expected);
     }
@@ -72,10 +72,10 @@ public class TelemetryFormatterTests
     [Fact]
     public void TruncateName_LongName_AddsEllipsis()
     {
-        var longName = "This is a very long function name that exceeds the limit";
-        var maxLength = 30;
+        string longName = "This is a very long function name that exceeds the limit";
+        int maxLength = 30;
 
-        var result = TelemetryFormatter.TruncateName(longName, maxLength);
+        string result = TelemetryFormatter.TruncateName(longName, maxLength);
 
         result.Should().HaveLength(30);
         result.Should().EndWith("…");
@@ -88,7 +88,7 @@ public class TelemetryFormatterTests
     [InlineData(null, 60, "")]
     public void TruncateDetail_ShortText_ReturnsUnchanged(string? detail, int maxLength, string expected)
     {
-        var result = TelemetryFormatter.TruncateDetail(detail, maxLength);
+        string result = TelemetryFormatter.TruncateDetail(detail, maxLength);
 
         result.Should().Be(expected);
     }
@@ -96,9 +96,9 @@ public class TelemetryFormatterTests
     [Fact]
     public void TruncateDetail_WithNewlines_ReplacesWithSpaces()
     {
-        var detailWithNewlines = "Line 1\nLine 2\r\nLine 3";
+        string detailWithNewlines = "Line 1\nLine 2\r\nLine 3";
 
-        var result = TelemetryFormatter.TruncateDetail(detailWithNewlines, 100);
+        string result = TelemetryFormatter.TruncateDetail(detailWithNewlines, 100);
 
         result.Should().NotContain("\n");
         result.Should().NotContain("\r\n");
@@ -108,10 +108,10 @@ public class TelemetryFormatterTests
     [Fact]
     public void TruncateDetail_LongText_TruncatesAndAddsEllipsis()
     {
-        var longDetail = "This is a very detailed message that goes on for quite a while and should be truncated";
-        var maxLength = 50;
+        string longDetail = "This is a very detailed message that goes on for quite a while and should be truncated";
+        int maxLength = 50;
 
-        var result = TelemetryFormatter.TruncateDetail(longDetail, maxLength);
+        string result = TelemetryFormatter.TruncateDetail(longDetail, maxLength);
 
         result.Should().HaveLength(50);
         result.Should().EndWith("…");
@@ -125,7 +125,7 @@ public class TelemetryFormatterTests
     [InlineData(0, 100, 5)] // Minimum 5%
     public void CalculateWaterfallWidth_ReturnsCorrectPercentage(double spanDuration, double maxDuration, int expectedMin)
     {
-        var result = TelemetryFormatter.CalculateWaterfallWidth(spanDuration, maxDuration);
+        int result = TelemetryFormatter.CalculateWaterfallWidth(spanDuration, maxDuration);
 
         result.Should().BeGreaterThanOrEqualTo(expectedMin);
         result.Should().BeLessThanOrEqualTo(100);
@@ -134,7 +134,7 @@ public class TelemetryFormatterTests
     [Fact]
     public void CalculateWaterfallWidth_ZeroMaxDuration_ReturnsZero()
     {
-        var result = TelemetryFormatter.CalculateWaterfallWidth(50, 0);
+        int result = TelemetryFormatter.CalculateWaterfallWidth(50, 0);
 
         result.Should().Be(0);
     }
@@ -142,7 +142,7 @@ public class TelemetryFormatterTests
     [Fact]
     public void CalculateWaterfallWidth_NegativeMaxDuration_ReturnsZero()
     {
-        var result = TelemetryFormatter.CalculateWaterfallWidth(50, -100);
+        int result = TelemetryFormatter.CalculateWaterfallWidth(50, -100);
 
         result.Should().Be(0);
     }

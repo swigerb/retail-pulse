@@ -35,7 +35,7 @@ public class AsyncSqliteApprovalTests : IDisposable
     [Fact]
     public async Task RequestApprovalAsync_IsNonBlocking()
     {
-        var request = await _gate.RequestApprovalAsync(MakeContext());
+        ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
 
         request.Should().NotBeNull();
         request.RequestId.Should().NotBeNullOrEmpty();
@@ -44,8 +44,8 @@ public class AsyncSqliteApprovalTests : IDisposable
     [Fact]
     public async Task GetResultAsync_ReturnsAsyncResult()
     {
-        var request = await _gate.RequestApprovalAsync(MakeContext());
-        var result = await _gate.GetResultAsync(request.RequestId);
+        ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
+        ApprovalResult result = await _gate.GetResultAsync(request.RequestId);
 
         result.Decision.Should().Be(ApprovalDecision.Pending);
     }
@@ -53,10 +53,10 @@ public class AsyncSqliteApprovalTests : IDisposable
     [Fact]
     public async Task RespondAsync_PersistsDecisionAsynchronously()
     {
-        var request = await _gate.RequestApprovalAsync(MakeContext());
+        ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
         await _gate.RespondAsync(request.RequestId, ApprovalDecision.Approved, "Looks good");
 
-        var result = await _gate.GetResultAsync(request.RequestId);
+        ApprovalResult result = await _gate.GetResultAsync(request.RequestId);
         result.Decision.Should().Be(ApprovalDecision.Approved);
         result.Comment.Should().Be("Looks good");
     }
@@ -67,17 +67,17 @@ public class AsyncSqliteApprovalTests : IDisposable
         await _gate.RequestApprovalAsync(MakeContext("Pending 1"));
         await _gate.RequestApprovalAsync(MakeContext("Pending 2"));
 
-        var pending = await _gate.GetPendingAsync("user-1");
+        IReadOnlyList<ApprovalRequest> pending = await _gate.GetPendingAsync("user-1");
         pending.Should().HaveCount(2);
     }
 
     [Fact]
     public async Task GetHistoryAsync_ReturnsAsyncResults()
     {
-        var r = await _gate.RequestApprovalAsync(MakeContext("Historic"));
+        ApprovalRequest r = await _gate.RequestApprovalAsync(MakeContext("Historic"));
         await _gate.RespondAsync(r.RequestId, ApprovalDecision.Rejected);
 
-        var history = await _gate.GetHistoryAsync();
+        IReadOnlyList<ApprovalRequest> history = await _gate.GetHistoryAsync();
         history.Should().HaveCount(1);
     }
 
@@ -87,14 +87,14 @@ public class AsyncSqliteApprovalTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var act = () => _gate.RequestApprovalAsync(MakeContext(), cts.Token);
+        Func<Task<ApprovalRequest>> act = () => _gate.RequestApprovalAsync(MakeContext(), cts.Token);
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
     public async Task WaitForApprovalAsync_UsesExponentialBackoff()
     {
-        var request = await _gate.RequestApprovalAsync(MakeContext());
+        ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
 
         // Respond after a short delay
         _ = Task.Run(async () =>
@@ -103,18 +103,18 @@ public class AsyncSqliteApprovalTests : IDisposable
             await _gate.RespondAsync(request.RequestId, ApprovalDecision.Approved);
         });
 
-        var result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: TimeSpan.FromSeconds(5));
+        ApprovalResult result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: TimeSpan.FromSeconds(5));
         result.Decision.Should().Be(ApprovalDecision.Approved);
     }
 
     [Fact]
     public async Task WaitForApprovalAsync_TimesOut_WithBackoff()
     {
-        var request = await _gate.RequestApprovalAsync(MakeContext());
+        ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
 
-        var start = DateTimeOffset.UtcNow;
-        var result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: TimeSpan.FromMilliseconds(300));
-        var elapsed = DateTimeOffset.UtcNow - start;
+        DateTimeOffset start = DateTimeOffset.UtcNow;
+        ApprovalResult result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: TimeSpan.FromMilliseconds(300));
+        TimeSpan elapsed = DateTimeOffset.UtcNow - start;
 
         result.Decision.Should().Be(ApprovalDecision.TimedOut);
         // Should complete reasonably close to timeout (backoff starts at 250ms)

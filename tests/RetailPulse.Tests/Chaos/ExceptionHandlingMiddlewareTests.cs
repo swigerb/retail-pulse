@@ -28,7 +28,7 @@ public class ExceptionHandlingMiddlewareTests
         context.Response.ContentType.Should().Be("application/problem+json");
 
         context.Response.Body.Seek(0, SeekOrigin.Begin);
-        var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
+        string body = await new StreamReader(context.Response.Body).ReadToEndAsync();
         var problem = JsonDocument.Parse(body);
         problem.RootElement.GetProperty("correlationId").GetString().Should().NotBeNullOrEmpty();
         problem.RootElement.GetProperty("status").GetInt32().Should().Be(500);
@@ -50,7 +50,7 @@ public class ExceptionHandlingMiddlewareTests
         context.Response.StatusCode.Should().Be(400);
 
         context.Response.Body.Seek(0, SeekOrigin.Begin);
-        var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
+        string body = await new StreamReader(context.Response.Body).ReadToEndAsync();
         var problem = JsonDocument.Parse(body);
         problem.RootElement.GetProperty("errorCategory").GetString().Should().Be("User");
         problem.RootElement.GetProperty("detail").GetString().Should().Contain("Invalid input");
@@ -71,7 +71,7 @@ public class ExceptionHandlingMiddlewareTests
         context.Response.StatusCode.Should().Be(503);
 
         context.Response.Body.Seek(0, SeekOrigin.Begin);
-        var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
+        string body = await new StreamReader(context.Response.Body).ReadToEndAsync();
         var problem = JsonDocument.Parse(body);
         problem.RootElement.GetProperty("errorCategory").GetString().Should().Be("Transient");
     }
@@ -107,7 +107,7 @@ public class ExceptionHandlingMiddlewareTests
         await middleware.InvokeAsync(context);
 
         context.Response.Body.Seek(0, SeekOrigin.Begin);
-        var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
+        string body = await new StreamReader(context.Response.Body).ReadToEndAsync();
         body.Should().Contain("test-correlation-123");
     }
 }

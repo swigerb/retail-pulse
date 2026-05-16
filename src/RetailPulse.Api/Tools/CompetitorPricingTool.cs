@@ -24,13 +24,13 @@ public class CompetitorPricingTool
     {
         try
         {
-            var url = "/api/competitive/pricing?";
+            string url = "/api/competitive/pricing?";
             if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
             if (!string.IsNullOrWhiteSpace(category)) url += $"&category={Uri.EscapeDataString(category)}";
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
             if (!string.IsNullOrWhiteSpace(competitors)) url += $"&competitors={Uri.EscapeDataString(competitors)}";
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

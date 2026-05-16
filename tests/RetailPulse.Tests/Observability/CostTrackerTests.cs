@@ -21,7 +21,7 @@ public class CostTrackerTests
 
     private static InMemoryCostTracker CreateTrackerWithPricing()
     {
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["TokenPricing:gpt-5.4-mini:InputPerMillion"] = "0.15",
@@ -43,7 +43,7 @@ public class CostTrackerTests
         await _tracker.TrackUsageAsync(MakeEvent("agent-1", "gpt-5.4-mini", 100, 50));
         await _tracker.TrackUsageAsync(MakeEvent("agent-1", "gpt-5.4-mini", 200, 100));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.TotalTokens.Should().Be(450); // 100+50+200+100
         summary.RequestCount.Should().Be(2);
@@ -59,7 +59,7 @@ public class CostTrackerTests
         // gpt-5.4-mini: $0.15/1M input, $0.60/1M output
         await _tracker.TrackUsageAsync(MakeEvent("agent-1", "gpt-5.4-mini", 1_000_000, 1_000_000));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.TotalCost.Should().Be(0.15m + 0.60m); // $0.75
     }
@@ -70,7 +70,7 @@ public class CostTrackerTests
         // gpt-4o: $2.50/1M input, $10.00/1M output
         await _tracker.TrackUsageAsync(MakeEvent("agent-1", "gpt-4o", 1_000_000, 1_000_000));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.TotalCost.Should().Be(2.50m + 10.00m); // $12.50
     }
@@ -81,7 +81,7 @@ public class CostTrackerTests
         // claude-sonnet: $3.00/1M input, $15.00/1M output
         await _tracker.TrackUsageAsync(MakeEvent("agent-1", "claude-sonnet", 1_000_000, 1_000_000));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.TotalCost.Should().Be(3.00m + 15.00m); // $18.00
     }
@@ -92,7 +92,7 @@ public class CostTrackerTests
         // Unknown model: $1.00/1M input, $5.00/1M output (default)
         await _tracker.TrackUsageAsync(MakeEvent("agent-1", "unknown-model-xyz", 1_000_000, 1_000_000));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.TotalCost.Should().Be(1.00m + 5.00m); // $6.00 (default)
     }
@@ -103,7 +103,7 @@ public class CostTrackerTests
         // 1000 tokens of gpt-5.4-mini input: 1000/1M * $0.15 = $0.00015
         await _tracker.TrackUsageAsync(MakeEvent("agent-1", "gpt-5.4-mini", 1000, 0));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.TotalCost.Should().Be(0.00015m);
     }
@@ -120,7 +120,7 @@ public class CostTrackerTests
         // Old event (8 days ago)
         await _tracker.TrackUsageAsync(MakeEvent("agent-2", "gpt-4o", 1000, 1000, DateTime.UtcNow.AddDays(-8)));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.Today);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.Today);
 
         summary.RequestCount.Should().Be(1);
         summary.TotalTokens.Should().Be(1000); // 500+500
@@ -133,7 +133,7 @@ public class CostTrackerTests
         await _tracker.TrackUsageAsync(MakeEvent("a2", "gpt-4o", 100, 100, DateTime.UtcNow.AddDays(-3)));
         await _tracker.TrackUsageAsync(MakeEvent("a3", "gpt-4o", 100, 100, DateTime.UtcNow.AddDays(-10)));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.Week);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.Week);
 
         summary.RequestCount.Should().Be(2); // Today and 3 days ago
     }
@@ -145,7 +145,7 @@ public class CostTrackerTests
         await _tracker.TrackUsageAsync(MakeEvent("a2", "gpt-4o", 100, 100, DateTime.UtcNow.AddDays(-15)));
         await _tracker.TrackUsageAsync(MakeEvent("a3", "gpt-4o", 100, 100, DateTime.UtcNow.AddDays(-45)));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.Month);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.Month);
 
         summary.RequestCount.Should().Be(2); // Today and 15 days ago
     }
@@ -156,7 +156,7 @@ public class CostTrackerTests
         await _tracker.TrackUsageAsync(MakeEvent("a1", "gpt-4o", 100, 100, DateTime.UtcNow));
         await _tracker.TrackUsageAsync(MakeEvent("a2", "gpt-4o", 100, 100, DateTime.UtcNow.AddDays(-365)));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.RequestCount.Should().Be(2);
     }
@@ -173,7 +173,7 @@ public class CostTrackerTests
         // Agent-2: cheap model
         await _tracker.TrackUsageAsync(MakeEvent("agent-2", "gpt-5.4-mini", 100_000, 100_000));
 
-        var agents = await _tracker.GetByAgentAsync(CostPeriod.All);
+        IReadOnlyList<AgentCostBreakdown> agents = await _tracker.GetByAgentAsync(CostPeriod.All);
 
         agents.Should().HaveCount(2);
         agents[0].AgentId.Should().Be("agent-1"); // claude-sonnet is more expensive
@@ -187,7 +187,7 @@ public class CostTrackerTests
         await _tracker.TrackUsageAsync(new UsageEvent("agent-1", "gpt-4o", 100, 50, "GetDepletions", DateTime.UtcNow));
         await _tracker.TrackUsageAsync(new UsageEvent("agent-1", "gpt-4o", 100, 50, "CreateChart", DateTime.UtcNow));
 
-        var agents = await _tracker.GetByAgentAsync(CostPeriod.All);
+        IReadOnlyList<AgentCostBreakdown> agents = await _tracker.GetByAgentAsync(CostPeriod.All);
 
         agents.Should().HaveCount(1);
         agents[0].TopTool.Should().Be("GetDepletions");
@@ -200,15 +200,15 @@ public class CostTrackerTests
     [Fact]
     public async Task GetTrend_ReturnsDailyAggregates()
     {
-        var today = DateTime.UtcNow.Date;
+        DateTime today = DateTime.UtcNow.Date;
         await _tracker.TrackUsageAsync(MakeEvent("a1", "gpt-4o", 100, 50, today.AddHours(10)));
         await _tracker.TrackUsageAsync(MakeEvent("a1", "gpt-4o", 200, 100, today.AddHours(14)));
 
-        var trend = await _tracker.GetTrendAsync(days: 3);
+        CostTrend trend = await _tracker.GetTrendAsync(days: 3);
 
         trend.Days.Should().HaveCount(3);
         // The last day (today) should have 2 events
-        var todayEntry = trend.Days.FirstOrDefault(d => d.Date == today);
+        DailyCost? todayEntry = trend.Days.FirstOrDefault(d => d.Date == today);
         todayEntry.Should().NotBeNull();
         todayEntry.Tokens.Should().Be(450); // 100+50+200+100
     }
@@ -216,7 +216,7 @@ public class CostTrackerTests
     [Fact]
     public async Task GetTrend_NoDays_EmptyBucketsReturned()
     {
-        var trend = await _tracker.GetTrendAsync(days: 5);
+        CostTrend trend = await _tracker.GetTrendAsync(days: 5);
 
         trend.Days.Should().HaveCount(5);
         trend.Days.Should().AllSatisfy(d => d.Cost.Should().Be(0));
@@ -229,7 +229,7 @@ public class CostTrackerTests
     [Fact]
     public async Task EmptyTracker_GetSummary_ReturnsZeroValues()
     {
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         summary.TotalTokens.Should().Be(0);
         summary.TotalCost.Should().Be(0);
@@ -239,7 +239,7 @@ public class CostTrackerTests
     [Fact]
     public async Task EmptyTracker_GetByAgent_ReturnsEmptyList()
     {
-        var agents = await _tracker.GetByAgentAsync(CostPeriod.All);
+        IReadOnlyList<AgentCostBreakdown> agents = await _tracker.GetByAgentAsync(CostPeriod.All);
         agents.Should().BeEmpty();
     }
 
@@ -253,7 +253,7 @@ public class CostTrackerTests
         await _tracker.TrackUsageAsync(MakeEvent("a1", "GPT-5.4-MINI", 1_000_000, 0));
         await _tracker.TrackUsageAsync(MakeEvent("a2", "gpt-5.4-mini", 1_000_000, 0));
 
-        var summary = await _tracker.GetSummaryAsync(CostPeriod.All);
+        CostSummary summary = await _tracker.GetSummaryAsync(CostPeriod.All);
 
         // Both should match gpt-5.4-mini pricing ($0.15/1M input)
         summary.TotalCost.Should().Be(0.30m);

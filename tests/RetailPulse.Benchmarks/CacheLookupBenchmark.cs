@@ -36,7 +36,7 @@ public class CacheLookupBenchmark
         // Prefill cache
         for (int i = 0; i < PrefilledEntries; i++)
         {
-            var key = InMemoryResponseCache.GenerateCacheKey("agent1", $"query-{i}");
+            string key = InMemoryResponseCache.GenerateCacheKey("agent1", $"query-{i}");
             _cache.SetAsync(key, _response).GetAwaiter().GetResult();
         }
 
@@ -65,7 +65,7 @@ public class CacheLookupBenchmark
     [Benchmark(Description = "SetAsync: insert new entry")]
     public Task SetNew()
     {
-        var key = InMemoryResponseCache.GenerateCacheKey("agent1", $"bench-{Random.Shared.Next()}");
+        string key = InMemoryResponseCache.GenerateCacheKey("agent1", $"bench-{Random.Shared.Next()}");
         return _cache.SetAsync(key, _response);
     }
 

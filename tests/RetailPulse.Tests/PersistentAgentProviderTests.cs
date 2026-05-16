@@ -1,3 +1,4 @@
+using System.Reflection;
 using Azure.AI.Agents.Persistent;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -33,7 +34,7 @@ public class PersistentAgentProviderTests
             client: null!,
             NullLogger<PersistentAgentProvider<TestAgent>>.Instance);
 
-        var info = await provider.GetAgentInfoAsync();
+        AgentInfo info = await provider.GetAgentInfoAsync();
 
         info.Id.Should().Be("asst_directbypass123");
         info.FriendlyName.Should().Be("Test Agent");
@@ -55,7 +56,7 @@ public class PersistentAgentProviderTests
             client: null!,
             NullLogger<PersistentAgentProvider<TestAgent>>.Instance);
 
-        var id = await provider.GetAgentIdAsync();
+        string id = await provider.GetAgentIdAsync();
         id.Should().Be("asst_xyz");
     }
 
@@ -74,8 +75,8 @@ public class PersistentAgentProviderTests
             client: null!,
             NullLogger<PersistentAgentProvider<TestAgent>>.Instance);
 
-        var first = await provider.GetAgentInfoAsync();
-        var second = await provider.GetAgentInfoAsync();
+        AgentInfo first = await provider.GetAgentInfoAsync();
+        AgentInfo second = await provider.GetAgentInfoAsync();
 
         // Cached AgentInfo should be the same instance
         ReferenceEquals(first, second).Should().BeTrue("resolved agent info is cached after the first call");
@@ -106,7 +107,7 @@ public class PersistentAgentProviderTests
     {
         // Validates that the required-modifier contract is preserved. If a future
         // change drops 'required', this test forces the team to revisit it.
-        var props = typeof(AgentResolutionOptions).GetProperties();
+        PropertyInfo[] props = typeof(AgentResolutionOptions).GetProperties();
         props.Should().Contain(p => p.Name == nameof(AgentResolutionOptions.FriendlyName));
         props.Should().Contain(p => p.Name == nameof(AgentResolutionOptions.ProjectEndpoint));
         props.Should().Contain(p => p.Name == nameof(AgentResolutionOptions.DirectAgentId));

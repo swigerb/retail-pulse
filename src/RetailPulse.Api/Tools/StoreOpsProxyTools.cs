@@ -21,9 +21,9 @@ public class StorePerformanceTool
     {
         try
         {
-            var url = "/api/stores/performance?";
+            string url = "/api/stores/performance?";
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -54,8 +54,8 @@ public class ShelfLayoutTool
     {
         try
         {
-            var url = $"/api/stores/{Uri.EscapeDataString(storeId)}/planogram/{Uri.EscapeDataString(aisleId)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/stores/{Uri.EscapeDataString(storeId)}/planogram/{Uri.EscapeDataString(aisleId)}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -87,9 +87,9 @@ public class OptimizePlanogramTool
     {
         try
         {
-            var url = $"/api/stores/{Uri.EscapeDataString(storeId)}/planogram/{Uri.EscapeDataString(aisleId)}/optimize?";
+            string url = $"/api/stores/{Uri.EscapeDataString(storeId)}/planogram/{Uri.EscapeDataString(aisleId)}/optimize?";
             if (!string.IsNullOrWhiteSpace(brandFocus)) url += $"&brandFocus={Uri.EscapeDataString(brandFocus)}";
-            var response = await _httpClient.PostAsync(url, null, cancellationToken);
+            HttpResponseMessage response = await _httpClient.PostAsync(url, null, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
@@ -120,9 +120,9 @@ public class PredictStockoutTool
     {
         try
         {
-            var url = $"/api/stores/{Uri.EscapeDataString(storeId)}/stockout-risk?";
+            string url = $"/api/stores/{Uri.EscapeDataString(storeId)}/stockout-risk?";
             if (!string.IsNullOrWhiteSpace(skuId)) url += $"&skuId={Uri.EscapeDataString(skuId)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

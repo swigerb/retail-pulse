@@ -31,7 +31,7 @@ public class CacheWarmingService : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var enabled = _configuration.GetValue("CacheWarming:Enabled", true);
+        bool enabled = _configuration.GetValue("CacheWarming:Enabled", true);
         if (!enabled)
         {
             _logger.LogInformation("Cache warming is disabled via configuration");
@@ -51,7 +51,7 @@ public class CacheWarmingService : IHostedService
                 QueryHash: healthCheckKey);
 
             await _cache.SetAsync(healthCheckKey, probe, TimeSpan.FromSeconds(30), cancellationToken);
-            var readBack = await _cache.GetAsync(healthCheckKey, cancellationToken);
+            CachedResponse? readBack = await _cache.GetAsync(healthCheckKey, cancellationToken);
 
             if (readBack is not null)
             {

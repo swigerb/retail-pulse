@@ -28,7 +28,7 @@ public class RegionTests
     [Fact]
     public void Constructor_WithUnknownRegion_Throws()
     {
-        var act = () => new Region("Mars Colony");
+        Func<Region> act = () => new Region("Mars Colony");
         act.Should().Throw<ArgumentException>().WithMessage("*Unknown region*");
     }
 
@@ -38,7 +38,7 @@ public class RegionTests
     [InlineData("   ")]
     public void Constructor_WithNullOrEmpty_Throws(string? value)
     {
-        var act = () => new Region(value!);
+        Func<Region> act = () => new Region(value!);
         act.Should().Throw<ArgumentException>();
     }
 

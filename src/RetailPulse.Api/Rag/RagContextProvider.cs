@@ -29,7 +29,7 @@ public class RagContextProvider
     {
         try
         {
-            var results = await _knowledgeBase.SearchAsync(userMessage, _topK, ct);
+            IReadOnlyList<SearchResult> results = await _knowledgeBase.SearchAsync(userMessage, _topK, ct);
 
             var relevant = results.Where(r => r.Score >= _minRelevanceScore).ToList();
             if (relevant.Count == 0)
@@ -40,7 +40,7 @@ public class RagContextProvider
             sb.AppendLine("Use the following grounded information to inform your response. Cite sources when relevant.");
             sb.AppendLine();
 
-            foreach (var result in relevant)
+            foreach (SearchResult? result in relevant)
             {
                 sb.AppendLine(CultureInfo.InvariantCulture, $"[Source: {result.Title}, chunk {result.ChunkIndex}] (relevance: {result.Score.ToString("F2", CultureInfo.InvariantCulture)})");
                 sb.AppendLine(result.Chunk);

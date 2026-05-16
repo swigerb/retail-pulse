@@ -22,7 +22,7 @@ public class ExceptionLoggingTests
     {
         var logger = new Mock<ILogger<RetailOpsRouter>>();
 
-        var result = RetailOpsRouter.ParseClassification("NOT VALID JSON", logger.Object);
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification("NOT VALID JSON", logger.Object);
 
         result.Should().NotBeNull("parser should return a fallback, not throw");
 
@@ -43,7 +43,7 @@ public class ExceptionLoggingTests
     public async Task ParseClassification_ValidJson_DoesNotProduceErrorLogs()
     {
         var logger = new Mock<ILogger<RetailOpsRouter>>();
-        var validJson = """{"intent":"general","confidence":0.9,"intents":["general"]}""";
+        string validJson = /*lang=json,strict*/ """{"intent":"general","confidence":0.9,"intents":["general"]}""";
 
         RetailOpsRouter.ParseClassification(validJson, logger.Object);
 
@@ -99,7 +99,7 @@ public class ExceptionLoggingTests
     {
         var logger = new Mock<ILogger<MemoryExtractionService>>();
 
-        var result = MemoryExtractionService.ParseExtraction("NOT VALID JSON", logger.Object);
+        MemoryExtractionService.ExtractionResult result = MemoryExtractionService.ParseExtraction("NOT VALID JSON", logger.Object);
 
         result.Should().NotBeNull("parser should return a fallback, not throw");
 
@@ -120,7 +120,7 @@ public class ExceptionLoggingTests
     public async Task ParseExtraction_ValidJson_DoesNotProduceErrorLogs()
     {
         var logger = new Mock<ILogger<MemoryExtractionService>>();
-        var validJson = """{"summary":"test","entities":["A"],"preference":null}""";
+        string validJson = /*lang=json,strict*/ """{"summary":"test","entities":["A"],"preference":null}""";
 
         MemoryExtractionService.ParseExtraction(validJson, logger.Object);
 

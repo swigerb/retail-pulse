@@ -19,9 +19,9 @@ public class AccessControlTests
     public void CheckAccess_UserWithRegionAccess_Allowed()
     {
         var guard = new AccessControlGuard(enabled: true);
-        var user = MakeUser("analyst", "Southeast", "Northeast");
+        UserScope user = MakeUser("analyst", "Southeast", "Northeast");
 
-        var result = guard.CheckAccess(user, "Southeast");
+        AccessControlResult result = guard.CheckAccess(user, "Southeast");
 
         result.IsAllowed.Should().BeTrue();
         result.DenialMessage.Should().BeNull();
@@ -31,7 +31,7 @@ public class AccessControlTests
     public void CheckAccess_UserWithMultipleRegions_AllAllowed()
     {
         var guard = new AccessControlGuard(enabled: true);
-        var user = MakeUser("analyst", "Southeast", "Northeast", "Midwest");
+        UserScope user = MakeUser("analyst", "Southeast", "Northeast", "Midwest");
 
         guard.CheckAccess(user, "Southeast").IsAllowed.Should().BeTrue();
         guard.CheckAccess(user, "Northeast").IsAllowed.Should().BeTrue();
@@ -42,7 +42,7 @@ public class AccessControlTests
     public void CheckAccess_CaseInsensitive_Allowed()
     {
         var guard = new AccessControlGuard(enabled: true);
-        var user = MakeUser("analyst", "Southeast");
+        UserScope user = MakeUser("analyst", "Southeast");
 
         guard.CheckAccess(user, "southeast").IsAllowed.Should().BeTrue();
         guard.CheckAccess(user, "SOUTHEAST").IsAllowed.Should().BeTrue();
@@ -56,9 +56,9 @@ public class AccessControlTests
     public void CheckAccess_UserWithoutRegionAccess_Denied()
     {
         var guard = new AccessControlGuard(enabled: true);
-        var user = MakeUser("analyst", "Southeast");
+        UserScope user = MakeUser("analyst", "Southeast");
 
-        var result = guard.CheckAccess(user, "Northwest");
+        AccessControlResult result = guard.CheckAccess(user, "Northwest");
 
         result.IsAllowed.Should().BeFalse();
         result.DenialMessage.Should().NotBeNull();
@@ -68,9 +68,9 @@ public class AccessControlTests
     public void CheckAccess_DenialMessage_IsFriendly()
     {
         var guard = new AccessControlGuard(enabled: true);
-        var user = MakeUser("analyst", "Southeast");
+        UserScope user = MakeUser("analyst", "Southeast");
 
-        var result = guard.CheckAccess(user, "Northwest");
+        AccessControlResult result = guard.CheckAccess(user, "Northwest");
 
         result.DenialMessage.Should().Contain("Northwest");
         result.DenialMessage.Should().Contain("Southeast");
@@ -83,9 +83,9 @@ public class AccessControlTests
     public void CheckAccess_UserWithNoRegions_AllDenied()
     {
         var guard = new AccessControlGuard(enabled: true);
-        var user = MakeUser("analyst");
+        UserScope user = MakeUser("analyst");
 
-        var result = guard.CheckAccess(user, "Southeast");
+        AccessControlResult result = guard.CheckAccess(user, "Southeast");
         result.IsAllowed.Should().BeFalse();
     }
 
@@ -97,7 +97,7 @@ public class AccessControlTests
     public void CheckAccess_Admin_AlwaysAllowed()
     {
         var guard = new AccessControlGuard(enabled: true);
-        var admin = MakeUser("admin"); // no explicit regions
+        UserScope admin = MakeUser("admin"); // no explicit regions
 
         guard.CheckAccess(admin, "Southeast").IsAllowed.Should().BeTrue();
         guard.CheckAccess(admin, "Northwest").IsAllowed.Should().BeTrue();
@@ -108,7 +108,7 @@ public class AccessControlTests
     public void CheckAccess_AdminRole_CaseInsensitive()
     {
         var guard = new AccessControlGuard(enabled: true);
-        var admin = MakeUser("Admin");
+        UserScope admin = MakeUser("Admin");
 
         guard.CheckAccess(admin, "Southeast").IsAllowed.Should().BeTrue();
     }
@@ -121,7 +121,7 @@ public class AccessControlTests
     public void CheckAccess_Disabled_AllQueriesAllowed()
     {
         var guard = new AccessControlGuard(enabled: false);
-        var user = MakeUser("analyst", "Southeast");
+        UserScope user = MakeUser("analyst", "Southeast");
 
         // User only has Southeast, but access control is disabled
         guard.CheckAccess(user, "Northwest").IsAllowed.Should().BeTrue();
@@ -132,7 +132,7 @@ public class AccessControlTests
     public void CheckAccess_Disabled_NoRegions_StillAllowed()
     {
         var guard = new AccessControlGuard(enabled: false);
-        var user = MakeUser("analyst"); // no regions at all
+        UserScope user = MakeUser("analyst"); // no regions at all
 
         guard.CheckAccess(user, "Southeast").IsAllowed.Should().BeTrue();
     }

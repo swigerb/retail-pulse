@@ -13,8 +13,8 @@ public class UpdateMetricsToolTests : IDisposable
 
     public UpdateMetricsToolTests()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
         _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_test_{Guid.NewGuid():N}.db");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
@@ -35,7 +35,7 @@ public class UpdateMetricsToolTests : IDisposable
     [Fact]
     public void UpdateMetrics_CanUpdateSentimentValue_SocialCrisisScenario()
     {
-        var result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "Sentiment", "FreshMart", "Pacific Northwest", "Sentiment", "15"));
+        JsonElement result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "Sentiment", "FreshMart", "Pacific Northwest", "Sentiment", "15"));
 
         result.GetProperty("success").GetBoolean().Should().BeTrue();
         result.GetProperty("field").GetString().Should().Be("Sentiment");
@@ -45,7 +45,7 @@ public class UpdateMetricsToolTests : IDisposable
     [Fact]
     public void UpdateMetrics_CanUpdateDepletionsField()
     {
-        var result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "Depletions", "FreshMart", "Northeast", "DepletionsYoY", "+18.5%"));
+        JsonElement result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "Depletions", "FreshMart", "Northeast", "DepletionsYoY", "+18.5%"));
 
         result.GetProperty("success").GetBoolean().Should().BeTrue();
         result.GetProperty("field").GetString().Should().Be("DepletionsYoY");
@@ -55,7 +55,7 @@ public class UpdateMetricsToolTests : IDisposable
     [Fact]
     public void UpdateMetrics_CanUpdateShipmentField_SupplyChainRerouteScenario()
     {
-        var result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "Shipments", "FreshMart", "Northeast", "ShipmentsYoY", "0"));
+        JsonElement result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "Shipments", "FreshMart", "Northeast", "ShipmentsYoY", "0"));
 
         result.GetProperty("success").GetBoolean().Should().BeTrue();
         result.GetProperty("field").GetString().Should().Be("ShipmentsYoY");
@@ -65,7 +65,7 @@ public class UpdateMetricsToolTests : IDisposable
     [Fact]
     public void UpdateMetrics_RejectsInvalidTableName()
     {
-        var result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "InvalidTable", "FreshMart", "Northeast", "DepletionsYoY", "10"));
+        JsonElement result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "InvalidTable", "FreshMart", "Northeast", "DepletionsYoY", "10"));
 
         result.GetProperty("error").GetString().Should().Contain("Invalid table");
     }
@@ -73,7 +73,7 @@ public class UpdateMetricsToolTests : IDisposable
     [Fact]
     public void UpdateMetrics_RejectsInvalidFieldName()
     {
-        var result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "Depletions", "FreshMart", "Northeast", "FakeField", "10"));
+        JsonElement result = Parse(UpdateMetricsTool.UpdateMetrics(_db, "Depletions", "FreshMart", "Northeast", "FakeField", "10"));
 
         result.GetProperty("error").GetString().Should().Contain("Invalid field");
     }
@@ -83,7 +83,7 @@ public class UpdateMetricsToolTests : IDisposable
     {
         UpdateMetricsTool.UpdateMetrics(_db, "Sentiment", "FreshMart", "Pacific Northwest", "Sentiment", "15");
 
-        var readResult = Parse(_db.GetFieldSentiment("FreshMart", "Pacific Northwest"));
+        JsonElement readResult = Parse(_db.GetFieldSentiment("FreshMart", "Pacific Northwest"));
 
         readResult.GetProperty("sentiment").GetString().Should().Be("15");
     }
@@ -93,7 +93,7 @@ public class UpdateMetricsToolTests : IDisposable
     {
         UpdateMetricsTool.UpdateMetrics(_db, "Depletions", "FreshMart", "Northeast", "DepletionsYoY", "+99.9%");
 
-        var readResult = Parse(_db.GetDepletionStats("FreshMart", "Northeast", "YoY"));
+        JsonElement readResult = Parse(_db.GetDepletionStats("FreshMart", "Northeast", "YoY"));
 
         readResult.GetProperty("metrics").GetProperty("depletions_yoy").GetString().Should().Be("+99.9%");
     }

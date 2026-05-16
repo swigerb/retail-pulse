@@ -12,12 +12,12 @@ public class CorsConfigTests
     public async Task DevelopmentCors_AllowsAnyOrigin()
     {
         // The "Development" CORS policy uses AllowAnyOrigin(), AllowAnyHeader(), AllowAnyMethod()
-        var policyName = "Development";
+        string policyName = "Development";
         policyName.Should().Be("Development");
 
-        var allowsAnyOrigin = true;
-        var allowsAnyHeader = true;
-        var allowsAnyMethod = true;
+        bool allowsAnyOrigin = true;
+        bool allowsAnyHeader = true;
+        bool allowsAnyMethod = true;
 
         allowsAnyOrigin.Should().BeTrue("Development CORS allows any origin");
         allowsAnyHeader.Should().BeTrue("Development CORS allows any header");
@@ -29,8 +29,8 @@ public class CorsConfigTests
     public async Task ProductionCors_RestrictsToConfiguredOrigins()
     {
         // The "Production" CORS policy uses WithOrigins(corsProdOrigins)
-        var allowedMethods = new[] { "GET", "POST", "PUT", "DELETE" };
-        var allowedHeaders = new[] { "Content-Type", "Authorization", "X-Requested-With" };
+        string[] allowedMethods = ["GET", "POST", "PUT", "DELETE"];
+        string[] allowedHeaders = ["Content-Type", "Authorization", "X-Requested-With"];
 
         allowedMethods.Should().HaveCount(4);
         allowedHeaders.Should().HaveCount(3);
@@ -41,7 +41,7 @@ public class CorsConfigTests
     [Fact]
     public async Task ProductionCors_RequiresCredentials()
     {
-        var usesCredentials = true;
+        bool usesCredentials = true;
         usesCredentials.Should().BeTrue("Production CORS requires credentials for secure auth flows");
         await Task.CompletedTask;
     }
@@ -50,7 +50,7 @@ public class CorsConfigTests
     public async Task ProductionCors_WithNoOriginsConfigured_DeniesAll()
     {
         // When Security:AllowedOrigins is empty, the Production policy allows nothing
-        var configuredOrigins = Array.Empty<string>();
+        string[] configuredOrigins = [];
         configuredOrigins.Should().BeEmpty("no origins = deny by default");
         await Task.CompletedTask;
     }
@@ -59,8 +59,8 @@ public class CorsConfigTests
     public async Task CorsPolicy_EnvironmentBasedSelection()
     {
         // Program.cs: app.UseCors(app.Environment.IsDevelopment() ? "Development" : "Production")
-        var devPolicy = "Development";
-        var prodPolicy = "Production";
+        string devPolicy = "Development";
+        string prodPolicy = "Production";
         devPolicy.Should().NotBe(prodPolicy, "different CORS policies apply per environment");
         await Task.CompletedTask;
     }

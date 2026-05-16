@@ -39,7 +39,7 @@ public class DeprecationTests : IAsyncDisposable
 
     public DeprecationTests()
     {
-        var builder = new HostBuilder()
+        IHostBuilder builder = new HostBuilder()
             .ConfigureWebHost(webHost =>
             {
                 webHost.UseTestServer();
@@ -49,14 +49,14 @@ public class DeprecationTests : IAsyncDisposable
                     app.UseRouting();
                     app.UseEndpoints(endpoints =>
                     {
-                        foreach (var route in DeprecatedRoutes)
+                        foreach (string route in DeprecatedRoutes)
                         {
                             endpoints.MapGet(route, async ctx =>
                             {
                                 ctx.Response.Headers["X-Deprecated"] = "true";
                                 ctx.Response.Headers["Sunset"] = "2026-12-31";
                                 ctx.Response.ContentType = "application/json";
-                                await ctx.Response.WriteAsync("{\"status\":\"ok\"}");
+                                await ctx.Response.WriteAsync(/*lang=json,strict*/ "{\"status\":\"ok\"}");
                             });
                         }
                     });
@@ -82,7 +82,7 @@ public class DeprecationTests : IAsyncDisposable
     [InlineData("/api/demand-risks")]
     public async Task DeprecatedEndpoint_ReturnsSuccessfulResponse(string route)
     {
-        var response = await _client.GetAsync(route);
+        HttpResponseMessage response = await _client.GetAsync(route);
 
         response.IsSuccessStatusCode.Should().BeTrue(
             $"deprecated endpoint {route} should still return a successful response for backward compatibility");
@@ -95,7 +95,7 @@ public class DeprecationTests : IAsyncDisposable
     [InlineData("/api/demand-risks")]
     public async Task DeprecatedEndpoint_IncludesXDeprecatedHeader(string route)
     {
-        var response = await _client.GetAsync(route);
+        HttpResponseMessage response = await _client.GetAsync(route);
 
         response.Headers.Should().ContainKey("X-Deprecated");
         response.Headers.GetValues("X-Deprecated").Should().ContainSingle()
@@ -109,7 +109,7 @@ public class DeprecationTests : IAsyncDisposable
     [InlineData("/api/demand-risks")]
     public async Task DeprecatedEndpoint_IncludesSunsetHeader(string route)
     {
-        var response = await _client.GetAsync(route);
+        HttpResponseMessage response = await _client.GetAsync(route);
 
         response.Headers.Should().ContainKey("Sunset");
         response.Headers.GetValues("Sunset").Should().ContainSingle()

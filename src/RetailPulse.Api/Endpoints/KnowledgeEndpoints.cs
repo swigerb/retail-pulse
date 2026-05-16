@@ -15,14 +15,14 @@ public static class KnowledgeEndpoints
             if (string.IsNullOrWhiteSpace(body.Title) || string.IsNullOrWhiteSpace(body.Content))
                 return Results.BadRequest(new { error = "Fields 'title' and 'content' are required." });
 
-            var id = await kb.IngestDocumentAsync(body.Title, body.Content, body.Source ?? "upload", ct);
+            string id = await kb.IngestDocumentAsync(body.Title, body.Content, body.Source ?? "upload", ct);
             return Results.Ok(new { documentId = id, title = body.Title, status = "ingested" });
         })
         .WithName("UploadKnowledge").RequireAuthorization().RequireRateLimiting("upload");
 
         app.MapGet("/api/knowledge/documents", async (IKnowledgeBase kb, CancellationToken ct) =>
         {
-            var docs = await kb.ListDocumentsAsync(ct);
+            IReadOnlyList<DocumentInfo> docs = await kb.ListDocumentsAsync(ct);
             return Results.Ok(docs);
         })
         .WithName("ListKnowledgeDocuments").RequireAuthorization().RequireRateLimiting("relaxed");
@@ -39,17 +39,17 @@ public static class KnowledgeEndpoints
             if (string.IsNullOrWhiteSpace(body.Query))
                 return Results.BadRequest(new { error = "Field 'query' is required." });
 
-            var results = await kb.SearchAsync(body.Query, body.TopK ?? 5, ct);
+            IReadOnlyList<SearchResult> results = await kb.SearchAsync(body.Query, body.TopK ?? 5, ct);
             return Results.Ok(new { query = body.Query, results });
         })
         .WithName("SearchKnowledge").RequireAuthorization().RequireRateLimiting("relaxed");
 
         app.MapGet("/api/knowledge/stats", async (IKnowledgeBase kb, CancellationToken ct) =>
         {
-            var docs = await kb.ListDocumentsAsync(ct);
-            var docCount = docs.Count;
-            var chunkCount = docs.Sum(d => d.ChunkCount);
-            var avgChunks = docCount > 0 ? (double)chunkCount / docCount : 0;
+            IReadOnlyList<DocumentInfo> docs = await kb.ListDocumentsAsync(ct);
+            int docCount = docs.Count;
+            int chunkCount = docs.Sum(d => d.ChunkCount);
+            double avgChunks = docCount > 0 ? (double)chunkCount / docCount : 0;
 
             return Results.Ok(new
             {
@@ -67,7 +67,7 @@ public static class KnowledgeEndpoints
                 return Results.BadRequest(new { error = "Field 'text' is required." });
 
             // Search knowledge base for relevant context
-            var searchResults = await kb.SearchAsync(body.Text, 5, ct);
+            IReadOnlyList<SearchResult> searchResults = await kb.SearchAsync(body.Text, 5, ct);
             var citations = searchResults
                 .Where(r => r.Score >= 0.3)
                 .Select(r => new
@@ -83,7 +83,7 @@ public static class KnowledgeEndpoints
             if (searchResults.Count > 0)
             {
                 contextBuilder.AppendLine("--- Reference Context (from knowledge base) ---");
-                foreach (var result in searchResults.Take(3))
+                foreach (SearchResult? result in searchResults.Take(3))
                 {
                     contextBuilder.AppendLine(CultureInfo.InvariantCulture, $"[Source: {result.Title}, chunk {result.ChunkIndex}]");
                     contextBuilder.AppendLine(result.Chunk);
@@ -93,7 +93,7 @@ public static class KnowledgeEndpoints
             }
 
             // Route to GeneralAgent with RAG context
-            var generalAgent = specialists.FirstOrDefault(s => s.Key == "general");
+            ISpecialistAgent? generalAgent = specialists.FirstOrDefault(s => s.Key == "general");
             if (generalAgent is null)
                 return Results.StatusCode(503);
 
@@ -112,9 +112,9 @@ public static class KnowledgeEndpoints
 
             try
             {
-                var response = await generalAgent.HandleAsync(chatRequest, ct);
+                ChatResponse response = await generalAgent.HandleAsync(chatRequest, ct);
 
-                var confidence = citations.Count switch
+                string confidence = citations.Count switch
                 {
                     >= 3 => "high",
                     >= 1 => "medium",

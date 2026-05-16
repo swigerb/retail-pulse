@@ -73,9 +73,9 @@ public partial class RetailOpsRouter : IAgentRouter
 
         // Build a lookup: intent → specialist (first specialist that claims it wins)
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase);
-        foreach (var specialist in specialists)
+        foreach (ISpecialistAgent specialist in specialists)
         {
-            foreach (var intent in specialist.SupportedIntents)
+            foreach (string intent in specialist.SupportedIntents)
             {
                 lookup.TryAdd(intent, specialist);
             }
@@ -90,7 +90,7 @@ public partial class RetailOpsRouter : IAgentRouter
         string? tenantId,
         CancellationToken ct = default)
     {
-        using var routingActivity = AgentTelemetry.Source.StartActivity(
+        using Activity? routingActivity = AgentTelemetry.Source.StartActivity(
             "agent.routing", ActivityKind.Internal);
         routingActivity?.SetTag("agent.router", "RetailOpsRouter");
         routingActivity?.SetTag("agent.message_length", message.Length);
@@ -100,7 +100,7 @@ public partial class RetailOpsRouter : IAgentRouter
         try
         {
             // Fast-path: skip LLM call if keywords clearly indicate intent
-            var keywordResult = TryKeywordClassify(message);
+            IntentClassification? keywordResult = TryKeywordClassify(message);
             if (keywordResult is not null)
             {
                 _logger.LogInformation("Keyword fast-path matched intent '{Intent}' for message", keywordResult.Intent);
@@ -111,7 +111,7 @@ public partial class RetailOpsRouter : IAgentRouter
                 routingActivity?.SetTag("agent.routing.confidence", keywordResult.Confidence);
                 routingActivity?.SetTag("agent.routing.duration_ms", sw.ElapsedMilliseconds);
 
-                if (_specialists.TryGetValue(keywordResult.Intent, out var fastPathSpecialist))
+                if (_specialists.TryGetValue(keywordResult.Intent, out ISpecialistAgent? fastPathSpecialist))
                 {
                     return new RoutingDecision(
                         fastPathSpecialist.Key, keywordResult.Intent, keywordResult.Confidence,
@@ -121,7 +121,7 @@ public partial class RetailOpsRouter : IAgentRouter
                 // Keyword matched but no specialist registered — fall through to LLM
             }
 
-            var classification = await ClassifyIntentAsync(message, conversationHistory, ct);
+            IntentClassification classification = await ClassifyIntentAsync(message, conversationHistory, ct);
 
             _metrics?.RecordIntentClassification(classification.Intent, fastPathHit: false);
             _metrics?.RecordRoutingDuration(sw.ElapsedMilliseconds);
@@ -145,7 +145,7 @@ public partial class RetailOpsRouter : IAgentRouter
             }
 
             // Look up the specialist for the classified intent
-            if (_specialists.TryGetValue(classification.Intent, out var specialist))
+            if (_specialists.TryGetValue(classification.Intent, out ISpecialistAgent? specialist))
             {
                 _logger.LogInformation(
                     "Router classified intent '{Intent}' (confidence: {Confidence:F2}) → agent '{AgentKey}'",
@@ -196,9 +196,9 @@ public partial class RetailOpsRouter : IAgentRouter
                 AgentIntent.PortfolioHealth, _keywordMatchConfidence, [AgentIntent.PortfolioHealth]);
         }
 
-        foreach (var (intent, keywords) in _keywordPatterns)
+        foreach ((string? intent, string[]? keywords) in _keywordPatterns)
         {
-            foreach (var keyword in keywords)
+            foreach (string keyword in keywords)
             {
                 if (message.Contains(keyword, StringComparison.OrdinalIgnoreCase))
                 {
@@ -224,13 +224,13 @@ public partial class RetailOpsRouter : IAgentRouter
         if (conversationHistory is { Count: > 0 })
         {
             const int maxContextTurns = 4;
-            var recentHistory = conversationHistory.Count > maxContextTurns * 2
+            IReadOnlyList<ChatHistoryMessage> recentHistory = conversationHistory.Count > maxContextTurns * 2
                 ? [.. conversationHistory.Skip(conversationHistory.Count - (maxContextTurns * 2))]
                 : conversationHistory;
 
-            foreach (var turn in recentHistory)
+            foreach (ChatHistoryMessage turn in recentHistory)
             {
-                var role = string.Equals(turn.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                ChatRole role = string.Equals(turn.Role, "assistant", StringComparison.OrdinalIgnoreCase)
                     ? ChatRole.Assistant
                     : ChatRole.User;
                 messages.Add(new ChatMessage(role, turn.Content));
@@ -245,8 +245,8 @@ public partial class RetailOpsRouter : IAgentRouter
             ResponseFormat = ChatResponseFormat.Json
         };
 
-        var response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
-        var responseText = response.Text ?? "";
+        Microsoft.Extensions.AI.ChatResponse response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
+        string responseText = response.Text ?? "";
 
         return ParseClassification(responseText, _logger);
     }
@@ -260,23 +260,23 @@ public partial class RetailOpsRouter : IAgentRouter
         try
         {
             using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
+            JsonElement root = doc.RootElement;
 
-            var intent = root.TryGetProperty("intent", out var intentProp)
+            string intent = root.TryGetProperty("intent", out JsonElement intentProp)
                 ? intentProp.GetString() ?? AgentIntent.General
                 : AgentIntent.General;
 
-            var confidence = root.TryGetProperty("confidence", out var confProp)
+            double confidence = root.TryGetProperty("confidence", out JsonElement confProp)
                 ? confProp.GetDouble()
                 : 0.5;
 
             var detectedIntents = new List<string>();
-            if (root.TryGetProperty("intents", out var intentsProp) &&
+            if (root.TryGetProperty("intents", out JsonElement intentsProp) &&
                 intentsProp.ValueKind == JsonValueKind.Array)
             {
-                foreach (var item in intentsProp.EnumerateArray())
+                foreach (JsonElement item in intentsProp.EnumerateArray())
                 {
-                    var val = item.GetString();
+                    string? val = item.GetString();
                     if (!string.IsNullOrEmpty(val))
                         detectedIntents.Add(val);
                 }

@@ -84,7 +84,7 @@ public partial class ToolPrefetchService
         string? category = null;
 
         // Brand extraction — longest match first to avoid partial matches
-        foreach (var knownBrand in _knownBrands.OrderByDescending(b => b.Length))
+        foreach (string? knownBrand in _knownBrands.OrderByDescending(b => b.Length))
         {
             if (message.Contains(knownBrand, StringComparison.OrdinalIgnoreCase))
             {
@@ -94,7 +94,7 @@ public partial class ToolPrefetchService
         }
 
         // Region extraction
-        foreach (var knownRegion in _knownRegions)
+        foreach (string knownRegion in _knownRegions)
         {
             if (message.Contains(knownRegion, StringComparison.OrdinalIgnoreCase))
             {
@@ -104,7 +104,7 @@ public partial class ToolPrefetchService
         }
 
         // Channel extraction
-        var channelMatch = ChannelPattern().Match(message);
+        Match channelMatch = ChannelPattern().Match(message);
         if (channelMatch.Success)
         {
             channel = _knownChannels.FirstOrDefault(c =>
@@ -112,7 +112,7 @@ public partial class ToolPrefetchService
         }
         else
         {
-            foreach (var knownChannel in _knownChannels)
+            foreach (string knownChannel in _knownChannels)
             {
                 if (knownChannel != "All" && message.Contains(knownChannel, StringComparison.OrdinalIgnoreCase))
                 {
@@ -123,13 +123,13 @@ public partial class ToolPrefetchService
         }
 
         // Category — derive from brand if detected, otherwise check explicit mentions
-        if (brand is not null && _brandCategoryMap.TryGetValue(brand, out var derivedCategory))
+        if (brand is not null && _brandCategoryMap.TryGetValue(brand, out string? derivedCategory))
         {
             category = derivedCategory;
         }
         else
         {
-            foreach (var knownCategory in _knownCategories)
+            foreach (string knownCategory in _knownCategories)
             {
                 if (message.Contains(knownCategory, StringComparison.OrdinalIgnoreCase))
                 {
@@ -170,7 +170,7 @@ public partial class ToolPrefetchService
                     ["channel"] = entities.Channel ?? "All"
                 };
 
-                var cached = _toolCache.TryGet("GetHistoricalDemand", args);
+                string? cached = _toolCache.TryGet("GetHistoricalDemand", args);
                 if (cached is not null)
                 {
                     results["GetHistoricalDemand"] = cached;
@@ -193,7 +193,7 @@ public partial class ToolPrefetchService
                     ["category"] = entities.Category
                 };
 
-                var cached = _toolCache.TryGet("GetSeasonalityFactors", args);
+                string? cached = _toolCache.TryGet("GetSeasonalityFactors", args);
                 if (cached is not null)
                 {
                     results["GetSeasonalityFactors"] = cached;
@@ -222,14 +222,14 @@ public partial class ToolPrefetchService
                 _logger.LogWarning(ex, "One or more prefetch tasks failed — returning partial results");
             }
 
-            foreach (var (toolName, resultTask) in tasks)
+            foreach ((string? toolName, Task<string>? resultTask) in tasks)
             {
                 if (resultTask.IsCompletedSuccessfully)
                 {
                     results[toolName] = resultTask.Result;
 
                     // Store in tool cache for subsequent LLM tool calls
-                    var cacheArgs = BuildCacheArgs(toolName, entities);
+                    Dictionary<string, object?> cacheArgs = BuildCacheArgs(toolName, entities);
                     _toolCache.Set(toolName, cacheArgs, resultTask.Result);
                 }
                 else if (resultTask.IsFaulted)

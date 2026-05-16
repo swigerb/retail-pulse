@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.Tracing;
@@ -32,20 +33,20 @@ public sealed class MemoryExtractionBackgroundService : BackgroundService
     {
         _logger.LogInformation("Memory extraction background service started");
 
-        await foreach (var item in _channel.Reader.ReadAllAsync(stoppingToken))
+        await foreach (MemoryWorkItem item in _channel.Reader.ReadAllAsync(stoppingToken))
         {
             try
             {
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 linkedCts.CancelAfter(TimeSpan.FromSeconds(30));
 
-                await using var scope = _scopeFactory.CreateAsyncScope();
-                var middleware = scope.ServiceProvider.GetRequiredService<ConversationMemoryMiddleware>();
+                await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+                ConversationMemoryMiddleware middleware = scope.ServiceProvider.GetRequiredService<ConversationMemoryMiddleware>();
 
-                var storeStart = DateTimeOffset.UtcNow;
-                using var memoryStoreActivity = AgentTelemetry.StartMemoryStore(item.UserId);
+                DateTimeOffset storeStart = DateTimeOffset.UtcNow;
+                using Activity? memoryStoreActivity = AgentTelemetry.StartMemoryStore(item.UserId);
                 await middleware.ExtractAndStoreAsync(item.UserId, item.UserMessage, item.AssistantReply, linkedCts.Token);
-                var storeEnd = DateTimeOffset.UtcNow;
+                DateTimeOffset storeEnd = DateTimeOffset.UtcNow;
 
                 if (item.TraceId is not null)
                 {

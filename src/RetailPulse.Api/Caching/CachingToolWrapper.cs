@@ -65,10 +65,10 @@ internal sealed class CachedAIFunction : AIFunction
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        var argDict = ExtractArguments(arguments);
+        IDictionary<string, object?> argDict = ExtractArguments(arguments);
 
         // Check cache
-        var cached = _cache.TryGet(_inner.Name, argDict);
+        string? cached = _cache.TryGet(_inner.Name, argDict);
         if (cached is not null)
         {
             _logger.LogDebug("Cache hit for tool {Tool} — returning cached result", _inner.Name);
@@ -76,8 +76,8 @@ internal sealed class CachedAIFunction : AIFunction
         }
 
         // Cache miss — invoke the real tool
-        var result = await _inner.InvokeAsync(arguments, cancellationToken);
-        var resultStr = result?.ToString() ?? string.Empty;
+        object? result = await _inner.InvokeAsync(arguments, cancellationToken);
+        string resultStr = result?.ToString() ?? string.Empty;
 
         // Store in cache (validation happens inside Set)
         _cache.Set(_inner.Name, argDict, resultStr);
@@ -88,7 +88,7 @@ internal sealed class CachedAIFunction : AIFunction
     private static IDictionary<string, object?> ExtractArguments(AIFunctionArguments args)
     {
         var dict = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var kvp in args)
+        foreach (KeyValuePair<string, object?> kvp in args)
         {
             dict[kvp.Key] = kvp.Value;
         }

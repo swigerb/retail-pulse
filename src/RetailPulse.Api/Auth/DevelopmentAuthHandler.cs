@@ -23,13 +23,13 @@ public class DevelopmentAuthHandler : AuthenticationHandler<AuthenticationScheme
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        var claims = new[]
-        {
+        Claim[] claims =
+        [
             new Claim(ClaimTypes.NameIdentifier, "dev-user"),
             new Claim(ClaimTypes.Name, "Development User"),
             new Claim(ClaimTypes.Role, "Admin"),
             new Claim("oid", "00000000-0000-0000-0000-000000000000")
-        };
+        ];
 
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);

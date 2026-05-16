@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -33,10 +34,10 @@ public class RouterIntegrationTests
     public async Task FullPipeline_DemandMessage_RoutesAndReturnsResponse()
     {
         // Router classifies as demand
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.92,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(
+        GeneralAgent generalAgent = CreateGeneralAgent(
             MockChatClient("Brand X demand is projected to grow 15% next quarter."));
 
         // Create a mock DemandForecastAgent that claims the demand/forecasting intent
@@ -47,14 +48,14 @@ public class RouterIntegrationTests
             .ReturnsAsync(new Contracts.ChatResponse("Brand X demand is projected to grow 15% next quarter.", SessionId: "session-1", Spans: []));
 
         var specialists = new List<ISpecialistAgent> { demandAgent.Object, generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
         // Route the message
-        var routingResult = await router.RouteAsync(
+        RoutingDecision routingResult = await router.RouteAsync(
             "What's the demand forecast for Brand X?", null, null, null);
 
         // The general agent handles all intents, so route to it
-        var response = await generalAgent.HandleAsync(
+        Contracts.ChatResponse response = await generalAgent.HandleAsync(
             new ChatRequest("What's the demand forecast for Brand X?", SessionId: "session-1"));
 
         // Assert routing
@@ -69,19 +70,19 @@ public class RouterIntegrationTests
     [Fact]
     public async Task FullPipeline_GeneralMessage_RoutesToGeneralAgent()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.85,\"intents\":[\"{AgentIntent.General}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(
+        GeneralAgent generalAgent = CreateGeneralAgent(
             MockChatClient("Here is the portfolio overview."));
 
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(
+        RoutingDecision routingResult = await router.RouteAsync(
             "Show me the portfolio overview", null, null, null);
 
-        var response = await generalAgent.HandleAsync(
+        Contracts.ChatResponse response = await generalAgent.HandleAsync(
             new ChatRequest("Show me the portfolio overview", SessionId: "s-1"));
 
         routingResult.Intent.Should().Be(AgentIntent.General);
@@ -92,16 +93,16 @@ public class RouterIntegrationTests
     [Fact]
     public async Task FullPipeline_LowConfidence_FallsBackToGeneral()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.3,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(
+        GeneralAgent generalAgent = CreateGeneralAgent(
             MockChatClient("Could you be more specific?"));
 
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(
+        RoutingDecision routingResult = await router.RouteAsync(
             "Tell me about stuff", null, null, null);
 
         routingResult.Intent.Should().Be(AgentIntent.General);
@@ -118,17 +119,17 @@ public class RouterIntegrationTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("LLM down"));
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("I can help!"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("I can help!"));
 
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(failingClient.Object, specialists);
+        RetailOpsRouter router = CreateRouter(failingClient.Object, specialists);
 
         // Router falls back to general
-        var routingResult = await router.RouteAsync("hello", null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync("hello", null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.General);
 
         // General agent still works
-        var response = await generalAgent.HandleAsync(
+        Contracts.ChatResponse response = await generalAgent.HandleAsync(
             new ChatRequest("hello", SessionId: "s-fallback"));
         response.Reply.Should().Be("I can help!");
     }
@@ -140,7 +141,7 @@ public class RouterIntegrationTests
     [Fact]
     public void RoutingServiceExtensions_RegistersServicesWithoutError()
     {
-        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var services = new ServiceCollection();
 
         var generalDef = new AgentDefinition
         {
@@ -164,7 +165,7 @@ public class RouterIntegrationTests
             }
         };
 
-        var act = () => services.AddAgentRouting(
+        Func<IServiceCollection> act = () => services.AddAgentRouting(
             promptConfig,
             generalDef,
             foundryEnabled: false,
@@ -176,13 +177,13 @@ public class RouterIntegrationTests
     [Fact]
     public void RoutingServiceExtensions_ThrowsIfRouterDefMissing()
     {
-        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var services = new ServiceCollection();
         var promptConfig = new PromptConfiguration
         {
             Agents = []
         };
 
-        var act = () => services.AddAgentRouting(
+        Func<IServiceCollection> act = () => services.AddAgentRouting(
             promptConfig,
             new AgentDefinition { Name = "General", SystemPrompt = "test" },
             foundryEnabled: false,
@@ -199,10 +200,10 @@ public class RouterIntegrationTests
     [Fact]
     public async Task FullPipeline_GeneralAgent_EmitsSpans()
     {
-        var chatClient = MockChatClient("Analysis complete.");
-        var agent = CreateGeneralAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Analysis complete.");
+        GeneralAgent agent = CreateGeneralAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Run analysis", SessionId: "telemetry-test"));
 
         response.Spans.Should().NotBeEmpty();
@@ -214,10 +215,10 @@ public class RouterIntegrationTests
     [Fact]
     public async Task FullPipeline_GeneralAgent_SpansHaveTimestamps()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateGeneralAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        GeneralAgent agent = CreateGeneralAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "ts-test"));
 
         response.Spans.Should().OnlyContain(s => s.Timestamp > DateTimeOffset.MinValue);
@@ -226,10 +227,10 @@ public class RouterIntegrationTests
     [Fact]
     public async Task FullPipeline_TotalDurationMs_ReflectsRealTime()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateGeneralAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        GeneralAgent agent = CreateGeneralAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "dur-test"));
 
         response.TotalDurationMs.Should().NotBeNull();
@@ -243,18 +244,18 @@ public class RouterIntegrationTests
     [Fact]
     public async Task FullPipeline_DifferentTenants_RouteIndependently()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.9,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
-        var generalAgent = CreateGeneralAgent(MockChatClient("ok"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("ok"));
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
         // Route for tenant A
-        var resultA = await router.RouteAsync(
+        RoutingDecision resultA = await router.RouteAsync(
             "demand forecast?", null, null, "tenant-a");
 
         // Route for tenant B (same message)
-        var resultB = await router.RouteAsync(
+        RoutingDecision resultB = await router.RouteAsync(
             "demand forecast?", null, null, "tenant-b");
 
         // Both get consistent classification
@@ -265,17 +266,17 @@ public class RouterIntegrationTests
     [Fact]
     public async Task FullPipeline_DifferentUsers_RouteIndependently()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SentimentField}\",\"confidence\":0.9,\"intents\":[\"{AgentIntent.SentimentField}\"]}}");
-        var generalAgent = CreateGeneralAgent(MockChatClient("sentiment data"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("sentiment data"));
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
         var userA = new UserContext("obj-1", "Alice", "alice@contoso.com");
         var userB = new UserContext("obj-2", "Bob", "bob@contoso.com");
 
-        var resultA = await router.RouteAsync("distributor sentiment?", null, userA, "tenant-1");
-        var resultB = await router.RouteAsync("distributor sentiment?", null, userB, "tenant-1");
+        RoutingDecision resultA = await router.RouteAsync("distributor sentiment?", null, userA, "tenant-1");
+        RoutingDecision resultB = await router.RouteAsync("distributor sentiment?", null, userB, "tenant-1");
 
         resultA.Intent.Should().Be(resultB.Intent);
     }
@@ -290,16 +291,16 @@ public class RouterIntegrationTests
     [InlineData("Show historical sales trends")]
     public async Task FullPipeline_DemandQueries_RouteToDemandForecasting(string message)
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.92,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
 
-        var demandAgent = CreateMockDemandAgent();
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        ISpecialistAgent demandAgent = CreateMockDemandAgent();
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
 
         var specialists = new List<ISpecialistAgent> { demandAgent, generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(message, null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync(message, null, null, null);
 
         routingResult.Intent.Should().Be(AgentIntent.DemandForecasting);
         routingResult.Confidence.Should().BeGreaterThan(0.6);
@@ -310,15 +311,15 @@ public class RouterIntegrationTests
     public async Task FullPipeline_DepletionQuery_StillRoutesToGeneral_BackwardCompat()
     {
         // "What are my depletions?" is a general portfolio query, not demand forecasting
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.85,\"intents\":[\"{AgentIntent.General}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("Here are your depletions."));
-        var demandAgent = CreateMockDemandAgent();
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("Here are your depletions."));
+        ISpecialistAgent demandAgent = CreateMockDemandAgent();
         var specialists = new List<ISpecialistAgent> { demandAgent, generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync("What are my depletions?", null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync("What are my depletions?", null, null, null);
 
         routingResult.Intent.Should().Be(AgentIntent.General);
         routingResult.AgentKey.Should().Be("general");
@@ -327,12 +328,12 @@ public class RouterIntegrationTests
     [Fact]
     public async Task FullPipeline_DemandAgent_DispatchedCorrectly()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.95,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
 
-        var demandChatClient = MockChatClient("Sierra Gold Tequila demand is projected to grow 8%.");
-        var demandHubContext = CreateMockHubContext();
-        var demandConfig = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        IChatClient demandChatClient = MockChatClient("Sierra Gold Tequila demand is projected to grow 8%.");
+        IHubContext<TelemetryHub> demandHubContext = CreateMockHubContext();
+        IConfigurationRoot demandConfig = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
         var demandPipeline = new AgentExecutionPipeline(
             demandChatClient, demandHubContext, demandConfig,
             NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
@@ -341,16 +342,16 @@ public class RouterIntegrationTests
             new AgentDefinition { Name = "DemandForecast", Model = "gpt-5.4-mini", SystemPrompt = "Demand specialist", Temperature = 0.3 },
             []);
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { demandAgent, generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
         // Route should select demand agent
-        var routingResult = await router.RouteAsync("Forecast demand for Sierra Gold", null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync("Forecast demand for Sierra Gold", null, null, null);
         routingResult.AgentKey.Should().Be("demand-forecasting");
 
         // Dispatch to demand agent
-        var response = await demandAgent.HandleAsync(
+        Contracts.ChatResponse response = await demandAgent.HandleAsync(
             new ChatRequest("Forecast demand for Sierra Gold", SessionId: "demand-dispatch-test"));
 
         response.Reply.Should().Contain("Sierra Gold Tequila");
@@ -366,7 +367,7 @@ public class RouterIntegrationTests
         mock.Setup(a => a.HandleAsync(
                 It.IsAny<ChatRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RetailPulse.Contracts.ChatResponse("Demand forecast ready", "session-demand", []));
+            .ReturnsAsync(new Contracts.ChatResponse("Demand forecast ready", "session-demand", []));
         return mock.Object;
     }
 
@@ -422,7 +423,7 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -445,12 +446,12 @@ public class RouterIntegrationTests
     [Fact]
     public async Task MemoryPersists_AcrossMultipleConversations()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"integ_mem_{Guid.NewGuid():N}.db");
+        string dbPath = Path.Combine(Path.GetTempPath(), $"integ_mem_{Guid.NewGuid():N}.db");
         try
         {
             using var memory = new SqliteConversationMemory(dbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
 
-            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset now = DateTimeOffset.UtcNow;
             var prefEntry = new MemoryEntry(Guid.NewGuid().ToString("N"), "user-1",
                 MemoryType.UserPreference, "Prefers line charts", null, now, now.AddDays(90));
             await memory.StoreAsync("user-1", prefEntry);
@@ -459,7 +460,7 @@ public class RouterIntegrationTests
                 MemoryType.EntityMention, "Discussed Brand X sales", "Brand X", now, now.AddDays(30));
             await memory.StoreAsync("user-1", entityEntry);
 
-            var memories = await memory.RecallAsync("user-1", maxResults: 10);
+            IReadOnlyList<MemoryEntry> memories = await memory.RecallAsync("user-1", maxResults: 10);
             memories.Should().HaveCount(2);
             memories.Should().Contain(m => m.Type == MemoryType.UserPreference);
             memories.Should().Contain(m => m.Type == MemoryType.EntityMention);
@@ -475,7 +476,7 @@ public class RouterIntegrationTests
     [Fact]
     public async Task ApprovalFlow_EndToEnd_RequestRespondAgentReceives()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"integ_appr_{Guid.NewGuid():N}.db");
+        string dbPath = Path.Combine(Path.GetTempPath(), $"integ_appr_{Guid.NewGuid():N}.db");
         try
         {
             var gate = new SqliteApprovalGate(dbPath, Mock.Of<ILogger<SqliteApprovalGate>>());
@@ -483,13 +484,13 @@ public class RouterIntegrationTests
             var context = new ApprovalContext("demand-agent", "user-1",
                 "Generate Q4 forecast for all 12 brands",
                 "High compute cost", "Medium", "Quarterly forecast generation");
-            var request = await gate.RequestApprovalAsync(context);
+            ApprovalRequest request = await gate.RequestApprovalAsync(context);
             request.RequestId.Should().NotBeNullOrEmpty();
 
             await gate.RespondAsync(request.RequestId, ApprovalDecision.Approved,
                 comment: "Approved - run during off-peak");
 
-            var agentResult = await gate.GetResultAsync(request.RequestId);
+            ApprovalResult agentResult = await gate.GetResultAsync(request.RequestId);
             agentResult.Decision.Should().Be(ApprovalDecision.Approved);
             agentResult.Comment.Should().Be("Approved - run during off-peak");
         }
@@ -504,17 +505,17 @@ public class RouterIntegrationTests
     [Fact]
     public async Task MemoryManagementRouting_ForgetIntentRoutes()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.MemoryManagement}\",\"confidence\":0.95,\"intents\":[\"{AgentIntent.MemoryManagement}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("Done."));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("Done."));
         var memoryAgent = new MemoryManagementAgent(
             Mock.Of<IConversationMemory>(),
             Mock.Of<ILogger<MemoryManagementAgent>>());
         var specialists = new List<ISpecialistAgent> { generalAgent, memoryAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync("Forget everything about me", null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync("Forget everything about me", null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.MemoryManagement);
     }
 
@@ -528,7 +529,7 @@ public class RouterIntegrationTests
     [InlineData("Estimate lift for a discount promo in the Northeast")]
     public async Task Router_PromoMessages_RoutesToPromotionTrade(string message)
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.PromotionTrade}\",\"confidence\":0.92,\"intents\":[\"{AgentIntent.PromotionTrade}\"]}}");
 
         var hubContext = new Mock<IHubContext<TelemetryHub>>();
@@ -537,7 +538,7 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var promoConfig = new ConfigurationBuilder()
+        IConfigurationRoot promoConfig = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -552,18 +553,18 @@ public class RouterIntegrationTests
             new AgentDefinition { Name = "PromoPlanning", Model = "gpt-5.4-mini", SystemPrompt = "promo specialist", Temperature = 0.3 },
             []);
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, promoAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(message, null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync(message, null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.PromotionTrade);
     }
 
     [Fact]
     public async Task FullPipeline_PromoMessage_RoutesAndReturnsResponse()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.PromotionTrade}\",\"confidence\":0.90,\"intents\":[\"{AgentIntent.PromotionTrade}\"]}}");
 
         var hubContext = new Mock<IHubContext<TelemetryHub>>();
@@ -572,7 +573,7 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var promoConfig2 = new ConfigurationBuilder()
+        IConfigurationRoot promoConfig2 = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -587,15 +588,15 @@ public class RouterIntegrationTests
             new AgentDefinition { Name = "PromoPlanning", Model = "gpt-5.4-mini", SystemPrompt = "promo specialist", Temperature = 0.3 },
             []);
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, promoAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(
+        RoutingDecision routingResult = await router.RouteAsync(
             "Plan a BOGO promotion for Sierra Gold Tequila in the Northeast", null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.PromotionTrade);
 
-        var response = await promoAgent.HandleAsync(
+        Contracts.ChatResponse response = await promoAgent.HandleAsync(
             new ChatRequest("Plan a BOGO promotion for Sierra Gold Tequila", SessionId: "promo-pipeline-1"));
         response.Reply.Should().Contain("Sierra Gold");
         response.Spans.Should().NotBeEmpty();
@@ -604,14 +605,14 @@ public class RouterIntegrationTests
     [Fact]
     public async Task Router_PromoIntent_DoesNotRouteToDemand()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.PromotionTrade}\",\"confidence\":0.88,\"intents\":[\"{AgentIntent.PromotionTrade}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("general"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general"));
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(
+        RoutingDecision routingResult = await router.RouteAsync(
             "Estimate ROI for a bundle promotion", null, null, null);
         // Without a promo specialist registered, falls back to general — does NOT misroute to demand
         routingResult.AgentKey.Should().Be("general");
@@ -628,7 +629,7 @@ public class RouterIntegrationTests
     [InlineData("Is BrandX a threat to Sierra Gold Tequila?")]
     public async Task Router_CompetitiveQuery_ClassifiesAsCompetitiveMarket(string message)
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.91,\"intents\":[\"{AgentIntent.CompetitiveMarket}\"]}}");
 
         var hubContext = new Mock<IHubContext<TelemetryHub>>();
@@ -637,7 +638,7 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var compConfig = new ConfigurationBuilder()
+        IConfigurationRoot compConfig = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -654,18 +655,18 @@ public class RouterIntegrationTests
             hubContext.Object,
             Mock.Of<ILogger<CompetitiveIntelAgent>>());
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, competitiveAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(message, null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync(message, null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.CompetitiveMarket);
     }
 
     [Fact]
     public async Task FullPipeline_CompetitiveMessage_RoutesAndReturnsResponse()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.93,\"intents\":[\"{AgentIntent.CompetitiveMarket}\"]}}");
 
         var hubContext = new Mock<IHubContext<TelemetryHub>>();
@@ -674,7 +675,7 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var compConfig2 = new ConfigurationBuilder()
+        IConfigurationRoot compConfig2 = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -691,15 +692,15 @@ public class RouterIntegrationTests
             hubContext.Object,
             Mock.Of<ILogger<CompetitiveIntelAgent>>());
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, competitiveAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(
+        RoutingDecision routingResult = await router.RouteAsync(
             "What competitive threats exist for Sierra Gold Tequila in the Northeast?", null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.CompetitiveMarket);
 
-        var response = await competitiveAgent.HandleAsync(
+        Contracts.ChatResponse response = await competitiveAgent.HandleAsync(
             new ChatRequest("What competitive threats exist for Sierra Gold Tequila?", SessionId: "comp-pipeline-1"));
         response.Reply.Should().Contain("BrandX");
         response.Spans.Should().NotBeEmpty();
@@ -708,14 +709,14 @@ public class RouterIntegrationTests
     [Fact]
     public async Task Router_CompetitiveIntent_DoesNotRouteToDemandOrPromo()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.89,\"intents\":[\"{AgentIntent.CompetitiveMarket}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("general"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general"));
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(
+        RoutingDecision routingResult = await router.RouteAsync(
             "Analyze the competitive landscape for snacks", null, null, null);
         // Without a competitive specialist registered, falls back to general — no misroute
         routingResult.AgentKey.Should().Be("general");
@@ -733,22 +734,22 @@ public class RouterIntegrationTests
     [InlineData("What's the inventory level for Sierra Gold?")]
     public async Task Router_SupplyQuery_ClassifiesAsSupplyShipments(string message)
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.91,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
 
-        var supplyAgent = CreateMockSupplyAgent();
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        ISpecialistAgent supplyAgent = CreateMockSupplyAgent();
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, supplyAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(message, null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync(message, null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.SupplyShipments);
     }
 
     [Fact]
     public async Task FullPipeline_SupplyMessage_RoutesAndReturnsResponse()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.93,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
 
         var hubContext = new Mock<IHubContext<TelemetryHub>>();
@@ -757,7 +758,7 @@ public class RouterIntegrationTests
         clients.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
         hubContext.Setup(h => h.Clients).Returns(clients.Object);
 
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -768,15 +769,15 @@ public class RouterIntegrationTests
             Mock.Of<ILogger<Agents.Specialists.SupplyChainAgent>>(),
             config);
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("general fallback"));
         var specialists = new List<ISpecialistAgent> { generalAgent, supplyAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(
+        RoutingDecision routingResult = await router.RouteAsync(
             "What's the supply chain status for Sierra Gold Tequila?", null, null, null);
         routingResult.Intent.Should().Be(AgentIntent.SupplyShipments);
 
-        var response = await supplyAgent.HandleAsync(
+        Contracts.ChatResponse response = await supplyAgent.HandleAsync(
             new ChatRequest("What's the supply chain status for Sierra Gold Tequila?", SessionId: "supply-pipeline-1"));
         response.Reply.Should().Contain("Sierra Gold Tequila");
         response.Spans.Should().NotBeEmpty();
@@ -791,7 +792,7 @@ public class RouterIntegrationTests
         mock.Setup(a => a.HandleAsync(
                 It.IsAny<ChatRequest>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RetailPulse.Contracts.ChatResponse("Supply chain healthy", "session-supply", []));
+            .ReturnsAsync(new Contracts.ChatResponse("Supply chain healthy", "session-supply", []));
         return mock.Object;
     }
 
@@ -807,14 +808,14 @@ public class RouterIntegrationTests
         // Health queries are broad — they could go to General for now,
         // or to a council endpoint once implemented. We verify the router
         // classifies them and doesn't crash.
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.85,\"intents\":[\"{AgentIntent.General}\"]}}");
 
-        var generalAgent = CreateGeneralAgent(MockChatClient("Brand health overview ready."));
+        GeneralAgent generalAgent = CreateGeneralAgent(MockChatClient("Brand health overview ready."));
         var specialists = new List<ISpecialistAgent> { generalAgent };
-        var router = CreateRouter(routerClient, specialists);
+        RetailOpsRouter router = CreateRouter(routerClient, specialists);
 
-        var routingResult = await router.RouteAsync(message, null, null, null);
+        RoutingDecision routingResult = await router.RouteAsync(message, null, null, null);
         routingResult.Should().NotBeNull();
         routingResult.Confidence.Should().BeGreaterThan(0);
     }

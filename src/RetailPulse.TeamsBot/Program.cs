@@ -7,14 +7,14 @@ using RetailPulse.TeamsBot.Auth;
 using RetailPulse.TeamsBot.Cards;
 using RetailPulse.TeamsBot.Services;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
 // Health checks — includes SignalR connection status
 builder.Services.AddHealthChecks()
     .AddCheck("bot", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Bot is running"))
-    .AddCheck<RetailPulse.TeamsBot.SignalRHealthCheck>("signalr");
+    .AddCheck<SignalRHealthCheck>("signalr");
 
 // M365 Agents SDK setup
 builder.Services.AddHttpClient();
@@ -35,7 +35,7 @@ builder.Services.AddSingleton(sp =>
 {
     // Prefer Aspire service discovery; in non-Aspire/non-Development the API
     // URL must be explicitly configured via TeamsBot:ApiBaseUrl.
-    var apiUrl = builder.Configuration["services:api:https:0"]
+    string? apiUrl = builder.Configuration["services:api:https:0"]
         ?? builder.Configuration["services:api:http:0"]
         ?? builder.Configuration["TeamsBot:ApiBaseUrl"]
         ?? (builder.Environment.IsDevelopment() ? "http://localhost:5000" : null);
@@ -47,9 +47,9 @@ builder.Services.AddSingleton(sp =>
             "Configure 'TeamsBot:ApiBaseUrl' or run under Aspire (which sets 'services:api:https:0').");
     }
 
-    var telemetryUrl = $"{apiUrl.TrimEnd('/')}/hubs/telemetry";
+    string telemetryUrl = $"{apiUrl.TrimEnd('/')}/hubs/telemetry";
 
-    var connection = new HubConnectionBuilder()
+    HubConnection connection = new HubConnectionBuilder()
         .WithUrl(telemetryUrl)
         .WithAutomaticReconnect()
         .Build();
@@ -58,21 +58,21 @@ builder.Services.AddSingleton(sp =>
 });
 
 // Services
-builder.Services.AddSingleton<TelemetrySignalRClient>(sp =>
+builder.Services.AddSingleton(sp =>
 {
-    var conn = sp.GetRequiredService<HubConnection>();
-    var logger = sp.GetRequiredService<ILogger<TelemetrySignalRClient>>();
-    var mode = builder.Configuration["TeamsBot:HealthMode"] ?? "degraded";
+    HubConnection conn = sp.GetRequiredService<HubConnection>();
+    ILogger<TelemetrySignalRClient> logger = sp.GetRequiredService<ILogger<TelemetrySignalRClient>>();
+    string mode = builder.Configuration["TeamsBot:HealthMode"] ?? "degraded";
     return new TelemetrySignalRClient(conn, logger, mode);
 });
 builder.Services.AddSingleton<SessionManager>();
 builder.Services.AddScoped<TeamsSsoHandler>();
 builder.Services.AddSingleton<AdaptiveCardBuilder>();
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // Connect SignalR client at startup
-var telemetryClient = app.Services.GetRequiredService<TelemetrySignalRClient>();
+TelemetrySignalRClient telemetryClient = app.Services.GetRequiredService<TelemetrySignalRClient>();
 await telemetryClient.ConnectAsync();
 
 app.MapDefaultEndpoints();

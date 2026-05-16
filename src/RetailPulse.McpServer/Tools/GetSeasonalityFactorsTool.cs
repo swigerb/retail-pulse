@@ -13,7 +13,7 @@ public static class GetSeasonalityFactorsTool
         RetailPulseDb data,
         [Description("Product category (e.g. 'Spirits', 'Grocery', 'Quick-Serve Restaurant', 'All'). Defaults to 'All'.")] string category = "All")
     {
-        var effectiveCategory = string.Equals(category, "All", StringComparison.OrdinalIgnoreCase) ? null : category;
+        string? effectiveCategory = string.Equals(category, "All", StringComparison.OrdinalIgnoreCase) ? null : category;
         return data.GetSeasonalityFactors(effectiveCategory);
     }
 }

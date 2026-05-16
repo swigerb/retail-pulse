@@ -30,12 +30,12 @@ public class InMemoryCostTracker : ICostTracker
     private static Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)> BuildPricingTable(IConfiguration configuration)
     {
         var pricing = new Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)>(StringComparer.OrdinalIgnoreCase);
-        var section = configuration.GetSection("TokenPricing");
+        IConfigurationSection section = configuration.GetSection("TokenPricing");
 
-        foreach (var child in section.GetChildren())
+        foreach (IConfigurationSection child in section.GetChildren())
         {
-            var inputRate = child.GetValue<decimal>("InputPerMillion");
-            var outputRate = child.GetValue<decimal>("OutputPerMillion");
+            decimal inputRate = child.GetValue<decimal>("InputPerMillion");
+            decimal outputRate = child.GetValue<decimal>("OutputPerMillion");
             pricing[child.Key] = (inputRate, outputRate);
         }
 
@@ -57,23 +57,23 @@ public class InMemoryCostTracker : ICostTracker
 
     public Task<CostSummary> GetSummaryAsync(CostPeriod period, CancellationToken ct = default)
     {
-        var filtered = FilterByPeriod(period);
-        var totalTokens = filtered.Sum(e => e.InputTokens + e.OutputTokens);
-        var totalCost = filtered.Sum(e => CalculateCost(e));
+        List<UsageEvent> filtered = FilterByPeriod(period);
+        int totalTokens = filtered.Sum(e => e.InputTokens + e.OutputTokens);
+        decimal totalCost = filtered.Sum(e => CalculateCost(e));
 
         return Task.FromResult(new CostSummary(totalTokens, totalCost, filtered.Count, period));
     }
 
     public Task<IReadOnlyList<AgentCostBreakdown>> GetByAgentAsync(CostPeriod period, CancellationToken ct = default)
     {
-        var filtered = FilterByPeriod(period);
+        List<UsageEvent> filtered = FilterByPeriod(period);
         var grouped = filtered
             .GroupBy(e => e.AgentId)
             .Select(g =>
             {
-                var tokens = g.Sum(e => e.InputTokens + e.OutputTokens);
-                var cost = g.Sum(e => CalculateCost(e));
-                var topTool = g
+                int tokens = g.Sum(e => e.InputTokens + e.OutputTokens);
+                decimal cost = g.Sum(e => CalculateCost(e));
+                string topTool = g
                     .Where(e => e.ToolName != null)
                     .GroupBy(e => e.ToolName)
                     .OrderByDescending(tg => tg.Count())
@@ -90,16 +90,16 @@ public class InMemoryCostTracker : ICostTracker
 
     public Task<CostTrend> GetTrendAsync(int days = 7, CancellationToken ct = default)
     {
-        var cutoff = DateTime.UtcNow.AddDays(-days);
+        DateTime cutoff = DateTime.UtcNow.AddDays(-days);
         var events = _events.Where(e => e.Timestamp >= cutoff).ToList();
 
         var dailyCosts = Enumerable.Range(0, days)
             .Select(i =>
             {
-                var date = DateTime.UtcNow.Date.AddDays(-days + 1 + i);
+                DateTime date = DateTime.UtcNow.Date.AddDays(-days + 1 + i);
                 var dayEvents = events.Where(e => e.Timestamp.Date == date).ToList();
-                var cost = dayEvents.Sum(e => CalculateCost(e));
-                var tokens = dayEvents.Sum(e => e.InputTokens + e.OutputTokens);
+                decimal cost = dayEvents.Sum(e => CalculateCost(e));
+                int tokens = dayEvents.Sum(e => e.InputTokens + e.OutputTokens);
                 return new DailyCost(date, cost, tokens);
             })
             .ToList();
@@ -110,8 +110,8 @@ public class InMemoryCostTracker : ICostTracker
     /// <summary>Evict events older than the configured TTL.</summary>
     private void EvictStale()
     {
-        var cutoff = DateTime.UtcNow.AddHours(-_options.CostEventTtlHours);
-        while (_events.TryPeek(out var oldest) && oldest.Timestamp < cutoff)
+        DateTime cutoff = DateTime.UtcNow.AddHours(-_options.CostEventTtlHours);
+        while (_events.TryPeek(out UsageEvent? oldest) && oldest.Timestamp < cutoff)
         {
             if (_events.TryDequeue(out _))
                 Interlocked.Decrement(ref _eventCount);
@@ -120,8 +120,8 @@ public class InMemoryCostTracker : ICostTracker
 
     private List<UsageEvent> FilterByPeriod(CostPeriod period)
     {
-        var now = DateTime.UtcNow;
-        var cutoff = period switch
+        DateTime now = DateTime.UtcNow;
+        DateTime cutoff = period switch
         {
             CostPeriod.Today => now.Date,
             CostPeriod.Week => now.AddDays(-7),
@@ -135,9 +135,9 @@ public class InMemoryCostTracker : ICostTracker
 
     private decimal CalculateCost(UsageEvent e)
     {
-        var (InputPer1M, OutputPer1M) = _modelPricing.GetValueOrDefault(e.Model, _defaultPricing);
-        var inputCost = e.InputTokens / 1_000_000m * InputPer1M;
-        var outputCost = e.OutputTokens / 1_000_000m * OutputPer1M;
+        (decimal InputPer1M, decimal OutputPer1M) = _modelPricing.GetValueOrDefault(e.Model, _defaultPricing);
+        decimal inputCost = e.InputTokens / 1_000_000m * InputPer1M;
+        decimal outputCost = e.OutputTokens / 1_000_000m * OutputPer1M;
         return inputCost + outputCost;
     }
 }

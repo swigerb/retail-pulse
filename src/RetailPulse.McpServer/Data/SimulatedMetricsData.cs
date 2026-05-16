@@ -33,12 +33,12 @@ public class SimulatedMetricsData
             return GetNationalDepletionStats(brand.Trim(), period);
         }
 
-        var key = (brand.Trim(), region.Trim());
+        (string, string) key = (brand.Trim(), region.Trim());
 
-        if (!_depletionData.TryGetValue(key, out var record))
+        if (!_depletionData.TryGetValue(key, out DepletionRecord? record))
         {
-            var normalizedBrand = NormalizeDiacritics(brand.Trim());
-            var match = _depletionData.Keys.FirstOrDefault(k =>
+            string normalizedBrand = NormalizeDiacritics(brand.Trim());
+            (string Brand, string Region) match = _depletionData.Keys.FirstOrDefault(k =>
                 NormalizeDiacritics(k.Brand).Contains(normalizedBrand, StringComparison.OrdinalIgnoreCase) &&
                 k.Region.Contains(region.Trim(), StringComparison.OrdinalIgnoreCase));
 
@@ -48,10 +48,12 @@ public class SimulatedMetricsData
                 record = _depletionData[match];
             }
             else
+            {
                 return new { error = $"No data found for brand '{brand}' in region '{region}'.", available_brands = GetAvailableBrands(), available_regions = GetAvailableRegions() };
+            }
         }
 
-        var periodMultiplier = period?.Trim().ToUpperInvariant() switch
+        double periodMultiplier = period?.Trim().ToUpperInvariant() switch
         {
             "Q1" => 0.85,
             "Q2" => 1.05,
@@ -81,11 +83,11 @@ public class SimulatedMetricsData
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
 
-        var normalizedRegion = region.Trim();
-        var normalizedPeriod = string.IsNullOrWhiteSpace(period) ? "YTD" : period.Trim();
+        string normalizedRegion = region.Trim();
+        string normalizedPeriod = string.IsNullOrWhiteSpace(period) ? "YTD" : period.Trim();
 
         var results = new List<object>();
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
             results.Add(GetDepletionStats(brand.Name, normalizedRegion, normalizedPeriod));
         }
@@ -106,13 +108,13 @@ public class SimulatedMetricsData
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
 
-        var key = (brand.Trim(), region.Trim());
+        (string, string) key = (brand.Trim(), region.Trim());
 
-        if (!_shipmentData.TryGetValue(key, out var record))
+        if (!_shipmentData.TryGetValue(key, out ShipmentRecord? record))
         {
-            var normalizedBrand = NormalizeDiacritics(brand.Trim());
-            var normalizedRegion = region.Trim();
-            var match = _shipmentData.Keys.FirstOrDefault(k =>
+            string normalizedBrand = NormalizeDiacritics(brand.Trim());
+            string normalizedRegion = region.Trim();
+            (string Brand, string Region) match = _shipmentData.Keys.FirstOrDefault(k =>
                 NormalizeDiacritics(k.Brand).Contains(normalizedBrand, StringComparison.OrdinalIgnoreCase) &&
                 k.Region.Contains(normalizedRegion, StringComparison.OrdinalIgnoreCase));
 
@@ -122,10 +124,12 @@ public class SimulatedMetricsData
                 record = _shipmentData[match];
             }
             else
+            {
                 return new { error = $"No shipment data for brand '{brand}' in region '{region}'.", available_brands = GetAvailableBrands(), available_regions = GetAvailableRegions() };
+            }
         }
 
-        var periodMultiplier = period?.Trim().ToUpperInvariant() switch
+        double periodMultiplier = period?.Trim().ToUpperInvariant() switch
         {
             "Q1" => 0.85,
             "Q2" => 1.05,
@@ -166,12 +170,12 @@ public class SimulatedMetricsData
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
 
-        var key = (brand.Trim(), region.Trim());
+        (string, string) key = (brand.Trim(), region.Trim());
 
-        if (!_sentimentData.TryGetValue(key, out var sentimentRecord))
+        if (!_sentimentData.TryGetValue(key, out SentimentRecord? sentimentRecord))
         {
-            var normalizedBrand = NormalizeDiacritics(brand.Trim());
-            var match = _sentimentData.Keys.FirstOrDefault(k =>
+            string normalizedBrand = NormalizeDiacritics(brand.Trim());
+            (string Brand, string Region) match = _sentimentData.Keys.FirstOrDefault(k =>
                 NormalizeDiacritics(k.Brand).Contains(normalizedBrand, StringComparison.OrdinalIgnoreCase) &&
                 k.Region.Contains(region.Trim(), StringComparison.OrdinalIgnoreCase));
 
@@ -181,7 +185,9 @@ public class SimulatedMetricsData
                 sentimentRecord = _sentimentData[match];
             }
             else
+            {
                 return new { error = $"No sentiment data for brand '{brand}' in region '{region}'.", available_brands = GetAvailableBrands(), available_regions = GetAvailableRegions() };
+            }
         }
 
         return new
@@ -201,28 +207,28 @@ public class SimulatedMetricsData
         var data = new Dictionary<(string Brand, string Region), DepletionRecord>(StringTupleComparer.Instance);
         _ = new[] { "On Track", "Growth Leader", "Declining", "Overstocked" };
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
             // Each brand gets a base growth profile influenced by its category and price segment
-            var brandSeed = GetStableHash(brand.Name);
-            var baseTrend = GetBaseTrend(brand, brandSeed);
+            int brandSeed = GetStableHash(brand.Name);
+            double baseTrend = GetBaseTrend(brand, brandSeed);
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var regionSeed = GetStableHash($"{brand.Name}|{region}");
+                int regionSeed = GetStableHash($"{brand.Name}|{region}");
                 var regionRng = new Random(regionSeed);
 
-                var regionVariance = (regionRng.NextDouble() - 0.5) * 8.0; // ±4%
-                var depletionGrowth = Math.Round(baseTrend + regionVariance, 1);
-                var sellThroughGrowth = Math.Round(depletionGrowth + ((regionRng.NextDouble() - 0.5) * 4.0), 1);
+                double regionVariance = (regionRng.NextDouble() - 0.5) * 8.0; // ±4%
+                double depletionGrowth = Math.Round(baseTrend + regionVariance, 1);
+                double sellThroughGrowth = Math.Round(depletionGrowth + ((regionRng.NextDouble() - 0.5) * 4.0), 1);
 
                 // Inventory weeks inversely correlated with growth
-                var inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - (depletionGrowth * 0.3) + (regionRng.NextDouble() * 3.0)), 1);
+                double inventoryWeeks = Math.Round(Math.Max(2.5, 7.0 - (depletionGrowth * 0.3) + (regionRng.NextDouble() * 3.0)), 1);
 
                 // Status based on metrics
-                var status = DetermineDepletionStatus(depletionGrowth, sellThroughGrowth, inventoryWeeks);
+                string status = DetermineDepletionStatus(depletionGrowth, sellThroughGrowth, inventoryWeeks);
 
-                var summary = GenerateDepletionSummary(brand, region, depletionGrowth, sellThroughGrowth, inventoryWeeks, status, regionRng);
+                string summary = GenerateDepletionSummary(brand, region, depletionGrowth, sellThroughGrowth, inventoryWeeks, status, regionRng);
 
                 data[(brand.Name, region)] = new DepletionRecord(
                     FormatPercentage(depletionGrowth),
@@ -240,34 +246,34 @@ public class SimulatedMetricsData
     {
         var data = new Dictionary<(string Brand, string Region), ShipmentRecord>(StringTupleComparer.Instance);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var baseTrend = GetBaseTrend(brand, GetStableHash(brand.Name));
+            double baseTrend = GetBaseTrend(brand, GetStableHash(brand.Name));
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var regionSeed = GetStableHash($"ship|{brand.Name}|{region}");
+                int regionSeed = GetStableHash($"ship|{brand.Name}|{region}");
                 var regionRng = new Random(regionSeed);
 
-                var shipmentGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.3) * 6.0), 1);
-                var sellThroughGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.5) * 5.0), 1);
-                var depletionGrowth = Math.Round(sellThroughGrowth + ((regionRng.NextDouble() - 0.5) * 3.0), 1);
+                double shipmentGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.3) * 6.0), 1);
+                double sellThroughGrowth = Math.Round(baseTrend + ((regionRng.NextDouble() - 0.5) * 5.0), 1);
+                double depletionGrowth = Math.Round(sellThroughGrowth + ((regionRng.NextDouble() - 0.5) * 3.0), 1);
 
-                var inventoryWeeks = Math.Round(Math.Max(2.5, 6.5 - (depletionGrowth * 0.25) + (regionRng.NextDouble() * 3.0)), 1);
+                double inventoryWeeks = Math.Round(Math.Max(2.5, 6.5 - (depletionGrowth * 0.25) + (regionRng.NextDouble() * 3.0)), 1);
 
                 // Base cases scaled by brand category and price
-                var baseCases = brand.PriceSegment switch
+                int baseCases = brand.PriceSegment switch
                 {
                     "Ultra-Premium" => 2_000 + regionRng.Next(1_000, 5_000),
                     "Premium" => 5_000 + regionRng.Next(3_000, 15_000),
                     _ => 8_000 + regionRng.Next(5_000, 25_000)
                 };
-                var casesShipped = baseCases + (int)(baseCases * shipmentGrowth / 100.0);
-                var casesDepleted = baseCases + (int)(baseCases * depletionGrowth / 100.0);
+                int casesShipped = baseCases + (int)(baseCases * shipmentGrowth / 100.0);
+                int casesDepleted = baseCases + (int)(baseCases * depletionGrowth / 100.0);
 
-                var (anomalyType, riskLevel) = DetermineAnomalyType(shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks);
+                (string? anomalyType, string? riskLevel) = DetermineAnomalyType(shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks);
 
-                var analysis = GenerateShipmentAnalysis(brand, region, shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks, casesShipped, casesDepleted, anomalyType);
+                string analysis = GenerateShipmentAnalysis(brand, region, shipmentGrowth, sellThroughGrowth, depletionGrowth, inventoryWeeks, casesShipped, casesDepleted, anomalyType);
 
                 data[(brand.Name, region)] = new ShipmentRecord(
                     FormatPercentage(shipmentGrowth),
@@ -289,16 +295,16 @@ public class SimulatedMetricsData
     {
         var data = new Dictionary<(string Brand, string Region), SentimentRecord>(StringTupleComparer.Instance);
 
-        foreach (var brand in _tenant.Brands)
+        foreach (BrandConfig brand in _tenant.Brands)
         {
-            var baseTrend = GetBaseTrend(brand, GetStableHash(brand.Name));
+            double baseTrend = GetBaseTrend(brand, GetStableHash(brand.Name));
 
-            foreach (var region in _tenant.Regions)
+            foreach (string region in _tenant.Regions)
             {
-                var regionSeed = GetStableHash($"sent|{brand.Name}|{region}");
+                int regionSeed = GetStableHash($"sent|{brand.Name}|{region}");
                 var regionRng = new Random(regionSeed);
 
-                var sentiment = GenerateFieldSentiment(brand, region, baseTrend, regionRng);
+                string sentiment = GenerateFieldSentiment(brand, region, baseTrend, regionRng);
                 data[(brand.Name, region)] = new SentimentRecord(sentiment);
             }
         }
@@ -312,7 +318,7 @@ public class SimulatedMetricsData
     {
         var rng = new Random(seed);
         // Categories have different momentum
-        var categoryBoost = brand.Category switch
+        double categoryBoost = brand.Category switch
         {
             "Tequila" => 4.0 + (rng.NextDouble() * 4.0),
             "Mezcal" => 5.0 + (rng.NextDouble() * 5.0),
@@ -324,7 +330,7 @@ public class SimulatedMetricsData
             _ => -1.0 + (rng.NextDouble() * 4.0)
         };
         // Ultra-Premium tends to outperform within category
-        var segmentBoost = brand.PriceSegment switch
+        double segmentBoost = brand.PriceSegment switch
         {
             "Ultra-Premium" => 2.0,
             "Premium" => 0.5,
@@ -345,7 +351,7 @@ public class SimulatedMetricsData
     private static (string AnomalyType, string RiskLevel) DetermineAnomalyType(
         double shipmentGrowth, double sellThroughGrowth, double depletionGrowth, double inventoryWeeks)
     {
-        var gap = shipmentGrowth - sellThroughGrowth;
+        double gap = shipmentGrowth - sellThroughGrowth;
 
         if (gap > 6.0 && inventoryWeeks > 8.0)
             return ("pipeline_clog", inventoryWeeks > 10.0 ? "critical" : "high");
@@ -370,7 +376,7 @@ public class SimulatedMetricsData
     private static string GenerateDepletionSummary(BrandConfig brand, string region,
         double depletionGrowth, double sellThroughGrowth, double inventoryWeeks, string status, Random rng)
     {
-        var variants = brand.Variants.Count > 0 ? brand.Variants[rng.Next(brand.Variants.Count)] : "core";
+        string variants = brand.Variants.Count > 0 ? brand.Variants[rng.Next(brand.Variants.Count)] : "core";
 
         return status switch
         {
@@ -397,8 +403,8 @@ public class SimulatedMetricsData
         double inventoryWeeks, int casesShipped, int casesDepleted,
         string anomalyType)
     {
-        var gap = casesShipped - casesDepleted;
-        var model = _tenant.Distribution?.Model ?? "Three-Tier";
+        int gap = casesShipped - casesDepleted;
+        string model = _tenant.Distribution?.Model ?? "Three-Tier";
 
         return anomalyType switch
         {
@@ -429,8 +435,8 @@ public class SimulatedMetricsData
 
     private string GenerateFieldSentiment(BrandConfig brand, string region, double baseTrend, Random rng)
     {
-        var variantList = string.Join(", ", brand.Variants.Take(3));
-        var channel = _tenant.Channels.Count > 0 ? _tenant.Channels[rng.Next(_tenant.Channels.Count)] : "retail";
+        string variantList = string.Join(", ", brand.Variants.Take(3));
+        string channel = _tenant.Channels.Count > 0 ? _tenant.Channels[rng.Next(_tenant.Channels.Count)] : "retail";
 
         // Build a rich, multi-sentence narrative
         var sentences = new List<string>();
@@ -469,7 +475,7 @@ public class SimulatedMetricsData
 
     private object GetNationalDepletionStats(string brand, string? period)
     {
-        var normalizedBrand = NormalizeDiacritics(brand);
+        string normalizedBrand = NormalizeDiacritics(brand);
         var regionalData = _depletionData
             .Where(kv => NormalizeDiacritics(kv.Key.Brand).Contains(normalizedBrand, StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -477,7 +483,7 @@ public class SimulatedMetricsData
         if (regionalData.Count == 0)
             return new { error = $"No data found for brand '{brand}'.", available_brands = GetAvailableBrands() };
 
-        var periodMultiplier = period?.Trim().ToUpperInvariant() switch
+        double periodMultiplier = period?.Trim().ToUpperInvariant() switch
         {
             "Q1" => 0.85,
             "Q2" => 1.05,
@@ -486,9 +492,9 @@ public class SimulatedMetricsData
             _ => 1.0
         };
 
-        var avgDepletions = regionalData.Average(kv => ParsePercentage(kv.Value.DepletionsYoY));
-        var avgSellThrough = regionalData.Average(kv => ParsePercentage(kv.Value.SellThroughYoY));
-        var avgInventory = regionalData.Average(kv => kv.Value.InventoryWeeks);
+        double avgDepletions = regionalData.Average(kv => ParsePercentage(kv.Value.DepletionsYoY));
+        double avgSellThrough = regionalData.Average(kv => ParsePercentage(kv.Value.SellThroughYoY));
+        double avgInventory = regionalData.Average(kv => kv.Value.InventoryWeeks);
 
         return new
         {
@@ -513,7 +519,7 @@ public class SimulatedMetricsData
     }
 
     private static double ParsePercentage(string pct) =>
-        double.TryParse(pct.TrimEnd('%').TrimStart('+'), out var val) ? val : 0;
+        double.TryParse(pct.TrimEnd('%').TrimStart('+'), out double val) ? val : 0;
 
     // ── Utility Methods ──────────────────────────────────────────────────
 
@@ -528,9 +534,9 @@ public class SimulatedMetricsData
 
     private static string AdjustPercentage(string pct, double multiplier)
     {
-        if (double.TryParse(pct.TrimEnd('%').TrimStart('+'), out var val))
+        if (double.TryParse(pct.TrimEnd('%').TrimStart('+'), out double val))
         {
-            var adjusted = Math.Round(val * multiplier, 1);
+            double adjusted = Math.Round(val * multiplier, 1);
             return (adjusted >= 0 ? "+" : "") + adjusted + "%";
         }
         return pct;
@@ -542,7 +548,7 @@ public class SimulatedMetricsData
         unchecked
         {
             int hash = 17;
-            foreach (var c in input)
+            foreach (char c in input)
                 hash = (hash * 31) + c;
             return Math.Abs(hash);
         }
@@ -550,9 +556,9 @@ public class SimulatedMetricsData
 
     private static string NormalizeDiacritics(string text)
     {
-        var normalized = text.Normalize(NormalizationForm.FormD);
+        string normalized = text.Normalize(NormalizationForm.FormD);
         var sb = new StringBuilder(normalized.Length);
-        foreach (var c in normalized)
+        foreach (char c in normalized)
         {
             if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
                 sb.Append(c);

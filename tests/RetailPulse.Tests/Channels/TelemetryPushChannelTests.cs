@@ -63,7 +63,7 @@ public class TelemetryPushChannelTests
         channel.TryWrite(item).Should().BeTrue();
         channel.Complete();
 
-        var read = await channel.Reader.ReadAsync();
+        TelemetryPushItem read = await channel.Reader.ReadAsync();
         read.EventType.Should().Be("span_completed");
         read.Span.Should().NotBeNull();
         read.Span.OperationName.Should().Be("test.op");
@@ -79,7 +79,7 @@ public class TelemetryPushChannelTests
         channel.Complete();
 
         var items = new List<TelemetryPushItem>();
-        await foreach (var item in channel.Reader.ReadAllAsync())
+        await foreach (TelemetryPushItem item in channel.Reader.ReadAllAsync())
             items.Add(item);
 
         items[0].TraceId.Should().Be("first");
@@ -93,7 +93,7 @@ public class TelemetryPushChannelTests
         for (int i = 0; i < 3; i++)
             channel.TryWrite(new TelemetryPushItem("trace_started", TraceId: $"fill-{i}"));
 
-        var tasks = Enumerable.Range(0, 50).Select(i => Task.Run(() =>
+        IEnumerable<Task<bool>> tasks = Enumerable.Range(0, 50).Select(i => Task.Run(() =>
             channel.TryWrite(new TelemetryPushItem("span_completed"))
         ));
         await Task.WhenAll(tasks);

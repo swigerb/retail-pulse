@@ -14,10 +14,7 @@ public static class SupplyTools
         [Description("Brand name to filter (e.g. 'Sierra Gold Tequila', 'FreshMart'). Omit for all brands.")] string? brand = null,
         [Description("Region to filter (e.g. 'Northeast', 'West Coast'). Omit for all regions.")] string? region = null,
         [Description("Category to filter (e.g. 'Spirits', 'Grocery'). Omit for all categories.")] string? category = null,
-        [Description("Status filter: 'healthy', 'low', 'critical', 'out_of_stock'. Omit for all.")] string? status = null)
-    {
-        return data.GetInventoryLevels(brand, region, category, status);
-    }
+        [Description("Status filter: 'healthy', 'low', 'critical', 'out_of_stock'. Omit for all.")] string? status = null) => data.GetInventoryLevels(brand, region, category, status);
 
     [McpServerTool(Name = "GetSupplyDisruptions")]
     [Description("Get active supply chain disruptions. Returns disruption type (logistics/supplier/weather/demand_surge), severity, impacted SKUs, and estimated resolution. Use for risk assessment and supply chain visibility.")]
@@ -26,10 +23,7 @@ public static class SupplyTools
         [Description("Brand name to filter. Omit for all brands.")] string? brand = null,
         [Description("Region to filter. Omit for all regions.")] string? region = null,
         [Description("Severity filter: 'high', 'medium', 'low'. Omit for all.")] string? severity = null,
-        [Description("Show only active disruptions (default: true).")] bool activeOnly = true)
-    {
-        return data.GetSupplyDisruptions(brand, region, severity, activeOnly);
-    }
+        [Description("Show only active disruptions (default: true).")] bool activeOnly = true) => data.GetSupplyDisruptions(brand, region, severity, activeOnly);
 
     [McpServerTool(Name = "GetFulfillmentRate")]
     [Description("Get order fulfillment rate trends over time. Returns fill rate %, on-time delivery %, and backorder counts by period. Use for service level assessment and trend detection.")]
@@ -38,10 +32,7 @@ public static class SupplyTools
         [Description("Brand name to filter. Omit for all brands.")] string? brand = null,
         [Description("Region to filter. Omit for all regions.")] string? region = null,
         [Description("Specific period to filter (e.g. '2026-04'). Omit for all periods.")] string? period = null,
-        [Description("Minimum number of periods to return (1-12). Default: 6")] int minPeriods = 6)
-    {
-        return data.GetFulfillmentRates(brand, region, period, minPeriods);
-    }
+        [Description("Minimum number of periods to return (1-12). Default: 6")] int minPeriods = 6) => data.GetFulfillmentRates(brand, region, period, minPeriods);
 
     [McpServerTool(Name = "GetSupplyHealthSummary")]
     [Description("Get an aggregate supply chain health summary combining inventory status, active disruptions, and fulfillment rates into an overall assessment (Green/Yellow/Red). Use for executive-level health overviews.")]

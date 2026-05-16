@@ -1,4 +1,5 @@
 using FluentAssertions;
+using FluentAssertions.Specialized;
 using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Tests.Consensus;
@@ -20,17 +21,17 @@ public class CouncilApiTests
     [Fact]
     public async Task Convene_ValidBrand_ReturnsVerdictWithAllFields()
     {
-        var agents = new[]
-        {
+        ICouncilAgent[] agents =
+        [
             CreateVotingAgent("demand-forecasting", "Demand Forecast Agent", HealthRating.Green, 0.92),
             CreateVotingAgent("supply-chain", "Supply Chain Agent", HealthRating.Yellow, 0.85),
             CreateVotingAgent("competitive-intel", "Competitive Intelligence Agent", HealthRating.Green, 0.88)
-        };
+        ];
 
         var orchestrator = new ConsensusOrchestrator(
             agents, Mock.Of<ILogger<ConsensusOrchestrator>>());
 
-        var verdict = await orchestrator.ConveneAsync("Sierra Gold Tequila", CancellationToken.None);
+        CouncilVerdict verdict = await orchestrator.ConveneAsync("Sierra Gold Tequila", CancellationToken.None);
 
         // All required fields present
         verdict.Brand.Should().Be("Sierra Gold Tequila");
@@ -43,17 +44,17 @@ public class CouncilApiTests
     [Fact]
     public async Task Convene_ValidBrand_ResponseIncludesVotes()
     {
-        var agents = new[]
-        {
+        ICouncilAgent[] agents =
+        [
             CreateVotingAgent("demand-forecasting", "Demand Forecast Agent", HealthRating.Green, 0.90),
             CreateVotingAgent("supply-chain", "Supply Chain Agent", HealthRating.Green, 0.85),
             CreateVotingAgent("competitive-intel", "Competitive Intelligence Agent", HealthRating.Green, 0.80)
-        };
+        ];
 
         var orchestrator = new ConsensusOrchestrator(
             agents, Mock.Of<ILogger<ConsensusOrchestrator>>());
 
-        var verdict = await orchestrator.ConveneAsync("Ridgeline Bourbon", CancellationToken.None);
+        CouncilVerdict verdict = await orchestrator.ConveneAsync("Ridgeline Bourbon", CancellationToken.None);
 
         verdict.Votes.Should().HaveCount(3);
         verdict.Votes.Should().OnlyContain(v =>
@@ -66,17 +67,17 @@ public class CouncilApiTests
     [Fact]
     public async Task Convene_ValidBrand_ResponseIncludesSynthesis()
     {
-        var agents = new[]
-        {
+        ICouncilAgent[] agents =
+        [
             CreateVotingAgent("demand-forecasting", "Demand Forecast Agent", HealthRating.Green, 0.90),
             CreateVotingAgent("supply-chain", "Supply Chain Agent", HealthRating.Red, 0.95),
             CreateVotingAgent("competitive-intel", "Competitive Intelligence Agent", HealthRating.Yellow, 0.80)
-        };
+        ];
 
         var orchestrator = new ConsensusOrchestrator(
             agents, Mock.Of<ILogger<ConsensusOrchestrator>>());
 
-        var verdict = await orchestrator.ConveneAsync("FreshMart", CancellationToken.None);
+        CouncilVerdict verdict = await orchestrator.ConveneAsync("FreshMart", CancellationToken.None);
 
         verdict.Synthesis.Should().NotBeNullOrWhiteSpace();
         verdict.OverallRating.Should().BeDefined();
@@ -89,19 +90,19 @@ public class CouncilApiTests
     [Fact]
     public async Task Convene_UnknownBrand_GracefulHandling()
     {
-        var agents = new[]
-        {
+        ICouncilAgent[] agents =
+        [
             CreateVotingAgent("demand-forecasting", "Demand Forecast Agent", HealthRating.Yellow, 0.50),
             CreateVotingAgent("supply-chain", "Supply Chain Agent", HealthRating.Yellow, 0.45),
             CreateVotingAgent("competitive-intel", "Competitive Intelligence Agent", HealthRating.Yellow, 0.40)
-        };
+        ];
 
         var orchestrator = new ConsensusOrchestrator(
             agents, Mock.Of<ILogger<ConsensusOrchestrator>>());
 
         // Should NOT throw — returns a verdict (even if uncertain)
-        var act = () => orchestrator.ConveneAsync("NonExistentBrand999", CancellationToken.None);
-        var verdict = await act.Should().NotThrowAsync();
+        Func<Task<CouncilVerdict>> act = () => orchestrator.ConveneAsync("NonExistentBrand999", CancellationToken.None);
+        AndWhichConstraint<GenericAsyncFunctionAssertions<CouncilVerdict>, CouncilVerdict> verdict = await act.Should().NotThrowAsync();
 
         verdict.Subject.Should().NotBeNull();
         verdict.Subject.Brand.Should().Be("NonExistentBrand999");
@@ -114,12 +115,12 @@ public class CouncilApiTests
     [Fact]
     public void CouncilAgents_ListParticipatingAgents()
     {
-        var agents = new[]
-        {
+        ICouncilAgent[] agents =
+        [
             CreateVotingAgent("demand-forecasting", "Demand Forecast Agent", HealthRating.Green, 0.90),
             CreateVotingAgent("supply-chain", "Supply Chain Agent", HealthRating.Green, 0.85),
             CreateVotingAgent("competitive-intel", "Competitive Intelligence Agent", HealthRating.Green, 0.80)
-        };
+        ];
 
         // Verify the orchestrator exposes its agents
         var agentKeys = agents.Select(a => a.Key).ToList();
@@ -133,12 +134,12 @@ public class CouncilApiTests
     [Fact]
     public void CouncilAgents_AllHaveDisplayNames()
     {
-        var agents = new[]
-        {
+        ICouncilAgent[] agents =
+        [
             CreateVotingAgent("demand-forecasting", "Demand Forecast Agent", HealthRating.Green, 0.90),
             CreateVotingAgent("supply-chain", "Supply Chain Agent", HealthRating.Green, 0.85),
             CreateVotingAgent("competitive-intel", "Competitive Intelligence Agent", HealthRating.Green, 0.80)
-        };
+        ];
 
         agents.Should().OnlyContain(a => !string.IsNullOrWhiteSpace(a.DisplayName));
     }
@@ -150,18 +151,18 @@ public class CouncilApiTests
     [Fact]
     public async Task Convene_ResponseTime_UnderFifteenSeconds()
     {
-        var agents = new[]
-        {
+        ICouncilAgent[] agents =
+        [
             CreateVotingAgent("demand-forecasting", "Demand Forecast Agent", HealthRating.Green, 0.90),
             CreateVotingAgent("supply-chain", "Supply Chain Agent", HealthRating.Green, 0.85),
             CreateVotingAgent("competitive-intel", "Competitive Intelligence Agent", HealthRating.Green, 0.80)
-        };
+        ];
 
         var orchestrator = new ConsensusOrchestrator(
             agents, Mock.Of<ILogger<ConsensusOrchestrator>>());
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var verdict = await orchestrator.ConveneAsync("Summit Vodka", CancellationToken.None);
+        CouncilVerdict verdict = await orchestrator.ConveneAsync("Summit Vodka", CancellationToken.None);
         sw.Stop();
 
         sw.ElapsedMilliseconds.Should().BeLessThan(15_000,
@@ -176,12 +177,12 @@ public class CouncilApiTests
     [Fact]
     public async Task Convene_CancellationRequested_StopsGracefully()
     {
-        var agents = new[]
-        {
+        ICouncilAgent[] agents =
+        [
             CreateVotingAgent("demand-forecasting", "Demand Forecast Agent", HealthRating.Green, 0.90),
             CreateVotingAgent("supply-chain", "Supply Chain Agent", HealthRating.Green, 0.85),
             CreateVotingAgent("competitive-intel", "Competitive Intelligence Agent", HealthRating.Green, 0.80)
-        };
+        ];
 
         var orchestrator = new ConsensusOrchestrator(
             agents, Mock.Of<ILogger<ConsensusOrchestrator>>());
@@ -192,7 +193,7 @@ public class CouncilApiTests
         // Should handle gracefully — either return a result or throw OCE
         try
         {
-            var verdict = await orchestrator.ConveneAsync("Summit Vodka", cts.Token);
+            CouncilVerdict verdict = await orchestrator.ConveneAsync("Summit Vodka", cts.Token);
             // If it returns without throwing, it handled cancellation gracefully
             verdict.Brand.Should().Be("Summit Vodka");
         }

@@ -18,7 +18,7 @@ public class DurableAuditLog : IAuditLog, IDisposable
 
     public DurableAuditLog(string dbPath)
     {
-        var dir = Path.GetDirectoryName(dbPath);
+        string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
@@ -30,7 +30,7 @@ public class DurableAuditLog : IAuditLog, IDisposable
 
     private void InitializeSchema()
     {
-        using var cmd = _connection.CreateCommand();
+        using SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = """
             CREATE TABLE IF NOT EXISTS audit_log (
                 id TEXT PRIMARY KEY,
@@ -54,9 +54,9 @@ public class DurableAuditLog : IAuditLog, IDisposable
 
     private void LoadLastChecksum()
     {
-        using var cmd = _connection.CreateCommand();
+        using SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = "SELECT checksum FROM audit_log ORDER BY rowid DESC LIMIT 1";
-        var result = cmd.ExecuteScalar();
+        object? result = cmd.ExecuteScalar();
         _lastChecksum = result as string ?? string.Empty;
     }
 
@@ -65,14 +65,14 @@ public class DurableAuditLog : IAuditLog, IDisposable
         await _writeLock.WaitAsync(ct);
         try
         {
-            var timestampStr = entry.Timestamp.ToString("O", CultureInfo.InvariantCulture);
-            var durationMs = entry.Duration.TotalMilliseconds;
-            var entryJson = BuildChecksumPayload(entry.Id, timestampStr, entry.UserId, entry.AgentId,
+            string timestampStr = entry.Timestamp.ToString("O", CultureInfo.InvariantCulture);
+            double durationMs = entry.Duration.TotalMilliseconds;
+            string entryJson = BuildChecksumPayload(entry.Id, timestampStr, entry.UserId, entry.AgentId,
                 entry.Action, entry.InputSummary, entry.OutputSummary, entry.TokensUsed, durationMs);
 
-            var checksum = ComputeChecksum(_lastChecksum, entryJson);
+            string checksum = ComputeChecksum(_lastChecksum, entryJson);
 
-            using var cmd = _connection.CreateCommand();
+            using SqliteCommand cmd = _connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO audit_log (id, timestamp, user_id, agent_id, action, input_summary, output_summary, tokens_used, duration_ms, checksum)
                 VALUES (@id, @ts, @uid, @aid, @action, @input, @output, @tokens, @duration, @checksum)
@@ -131,13 +131,13 @@ public class DurableAuditLog : IAuditLog, IDisposable
         sb.Append(" ORDER BY timestamp DESC LIMIT @limit");
         parameters.Add(new SqliteParameter("@limit", query.Limit));
 
-        using var cmd = _connection.CreateCommand();
+        using SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = sb.ToString();
-        foreach (var p in parameters)
+        foreach (SqliteParameter p in parameters)
             cmd.Parameters.Add(p);
 
         var results = new List<AuditEntry>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             results.Add(new AuditEntry(
@@ -157,24 +157,24 @@ public class DurableAuditLog : IAuditLog, IDisposable
 
     public Task<AuditStats> GetStatsAsync(CancellationToken ct = default)
     {
-        using var cmd = _connection.CreateCommand();
+        using SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM audit_log";
-        var total = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+        int total = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
 
         var byAgent = new Dictionary<string, int>();
-        using (var agentCmd = _connection.CreateCommand())
+        using (SqliteCommand agentCmd = _connection.CreateCommand())
         {
             agentCmd.CommandText = "SELECT agent_id, COUNT(*) FROM audit_log GROUP BY agent_id";
-            using var reader = agentCmd.ExecuteReader();
+            using SqliteDataReader reader = agentCmd.ExecuteReader();
             while (reader.Read())
                 byAgent[reader.GetString(0)] = reader.GetInt32(1);
         }
 
         var byAction = new Dictionary<string, int>();
-        using (var actionCmd = _connection.CreateCommand())
+        using (SqliteCommand actionCmd = _connection.CreateCommand())
         {
             actionCmd.CommandText = "SELECT action, COUNT(*) FROM audit_log GROUP BY action";
-            using var reader = actionCmd.ExecuteReader();
+            using SqliteDataReader reader = actionCmd.ExecuteReader();
             while (reader.Read())
                 byAction[reader.GetString(0)] = reader.GetInt32(1);
         }
@@ -188,15 +188,15 @@ public class DurableAuditLog : IAuditLog, IDisposable
     /// </summary>
     public bool VerifyIntegrity()
     {
-        using var cmd = _connection.CreateCommand();
+        using SqliteCommand cmd = _connection.CreateCommand();
         cmd.CommandText = "SELECT id, timestamp, user_id, agent_id, action, input_summary, output_summary, tokens_used, duration_ms, checksum FROM audit_log ORDER BY rowid ASC";
 
-        using var reader = cmd.ExecuteReader();
-        var previousChecksum = string.Empty;
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        string previousChecksum = string.Empty;
 
         while (reader.Read())
         {
-            var entryJson = BuildChecksumPayload(
+            string entryJson = BuildChecksumPayload(
                 reader.GetString(0),  // id
                 reader.GetString(1),  // timestamp (stored as ISO string)
                 reader.GetString(2),  // user_id
@@ -207,8 +207,8 @@ public class DurableAuditLog : IAuditLog, IDisposable
                 reader.GetInt32(7),   // tokens_used
                 reader.GetDouble(8)); // duration_ms
 
-            var expectedChecksum = ComputeChecksum(previousChecksum, entryJson);
-            var actualChecksum = reader.GetString(9);
+            string expectedChecksum = ComputeChecksum(previousChecksum, entryJson);
+            string actualChecksum = reader.GetString(9);
 
             if (expectedChecksum != actualChecksum)
                 return false;
@@ -224,15 +224,12 @@ public class DurableAuditLog : IAuditLog, IDisposable
     /// Uses pipe-delimited concatenation to avoid JSON serialization inconsistencies.
     /// </summary>
     private static string BuildChecksumPayload(string id, string timestamp, string userId, string agentId,
-        string action, string inputSummary, string outputSummary, int tokensUsed, double durationMs)
-    {
-        return $"{id}|{timestamp}|{userId}|{agentId}|{action}|{inputSummary}|{outputSummary}|{tokensUsed}|{durationMs}";
-    }
+        string action, string inputSummary, string outputSummary, int tokensUsed, double durationMs) => $"{id}|{timestamp}|{userId}|{agentId}|{action}|{inputSummary}|{outputSummary}|{tokensUsed}|{durationMs}";
 
     internal static string ComputeChecksum(string previousChecksum, string entryJson)
     {
-        var input = previousChecksum + entryJson;
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        string input = previousChecksum + entryJson;
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         return Convert.ToHexStringLower(hash);
     }
 

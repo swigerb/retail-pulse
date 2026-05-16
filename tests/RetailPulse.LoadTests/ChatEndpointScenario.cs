@@ -20,7 +20,7 @@ public class ChatEndpointScenario
     {
         using var httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
 
-        var chatPayload = JsonSerializer.Serialize(new
+        string chatPayload = JsonSerializer.Serialize(new
         {
             message = "How is Apex Grill performing in the Southwest this quarter?",
             sessionId = $"loadtest-{Guid.NewGuid():N}"
@@ -28,11 +28,11 @@ public class ChatEndpointScenario
 
         return Scenario.Create("chat_endpoint", async context =>
             {
-                var request = Http.CreateRequest("POST", $"{BaseUrl}/api/v1/chat")
+                HttpRequestMessage request = Http.CreateRequest("POST", $"{BaseUrl}/api/v1/chat")
                     .WithHeader("Content-Type", "application/json")
                     .WithBody(new StringContent(chatPayload, Encoding.UTF8, "application/json"));
 
-                var response = await Http.Send(httpClient, request);
+                Response<HttpResponseMessage> response = await Http.Send(httpClient, request);
                 return response;
             })
             .WithoutWarmUp()

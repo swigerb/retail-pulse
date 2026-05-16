@@ -37,10 +37,7 @@ public class DemandForecastAgent : ISpecialistAgent, IPrefetchableAgent
         _tools = tools;
     }
 
-    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
-    {
-        return HandleWithPrefetchAsync(request, null, ct);
-    }
+    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default) => HandleWithPrefetchAsync(request, null, ct);
 
     public Task<ChatResponse> HandleWithPrefetchAsync(
         ChatRequest request,

@@ -74,7 +74,7 @@ public class PromptTemplateEngineTests
     public void HydrateTemplate_ReplacesPlaceholdersInRawString()
     {
         var engine = new PromptTemplateEngine(CreateTestTenant());
-        var result = engine.HydrateTemplate("Hello {tenant.company}!");
+        string result = engine.HydrateTemplate("Hello {tenant.company}!");
         result.Should().Be("Hello TestCo!");
     }
 

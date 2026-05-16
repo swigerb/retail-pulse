@@ -24,7 +24,7 @@ public class ChartDataTool
     {
         try
         {
-            var spec = JsonSerializer.Deserialize<ChartSpec>(chartSpecJson, _inputOptions);
+            ChartSpec? spec = JsonSerializer.Deserialize<ChartSpec>(chartSpecJson, _inputOptions);
             if (spec == null)
             {
                 return Task.FromResult(JsonSerializer.Serialize(new { error = "Invalid chart specification" }));

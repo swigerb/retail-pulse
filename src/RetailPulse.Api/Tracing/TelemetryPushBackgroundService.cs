@@ -28,7 +28,7 @@ public sealed class TelemetryPushBackgroundService : BackgroundService
     {
         _logger.LogInformation("Telemetry push background service started");
 
-        await foreach (var item in _channel.Reader.ReadAllAsync(stoppingToken))
+        await foreach (TelemetryPushItem item in _channel.Reader.ReadAllAsync(stoppingToken))
         {
             try
             {
@@ -55,7 +55,7 @@ public sealed class TelemetryPushBackgroundService : BackgroundService
                             {
                                 id = item.Span.SpanId,
                                 name = item.Span.OperationName,
-                                type = item.Span.Tags is not null && item.Span.Tags.TryGetValue("span.type", out var spanType) ? spanType : "generic",
+                                type = item.Span.Tags is not null && item.Span.Tags.TryGetValue("span.type", out string? spanType) ? spanType : "generic",
                                 durationMs = item.Span.DurationMs,
                                 startTime = item.Span.StartTime,
                                 endTime = item.Span.EndTime,

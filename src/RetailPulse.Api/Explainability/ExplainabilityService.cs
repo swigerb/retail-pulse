@@ -48,7 +48,7 @@ public class ExplainabilityService
     /// <summary>Start tracing a new query.</summary>
     public string StartTrace(string sessionId, string query)
     {
-        var traceId = $"{sessionId}-{Guid.NewGuid():N}"[..32];
+        string traceId = $"{sessionId}-{Guid.NewGuid():N}"[..32];
         var trace = new ExplanationTrace(
             sessionId, query,
             [], [],
@@ -63,7 +63,7 @@ public class ExplainabilityService
     public void RecordToolCall(string traceId, string toolName, string arguments,
         string resultSummary, long durationMs)
     {
-        if (_traces.TryGetValue(traceId, out var trace))
+        if (_traces.TryGetValue(traceId, out ExplanationTrace? trace))
         {
             trace.ToolSteps.Add(new ToolStep(
                 toolName, arguments,
@@ -75,7 +75,7 @@ public class ExplainabilityService
     /// <summary>Record a reasoning/processing step.</summary>
     public void RecordReasoning(string traceId, string agentKey, string phase, string description)
     {
-        if (_traces.TryGetValue(traceId, out var trace))
+        if (_traces.TryGetValue(traceId, out ExplanationTrace? trace))
         {
             trace.ReasoningChain.Add(new ReasoningStep(
                 agentKey, phase, description, DateTime.UtcNow));
@@ -85,7 +85,7 @@ public class ExplainabilityService
     /// <summary>Complete a trace with the final answer.</summary>
     public void CompleteTrace(string traceId, string finalAnswer, long totalDurationMs)
     {
-        if (_traces.TryGetValue(traceId, out var existing))
+        if (_traces.TryGetValue(traceId, out ExplanationTrace? existing))
         {
             _traces[traceId] = existing with
             {
@@ -102,7 +102,7 @@ public class ExplainabilityService
     /// <summary>Get a trace by ID.</summary>
     public ExplanationTrace? GetTrace(string traceId)
     {
-        _traces.TryGetValue(traceId, out var trace);
+        _traces.TryGetValue(traceId, out ExplanationTrace? trace);
         return trace;
     }
 
@@ -120,7 +120,7 @@ public class ExplainabilityService
     /// </summary>
     public string BuildExplanation(string traceId)
     {
-        if (!_traces.TryGetValue(traceId, out var trace))
+        if (!_traces.TryGetValue(traceId, out ExplanationTrace? trace))
             return "No trace found for this response.";
 
         var lines = new List<string>
@@ -133,9 +133,9 @@ public class ExplainabilityService
         if (trace.ToolSteps.Count > 0)
         {
             lines.Add("### Data Sources Consulted");
-            for (var i = 0; i < trace.ToolSteps.Count; i++)
+            for (int i = 0; i < trace.ToolSteps.Count; i++)
             {
-                var step = trace.ToolSteps[i];
+                ToolStep step = trace.ToolSteps[i];
                 lines.Add($"{i + 1}. **{step.ToolName}** ({step.DurationMs}ms)");
                 lines.Add($"   - Input: `{step.Arguments}`");
                 lines.Add($"   - Result: {step.ResultSummary[..Math.Min(150, step.ResultSummary.Length)]}");
@@ -146,7 +146,7 @@ public class ExplainabilityService
         if (trace.ReasoningChain.Count > 0)
         {
             lines.Add("### Reasoning Steps");
-            foreach (var step in trace.ReasoningChain)
+            foreach (ReasoningStep step in trace.ReasoningChain)
             {
                 lines.Add($"- [{step.AgentKey}/{step.Phase}] {step.Description}");
             }
@@ -162,11 +162,11 @@ public class ExplainabilityService
     /// <summary>Prune old traces to prevent unbounded memory growth.</summary>
     public void PruneOlderThan(TimeSpan maxAge)
     {
-        var cutoff = DateTime.UtcNow - maxAge;
+        DateTime cutoff = DateTime.UtcNow - maxAge;
         var toRemove = _traces.Where(kv => kv.Value.StartedAt < cutoff)
             .Select(kv => kv.Key).ToList();
 
-        foreach (var key in toRemove)
+        foreach (string? key in toRemove)
             _traces.TryRemove(key, out _);
 
         if (toRemove.Count > 0)

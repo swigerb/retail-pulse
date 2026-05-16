@@ -81,22 +81,22 @@ public class CompetitiveIntelAgent : ISpecialistAgent
             using var doc = JsonDocument.Parse(resultText);
 
             // Check threat detection results for high-severity items
-            if (doc.RootElement.TryGetProperty("threats", out var threats) &&
+            if (doc.RootElement.TryGetProperty("threats", out JsonElement threats) &&
                 threats.ValueKind == JsonValueKind.Array)
             {
-                foreach (var threat in threats.EnumerateArray())
+                foreach (JsonElement threat in threats.EnumerateArray())
                 {
-                    var severity = threat.TryGetProperty("severity", out var sev) ? sev.GetString() : "low";
+                    string? severity = threat.TryGetProperty("severity", out JsonElement sev) ? sev.GetString() : "low";
                     if (severity != "high") continue;
 
-                    var threatType = threat.TryGetProperty("type", out var tt) ? tt.GetString() ?? "unknown" : "unknown";
-                    var competitor = threat.TryGetProperty("competitor", out var comp) ? comp.GetString() : "Unknown";
-                    var region = threat.TryGetProperty("region", out var reg) ? reg.GetString() ?? "National" : "National";
-                    var brand = threat.TryGetProperty("brand", out var br) ? br.GetString() : null;
-                    var category = threat.TryGetProperty("category", out var cat) ? cat.GetString() : null;
-                    var recommendation = threat.TryGetProperty("recommendation", out var rec) ? rec.GetString() : "Monitor";
+                    string threatType = threat.TryGetProperty("type", out JsonElement tt) ? tt.GetString() ?? "unknown" : "unknown";
+                    string? competitor = threat.TryGetProperty("competitor", out JsonElement comp) ? comp.GetString() : "Unknown";
+                    string region = threat.TryGetProperty("region", out JsonElement reg) ? reg.GetString() ?? "National" : "National";
+                    string? brand = threat.TryGetProperty("brand", out JsonElement br) ? br.GetString() : null;
+                    string? category = threat.TryGetProperty("category", out JsonElement cat) ? cat.GetString() : null;
+                    string? recommendation = threat.TryGetProperty("recommendation", out JsonElement rec) ? rec.GetString() : "Monitor";
 
-                    var displayBrand = brand ?? category ?? "Unknown";
+                    string displayBrand = brand ?? category ?? "Unknown";
 
                     if (!_alertService.IsThrottled("competitive_threat", displayBrand, region))
                     {
@@ -142,19 +142,19 @@ public class CompetitiveIntelAgent : ISpecialistAgent
             }
 
             // Check pricing results for dramatic drops (>10%)
-            if (doc.RootElement.TryGetProperty("price_drop_threats", out var dropCount) &&
+            if (doc.RootElement.TryGetProperty("price_drop_threats", out JsonElement dropCount) &&
                 dropCount.GetInt32() > 0 &&
-                doc.RootElement.TryGetProperty("pricing", out var pricing) &&
+                doc.RootElement.TryGetProperty("pricing", out JsonElement pricing) &&
                 pricing.ValueKind == JsonValueKind.Array)
             {
-                foreach (var p in pricing.EnumerateArray())
+                foreach (JsonElement p in pricing.EnumerateArray())
                 {
-                    var pctChange = p.TryGetProperty("price_change_percent", out var pct) ? pct.GetDouble() : 0;
+                    double pctChange = p.TryGetProperty("price_change_percent", out JsonElement pct) ? pct.GetDouble() : 0;
                     if (pctChange >= -10) continue;
 
-                    var competitor = p.TryGetProperty("competitor", out var comp) ? comp.GetString() : "Unknown";
-                    var brand = p.TryGetProperty("brand", out var br) ? br.GetString() ?? "Unknown" : "Unknown";
-                    var region = p.TryGetProperty("region", out var reg) ? reg.GetString() ?? "National" : "National";
+                    string? competitor = p.TryGetProperty("competitor", out JsonElement comp) ? comp.GetString() : "Unknown";
+                    string brand = p.TryGetProperty("brand", out JsonElement br) ? br.GetString() ?? "Unknown" : "Unknown";
+                    string region = p.TryGetProperty("region", out JsonElement reg) ? reg.GetString() ?? "National" : "National";
 
                     if (!_alertService.IsThrottled("competitive_threat", brand, region))
                     {

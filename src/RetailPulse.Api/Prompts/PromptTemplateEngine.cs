@@ -50,7 +50,7 @@ public sealed class PromptTemplateEngine
         if (string.IsNullOrEmpty(template))
             return template;
 
-        foreach (var (placeholder, value) in _replacements)
+        foreach ((string? placeholder, string? value) in _replacements)
         {
             template = template.Replace(placeholder, value);
         }

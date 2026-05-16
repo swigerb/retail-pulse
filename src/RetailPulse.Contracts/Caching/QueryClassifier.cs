@@ -21,7 +21,7 @@ public static partial class QueryClassifier
         if (string.Equals(agentId, "demand-forecasting", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var lower = query.ToLowerInvariant();
+        string lower = query.ToLowerInvariant();
 
         // Never cache: time-sensitive or recommendation-style queries
         if (NeverCachePattern().IsMatch(lower))

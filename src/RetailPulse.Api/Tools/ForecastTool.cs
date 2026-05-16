@@ -23,8 +23,8 @@ public class ForecastTool
     {
         try
         {
-            var url = $"/api/forecast?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/forecast?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

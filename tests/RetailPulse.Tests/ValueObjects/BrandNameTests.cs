@@ -25,7 +25,7 @@ public class BrandNameTests
     [InlineData("   ")]
     public void Constructor_WithInvalidName_Throws(string? value)
     {
-        var act = () => new BrandName(value!);
+        Func<BrandName> act = () => new BrandName(value!);
         act.Should().Throw<ArgumentException>();
     }
 

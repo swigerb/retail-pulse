@@ -19,10 +19,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_DemandSpike25Percent_DetectsAlert()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand X", "Northeast", "demand_spike", baseline: 1000, current: 1250);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
         alerts[0].Type.Should().Be("demand_spike");
@@ -33,10 +33,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_DemandSpike50Percent_DetectsHighSeverity()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand A", "West", "demand_spike", baseline: 1000, current: 1500);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
         alerts[0].Severity.Should().Be("high");
@@ -45,10 +45,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_DemandSpike30Percent_DetectsMediumSeverity()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand B", "South", "demand_spike", baseline: 1000, current: 1300);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
         alerts[0].Severity.Should().Be("medium");
@@ -60,10 +60,10 @@ public class AlertServiceTests
     [InlineData(1000, 1200)] // exactly 20% — not above
     public async Task CheckForAlerts_DemandBelowThreshold_NoAlert(double baseline, double current)
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand C", "Midwest", "demand_spike", baseline, current);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().BeEmpty("demand must be ABOVE 20% threshold, not equal to or below");
     }
@@ -71,10 +71,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_DemandSpike21Percent_FiresAlert()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand D", "Southeast", "demand_spike", baseline: 1000, current: 1210);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
     }
@@ -86,10 +86,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_SupplyDrop20Percent_DetectsAlert()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand E", "West", "supply_drop", baseline: 1000, current: 800);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
         alerts[0].Type.Should().Be("supply_drop");
@@ -98,10 +98,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_SupplyDrop45Percent_DetectsHighSeverity()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand F", "Northeast", "supply_drop", baseline: 1000, current: 550);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
         alerts[0].Severity.Should().Be("high");
@@ -113,10 +113,10 @@ public class AlertServiceTests
     [InlineData(1000, 850)] // exactly 15% — not above
     public async Task CheckForAlerts_SupplyDropBelowThreshold_NoAlert(double baseline, double current)
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand G", "South", "supply_drop", baseline, current);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().BeEmpty("supply drop must exceed 15% threshold");
     }
@@ -124,10 +124,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_SupplyDrop16Percent_FiresAlert()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand H", "Midwest", "supply_drop", baseline: 1000, current: 840);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
     }
@@ -139,10 +139,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_TrendReversal15Percent_DetectsAlert()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand I", "Southeast", "trend_reversal", baseline: 1000, current: 1150);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
         alerts[0].Type.Should().Be("trend_reversal");
@@ -151,10 +151,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_TrendReversal25Percent_MediumSeverity()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand J", "West", "trend_reversal", baseline: 1000, current: 750);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
         alerts[0].Severity.Should().Be("medium");
@@ -166,10 +166,10 @@ public class AlertServiceTests
     [InlineData(1000, 1100)] // exactly 10% — not above
     public async Task CheckForAlerts_TrendReversalBelowThreshold_NoAlert(double baseline, double current)
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand K", "Northeast", "trend_reversal", baseline, current);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().BeEmpty("trend reversal must exceed 10% threshold");
     }
@@ -186,11 +186,11 @@ public class AlertServiceTests
     public async Task CheckForAlerts_SeverityClassification_CorrectByDeviation(
         double baseline, double current, string expectedSeverity)
     {
-        var svc = CreateService();
-        var type = current > baseline ? "demand_spike" : "supply_drop";
+        InMemoryAlertService svc = CreateService();
+        string type = current > baseline ? "demand_spike" : "supply_drop";
         svc.SeedDataPoint("TestBrand", "TestRegion", type, baseline, current);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().ContainSingle();
         alerts[0].Severity.Should().Be(expectedSeverity);
@@ -203,12 +203,12 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_AlertHasAllFieldsPopulated()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Apex Grill", "Southwest", "demand_spike", baseline: 1000, current: 1500);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
-        var alert = alerts.Should().ContainSingle().Subject;
+        Alert alert = alerts.Should().ContainSingle().Subject;
         alert.Id.Should().NotBeNullOrEmpty();
         alert.Type.Should().NotBeNullOrEmpty();
         alert.Severity.Should().NotBeNullOrEmpty();
@@ -223,10 +223,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_AlertMetadata_ContainsDeviationPercent()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand M", "West", "demand_spike", baseline: 1000, current: 1400);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts[0].Metadata.Should().NotBeNull();
         alerts[0].Metadata.Should().ContainKey("deviationPercent");
@@ -236,12 +236,12 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_MultipleAnomalies_ReturnsAllAlerts()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand N", "West", "demand_spike", baseline: 1000, current: 1300);
         svc.SeedDataPoint("Brand O", "East", "supply_drop", baseline: 1000, current: 800);
         svc.SeedDataPoint("Brand P", "South", "trend_reversal", baseline: 1000, current: 1200);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().HaveCount(3);
         alerts.Select(a => a.Type).Should().BeEquivalentTo(
@@ -251,10 +251,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_NoAnomalies_ReturnsEmpty()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand Q", "West", "demand_spike", baseline: 1000, current: 1100);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().BeEmpty();
     }
@@ -262,11 +262,11 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_UniqueIdsPerAlert()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand R", "East", "demand_spike", baseline: 1000, current: 1500);
         svc.SeedDataPoint("Brand S", "West", "supply_drop", baseline: 1000, current: 500);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts.Should().HaveCount(2);
         alerts[0].Id.Should().NotBe(alerts[1].Id);
@@ -275,10 +275,10 @@ public class AlertServiceTests
     [Fact]
     public async Task CheckForAlerts_AlertDescription_ContainsDeviationInfo()
     {
-        var svc = CreateService();
+        InMemoryAlertService svc = CreateService();
         svc.SeedDataPoint("Brand T", "North", "demand_spike", baseline: 1000, current: 1350);
 
-        var alerts = await svc.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await svc.CheckForAlertsAsync();
 
         alerts[0].Description.Should().Contain("35");
     }

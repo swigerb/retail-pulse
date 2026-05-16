@@ -59,7 +59,7 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
 
     public Task<GuardrailsStats> GetStatsAsync(CancellationToken ct = default)
     {
-        var total = _jailbreakCount + _piiCount + _accessDenialCount;
+        int total = _jailbreakCount + _piiCount + _accessDenialCount;
         return Task.FromResult(new GuardrailsStats(
             TotalBlocked: total,
             JailbreakAttempts: _jailbreakCount,

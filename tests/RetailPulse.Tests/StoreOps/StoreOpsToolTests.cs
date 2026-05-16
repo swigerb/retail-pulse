@@ -19,8 +19,8 @@ public class StoreOpsToolTests : IDisposable
 
     public StoreOpsToolTests()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
         _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_storeops_test_{Guid.NewGuid():N}.db");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
@@ -43,16 +43,16 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void GetStorePerformance_ReturnsStoresWithValidPerformanceIndex()
     {
-        var result = Parse(_db.GetStorePerformance());
+        JsonElement result = Parse(_db.GetStorePerformance());
 
         result.TryGetProperty("error", out _).Should().BeFalse("should return store performance data");
-        var stores = result.GetProperty("stores");
+        JsonElement stores = result.GetProperty("stores");
         stores.GetArrayLength().Should().BeGreaterThan(0, "should return at least one store");
 
-        foreach (var store in stores.EnumerateArray())
+        foreach (JsonElement store in stores.EnumerateArray())
         {
             store.GetProperty("storeId").GetString().Should().NotBeNullOrEmpty();
-            var perfIndex = store.GetProperty("performanceIndex").GetDouble();
+            double perfIndex = store.GetProperty("performanceIndex").GetDouble();
             perfIndex.Should().BeGreaterThan(0, "performance index should be positive");
             perfIndex.Should().BeLessThan(5.0, "performance index should be reasonable (< 5x target)");
         }
@@ -65,14 +65,14 @@ public class StoreOpsToolTests : IDisposable
     [InlineData("Southwest")]
     public void GetStorePerformance_FiltersByRegion(string region)
     {
-        var result = Parse(_db.GetStorePerformance(region: region));
+        JsonElement result = Parse(_db.GetStorePerformance(region: region));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var stores = result.GetProperty("stores");
+        JsonElement stores = result.GetProperty("stores");
         stores.GetArrayLength().Should().BeGreaterThan(0,
             $"should return stores for region '{region}'");
 
-        foreach (var store in stores.EnumerateArray())
+        foreach (JsonElement store in stores.EnumerateArray())
         {
             store.GetProperty("region").GetString().Should().Be(region,
                 $"all stores should be in region '{region}'");
@@ -82,17 +82,17 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void GetStorePerformance_PerformanceIndex_IsRevenueOverTargetRatio()
     {
-        var result = Parse(_db.GetStorePerformance());
-        var stores = result.GetProperty("stores");
+        JsonElement result = Parse(_db.GetStorePerformance());
+        JsonElement stores = result.GetProperty("stores");
 
-        foreach (var store in stores.EnumerateArray())
+        foreach (JsonElement store in stores.EnumerateArray())
         {
-            var revenue = store.GetProperty("revenue").GetDouble();
-            var target = store.GetProperty("target").GetDouble();
-            var perfIndex = store.GetProperty("performanceIndex").GetDouble();
+            double revenue = store.GetProperty("revenue").GetDouble();
+            double target = store.GetProperty("target").GetDouble();
+            double perfIndex = store.GetProperty("performanceIndex").GetDouble();
 
             target.Should().BeGreaterThan(0, "target should be positive");
-            var expectedIndex = revenue / target;
+            double expectedIndex = revenue / target;
             perfIndex.Should().BeApproximately(expectedIndex, 0.01,
                 "performanceIndex should equal revenue / target");
         }
@@ -101,10 +101,10 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void GetStorePerformance_InvalidRegion_ReturnsEmptyOrError()
     {
-        var result = Parse(_db.GetStorePerformance(region: "Narnia"));
+        JsonElement result = Parse(_db.GetStorePerformance(region: "Narnia"));
 
         // Either returns empty stores array or an error
-        if (result.TryGetProperty("stores", out var stores))
+        if (result.TryGetProperty("stores", out JsonElement stores))
         {
             stores.GetArrayLength().Should().Be(0, "invalid region should return no stores");
         }
@@ -121,21 +121,21 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void GetShelfLayout_ValidAisle_ReturnsCorrectLayout()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.GetShelfLayout(storeId, aisleId));
+        JsonElement result = Parse(_db.GetShelfLayout(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse(
             $"should return shelf layout for aisle '{aisleId}'");
 
-        var slots = result.GetProperty("slots");
+        JsonElement slots = result.GetProperty("slots");
         slots.GetArrayLength().Should().BeGreaterThan(0, "aisle should have slots");
 
-        foreach (var slot in slots.EnumerateArray())
+        foreach (JsonElement slot in slots.EnumerateArray())
         {
             slot.GetProperty("shelfLevel").ValueKind.Should().NotBe(JsonValueKind.Undefined);
             slot.GetProperty("position").ValueKind.Should().NotBe(JsonValueKind.Undefined);
@@ -145,13 +145,13 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void GetShelfLayout_InvalidAisle_ReturnsEmptyOrError()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var result = Parse(_db.GetShelfLayout(storeId, "ZZ99"));
+        JsonElement result = Parse(_db.GetShelfLayout(storeId, "ZZ99"));
 
         // Either returns empty slots or an error object
-        if (result.TryGetProperty("slots", out var slots))
+        if (result.TryGetProperty("slots", out JsonElement slots))
         {
             slots.GetArrayLength().Should().Be(0,
                 "invalid aisle should return no slots");
@@ -165,18 +165,18 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void GetShelfLayout_SlotsHaveSkuAndFacingWidth()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.GetShelfLayout(storeId, aisleId));
+        JsonElement result = Parse(_db.GetShelfLayout(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var slots = result.GetProperty("slots");
+        JsonElement slots = result.GetProperty("slots");
 
-        foreach (var slot in slots.EnumerateArray())
+        foreach (JsonElement slot in slots.EnumerateArray())
         {
             slot.GetProperty("skuId").GetString().Should().NotBeNullOrEmpty(
                 "each slot should have a SKU identifier");
@@ -192,18 +192,18 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void PredictStockout_HasValidDaysUntilStockout()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var result = Parse(_db.PredictStockout(storeId));
+        JsonElement result = Parse(_db.PredictStockout(storeId));
 
         result.TryGetProperty("error", out _).Should().BeFalse("should return stockout predictions");
-        var predictions = result.GetProperty("predictions");
+        JsonElement predictions = result.GetProperty("predictions");
         predictions.GetArrayLength().Should().BeGreaterThan(0);
 
-        foreach (var prediction in predictions.EnumerateArray())
+        foreach (JsonElement prediction in predictions.EnumerateArray())
         {
-            var daysUntilStockout = prediction.GetProperty("daysUntilStockout").GetInt32();
+            int daysUntilStockout = prediction.GetProperty("daysUntilStockout").GetInt32();
             daysUntilStockout.Should().BeGreaterThanOrEqualTo(0,
                 "daysUntilStockout should be non-negative");
         }
@@ -212,19 +212,19 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void PredictStockout_ReturnsSortedByVelocityDescending()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var result = Parse(_db.PredictStockout(storeId));
+        JsonElement result = Parse(_db.PredictStockout(storeId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var predictions = result.GetProperty("predictions");
-        var count = predictions.GetArrayLength();
+        JsonElement predictions = result.GetProperty("predictions");
+        int count = predictions.GetArrayLength();
 
         if (count > 1)
         {
             var velocities = new List<double>();
-            foreach (var p in predictions.EnumerateArray())
+            foreach (JsonElement p in predictions.EnumerateArray())
             {
                 velocities.Add(p.GetProperty("currentVelocity").GetDouble());
             }
@@ -237,15 +237,15 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void PredictStockout_EachPredictionHasRequiredFields()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var result = Parse(_db.PredictStockout(storeId));
+        JsonElement result = Parse(_db.PredictStockout(storeId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var predictions = result.GetProperty("predictions");
+        JsonElement predictions = result.GetProperty("predictions");
 
-        foreach (var p in predictions.EnumerateArray())
+        foreach (JsonElement p in predictions.EnumerateArray())
         {
             p.GetProperty("skuId").GetString().Should().NotBeNullOrEmpty();
             p.GetProperty("daysUntilStockout").GetInt32().Should().BeGreaterThanOrEqualTo(0);
@@ -257,19 +257,19 @@ public class StoreOpsToolTests : IDisposable
     [Fact]
     public void PredictStockout_FiltersBySku_ReturnsOnlyThatSku()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
         // Get all predictions first to find a valid SKU
-        var allResult = Parse(_db.PredictStockout(storeId));
-        var allPredictions = allResult.GetProperty("predictions");
+        JsonElement allResult = Parse(_db.PredictStockout(storeId));
+        JsonElement allPredictions = allResult.GetProperty("predictions");
         if (allPredictions.GetArrayLength() == 0) return;
 
-        var firstSku = allPredictions[0].GetProperty("skuId").GetString();
-        var filteredResult = Parse(_db.PredictStockout(storeId, skuId: firstSku));
-        var filtered = filteredResult.GetProperty("predictions");
+        string? firstSku = allPredictions[0].GetProperty("skuId").GetString();
+        JsonElement filteredResult = Parse(_db.PredictStockout(storeId, skuId: firstSku));
+        JsonElement filtered = filteredResult.GetProperty("predictions");
 
-        foreach (var p in filtered.EnumerateArray())
+        foreach (JsonElement p in filtered.EnumerateArray())
         {
             p.GetProperty("skuId").GetString().Should().Be(firstSku,
                 "filtered results should only contain the requested SKU");
@@ -282,8 +282,8 @@ public class StoreOpsToolTests : IDisposable
 
     private string? GetFirstStoreId()
     {
-        var result = Parse(_db.GetStorePerformance());
-        return result.TryGetProperty("stores", out var stores) && stores.GetArrayLength() > 0
+        JsonElement result = Parse(_db.GetStorePerformance());
+        return result.TryGetProperty("stores", out JsonElement stores) && stores.GetArrayLength() > 0
             ? stores[0].GetProperty("storeId").GetString()
             : null;
     }
@@ -292,10 +292,10 @@ public class StoreOpsToolTests : IDisposable
     {
         using var conn = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT AisleId FROM ShelfLayouts WHERE StoreId = @storeId LIMIT 1";
         cmd.Parameters.AddWithValue("@storeId", storeId);
-        var result = cmd.ExecuteScalar();
+        object? result = cmd.ExecuteScalar();
         return result?.ToString();
     }
 

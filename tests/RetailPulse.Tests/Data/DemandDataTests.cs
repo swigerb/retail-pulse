@@ -40,8 +40,8 @@ public class DemandDataTests : IDisposable
 
     public DemandDataTests()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
         _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_data_test_{Guid.NewGuid():N}.db");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
@@ -78,16 +78,16 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void DemandHistory_CoversAllTenantBrands()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Brand FROM DemandHistory ORDER BY Brand";
 
         var seededBrands = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
             seededBrands.Add(reader.GetString(0));
 
-        foreach (var expected in ExpectedBrands)
+        foreach (string expected in ExpectedBrands)
         {
             seededBrands.Should().Contain(expected,
                 $"brand '{expected}' from tenant.yaml should be seeded in DemandHistory");
@@ -104,12 +104,12 @@ public class DemandDataTests : IDisposable
     [InlineData("Foundry Home")]
     public void DemandHistory_EachBrandHasData(string brand)
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM DemandHistory WHERE Brand = @brand";
         cmd.Parameters.AddWithValue("@brand", brand);
 
-        var count = Convert.ToInt32(cmd.ExecuteScalar());
+        int count = Convert.ToInt32(cmd.ExecuteScalar());
         count.Should().BeGreaterThan(0,
             $"brand '{brand}' should have demand history records");
     }
@@ -121,16 +121,16 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void DemandHistory_CoversAllTenantRegions()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Region FROM DemandHistory ORDER BY Region";
 
         var seededRegions = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
             seededRegions.Add(reader.GetString(0));
 
-        foreach (var expected in ExpectedRegions)
+        foreach (string expected in ExpectedRegions)
         {
             seededRegions.Should().Contain(expected,
                 $"region '{expected}' from tenant.yaml should be seeded in DemandHistory");
@@ -146,12 +146,12 @@ public class DemandDataTests : IDisposable
     [InlineData("Pacific Northwest")]
     public void DemandHistory_EachRegionHasData(string region)
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM DemandHistory WHERE Region = @region";
         cmd.Parameters.AddWithValue("@region", region);
 
-        var count = Convert.ToInt32(cmd.ExecuteScalar());
+        int count = Convert.ToInt32(cmd.ExecuteScalar());
         count.Should().BeGreaterThan(0,
             $"region '{region}' should have demand history records");
     }
@@ -163,17 +163,17 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void DemandHistory_SpansAtLeast12Months()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT MIN(Date), MAX(Date) FROM DemandHistory";
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         reader.Read().Should().BeTrue();
 
         var minDate = DateOnly.Parse(reader.GetString(0));
         var maxDate = DateOnly.Parse(reader.GetString(1));
 
-        var monthSpan = ((maxDate.Year - minDate.Year) * 12) + (maxDate.Month - minDate.Month);
+        int monthSpan = ((maxDate.Year - minDate.Year) * 12) + (maxDate.Month - minDate.Month);
         monthSpan.Should().BeGreaterThanOrEqualTo(11,
             "demand history should span at least 12 months (11+ month difference)");
     }
@@ -182,8 +182,8 @@ public class DemandDataTests : IDisposable
     public void DemandHistory_NoContinuousGapsLargerThan2Days()
     {
         // Check for gaps in the data for a single brand/region/channel combo
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Date FROM DemandHistory
             WHERE Brand = 'Sierra Gold Tequila' AND Region = 'Northeast' AND Channel = 'Off-Premise'
@@ -191,7 +191,7 @@ public class DemandDataTests : IDisposable
             """;
 
         var dates = new List<DateOnly>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
             dates.Add(DateOnly.Parse(reader.GetString(0)));
 
@@ -199,7 +199,7 @@ public class DemandDataTests : IDisposable
 
         for (int i = 1; i < dates.Count; i++)
         {
-            var gap = dates[i].DayNumber - dates[i - 1].DayNumber;
+            int gap = dates[i].DayNumber - dates[i - 1].DayNumber;
             gap.Should().BeLessThanOrEqualTo(2,
                 $"no gaps > 2 days should exist between {dates[i - 1]} and {dates[i]}");
         }
@@ -208,14 +208,14 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void DemandHistory_HasDailyGranularity()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT COUNT(DISTINCT Date) FROM DemandHistory
             WHERE Brand = 'Sierra Gold Tequila' AND Region = 'Northeast' AND Channel = 'Off-Premise'
             """;
 
-        var distinctDays = Convert.ToInt32(cmd.ExecuteScalar());
+        int distinctDays = Convert.ToInt32(cmd.ExecuteScalar());
         distinctDays.Should().BeGreaterThanOrEqualTo(360,
             "should have near-daily data for a full year");
     }
@@ -228,10 +228,10 @@ public class DemandDataTests : IDisposable
     public void DemandHistory_SpiritsHolidaySeasonHigherThanAugust()
     {
         // Nov-Dec should have higher volume than August for spirits brands
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
 
-        var novDecVolume = GetAverageMonthlyVolume(conn, "Sierra Gold Tequila", [11, 12]);
-        var augVolume = GetAverageMonthlyVolume(conn, "Sierra Gold Tequila", [8]);
+        double novDecVolume = GetAverageMonthlyVolume(conn, "Sierra Gold Tequila", [11, 12]);
+        double augVolume = GetAverageMonthlyVolume(conn, "Sierra Gold Tequila", [8]);
 
         novDecVolume.Should().BeGreaterThan(augVolume,
             "spirits demand in Nov-Dec should exceed August due to holiday seasonality");
@@ -241,10 +241,10 @@ public class DemandDataTests : IDisposable
     public void DemandHistory_HomeImprovementSpringHigherThanWinter()
     {
         // Spring (Mar-May) should be higher than winter (Jan-Feb) for home improvement
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
 
-        var springVolume = GetAverageMonthlyVolume(conn, "Pinnacle Hardware", [3, 4, 5]);
-        var winterVolume = GetAverageMonthlyVolume(conn, "Pinnacle Hardware", [1, 2]);
+        double springVolume = GetAverageMonthlyVolume(conn, "Pinnacle Hardware", [3, 4, 5]);
+        double winterVolume = GetAverageMonthlyVolume(conn, "Pinnacle Hardware", [1, 2]);
 
         springVolume.Should().BeGreaterThan(winterVolume,
             "home improvement demand in spring should exceed winter");
@@ -254,10 +254,10 @@ public class DemandDataTests : IDisposable
     public void DemandHistory_QsrSummerHigherThanWinter()
     {
         // Summer (Jun-Aug) should be higher than winter (Jan-Feb) for QSR
-        using var conn = OpenConnection();
+        using SqliteConnection conn = OpenConnection();
 
-        var summerVolume = GetAverageMonthlyVolume(conn, "Apex Grill", [6, 7, 8]);
-        var winterVolume = GetAverageMonthlyVolume(conn, "Apex Grill", [1, 2]);
+        double summerVolume = GetAverageMonthlyVolume(conn, "Apex Grill", [6, 7, 8]);
+        double winterVolume = GetAverageMonthlyVolume(conn, "Apex Grill", [1, 2]);
 
         summerVolume.Should().BeGreaterThan(winterVolume,
             "QSR demand in summer should exceed winter");
@@ -265,8 +265,8 @@ public class DemandDataTests : IDisposable
 
     private static double GetAverageMonthlyVolume(SqliteConnection conn, string brand, int[] months)
     {
-        var monthFilter = string.Join(",", months);
-        using var cmd = conn.CreateCommand();
+        string monthFilter = string.Join(",", months);
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = $"""
             SELECT AVG(Volume) FROM DemandHistory
             WHERE Brand = @brand
@@ -274,7 +274,7 @@ public class DemandDataTests : IDisposable
             """;
         cmd.Parameters.AddWithValue("@brand", brand);
 
-        var result = cmd.ExecuteScalar();
+        object? result = cmd.ExecuteScalar();
         return result is DBNull ? 0 : Convert.ToDouble(result);
     }
 
@@ -287,16 +287,16 @@ public class DemandDataTests : IDisposable
     {
         var expectedCategories = _tenant.Brands.Select(b => b.Category).Distinct().ToList();
 
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Category FROM SeasonalFactors ORDER BY Category";
 
         var seededCategories = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
             seededCategories.Add(reader.GetString(0));
 
-        foreach (var expected in expectedCategories)
+        foreach (string? expected in expectedCategories)
         {
             seededCategories.Should().Contain(expected,
                 $"category '{expected}' from tenant.yaml should have seasonal factors");
@@ -306,15 +306,15 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void SeasonalFactors_MultipliersInReasonableRange()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT MIN(Multiplier), MAX(Multiplier) FROM SeasonalFactors";
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         reader.Read().Should().BeTrue();
 
-        var minMultiplier = reader.GetDouble(0);
-        var maxMultiplier = reader.GetDouble(1);
+        double minMultiplier = reader.GetDouble(0);
+        double maxMultiplier = reader.GetDouble(1);
 
         minMultiplier.Should().BeGreaterThanOrEqualTo(0.5, "minimum multiplier should be reasonable");
         maxMultiplier.Should().BeLessThanOrEqualTo(2.0, "maximum multiplier should be reasonable");
@@ -323,12 +323,12 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void SeasonalFactors_AllMonthsAreValid()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Month FROM SeasonalFactors ORDER BY Month";
 
         var months = new List<int>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
             months.Add(reader.GetInt32(0));
 
@@ -338,8 +338,8 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void SeasonalFactors_SpiritsDecemberIsHighest()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Month, Multiplier FROM SeasonalFactors
             WHERE Category = 'Spirits'
@@ -347,11 +347,11 @@ public class DemandDataTests : IDisposable
             LIMIT 1
             """;
 
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         reader.Read().Should().BeTrue();
 
-        var peakMonth = reader.GetInt32(0);
-        var peakMultiplier = reader.GetDouble(1);
+        int peakMonth = reader.GetInt32(0);
+        double peakMultiplier = reader.GetDouble(1);
 
         peakMonth.Should().BeOneOf([11, 12], "spirits peak should be Nov or Dec");
         peakMultiplier.Should().BeGreaterThan(1.0, "peak month should boost demand");
@@ -360,14 +360,14 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void SeasonalFactors_HaveDescriptions()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT COUNT(*) FROM SeasonalFactors
             WHERE Description IS NOT NULL AND Description != ''
             """;
 
-        var count = Convert.ToInt32(cmd.ExecuteScalar());
+        int count = Convert.ToInt32(cmd.ExecuteScalar());
         count.Should().BeGreaterThan(0,
             "at least some seasonal factors should have descriptions");
     }
@@ -379,38 +379,38 @@ public class DemandDataTests : IDisposable
     [Fact]
     public void DemandHistory_AllVolumesPositive()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM DemandHistory WHERE Volume <= 0";
 
-        var negativeCount = Convert.ToInt32(cmd.ExecuteScalar());
+        int negativeCount = Convert.ToInt32(cmd.ExecuteScalar());
         negativeCount.Should().Be(0, "all demand volumes should be positive");
     }
 
     [Fact]
     public void DemandHistory_AllUnitsPositive()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM DemandHistory WHERE Units <= 0";
 
-        var negativeCount = Convert.ToInt32(cmd.ExecuteScalar());
+        int negativeCount = Convert.ToInt32(cmd.ExecuteScalar());
         negativeCount.Should().Be(0, "all demand units should be positive");
     }
 
     [Fact]
     public void DemandHistory_AllChannelsCovered()
     {
-        using var conn = OpenConnection();
-        using var cmd = conn.CreateCommand();
+        using SqliteConnection conn = OpenConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT Channel FROM DemandHistory ORDER BY Channel";
 
         var seededChannels = new List<string>();
-        using var reader = cmd.ExecuteReader();
+        using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
             seededChannels.Add(reader.GetString(0));
 
-        foreach (var expected in ExpectedChannels)
+        foreach (string expected in ExpectedChannels)
         {
             seededChannels.Should().Contain(expected,
                 $"channel '{expected}' from tenant.yaml should be seeded in DemandHistory");

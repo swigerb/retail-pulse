@@ -38,11 +38,11 @@ public class TelemetryCollectorTests
     [Fact]
     public async Task RecordSpanAsync_CreatesCorrectAgentSpan()
     {
-        var before = DateTimeOffset.UtcNow;
+        DateTimeOffset before = DateTimeOffset.UtcNow;
         await _collector.RecordSpanAsync("agent.response", "response", "Hello!", 100.0);
-        var after = DateTimeOffset.UtcNow;
+        DateTimeOffset after = DateTimeOffset.UtcNow;
 
-        var span = _collector.Spans.First();
+        AgentSpan span = _collector.Spans.First();
         span.Should().BeOfType<AgentSpan>();
         span.Timestamp.Should().BeOnOrAfter(before);
         span.Timestamp.Should().BeOnOrBefore(after);

@@ -33,7 +33,7 @@ public class ConversationExporter : IConversationExport
 
     public Task<ExportResult> ExportAsync(string sessionId, ExportFormat format, CancellationToken ct = default)
     {
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        if (!_sessions.TryGetValue(sessionId, out TrackedSession? session))
             throw new KeyNotFoundException($"Session '{sessionId}' not found.");
 
         List<TrackedMessage> snapshot;
@@ -42,15 +42,15 @@ public class ConversationExporter : IConversationExport
             snapshot = [.. session.Messages];
         }
 
-        var content = format switch
+        string content = format switch
         {
             ExportFormat.Markdown => ExportMarkdown(session, snapshot),
             ExportFormat.Json => ExportJson(session, snapshot),
             _ => throw new ArgumentOutOfRangeException(nameof(format))
         };
 
-        var extension = format == ExportFormat.Markdown ? "md" : "json";
-        var fileName = $"session-{sessionId[..Math.Min(8, sessionId.Length)]}.{extension}";
+        string extension = format == ExportFormat.Markdown ? "md" : "json";
+        string fileName = $"session-{sessionId[..Math.Min(8, sessionId.Length)]}.{extension}";
 
         return Task.FromResult(new ExportResult(content, format, fileName, DateTime.UtcNow));
     }
@@ -80,7 +80,7 @@ public class ConversationExporter : IConversationExport
     /// </summary>
     public Task TrackMessageAsync(string sessionId, TrackedMessage message, CancellationToken ct = default)
     {
-        var session = _sessions.GetOrAdd(sessionId, id => new TrackedSession
+        TrackedSession session = _sessions.GetOrAdd(sessionId, id => new TrackedSession
         {
             SessionId = id,
             StartedAt = DateTime.UtcNow
@@ -108,7 +108,7 @@ public class ConversationExporter : IConversationExport
     /// <summary>Remove the session with the oldest last-activity timestamp.</summary>
     private void EvictOldestSession(string excludeSessionId)
     {
-        var oldest = _sessions
+        string? oldest = _sessions
             .Where(kv => kv.Key != excludeSessionId)
             .OrderBy(kv => Volatile.Read(ref kv.Value.LastActivity))
             .Select(kv => kv.Key)
@@ -132,9 +132,9 @@ public class ConversationExporter : IConversationExport
         sb.AppendLine("---");
         sb.AppendLine();
 
-        foreach (var msg in messages)
+        foreach (TrackedMessage msg in messages)
         {
-            var agentLabel = !string.IsNullOrEmpty(msg.AgentId) ? $" [{msg.AgentId}]" : "";
+            string agentLabel = !string.IsNullOrEmpty(msg.AgentId) ? $" [{msg.AgentId}]" : "";
             sb.AppendLine(CultureInfo.InvariantCulture, $"### {msg.Role}{agentLabel} — {msg.Timestamp.ToString("HH:mm:ss", CultureInfo.InvariantCulture)}");
             sb.AppendLine();
             sb.AppendLine(msg.Content);
@@ -143,7 +143,7 @@ public class ConversationExporter : IConversationExport
             if (msg.ToolCalls is { Count: > 0 })
             {
                 sb.AppendLine("**Tool Calls:**");
-                foreach (var tool in msg.ToolCalls)
+                foreach (string tool in msg.ToolCalls)
                 {
                     sb.AppendLine(CultureInfo.InvariantCulture, $"- `{tool}`");
                 }

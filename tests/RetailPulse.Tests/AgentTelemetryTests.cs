@@ -20,15 +20,12 @@ public class AgentTelemetryTests : IDisposable
         ActivitySource.AddActivityListener(_listener);
     }
 
-    public void Dispose()
-    {
-        _listener.Dispose();
-    }
+    public void Dispose() => _listener.Dispose();
 
     [Fact]
     public void StartAgentThought_CreatesActivityWithCorrectTags()
     {
-        using var activity = AgentTelemetry.StartAgentThought("test-agent", "What is the status?");
+        using Activity? activity = AgentTelemetry.StartAgentThought("test-agent", "What is the status?");
 
         activity.Should().NotBeNull();
         activity.OperationName.Should().Be("agent.thought");
@@ -39,19 +36,19 @@ public class AgentTelemetryTests : IDisposable
     [Fact]
     public void StartToolCall_CreatesActivityWithCorrectTags()
     {
-        using var activity = AgentTelemetry.StartToolCall("GetDepletionStats", "{\"brand\":\"Patron\"}");
+        using Activity? activity = AgentTelemetry.StartToolCall("GetDepletionStats", /*lang=json,strict*/ "{\"brand\":\"Patron\"}");
 
         activity.Should().NotBeNull();
         activity.OperationName.Should().Be("tool.GetDepletionStats");
         activity.Kind.Should().Be(ActivityKind.Client);
         activity.GetTagItem("tool.name").Should().Be("GetDepletionStats");
-        activity.GetTagItem("tool.arguments").Should().Be("{\"brand\":\"Patron\"}");
+        activity.GetTagItem("tool.arguments").Should().Be(/*lang=json,strict*/ "{\"brand\":\"Patron\"}");
     }
 
     [Fact]
     public void StartToolResult_CreatesActivityWithCorrectTags()
     {
-        using var activity = AgentTelemetry.StartToolResult("GetDepletionStats", 256);
+        using Activity? activity = AgentTelemetry.StartToolResult("GetDepletionStats", 256);
 
         activity.Should().NotBeNull();
         activity.OperationName.Should().Be("tool.GetDepletionStats.result");
@@ -62,7 +59,7 @@ public class AgentTelemetryTests : IDisposable
     [Fact]
     public void StartAgentResponse_CreatesActivityWithCorrectTags()
     {
-        using var activity = AgentTelemetry.StartAgentResponse("retail-pulse");
+        using Activity? activity = AgentTelemetry.StartAgentResponse("retail-pulse");
 
         activity.Should().NotBeNull();
         activity.OperationName.Should().Be("agent.response");

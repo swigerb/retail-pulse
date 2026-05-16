@@ -8,29 +8,29 @@ public static class PromoEndpoints
     {
         app.MapGet("/api/promo/calendar", async (HttpContext http, IHttpClientFactory httpFactory, CancellationToken ct) =>
         {
-            var brand = http.Request.Query["brand"].FirstOrDefault();
-            var region = http.Request.Query["region"].FirstOrDefault();
-            var monthsStr = http.Request.Query["months"].FirstOrDefault();
-            var months = int.TryParse(monthsStr, out var m) ? m : 6;
+            string? brand = http.Request.Query["brand"].FirstOrDefault();
+            string? region = http.Request.Query["region"].FirstOrDefault();
+            string? monthsStr = http.Request.Query["months"].FirstOrDefault();
+            int months = int.TryParse(monthsStr, out int m) ? m : 6;
 
-            var client = httpFactory.CreateClient("McpServer");
-            var url = $"/api/promo/calendar?months={months}";
+            HttpClient client = httpFactory.CreateClient("McpServer");
+            string url = $"/api/promo/calendar?months={months}";
             if (!string.IsNullOrWhiteSpace(brand)) url += $"&brand={Uri.EscapeDataString(brand)}";
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
 
-            var response = await client.GetAsync(url, ct);
+            HttpResponseMessage response = await client.GetAsync(url, ct);
             response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync(ct);
+            string json = await response.Content.ReadAsStringAsync(ct);
             return Results.Content(json, "application/json");
         })
         .WithName("GetPromoCalendar").RequireAuthorization().RequireRateLimiting("relaxed");
 
         app.MapGet("/api/promo/types", async (IHttpClientFactory httpFactory, CancellationToken ct) =>
         {
-            var client = httpFactory.CreateClient("McpServer");
-            var response = await client.GetAsync("/api/promo/types", ct);
+            HttpClient client = httpFactory.CreateClient("McpServer");
+            HttpResponseMessage response = await client.GetAsync("/api/promo/types", ct);
             response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync(ct);
+            string json = await response.Content.ReadAsStringAsync(ct);
             return Results.Content(json, "application/json");
         })
         .WithName("GetPromoTypes").RequireAuthorization().RequireRateLimiting("relaxed");
@@ -43,37 +43,37 @@ public static class PromoEndpoints
                 return Results.BadRequest(new { error = "Fields brand, region, promoType, and budget (> 0) are required." });
             }
 
-            if (!DateOnly.TryParse(request.StartDate, out var startDate) || !DateOnly.TryParse(request.EndDate, out var endDate))
+            if (!DateOnly.TryParse(request.StartDate, out DateOnly startDate) || !DateOnly.TryParse(request.EndDate, out DateOnly endDate))
             {
                 return Results.BadRequest(new { error = "startDate and endDate must be valid ISO dates (yyyy-MM-dd)." });
             }
 
-            var durationWeeks = Math.Max(1, (endDate.DayNumber - startDate.DayNumber) / 7);
-            var client = httpFactory.CreateClient("McpServer");
+            int durationWeeks = Math.Max(1, (endDate.DayNumber - startDate.DayNumber) / 7);
+            HttpClient client = httpFactory.CreateClient("McpServer");
 
             // Orchestrate: call all promo tools in parallel
-            var historyTask = client.GetStringAsync(
+            Task<string> historyTask = client.GetStringAsync(
                 $"/api/promo/history?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&promoType={Uri.EscapeDataString(request.PromoType)}&months=12", ct);
-            var liftTask = client.GetStringAsync(
+            Task<string> liftTask = client.GetStringAsync(
                 $"/api/promo/calculate-lift?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&promoType={Uri.EscapeDataString(request.PromoType)}&spend={request.Budget}", ct);
-            var timingTask = client.GetStringAsync(
+            Task<string> timingTask = client.GetStringAsync(
                 $"/api/promo/evaluate-timing?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&startDate={Uri.EscapeDataString(request.StartDate)}&endDate={Uri.EscapeDataString(request.EndDate)}", ct);
-            var roiTask = client.GetStringAsync(
+            Task<string> roiTask = client.GetStringAsync(
                 $"/api/promo/estimate-roi?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&promoType={Uri.EscapeDataString(request.PromoType)}&spend={request.Budget}&durationWeeks={durationWeeks}", ct);
 
             await Task.WhenAll(historyTask, liftTask, timingTask, roiTask);
 
-            var historyJson = await historyTask;
-            var liftJson = await liftTask;
-            var timingJson = await timingTask;
-            var roiJson = await roiTask;
+            string historyJson = await historyTask;
+            string liftJson = await liftTask;
+            string timingJson = await timingTask;
+            string roiJson = await roiTask;
 
             // Parse ROI for approval gate decision
             using var roiDoc = System.Text.Json.JsonDocument.Parse(roiJson);
-            var expectedRoi = roiDoc.RootElement.TryGetProperty("expected_roi", out var roiProp) ? roiProp.GetDouble() : 0;
+            double expectedRoi = roiDoc.RootElement.TryGetProperty("expected_roi", out System.Text.Json.JsonElement roiProp) ? roiProp.GetDouble() : 0;
 
             // Determine recommendation
-            var recommendation = expectedRoi switch
+            string recommendation = expectedRoi switch
             {
                 >= 3.0 => "strongly_recommended",
                 >= 2.0 => "recommended",
@@ -84,13 +84,13 @@ public static class PromoEndpoints
             // Build risk factors
             var riskFactors = new List<string>();
             using var timingDoc = System.Text.Json.JsonDocument.Parse(timingJson);
-            if (timingDoc.RootElement.TryGetProperty("conflicts", out var conflicts) && conflicts.GetArrayLength() > 0)
+            if (timingDoc.RootElement.TryGetProperty("conflicts", out System.Text.Json.JsonElement conflicts) && conflicts.GetArrayLength() > 0)
                 riskFactors.Add($"{conflicts.GetArrayLength()} overlapping campaign(s) detected");
-            if (timingDoc.RootElement.TryGetProperty("risks", out var risks))
+            if (timingDoc.RootElement.TryGetProperty("risks", out System.Text.Json.JsonElement risks))
             {
-                foreach (var risk in risks.EnumerateArray())
+                foreach (System.Text.Json.JsonElement risk in risks.EnumerateArray())
                 {
-                    if (risk.TryGetProperty("detail", out var detail))
+                    if (risk.TryGetProperty("detail", out System.Text.Json.JsonElement detail))
                         riskFactors.Add(detail.GetString() ?? "Unknown risk");
                 }
             }
@@ -101,14 +101,14 @@ public static class PromoEndpoints
 
             // Check approval gate trigger
             string? approvalRequestId = null;
-            var requiresApproval = request.Budget > 500000 || (expectedRoi < 2.0 && request.Budget > 100000);
+            bool requiresApproval = request.Budget > 500000 || (expectedRoi < 2.0 && request.Budget > 100000);
             if (requiresApproval)
             {
-                var reason = request.Budget > 500000
+                string reason = request.Budget > 500000
                     ? $"High-budget promo: ${request.Budget:N0} for {request.Brand} in {request.Region}"
                     : $"Low-ROI risk: {expectedRoi:F2}x ROI with ${request.Budget:N0} budget for {request.Brand}";
 
-                var approvalRequest = await approvalGate.RequestApprovalAsync(new ApprovalContext(
+                ApprovalRequest approvalRequest = await approvalGate.RequestApprovalAsync(new ApprovalContext(
                     AgentId: "promo-planning",
                     UserId: "taskmodule",
                     Action: $"Execute {request.PromoType} promotion for {request.Brand} in {request.Region}",

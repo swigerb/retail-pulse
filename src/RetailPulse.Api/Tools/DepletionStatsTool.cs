@@ -23,7 +23,7 @@ public class DepletionStatsTool
     {
         try
         {
-            var response = await _httpClient.GetAsync(
+            HttpResponseMessage response = await _httpClient.GetAsync(
                 $"/api/depletion-stats?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&period={Uri.EscapeDataString(period)}",
                 cancellationToken);
             response.EnsureSuccessStatusCode();

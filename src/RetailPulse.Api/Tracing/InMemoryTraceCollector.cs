@@ -59,7 +59,7 @@ public class InMemoryTraceCollector : ITraceCollector
     {
         ArgumentNullException.ThrowIfNull(span);
 
-        var bag = _traces.GetOrAdd(span.TraceId, traceId =>
+        ConcurrentBag<TraceSpan> bag = _traces.GetOrAdd(span.TraceId, traceId =>
         {
             _traceOrder.Enqueue(traceId);
 
@@ -83,28 +83,22 @@ public class InMemoryTraceCollector : ITraceCollector
     /// Call this after routing completes so the frontend receives intent/agent context.
     /// This supplements the initial trace_started emitted by CaptureSpan.
     /// </summary>
-    public void EmitTraceStarted(string traceId, DateTimeOffset startTime, string? intent = null, string? agentName = null)
-    {
-        _pushChannel?.TryWrite(new TelemetryPushItem("trace_started", TraceId: traceId, Timestamp: startTime, Intent: intent, AgentName: agentName));
-    }
+    public void EmitTraceStarted(string traceId, DateTimeOffset startTime, string? intent = null, string? agentName = null) => _pushChannel?.TryWrite(new TelemetryPushItem("trace_started", TraceId: traceId, Timestamp: startTime, Intent: intent, AgentName: agentName));
 
-    public IReadOnlyList<TraceSpan>? GetSpans(string traceId)
-    {
-        return !_traces.TryGetValue(traceId, out var bag) ? null : [.. bag.OrderBy(s => s.StartTime)];
-    }
+    public IReadOnlyList<TraceSpan>? GetSpans(string traceId) => !_traces.TryGetValue(traceId, out ConcurrentBag<TraceSpan>? bag) ? null : [.. bag.OrderBy(s => s.StartTime)];
 
     public TraceSummary? GetSummary(string traceId)
     {
-        var spans = GetSpans(traceId);
+        IReadOnlyList<TraceSpan>? spans = GetSpans(traceId);
         if (spans == null || spans.Count == 0)
             return null;
 
-        var totalInputTokens = spans.Sum(s => s.InputTokens);
-        var totalOutputTokens = spans.Sum(s => s.OutputTokens);
-        var totalCost = spans.Sum(s => s.EstimatedCostUsd);
-        var startTime = spans.Min(s => s.StartTime);
-        var endTime = spans.Max(s => s.EndTime);
-        var totalDurationMs = (endTime - startTime).TotalMilliseconds;
+        int totalInputTokens = spans.Sum(s => s.InputTokens);
+        int totalOutputTokens = spans.Sum(s => s.OutputTokens);
+        decimal totalCost = spans.Sum(s => s.EstimatedCostUsd);
+        DateTimeOffset startTime = spans.Min(s => s.StartTime);
+        DateTimeOffset endTime = spans.Max(s => s.EndTime);
+        double totalDurationMs = (endTime - startTime).TotalMilliseconds;
 
         return new TraceSummary(
             TraceId: traceId,
@@ -120,29 +114,29 @@ public class InMemoryTraceCollector : ITraceCollector
 
     public StructuredTraceSummary? GetStructuredSummary(string traceId)
     {
-        var spans = GetSpans(traceId);
+        IReadOnlyList<TraceSpan>? spans = GetSpans(traceId);
         if (spans == null || spans.Count == 0)
             return null;
 
-        var totalInputTokens = spans.Sum(s => s.InputTokens);
-        var totalOutputTokens = spans.Sum(s => s.OutputTokens);
-        var startTime = spans.Min(s => s.StartTime);
-        var endTime = spans.Max(s => s.EndTime);
-        var totalDurationMs = (endTime - startTime).TotalMilliseconds;
-        var totalCost = CalculateCost(totalInputTokens, totalOutputTokens);
+        int totalInputTokens = spans.Sum(s => s.InputTokens);
+        int totalOutputTokens = spans.Sum(s => s.OutputTokens);
+        DateTimeOffset startTime = spans.Min(s => s.StartTime);
+        DateTimeOffset endTime = spans.Max(s => s.EndTime);
+        double totalDurationMs = (endTime - startTime).TotalMilliseconds;
+        decimal totalCost = CalculateCost(totalInputTokens, totalOutputTokens);
 
         var steps = new List<TraceStep>();
-        foreach (var span in spans)
+        foreach (TraceSpan span in spans)
         {
-            var tags = span.Tags ?? new Dictionary<string, string>();
+            IDictionary<string, string> tags = span.Tags ?? new Dictionary<string, string>();
 
-            var step = span.OperationName switch
+            TraceStep step = span.OperationName switch
             {
                 "router.classify" => new TraceStep(
                     "Intent Classification",
                     span.DurationMs,
                     Result: GetTag(tags, "router.intent"),
-                    Confidence: double.TryParse(GetTag(tags, "router.confidence"), out var c) ? c : null),
+                    Confidence: double.TryParse(GetTag(tags, "router.confidence"), out double c) ? c : null),
 
                 "router.select_agent" => new TraceStep(
                     $"Agent Selection: {GetTag(tags, "router.selected_agent") ?? "unknown"}",
@@ -152,7 +146,7 @@ public class InMemoryTraceCollector : ITraceCollector
                 var op when op.StartsWith("agent.") && op.EndsWith(".process") => new TraceStep(
                     $"Agent: {GetTag(tags, "agent.name") ?? op}",
                     span.DurationMs,
-                    ToolsCalled: int.TryParse(GetTag(tags, "agent.tools_called_count"), out var tc) ? tc : null,
+                    ToolsCalled: int.TryParse(GetTag(tags, "agent.tools_called_count"), out int tc) ? tc : null,
                     Tokens: span.InputTokens > 0 || span.OutputTokens > 0
                         ? new TraceTokenDetail(span.InputTokens, span.OutputTokens) : null),
 
@@ -186,13 +180,13 @@ public class InMemoryTraceCollector : ITraceCollector
 
     public IReadOnlyList<TraceSummary> GetRecentTraces(int count = 20)
     {
-        var traceIds = _traceOrder.ToArray();
+        string[] traceIds = [.. _traceOrder];
         var summaries = new List<TraceSummary>();
 
         // Iterate in reverse order (most recent first)
         for (int i = traceIds.Length - 1; i >= 0 && summaries.Count < count; i--)
         {
-            var summary = GetSummary(traceIds[i]);
+            TraceSummary? summary = GetSummary(traceIds[i]);
             if (summary != null)
                 summaries.Add(summary);
         }
@@ -208,7 +202,7 @@ public class InMemoryTraceCollector : ITraceCollector
     {
         if (_hubContext is null) return;
 
-        var summary = GetStructuredSummary(traceId);
+        StructuredTraceSummary? summary = GetStructuredSummary(traceId);
         if (summary is not null)
         {
             await _hubContext.Clients.All.SendAsync("trace_completed", summary);
@@ -222,11 +216,11 @@ public class InMemoryTraceCollector : ITraceCollector
 
         if (_configuration is not null)
         {
-            var pricingSection = _configuration.GetSection("TokenPricing");
-            foreach (var model in pricingSection.GetChildren())
+            IConfigurationSection pricingSection = _configuration.GetSection("TokenPricing");
+            foreach (IConfigurationSection model in pricingSection.GetChildren())
             {
-                var inRate = model.GetValue<decimal?>("InputPerMillion");
-                var outRate = model.GetValue<decimal?>("OutputPerMillion");
+                decimal? inRate = model.GetValue<decimal?>("InputPerMillion");
+                decimal? outRate = model.GetValue<decimal?>("OutputPerMillion");
                 if (inRate.HasValue && outRate.HasValue)
                 {
                     inputRate = inRate.Value;
@@ -243,7 +237,7 @@ public class InMemoryTraceCollector : ITraceCollector
     {
         lock (_evictionLock)
         {
-            while (_traces.Count > Capacity && _traceOrder.TryDequeue(out var oldest))
+            while (_traces.Count > Capacity && _traceOrder.TryDequeue(out string? oldest))
             {
                 _traces.TryRemove(oldest, out _);
             }
@@ -251,5 +245,5 @@ public class InMemoryTraceCollector : ITraceCollector
     }
 
     private static string? GetTag(IDictionary<string, string> tags, string key)
-        => tags.TryGetValue(key, out var value) ? value : null;
+        => tags.TryGetValue(key, out string? value) ? value : null;
 }

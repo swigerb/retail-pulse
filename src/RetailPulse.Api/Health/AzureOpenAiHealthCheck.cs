@@ -27,19 +27,19 @@ public class AzureOpenAiHealthCheck : IHealthCheck
     {
         try
         {
-            var endpoint = _configuration["OpenAI:Endpoint"];
+            string? endpoint = _configuration["OpenAI:Endpoint"];
             if (string.IsNullOrWhiteSpace(endpoint))
             {
                 return HealthCheckResult.Degraded("OpenAI endpoint is not configured.");
             }
 
-            var client = _httpClientFactory.CreateClient();
-            var apiKey = _configuration["OpenAI:ApiKey"] ?? "";
+            HttpClient client = _httpClientFactory.CreateClient();
+            string apiKey = _configuration["OpenAI:ApiKey"] ?? "";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{endpoint}/models");
             request.Headers.Add("api-key", apiKey);
 
-            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {

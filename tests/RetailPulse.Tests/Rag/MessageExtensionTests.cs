@@ -29,17 +29,17 @@ public class MessageExtensionTests
     [Fact]
     public async Task Search_WithMatchingContent_ReturnsCitationsWithTitleAndScore()
     {
-        var kb = CreateKb();
+        InMemoryKnowledgeBase kb = CreateKb();
         await kb.IngestDocumentAsync("Holiday Planning Guide",
             "Holiday promotions drive 40% of annual revenue for retail brands. " +
             "Holiday season preparation includes inventory forecasting and staffing. " +
             "Holiday planning holiday strategy holiday analysis holiday optimization.",
             "wiki");
 
-        var results = await kb.SearchAsync("holiday promotions");
+        IReadOnlyList<SearchResult> results = await kb.SearchAsync("holiday promotions");
 
         results.Should().NotBeEmpty("search should find matching content");
-        var first = results[0];
+        SearchResult first = results[0];
         first.Title.Should().Be("Holiday Planning Guide");
         first.Chunk.Should().NotBeNullOrWhiteSpace();
         first.Score.Should().BeGreaterThan(0);
@@ -51,7 +51,7 @@ public class MessageExtensionTests
     [Fact]
     public async Task Search_MultipleSources_ReturnsCitationsFromMultipleDocs()
     {
-        var kb = CreateKb();
+        InMemoryKnowledgeBase kb = CreateKb();
         await kb.IngestDocumentAsync("Doc A",
             "Retail promotions are key to driving foot traffic and sales during peak seasons. " +
             "Promotions promotions promotions retail retail retail strategy.",
@@ -65,7 +65,7 @@ public class MessageExtensionTests
             "Logistics logistics logistics warehousing distribution.",
             "source-c");
 
-        var results = await kb.SearchAsync("retail promotions", topK: 5);
+        IReadOnlyList<SearchResult> results = await kb.SearchAsync("retail promotions", topK: 5);
 
         results.Should().NotBeEmpty();
         results.Select(r => r.Title).Should().Contain("Doc A");
@@ -74,7 +74,7 @@ public class MessageExtensionTests
     [Fact]
     public async Task Search_ResultsRankedByScore()
     {
-        var kb = CreateKb();
+        InMemoryKnowledgeBase kb = CreateKb();
         await kb.IngestDocumentAsync("Holiday Guide",
             "Holiday planning holiday promotions holiday season holiday revenue holiday staffing " +
             "holiday forecasting holiday preparation holiday analysis.",
@@ -84,7 +84,7 @@ public class MessageExtensionTests
             "Operations management staffing scheduling inventory warehousing.",
             "wiki");
 
-        var results = await kb.SearchAsync("holiday");
+        IReadOnlyList<SearchResult> results = await kb.SearchAsync("holiday");
 
         results.Should().NotBeEmpty();
         if (results.Count > 1)
@@ -101,9 +101,9 @@ public class MessageExtensionTests
     [Fact]
     public async Task Search_EmptyKB_ReturnsNoCitations()
     {
-        var kb = CreateKb();
+        InMemoryKnowledgeBase kb = CreateKb();
 
-        var results = await kb.SearchAsync("holiday promotions");
+        IReadOnlyList<SearchResult> results = await kb.SearchAsync("holiday promotions");
 
         results.Should().BeEmpty("empty KB should return no search results");
     }
@@ -111,10 +111,10 @@ public class MessageExtensionTests
     [Fact]
     public async Task Context_EmptyKB_ReturnsNull()
     {
-        var kb = CreateKb();
-        var provider = CreateProvider(kb);
+        InMemoryKnowledgeBase kb = CreateKb();
+        RagContextProvider provider = CreateProvider(kb);
 
-        var context = await provider.GetContextAsync("Tell me about holiday promotions");
+        string? context = await provider.GetContextAsync("Tell me about holiday promotions");
 
         context.Should().BeNull("empty KB should produce no context");
     }
@@ -126,7 +126,7 @@ public class MessageExtensionTests
     [Fact]
     public async Task GetContext_WithRelevantContent_ReturnsFormattedContext()
     {
-        var kb = CreateKb();
+        InMemoryKnowledgeBase kb = CreateKb();
         await kb.IngestDocumentAsync("Pricing Guide",
             "Dynamic pricing increases margins by 8-12%. " +
             "Price elasticity determines optimal pricing for retail products. " +
@@ -134,9 +134,9 @@ public class MessageExtensionTests
             "Pricing strategy pricing frameworks pricing models pricing optimization.",
             "internal-wiki");
 
-        var provider = CreateProvider(kb);
+        RagContextProvider provider = CreateProvider(kb);
 
-        var context = await provider.GetContextAsync("How does dynamic pricing affect margins?");
+        string? context = await provider.GetContextAsync("How does dynamic pricing affect margins?");
 
         context.Should().NotBeNullOrWhiteSpace("relevant content should produce context");
         context.Should().Contain("pricing", "context should contain relevant content from KB");
@@ -145,14 +145,14 @@ public class MessageExtensionTests
     [Fact]
     public async Task GetContext_IrrelevantQuery_ReturnsNull()
     {
-        var kb = CreateKb();
+        InMemoryKnowledgeBase kb = CreateKb();
         await kb.IngestDocumentAsync("Holiday Guide",
             "Holiday promotions and seasonal retail staffing strategies.",
             "wiki");
 
-        var provider = CreateProvider(kb);
+        RagContextProvider provider = CreateProvider(kb);
 
-        var context = await provider.GetContextAsync("quantum computing algorithms");
+        string? context = await provider.GetContextAsync("quantum computing algorithms");
 
         context.Should().BeNull("irrelevant query should produce no context");
     }
@@ -160,7 +160,7 @@ public class MessageExtensionTests
     [Fact]
     public async Task GetContext_MultipleDocuments_IncludesRelevantContent()
     {
-        var kb = CreateKb();
+        InMemoryKnowledgeBase kb = CreateKb();
         await kb.IngestDocumentAsync("Pricing Doc",
             "Pricing strategies for retail include dynamic pricing and competitive analysis. " +
             "Pricing pricing pricing retail retail retail strategy strategy.",
@@ -170,9 +170,9 @@ public class MessageExtensionTests
             "Marketing marketing marketing branding branding branding.",
             "wiki");
 
-        var provider = CreateProvider(kb);
+        RagContextProvider provider = CreateProvider(kb);
 
-        var context = await provider.GetContextAsync("retail pricing strategies");
+        string? context = await provider.GetContextAsync("retail pricing strategies");
 
         context.Should().NotBeNullOrWhiteSpace();
     }
@@ -194,7 +194,7 @@ public class MessageExtensionTests
         var provider = new RagContextProvider(mockKb.Object,
             NullLoggerFactory.Instance.CreateLogger<RagContextProvider>());
 
-        var context = await provider.GetContextAsync("holiday promotions");
+        string? context = await provider.GetContextAsync("holiday promotions");
 
         context.Should().NotBeNullOrWhiteSpace();
         mockKb.Verify(kb => kb.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
@@ -211,7 +211,7 @@ public class MessageExtensionTests
         var provider = new RagContextProvider(mockKb.Object,
             NullLoggerFactory.Instance.CreateLogger<RagContextProvider>());
 
-        var context = await provider.GetContextAsync("anything");
+        string? context = await provider.GetContextAsync("anything");
 
         context.Should().BeNull();
     }

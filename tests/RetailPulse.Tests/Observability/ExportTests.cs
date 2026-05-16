@@ -26,7 +26,7 @@ public class ExportTests
     {
         await SeedAuditEntries("session-abc");
 
-        var result = await _exporter.ExportAsync("session-abc", ExportFormat.Markdown);
+        ExportResult result = await _exporter.ExportAsync("session-abc", ExportFormat.Markdown);
 
         result.Content.Should().Contain("session-abc");
         result.Content.Should().Contain("agent-1");
@@ -44,7 +44,7 @@ public class ExportTests
 
         await _auditLog.LogAsync(entry);
 
-        var result = await _exporter.ExportAsync("session-tools", ExportFormat.Markdown);
+        ExportResult result = await _exporter.ExportAsync("session-tools", ExportFormat.Markdown);
 
         result.Content.Should().Contain("tool_call");
         result.Content.Should().Contain("GetDepletions");
@@ -55,7 +55,7 @@ public class ExportTests
     {
         await SeedAuditEntries("session-hdr");
 
-        var result = await _exporter.ExportAsync("session-hdr", ExportFormat.Markdown);
+        ExportResult result = await _exporter.ExportAsync("session-hdr", ExportFormat.Markdown);
 
         result.Content.Should().Contain("# Conversation Export");
         result.Content.Should().Contain("Exported:");
@@ -70,7 +70,7 @@ public class ExportTests
             "input", "output", 150, TimeSpan.FromMilliseconds(250));
         await _auditLog.LogAsync(entry);
 
-        var result = await _exporter.ExportAsync("session-meta", ExportFormat.Markdown);
+        ExportResult result = await _exporter.ExportAsync("session-meta", ExportFormat.Markdown);
 
         result.Content.Should().Contain("150");
         result.Content.Should().Contain("250");
@@ -85,7 +85,7 @@ public class ExportTests
     {
         await SeedAuditEntries("session-json");
 
-        var result = await _exporter.ExportAsync("session-json", ExportFormat.Json);
+        ExportResult result = await _exporter.ExportAsync("session-json", ExportFormat.Json);
 
         result.Format.Should().Be(ExportFormat.Json);
         result.FileName.Should().EndWith(".json");
@@ -104,10 +104,10 @@ public class ExportTests
             "chat", "What are Q4 trends?", "Demand is up 15%.", 300, TimeSpan.FromMilliseconds(500));
         await _auditLog.LogAsync(entry);
 
-        var result = await _exporter.ExportAsync("session-fields", ExportFormat.Json);
+        ExportResult result = await _exporter.ExportAsync("session-fields", ExportFormat.Json);
         var doc = JsonDocument.Parse(result.Content);
-        var entries = doc.RootElement.GetProperty("entries");
-        var first = entries[0];
+        JsonElement entries = doc.RootElement.GetProperty("entries");
+        JsonElement first = entries[0];
 
         // System.Text.Json serializes anonymous type properties as PascalCase by default
         first.TryGetProperty("Id", out _).Should().BeTrue();
@@ -128,7 +128,7 @@ public class ExportTests
     public async Task ExportEmptySession_ReturnsMinimalValidOutput()
     {
         // No entries seeded — exporter falls back to recent entries (empty)
-        var result = await _exporter.ExportAsync("no-such-session", ExportFormat.Markdown);
+        ExportResult result = await _exporter.ExportAsync("no-such-session", ExportFormat.Markdown);
 
         result.Should().NotBeNull();
         result.Content.Should().NotBeNullOrEmpty();
@@ -138,7 +138,7 @@ public class ExportTests
     [Fact]
     public async Task ExportEmptySession_Json_IsValidJson()
     {
-        var result = await _exporter.ExportAsync("empty-session", ExportFormat.Json);
+        ExportResult result = await _exporter.ExportAsync("empty-session", ExportFormat.Json);
 
         result.Should().NotBeNull();
         var doc = JsonDocument.Parse(result.Content);
@@ -154,7 +154,7 @@ public class ExportTests
     {
         await SeedAuditEntries("session-list");
 
-        var sessions = await _exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await _exporter.ListSessionsAsync();
 
         sessions.Should().NotBeEmpty();
         sessions.Should().Contain(s => s.MessageCount > 0);
@@ -163,7 +163,7 @@ public class ExportTests
     [Fact]
     public async Task ListSessions_EmptyLog_ReturnsEmpty()
     {
-        var sessions = await _exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await _exporter.ListSessionsAsync();
         sessions.Should().BeEmpty();
     }
 
@@ -175,7 +175,7 @@ public class ExportTests
         await _auditLog.LogAsync(entry1);
         await _auditLog.LogAsync(entry2);
 
-        var sessions = await _exporter.ListSessionsAsync();
+        IReadOnlyList<ExportableSession> sessions = await _exporter.ListSessionsAsync();
 
         sessions.Should().NotBeEmpty();
         // At least one session should have agent info

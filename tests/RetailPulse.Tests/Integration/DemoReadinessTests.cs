@@ -86,22 +86,22 @@ public class DemoReadinessTests
     {
         _ = category;
 
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{expectedIntent}\",\"confidence\":0.9,\"intents\":[\"{expectedIntent}\"]}}");
 
-        var (router, specialists) = BuildProductionLikePipeline(routerClient);
+        (RetailOpsRouter? router, IReadOnlyList<ISpecialistAgent>? specialists) = BuildProductionLikePipeline(routerClient);
 
-        var decision = await router.RouteAsync(prompt, null, null, null);
+        RoutingDecision decision = await router.RouteAsync(prompt, null, null, null);
 
         decision.Should().NotBeNull($"router must classify default prompt: '{prompt}'");
         decision.Confidence.Should().BeGreaterThanOrEqualTo(0.6, "demo prompts should be high-confidence");
 
-        var specialist = specialists.FirstOrDefault(s =>
+        ISpecialistAgent? specialist = specialists.FirstOrDefault(s =>
             string.Equals(s.Key, decision.AgentKey, StringComparison.OrdinalIgnoreCase));
 
         specialist.Should().NotBeNull($"a specialist must be registered for routing key '{decision.AgentKey}'");
 
-        var response = await specialist.HandleAsync(
+        Contracts.ChatResponse response = await specialist.HandleAsync(
             new ChatRequest(prompt, SessionId: "demo-readiness"));
 
         response.Should().NotBeNull();
@@ -111,7 +111,7 @@ public class DemoReadinessTests
     [Fact]
     public void IntentCoverage_IsDocumentedAndNoOrphans()
     {
-        var (_, specialists) = BuildProductionLikePipeline(MockChatClient("{}"));
+        (RetailOpsRouter _, IReadOnlyList<ISpecialistAgent>? specialists) = BuildProductionLikePipeline(MockChatClient("{}"));
         var supported = specialists
             .SelectMany(s => s.SupportedIntents)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -125,7 +125,7 @@ public class DemoReadinessTests
             AgentIntent.Scorecard,
         };
 
-        foreach (var intent in AgentIntent.All)
+        foreach (string intent in AgentIntent.All)
         {
             if (fallbackOnly.Contains(intent)) continue;
 
@@ -140,12 +140,12 @@ public class DemoReadinessTests
     [InlineData("council/health")]
     public async Task UnclaimedIntent_RouterFallsBackToGeneral_NotException(string intent)
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{intent}\",\"confidence\":0.9,\"intents\":[\"{intent}\"]}}");
 
-        var (router, _) = BuildProductionLikePipeline(routerClient);
+        (RetailOpsRouter? router, IReadOnlyList<ISpecialistAgent> _) = BuildProductionLikePipeline(routerClient);
 
-        var decision = await router.RouteAsync("anything", null, null, null);
+        RoutingDecision decision = await router.RouteAsync("anything", null, null, null);
 
         decision.AgentKey.Should().Be("general",
             $"intent '{intent}' has no registered specialist in this pipeline — must fall back gracefully");
@@ -154,12 +154,12 @@ public class DemoReadinessTests
     [Fact]
     public async Task LowConfidenceClassification_FallsBackToGeneral_NotException()
     {
-        var routerClient = MockChatClient(
+        IChatClient routerClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.3,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
 
-        var (router, _) = BuildProductionLikePipeline(routerClient);
+        (RetailOpsRouter? router, IReadOnlyList<ISpecialistAgent> _) = BuildProductionLikePipeline(routerClient);
 
-        var decision = await router.RouteAsync("vague question", null, null, null);
+        RoutingDecision decision = await router.RouteAsync("vague question", null, null, null);
 
         decision.AgentKey.Should().Be("general", "low-confidence classifications must degrade gracefully");
         decision.Intent.Should().Be(AgentIntent.General);
@@ -176,9 +176,9 @@ public class DemoReadinessTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("simulated upstream timeout"));
 
-        var (router, _) = BuildProductionLikePipeline(failingClient.Object);
+        (RetailOpsRouter? router, IReadOnlyList<ISpecialistAgent> _) = BuildProductionLikePipeline(failingClient.Object);
 
-        var decision = await router.RouteAsync("anything", null, null, null);
+        RoutingDecision decision = await router.RouteAsync("anything", null, null, null);
 
         decision.AgentKey.Should().Be("general",
             "model timeouts must NOT crash the chat endpoint during a live demo");
@@ -188,10 +188,10 @@ public class DemoReadinessTests
     [Fact]
     public async Task MalformedRouterJson_FallsBackToGeneral_NotException()
     {
-        var malformedClient = MockChatClient("not valid json {{{");
-        var (router, _) = BuildProductionLikePipeline(malformedClient);
+        IChatClient malformedClient = MockChatClient("not valid json {{{");
+        (RetailOpsRouter? router, IReadOnlyList<ISpecialistAgent> _) = BuildProductionLikePipeline(malformedClient);
 
-        var decision = await router.RouteAsync("anything", null, null, null);
+        RoutingDecision decision = await router.RouteAsync("anything", null, null, null);
 
         decision.AgentKey.Should().Be("general");
         decision.Intent.Should().Be(AgentIntent.General);
@@ -222,8 +222,8 @@ public class DemoReadinessTests
     private static (RetailOpsRouter Router, IReadOnlyList<ISpecialistAgent> Specialists)
         BuildProductionLikePipeline(IChatClient routerClient)
     {
-        var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder()
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
         var pipeline = new AgentExecutionPipeline(
@@ -257,7 +257,7 @@ public class DemoReadinessTests
             new PlanogramAgent(pipeline, def, []),
             new MarginAgent(pipeline, def, []),
             new MemoryManagementAgent(
-                Mock.Of<RetailPulse.Contracts.Memory.IConversationMemory>(),
+                Mock.Of<Contracts.Memory.IConversationMemory>(),
                 NullLoggerFactory.Instance.CreateLogger<MemoryManagementAgent>()),
         };
 

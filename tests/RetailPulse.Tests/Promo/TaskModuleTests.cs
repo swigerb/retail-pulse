@@ -28,8 +28,8 @@ public class TaskModuleTests : IDisposable
 
     public TaskModuleTests()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
         _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_taskmod_test_{Guid.NewGuid():N}.db");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
@@ -51,8 +51,8 @@ public class TaskModuleTests : IDisposable
 
     private static PromoPlanningAgent CreateAgent(IApprovalGate? gate = null)
     {
-        var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder()
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 
@@ -106,10 +106,10 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task CheckApproval_HighSpend_RequiresApproval()
     {
-        var gate = CreateMockGate(ApprovalDecision.Approved);
-        var agent = CreateAgent(gate.Object);
+        Mock<IApprovalGate> gate = CreateMockGate(ApprovalDecision.Approved);
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 600_000, roi: 50, userId: "user-1", description: "High-budget campaign");
 
         result.Should().NotBeNull();
@@ -120,11 +120,11 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task CheckApproval_MediumSpendLowRoi_RequiresApproval()
     {
-        var gate = CreateMockGate(ApprovalDecision.Approved);
-        var agent = CreateAgent(gate.Object);
+        Mock<IApprovalGate> gate = CreateMockGate(ApprovalDecision.Approved);
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
         // spend > $100K and ROI < 10% triggers approval
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 150_000, roi: 5.0, userId: "user-2", description: "Low ROI campaign");
 
         result.Should().NotBeNull();
@@ -134,11 +134,11 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task CheckApproval_NormalSpendGoodRoi_NoApprovalNeeded()
     {
-        var gate = CreateMockGate(ApprovalDecision.Approved);
-        var agent = CreateAgent(gate.Object);
+        Mock<IApprovalGate> gate = CreateMockGate(ApprovalDecision.Approved);
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
         // $50K spend with 50% ROI — well below both thresholds
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 50_000, roi: 50, userId: "user-3", description: "Normal campaign");
 
         result.Should().BeNull("no approval needed for low spend with good ROI");
@@ -148,11 +148,11 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task CheckApproval_BoundarySpend500K_RequiresApproval()
     {
-        var gate = CreateMockGate(ApprovalDecision.Approved);
-        var agent = CreateAgent(gate.Object);
+        Mock<IApprovalGate> gate = CreateMockGate(ApprovalDecision.Approved);
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
         // Exactly $500,001 — just above the high-spend threshold
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 500_001, roi: 50, userId: "user-4", description: "Boundary campaign");
 
         result.Should().NotBeNull("spend > 500K triggers approval regardless of ROI");
@@ -162,11 +162,11 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task CheckApproval_BoundarySpend100K_WithLowRoi_RequiresApproval()
     {
-        var gate = CreateMockGate(ApprovalDecision.Approved);
-        var agent = CreateAgent(gate.Object);
+        Mock<IApprovalGate> gate = CreateMockGate(ApprovalDecision.Approved);
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
         // $100,001 with ROI 9.9 — both conditions met for medium-spend low-ROI rule
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 100_001, roi: 9.9, userId: "user-5", description: "Boundary low-ROI campaign");
 
         result.Should().NotBeNull("spend > 100K and ROI < 10 triggers approval");
@@ -176,11 +176,11 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task CheckApproval_MediumSpendHighRoi_NoApprovalNeeded()
     {
-        var gate = CreateMockGate(ApprovalDecision.Approved);
-        var agent = CreateAgent(gate.Object);
+        Mock<IApprovalGate> gate = CreateMockGate(ApprovalDecision.Approved);
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
         // $150K with 15% ROI — above spend threshold but ROI >= 10, so no approval
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 150_000, roi: 15, userId: "user-6", description: "Good ROI campaign");
 
         result.Should().BeNull("medium spend with good ROI does not require approval");
@@ -194,9 +194,9 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task ApprovalGate_WhenNull_ReturnsNull()
     {
-        var agent = CreateAgent(gate: null);
+        PromoPlanningAgent agent = CreateAgent(gate: null);
 
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 600_000, roi: 50, userId: "user-1", description: "No gate configured");
 
         result.Should().BeNull("no approval gate configured — returns null immediately");
@@ -205,10 +205,10 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task ApprovalGate_WhenApproved_ReturnsApproved()
     {
-        var gate = CreateMockGate(ApprovalDecision.Approved, "Looks good");
-        var agent = CreateAgent(gate.Object);
+        Mock<IApprovalGate> gate = CreateMockGate(ApprovalDecision.Approved, "Looks good");
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 600_000, roi: 50, userId: "user-1", description: "Approved campaign");
 
         result.Should().NotBeNull();
@@ -219,10 +219,10 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public async Task ApprovalGate_WhenDenied_ReturnsDenied()
     {
-        var gate = CreateMockGate(ApprovalDecision.Rejected, "Too risky");
-        var agent = CreateAgent(gate.Object);
+        Mock<IApprovalGate> gate = CreateMockGate(ApprovalDecision.Rejected, "Too risky");
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 600_000, roi: 50, userId: "user-1", description: "Rejected campaign");
 
         result.Should().NotBeNull();
@@ -246,7 +246,7 @@ public class TaskModuleTests : IDisposable
         gate.Setup(g => g.GetResultAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ApprovalResult("req-123", ApprovalDecision.Pending, null, null));
 
-        var agent = CreateAgent(gate.Object);
+        PromoPlanningAgent agent = CreateAgent(gate.Object);
 
         await agent.CheckApprovalAsync(
             spend: 750_000, roi: 3.5, userId: "analyst-1", description: "Premium launch");
@@ -267,7 +267,7 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public void EstimateROI_HighSpend_SetsRequiresApprovalTrue()
     {
-        var result = Parse(_db.EstimateROI(
+        JsonElement result = Parse(_db.EstimateROI(
             brand: "Sierra Gold Tequila",
             region: "Northeast",
             promoType: "Discount",
@@ -283,7 +283,7 @@ public class TaskModuleTests : IDisposable
     [Fact]
     public void EstimateROI_NormalSpend_SetsRequiresApprovalFalse()
     {
-        var result = Parse(_db.EstimateROI(
+        JsonElement result = Parse(_db.EstimateROI(
             brand: "Sierra Gold Tequila",
             region: "Northeast",
             promoType: "Discount",

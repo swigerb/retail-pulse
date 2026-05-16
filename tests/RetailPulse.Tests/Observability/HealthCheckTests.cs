@@ -16,12 +16,12 @@ public class HealthCheckTests
     [Fact]
     public async Task McpServerHealthCheck_ReturnsHealthy_WhenServerResponds200()
     {
-        var handler = CreateMockHandler(HttpStatusCode.OK);
-        var factory = CreateFactory(handler);
+        DelegatingHandler handler = CreateMockHandler(HttpStatusCode.OK);
+        Mock<IHttpClientFactory> factory = CreateFactory(handler);
         var logger = new Mock<ILogger<McpServerHealthCheck>>();
 
         var check = new McpServerHealthCheck(factory.Object, logger.Object);
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
 
         result.Status.Should().Be(HealthStatus.Healthy);
     }
@@ -29,12 +29,12 @@ public class HealthCheckTests
     [Fact]
     public async Task McpServerHealthCheck_ReturnsDegraded_WhenServerReturns500()
     {
-        var handler = CreateMockHandler(HttpStatusCode.InternalServerError);
-        var factory = CreateFactory(handler);
+        DelegatingHandler handler = CreateMockHandler(HttpStatusCode.InternalServerError);
+        Mock<IHttpClientFactory> factory = CreateFactory(handler);
         var logger = new Mock<ILogger<McpServerHealthCheck>>();
 
         var check = new McpServerHealthCheck(factory.Object, logger.Object);
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
 
         result.Status.Should().Be(HealthStatus.Degraded);
     }
@@ -42,12 +42,12 @@ public class HealthCheckTests
     [Fact]
     public async Task McpServerHealthCheck_ReturnsUnhealthy_WhenExceptionThrown()
     {
-        var handler = CreateThrowingHandler(new HttpRequestException("Connection refused"));
-        var factory = CreateFactory(handler);
+        DelegatingHandler handler = CreateThrowingHandler(new HttpRequestException("Connection refused"));
+        Mock<IHttpClientFactory> factory = CreateFactory(handler);
         var logger = new Mock<ILogger<McpServerHealthCheck>>();
 
         var check = new McpServerHealthCheck(factory.Object, logger.Object);
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
 
         result.Status.Should().Be(HealthStatus.Unhealthy);
         result.Exception.Should().BeOfType<HttpRequestException>();
@@ -60,13 +60,13 @@ public class HealthCheckTests
     [Fact]
     public async Task AzureOpenAiHealthCheck_ReturnsHealthy_WhenEndpointResponds200()
     {
-        var handler = CreateMockHandler(HttpStatusCode.OK);
-        var factory = CreateRawFactory(handler);
-        var config = CreateConfig("https://test.openai.azure.com", "test-key");
+        DelegatingHandler handler = CreateMockHandler(HttpStatusCode.OK);
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig("https://test.openai.azure.com", "test-key");
         var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
 
         var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
 
         result.Status.Should().Be(HealthStatus.Healthy);
     }
@@ -74,13 +74,13 @@ public class HealthCheckTests
     [Fact]
     public async Task AzureOpenAiHealthCheck_ReturnsDegraded_WhenUnauthorized()
     {
-        var handler = CreateMockHandler(HttpStatusCode.Unauthorized);
-        var factory = CreateRawFactory(handler);
-        var config = CreateConfig("https://test.openai.azure.com", "bad-key");
+        DelegatingHandler handler = CreateMockHandler(HttpStatusCode.Unauthorized);
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig("https://test.openai.azure.com", "bad-key");
         var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
 
         var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
 
         result.Status.Should().Be(HealthStatus.Degraded);
     }
@@ -88,13 +88,13 @@ public class HealthCheckTests
     [Fact]
     public async Task AzureOpenAiHealthCheck_ReturnsDegraded_WhenEndpointNotConfigured()
     {
-        var handler = CreateMockHandler(HttpStatusCode.OK);
-        var factory = CreateRawFactory(handler);
-        var config = CreateConfig(null, null);
+        DelegatingHandler handler = CreateMockHandler(HttpStatusCode.OK);
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig(null, null);
         var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
 
         var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
 
         result.Status.Should().Be(HealthStatus.Degraded);
     }
@@ -102,13 +102,13 @@ public class HealthCheckTests
     [Fact]
     public async Task AzureOpenAiHealthCheck_ReturnsUnhealthy_WhenExceptionThrown()
     {
-        var handler = CreateThrowingHandler(new HttpRequestException("DNS resolution failed"));
-        var factory = CreateRawFactory(handler);
-        var config = CreateConfig("https://test.openai.azure.com", "key");
+        DelegatingHandler handler = CreateThrowingHandler(new HttpRequestException("DNS resolution failed"));
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig("https://test.openai.azure.com", "key");
         var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
 
         var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
 
         result.Status.Should().Be(HealthStatus.Unhealthy);
     }

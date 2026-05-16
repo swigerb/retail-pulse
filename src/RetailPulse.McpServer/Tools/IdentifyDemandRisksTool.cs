@@ -12,8 +12,5 @@ public static class IdentifyDemandRisksTool
     public static object IdentifyDemandRisks(
         RetailPulseDb data,
         [Description("Brand name (e.g. 'Sierra Gold Tequila')")] string brand,
-        [Description("Region (e.g. 'Northeast', 'National'). Defaults to 'National'.")] string region = "National")
-    {
-        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.IdentifyDemandRisks(brand, region);
-    }
+        [Description("Region (e.g. 'Northeast', 'National'). Defaults to 'National'.")] string region = "National") => string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.IdentifyDemandRisks(brand, region);
 }

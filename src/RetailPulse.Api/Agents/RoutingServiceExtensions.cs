@@ -1,7 +1,12 @@
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
+using RetailPulse.Api.Alerts;
+using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
+using RetailPulse.Api.Telemetry;
+using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
 
@@ -44,21 +49,21 @@ public static class RoutingServiceExtensions
         // Register the shared execution pipeline
         services.AddScoped<IAgentExecutionPipeline>(sp =>
         {
-            var chatClient = sp.GetRequiredService<IChatClient>();
-            var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
-            var streamingHubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.StreamingHub>>();
-            var streamingFeature = sp.GetRequiredService<StreamingProgressFeature>();
-            var configuration = sp.GetRequiredService<IConfiguration>();
-            var logger = sp.GetRequiredService<ILogger<AgentExecutionPipeline>>();
-            var metrics = sp.GetService<Telemetry.RetailPulseMetrics>();
+            IChatClient chatClient = sp.GetRequiredService<IChatClient>();
+            IHubContext<TelemetryHub> hubContext = sp.GetRequiredService<IHubContext<TelemetryHub>>();
+            IHubContext<StreamingHub> streamingHubContext = sp.GetRequiredService<IHubContext<StreamingHub>>();
+            StreamingProgressFeature streamingFeature = sp.GetRequiredService<StreamingProgressFeature>();
+            IConfiguration configuration = sp.GetRequiredService<IConfiguration>();
+            ILogger<AgentExecutionPipeline> logger = sp.GetRequiredService<ILogger<AgentExecutionPipeline>>();
+            RetailPulseMetrics? metrics = sp.GetService<RetailPulseMetrics>();
             return new AgentExecutionPipeline(chatClient, hubContext, streamingHubContext, streamingFeature, configuration, logger, metrics);
         });
 
         // Register GeneralAgent as ISpecialistAgent
-        services.AddScoped<GeneralAgent>(sp =>
+        services.AddScoped(sp =>
         {
-            var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-            var tools = toolsFactory(sp);
+            IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+            IEnumerable<AITool> tools = toolsFactory(sp);
             return new GeneralAgent(pipeline, generalAgentDef, tools);
         });
         services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<GeneralAgent>());
@@ -66,10 +71,10 @@ public static class RoutingServiceExtensions
         // Register DemandForecastAgent as ISpecialistAgent
         if (demandForecastDef is not null && demandToolsFactory is not null)
         {
-            services.AddScoped<DemandForecastAgent>(sp =>
+            services.AddScoped(sp =>
             {
-                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-                var tools = demandToolsFactory(sp);
+                IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+                IEnumerable<AITool> tools = demandToolsFactory(sp);
                 return new DemandForecastAgent(pipeline, demandForecastDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<DemandForecastAgent>());
@@ -78,11 +83,11 @@ public static class RoutingServiceExtensions
         // Register PromoPlanningAgent as ISpecialistAgent
         if (promoPlanningDef is not null && promoToolsFactory is not null)
         {
-            services.AddScoped<PromoPlanningAgent>(sp =>
+            services.AddScoped(sp =>
             {
-                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-                var tools = promoToolsFactory(sp);
-                var approvalGate = sp.GetService<RetailPulse.Contracts.Approval.IApprovalGate>();
+                IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+                IEnumerable<AITool> tools = promoToolsFactory(sp);
+                IApprovalGate? approvalGate = sp.GetService<IApprovalGate>();
                 return new PromoPlanningAgent(pipeline, promoPlanningDef, tools, approvalGate);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<PromoPlanningAgent>());
@@ -91,13 +96,13 @@ public static class RoutingServiceExtensions
         // Register CompetitiveIntelAgent as ISpecialistAgent
         if (competitiveIntelDef is not null && competitiveToolsFactory is not null)
         {
-            services.AddScoped<CompetitiveIntelAgent>(sp =>
+            services.AddScoped(sp =>
             {
-                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-                var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
-                var tools = competitiveToolsFactory(sp);
-                var logger = sp.GetRequiredService<ILogger<CompetitiveIntelAgent>>();
-                var alertService = sp.GetService<Alerts.SqliteAlertService>();
+                IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+                IHubContext<TelemetryHub> hubContext = sp.GetRequiredService<IHubContext<TelemetryHub>>();
+                IEnumerable<AITool> tools = competitiveToolsFactory(sp);
+                ILogger<CompetitiveIntelAgent> logger = sp.GetRequiredService<ILogger<CompetitiveIntelAgent>>();
+                SqliteAlertService? alertService = sp.GetService<SqliteAlertService>();
                 return new CompetitiveIntelAgent(pipeline, competitiveIntelDef, tools, hubContext, logger, alertService);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<CompetitiveIntelAgent>());
@@ -106,10 +111,10 @@ public static class RoutingServiceExtensions
         // Register SupplyChainAgent as ISpecialistAgent
         if (supplyChainDef is not null && supplyToolsFactory is not null)
         {
-            services.AddScoped<SupplyChainAgent>(sp =>
+            services.AddScoped(sp =>
             {
-                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-                var tools = supplyToolsFactory(sp);
+                IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+                IEnumerable<AITool> tools = supplyToolsFactory(sp);
                 return new SupplyChainAgent(pipeline, supplyChainDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<SupplyChainAgent>());
@@ -118,10 +123,10 @@ public static class RoutingServiceExtensions
         // Register StoreOpsAgent as ISpecialistAgent
         if (storeOpsDef is not null && storeOpsToolsFactory is not null)
         {
-            services.AddScoped<StoreOpsAgent>(sp =>
+            services.AddScoped(sp =>
             {
-                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-                var tools = storeOpsToolsFactory(sp);
+                IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+                IEnumerable<AITool> tools = storeOpsToolsFactory(sp);
                 return new StoreOpsAgent(pipeline, storeOpsDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<StoreOpsAgent>());
@@ -130,10 +135,10 @@ public static class RoutingServiceExtensions
         // Register PlanogramAgent as ISpecialistAgent
         if (planogramDef is not null && planogramToolsFactory is not null)
         {
-            services.AddScoped<PlanogramAgent>(sp =>
+            services.AddScoped(sp =>
             {
-                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-                var tools = planogramToolsFactory(sp);
+                IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+                IEnumerable<AITool> tools = planogramToolsFactory(sp);
                 return new PlanogramAgent(pipeline, planogramDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<PlanogramAgent>());
@@ -142,26 +147,26 @@ public static class RoutingServiceExtensions
         // Register MarginAgent as ISpecialistAgent
         if (marginDef is not null && marginToolsFactory is not null)
         {
-            services.AddScoped<MarginAgent>(sp =>
+            services.AddScoped(sp =>
             {
-                var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-                var tools = marginToolsFactory(sp);
+                IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+                IEnumerable<AITool> tools = marginToolsFactory(sp);
                 return new MarginAgent(pipeline, marginDef, tools);
             });
             services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<MarginAgent>());
         }
 
         // Register MemoryManagementAgent as ISpecialistAgent
-        services.AddScoped<MemoryManagementAgent>(sp =>
+        services.AddScoped(sp =>
         {
-            var memory = sp.GetRequiredService<IConversationMemory>();
-            var logger = sp.GetRequiredService<ILogger<MemoryManagementAgent>>();
+            IConversationMemory memory = sp.GetRequiredService<IConversationMemory>();
+            ILogger<MemoryManagementAgent> logger = sp.GetRequiredService<ILogger<MemoryManagementAgent>>();
             return new MemoryManagementAgent(memory, logger);
         });
         services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<MemoryManagementAgent>());
 
         // Register IAgentRouter → RetailOpsRouter
-        var routerDef = promptConfig.Agents.TryGetValue("router", out var def)
+        AgentDefinition routerDef = promptConfig.Agents.TryGetValue("router", out AgentDefinition? def)
             ? def
             : throw new InvalidOperationException(
                 "Missing 'router' agent definition in prompts.yaml. " +
@@ -169,9 +174,9 @@ public static class RoutingServiceExtensions
 
         services.AddScoped<IAgentRouter>(sp =>
         {
-            var chatClient = sp.GetRequiredService<IChatClient>();
-            var specialists = sp.GetServices<ISpecialistAgent>();
-            var logger = sp.GetRequiredService<ILogger<RetailOpsRouter>>();
+            IChatClient chatClient = sp.GetRequiredService<IChatClient>();
+            IEnumerable<ISpecialistAgent> specialists = sp.GetServices<ISpecialistAgent>();
+            ILogger<RetailOpsRouter> logger = sp.GetRequiredService<ILogger<RetailOpsRouter>>();
 
             return new RetailOpsRouter(chatClient, routerDef, specialists, logger);
         });

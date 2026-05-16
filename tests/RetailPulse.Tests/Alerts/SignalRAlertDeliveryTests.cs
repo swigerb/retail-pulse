@@ -31,7 +31,7 @@ public class SignalRAlertDeliveryTests
     [Fact]
     public async Task AlertFired_PushesToSignalRHub()
     {
-        var (hub, clientProxy) = CreateHubMock();
+        (Mock<IHubContext<TelemetryHub>>? hub, Mock<IClientProxy>? clientProxy) = CreateHubMock();
 
         var alert = new Alert(
             Id: "alert-001",
@@ -72,16 +72,16 @@ public class SignalRAlertDeliveryTests
     [Fact]
     public async Task MultipleAlerts_EachPushedSeparately()
     {
-        var (hub, clientProxy) = CreateHubMock();
+        (Mock<IHubContext<TelemetryHub>>? hub, Mock<IClientProxy>? clientProxy) = CreateHubMock();
 
-        var alerts = new[]
-        {
+        Alert[] alerts =
+        [
             new Alert("a1", "demand_spike", "high", "Spike 1", "desc", "Brand A", "NE", "action", DateTimeOffset.UtcNow),
             new Alert("a2", "supply_drop", "medium", "Drop 1", "desc", "Brand B", "SE", "action", DateTimeOffset.UtcNow),
             new Alert("a3", "trend_reversal", "medium", "Reversal 1", "desc", "Brand C", "MW", "action", DateTimeOffset.UtcNow),
-        };
+        ];
 
-        foreach (var alert in alerts)
+        foreach (Alert? alert in alerts)
         {
             await hub.Object.Clients.All.SendAsync("alert_fired", new
             {
@@ -101,7 +101,7 @@ public class SignalRAlertDeliveryTests
     [Fact]
     public async Task AlertPayload_ContainsBrandAndRegion()
     {
-        var (hub, clientProxy) = CreateHubMock();
+        (Mock<IHubContext<TelemetryHub>>? hub, Mock<IClientProxy>? clientProxy) = CreateHubMock();
         object? capturedPayload = null;
 
         clientProxy
@@ -122,7 +122,7 @@ public class SignalRAlertDeliveryTests
         });
 
         capturedPayload.Should().NotBeNull("payload should be captured");
-        var json = System.Text.Json.JsonSerializer.Serialize(capturedPayload);
+        string json = System.Text.Json.JsonSerializer.Serialize(capturedPayload);
         json.Should().Contain("Ridgeline Bourbon");
         json.Should().Contain("Southeast");
     }
@@ -134,11 +134,11 @@ public class SignalRAlertDeliveryTests
     [Fact]
     public async Task NoAlerts_NothingPushed()
     {
-        var (_, clientProxy) = CreateHubMock();
+        (Mock<IHubContext<TelemetryHub>> _, Mock<IClientProxy>? clientProxy) = CreateHubMock();
 
         // Don't call SendAsync — simulate a check cycle with 0 alerts
         var alertService = new InMemoryAlertService();
-        var alerts = await alertService.CheckForAlertsAsync();
+        IReadOnlyList<Alert> alerts = await alertService.CheckForAlertsAsync();
 
         alerts.Should().BeEmpty("no data seeded → no alerts");
 

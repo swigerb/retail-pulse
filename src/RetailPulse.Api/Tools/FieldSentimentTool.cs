@@ -22,7 +22,7 @@ public class FieldSentimentTool
     {
         try
         {
-            var response = await _httpClient.GetAsync(
+            HttpResponseMessage response = await _httpClient.GetAsync(
                 $"/api/field-sentiment?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}",
                 cancellationToken);
             response.EnsureSuccessStatusCode();

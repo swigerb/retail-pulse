@@ -18,8 +18,8 @@ public class PlanogramTests : IDisposable
 
     public PlanogramTests()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
         _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_planogram_test_{Guid.NewGuid():N}.db");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
@@ -42,26 +42,26 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_PlacesHighVelocitySkusAtEyeLevel()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.OptimizePlanogram(storeId, aisleId));
+        JsonElement result = Parse(_db.OptimizePlanogram(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse(
             "should return optimized planogram");
 
-        var slots = result.GetProperty("currentLayout").GetProperty("slots");
+        JsonElement slots = result.GetProperty("currentLayout").GetProperty("slots");
 
         var allSlots = new List<(int shelfLevel, string skuId, double velocity)>();
 
-        foreach (var slot in slots.EnumerateArray())
+        foreach (JsonElement slot in slots.EnumerateArray())
         {
-            var shelfLevel = slot.GetProperty("shelfLevel").GetInt32();
-            var skuId = slot.GetProperty("skuId").GetString()!;
-            var velocity = slot.TryGetProperty("dailyVelocity", out var v) ? v.GetDouble() : 0;
+            int shelfLevel = slot.GetProperty("shelfLevel").GetInt32();
+            string skuId = slot.GetProperty("skuId").GetString()!;
+            double velocity = slot.TryGetProperty("dailyVelocity", out JsonElement v) ? v.GetDouble() : 0;
             allSlots.Add((shelfLevel, skuId, velocity));
         }
 
@@ -87,18 +87,18 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_RespectsFacingWidthConstraints()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.OptimizePlanogram(storeId, aisleId));
+        JsonElement result = Parse(_db.OptimizePlanogram(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var slots = result.GetProperty("currentLayout").GetProperty("slots");
+        JsonElement slots = result.GetProperty("currentLayout").GetProperty("slots");
 
-        foreach (var slot in slots.EnumerateArray())
+        foreach (JsonElement slot in slots.EnumerateArray())
         {
             slot.GetProperty("facingWidth").GetDouble().Should().BeGreaterThan(0,
                 "every slot must have a positive facing width");
@@ -108,18 +108,18 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_AllFacingsArePositive()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.OptimizePlanogram(storeId, aisleId));
+        JsonElement result = Parse(_db.OptimizePlanogram(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var slots = result.GetProperty("currentLayout").GetProperty("slots");
+        JsonElement slots = result.GetProperty("currentLayout").GetProperty("slots");
 
-        foreach (var slot in slots.EnumerateArray())
+        foreach (JsonElement slot in slots.EnumerateArray())
         {
             slot.GetProperty("facingWidth").GetDouble().Should().BeGreaterThan(0,
                 "every slot must have a positive facing width");
@@ -133,18 +133,18 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_AllSlotsHaveValidSkuIds()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.OptimizePlanogram(storeId, aisleId));
+        JsonElement result = Parse(_db.OptimizePlanogram(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var slots = result.GetProperty("currentLayout").GetProperty("slots");
+        JsonElement slots = result.GetProperty("currentLayout").GetProperty("slots");
 
-        foreach (var slot in slots.EnumerateArray())
+        foreach (JsonElement slot in slots.EnumerateArray())
         {
             slot.GetProperty("skuId").GetString().Should().NotBeNullOrEmpty(
                 "every slot must have a valid SKU ID");
@@ -160,16 +160,16 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_PredictedUpliftIsPositive()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.OptimizePlanogram(storeId, aisleId));
+        JsonElement result = Parse(_db.OptimizePlanogram(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var uplift = result.GetProperty("predictedUplift").GetDouble();
+        double uplift = result.GetProperty("predictedUplift").GetDouble();
         uplift.Should().BeGreaterThan(0,
             "optimized planogram should predict positive uplift over current layout");
     }
@@ -177,16 +177,16 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_UpliftIsReasonable()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.OptimizePlanogram(storeId, aisleId));
+        JsonElement result = Parse(_db.OptimizePlanogram(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
-        var uplift = result.GetProperty("predictedUplift").GetDouble();
+        double uplift = result.GetProperty("predictedUplift").GetDouble();
         uplift.Should().BeLessThan(100,
             "predicted uplift should be reasonable (< 100%)");
     }
@@ -198,23 +198,23 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_OriginalLayoutPreserved()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
         // Capture original layout before optimization
-        var originalLayout = Parse(_db.GetShelfLayout(storeId, aisleId));
+        JsonElement originalLayout = Parse(_db.GetShelfLayout(storeId, aisleId));
 
         // Run optimization
         _ = Parse(_db.OptimizePlanogram(storeId, aisleId));
 
         // Verify original layout wasn't mutated
-        var afterLayout = Parse(_db.GetShelfLayout(storeId, aisleId));
+        JsonElement afterLayout = Parse(_db.GetShelfLayout(storeId, aisleId));
 
-        var originalJson = JsonSerializer.Serialize(originalLayout);
-        var afterJson = JsonSerializer.Serialize(afterLayout);
+        string originalJson = JsonSerializer.Serialize(originalLayout);
+        string afterJson = JsonSerializer.Serialize(afterLayout);
 
         afterJson.Should().Be(originalJson,
             "optimization should not mutate the original layout");
@@ -223,13 +223,13 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_ReturnsCurrentLayoutAndUplift()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var aisleId = GetFirstAisleId(storeId);
+        string? aisleId = GetFirstAisleId(storeId);
         if (aisleId == null) return;
 
-        var result = Parse(_db.OptimizePlanogram(storeId, aisleId));
+        JsonElement result = Parse(_db.OptimizePlanogram(storeId, aisleId));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
 
@@ -242,15 +242,15 @@ public class PlanogramTests : IDisposable
     [Fact]
     public void OptimizePlanogram_InvalidAisle_ReturnsError()
     {
-        var storeId = GetFirstStoreId();
+        string? storeId = GetFirstStoreId();
         if (storeId == null) return;
 
-        var result = Parse(_db.OptimizePlanogram(storeId, "ZZ99"));
+        JsonElement result = Parse(_db.OptimizePlanogram(storeId, "ZZ99"));
 
         // Should return error or empty slots in currentLayout
-        var hasError = result.TryGetProperty("error", out _);
-        var hasEmptySlots = result.TryGetProperty("currentLayout", out var layout)
-            && layout.TryGetProperty("slots", out var slots)
+        bool hasError = result.TryGetProperty("error", out _);
+        bool hasEmptySlots = result.TryGetProperty("currentLayout", out JsonElement layout)
+            && layout.TryGetProperty("slots", out JsonElement slots)
             && slots.GetArrayLength() == 0;
 
         (hasError || hasEmptySlots).Should().BeTrue(
@@ -263,8 +263,8 @@ public class PlanogramTests : IDisposable
 
     private string? GetFirstStoreId()
     {
-        var result = Parse(_db.GetStorePerformance());
-        return result.TryGetProperty("stores", out var stores) && stores.GetArrayLength() > 0
+        JsonElement result = Parse(_db.GetStorePerformance());
+        return result.TryGetProperty("stores", out JsonElement stores) && stores.GetArrayLength() > 0
             ? stores[0].GetProperty("storeId").GetString()
             : null;
     }
@@ -273,7 +273,7 @@ public class PlanogramTests : IDisposable
     {
         using var conn = new SqliteConnection($"Data Source={_dbPath};Mode=ReadOnly");
         conn.Open();
-        using var cmd = conn.CreateCommand();
+        using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT AisleId FROM ShelfLayouts WHERE StoreId = @storeId LIMIT 1";
         cmd.Parameters.AddWithValue("@storeId", storeId);
         return cmd.ExecuteScalar()?.ToString();

@@ -13,8 +13,5 @@ public static class GenerateForecastTool
         RetailPulseDb data,
         [Description("Brand name (e.g. 'Sierra Gold Tequila')")] string brand,
         [Description("Region (e.g. 'Northeast', 'National'). Defaults to 'National'.")] string region = "National",
-        [Description("Channel (e.g. 'On-Premise', 'Off-Premise', 'E-Commerce', 'All'). Defaults to 'All'.")] string channel = "All")
-    {
-        return string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GenerateForecast(brand, region);
-    }
+        [Description("Channel (e.g. 'On-Premise', 'Off-Premise', 'E-Commerce', 'All'). Defaults to 'All'.")] string channel = "All") => string.IsNullOrWhiteSpace(brand) ? (new { error = "Parameter 'brand' is required." }) : data.GenerateForecast(brand, region);
 }

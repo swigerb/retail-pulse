@@ -26,12 +26,12 @@ public class RetailOpsRouterTests
     [InlineData("Show me the portfolio overview", AgentIntent.General)]
     public async Task RouteAsync_ClassifiesKnownIntents(string message, string expectedIntent)
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{expectedIntent}\",\"confidence\":0.92,\"intents\":[\"{expectedIntent}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(message, null, null, null);
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
 
         result.Intent.Should().Be(expectedIntent);
         result.Confidence.Should().BeGreaterThanOrEqualTo(0.6);
@@ -40,12 +40,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_DemandForecastMessage_RoutesToCorrectAgent()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.95,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(
+        RoutingDecision result = await router.RouteAsync(
             "What's the demand forecast for Brand X?", null, null, null);
 
         result.AgentKey.Should().Be("general");
@@ -56,12 +56,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_PromotionMessage_ClassifiesCorrectly()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.PromotionTrade}\",\"confidence\":0.88,\"intents\":[\"{AgentIntent.PromotionTrade}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(
+        RoutingDecision result = await router.RouteAsync(
             "How did our last promotion perform?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.PromotionTrade);
@@ -70,12 +70,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_SupplyChainMessage_ClassifiesCorrectly()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.91,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(
+        RoutingDecision result = await router.RouteAsync(
             "Where are my shipments?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.SupplyShipments);
@@ -84,12 +84,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_CompetitiveMessage_ClassifiesCorrectly()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.85,\"intents\":[\"{AgentIntent.CompetitiveMarket}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(
+        RoutingDecision result = await router.RouteAsync(
             "What are competitors doing?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.CompetitiveMarket);
@@ -98,12 +98,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_SentimentMessage_ClassifiesCorrectly()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SentimentField}\",\"confidence\":0.87,\"intents\":[\"{AgentIntent.SentimentField}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(
+        RoutingDecision result = await router.RouteAsync(
             "What's distributor sentiment?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.SentimentField);
@@ -116,12 +116,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_LowConfidence_FallsBackToGeneral()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.3,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(
+        RoutingDecision result = await router.RouteAsync(
             "Tell me something about stuff", null, null, null);
 
         // Threshold is 0.6 — should fall back
@@ -131,12 +131,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_ExactlyAtThreshold_DoesNotFallBack()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.6,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync("shipments?", null, null, null);
+        RoutingDecision result = await router.RouteAsync("shipments?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.SupplyShipments);
     }
@@ -144,12 +144,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_JustBelowThreshold_FallsBackToGeneral()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.59,\"intents\":[\"{AgentIntent.SupplyShipments}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(
+        RoutingDecision result = await router.RouteAsync(
             "Maybe something about shipments?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.General);
@@ -158,12 +158,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_ZeroConfidence_FallsBackToGeneral()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.CompetitiveMarket}\",\"confidence\":0.0,\"intents\":[\"{AgentIntent.CompetitiveMarket}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync("...", null, null, null);
+        RoutingDecision result = await router.RouteAsync("...", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.General);
     }
@@ -175,12 +175,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_MultiIntentResponse_ReturnsAllDetectedIntents()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.85,\"intents\":[\"{AgentIntent.DemandForecasting}\",\"{AgentIntent.CompetitiveMarket}\"]}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync(
+        RoutingDecision result = await router.RouteAsync(
             "How's demand and what are competitors doing?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.DemandForecasting);
@@ -208,8 +208,8 @@ public class RetailOpsRouterTests
                 new ChatMessage(ChatRole.Assistant,
                     $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.8}}")));
 
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(mockClient.Object, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(mockClient.Object, specialists);
 
         var history = new List<ChatHistoryMessage>
         {
@@ -228,25 +228,25 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_NullHistory_DoesNotThrow()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.8}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var act = () => router.RouteAsync("Hello", null, null, null);
+        Func<Task<RoutingDecision>> act = () => router.RouteAsync("Hello", null, null, null);
         await act.Should().NotThrowAsync();
     }
 
     [Fact]
     public async Task RouteAsync_WithUserContext_CompletesSuccessfully()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.85}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
         var user = new UserContext("obj-123", "Jane Smith", "jane@contoso.com");
-        var result = await router.RouteAsync("hello", null, user, "tenant-contoso");
+        RoutingDecision result = await router.RouteAsync("hello", null, user, "tenant-contoso");
 
         result.Should().NotBeNull();
     }
@@ -254,12 +254,12 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_WithTenantId_CompletesSuccessfully()
     {
-        var chatClient = MockChatClient(
+        IChatClient chatClient = MockChatClient(
             $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.85}}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync("hello", null, null, "tenant-contoso");
+        RoutingDecision result = await router.RouteAsync("hello", null, null, "tenant-contoso");
 
         result.Should().NotBeNull();
     }
@@ -279,10 +279,10 @@ public class RetailOpsRouterTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("LLM unavailable"));
 
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient.Object, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient.Object, specialists);
 
-        var result = await router.RouteAsync("What's demand?", null, null, null);
+        RoutingDecision result = await router.RouteAsync("What's demand?", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.General);
         result.Confidence.Should().Be(0.0);
@@ -291,11 +291,11 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_MalformedJsonFromLlm_DoesNotThrow()
     {
-        var chatClient = MockChatClient("This is not valid JSON at all");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        IChatClient chatClient = MockChatClient("This is not valid JSON at all");
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync("demand forecast?", null, null, null);
+        RoutingDecision result = await router.RouteAsync("demand forecast?", null, null, null);
 
         result.Should().NotBeNull();
     }
@@ -303,11 +303,11 @@ public class RetailOpsRouterTests
     [Fact]
     public async Task RouteAsync_EmptyJsonResponse_FallsBackToGeneral()
     {
-        var chatClient = MockChatClient("{}");
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient, specialists);
+        IChatClient chatClient = MockChatClient("{}");
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
 
-        var result = await router.RouteAsync("test", null, null, null);
+        RoutingDecision result = await router.RouteAsync("test", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.General);
     }
@@ -323,10 +323,10 @@ public class RetailOpsRouterTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
-        var specialists = CreateSpecialists();
-        var router = CreateRouter(chatClient.Object, specialists);
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+        RetailOpsRouter router = CreateRouter(chatClient.Object, specialists);
 
-        var result = await router.RouteAsync("test", null, null, null);
+        RoutingDecision result = await router.RouteAsync("test", null, null, null);
         result.Intent.Should().Be(AgentIntent.General);
     }
 
@@ -337,7 +337,7 @@ public class RetailOpsRouterTests
     [Fact]
     public void ParseClassification_ValidJson_ReturnsCorrectIntentAndConfidence()
     {
-        var result = RetailOpsRouter.ParseClassification(
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.95,\"intents\":[\"{AgentIntent.DemandForecasting}\"]}}");
 
         result.Intent.Should().Be(AgentIntent.DemandForecasting);
@@ -348,7 +348,7 @@ public class RetailOpsRouterTests
     [Fact]
     public void ParseClassification_MissingIntent_DefaultsToGeneral()
     {
-        var result = RetailOpsRouter.ParseClassification("{\"confidence\":0.8}");
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification(/*lang=json,strict*/ "{\"confidence\":0.8}");
 
         result.Intent.Should().Be(AgentIntent.General);
     }
@@ -356,7 +356,7 @@ public class RetailOpsRouterTests
     [Fact]
     public void ParseClassification_MissingConfidence_DefaultsToHalf()
     {
-        var result = RetailOpsRouter.ParseClassification(
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\"}}");
 
         result.Confidence.Should().Be(0.5);
@@ -365,8 +365,9 @@ public class RetailOpsRouterTests
     [Fact]
     public void ParseClassification_UnknownIntent_NormalizesToGeneral()
     {
-        var result = RetailOpsRouter.ParseClassification(
-            "{\"intent\":\"unknown/category\",\"confidence\":0.9}");
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification(
+                                 /*lang=json,strict*/
+                                 "{\"intent\":\"unknown/category\",\"confidence\":0.9}");
 
         result.Intent.Should().Be(AgentIntent.General);
     }
@@ -374,7 +375,7 @@ public class RetailOpsRouterTests
     [Fact]
     public void ParseClassification_InvalidJson_ReturnsGeneralWithZeroConfidence()
     {
-        var result = RetailOpsRouter.ParseClassification("not json");
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification("not json");
 
         result.Intent.Should().Be(AgentIntent.General);
         result.Confidence.Should().Be(0.0);
@@ -383,7 +384,7 @@ public class RetailOpsRouterTests
     [Fact]
     public void ParseClassification_EmptyJson_ReturnsGeneralDefault()
     {
-        var result = RetailOpsRouter.ParseClassification("{}");
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification("{}");
 
         result.Intent.Should().Be(AgentIntent.General);
         result.Confidence.Should().Be(0.5);
@@ -392,7 +393,7 @@ public class RetailOpsRouterTests
     [Fact]
     public void ParseClassification_MultipleIntents_PreservesAll()
     {
-        var result = RetailOpsRouter.ParseClassification(
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification(
             $"{{\"intent\":\"{AgentIntent.DemandForecasting}\",\"confidence\":0.88,\"intents\":[\"{AgentIntent.DemandForecasting}\",\"{AgentIntent.CompetitiveMarket}\"]}}");
 
         result.DetectedIntents.Should().HaveCount(2);
@@ -403,7 +404,7 @@ public class RetailOpsRouterTests
     [Fact]
     public void ParseClassification_EmptyIntentsArray_FallsBackToMainIntent()
     {
-        var result = RetailOpsRouter.ParseClassification(
+        RetailOpsRouter.IntentClassification result = RetailOpsRouter.ParseClassification(
             $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.7,\"intents\":[]}}");
 
         result.DetectedIntents.Should().HaveCount(1);

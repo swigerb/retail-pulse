@@ -18,7 +18,7 @@ public class SqlInjectionTests
 {
     private static GuardrailsMiddleware CreateMiddleware(GuardrailsConfig? config = null)
     {
-        var cfg = config ?? new GuardrailsConfig
+        GuardrailsConfig cfg = config ?? new GuardrailsConfig
         {
             JailbreakDetectionEnabled = true,
             PiiDetectionEnabled = true,
@@ -42,8 +42,8 @@ public class SqlInjectionTests
     [InlineData("test'; drop table customers;--")]
     public async Task Injection_DropTable_Blocked(string input)
     {
-        var mw = CreateMiddleware();
-        var result = await mw.CheckInputAsync(MakeRequest(input));
+        GuardrailsMiddleware mw = CreateMiddleware();
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(input));
 
         result.IsBlocked.Should().BeTrue($"'{input}' contains a SQL injection pattern");
         result.RefusalMessage.Should().Contain("injection");
@@ -54,8 +54,8 @@ public class SqlInjectionTests
     [InlineData("' or 1=1--")]
     public async Task Injection_OrTautology_Blocked(string input)
     {
-        var mw = CreateMiddleware();
-        var result = await mw.CheckInputAsync(MakeRequest(input));
+        GuardrailsMiddleware mw = CreateMiddleware();
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(input));
 
         result.IsBlocked.Should().BeTrue($"'{input}' is a classic SQL injection tautology");
     }
@@ -65,8 +65,8 @@ public class SqlInjectionTests
     [InlineData("1 union select * from credentials")]
     public async Task Injection_UnionSelect_Blocked(string input)
     {
-        var mw = CreateMiddleware();
-        var result = await mw.CheckInputAsync(MakeRequest(input));
+        GuardrailsMiddleware mw = CreateMiddleware();
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(input));
 
         result.IsBlocked.Should().BeTrue($"'{input}' contains UNION SELECT injection");
     }
@@ -79,8 +79,8 @@ public class SqlInjectionTests
     [InlineData("javascript:alert(1)")]
     public async Task Injection_XssPatterns_Blocked(string input)
     {
-        var mw = CreateMiddleware();
-        var result = await mw.CheckInputAsync(MakeRequest(input));
+        GuardrailsMiddleware mw = CreateMiddleware();
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(input));
 
         result.IsBlocked.Should().BeTrue($"'{input}' contains an XSS/injection pattern");
     }
@@ -97,8 +97,8 @@ public class SqlInjectionTests
     [InlineData("Compare Northeast and Southeast performance")]
     public async Task Injection_NormalQueries_NotBlocked(string input)
     {
-        var mw = CreateMiddleware();
-        var result = await mw.CheckInputAsync(MakeRequest(input));
+        GuardrailsMiddleware mw = CreateMiddleware();
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest(input));
 
         result.IsBlocked.Should().BeFalse($"'{input}' is a normal business query");
     }
@@ -122,7 +122,7 @@ public class SqlInjectionTests
 
         await mw.CheckInputAsync(MakeRequest("'; drop table users--"));
 
-        var entries = await log.GetRecentAsync();
+        IReadOnlyList<SuspiciousRequest> entries = await log.GetRecentAsync();
         entries.Should().ContainSingle(e => e.DetectionType == "injection",
             "blocked injection attempt should be logged");
     }
@@ -134,12 +134,12 @@ public class SqlInjectionTests
     [Fact]
     public async Task Injection_DetectionDisabled_NotBlocked()
     {
-        var mw = CreateMiddleware(new GuardrailsConfig
+        GuardrailsMiddleware mw = CreateMiddleware(new GuardrailsConfig
         {
             JailbreakDetectionEnabled = false // injection piggybacks on this toggle
         });
 
-        var result = await mw.CheckInputAsync(MakeRequest("'; drop table users--"));
+        GuardrailResult result = await mw.CheckInputAsync(MakeRequest("'; drop table users--"));
 
         result.IsBlocked.Should().BeFalse("injection detection is disabled when JailbreakDetectionEnabled = false");
     }

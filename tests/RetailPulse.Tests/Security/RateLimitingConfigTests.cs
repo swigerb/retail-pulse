@@ -50,7 +50,7 @@ public class RateLimitingConfigTests
     [Fact]
     public async Task StrictPolicy_IsLowerThanModerateAndRelaxed()
     {
-        var strictLimit = ExpectedPolicies["strict"].PermitLimit;
+        int strictLimit = ExpectedPolicies["strict"].PermitLimit;
 
         strictLimit.Should().BeLessThanOrEqualTo(ExpectedPolicies["moderate"].PermitLimit);
         strictLimit.Should().BeLessThanOrEqualTo(ExpectedPolicies["relaxed"].PermitLimit);
@@ -60,7 +60,7 @@ public class RateLimitingConfigTests
     [Fact]
     public async Task UploadPolicy_IsMostRestrictive()
     {
-        var uploadLimit = ExpectedPolicies["upload"].PermitLimit;
+        int uploadLimit = ExpectedPolicies["upload"].PermitLimit;
 
         uploadLimit.Should().BeLessThanOrEqualTo(ExpectedPolicies["strict"].PermitLimit);
         uploadLimit.Should().BeLessThanOrEqualTo(ExpectedPolicies["moderate"].PermitLimit);
@@ -71,7 +71,7 @@ public class RateLimitingConfigTests
     [Fact]
     public async Task RelaxedPolicy_IsHighestPermitLimit()
     {
-        var relaxedLimit = ExpectedPolicies["relaxed"].PermitLimit;
+        int relaxedLimit = ExpectedPolicies["relaxed"].PermitLimit;
 
         relaxedLimit.Should().BeGreaterThanOrEqualTo(ExpectedPolicies["strict"].PermitLimit);
         relaxedLimit.Should().BeGreaterThanOrEqualTo(ExpectedPolicies["upload"].PermitLimit);

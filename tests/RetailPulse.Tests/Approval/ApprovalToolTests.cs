@@ -21,7 +21,7 @@ public class ApprovalToolTests
     public ApprovalToolTests()
     {
         _gateMock = new Mock<IApprovalGate>();
-        var hubContext = CreateMockHubContext();
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
         _tool = new ApprovalTool(
             _gateMock.Object,
             hubContext,
@@ -40,7 +40,7 @@ public class ApprovalToolTests
 
     private void SetupApprovalFlow(ApprovalDecision decision, string? comment = null)
     {
-        var requestId = Guid.NewGuid().ToString("N");
+        string requestId = Guid.NewGuid().ToString("N");
 
         _gateMock.Setup(g => g.RequestApprovalAsync(It.IsAny<ApprovalContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ApprovalContext ctx, CancellationToken _) =>
@@ -57,7 +57,7 @@ public class ApprovalToolTests
     {
         SetupApprovalFlow(ApprovalDecision.Approved);
 
-        var result = await _tool.RequestApproval(
+        string result = await _tool.RequestApproval(
             action: "Delete 500 forecast records",
             impact: "Affects all demand predictions",
             urgency: "high",
@@ -79,7 +79,7 @@ public class ApprovalToolTests
     {
         SetupApprovalFlow(ApprovalDecision.Approved, "Go ahead");
 
-        var result = await _tool.RequestApproval(
+        string result = await _tool.RequestApproval(
             "action", "impact", "medium", "reasoning", "agent", "user");
 
         result.Should().Contain("Approved");
@@ -90,7 +90,7 @@ public class ApprovalToolTests
     {
         SetupApprovalFlow(ApprovalDecision.TimedOut);
 
-        var result = await _tool.RequestApproval(
+        string result = await _tool.RequestApproval(
             "action", "impact", "medium", "reasoning", "agent", "user");
 
         result.Should().Contain("TimedOut");
@@ -125,7 +125,7 @@ public class ApprovalToolTests
     {
         SetupApprovalFlow(ApprovalDecision.Rejected, "Not authorized");
 
-        var result = await _tool.RequestApproval(
+        string result = await _tool.RequestApproval(
             "action", "impact", "medium", "reasoning", "agent", "user");
 
         result.Should().Contain("Rejected");
@@ -136,7 +136,7 @@ public class ApprovalToolTests
     {
         SetupApprovalFlow(ApprovalDecision.Modified, "Approved for 100 records only");
 
-        var result = await _tool.RequestApproval(
+        string result = await _tool.RequestApproval(
             "Bulk update 5000 records", "High", "medium", "Batch job", "agent", "user");
 
         result.Should().Contain("Modified");
@@ -153,7 +153,7 @@ public class ApprovalToolTests
         _gateMock.Setup(g => g.RequestApprovalAsync(It.IsAny<ApprovalContext>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Gate unavailable"));
 
-        var result = await _tool.RequestApproval(
+        string result = await _tool.RequestApproval(
             "action", "impact", "medium", "reasoning", "agent", "user");
 
         result.Should().Contain("Error");
@@ -169,7 +169,7 @@ public class ApprovalToolTests
         _gateMock.Setup(g => g.RequestApprovalAsync(It.IsAny<ApprovalContext>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
-        var result = await _tool.RequestApproval(
+        string result = await _tool.RequestApproval(
             "action", "impact", "medium", "reasoning", "agent", "user",
             cancellationToken: cts.Token);
 

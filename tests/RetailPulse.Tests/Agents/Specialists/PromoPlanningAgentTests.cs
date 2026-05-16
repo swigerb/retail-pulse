@@ -29,21 +29,21 @@ public class PromoPlanningAgentTests
     [Fact]
     public void Key_IsPromoPlanning()
     {
-        var agent = CreateAgent();
+        PromoPlanningAgent agent = CreateAgent();
         agent.Key.Should().Be("promo-planning");
     }
 
     [Fact]
     public void DisplayName_IsNotEmpty()
     {
-        var agent = CreateAgent();
+        PromoPlanningAgent agent = CreateAgent();
         agent.DisplayName.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
     public void SupportedIntents_ContainsPromotionTrade()
     {
-        var agent = CreateAgent();
+        PromoPlanningAgent agent = CreateAgent();
         agent.SupportedIntents.Should().Contain(AgentIntent.PromotionTrade);
     }
 
@@ -51,14 +51,14 @@ public class PromoPlanningAgentTests
     public void SupportedIntents_DoesNotContainGeneralFallback()
     {
         // Promo agent is a specialist — should NOT claim general/fallback
-        var agent = CreateAgent();
+        PromoPlanningAgent agent = CreateAgent();
         agent.SupportedIntents.Should().NotContain(AgentIntent.General);
     }
 
     [Fact]
     public void SupportedIntents_DoesNotContainOtherSpecialistIntents()
     {
-        var agent = CreateAgent();
+        PromoPlanningAgent agent = CreateAgent();
         agent.SupportedIntents.Should().NotContain(AgentIntent.DemandForecasting);
         agent.SupportedIntents.Should().NotContain(AgentIntent.SupplyShipments);
         agent.SupportedIntents.Should().NotContain(AgentIntent.CompetitiveMarket);
@@ -68,7 +68,7 @@ public class PromoPlanningAgentTests
     [Fact]
     public void SupportedIntents_OnlyPromotionTrade()
     {
-        var agent = CreateAgent();
+        PromoPlanningAgent agent = CreateAgent();
         agent.SupportedIntents.Should().HaveCount(1);
         agent.SupportedIntents.Should().ContainSingle(i => i == AgentIntent.PromotionTrade);
     }
@@ -80,11 +80,11 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task HandleAsync_ReturnsReplyFromModel()
     {
-        var chatClient = MockChatClient("Sierra Gold Tequila promo lift is projected at 12% for the spring campaign.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Sierra Gold Tequila promo lift is projected at 12% for the spring campaign.");
+        PromoPlanningAgent agent = CreateAgent(chatClient);
 
         var request = new ChatRequest("What's the promo plan for Sierra Gold Tequila?", SessionId: "session-promo-1");
-        var response = await agent.HandleAsync(request);
+        Contracts.ChatResponse response = await agent.HandleAsync(request);
 
         response.Reply.Should().Contain("Sierra Gold Tequila");
         response.SessionId.Should().Be("session-promo-1");
@@ -93,10 +93,10 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task HandleAsync_GeneratesSessionIdWhenMissing()
     {
-        var chatClient = MockChatClient("Promotion plan ready");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Promotion plan ready");
+        PromoPlanningAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(new ChatRequest("Plan a promo"));
+        Contracts.ChatResponse response = await agent.HandleAsync(new ChatRequest("Plan a promo"));
 
         response.SessionId.Should().NotBeNullOrWhiteSpace();
     }
@@ -104,10 +104,10 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task HandleAsync_IncludesSpans()
     {
-        var chatClient = MockChatClient("Promotion analysis complete");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("Promotion analysis complete");
+        PromoPlanningAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("Generate promo plan for Ridgeline Bourbon", SessionId: "span-test"));
 
         response.Spans.Should().NotBeEmpty();
@@ -118,10 +118,10 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task HandleAsync_PropagatesSessionId()
     {
-        var chatClient = MockChatClient("ok");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("ok");
+        PromoPlanningAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("promo?", SessionId: "my-promo-session-42"));
 
         response.SessionId.Should().Be("my-promo-session-42");
@@ -130,10 +130,10 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task HandleAsync_IncludesTotalDurationMs()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        PromoPlanningAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("promo?", SessionId: "dur-test"));
 
         response.TotalDurationMs.Should().NotBeNull();
@@ -143,10 +143,10 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task HandleAsync_SpansHaveTimestamps()
     {
-        var chatClient = MockChatClient("done");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient("done");
+        PromoPlanningAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("test", SessionId: "ts-test"));
 
         response.Spans.Should().OnlyContain(s => s.Timestamp > DateTimeOffset.MinValue);
@@ -171,7 +171,7 @@ public class PromoPlanningAgentTests
             .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
                 new ChatMessage(ChatRole.Assistant, "done")));
 
-        var agent = CreateAgent(mockClient.Object);
+        PromoPlanningAgent agent = CreateAgent(mockClient.Object);
         var request = new ChatRequest(
             "Now plan next quarter's promo",
             SessionId: "hist-1",
@@ -209,7 +209,7 @@ public class PromoPlanningAgentTests
             .Select(i => new ChatHistoryMessage(i % 2 == 0 ? "assistant" : "user", $"h-{i}"))
             .ToList();
 
-        var agent = CreateAgent(mockClient.Object);
+        PromoPlanningAgent agent = CreateAgent(mockClient.Object);
         await agent.HandleAsync(
             new ChatRequest("current", SessionId: "cap-test", History: history));
 
@@ -244,7 +244,7 @@ public class PromoPlanningAgentTests
             AIFunctionFactory.Create(() => "lift calc", "CalculatePromoLift")
         };
 
-        var agent = CreateAgent(mockClient.Object, promoTools);
+        PromoPlanningAgent agent = CreateAgent(mockClient.Object, promoTools);
         await agent.HandleAsync(new ChatRequest("promo?", SessionId: "tool-test"));
 
         capturedOptions.Should().NotBeNull();
@@ -257,8 +257,8 @@ public class PromoPlanningAgentTests
     [Fact]
     public void PromoAgent_KeyDiffersFromGeneral()
     {
-        var promoAgent = CreateAgent();
-        var generalAgent = Fixtures.AgentTestFixtures.CreateGeneralAgent();
+        PromoPlanningAgent promoAgent = CreateAgent();
+        GeneralAgent generalAgent = Fixtures.AgentTestFixtures.CreateGeneralAgent();
 
         promoAgent.Key.Should().NotBe(generalAgent.Key);
         promoAgent.Key.Should().Be("promo-planning");
@@ -272,10 +272,10 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task CheckApprovalAsync_HighSpend_TriggersApproval()
     {
-        var mockGate = CreateMockApprovalGate();
-        var agent = CreateAgent(approvalGate: mockGate.Object);
+        Mock<IApprovalGate> mockGate = CreateMockApprovalGate();
+        PromoPlanningAgent agent = CreateAgent(approvalGate: mockGate.Object);
 
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 600_000, roi: 15, userId: "user-1", description: "Summer campaign");
 
         result.Should().NotBeNull();
@@ -288,10 +288,10 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task CheckApprovalAsync_MediumSpendLowRoi_TriggersApproval()
     {
-        var mockGate = CreateMockApprovalGate();
-        var agent = CreateAgent(approvalGate: mockGate.Object);
+        Mock<IApprovalGate> mockGate = CreateMockApprovalGate();
+        PromoPlanningAgent agent = CreateAgent(approvalGate: mockGate.Object);
 
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 150_000, roi: 5, userId: "user-2", description: "Low ROI promo");
 
         result.Should().NotBeNull();
@@ -304,10 +304,10 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task CheckApprovalAsync_NormalSpend_ReturnsNull()
     {
-        var mockGate = CreateMockApprovalGate();
-        var agent = CreateAgent(approvalGate: mockGate.Object);
+        Mock<IApprovalGate> mockGate = CreateMockApprovalGate();
+        PromoPlanningAgent agent = CreateAgent(approvalGate: mockGate.Object);
 
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 50_000, roi: 20, userId: "user-3", description: "Small promo");
 
         result.Should().BeNull();
@@ -319,9 +319,9 @@ public class PromoPlanningAgentTests
     [Fact]
     public async Task CheckApprovalAsync_NoApprovalGate_ReturnsNull()
     {
-        var agent = CreateAgent(approvalGate: null);
+        PromoPlanningAgent agent = CreateAgent(approvalGate: null);
 
-        var result = await agent.CheckApprovalAsync(
+        ApprovalResult? result = await agent.CheckApprovalAsync(
             spend: 1_000_000, roi: 5, userId: "user-4", description: "Huge campaign");
 
         result.Should().BeNull();
@@ -345,8 +345,8 @@ public class PromoPlanningAgentTests
                 CreatePipelineResponse(429),
                 null));
 
-        var agent = CreateAgent(mockClient.Object);
-        var response = await agent.HandleAsync(
+        PromoPlanningAgent agent = CreateAgent(mockClient.Object);
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("promo?", SessionId: "s-429"));
 
         response.Reply.Should().Contain("rate-limited");
@@ -365,8 +365,8 @@ public class PromoPlanningAgentTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        var agent = CreateAgent(mockClient.Object);
-        var response = await agent.HandleAsync(
+        PromoPlanningAgent agent = CreateAgent(mockClient.Object);
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("promo?", SessionId: "s-err"));
 
         response.Reply.Should().Contain("Something went wrong");
@@ -392,10 +392,10 @@ public class PromoPlanningAgentTests
     [InlineData("Foundry Home")]
     public async Task HandleAsync_AllTenantBrands_ProcessWithoutError(string brand)
     {
-        var chatClient = MockChatClient($"Promo plan for {brand}: 15% lift expected during campaign.");
-        var agent = CreateAgent(chatClient);
+        IChatClient chatClient = MockChatClient($"Promo plan for {brand}: 15% lift expected during campaign.");
+        PromoPlanningAgent agent = CreateAgent(chatClient);
 
-        var response = await agent.HandleAsync(
+        Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest($"What's the promo plan for {brand}?", SessionId: $"brand-{brand}"));
 
         response.Reply.Should().NotBeNullOrWhiteSpace();
@@ -425,8 +425,8 @@ public class PromoPlanningAgentTests
         IEnumerable<AITool>? tools = null,
         IApprovalGate? approvalGate = null)
     {
-        var hubContext = CreateMockHubContext();
-        var config = new ConfigurationBuilder()
+        IHubContext<TelemetryHub> hubContext = CreateMockHubContext();
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection([])
             .Build();
 

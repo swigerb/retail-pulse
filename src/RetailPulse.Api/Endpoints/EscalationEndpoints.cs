@@ -1,3 +1,4 @@
+using RetailPulse.Api.Escalation;
 using RetailPulse.Contracts.Routing;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
 
@@ -7,13 +8,13 @@ public static class EscalationEndpoints
 {
     public static WebApplication MapEscalationEndpoints(this WebApplication app)
     {
-        app.MapPost("/api/escalate", async (ChatRequest request, RetailPulse.Api.Escalation.EscalationOrchestrator escalation, IAgentRouter router, ILogger<Program> logger, CancellationToken ct) =>
+        app.MapPost("/api/escalate", async (ChatRequest request, EscalationOrchestrator escalation, IAgentRouter router, ILogger<Program> logger, CancellationToken ct) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
                 return Results.BadRequest(new { error = "Field 'message' is required." });
 
-            var decision = await router.RouteAsync(request.Message, request.History, request.User, null, ct);
-            var result = await escalation.EscalateAsync(request, decision, ct);
+            RoutingDecision decision = await router.RouteAsync(request.Message, request.History, request.User, null, ct);
+            EscalationOrchestrator.EscalationResult result = await escalation.EscalateAsync(request, decision, ct);
 
             return Results.Ok(new
             {

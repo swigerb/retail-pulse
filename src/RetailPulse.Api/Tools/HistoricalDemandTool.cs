@@ -24,8 +24,8 @@ public class HistoricalDemandTool
     {
         try
         {
-            var url = $"/api/historical-demand?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&channel={Uri.EscapeDataString(channel)}";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            string url = $"/api/historical-demand?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&channel={Uri.EscapeDataString(channel)}";
+            HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

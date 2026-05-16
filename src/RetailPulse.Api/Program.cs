@@ -15,7 +15,9 @@ using RetailPulse.Api.Auth;
 using RetailPulse.Api.Caching;
 using RetailPulse.Api.Cards;
 using RetailPulse.Api.Configuration;
+using RetailPulse.Api.Consensus;
 using RetailPulse.Api.Endpoints;
+using RetailPulse.Api.Escalation;
 using RetailPulse.Api.Health;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
@@ -24,6 +26,7 @@ using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Resilience;
+using RetailPulse.Api.Scorecard;
 using RetailPulse.Api.Security;
 using RetailPulse.Api.Telemetry;
 using RetailPulse.Api.Tools;
@@ -42,7 +45,7 @@ using RetailPulse.Contracts.Tracing;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Aspire ServiceDefaults (OTel, health checks, service discovery)
 builder.AddServiceDefaults();
@@ -51,10 +54,10 @@ builder.AddServiceDefaults();
 builder.Services.AddMemoryCache();
 
 // ── Tool Result Cache ────────────────────────────────────────────────────
-builder.Services.Configure<RetailPulse.Api.Caching.ToolCacheOptions>(
-    builder.Configuration.GetSection(RetailPulse.Api.Caching.ToolCacheOptions.SectionName));
-builder.Services.AddSingleton<RetailPulse.Api.Caching.ToolResultCache>();
-builder.Services.AddSingleton<RetailPulse.Api.Caching.CachingToolWrapper>();
+builder.Services.Configure<ToolCacheOptions>(
+    builder.Configuration.GetSection(ToolCacheOptions.SectionName));
+builder.Services.AddSingleton<ToolResultCache>();
+builder.Services.AddSingleton<CachingToolWrapper>();
 
 // ── Custom Business Metrics ─────────────────────────────────────────────
 builder.Services.AddSingleton<RetailPulseMetrics>();
@@ -71,7 +74,7 @@ builder.Services.Configure<KnowledgeOptions>(builder.Configuration.GetSection(Kn
 builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
 // Load tenant configuration
-var tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
+string tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
 var tenantProvider = new FileTenantProvider(tenantConfigPath);
 builder.Services.AddSingleton<ITenantProvider>(tenantProvider);
 
@@ -82,24 +85,18 @@ builder.Services.AddOpenTelemetry()
 
 // SignalR for real-time telemetry
 builder.Services.AddSignalR()
-    .AddJsonProtocol(options =>
-    {
-        options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-    });
+    .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 
 // ── CORS — split policies for Development vs Production ─────────────────
-var corsDevOrigins = new[] { "http://localhost:5173", "https://localhost:5173" };
-var corsProdOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>()
+string[] corsDevOrigins = ["http://localhost:5173", "https://localhost:5173"];
+string[] corsProdOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>()
     ?? [];
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("Development", policy =>
-    {
-        policy.AllowAnyOrigin()
+    options.AddPolicy("Development", policy => policy.AllowAnyOrigin()
             .AllowAnyHeader()
-            .AllowAnyMethod();
-    });
+            .AllowAnyMethod());
 
     options.AddPolicy("Production", policy =>
     {
@@ -115,7 +112,7 @@ builder.Services.AddCors(options =>
 });
 
 // ── Authentication & Authorization ──────────────────────────────────────
-var requireAuth = builder.Configuration.GetValue("Security:RequireAuth",
+bool requireAuth = builder.Configuration.GetValue("Security:RequireAuth",
     !builder.Environment.IsDevelopment());
 
 if (builder.Environment.IsDevelopment())
@@ -186,90 +183,87 @@ builder.Services.AddApiVersioning(options =>
 });
 
 // Load prompts from YAML and resolve tenant placeholders via PromptTemplateEngine
-var promptsPath = Path.Combine(builder.Environment.ContentRootPath, "prompts.yaml");
-var promptConfig = RetailPulse.Api.Agents.RetailPulseAgent.LoadPrompts(promptsPath);
-var agentDef = promptConfig.Agents["retail-pulse"];
+string promptsPath = Path.Combine(builder.Environment.ContentRootPath, "prompts.yaml");
+PromptConfiguration promptConfig = RetailPulseAgent.LoadPrompts(promptsPath);
+AgentDefinition agentDef = promptConfig.Agents["retail-pulse"];
 
-var tenant = tenantProvider.GetTenant();
+TenantConfiguration tenant = tenantProvider.GetTenant();
 var promptEngine = new RetailPulse.Api.Prompts.PromptTemplateEngine(tenant);
 
 // Hydrate all agent definitions with tenant placeholders
 promptEngine.Hydrate(agentDef);
 
-var demandForecastDef = promptConfig.Agents["demand-forecast"];
+AgentDefinition demandForecastDef = promptConfig.Agents["demand-forecast"];
 promptEngine.Hydrate(demandForecastDef);
 
 // Router prompt doesn't need tenant placeholders (intent classification is domain-generic)
-var routerDef = promptConfig.Agents["router"];
+AgentDefinition routerDef = promptConfig.Agents["router"];
 
-var promoPlanningDef = promptConfig.Agents.TryGetValue("promo-planning", out var promoDef) ? promoDef : null;
+AgentDefinition? promoPlanningDef = promptConfig.Agents.TryGetValue("promo-planning", out AgentDefinition? promoDef) ? promoDef : null;
 if (promoPlanningDef != null) promptEngine.Hydrate(promoPlanningDef);
 
-var competitiveIntelDef = promptConfig.Agents.TryGetValue("competitive-intel", out var compDef) ? compDef : null;
+AgentDefinition? competitiveIntelDef = promptConfig.Agents.TryGetValue("competitive-intel", out AgentDefinition? compDef) ? compDef : null;
 if (competitiveIntelDef != null) promptEngine.Hydrate(competitiveIntelDef);
 
-var supplyChainDef = promptConfig.Agents.TryGetValue("supply-chain", out var scDef) ? scDef : null;
+AgentDefinition? supplyChainDef = promptConfig.Agents.TryGetValue("supply-chain", out AgentDefinition? scDef) ? scDef : null;
 if (supplyChainDef != null) promptEngine.Hydrate(supplyChainDef);
 
 // Load council synthesis and vote prompt definitions
-var councilSynthesisDef = promptConfig.Agents.TryGetValue("council-synthesis", out var synthDef) ? synthDef : null;
-var councilVoteDef = promptConfig.Agents.TryGetValue("council-vote", out var vDef) ? vDef : null;
+AgentDefinition? councilSynthesisDef = promptConfig.Agents.TryGetValue("council-synthesis", out AgentDefinition? synthDef) ? synthDef : null;
+AgentDefinition? councilVoteDef = promptConfig.Agents.TryGetValue("council-vote", out AgentDefinition? vDef) ? vDef : null;
 
-var storeOpsDef = promptConfig.Agents.TryGetValue("store-ops", out var soDef) ? soDef : null;
+AgentDefinition? storeOpsDef = promptConfig.Agents.TryGetValue("store-ops", out AgentDefinition? soDef) ? soDef : null;
 if (storeOpsDef != null) promptEngine.Hydrate(storeOpsDef);
 
-var planogramDef = promptConfig.Agents.TryGetValue("planogram", out var pgDef) ? pgDef : null;
+AgentDefinition? planogramDef = promptConfig.Agents.TryGetValue("planogram", out AgentDefinition? pgDef) ? pgDef : null;
 if (planogramDef != null) promptEngine.Hydrate(planogramDef);
 
-var marginDef = promptConfig.Agents.TryGetValue("margin", out var mrgDef) ? mrgDef : null;
+AgentDefinition? marginDef = promptConfig.Agents.TryGetValue("margin", out AgentDefinition? mrgDef) ? mrgDef : null;
 if (marginDef != null) promptEngine.Hydrate(marginDef);
 
 // Load scorecard and exec-brief synthesis definitions
-var scorecardSynthesisDef = promptConfig.Agents.TryGetValue("scorecard-synthesis", out var scSynthDef) ? scSynthDef : null;
-var execBriefDef = promptConfig.Agents.TryGetValue("exec-brief", out var ebDef) ? ebDef : null;
+AgentDefinition? scorecardSynthesisDef = promptConfig.Agents.TryGetValue("scorecard-synthesis", out AgentDefinition? scSynthDef) ? scSynthDef : null;
+AgentDefinition? execBriefDef = promptConfig.Agents.TryGetValue("exec-brief", out AgentDefinition? ebDef) ? ebDef : null;
 
 // Load field-sentiment agent definition
-var fieldSentimentDef = promptConfig.Agents.TryGetValue("field-sentiment", out var fsDef) ? fsDef : null;
+AgentDefinition? fieldSentimentDef = promptConfig.Agents.TryGetValue("field-sentiment", out AgentDefinition? fsDef) ? fsDef : null;
 if (fieldSentimentDef != null) promptEngine.Hydrate(fieldSentimentDef);
 
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
-var mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]
+string mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]
     ?? (builder.Environment.IsDevelopment() ? "http://localhost:5200" : null)
     ?? throw new InvalidOperationException(
         "Configuration value 'McpServer:BaseUrl' is required outside of Development.");
 builder.Services.AddTransient<McpResponseCachingHandler>();
-builder.Services.AddHttpClient("McpServer", client =>
-{
-    client.BaseAddress = new Uri(mcpBaseUrl);
-}).AddHttpMessageHandler<McpResponseCachingHandler>()
+builder.Services.AddHttpClient("McpServer", client => client.BaseAddress = new Uri(mcpBaseUrl)).AddHttpMessageHandler<McpResponseCachingHandler>()
   .AddMcpResilienceHandler();
 
 // Register tools
-builder.Services.AddScoped<DepletionStatsTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new DepletionStatsTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<DepletionStatsTool>>());
 });
-builder.Services.AddScoped<PortfolioDepletionStatsTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new PortfolioDepletionStatsTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<PortfolioDepletionStatsTool>>());
 });
-builder.Services.AddScoped<FieldSentimentTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new FieldSentimentTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<FieldSentimentTool>>());
 });
-builder.Services.AddScoped<ShipmentStatsTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new ShipmentStatsTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<ShipmentStatsTool>>());
@@ -278,9 +272,9 @@ builder.Services.AddScoped<ShipmentStatsTool>(sp =>
 // Chart data tool (always available)
 builder.Services.AddScoped<ChartDataTool>();
 
-builder.Services.AddScoped<VariantMixTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new VariantMixTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<VariantMixTool>>());
@@ -288,30 +282,30 @@ builder.Services.AddScoped<VariantMixTool>(sp =>
 
 // Demand forecasting tools (deprecated — kept for backward compat during v2 transition)
 #pragma warning disable CS0618 // Obsolete demand tool proxies still registered for legacy agent pipeline
-builder.Services.AddScoped<HistoricalDemandTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new HistoricalDemandTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<HistoricalDemandTool>>());
 });
-builder.Services.AddScoped<ForecastTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new ForecastTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<ForecastTool>>());
 });
-builder.Services.AddScoped<SeasonalityFactorsTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new SeasonalityFactorsTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<SeasonalityFactorsTool>>());
 });
-builder.Services.AddScoped<DemandRisksTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new DemandRisksTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<DemandRisksTool>>());
@@ -322,185 +316,185 @@ builder.Services.AddScoped<DemandRisksTool>(sp =>
 builder.Services.AddScoped<RetailPulse.Api.Prefetch.ToolPrefetchService>();
 
 // Promo planning tools
-builder.Services.AddScoped<PromoHistoryTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new PromoHistoryTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<PromoHistoryTool>>());
 });
-builder.Services.AddScoped<CalculateLiftTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new CalculateLiftTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<CalculateLiftTool>>());
 });
-builder.Services.AddScoped<EvaluateTimingTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new EvaluateTimingTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<EvaluateTimingTool>>());
 });
-builder.Services.AddScoped<EstimateROITool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new EstimateROITool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<EstimateROITool>>());
 });
 
 // Competitive intelligence tools
-builder.Services.AddScoped<CompetitorPricingTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new CompetitorPricingTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<CompetitorPricingTool>>());
 });
-builder.Services.AddScoped<MarketShareTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new MarketShareTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<MarketShareTool>>());
 });
-builder.Services.AddScoped<DetectThreatsTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new DetectThreatsTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<DetectThreatsTool>>());
 });
-builder.Services.AddScoped<CompetitiveLandscapeTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new CompetitiveLandscapeTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<CompetitiveLandscapeTool>>());
 });
 
 // Supply chain tools
-builder.Services.AddScoped<InventoryLevelsTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new InventoryLevelsTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<InventoryLevelsTool>>());
 });
-builder.Services.AddScoped<SupplyDisruptionsTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new SupplyDisruptionsTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<SupplyDisruptionsTool>>());
 });
-builder.Services.AddScoped<FulfillmentRateTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new FulfillmentRateTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<FulfillmentRateTool>>());
 });
-builder.Services.AddScoped<SupplyHealthTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new SupplyHealthTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<SupplyHealthTool>>());
 });
 
 // Store operations tools
-builder.Services.AddScoped<StorePerformanceTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new StorePerformanceTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<StorePerformanceTool>>());
 });
-builder.Services.AddScoped<ShelfLayoutTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new ShelfLayoutTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<ShelfLayoutTool>>());
 });
-builder.Services.AddScoped<OptimizePlanogramTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new OptimizePlanogramTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<OptimizePlanogramTool>>());
 });
-builder.Services.AddScoped<PredictStockoutTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new PredictStockoutTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<PredictStockoutTool>>());
 });
 
 // Margin analysis tools
-builder.Services.AddScoped<MarginByBrandTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new MarginByBrandTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<MarginByBrandTool>>());
 });
-builder.Services.AddScoped<MarginDriversTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new MarginDriversTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<MarginDriversTool>>());
 });
-builder.Services.AddScoped<MarginTrendTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new MarginTrendTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<MarginTrendTool>>());
 });
-builder.Services.AddScoped<DetectMarginRisksTool>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
     return new DetectMarginRisksTool(
         factory.CreateClient("McpServer"),
         sp.GetService<ILogger<DetectMarginRisksTool>>());
 });
 
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
-var approvalDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "approvals.db");
+string approvalDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>
     new SqliteApprovalGate(approvalDbPath, sp.GetRequiredService<ILogger<SqliteApprovalGate>>()));
 
 // Approval tool — available to specialist agents for high-impact recommendations
-builder.Services.AddScoped<ApprovalTool>(sp =>
+builder.Services.AddScoped(sp =>
     new ApprovalTool(
         sp.GetRequiredService<IApprovalGate>(),
-        sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<TelemetryHub>>(),
+        sp.GetRequiredService<IHubContext<TelemetryHub>>(),
         sp.GetRequiredService<ILogger<ApprovalTool>>()));
 
 // Conversation memory — SQLite-backed, per-user, with configurable TTL
 // Conversation memory — SQLite-backed with bounded-channel background extraction
-var memoryDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "memory.db");
+string memoryDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "memory.db");
 builder.Services.AddConversationMemory(memoryDbPath);
 
 // Proactive alerts — background anomaly detection with SQLite persistence
-var alertsDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "alerts.db");
+string alertsDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "alerts.db");
 builder.Services.AddProactiveAlerts(alertsDbPath);
 
 // Distributed tracing — in-memory ring buffer with bounded-channel SignalR push
-builder.Services.AddSingleton<RetailPulse.Api.Tracing.TelemetryPushChannel>();
-builder.Services.AddSingleton<InMemoryTraceCollector>(sp =>
+builder.Services.AddSingleton<TelemetryPushChannel>();
+builder.Services.AddSingleton(sp =>
     new InMemoryTraceCollector(
         sp.GetRequiredService<IHubContext<TelemetryHub>>(),
         sp.GetRequiredService<IConfiguration>(),
-        sp.GetRequiredService<RetailPulse.Api.Tracing.TelemetryPushChannel>()));
+        sp.GetRequiredService<TelemetryPushChannel>()));
 builder.Services.AddSingleton<ITraceCollector>(sp => sp.GetRequiredService<InMemoryTraceCollector>());
-builder.Services.AddHostedService<RetailPulse.Api.Tracing.TelemetryPushBackgroundService>();
+builder.Services.AddHostedService<TelemetryPushBackgroundService>();
 
 // ── Pre-demo cache warming (populates MCP response cache on startup) ────
 builder.Services.AddHostedService<RetailPulse.Api.Startup.CacheWarmingService>();
@@ -511,8 +505,8 @@ builder.Services.AddSingleton<IKnowledgeBase>(sp => sp.GetRequiredService<InMemo
 builder.Services.AddSingleton<RagContextProvider>();
 
 // Response cache — in-memory with TTL expiration and LRU eviction
-builder.Services.AddSingleton<RetailPulse.Api.Caching.InMemoryResponseCache>();
-builder.Services.AddSingleton<IResponseCache>(sp => sp.GetRequiredService<RetailPulse.Api.Caching.InMemoryResponseCache>());
+builder.Services.AddSingleton<InMemoryResponseCache>();
+builder.Services.AddSingleton<IResponseCache>(sp => sp.GetRequiredService<InMemoryResponseCache>());
 
 // Guardrails — suspicious request log (ring buffer) and runtime config
 builder.Services.AddSingleton<RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog>();
@@ -529,7 +523,7 @@ builder.Services.AddScoped<StreamingMiddleware>();
 // (Registered below alongside Adaptive Card state)
 
 // Collaborative Adaptive Cards — in-memory multi-user card state with SignalR sync
-builder.Services.AddSingleton<InMemoryAdaptiveCardState>(sp =>
+builder.Services.AddSingleton(sp =>
     new InMemoryAdaptiveCardState(
         sp.GetRequiredService<IHubContext<TelemetryHub>>(),
         sp.GetRequiredService<ILogger<InMemoryAdaptiveCardState>>()));
@@ -538,8 +532,8 @@ builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<In
 // Observability Suite — cost tracking, audit log, conversation export
 builder.Services.AddSingleton<InMemoryCostTracker>();
 builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<InMemoryCostTracker>());
-var auditDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "audit.db");
-builder.Services.AddSingleton<DurableAuditLog>(_ => new DurableAuditLog(auditDbPath));
+string auditDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "audit.db");
+builder.Services.AddSingleton(_ => new DurableAuditLog(auditDbPath));
 builder.Services.AddSingleton<IAuditLog>(sp => sp.GetRequiredService<DurableAuditLog>());
 builder.Services.AddSingleton<ConversationExporter>();
 builder.Services.AddSingleton<IConversationExport>(sp => sp.GetRequiredService<ConversationExporter>());
@@ -547,14 +541,14 @@ builder.Services.AddSingleton<IConversationExport>(sp => sp.GetRequiredService<C
 // Register IChatClient — Azure OpenAI via APIM AI Gateway.
 // In Production we fail fast if the API key is missing rather than silently
 // using "demo-key" which would surface as opaque 401s at runtime.
-var openAiEndpoint = builder.Configuration["OpenAI:Endpoint"]
+string openAiEndpoint = builder.Configuration["OpenAI:Endpoint"]
     ?? (builder.Environment.IsDevelopment()
         ? "https://bsapim-dev-northcentralus-001.azure-api.net/inference"
         : null)
     ?? throw new InvalidOperationException(
         "Configuration value 'OpenAI:Endpoint' is required outside of Development.");
 
-var openAiApiKey = builder.Configuration["OpenAI:ApiKey"];
+string? openAiApiKey = builder.Configuration["OpenAI:ApiKey"];
 if (string.IsNullOrWhiteSpace(openAiApiKey))
 {
     openAiApiKey = builder.Environment.IsDevelopment()
@@ -581,23 +575,21 @@ var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDef.Model).AsIChatClient())
     .UseFunctionInvocation(configure: client =>
-    {
         // Cap tool-call iterations to prevent infinite loops where the model
         // keeps requesting tools without producing a final answer. 2 rounds
         // is optimal: most queries complete in 1 iteration, complex analyses
         // get a second pass. Reduces avg response time ~15% vs 3 iterations.
-        client.MaximumIterationsPerRequest = 2;
-    })
+        client.MaximumIterationsPerRequest = 2)
     // EnableSensitiveData logs prompts, responses, and tool arguments which
     // can include user PII. Only enable in Development.
     .UseOpenTelemetry(configure: c => c.EnableSensitiveData = builder.Environment.IsDevelopment());
 
 // Foundry agent — optional, controlled by FoundryAgent:Enabled config (default: false)
-var foundryEnabled = builder.Configuration.GetValue<bool>("FoundryAgent:Enabled", false);
+bool foundryEnabled = builder.Configuration.GetValue("FoundryAgent:Enabled", false);
 
 if (foundryEnabled)
 {
-    var foundryProjectEndpoint = builder.Configuration["FoundryAgent:ProjectEndpoint"]
+    string foundryProjectEndpoint = builder.Configuration["FoundryAgent:ProjectEndpoint"]
         ?? (builder.Environment.IsDevelopment()
             ? "https://bs-dev-swedencentral-aoai.services.ai.azure.com/api/projects/bs-dev-swedencentral-aoai-project"
             : null)
@@ -622,13 +614,13 @@ else
 // Register the multi-agent routing pipeline
 builder.Services.AddAgentRouting(promptConfig, agentDef, foundryEnabled, sp =>
 {
-    var factory = sp.GetRequiredService<IHttpClientFactory>();
-    var depletionTool = sp.GetRequiredService<DepletionStatsTool>();
-    var portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
-    var sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
-    var shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var variantMixTool = sp.GetRequiredService<VariantMixTool>();
+    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
+    DepletionStatsTool depletionTool = sp.GetRequiredService<DepletionStatsTool>();
+    PortfolioDepletionStatsTool portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
+    FieldSentimentTool sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
+    ShipmentStatsTool shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    VariantMixTool variantMixTool = sp.GetRequiredService<VariantMixTool>();
 
     var tools = new List<AITool>
     {
@@ -643,12 +635,12 @@ builder.Services.AddAgentRouting(promptConfig, agentDef, foundryEnabled, sp =>
     // Add either Foundry or local shipment analyzer
     if (foundryEnabled)
     {
-        var foundryAgent = sp.GetRequiredService<FoundryShipmentAgent>();
+        FoundryShipmentAgent foundryAgent = sp.GetRequiredService<FoundryShipmentAgent>();
         tools.Add(AIFunctionFactory.Create(foundryAgent.AnalyzeShipments));
     }
     else
     {
-        var localAnalyzer = sp.GetRequiredService<LocalShipmentAnalyzer>();
+        LocalShipmentAnalyzer localAnalyzer = sp.GetRequiredService<LocalShipmentAnalyzer>();
         tools.Add(AIFunctionFactory.Create(localAnalyzer.AnalyzeShipments));
     }
 
@@ -658,14 +650,14 @@ demandForecastDef: demandForecastDef,
 demandToolsFactory: sp =>
 {
 #pragma warning disable CS0618 // Obsolete demand tool proxies still used in legacy agent pipeline
-    var historicalDemandTool = sp.GetRequiredService<HistoricalDemandTool>();
-    var forecastTool = sp.GetRequiredService<ForecastTool>();
-    var seasonalityTool = sp.GetRequiredService<SeasonalityFactorsTool>();
-    var demandRisksTool = sp.GetRequiredService<DemandRisksTool>();
+    HistoricalDemandTool historicalDemandTool = sp.GetRequiredService<HistoricalDemandTool>();
+    ForecastTool forecastTool = sp.GetRequiredService<ForecastTool>();
+    SeasonalityFactorsTool seasonalityTool = sp.GetRequiredService<SeasonalityFactorsTool>();
+    DemandRisksTool demandRisksTool = sp.GetRequiredService<DemandRisksTool>();
 #pragma warning restore CS0618
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var approvalTool = sp.GetRequiredService<ApprovalTool>();
-    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    ApprovalTool approvalTool = sp.GetRequiredService<ApprovalTool>();
+    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     return cachingWrapper.WrapAll(
     [
@@ -680,13 +672,13 @@ demandToolsFactory: sp =>
 promoPlanningDef: promoPlanningDef,
 promoToolsFactory: sp =>
 {
-    var promoHistoryTool = sp.GetRequiredService<PromoHistoryTool>();
-    var calculateLiftTool = sp.GetRequiredService<CalculateLiftTool>();
-    var evaluateTimingTool = sp.GetRequiredService<EvaluateTimingTool>();
-    var estimateROITool = sp.GetRequiredService<EstimateROITool>();
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var approvalTool = sp.GetRequiredService<ApprovalTool>();
-    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+    PromoHistoryTool promoHistoryTool = sp.GetRequiredService<PromoHistoryTool>();
+    CalculateLiftTool calculateLiftTool = sp.GetRequiredService<CalculateLiftTool>();
+    EvaluateTimingTool evaluateTimingTool = sp.GetRequiredService<EvaluateTimingTool>();
+    EstimateROITool estimateROITool = sp.GetRequiredService<EstimateROITool>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    ApprovalTool approvalTool = sp.GetRequiredService<ApprovalTool>();
+    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     return cachingWrapper.WrapAll(
     [
@@ -701,12 +693,12 @@ promoToolsFactory: sp =>
 competitiveIntelDef: competitiveIntelDef,
 competitiveToolsFactory: sp =>
 {
-    var competitorPricingTool = sp.GetRequiredService<CompetitorPricingTool>();
-    var marketShareTool = sp.GetRequiredService<MarketShareTool>();
-    var detectThreatsTool = sp.GetRequiredService<DetectThreatsTool>();
-    var competitiveLandscapeTool = sp.GetRequiredService<CompetitiveLandscapeTool>();
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+    CompetitorPricingTool competitorPricingTool = sp.GetRequiredService<CompetitorPricingTool>();
+    MarketShareTool marketShareTool = sp.GetRequiredService<MarketShareTool>();
+    DetectThreatsTool detectThreatsTool = sp.GetRequiredService<DetectThreatsTool>();
+    CompetitiveLandscapeTool competitiveLandscapeTool = sp.GetRequiredService<CompetitiveLandscapeTool>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     return cachingWrapper.WrapAll(
     [
@@ -720,12 +712,12 @@ competitiveToolsFactory: sp =>
 supplyChainDef: supplyChainDef,
 supplyToolsFactory: sp =>
 {
-    var inventoryTool = sp.GetRequiredService<InventoryLevelsTool>();
-    var disruptionsTool = sp.GetRequiredService<SupplyDisruptionsTool>();
-    var fulfillmentTool = sp.GetRequiredService<FulfillmentRateTool>();
-    var supplyHealthTool = sp.GetRequiredService<SupplyHealthTool>();
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+    InventoryLevelsTool inventoryTool = sp.GetRequiredService<InventoryLevelsTool>();
+    SupplyDisruptionsTool disruptionsTool = sp.GetRequiredService<SupplyDisruptionsTool>();
+    FulfillmentRateTool fulfillmentTool = sp.GetRequiredService<FulfillmentRateTool>();
+    SupplyHealthTool supplyHealthTool = sp.GetRequiredService<SupplyHealthTool>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     return cachingWrapper.WrapAll(
     [
@@ -739,12 +731,12 @@ supplyToolsFactory: sp =>
 storeOpsDef: storeOpsDef,
 storeOpsToolsFactory: sp =>
 {
-    var storePerformanceTool = sp.GetRequiredService<StorePerformanceTool>();
-    var shelfLayoutTool = sp.GetRequiredService<ShelfLayoutTool>();
-    var optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
-    var predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+    StorePerformanceTool storePerformanceTool = sp.GetRequiredService<StorePerformanceTool>();
+    ShelfLayoutTool shelfLayoutTool = sp.GetRequiredService<ShelfLayoutTool>();
+    OptimizePlanogramTool optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
+    PredictStockoutTool predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     return cachingWrapper.WrapAll(
     [
@@ -758,11 +750,11 @@ storeOpsToolsFactory: sp =>
 planogramDef: planogramDef,
 planogramToolsFactory: sp =>
 {
-    var shelfLayoutTool = sp.GetRequiredService<ShelfLayoutTool>();
-    var optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
-    var predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+    ShelfLayoutTool shelfLayoutTool = sp.GetRequiredService<ShelfLayoutTool>();
+    OptimizePlanogramTool optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
+    PredictStockoutTool predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     return cachingWrapper.WrapAll(
     [
@@ -775,12 +767,12 @@ planogramToolsFactory: sp =>
 marginDef: marginDef,
 marginToolsFactory: sp =>
 {
-    var marginByBrandTool = sp.GetRequiredService<MarginByBrandTool>();
-    var marginDriversTool = sp.GetRequiredService<MarginDriversTool>();
-    var marginTrendTool = sp.GetRequiredService<MarginTrendTool>();
-    var detectMarginRisksTool = sp.GetRequiredService<DetectMarginRisksTool>();
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+    MarginByBrandTool marginByBrandTool = sp.GetRequiredService<MarginByBrandTool>();
+    MarginDriversTool marginDriversTool = sp.GetRequiredService<MarginDriversTool>();
+    MarginTrendTool marginTrendTool = sp.GetRequiredService<MarginTrendTool>();
+    DetectMarginRisksTool detectMarginRisksTool = sp.GetRequiredService<DetectMarginRisksTool>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     return cachingWrapper.WrapAll(
     [
@@ -795,14 +787,14 @@ marginToolsFactory: sp =>
 // Register FieldSentimentAgent — dedicated agent with scoped tools (only sentiment + chart)
 if (fieldSentimentDef is not null)
 {
-    builder.Services.AddScoped<FieldSentimentAgent>(sp =>
+    builder.Services.AddScoped(sp =>
     {
-        var pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-        var sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
-        var chartTool = sp.GetRequiredService<ChartDataTool>();
-        var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+        IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
+        FieldSentimentTool sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
+        ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+        CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
-        var tools = cachingWrapper.WrapAll(
+        IList<AITool> tools = cachingWrapper.WrapAll(
         [
             AIFunctionFactory.Create(sentimentTool.GetFieldSentiment),
             AIFunctionFactory.Create(chartTool.CreateChart)
@@ -818,26 +810,26 @@ if (councilSynthesisDef is not null && councilVoteDef is not null)
 {
     builder.Services.AddScoped<RetailPulse.Contracts.Consensus.IConsensusCouncil>(sp =>
     {
-        var specialists = sp.GetServices<ISpecialistAgent>();
-        var chatClient = sp.GetRequiredService<IChatClient>();
-        var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Consensus.ConsensusOrchestrator>>();
+        IEnumerable<ISpecialistAgent> specialists = sp.GetServices<ISpecialistAgent>();
+        IChatClient chatClient = sp.GetRequiredService<IChatClient>();
+        ILogger<ConsensusOrchestrator> logger = sp.GetRequiredService<ILogger<ConsensusOrchestrator>>();
 
-        return new RetailPulse.Api.Consensus.ConsensusOrchestrator(
+        return new ConsensusOrchestrator(
             specialists, chatClient, councilSynthesisDef, councilVoteDef, logger);
     });
 }
 
 // Register EscalationOrchestrator for L1→L2→L3 escalation
-var escalationSynthDef = councilSynthesisDef ?? scorecardSynthesisDef;
+AgentDefinition? escalationSynthDef = councilSynthesisDef ?? scorecardSynthesisDef;
 if (escalationSynthDef is not null)
 {
-    builder.Services.AddScoped<RetailPulse.Api.Escalation.EscalationOrchestrator>(sp =>
+    builder.Services.AddScoped(sp =>
     {
-        var specialists = sp.GetServices<ISpecialistAgent>();
-        var chatClient = sp.GetRequiredService<IChatClient>();
-        var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Escalation.EscalationOrchestrator>>();
+        IEnumerable<ISpecialistAgent> specialists = sp.GetServices<ISpecialistAgent>();
+        IChatClient chatClient = sp.GetRequiredService<IChatClient>();
+        ILogger<EscalationOrchestrator> logger = sp.GetRequiredService<ILogger<EscalationOrchestrator>>();
 
-        return new RetailPulse.Api.Escalation.EscalationOrchestrator(
+        return new EscalationOrchestrator(
             specialists, chatClient, escalationSynthDef, logger);
     });
 }
@@ -845,13 +837,13 @@ if (escalationSynthDef is not null)
 // Register ScorecardOrchestrator for portfolio scoring
 if (scorecardSynthesisDef is not null)
 {
-    builder.Services.AddScoped<RetailPulse.Api.Scorecard.ScorecardOrchestrator>(sp =>
+    builder.Services.AddScoped(sp =>
     {
-        var specialists = sp.GetServices<ISpecialistAgent>();
-        var chatClient = sp.GetRequiredService<IChatClient>();
-        var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Scorecard.ScorecardOrchestrator>>();
+        IEnumerable<ISpecialistAgent> specialists = sp.GetServices<ISpecialistAgent>();
+        IChatClient chatClient = sp.GetRequiredService<IChatClient>();
+        ILogger<ScorecardOrchestrator> logger = sp.GetRequiredService<ILogger<ScorecardOrchestrator>>();
 
-        return new RetailPulse.Api.Scorecard.ScorecardOrchestrator(
+        return new ScorecardOrchestrator(
             specialists, chatClient, scorecardSynthesisDef, logger);
     });
 }
@@ -860,18 +852,18 @@ if (scorecardSynthesisDef is not null)
 builder.Services.AddSingleton<RetailPulse.Api.Explainability.ExplainabilityService>();
 
 // Keep legacy RetailPulseAgent registration for backward compatibility
-builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
+builder.Services.AddScoped(sp =>
 {
-    var chatClient = sp.GetRequiredService<IChatClient>();
-    var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<TelemetryHub>>();
-    var depletionTool = sp.GetRequiredService<DepletionStatsTool>();
-    var portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
-    var sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
-    var shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
-    var chartTool = sp.GetRequiredService<ChartDataTool>();
-    var variantMixTool = sp.GetRequiredService<VariantMixTool>();
-    var logger = sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.RetailPulseAgent>>();
-    var cachingWrapper = sp.GetRequiredService<RetailPulse.Api.Caching.CachingToolWrapper>();
+    IChatClient chatClient = sp.GetRequiredService<IChatClient>();
+    IHubContext<TelemetryHub> hubContext = sp.GetRequiredService<IHubContext<TelemetryHub>>();
+    DepletionStatsTool depletionTool = sp.GetRequiredService<DepletionStatsTool>();
+    PortfolioDepletionStatsTool portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
+    FieldSentimentTool sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
+    ShipmentStatsTool shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
+    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    VariantMixTool variantMixTool = sp.GetRequiredService<VariantMixTool>();
+    ILogger<RetailPulseAgent> logger = sp.GetRequiredService<ILogger<RetailPulseAgent>>();
+    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     var tools = new List<AITool>
     {
@@ -885,31 +877,31 @@ builder.Services.AddScoped<RetailPulse.Api.Agents.RetailPulseAgent>(sp =>
 
     if (foundryEnabled)
     {
-        var foundryAgent = sp.GetRequiredService<FoundryShipmentAgent>();
+        FoundryShipmentAgent foundryAgent = sp.GetRequiredService<FoundryShipmentAgent>();
         tools.Add(AIFunctionFactory.Create(foundryAgent.AnalyzeShipments));
     }
     else
     {
-        var localAnalyzer = sp.GetRequiredService<LocalShipmentAnalyzer>();
+        LocalShipmentAnalyzer localAnalyzer = sp.GetRequiredService<LocalShipmentAnalyzer>();
         tools.Add(AIFunctionFactory.Create(localAnalyzer.AnalyzeShipments));
     }
 
     // Wrap data-fetching tools with caching (CreateChart and AnalyzeShipments excluded by wrapper)
-    var cachedTools = cachingWrapper.WrapAll(tools);
+    IList<AITool> cachedTools = cachingWrapper.WrapAll(tools);
 
-    var configuration = sp.GetRequiredService<IConfiguration>();
+    IConfiguration configuration = sp.GetRequiredService<IConfiguration>();
 
-    return new RetailPulse.Api.Agents.RetailPulseAgent(chatClient, agentDef, hubContext, cachedTools, logger, configuration);
+    return new RetailPulseAgent(chatClient, agentDef, hubContext, cachedTools, logger, configuration);
 });
 
 builder.Services.AddOpenApi();
 
-var app = builder.Build();
+WebApplication app = builder.Build();
 
 // Seed RAG knowledge base with sample documents (idempotent)
 {
-    var kb = app.Services.GetRequiredService<InMemoryKnowledgeBase>();
-    var seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("KnowledgeBaseSeeder");
+    InMemoryKnowledgeBase kb = app.Services.GetRequiredService<InMemoryKnowledgeBase>();
+    ILogger seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("KnowledgeBaseSeeder");
     await KnowledgeBaseSeeder.SeedAsync(kb, seedLogger);
 }
 

@@ -24,10 +24,10 @@ public class CardCommentTests
     [Fact]
     public async Task Comment_AddsCommentWithTimestamp()
     {
-        var card = await _state.CreateAsync(MakeRequest("Comment Card"));
-        var action = MakeCommentAction("user-1", "Great analysis!");
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Comment Card"));
+        CardAction action = MakeCommentAction("user-1", "Great analysis!");
 
-        var updated = await _state.ActionAsync(card.Id, action);
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, action);
 
         updated.Comments.Should().HaveCount(1);
         updated.Comments[0].Text.Should().Be("Great analysis!");
@@ -38,10 +38,10 @@ public class CardCommentTests
     [Fact]
     public async Task Comment_MultipleComments_PreservesOrder()
     {
-        var card = await _state.CreateAsync(MakeRequest("Multi Comment"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Multi Comment"));
         await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "First"));
         await _state.ActionAsync(card.Id, MakeCommentAction("user-2", "Second"));
-        var updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-3", "Third"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-3", "Third"));
 
         updated.Comments.Should().HaveCount(3);
         updated.Comments[0].Text.Should().Be("First");
@@ -52,11 +52,11 @@ public class CardCommentTests
     [Fact]
     public async Task Comment_OnArchivedCard_ThrowsInvalidOperation()
     {
-        var card = await _state.CreateAsync(MakeRequest("Archived"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Archived"));
         await _state.ArchiveAsync(card.Id);
 
-        var action = MakeCommentAction("user-1", "Late comment");
-        var act = () => _state.ActionAsync(card.Id, action);
+        CardAction action = MakeCommentAction("user-1", "Late comment");
+        Func<Task<AdaptiveCard>> act = () => _state.ActionAsync(card.Id, action);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -64,9 +64,9 @@ public class CardCommentTests
     [Fact]
     public async Task Comment_PreservesUserName()
     {
-        var card = await _state.CreateAsync(MakeRequest("UserName Comment"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("UserName Comment"));
         var action = new CardAction("user-1", "Bob Jones", CardActionType.Comment, new() { ["text"] = "Hello" });
-        var updated = await _state.ActionAsync(card.Id, action);
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, action);
 
         updated.Comments[0].UserName.Should().Be("Bob Jones");
     }
@@ -74,9 +74,9 @@ public class CardCommentTests
     [Fact]
     public async Task Comment_EmptyText_DoesNotAddComment()
     {
-        var card = await _state.CreateAsync(MakeRequest("Empty Comment"));
-        var action = MakeCommentAction("user-1", "");
-        var updated = await _state.ActionAsync(card.Id, action);
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Empty Comment"));
+        CardAction action = MakeCommentAction("user-1", "");
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, action);
 
         updated.Comments.Should().BeEmpty();
     }
@@ -84,9 +84,9 @@ public class CardCommentTests
     [Fact]
     public async Task Comment_WhitespaceOnly_DoesNotAddComment()
     {
-        var card = await _state.CreateAsync(MakeRequest("Whitespace Comment"));
-        var action = MakeCommentAction("user-1", "   ");
-        var updated = await _state.ActionAsync(card.Id, action);
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Whitespace Comment"));
+        CardAction action = MakeCommentAction("user-1", "   ");
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, action);
 
         updated.Comments.Should().BeEmpty();
     }
@@ -94,10 +94,10 @@ public class CardCommentTests
     [Fact]
     public async Task Comment_DoesNotAffectLifecycle()
     {
-        var card = await _state.CreateAsync(MakeRequest("Lifecycle Comment"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Lifecycle Comment"));
         card.Lifecycle.Should().Be(CardLifecycle.Active);
 
-        var updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "Comment"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "Comment"));
 
         updated.Lifecycle.Should().Be(CardLifecycle.Active);
     }
@@ -105,9 +105,9 @@ public class CardCommentTests
     [Fact]
     public async Task Comment_SameUserMultipleTimes_AllPreserved()
     {
-        var card = await _state.CreateAsync(MakeRequest("Repeat Commenter"));
+        AdaptiveCard card = await _state.CreateAsync(MakeRequest("Repeat Commenter"));
         await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "First thought"));
-        var updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "Second thought"));
+        AdaptiveCard updated = await _state.ActionAsync(card.Id, MakeCommentAction("user-1", "Second thought"));
 
         updated.Comments.Should().HaveCount(2);
     }
