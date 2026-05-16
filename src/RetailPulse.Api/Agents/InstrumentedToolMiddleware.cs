@@ -145,7 +145,7 @@ internal sealed class TimedAIFunction : AIFunction
         var sw = Stopwatch.StartNew();
         try
         {
-            var result = await _inner.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+            object? result = await _inner.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
             sw.Stop();
             ToolInvocationTimings.Record(_inner.Name, sw.ElapsedMilliseconds);
             return result;
