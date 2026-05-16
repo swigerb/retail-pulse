@@ -1,5 +1,15 @@
 # Chick — History
 
+## Notification — 2026-05-16 Timeout Fix from Costco
+
+🔔 **Action Required:** Update `DEFAULT_TIMEOUT_MS` in `src/RetailPulse.Web/src/services/api.ts` from **180s** to **~90s** to align with new backend timeout ceiling.
+
+**Context:** Costco fixed 504 timeouts by tightening request timeout from 150s → 60s and NetworkTimeout from 90s → 30s. The frontend timeout should stay ~90s (≥ backend timeout + network overhead) to avoid premature client-side cancellation.
+
+**See:** `.squad/decisions.md` — "Aggressive fast-fail timeouts for chat endpoints (2026-05-16)"
+
+---
+
 ## Summary (May 2026)
 
 **Major Accomplishments:**

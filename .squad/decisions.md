@@ -64,15 +64,6 @@
 - **Impact:** 63 new tests, all 237 total tests pass. Test coverage now includes the routing layer as a regression safety net for ongoing Sprint 1 specialist agent work.
 - **Owner:** Target (Tester)
 
-### Router Contract Reconciliation (2026-05-08)
-
-- **Context:** Sprint 1.1 required routing contracts, a RetailOpsRouter, GeneralAgent refactor, and DI wiring. Kroger (Architect) and Costco (Backend Dev) both implemented the same feature in parallel.
-- **Decision:** Adopted Kroger's contract design (`RetailPulse.Contracts.Routing` namespace) over Costco's root-level contracts. Key reasons:
-  1. **Namespace isolation** — `Contracts.Routing` keeps routing types separate from core chat contracts
-  2. **Richer intent model** — Slash-separated intents (`"demand/forecasting"`) support future sub-categorization
-  3. **Cleaner specialist interface** — `Key`/`SupportedIntents`/`HandleAsync(ChatRequest)` is more idiomatic than `AgentId`/`IntentCategories`/`ChatAsync`
-- **Consequences:** Legacy `RetailPulseAgent` kept as thin wrapper for backward compat with existing tests. All new specialist agents must implement `ISpecialistAgent` from `Contracts.Routing`. Router confidence threshold is 0.6 (Kroger's choice, slightly lower than the 0.7 in the original task spec).
-
 ### Align Demo Store Regions to Tenant.yaml Naming (2026-05-14)
 
 - **Context:** The demo store data in Dashboard.tsx used "West" as a region name, but tenant.yaml defines "West Coast". This caused a mismatch between what the heatmap displays and the canonical tenant configuration.
@@ -726,3 +717,83 @@ The key insight: by using **real velocity data from the seeded database**, the o
 1. **Reuse existing `OptimizePlanogram` tool** — Rejected because its response shape (raw slots without brand names/colors) doesn't match the frontend type. A new tool with the right shape is cleaner than adapter logic.
 2. **Render in side panel instead of inline** — Rejected because inline follows the established `ChartSpec` pattern and keeps the demo flow linear (ask → see result).
 3. **Add to Stores page permanently** — Rejected for Phase 1; can be a Phase 2 enhancement where last optimization is cached per store.
+
+
+
+## Archived Decisions & Recent Merges
+
+### Frontend chat message sanitization (defense-in-depth) (2026-05-15)
+
+# Decision: Frontend chat message sanitization (defense-in-depth)
+
+**Date:** 2026-05-15
+**Author:** Chick (Frontend Dev)
+**Status:** Implemented
+
+## Context
+Backend tool-call artifacts (`to=functions.IdentifyDemandRisks {...json}`) were leaking into rendered chat messages, including garbled Unicode characters.
+
+## Decision
+Added `src/utils/sanitizeMessage.ts` as a defense-in-depth layer that strips tool-call patterns before rendering in ChatPanel. This is NOT a replacement for backend fixing the root cause — it's a safety net.
+
+## Patterns stripped:
+- `to=functions.*` prefixes
+- JSON payloads following tool-call markers
+- Garbled CJK Unicode in tool-call context lines
+
+## Impact on Costco (Backend)
+- Backend should still fix the root cause of tool-call content leaking into response text
+- Frontend sanitization means the demo is unblocked regardless of backend fix timeline
+- If backend adds new tool-call patterns, the frontend regex may need updating
+
+## Convention
+All assistant message content should pass through `sanitizeMessage()` before rendering. Applied to both static and streaming message paths.
+
+
+### Sanitize AI response text before returning to client (2026-05-15)
+
+# Decision: Sanitize AI response text before returning to client
+
+**Date:** 2026-05-15
+**Author:** Costco (Backend Dev)
+**Status:** Implemented
+
+## Context
+
+The AI model occasionally emits raw function call syntax (`to=functions.ToolName`) and corrupted CJK characters as part of its text response. This leaked directly to the UI because `response.Text` was used without filtering.
+
+## Decision
+
+`AgentExecutionPipeline.SanitizeReplyText()` now strips:
+1. Lines matching `to=functions.\w+` (OpenAI-style function call leakage)
+2. Lines with CJK characters adjacent to `json`/`function`/`tool` keywords (corrupted hallucinations)
+3. If the entire reply is garbage after filtering, returns a graceful "unable to generate" message
+
+## Also Fixed
+
+- **Tool call timing:** Removed the `totalDuration / toolCount` hack that fabricated identical per-tool durations. Individual tool_call spans now report 0ms; the parent "thought" span carries real wall-clock.
+
+## Implications
+
+- **Chick (FE):** The `AgentRoutingIndicator` shows `routing.confidence` as a percentage badge. This is router classification confidence, NOT answer quality. Consider relabeling or adding a tooltip like "Routing confidence" to avoid user confusion.
+- **Target (Tests):** New `SanitizeReplyText` tests added in `AgentPipelineTests.cs`. If adding new sanitization patterns, add corresponding test cases.
+- **All agents:** Tool call spans will now show 0ms individually. The "thought" span is the authoritative duration for the full tool-calling pipeline.
+
+
+### Aggressive fast-fail timeouts for chat endpoints (2026-05-16)
+
+### Aggressive fast-fail timeouts for chat endpoints (2026-05-16)
+- **Author:** Costco (Backend Dev)
+- **Context:** Executive demo blocked by 504 timeouts. Root cause: timeout math was broken — `MaxIterations=2 × NetworkTimeout=90s = 180s` exceeded the `150s` request timeout, guaranteeing second-iteration cancellation. Azure SDK retry policy compounded the problem by retrying timed-out calls.
+- **Decision:** Tightened all timeout parameters for fast-fail:
+  - `NetworkTimeout`: 90s → 30s (single LLM call ceiling)
+  - `MaximumIterationsPerRequest`: 2 → 1 (single round-trip, no second timeout)
+  - Request-level timeout: 150s → 60s (both `/api/chat` and `/api/chat/stream`)
+  - Azure SDK retry: disabled via `ClientRetryPolicy(maxRetries: 0)`
+- **Rationale:** The budget math now works: 1 iteration × 30s network + routing overhead fits comfortably within 60s. Users get a clear error in ≤60s instead of waiting 2.5 minutes for a guaranteed timeout.
+- **Implications for the team:**
+  - **Chick (Frontend):** Update `DEFAULT_TIMEOUT_MS` in `src/RetailPulse.Web/src/services/api.ts` from 180s to ~90s to stay aligned with the 60s backend cap (give ~30s buffer for network).
+  - **Target (Tests):** Any test mocking slow IChatClient should expect cancellation at 60s, not 150s. Tests with `MaximumIterationsPerRequest` assertions should expect 1, not 2.
+  - **Kroger (Architecture):** If a future agent genuinely needs multi-iteration tool calling, it should get an endpoint-specific timeout override rather than raising the global cap.
+
+

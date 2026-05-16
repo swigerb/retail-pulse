@@ -1,5 +1,15 @@
 # Kroger — History
 
+## Notification — 2026-05-16 Timeout Fix from Costco
+
+🔔 **Pattern Established:** If a future agent genuinely needs multi-iteration tool calling and the 60s request timeout is insufficient, implement **endpoint-specific timeout override** rather than raising the global cap.
+
+**Context:** Costco fixed 504 timeouts by setting global request timeout to 60s (both `/api/chat` and `/api/chat/stream`). This tight budget works for current single-iteration agents. Future complex agents (e.g., council convene orchestrator with nested tool calls) should request their own `/api/agent-name/execute` endpoint with a higher timeout rather than changing the global limit.
+
+**See:** `.squad/decisions.md` — "Aggressive fast-fail timeouts for chat endpoints (2026-05-16)"
+
+---
+
 ## Recent Work (2026-05-14 onwards)
 
 ## 2026-05-14 — Promotion Planning Agent + Task Module (Sprint 2.1)
