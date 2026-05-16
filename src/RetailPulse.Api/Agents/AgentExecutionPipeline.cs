@@ -330,10 +330,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         sanitized = sanitized.TrimStart('\n', '\r', ' ');
 
         // If sanitization removed everything, that means the entire reply was garbage
-        if (string.IsNullOrWhiteSpace(sanitized))
-            return "I was unable to generate a response. Please try rephrasing your question.";
-
-        return sanitized;
+        return string.IsNullOrWhiteSpace(sanitized)
+            ? "I was unable to generate a response. Please try rephrasing your question."
+            : sanitized;
     }
 
     private ChatResponse HandleRateLimitError(
