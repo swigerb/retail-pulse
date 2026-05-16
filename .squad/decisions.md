@@ -2,6 +2,123 @@
 
 ## Active Decisions
 
+### Security Hardening — CORS, Telemetry PII, Bot Logs (2026-05-16)
+
+**Author:** Kroger (Lead)
+
+**Context:** GPT 5.5 code review surfaced four security findings (3 medium, 1 low) covering CORS scope, telemetry PII, Teams bot log content, and security headers.
+
+**Decisions:**
+
+1. **Development CORS is no longer wide open.** `Program.cs` previously used `AllowAnyOrigin` for the `Development` policy. It now uses `WithOrigins("http://localhost:5173", "https://localhost:5173", "http://localhost:5100", "https://localhost:5100")` plus `AllowCredentials`. If a new local frontend port is needed, add it to `corsDevOrigins` in `src/RetailPulse.Api/Program.cs`.
+
+2. **Telemetry sensitive-data is now config-gated, not environment-gated.** The `IChatClient.UseOpenTelemetry(EnableSensitiveData = …)` flag previously defaulted to `true` whenever `IsDevelopment()`, which meant raw user prompts and tool arguments showed up as span attributes on every dev box. It now reads `Telemetry:EnableSensitiveData` (default **false** everywhere, including Development). Operators must explicitly opt in for short, deliberate debugging sessions. Length-only tags (`message.length`, `agent.prompt_length`) on our own spans were already discipline-correct — no change needed.
+
+3. **Teams bot logs are PII-redacted.** Introduced `src/RetailPulse.TeamsBot/PrivacyRedactor.cs` with three helpers:
+   - `DescribeMessage(msg)` → `"[user message - {N} chars]"` (never the body)
+   - `RedactEmail(email)` → `"u:{4-byte-sha256}@{domain}"` (preserves domain + per-user correlation, not the local-part)
+   - `RedactName(name)` → `"u:{4-byte-sha256}"`
+   All future bot log statements that touch user content **must** route through `PrivacyRedactor`. Do not interpolate raw email, display name, or message body into log templates.
+
+4. **Security headers were already present** via `SecurityHeadersMiddleware` (X-Content-Type-Options, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, CSP, HSTS on HTTPS). No change required — flagged for future awareness.
+
+**Implications for the team:**
+- **Costco (Backend):** If you add a new specialist that wants to inspect prompts in spans, do **not** flip `Telemetry:EnableSensitiveData` in `appsettings.Development.json` and check it in. Use a local user-secrets entry or env var.
+- **Chick (Frontend):** If the Vite dev server moves off `localhost:5173`/`localhost:5100`, ping the Lead to extend the dev CORS allowlist.
+- **Any agent touching `RetailPulse.TeamsBot`:** new log lines must use `PrivacyRedactor` for user-supplied content; reviewers should block PRs that interpolate raw `{Email}`, `{DisplayName}`, or `{Message}`.
+
+**Validation:** `dotnet build` clean, `dotnet test` = 1860 passed / 0 failed.
+
+### Frontend Chat Message Sanitization (2026-05-15)
+
+**Author:** Chick (Frontend Dev)  
+**Status:** Implemented
+
+Backend tool-call artifacts (`to=functions.IdentifyDemandRisks {...json}`) were leaking into rendered chat messages, including garbled Unicode characters.
+
+Added `src/utils/sanitizeMessage.ts` as a defense-in-depth layer that strips tool-call patterns before rendering in ChatPanel. This is NOT a replacement for backend fixing the root cause — it's a safety net.
+
+**Patterns stripped:**
+- `to=functions.*` prefixes
+- JSON payloads following tool-call markers
+- Garbled CJK Unicode in tool-call context lines
+
+**Impact on Costco (Backend):** Backend should still fix the root cause of tool-call content leaking into response text. Frontend sanitization means the demo is unblocked regardless of backend fix timeline. If backend adds new tool-call patterns, the frontend regex may need updating.
+
+**Convention:** All assistant message content should pass through `sanitizeMessage()` before rendering. Applied to both static and streaming message paths.
+
+### Costco — Backend Code Review Fixes (2026-05-16)
+
+Decisions captured while applying five findings from the GPT-5.5 backend review.
+
+#### 1. MCP REST endpoints require API key outside Development
+
+The `RetailPulse.McpServer` host now enforces an API-key gate on `/api` and `/mcp` in any non-Development environment (or when `ApiKey:Enabled=true` is set explicitly). The compare is constant-time via `CryptographicOperations.FixedTimeEquals`.
+
+**Operator action:** every non-Dev deployment **must** set `ApiKey:Value` (config) or `ApiKey__Value` (env) before traffic is sent. Missing config produces a startup warning and rejects all requests with `503`. Defaulting to "required" is intentional — the MCP surface exposes tenant data and the previous "open by default" stance was the medium-severity finding.
+
+#### 2. Per-request tool timing via `ToolInvocationTimings` (AsyncLocal)
+
+`Microsoft.Extensions.AI`'s auto-invocation path (`IChatClient.GetResponseAsync` with `ChatOptions.Tools`) does not surface per-tool durations on the returned `ChatResponse`. We now capture them at the wrapper level:
+
+- `Agents/ToolInvocationTimings.cs` — `AsyncLocal<ConcurrentDictionary<string, ConcurrentQueue<long>>>`. `Begin()` opens a per-request scope; `Record(name, ms)` enqueues a duration; `TryDequeue(name)` returns the next duration (0 outside a scope or when the queue is empty).
+- `Agents/InstrumentedToolMiddleware.cs` — the existing `InstrumentedAIFunction` (streaming/SignalR path) now records every invocation. A new lightweight `TimedAIFunction` wrapper is used by the non-streaming path so we don't emit SignalR `progress` events when nobody is listening.
+- `Agents/AgentExecutionPipeline.cs` — both `ExecuteAsync` and `ExecuteWithProgressAsync` open a `ToolInvocationTimings.Begin()` scope before calling `GetResponseAsync`. `RecordToolSpansAsync` now dequeues real per-invocation durations in call order, stamps `tool.duration_ms` on the `tool_call` activity, and passes the same value into `IAgentTraceCollector`.
+
+**Convention:** any future tool wrapper or middleware that intercepts an `AIFunction.InvokeAsync` call **must** call `ToolInvocationTimings.Record(name, elapsedMs)` so tool spans stay accurate.
+
+#### 3. Reviewer's "deprecated demand proxy tools" finding rejected
+
+The review flagged `HistoricalDemandTool`, `ForecastTool`, `SeasonalityFactorsTool`, and `DemandRisksTool` as dead code because their DI registrations sit behind a `#pragma warning disable CS0618`. They are **not** dead — `RoutingServiceExtensions.AddAgentRouting` consumes them via the `demandToolsFactory` delegate to build the `DemandForecastAgent` specialist, and `Prefetch/ToolPrefetchService` invokes them for cache warming. Removing them would break runtime and tests. Only the truly-dead `RetailPulseAgent` DI registration was removed (`Program.cs`). The class itself stays because `RetailPulseAgent.LoadPrompts(...)` and `RetailPulseAgentTests` still use it.
+
+#### 4. Test-side cleanup
+
+Removing the v1 chat stubs invalidated three test files. They now reflect the canonical `/api/chat`[`/stream`] routes only:
+
+- `tests/RetailPulse.Tests/Security/ApiVersioningTests.cs` — rewritten.
+- `tests/RetailPulse.Tests/Security/OwaspTests.cs` — `A01_VersionedEndpoints_RequireAuthorization` renamed/rewritten as `A01_ChatEndpoints_RequireAuthorization`.
+- `tests/RetailPulse.Tests/Contract/ChatEndpointContractTests.cs` — comment updated.
+- `tests/RetailPulse.LoadTests/ChatEndpointScenario.cs` and `loadtest-config.json` — URL points at `/api/chat`.
+
+Also added a `using ChatResponse = RetailPulse.Contracts.ChatResponse;` alias to `ChatPipelineIntegrationTests.cs` to resolve a `Microsoft.Extensions.AI.ChatResponse` vs `RetailPulse.Contracts.ChatResponse` ambiguity that surfaced during this build cycle.
+
+**Verification:**
+- `dotnet build RetailPulse.slnx` — 0 errors.
+- `dotnet test RetailPulse.slnx --no-build` — 1886 passed, 0 failed, 2 skipped (LoadTests, expected — they require a running host).
+
+### Chat Endpoint Test Strategy (2026-05-16)
+
+**Author:** Target (Tester)  
+**Status:** Adopted
+
+The GPT 5.5 code review of chat endpoint error handling called out three critical test gaps:
+
+1. E2E error-path coverage for `/api/chat` and `/api/chat/stream` (429 → `rate_limited`, 504 → `request_timeout`, 503 → `service_unavailable`, 5xx → `ai_service_error` with status forwarding).
+2. Full chat pipeline integration test (guardrails → cache → router → agent select → execute → response assembly).
+3. Versioned/endpoint behavior tests for the surviving endpoints.
+
+`WebApplicationFactory<Program>` cannot host `RetailPulse.Api` in tests (startup requires `DefaultAzureCredential` and AddAzureAgent registrations), so a different harness is needed for endpoint-level tests.
+
+**Decision:** Use **two complementary patterns** depending on what is under test:
+
+1. **`TestServer` + replicated route handler** (`Endpoints/ChatEndpointErrorTests.cs`) for endpoint contract tests where the HTTP shape matters (status codes, JSON error envelope, headers, missing-field assertions). The test wires up a `HostBuilder().ConfigureWebHost(UseTestServer())` and copies the production try/catch blocks line-for-line. The only injected real dependency is the mocked `IAgentRouter` that throws to trigger each catch branch. This mirrors the existing `Endpoints/DeprecationTests.cs` precedent.
+
+2. **In-memory pipeline harness** (`Integration/ChatPipelineIntegrationTests.cs`) for stage-ordering / integration tests. This harness wires up the real `InMemoryResponseCache`, a mocked `IAgentRouter`, and mocked `ISpecialistAgent`s, then runs the same 7-stage sequence `ChatEndpoints.MapChatEndpoints` runs (cache lookup → route → select → execute → assemble → write-back). Lets us assert "cache hit short-circuits the router", "non-cacheable queries skip cache lookup", "error replies strip routing metadata", and "router intent drives specialist selection" without requiring the full ASP.NET pipeline.
+
+**Tradeoff & known risk:** Both patterns **duplicate** production code (the catch blocks and the stage-ordering logic). If `ChatEndpoints.cs` drifts, the tests will pass while production breaks. Mitigations:
+
+- Both test files carry a prominent class-level XML doc note pointing at the source-of-truth file and line ranges.
+- The error-test class also asserts the JSON envelope shape (`error` + `code` fields) via a parameterized contract test that future endpoints will be caught by even if catch blocks change.
+- The pipeline-test harness asserts the *order* of stages via call-tracking flags (`RouterWasCalled`, `AgentWasInvoked`), so reorderings still fail.
+
+This is the same tradeoff `DeprecationTests` already lives with — accepted across the codebase as the price of not being able to boot the API in tests.
+
+**Files:**
+- `tests/RetailPulse.Tests/Endpoints/ChatEndpointErrorTests.cs` (15 tests)
+- `tests/RetailPulse.Tests/Integration/ChatPipelineIntegrationTests.cs` (13 tests)
+
+All 1,886 tests pass after the addition.
+
 ### Default 3-minute client timeout on chat fetches (2026-05-15)
 - **Author:** Chick (Frontend Dev)
 - **Context:** The initial-screen suggested-prompt buttons called sendMessage() with a etch('/api/chat') that had no client-side timeout. When the backend stalled, the chat spinner ran indefinitely with no error surfaced — a hard demo blocker.
