@@ -3,7 +3,7 @@
   "BaseUrl": "http://localhost:5000",
   "Scenarios": {
     "ChatEndpoint": {
-      "Url": "/api/v1/chat",
+      "Url": "/api/chat",
       "Method": "POST",
       "Headers": {
         "Content-Type": "application/json",

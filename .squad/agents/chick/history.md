@@ -187,3 +187,37 @@
 ### Learnings
 - Backend error-as-success responses (200 OK with error in reply) need frontend detection — always check reply content before blindly rendering telemetry metadata
 - The ⏳ emoji prefix is the backend's convention for pipeline-caught errors — a stable detection heuristic
+---
+
+## 2026-05-16 — Frontend Code Review Fixes (GPT 5.5)
+
+**Status:** ✅ COMPLETE — 276 tests passing (271 → 276)
+
+### Fix 1: AdaptiveCardPanel SignalR reconnect churn
+**File:** `src/components/cards/AdaptiveCardPanel.tsx`
+**Issue:** SignalR effect depended on `selectedCard?.id`, tearing the hub connection down and rebuilding it on every card click.
+**Fix:** Mirrored `selectedCard.id` into a `selectedCardIdRef` and dropped the dep — connection now lives for the lifetime of the component. Update handlers read the latest selected id via the ref, so card-detail sync still works without churn.
+
+### Fix 2: ChatPanel unstable sendChatMessage identity
+**File:** `src/components/ChatPanel.tsx`
+**Issue:** `sendChatMessage` was wrapped in `useCallback` but listed `messages` and `onResponseReceived` in its deps, so it was re-created after every message append — propagating re-renders to suggested-prompt buttons and the input area.
+**Fix:** Added `messagesRef` and `onResponseReceivedRef`, both kept in sync by tiny effects. `sendChatMessage` now depends only on `sessionId` (stable for the life of the panel), giving the callback a stable identity while still reading the latest history when it fires.
+
+### Fix 3: ChatPanel test coverage (was zero)
+**File:** `src/__tests__/ChatPanel.test.tsx` (new)
+Added 5 component tests covering:
+- Welcome screen + suggested-prompt chip rendering
+- Send happy path (API call shape + user/assistant bubbles)
+- Loading indicator appears + clears
+- Error rejection renders `Error: ...` bubble + clears spinner
+- ⏳ backend-as-success replies suppress routing metadata
+Mocks `services/api`, `services/telemetryHub`, `components/ChartRenderer`, and stubs `Element.scrollIntoView` for jsdom.
+
+### Validation
+- `npm run build` — clean.
+- `npx vitest run` — 34 files, **276 passed**.
+
+### Learnings
+- Ref-mirror pattern is the right escape hatch for "stable callback that needs fresh state" — cleaner than `useEvent` proposals and works today.
+- Effects that own external resources (sockets, timers) should NEVER depend on data that changes during normal interaction. Mirror that data into a ref instead.
+- Fluent UI buttons match by their visible text including emoji — use `/🏪 All/` not `/All/` to avoid multi-element matches.

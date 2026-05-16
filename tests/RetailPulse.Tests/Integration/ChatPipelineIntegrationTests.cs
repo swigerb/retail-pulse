@@ -199,7 +199,7 @@ public class ChatPipelineIntegrationTests
         // catch blocks (HandleRateLimitError / HandleUnexpectedError).
         var harness = new PipelineHarness();
         harness.WhenRouterClassifies(AgentIntent.General, confidence: 0.9);
-        harness.WhenAgentReplies("⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.");
+        harness.WhenAgentReplies("⏳ The AI service is experiencing high demand. Please wait 30 seconds and try again.");
 
         ChatResponse response = await harness.RunPipelineAsync(
             new ChatRequest("hello", SessionId: "err-strip"));

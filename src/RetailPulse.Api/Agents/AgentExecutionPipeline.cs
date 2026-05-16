@@ -548,7 +548,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             agentName, failureDurationMs, ex.Status);
 
         return new ChatResponse(
-            "⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.",
+            "⏳ The AI service is experiencing high demand. Please wait 30 seconds and try again.",
             sessionId, [], null, failureDurationMs);
     }
 

@@ -497,7 +497,7 @@ public static class ChatEndpoints
                 return Results.Json(
                     new
                     {
-                        error = "The AI service is temporarily rate-limited. Please wait a moment and try again.",
+                        error = "The AI service is experiencing high demand. Please wait 30 seconds and try again.",
                         code = "rate_limited"
                     },
                     statusCode: StatusCodes.Status429TooManyRequests);
@@ -666,12 +666,12 @@ public static class ChatEndpoints
                 {
                     IHubContext<StreamingHub>? hub = app.Services.GetService<IHubContext<StreamingHub>>();
                     if (hub is not null && request.SessionId is not null)
-                        await StreamingEvents.SendErrorAsync(hub, request.SessionId, "The AI service is temporarily rate-limited.");
+                        await StreamingEvents.SendErrorAsync(hub, request.SessionId, "The AI service is experiencing high demand. Please wait 30 seconds and try again.");
                 }
                 catch { /* best-effort notification */ }
 
                 return Results.Json(
-                    new { error = "The AI service is temporarily rate-limited. Please wait a moment and try again.", code = "rate_limited" },
+                    new { error = "The AI service is experiencing high demand. Please wait 30 seconds and try again.", code = "rate_limited" },
                     statusCode: StatusCodes.Status429TooManyRequests);
             }
             catch (ClientResultException ex)

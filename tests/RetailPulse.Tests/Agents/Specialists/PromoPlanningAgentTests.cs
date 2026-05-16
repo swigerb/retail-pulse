@@ -349,7 +349,7 @@ public class PromoPlanningAgentTests
         Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("promo?", SessionId: "s-429"));
 
-        response.Reply.Should().Contain("rate-limited");
+        response.Reply.Should().Contain("high demand");
         response.SessionId.Should().Be("s-429");
         response.Spans.Should().BeEmpty();
     }

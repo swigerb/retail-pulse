@@ -479,6 +479,22 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
   const isMountedRef = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Mirror messages into a ref so sendChatMessage can read the latest history
+  // without listing `messages` as a dependency. Stable identity prevents
+  // re-rendering child components (suggested-prompt buttons, etc.) on every
+  // message append.
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Mirror onResponseReceived in a ref so callback identity stays stable even
+  // when the parent passes a fresh function each render.
+  const onResponseReceivedRef = useRef(onResponseReceived);
+  useEffect(() => {
+    onResponseReceivedRef.current = onResponseReceived;
+  }, [onResponseReceived]);
+
   useEffect(() => {
     isMountedRef.current = true;
     // Pre-join the SignalR session group so real-time telemetry works from the first message
@@ -519,13 +535,13 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
       abortControllerRef.current = controller;
 
       setMessages(prev => [...prev, { role: 'user', content: trimmed }]);
-      onResponseReceived?.({ totalDurationMs: undefined });
+      onResponseReceivedRef.current?.({ totalDurationMs: undefined });
       setLoading(true);
       setLoadingText('Thinking...');
       setProgressSteps([]);
 
       try {
-        const history: ChatHistoryMessage[] = messages
+        const history: ChatHistoryMessage[] = messagesRef.current
           .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.content.startsWith('Error:')))
           .map(m => ({ role: m.role, content: m.content }));
 
@@ -539,7 +555,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
         // error (rate-limit, timeout), suppress routing/telemetry metadata
         // so users don't see misleading "Agent X — 78% confidence" badges.
         const errorMasked = isErrorReply(response.reply);
-        onResponseReceived?.(errorMasked
+        onResponseReceivedRef.current?.(errorMasked
           ? { totalDurationMs: response.totalDurationMs }
           : { totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, routing: response.routing });
         setMessages(prev => [
@@ -562,7 +578,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
         }
       }
     },
-    [messages, onResponseReceived, sessionId],
+    [sessionId],
   );
 
   const handleSend = useCallback(async () => {

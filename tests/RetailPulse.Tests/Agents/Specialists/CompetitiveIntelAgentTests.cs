@@ -413,7 +413,7 @@ public class CompetitiveIntelAgentTests
         Contracts.ChatResponse response = await agent.HandleAsync(
             new ChatRequest("competitive?", SessionId: "s-429-comp"));
 
-        response.Reply.Should().Contain("rate-limited");
+        response.Reply.Should().Contain("high demand");
         response.SessionId.Should().Be("s-429-comp");
         response.Spans.Should().BeEmpty();
     }

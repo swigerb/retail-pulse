@@ -570,12 +570,14 @@ if (string.IsNullOrWhiteSpace(openAiApiKey))
 // 30s is generous for a single LLM call — if APIM can't return in 30s, retrying
 // won't help and the user shouldn't wait longer. The 60s request-level timeout
 // in /api/chat provides the overall ceiling.
-// RetryPolicy disabled: retrying a timed-out LLM call just doubles user wait time.
-// The request-level timeout will catch transient failures; let the user retry manually.
+// RetryPolicy: 3 retries with exponential backoff handles transient 429s from APIM,
+// which typically resolve in seconds. The SDK respects Retry-After headers automatically.
+// The 60s request-level CancellationToken is the ultimate safety net — if retries
+// exceed the budget, the CTS cancels everything.
 var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
 {
     NetworkTimeout = TimeSpan.FromSeconds(30),
-    RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 0)
+    RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 3)
 };
 
 var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(

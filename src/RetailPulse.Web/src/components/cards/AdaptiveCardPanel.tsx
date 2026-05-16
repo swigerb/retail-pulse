@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { makeStyles } from '@fluentui/react-components';
 import * as signalR from '@microsoft/signalr';
 import { CARD_COLORS, CARD_TYPE_CONFIG, CARD_LIFECYCLE_CONFIG } from '../../constants/agentRouting';
@@ -173,6 +173,14 @@ export default function AdaptiveCardPanel() {
   const [error, setError] = useState<string | null>(null);
   const [selectedCard, setSelectedCard] = useState<AdaptiveCard | null>(null);
 
+  // Mirror selectedCard into a ref so the SignalR effect can read the latest
+  // selection without re-subscribing (which would tear the hub connection
+  // down and back up on every card click — visible churn during demos).
+  const selectedCardIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedCardIdRef.current = selectedCard?.id ?? null;
+  }, [selectedCard]);
+
   const loadCards = useCallback(async () => {
     try {
       setLoading(true);
@@ -190,9 +198,20 @@ export default function AdaptiveCardPanel() {
     loadCards();
   }, [loadCards]);
 
-  // SignalR real-time updates
+  // SignalR real-time updates — connection lifecycle is bound to the
+  // component, NOT to selection. Card-selection state is read via a ref so
+  // selecting a different card never tears down or rebuilds the hub.
   useEffect(() => {
     let connection: signalR.HubConnection | null = null;
+
+    const applyUpdate = (updatedCard: AdaptiveCard) => {
+      setCards((prev) =>
+        prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)),
+      );
+      if (selectedCardIdRef.current === updatedCard.id) {
+        setSelectedCard(updatedCard);
+      }
+    };
 
     try {
       connection = new signalR.HubConnectionBuilder()
@@ -200,23 +219,8 @@ export default function AdaptiveCardPanel() {
         .withAutomaticReconnect()
         .build();
 
-      connection.on('card:action', (updatedCard: AdaptiveCard) => {
-        setCards((prev) =>
-          prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)),
-        );
-        if (selectedCard?.id === updatedCard.id) {
-          setSelectedCard(updatedCard);
-        }
-      });
-
-      connection.on('card:lifecycle', (updatedCard: AdaptiveCard) => {
-        setCards((prev) =>
-          prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)),
-        );
-        if (selectedCard?.id === updatedCard.id) {
-          setSelectedCard(updatedCard);
-        }
-      });
+      connection.on('card:action', applyUpdate);
+      connection.on('card:lifecycle', applyUpdate);
 
       connection.start().catch(() => {
         /* silent — telemetry hub may not be available */
@@ -228,7 +232,7 @@ export default function AdaptiveCardPanel() {
     return () => {
       connection?.stop();
     };
-  }, [selectedCard?.id]);
+  }, []);
 
   const handleVote = async (choice: VoteChoice) => {
     if (!selectedCard) return;
