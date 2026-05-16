@@ -1,5 +1,15 @@
 # Target — History
 
+## Notification — 2026-05-16 Timeout Fix from Costco
+
+🔔 **Action Required:** Update timeout assertions in tests to expect **60s** instead of 150s (or 75s per-request).
+
+**Context:** Costco fixed 504 timeouts by setting request-level timeout to 60s (both `/api/chat` and `/api/chat/stream`). Any tests that mock slow IChatClient should expect cancellation at 60s, not the old 150s limit. Tests with `MaximumIterationsPerRequest` assertions should expect 1, not 2.
+
+**See:** `.squad/decisions.md` — "Aggressive fast-fail timeouts for chat endpoints (2026-05-16)"
+
+---
+
 ## Recent Work (2026-05-15 onwards)
 
 ## 2026-05-15 — Executive demo readiness sweep (26 default UI prompts)

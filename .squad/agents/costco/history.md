@@ -1,5 +1,32 @@
 # Costco — History
 
+## Recent Work (2026-05-16)
+
+### 2026-05-16 — Fixed 504 timeout demo blocker
+
+**Status:** ✅ Complete — Pushed to main
+
+**Issue:** Executive demo broken by 504 timeouts on default-question buttons.
+
+**Root Cause:** Timeout math was internally inconsistent. `MaxIterations=2 × NetworkTimeout=90s = 180s` exceeded the request-level timeout of `150s`, guaranteeing second-iteration cancellation. Azure SDK retry policy compounded the problem.
+
+**Fix (src/RetailPulse.Api/):**
+- **Program.cs:**
+  - `NetworkTimeout`: 90s → 30s (single LLM call ceiling)
+  - `MaximumIterationsPerRequest`: 2 → 1 (single round-trip)
+  - `ClientRetryPolicy(maxRetries: 0)` (disable Azure SDK retries)
+- **Endpoints/ChatEndpoints.cs:**
+  - Request timeout: 150s → 60s (both `/api/chat` and `/api/chat/stream`)
+
+**Build:** 0 errors. Tests: 1,860 pass.
+
+**Decision:** Documented in `.squad/decisions.md` as "Aggressive fast-fail timeouts for chat endpoints (2026-05-16)"
+
+**Team Notifications:**
+- Chick (Frontend): Update `DEFAULT_TIMEOUT_MS` to ~90s in `src/RetailPulse.Web/src/services/api.ts`
+- Target (Tests): Update timeout assertions to expect 60s, not 150s
+- Kroger (Architecture): Establish endpoint-specific timeout override pattern for future multi-iteration agents
+
 ## Recent Work (2026-05-15)
 
 ## Learnings
