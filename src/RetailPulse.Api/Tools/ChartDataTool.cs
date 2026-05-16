@@ -20,8 +20,13 @@ public class ChartDataTool
 
     [Description("Create a chart visualization by providing structured chart data. Provide JSON matching ChartSpec schema. Types: line, bar, groupedBar, pie, donut, horizontalBar, stackedBar, gauge, table.")]
     public Task<string> CreateChart(
-        [Description("JSON string matching the ChartSpec schema")] string chartSpecJson)
+        [Description("JSON string matching the ChartSpec schema")] string chartSpecJson = "")
     {
+        if (string.IsNullOrWhiteSpace(chartSpecJson))
+        {
+            return Task.FromResult(JsonSerializer.Serialize(new { error = "The chartSpecJson parameter is required. Please provide a valid JSON string matching the ChartSpec schema." }));
+        }
+
         try
         {
             ChartSpec? spec = JsonSerializer.Deserialize<ChartSpec>(chartSpecJson, _inputOptions);

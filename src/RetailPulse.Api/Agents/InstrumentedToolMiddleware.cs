@@ -92,12 +92,14 @@ internal sealed class InstrumentedAIFunction : AIFunction
                 phase = "tool_result",
                 tool = toolName,
                 status = "failed",
-                detail = $"{toolName} failed after {sw.ElapsedMilliseconds}ms",
+                detail = $"{toolName} failed after {sw.ElapsedMilliseconds}ms: {ex.Message}",
                 duration_ms = sw.ElapsedMilliseconds,
                 timestamp = DateTimeOffset.UtcNow
             }, cancellationToken).ConfigureAwait(false);
 
-            throw;
+            // Return error as tool result so the LLM can recover gracefully
+            // instead of crashing the entire request pipeline
+            return $"{{\"error\": \"Tool '{toolName}' failed: {ex.Message}. Please check the required parameters and try again.\"}}";
         }
 
         sw.Stop();
@@ -143,12 +145,16 @@ internal sealed class TimedAIFunction : AIFunction
         var sw = Stopwatch.StartNew();
         try
         {
-            return await _inner.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+            var result = await _inner.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+            sw.Stop();
+            ToolInvocationTimings.Record(_inner.Name, sw.ElapsedMilliseconds);
+            return result;
         }
-        finally
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
             ToolInvocationTimings.Record(_inner.Name, sw.ElapsedMilliseconds);
+            return $"{{\"error\": \"Tool '{_inner.Name}' failed: {ex.Message}. Please check the required parameters and try again.\"}}";
         }
     }
 }
