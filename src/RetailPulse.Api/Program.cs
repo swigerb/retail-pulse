@@ -558,13 +558,15 @@ if (string.IsNullOrWhiteSpace(openAiApiKey))
 }
 
 // NetworkTimeout caps a single HTTP attempt (one LLM roundtrip) to the AI Gateway.
-// With function invocation, there are multiple sequential LLM calls per request:
-// first to decide which tools to call, then to synthesize results. Each call must
-// complete within this window. 90s accommodates large-context synthesis calls while
-// the 120s request-level timeout in /api/chat still provides the overall ceiling.
+// 30s is generous for a single LLM call — if APIM can't return in 30s, retrying
+// won't help and the user shouldn't wait longer. The 60s request-level timeout
+// in /api/chat provides the overall ceiling.
+// RetryPolicy disabled: retrying a timed-out LLM call just doubles user wait time.
+// The request-level timeout will catch transient failures; let the user retry manually.
 var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
 {
-    NetworkTimeout = TimeSpan.FromSeconds(90)
+    NetworkTimeout = TimeSpan.FromSeconds(30),
+    RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 0)
 };
 
 var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
@@ -575,11 +577,11 @@ var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDef.Model).AsIChatClient())
     .UseFunctionInvocation(configure: client =>
-        // Cap tool-call iterations to prevent infinite loops where the model
-        // keeps requesting tools without producing a final answer. 2 rounds
-        // is optimal: most queries complete in 1 iteration, complex analyses
-        // get a second pass. Reduces avg response time ~15% vs 3 iterations.
-        client.MaximumIterationsPerRequest = 2)
+        // Cap tool-call iterations to prevent the model from looping tool calls.
+        // 1 iteration keeps latency predictable: the model calls tools once and
+        // synthesizes results. A second iteration risks hitting the 60s request
+        // timeout on slow APIM calls and doubles worst-case latency.
+        client.MaximumIterationsPerRequest = 1)
     // EnableSensitiveData logs prompts, responses, and tool arguments which
     // can include user PII. Only enable in Development.
     .UseOpenTelemetry(configure: c => c.EnableSensitiveData = builder.Environment.IsDevelopment());
