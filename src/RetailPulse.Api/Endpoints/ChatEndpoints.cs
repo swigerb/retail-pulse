@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.AspNetCore.SignalR;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
@@ -485,7 +486,7 @@ public static class ChatEndpoints
         .RequireRateLimiting("strict");
 
         // Streaming chat endpoint — SSE/SignalR progressive token delivery
-        app.MapPost("/api/chat/stream", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
+        app.MapPost("/api/chat/stream", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, StreamingProgressFeature streamingProgressFeature, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
             var validation = ChatRequestValidator.Validate(request);
@@ -538,11 +539,16 @@ public static class ChatEndpoints
 
                 logger.LogInformation("Streaming route to {AgentKey} — intent: {Intent}", specialist.Key, decision.Intent);
 
-                // Execute agent — stream tokens via SignalR in parallel
+                // Execute agent with streaming progress — the pipeline emits real-time
+                // tool progress via SignalR and streams the final reply token-by-token.
+                // We signal streaming mode by setting the StreamingProgress feature.
+                streamingProgressFeature.Enable(sessionId);
                 var response = await specialist.HandleAsync(enrichedRequest, ct);
 
-                // Push the full response as streaming tokens via SignalR for clients listening
-                await streaming.StreamResponseFallbackAsync(sessionId, specialist.Key, response.Reply, ct);
+                // Stream the response via SignalR only if the pipeline didn't already do it
+                // (ExecuteWithProgressAsync streams inline; fallback covers non-progress paths)
+                if (!streamingProgressFeature.IsEnabled)
+                    await streaming.StreamResponseFallbackAsync(sessionId, specialist.Key, response.Reply, ct);
 
                 // PII redaction on output
                 var filteredReply = await guardrails.FilterOutputAsync(response.Reply, userId, ct);

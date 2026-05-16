@@ -38,14 +38,20 @@ public static class RoutingServiceExtensions
         AgentDefinition? marginDef = null,
         Func<IServiceProvider, IEnumerable<AITool>>? marginToolsFactory = null)
     {
+        // Register the scoped streaming progress feature
+        services.AddScoped<StreamingProgressFeature>();
+
         // Register the shared execution pipeline
         services.AddScoped<IAgentExecutionPipeline>(sp =>
         {
             var chatClient = sp.GetRequiredService<IChatClient>();
             var hubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.TelemetryHub>>();
+            var streamingHubContext = sp.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<Hubs.StreamingHub>>();
+            var streamingFeature = sp.GetRequiredService<StreamingProgressFeature>();
             var configuration = sp.GetRequiredService<IConfiguration>();
             var logger = sp.GetRequiredService<ILogger<AgentExecutionPipeline>>();
-            return new AgentExecutionPipeline(chatClient, hubContext, configuration, logger);
+            var metrics = sp.GetService<Telemetry.RetailPulseMetrics>();
+            return new AgentExecutionPipeline(chatClient, hubContext, streamingHubContext, streamingFeature, configuration, logger, metrics);
         });
 
         // Register GeneralAgent as ISpecialistAgent

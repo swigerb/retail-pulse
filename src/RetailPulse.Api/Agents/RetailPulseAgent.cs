@@ -28,11 +28,19 @@ public class RetailPulseAgent
         IHubContext<TelemetryHub> hubContext,
         IEnumerable<AITool> tools,
         ILogger<RetailPulseAgent> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHubContext<StreamingHub>? streamingHubContext = null,
+        StreamingProgressFeature? streamingFeature = null)
     {
         _agentDef = agentDef;
         var pipelineLogger = LoggerFactory.Create(b => { }).CreateLogger<AgentExecutionPipeline>();
-        _pipeline = new AgentExecutionPipeline(chatClient, hubContext, configuration, pipelineLogger);
+        _pipeline = new AgentExecutionPipeline(
+            chatClient,
+            hubContext,
+            streamingHubContext,
+            streamingFeature,
+            configuration,
+            pipelineLogger);
         _generalAgent = new GeneralAgent(_pipeline, agentDef, tools);
     }
 

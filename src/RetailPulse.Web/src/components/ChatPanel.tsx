@@ -21,6 +21,8 @@ import { AgentRoutingIndicator } from './AgentRoutingIndicator';
 import { MemoryIndicator } from './MemoryIndicator';
 import { ApprovalCard } from './ApprovalCard';
 import { StreamingMessage, CacheIndicator } from './streaming';
+import { ProgressIndicator } from './ProgressIndicator';
+import type { ProgressStep } from './ProgressIndicator';
 import { BlockedRequestMessage } from './guardrails';
 import { sanitizeMessage } from '../utils';
 
@@ -466,6 +468,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState<string>('Thinking...');
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [sessionId] = useState<string>(() => crypto.randomUUID().replace(/-/g, ''));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
@@ -483,6 +486,15 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
     const unsubscribe = onProgress((data) => {
       if (data.sessionId === sessionId && isMountedRef.current) {
         setLoadingText(data.detail);
+        const eventWithDuration = data as typeof data & { durationMs?: number };
+        if (data.phase === 'tool_result') {
+          setProgressSteps(prev => [...prev, {
+            phase: data.phase,
+            detail: data.detail,
+            durationMs: eventWithDuration.durationMs,
+            timestamp: data.timestamp,
+          }]);
+        }
       }
     });
     return () => {
@@ -510,6 +522,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
       onResponseReceived?.({ totalDurationMs: undefined });
       setLoading(true);
       setLoadingText('Thinking...');
+      setProgressSteps([]);
 
       try {
         const history: ChatHistoryMessage[] = messages
@@ -687,10 +700,10 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
               style={ASSISTANT_LOADING_AVATAR_STYLE}
             />
             <div className={styles.messageContent}>
-              <div className={styles.loadingContainer}>
-                <Spinner size="tiny" />
-                {loadingText}
-              </div>
+              <ProgressIndicator
+                currentPhase={loadingText}
+                completedSteps={progressSteps}
+              />
             </div>
           </div>
         )}

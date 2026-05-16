@@ -16,6 +16,14 @@ public interface IAgentExecutionPipeline
     /// telemetry → extract tool spans → extract charts → account tokens → return response.
     /// </summary>
     Task<ChatResponse> ExecuteAsync(AgentExecutionContext context, CancellationToken ct = default);
+
+    /// <summary>
+    /// Executes the agent pipeline with real-time progress events and streaming delivery.
+    /// Tool invocations emit granular SignalR progress events with accurate per-tool timing.
+    /// After the LLM response is obtained, the reply is streamed token-by-token via the
+    /// StreamingHub for progressive frontend rendering.
+    /// </summary>
+    Task<ChatResponse> ExecuteWithProgressAsync(AgentExecutionContext context, CancellationToken ct = default);
 }
 
 /// <summary>

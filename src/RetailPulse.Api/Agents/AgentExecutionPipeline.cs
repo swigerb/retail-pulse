@@ -21,9 +21,11 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 {
     private readonly IChatClient _chatClient;
     private readonly IHubContext<TelemetryHub> _hubContext;
+    private readonly IHubContext<StreamingHub>? _streamingHubContext;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AgentExecutionPipeline> _logger;
     private readonly RetailPulseMetrics? _metrics;
+    private readonly StreamingProgressFeature _streamingFeature;
 
     private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -39,19 +41,43 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
     public AgentExecutionPipeline(
         IChatClient chatClient,
         IHubContext<TelemetryHub> hubContext,
+        IHubContext<StreamingHub>? streamingHubContext,
+        StreamingProgressFeature? streamingFeature,
         IConfiguration configuration,
         ILogger<AgentExecutionPipeline> logger,
         RetailPulseMetrics? metrics = null)
     {
         _chatClient = chatClient;
         _hubContext = hubContext;
+        _streamingHubContext = streamingHubContext;
+        _streamingFeature = streamingFeature ?? new StreamingProgressFeature();
         _configuration = configuration;
         _logger = logger;
         _metrics = metrics;
     }
 
+    /// <summary>
+    /// Simplified constructor for backward compatibility (tests and legacy code).
+    /// Streaming progress is disabled when using this constructor.
+    /// </summary>
+    public AgentExecutionPipeline(
+        IChatClient chatClient,
+        IHubContext<TelemetryHub> hubContext,
+        IConfiguration configuration,
+        ILogger<AgentExecutionPipeline> logger,
+        RetailPulseMetrics? metrics = null)
+        : this(chatClient, hubContext, null, null, configuration, logger, metrics)
+    {
+    }
+
     public async Task<ChatResponse> ExecuteAsync(AgentExecutionContext context, CancellationToken ct = default)
     {
+        // Delegate to the streaming pipeline when the scoped feature is active
+        if (_streamingFeature.IsEnabled)
+        {
+            return await ExecuteWithProgressAsync(context, ct);
+        }
+
         var request = context.Request;
         var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
         var collector = new TelemetryCollector(_hubContext, sessionId);
@@ -181,6 +207,140 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         messages.Add(new(ChatRole.User, request.Message));
         return messages;
+    }
+
+    public async Task<ChatResponse> ExecuteWithProgressAsync(AgentExecutionContext context, CancellationToken ct = default)
+    {
+        var request = context.Request;
+        var sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
+        var collector = new TelemetryCollector(_hubContext, sessionId);
+
+        // Wrap tools with instrumentation for real-time per-tool progress events
+        var instrumentedToolMiddleware = new InstrumentedToolMiddleware(_hubContext);
+        var instrumentedTools = instrumentedToolMiddleware.WrapTools(context.Tools, sessionId);
+
+        var chatOptions = new ChatOptions
+        {
+            Temperature = context.Temperature,
+            Tools = [.. instrumentedTools]
+        };
+
+        var messages = BuildMessages(context.SystemPrompt, request);
+
+        var sw = Stopwatch.StartNew();
+        using var thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
+
+        // Emit progress: thinking phase
+        await _hubContext.Clients.Group(sessionId).SendAsync("progress", new
+        {
+            sessionId,
+            phase = "thinking",
+            detail = $"{context.AgentName} is reasoning...",
+            timestamp = DateTimeOffset.UtcNow
+        }, ct);
+
+        Microsoft.Extensions.AI.ChatResponse response;
+
+        try
+        {
+            response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
+        }
+        catch (ClientResultException ex) when (ex.Status == 429)
+        {
+            return HandleRateLimitError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            return HandleTimeoutError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            return HandleTimeoutError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+        }
+        catch (Exception ex)
+        {
+            return HandleUnexpectedError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+        }
+
+        var thoughtDurationMs = sw.ElapsedMilliseconds;
+        thoughtActivity?.SetTag("agent.duration_ms", thoughtDurationMs);
+
+        var (inputTokens, outputTokens, totalTokens) = ExtractTokenCounts(response);
+
+        await collector.RecordSpanAsync(
+            context.AgentName, "thought",
+            $"Processing: {request.Message[..Math.Min(100, request.Message.Length)]}",
+            thoughtDurationMs,
+            inputTokens > 0 ? inputTokens : null,
+            outputTokens > 0 ? outputTokens : null);
+
+        await RecordToolSpansAsync(response, collector, thoughtDurationMs, context.OnToolResult, _hubContext, sessionId, ct);
+
+        // Emit progress: synthesizing phase
+        await _hubContext.Clients.Group(sessionId).SendAsync("progress", new
+        {
+            sessionId,
+            phase = "synthesizing",
+            detail = "Preparing response...",
+            timestamp = DateTimeOffset.UtcNow
+        }, ct);
+
+        var postProcessStart = sw.ElapsedMilliseconds;
+        var reply = SanitizeReplyText(response.Text ?? context.FallbackReply);
+
+        var charts = ExtractChartSpecs(response);
+
+        // Stream the reply token-by-token via StreamingHub for progressive rendering
+        await StreamReplyAsync(sessionId, context.AgentName, reply, ct);
+
+        using var responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
+        var responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
+        await collector.RecordSpanAsync(
+            context.AgentName, "response",
+            reply[..Math.Min(200, reply.Length)],
+            responseDurationMs);
+
+        var totalDurationMs = sw.ElapsedMilliseconds;
+
+        var tokenUsage = BuildTokenUsage(inputTokens, outputTokens, totalTokens, context.ModelName);
+
+        _logger.LogInformation(
+            "Agent {AgentName} responded (streaming) in {DurationMs}ms with {SpanCount} spans, {ChartCount} charts, {TokenCount} tokens",
+            context.AgentName, totalDurationMs, collector.Spans.Count, charts.Count, totalTokens);
+
+        _metrics?.RecordAgentExecutionDuration(context.AgentName, totalDurationMs);
+
+        return new ChatResponse(
+            reply, sessionId, [.. collector.Spans],
+            charts.Count > 0 ? charts : null,
+            totalDurationMs, tokenUsage);
+    }
+
+    /// <summary>
+    /// Streams the completed reply text token-by-token via the StreamingHub
+    /// so the frontend's StreamingMessage component can render progressively.
+    /// </summary>
+    private async Task StreamReplyAsync(string sessionId, string agentName, string reply, CancellationToken ct)
+    {
+        if (_streamingHubContext is null) return;
+
+        await StreamingEvents.SendStartAsync(_streamingHubContext, sessionId, agentName);
+
+        // Split on whitespace boundaries and emit word-by-word
+        var words = reply.Split(' ');
+        var tokenIndex = 0;
+        foreach (var word in words)
+        {
+            ct.ThrowIfCancellationRequested();
+            var token = tokenIndex == 0 ? word : " " + word;
+            await StreamingEvents.SendTokenAsync(_streamingHubContext, sessionId, token, tokenIndex++);
+        }
+
+        await StreamingEvents.SendCompleteAsync(_streamingHubContext, sessionId, reply, fromCache: false);
     }
 
     private static (int input, int output, int total) ExtractTokenCounts(Microsoft.Extensions.AI.ChatResponse response)
