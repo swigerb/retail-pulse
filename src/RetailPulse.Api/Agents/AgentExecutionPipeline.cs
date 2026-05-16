@@ -1,6 +1,7 @@
 using System.ClientModel;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Hubs;
@@ -16,7 +17,7 @@ namespace RetailPulse.Api.Agents;
 /// Extracts the shared execution pattern from all specialist agents:
 /// message construction → LLM call → telemetry → tool spans → charts → tokens → response.
 /// </summary>
-public class AgentExecutionPipeline : IAgentExecutionPipeline
+public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 {
     private readonly IChatClient _chatClient;
     private readonly IHubContext<TelemetryHub> _hubContext;
@@ -25,6 +26,15 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly RetailPulseMetrics? _metrics;
 
     private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
+
+    // Matches raw function/tool call leakage patterns in model output:
+    // "to=functions.ToolName" prefix (OpenAI-style), optionally followed by garbage text and JSON args
+    [GeneratedRegex(@"(?:^|\n)\s*to=functions\.\w+[^\n]*(?:\n|$)", RegexOptions.Multiline)]
+    private static partial Regex FunctionCallLeakagePattern();
+
+    // Matches lines with CJK characters (hallucinated/corrupted text) adjacent to JSON or function patterns
+    [GeneratedRegex(@"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]{2,}[^\n]*(?:json|function|tool)[^\n]*", RegexOptions.IgnoreCase)]
+    private static partial Regex CorruptedTextPattern();
 
     public AgentExecutionPipeline(
         IChatClient chatClient,
@@ -119,7 +129,7 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         }, ct);
 
         var postProcessStart = sw.ElapsedMilliseconds;
-        var reply = response.Text ?? context.FallbackReply;
+        var reply = SanitizeReplyText(response.Text ?? context.FallbackReply);
 
         var charts = ExtractChartSpecs(response);
 
@@ -198,8 +208,9 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
                     callIdToName[fc.CallId] = fc.Name;
             }
 
-        var toolCount = callIdToName.Count;
-        var perToolMs = toolCount > 0 ? thoughtDurationMs / toolCount : 0;
+        // Tool durations cannot be individually measured when using the auto-invocation
+        // pattern (single GetResponseAsync). The parent "thought" span carries real wall-clock
+        // time. Individual tool_call spans report 0ms to avoid misleading identical timestamps.
 
         foreach (var msg in response.Messages)
             foreach (var content in msg.Contents)
@@ -218,10 +229,14 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
                     using var toolActivity = AgentTelemetry.StartToolCall(
                         toolCall.Name,
                         JsonSerializer.Serialize(toolCall.Arguments));
+
+                    // Duration reported as 0 — actual tool timing is not available from the
+                    // auto-invocation SDK pattern. The parent "thought" span carries the real
+                    // wall-clock time for the entire tool-calling loop.
                     await collector.RecordSpanAsync(
                         toolCall.Name, "tool_call",
                         $"Calling {toolCall.Name} with {JsonSerializer.Serialize(toolCall.Arguments)}",
-                        perToolMs);
+                        0);
                 }
                 else if (content is FunctionResultContent toolResult)
                 {
@@ -292,6 +307,33 @@ public class AgentExecutionPipeline : IAgentExecutionPipeline
         }
 
         return new TokenUsage(inputTokens, outputTokens, totalTokens, cost);
+    }
+
+    /// <summary>
+    /// Strips raw function/tool call leakage and corrupted text from the model's reply.
+    /// Some models occasionally emit partial function call syntax (e.g., "to=functions.ToolName ...")
+    /// or hallucinated non-Latin characters as part of the response text. This should never
+    /// reach the user.
+    /// </summary>
+    internal static string SanitizeReplyText(string reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply))
+            return reply;
+
+        // Remove "to=functions.*" lines (OpenAI-style function call leakage)
+        var sanitized = FunctionCallLeakagePattern().Replace(reply, "");
+
+        // Remove lines with CJK characters adjacent to function/json patterns (corrupted output)
+        sanitized = CorruptedTextPattern().Replace(sanitized, "");
+
+        // Trim leading whitespace/newlines that may remain after stripping
+        sanitized = sanitized.TrimStart('\n', '\r', ' ');
+
+        // If sanitization removed everything, that means the entire reply was garbage
+        if (string.IsNullOrWhiteSpace(sanitized))
+            return "I was unable to generate a response. Please try rephrasing your question.";
+
+        return sanitized;
     }
 
     private ChatResponse HandleRateLimitError(
