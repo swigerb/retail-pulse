@@ -14,7 +14,7 @@ import {
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo } from '../types';
 import type { SendMessageOptions } from '../services/api';
-import { sendMessage } from '../services/api';
+import { sendMessage, isErrorReply } from '../services/api';
 import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
 import { BrandLogo } from './BrandLogo';
 import { AgentRoutingIndicator } from './AgentRoutingIndicator';
@@ -535,10 +535,18 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           options,
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
-        onResponseReceived?.({ totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, routing: response.routing });
+        // When the backend returns a 200 OK but the reply is actually an
+        // error (rate-limit, timeout), suppress routing/telemetry metadata
+        // so users don't see misleading "Agent X — 78% confidence" badges.
+        const errorMasked = isErrorReply(response.reply);
+        onResponseReceived?.(errorMasked
+          ? { totalDurationMs: response.totalDurationMs }
+          : { totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, routing: response.routing });
         setMessages(prev => [
           ...prev,
-          { role: 'assistant', content: response.reply, spans: response.spans, charts: response.charts, routing: response.routing, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, memoryContext: response.memoryContext },
+          errorMasked
+            ? { role: 'assistant' as const, content: response.reply }
+            : { role: 'assistant' as const, content: response.reply, spans: response.spans, charts: response.charts, routing: response.routing, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, memoryContext: response.memoryContext },
         ]);
       } catch (err) {
         if (!isMountedRef.current || controller.signal.aborted) return;

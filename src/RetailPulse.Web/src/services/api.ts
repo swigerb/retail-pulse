@@ -127,6 +127,9 @@ export async function sendMessage(
 
   if (!res.ok) {
     const detail = await parseErrorBody(res);
+    if (res.status === 429) {
+      throw new Error('The AI service is busy. Please wait a moment and try again.');
+    }
     throw new Error(`API error ${res.status}: ${detail}`);
   }
 
@@ -135,4 +138,14 @@ export async function sendMessage(
     throw new Error('API error: malformed response payload');
   }
   return data;
+}
+
+/**
+ * Returns true when the reply text indicates a backend error wrapped in a
+ * 200 OK response (e.g. rate-limit or timeout caught by the pipeline).
+ * When this returns true the frontend should suppress routing/telemetry
+ * metadata so the user doesn't see misleading "Agent X — 78% confidence".
+ */
+export function isErrorReply(reply: string): boolean {
+  return reply.startsWith('⏳');
 }

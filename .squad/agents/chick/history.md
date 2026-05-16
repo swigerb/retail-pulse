@@ -164,3 +164,26 @@
 - Always accumulate ALL computed fields in incremental update handlers — missing `totalCostUsd` in `span_completed` was an easy oversight
 - Backend span types may differ from frontend type enums — defensive matching (`'tool' || 'tool_call'`) is essential
 - Frontend sanitization is defense-in-depth — backend should still fix its output, but the UI should never render raw tool-call internals
+
+---
+
+## 2026-05-16 — Suppress routing metadata on error responses
+
+**Status:** ✅ COMPLETE
+
+**Issue:** When the backend returns a 200 OK but the reply is an error (rate-limit ⏳, timeout ⏳), the UI displayed misleading routing metadata like "Demand Forecast Agent — 78% confidence" alongside the error text.
+
+**Root Cause:** `ChatPanel.tsx` unconditionally passed `response.routing` to the message object regardless of whether the reply was a real answer or a backend-caught error wrapped in a 200 response.
+
+**Fixes:**
+- `src/services/api.ts`: Added `isErrorReply()` helper — detects replies starting with "⏳" (the prefix used by `AgentExecutionPipeline` for caught errors). Also added friendly 429 message: "The AI service is busy. Please wait a moment and try again."
+- `src/components/ChatPanel.tsx`: When `isErrorReply(response.reply)` is true, the message is created without routing, spans, charts, tokenUsage, or memoryContext — only the error text is shown.
+- `src/__tests__/api.test.ts`: Added 4 new tests covering `isErrorReply` and 429 handling.
+
+**Validation:**
+- `npm run build` — clean
+- `npx vitest run` — 33 files, **271 passed**
+
+### Learnings
+- Backend error-as-success responses (200 OK with error in reply) need frontend detection — always check reply content before blindly rendering telemetry metadata
+- The ⏳ emoji prefix is the backend's convention for pipeline-caught errors — a stable detection heuristic
