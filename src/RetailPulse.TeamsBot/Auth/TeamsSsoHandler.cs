@@ -114,7 +114,8 @@ public class TeamsSsoHandler
                 return null;
             }
 
-            _logger.LogInformation("Successfully extracted user identity: {Name} ({Email})", name, email);
+            _logger.LogInformation("Successfully extracted user identity: {Name} ({Email})",
+                PrivacyRedactor.RedactName(name), PrivacyRedactor.RedactEmail(email));
 
             return new UserIdentity
             {

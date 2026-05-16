@@ -83,6 +83,7 @@ internal sealed class InstrumentedAIFunction : AIFunction
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
+            ToolInvocationTimings.Record(toolName, sw.ElapsedMilliseconds);
 
             // Emit tool_call failed
             await _hubContext.Clients.Group(_sessionId).SendAsync("progress", new
@@ -100,6 +101,7 @@ internal sealed class InstrumentedAIFunction : AIFunction
         }
 
         sw.Stop();
+        ToolInvocationTimings.Record(toolName, sw.ElapsedMilliseconds);
 
         // Emit tool_call completed with real timing
         await _hubContext.Clients.Group(_sessionId).SendAsync("progress", new
@@ -114,6 +116,40 @@ internal sealed class InstrumentedAIFunction : AIFunction
         }, cancellationToken).ConfigureAwait(false);
 
         return result;
+    }
+}
+
+/// <summary>
+/// Minimal timing wrapper for <see cref="AIFunction"/> instances that only need accurate
+/// per-invocation duration capture (used by the non-streaming execution path, which doesn't
+/// emit SignalR progress events for each tool call).
+/// </summary>
+internal sealed class TimedAIFunction : AIFunction
+{
+    private readonly AIFunction _inner;
+
+    public TimedAIFunction(AIFunction inner)
+    {
+        _inner = inner;
+    }
+
+    public override string Name => _inner.Name;
+    public override string Description => _inner.Description;
+
+    protected override async ValueTask<object?> InvokeCoreAsync(
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            return await _inner.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            sw.Stop();
+            ToolInvocationTimings.Record(_inner.Name, sw.ElapsedMilliseconds);
+        }
     }
 }
 

@@ -507,7 +507,7 @@ public static class ChatEndpoints
                 // Other APIM / Azure OpenAI errors (500, 503, etc.) — surface the
                 // status code so it doesn't fall through to a generic 503.
                 logger.LogError(ex, "ClientResultException (HTTP {Status}) during chat for session {SessionId}", ex.Status, request.SessionId);
-                int statusCode = ex.Status >= 400 && ex.Status < 600
+                int statusCode = ex.Status is >= 400 and < 600
                     ? ex.Status
                     : StatusCodes.Status503ServiceUnavailable;
                 return Results.Json(
@@ -677,7 +677,7 @@ public static class ChatEndpoints
             catch (ClientResultException ex)
             {
                 logger.LogError(ex, "ClientResultException (HTTP {Status}) during streaming chat for session {SessionId}", ex.Status, request.SessionId);
-                int statusCode = ex.Status >= 400 && ex.Status < 600
+                int statusCode = ex.Status is >= 400 and < 600
                     ? ex.Status
                     : StatusCodes.Status503ServiceUnavailable;
                 return Results.Json(
@@ -784,38 +784,6 @@ public static class ChatEndpoints
             return Results.Ok(new { agents, total = agents.Count });
         })
         .WithName("ListCouncilAgents").RequireAuthorization().RequireRateLimiting("relaxed");
-
-        // ── Versioned routes (v1) — same logic as legacy, without Sunset header ─
-        // Map v1 chat to same handler pipeline (legacy routes above include Sunset deprecation header)
-        app.MapPost("/api/v1/chat", (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
-        {
-            ValidationResult validation = ChatRequestValidator.Validate(request);
-            if (!validation.IsValid)
-                return Task.FromResult(Results.ValidationProblem(validation.Errors));
-
-            if (request is null || string.IsNullOrWhiteSpace(request.Message))
-                return Task.FromResult(Results.BadRequest(new { error = "Field 'message' is required." }));
-
-            return Task.FromResult(Results.Ok(new { version = "v1", message = "Versioned endpoint active" }));
-        })
-        .WithName("ChatV1")
-        .RequireAuthorization()
-        .RequireRateLimiting("strict");
-
-        app.MapPost("/api/v1/chat/stream", (ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
-        {
-            ValidationResult validation = ChatRequestValidator.Validate(request);
-            if (!validation.IsValid)
-                return Task.FromResult(Results.ValidationProblem(validation.Errors));
-
-            if (request is null || string.IsNullOrWhiteSpace(request.Message))
-                return Task.FromResult(Results.BadRequest(new { error = "Field 'message' is required." }));
-
-            return Task.FromResult(Results.Ok(new { version = "v1", message = "Versioned streaming endpoint active" }));
-        })
-        .WithName("ChatStreamV1")
-        .RequireAuthorization()
-        .RequireRateLimiting("strict");
 
         return app;
     }

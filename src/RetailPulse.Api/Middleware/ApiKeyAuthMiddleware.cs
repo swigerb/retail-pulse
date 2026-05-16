@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.Primitives;
 
 namespace RetailPulse.Api.Middleware;
@@ -22,7 +24,7 @@ public class ApiKeyAuthMiddleware
     private readonly RequestDelegate _next;
     private readonly bool _enabled;
     private readonly string _headerName;
-    private readonly string? _expectedKey;
+    private readonly byte[]? _expectedKeyBytes;
     private readonly ILogger<ApiKeyAuthMiddleware> _logger;
 
     public ApiKeyAuthMiddleware(
@@ -34,9 +36,12 @@ public class ApiKeyAuthMiddleware
         _logger = logger;
         _enabled = configuration.GetValue("ApiKey:Enabled", false);
         _headerName = configuration["ApiKey:Header"] ?? _defaultHeaderName;
-        _expectedKey = configuration["ApiKey:Value"];
+        string? expectedKey = configuration["ApiKey:Value"];
+        _expectedKeyBytes = string.IsNullOrWhiteSpace(expectedKey)
+            ? null
+            : Encoding.UTF8.GetBytes(expectedKey);
 
-        if (_enabled && string.IsNullOrWhiteSpace(_expectedKey))
+        if (_enabled && _expectedKeyBytes is null)
         {
             _logger.LogWarning(
                 "ApiKey:Enabled=true but ApiKey:Value is not configured. All /api requests will be rejected.");
@@ -51,7 +56,7 @@ public class ApiKeyAuthMiddleware
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(_expectedKey))
+        if (_expectedKeyBytes is null)
         {
             context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             await context.Response.WriteAsync("API key gate is enabled but no key is configured.");
@@ -59,7 +64,7 @@ public class ApiKeyAuthMiddleware
         }
 
         if (!context.Request.Headers.TryGetValue(_headerName, out StringValues provided)
-            || !string.Equals(provided.ToString(), _expectedKey, StringComparison.Ordinal))
+            || !KeysMatch(provided.ToString(), _expectedKeyBytes))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Missing or invalid API key.");
@@ -67,5 +72,17 @@ public class ApiKeyAuthMiddleware
         }
 
         await _next(context);
+    }
+
+    // Constant-time comparison to prevent timing-based key recovery attacks.
+    // FixedTimeEquals requires equal-length spans, so reject length mismatches
+    // up front (length itself is not secret).
+    private static bool KeysMatch(string provided, byte[] expectedBytes)
+    {
+        if (string.IsNullOrEmpty(provided))
+            return false;
+
+        byte[] providedBytes = Encoding.UTF8.GetBytes(provided);
+        return providedBytes.Length == expectedBytes.Length && CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes);
     }
 }
