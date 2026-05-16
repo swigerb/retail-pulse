@@ -1,7 +1,10 @@
 using System.Net;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
+using RetailPulse.Api.Caching;
 using RetailPulse.Api.Prefetch;
 using RetailPulse.Api.Tools;
 using RetailPulse.Contracts.Routing;
@@ -33,9 +36,16 @@ public class ToolPrefetchServiceTests
         var seasonalityTool = new SeasonalityFactorsTool(httpClient);
 #pragma warning restore CS0618
 
+        var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var toolCache = new ToolResultCache(
+            memoryCache,
+            Options.Create(new ToolCacheOptions()),
+            NullLogger<ToolResultCache>.Instance);
+
         _sut = new ToolPrefetchService(
             historicalDemandTool,
             seasonalityTool,
+            toolCache,
             NullLogger<ToolPrefetchService>.Instance);
     }
 
