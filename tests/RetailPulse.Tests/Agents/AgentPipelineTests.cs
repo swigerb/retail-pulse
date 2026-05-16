@@ -308,4 +308,41 @@ public class AgentPipelineTests
     }
 
     #endregion
+
+    #region SanitizeReplyText — function call leakage filtering
+
+    [Fact]
+    public void SanitizeReplyText_RemovesFunctionCallLeakage()
+    {
+        var dirty = "to=functions.IdentifyDemandRisks 天天中彩票提現 福利彩票天天彩json {\"brand\":\"Apex Grill\",\"region\":\"Southwest\",\"channel\":\"All\"}\nApex Grill is performing well in the Southwest.";
+        var clean = AgentExecutionPipeline.SanitizeReplyText(dirty);
+        clean.Should().NotContain("to=functions");
+        clean.Should().Contain("Apex Grill is performing well");
+    }
+
+    [Fact]
+    public void SanitizeReplyText_RemovesCorruptedCjkLines()
+    {
+        var dirty = "天天中彩票提現 福利彩票天天彩json garbage\nActual response content here.";
+        var clean = AgentExecutionPipeline.SanitizeReplyText(dirty);
+        clean.Should().NotContain("天天");
+        clean.Should().Contain("Actual response content here.");
+    }
+
+    [Fact]
+    public void SanitizeReplyText_PreservesCleanContent()
+    {
+        var clean = "Here's the demand forecast for Apex Grill in Q2.";
+        AgentExecutionPipeline.SanitizeReplyText(clean).Should().Be(clean);
+    }
+
+    [Fact]
+    public void SanitizeReplyText_ReturnsGracefulMessage_WhenEntireReplyIsGarbage()
+    {
+        var garbage = "to=functions.Foo blah blah";
+        var result = AgentExecutionPipeline.SanitizeReplyText(garbage);
+        result.Should().Contain("unable to generate a response");
+    }
+
+    #endregion
 }
