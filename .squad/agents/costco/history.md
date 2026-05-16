@@ -31,6 +31,14 @@
 
 ## Learnings
 
+### 2026-05-16 — Rate-limit (429) error handling at endpoint level
+
+1. **Two-layer 429 defense needed:** `AgentExecutionPipeline` catches `ClientResultException(429)` during agent execution, but the router classification call in `ChatEndpoints` is OUTSIDE that try/catch. A 429 during routing crashes to the generic `Exception` handler (503) or the debugger. Always add `ClientResultException` catches at the endpoint level too.
+
+2. **Strip routing metadata from error responses:** When the pipeline returns an error response (⏳/⚠️ prefix), the endpoint was still attaching `RoutingInfo` (showing "78% confidence"). This is misleading — confidence about intent classification is irrelevant when the answer is an error message. Detect error replies by prefix and null out `Routing`.
+
+3. **`ClientResultException.Status` maps to HTTP status codes:** For non-429 errors (500, 503 from APIM), forward the status code rather than always returning 503. This gives the frontend more signal for retry logic.
+
 ### 2026-05-16 — Timeout math must be internally consistent
 
 1. **Timeout budget arithmetic:** MaxIterations × NetworkTimeout must fit within the request-level timeout. The old config (2 × 90s = 180s vs 150s request cap) guaranteed the second iteration would always be cancelled by the request CTS. Always validate the math: `MaxIterations * NetworkTimeout < RequestTimeout`.
