@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
+using RetailPulse.Api.Caching;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Telemetry;
@@ -12,8 +13,8 @@ namespace RetailPulse.Api.Agents.Routing;
 
 /// <summary>
 /// LLM-based router that classifies user intent and dispatches to the
-/// appropriate specialist agent. Uses the same IChatClient pipeline
-/// (with OTel + function invocation middleware) for classification.
+/// appropriate specialist agent. Uses a dedicated IChatClient for classification
+/// (optionally a lighter model) and caches results to reduce TPM consumption.
 /// </summary>
 public partial class RetailOpsRouter : IAgentRouter
 {
@@ -22,6 +23,7 @@ public partial class RetailOpsRouter : IAgentRouter
     private readonly IReadOnlyDictionary<string, ISpecialistAgent> _specialists;
     private readonly ILogger<RetailOpsRouter> _logger;
     private readonly RetailPulseMetrics? _metrics;
+    private readonly RouterClassificationCache? _classificationCache;
 
     /// <summary>
     /// Minimum confidence threshold. Below this, the router falls back to
@@ -42,6 +44,14 @@ public partial class RetailOpsRouter : IAgentRouter
     private static partial Regex PortfolioPerformingRegex();
 
     /// <summary>
+    /// Matches single-brand performance queries like "how is Apex Grill performing in the Southwest?"
+    /// or "how is Brand X doing this quarter?" — these are simple data lookups that route to GeneralAgent.
+    /// Excludes portfolio-level queries (matched separately by <see cref="PortfolioPerformingRegex"/>).
+    /// </summary>
+    [GeneratedRegex(@"how is .+ (performing|doing)", RegexOptions.IgnoreCase)]
+    private static partial Regex BrandPerformingRegex();
+
+    /// <summary>
     /// Keyword patterns mapped to their intent. Each entry has "strong" keywords that match
     /// unambiguously on their own, regardless of message length or context. Short or generic
     /// keywords that could fire on ambiguous queries are excluded — the LLM handles those.
@@ -57,6 +67,8 @@ public partial class RetailOpsRouter : IAgentRouter
         (AgentIntent.Planogram, ["planogram", "shelf space", "shelf placement"]),
         (AgentIntent.StoreOps, ["store operations", "store performance", "retail ops"]),
         (AgentIntent.MemoryManagement, ["remember this", "what do you know about me", "forget about"]),
+        (AgentIntent.PromotionTrade, ["promotion", "trade spend", "promo effectiveness", "promotion roi"]),
+        (AgentIntent.Scorecard, ["scorecard", "brand scorecard", "performance scorecard"]),
     ];
 
     public RetailOpsRouter(
@@ -64,12 +76,14 @@ public partial class RetailOpsRouter : IAgentRouter
         AgentDefinition routerDef,
         IEnumerable<ISpecialistAgent> specialists,
         ILogger<RetailOpsRouter> logger,
-        RetailPulseMetrics? metrics = null)
+        RetailPulseMetrics? metrics = null,
+        RouterClassificationCache? classificationCache = null)
     {
         _chatClient = chatClient;
         _routerDef = routerDef;
         _logger = logger;
         _metrics = metrics;
+        _classificationCache = classificationCache;
 
         // Build a lookup: intent → specialist (first specialist that claims it wins)
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase);
@@ -121,7 +135,32 @@ public partial class RetailOpsRouter : IAgentRouter
                 // Keyword matched but no specialist registered — fall through to LLM
             }
 
+            // Check classification cache before making an LLM call
+            if (_classificationCache is not null)
+            {
+                RouterCacheEntry? cached = _classificationCache.TryGet(message);
+                if (cached is not null)
+                {
+                    _logger.LogInformation("Router cache hit for intent '{Intent}' (confidence: {Confidence:F2})", cached.Intent, cached.Confidence);
+                    _metrics?.RecordIntentClassification(cached.Intent, fastPathHit: true);
+                    _metrics?.RecordRoutingDuration(sw.ElapsedMilliseconds);
+                    routingActivity?.SetTag("agent.routing.cache_hit", true);
+                    routingActivity?.SetTag("agent.routing.intent", cached.Intent);
+                    routingActivity?.SetTag("agent.routing.confidence", cached.Confidence);
+                    routingActivity?.SetTag("agent.routing.duration_ms", sw.ElapsedMilliseconds);
+
+                    return _specialists.TryGetValue(cached.Intent, out ISpecialistAgent? cachedSpecialist)
+                        ? new RoutingDecision(
+                            cachedSpecialist.Key, cached.Intent, cached.Confidence, cached.DetectedIntents)
+                        : new RoutingDecision(
+                        "general", AgentIntent.General, cached.Confidence, cached.DetectedIntents);
+                }
+            }
+
             IntentClassification classification = await ClassifyIntentAsync(message, conversationHistory, ct);
+
+            // Cache the LLM classification result for future identical/similar queries
+            _classificationCache?.Set(message, classification.Intent, classification.Confidence, classification.DetectedIntents);
 
             _metrics?.RecordIntentClassification(classification.Intent, fastPathHit: false);
             _metrics?.RecordRoutingDuration(sw.ElapsedMilliseconds);
@@ -188,12 +227,20 @@ public partial class RetailOpsRouter : IAgentRouter
     {
         // Portfolio-level "performing" queries → council (multi-agent synthesis)
         // Single-brand queries like "How is Apex Grill performing in the Southwest?"
-        // intentionally fall through to LLM classification → routes to GeneralAgent
+        // intentionally fall through to the brand regex below → routes to GeneralAgent
         // (1 tool call) instead of the Consensus Council (4+ LLM roundtrips).
         if (PortfolioPerformingRegex().IsMatch(message))
         {
             return new IntentClassification(
                 AgentIntent.PortfolioHealth, _keywordMatchConfidence, [AgentIntent.PortfolioHealth]);
+        }
+
+        // Single-brand performance queries: "how is Apex Grill performing in the Southwest?"
+        // These are simple data lookups → General intent (one tool call)
+        if (BrandPerformingRegex().IsMatch(message) && !PortfolioPerformingRegex().IsMatch(message))
+        {
+            return new IntentClassification(
+                AgentIntent.General, _keywordMatchConfidence, [AgentIntent.General]);
         }
 
         foreach ((string? intent, string[]? keywords) in _keywordPatterns)

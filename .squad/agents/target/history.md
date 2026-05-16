@@ -49,6 +49,22 @@
 
 **Recommendation for the live demo:** smoke-test the 6 "field sentiment" prompts and the 8 chart prompts on the actual `/api/chat` endpoint at least 10 minutes before the executive presentation. These two clusters depend on tool routing that the in-memory tests cannot exercise.
 
+## Learnings
+
+### 2026-05-16 — Rate-limit fix test coverage (429 remediation)
+
+**Scope:** Added tests for 3 of 4 rate-limit fixes (Fix 2: classification cache, Fix 3: expanded keywords, Fix 4: separate router model).
+
+**New test files:**
+- `tests/RetailPulse.Tests/Caching/RouterClassificationCacheTests.cs` — 9 tests covering cache hit/miss, TTL expiration, message normalization (trim + case-insensitive), different messages → different entries, multi-intent preservation, overwrite semantics.
+- Extended `tests/RetailPulse.Tests/Agents/Router/RetailOpsRouterTests.cs` — added keyword fast-path tests (PortfolioPerformingRegex, BrandPerformingRegex, planogram, promotion ROI, brand scorecard), plus separate router model verification tests.
+
+**Key findings:**
+1. Costco added `BrandPerformingRegex` (`how is .+ (performing|doing)`) which routes brand+region performance queries to General via fast-path. This means "How is Apex Grill performing in the Southwest?" never hits the LLM — saves ~200ms and a TPM token.
+2. Costco expanded `_keywordPatterns` with `"promotion"`, `"promotion roi"`, `"promo effectiveness"` → PromotionTrade and `"scorecard"`, `"brand scorecard"`, `"performance scorecard"` → Scorecard.
+3. `RouterClassificationCache` uses SHA256 key generation with `message.Trim().ToLowerInvariant()` normalization — simple but effective deduplication.
+
+**Test count:** Router tests went from ~30 to 104 passing. Cache tests: 9 passing. Total verified: 113 tests passing.
 
 ---
 

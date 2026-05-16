@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Alerts;
+using RetailPulse.Api.Caching;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Telemetry;
@@ -174,11 +175,12 @@ public static class RoutingServiceExtensions
 
         services.AddScoped<IAgentRouter>(sp =>
         {
-            IChatClient chatClient = sp.GetRequiredService<IChatClient>();
+            IChatClient chatClient = sp.GetRequiredKeyedService<IChatClient>("router");
             IEnumerable<ISpecialistAgent> specialists = sp.GetServices<ISpecialistAgent>();
             ILogger<RetailOpsRouter> logger = sp.GetRequiredService<ILogger<RetailOpsRouter>>();
+            RouterClassificationCache? cache = sp.GetService<RouterClassificationCache>();
 
-            return new RetailOpsRouter(chatClient, routerDef, specialists, logger);
+            return new RetailOpsRouter(chatClient, routerDef, specialists, logger, classificationCache: cache);
         });
 
         return services;

@@ -59,6 +59,9 @@ builder.Services.Configure<ToolCacheOptions>(
 builder.Services.AddSingleton<ToolResultCache>();
 builder.Services.AddSingleton<CachingToolWrapper>();
 
+// ── Router Classification Cache ─────────────────────────────────────────
+builder.Services.AddSingleton<RouterClassificationCache>();
+
 // ── Custom Business Metrics ─────────────────────────────────────────────
 builder.Services.AddSingleton<RetailPulseMetrics>();
 
@@ -598,6 +601,24 @@ builder.Services.AddChatClient(
     // the Telemetry:EnableSensitiveData config flag for short, deliberate debugging.
     .UseOpenTelemetry(configure: c =>
         c.EnableSensitiveData = builder.Configuration.GetValue("Telemetry:EnableSensitiveData", false));
+
+// ── Router-specific IChatClient (lighter model for intent classification) ───
+// If OpenAI:RouterDeployment is configured and non-empty, create a separate
+// ChatClient for the router using a smaller/cheaper model deployment.
+// This reduces TPM consumption on the shared quota since routing is a simple
+// JSON classification task (~500 tokens) that doesn't need the full reasoning model.
+string? routerDeployment = builder.Configuration["OpenAI:RouterDeployment"];
+if (!string.IsNullOrWhiteSpace(routerDeployment) && routerDeployment != agentDef.Model)
+{
+    IChatClient routerChatClient = azureClient.GetChatClient(routerDeployment).AsIChatClient();
+    builder.Services.AddKeyedSingleton("router", routerChatClient);
+}
+else
+{
+    // Fall back: router uses the same model as agents (backward compatible)
+    builder.Services.AddKeyedSingleton("router",
+        (sp, _) => sp.GetRequiredService<IChatClient>());
+}
 
 // Foundry agent — optional, controlled by FoundryAgent:Enabled config (default: false)
 bool foundryEnabled = builder.Configuration.GetValue("FoundryAgent:Enabled", false);
