@@ -31,6 +31,16 @@
 
 ## Learnings
 
+### 2026-05-16 — Four-layer 429 defense architecture
+
+1. **Dual-call pattern demands quota headroom:** Router + agent through one APIM gateway means the effective TPM needed is 2× what a single-call system requires. 20K TPM with ~5500 tokens per query pair means ~3.6 queries/minute max — insufficient for demo scenarios. 80K gives room for parallel users.
+
+2. **Router classification is highly cacheable:** Intent classification for the same query is deterministic within a session. A 5-minute IMemoryCache TTL eliminates all repeat-query LLM calls. SHA256 hash of normalized message → cache key works well (same pattern as InMemoryResponseCache).
+
+3. **Keyed services for model separation:** DI keyed services (`AddKeyedSingleton<IChatClient>("router", ...)`) cleanly separate the router's lighter model from the main agent model. Backward-compatible: if config key is empty, register the same instance under both keys.
+
+4. **Regex keyword expansion reduces LLM dependency:** "How is Apex Grill performing in the Southwest?" was the #1 demo query hitting the LLM router. A simple `BrandPerformingRegex` (excluding portfolio patterns) routes it instantly. Every keyword match = one fewer LLM call = ~500 tokens saved from the quota.
+
 ### 2026-05-16 — Rate-limit (429) error handling at endpoint level
 
 1. **Two-layer 429 defense needed:** `AgentExecutionPipeline` catches `ClientResultException(429)` during agent execution, but the router classification call in `ChatEndpoints` is OUTSIDE that try/catch. A 429 during routing crashes to the generic `Exception` handler (503) or the debugger. Always add `ClientResultException` catches at the endpoint level too.

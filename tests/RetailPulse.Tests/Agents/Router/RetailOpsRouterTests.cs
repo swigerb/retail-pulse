@@ -413,6 +413,182 @@ public class RetailOpsRouterTests
 
     #endregion
 
+    #region Keyword Fast-Path — Expanded Patterns
+
+    [Theory]
+    [InlineData("How is our portfolio performing?", AgentIntent.PortfolioHealth)]
+    [InlineData("How is the overall performing?", AgentIntent.PortfolioHealth)]
+    [InlineData("planogram optimization for dairy", AgentIntent.Planogram)]
+    [InlineData("shelf space analysis for beverage aisle", AgentIntent.Planogram)]
+    public async Task RouteAsync_KeywordFastPath_MatchesExpectedIntent(string message, string expectedIntent)
+    {
+        // LLM should NOT be called — keyword fast-path returns first.
+        // Mock returns General; if fast-path fires, we get the real intent instead.
+        IChatClient chatClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.5}}");
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
+
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
+
+        result.Intent.Should().Be(expectedIntent);
+        result.Confidence.Should().Be(0.95, "keyword fast-path assigns 0.95 confidence");
+    }
+
+    [Fact]
+    public async Task RouteAsync_BrandRegionPerformanceQuery_DoesNotMatchPortfolioRegex()
+    {
+        // "How is Apex Grill performing in the Southwest?" should NOT hit PortfolioPerformingRegex.
+        // It matches BrandPerformingRegex → General intent via keyword fast-path (no LLM call needed).
+        var mockClient = new Mock<IChatClient>();
+        mockClient
+            .Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant,
+                    $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.88}}")));
+
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(mockClient.Object, specialists);
+
+        RoutingDecision result = await router.RouteAsync(
+            "How is Apex Grill performing in the Southwest this quarter?", null, null, null);
+
+        result.Intent.Should().Be(AgentIntent.General);
+        result.Confidence.Should().Be(0.95, "brand performing regex assigns keyword confidence");
+        // Verify LLM was NOT called (keyword fast-path intercepted)
+        mockClient.Verify(x => x.GetResponseAsync(
+            It.IsAny<IEnumerable<ChatMessage>>(),
+            It.IsAny<ChatOptions>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("Show me the promotion ROI for Q4", AgentIntent.PromotionTrade)]
+    [InlineData("promotion effectiveness this quarter", AgentIntent.PromotionTrade)]
+    [InlineData("What's the brand scorecard?", AgentIntent.Scorecard)]
+    public async Task RouteAsync_ExpandedKeywordPatterns_ClassifiesCorrectly(string message, string expectedIntent)
+    {
+        // These messages should route to the expected intent — either via keyword
+        // fast-path (if expanded keywords are in place) or via LLM classification.
+        IChatClient chatClient = MockChatClient(
+            $"{{\"intent\":\"{expectedIntent}\",\"confidence\":0.90,\"intents\":[\"{expectedIntent}\"]}}");
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
+
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
+
+        result.Intent.Should().Be(expectedIntent);
+        result.Confidence.Should().BeGreaterThanOrEqualTo(0.6);
+    }
+
+    [Fact]
+    public async Task RouteAsync_PortfolioPerformingQuery_HitsKeywordFastPath()
+    {
+        // "How is our portfolio performing?" should match PortfolioPerformingRegex → PortfolioHealth
+        // without calling the LLM.
+        var mockClient = new Mock<IChatClient>();
+        mockClient
+            .Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant,
+                    $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.5}}")));
+
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(mockClient.Object, specialists);
+
+        RoutingDecision result = await router.RouteAsync(
+            "How is our portfolio performing?", null, null, null);
+
+        result.Intent.Should().Be(AgentIntent.PortfolioHealth);
+        result.Confidence.Should().Be(0.95);
+        // LLM should NOT have been called
+        mockClient.Verify(x => x.GetResponseAsync(
+            It.IsAny<IEnumerable<ChatMessage>>(),
+            It.IsAny<ChatOptions>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #endregion
+
+    #region Separate Router Model Configuration
+
+    [Fact]
+    public void RouterConstructor_AcceptsDistinctAgentDefinition()
+    {
+        // Verify the router can be constructed with a separate model/deployment
+        // (simulating OpenAI:RouterDeployment config producing a distinct AgentDefinition).
+        IChatClient routerClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.8}}");
+        List<ISpecialistAgent> specialists = CreateSpecialists();
+
+        AgentDefinition routerDef = new()
+        {
+            Name = "Router",
+            Model = "gpt-5.4-mini-router", // distinct deployment for router
+            SystemPrompt = "Classify user intent. Return JSON.",
+            Temperature = 0.0
+        };
+
+        RetailOpsRouter router = new(
+            routerClient,
+            routerDef,
+            specialists,
+            Mock.Of<ILogger<RetailOpsRouter>>());
+
+        router.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task RouteAsync_WithDifferentRouterModel_UsesProvidedChatClient()
+    {
+        // When RouterDeployment is configured separately, the DI container provides
+        // a distinct IChatClient to the router. Verify the router uses that client.
+        var routerMock = new Mock<IChatClient>();
+        routerMock
+            .Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant,
+                    $"{{\"intent\":\"{AgentIntent.SupplyShipments}\",\"confidence\":0.91}}")));
+
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+
+        AgentDefinition routerDef = new()
+        {
+            Name = "Router",
+            Model = "gpt-5.4-mini-router",
+            SystemPrompt = "Classify intent.",
+            Temperature = 0.0
+        };
+
+        RetailOpsRouter router = new(
+            routerMock.Object,
+            routerDef,
+            specialists,
+            Mock.Of<ILogger<RetailOpsRouter>>());
+
+        // Use a message that won't hit keyword fast-path
+        RoutingDecision result = await router.RouteAsync(
+            "Tell me about supply delays in the Midwest", null, null, null);
+
+        result.Intent.Should().Be(AgentIntent.SupplyShipments);
+        // Verify the router-specific client was called
+        routerMock.Verify(x => x.GetResponseAsync(
+            It.IsAny<IEnumerable<ChatMessage>>(),
+            It.IsAny<ChatOptions>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    #endregion
+
     #region Helpers
 
     private static IChatClient MockChatClient(string responseText)
@@ -441,6 +617,51 @@ public class RetailOpsRouterTests
         ]);
 
         return [general.Object];
+    }
+
+    /// <summary>
+    /// Creates specialists covering ALL known intents (including PortfolioHealth,
+    /// Planogram, Scorecard, etc.) — needed by keyword fast-path tests that route
+    /// to intents beyond what the basic CreateSpecialists() supports.
+    /// </summary>
+    private static List<ISpecialistAgent> CreateSpecialistsWithAllIntents()
+    {
+        var general = new Mock<ISpecialistAgent>();
+        general.Setup(s => s.Key).Returns("general");
+        general.Setup(s => s.DisplayName).Returns("General Agent");
+        general.Setup(s => s.SupportedIntents).Returns(
+        [
+            AgentIntent.General, AgentIntent.DemandForecasting,
+            AgentIntent.PromotionTrade, AgentIntent.SupplyShipments,
+            AgentIntent.CompetitiveMarket, AgentIntent.SentimentField
+        ]);
+
+        var council = new Mock<ISpecialistAgent>();
+        council.Setup(s => s.Key).Returns("council");
+        council.Setup(s => s.DisplayName).Returns("Consensus Council");
+        council.Setup(s => s.SupportedIntents).Returns([AgentIntent.PortfolioHealth]);
+
+        var planogram = new Mock<ISpecialistAgent>();
+        planogram.Setup(s => s.Key).Returns("planogram");
+        planogram.Setup(s => s.DisplayName).Returns("Planogram Agent");
+        planogram.Setup(s => s.SupportedIntents).Returns([AgentIntent.Planogram]);
+
+        var scorecard = new Mock<ISpecialistAgent>();
+        scorecard.Setup(s => s.Key).Returns("scorecard");
+        scorecard.Setup(s => s.DisplayName).Returns("Scorecard Agent");
+        scorecard.Setup(s => s.SupportedIntents).Returns([AgentIntent.Scorecard]);
+
+        var storeOps = new Mock<ISpecialistAgent>();
+        storeOps.Setup(s => s.Key).Returns("store-ops");
+        storeOps.Setup(s => s.DisplayName).Returns("Store Ops Agent");
+        storeOps.Setup(s => s.SupportedIntents).Returns([AgentIntent.StoreOps]);
+
+        var margin = new Mock<ISpecialistAgent>();
+        margin.Setup(s => s.Key).Returns("margin");
+        margin.Setup(s => s.DisplayName).Returns("Margin Agent");
+        margin.Setup(s => s.SupportedIntents).Returns([AgentIntent.MarginAnalysis]);
+
+        return [general.Object, council.Object, planogram.Object, scorecard.Object, storeOps.Object, margin.Object];
     }
 
     private static RetailOpsRouter CreateRouter(

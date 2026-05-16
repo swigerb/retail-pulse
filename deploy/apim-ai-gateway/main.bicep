@@ -19,7 +19,7 @@ param inferenceApiPath string = 'inference'
 param subscriptionDisplayName string = 'Retail Pulse Demo'
 
 @description('Tokens per minute limit')
-param tokensPerMinute int = 20000
+param tokensPerMinute int = 80000
 
 // ---------------------------------------------------------------------------
 // Existing resources
