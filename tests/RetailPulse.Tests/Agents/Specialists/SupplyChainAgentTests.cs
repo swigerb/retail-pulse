@@ -377,7 +377,7 @@ public class SupplyChainAgentTests
         ChatResponse response = await agent.HandleAsync(
             new ChatRequest("supply?", SessionId: "s-429-supply"));
 
-        response.Reply.Should().Contain("rate-limited");
+        response.Reply.Should().Contain("high demand");
         response.SessionId.Should().Be("s-429-supply");
         response.Spans.Should().BeEmpty();
     }
@@ -580,7 +580,7 @@ public class SupplyChainAgent : ISpecialistAgent
             long failureDurationMs = sw.ElapsedMilliseconds;
             _logger.LogWarning(ex, "Supply chain agent rate-limited after {DurationMs}ms", failureDurationMs);
             return new ChatResponse(
-                "⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.",
+                "⏳ The AI service is experiencing high demand. Please wait 30 seconds and try again.",
                 sessionId, [], null, failureDurationMs);
         }
         catch (Exception ex)

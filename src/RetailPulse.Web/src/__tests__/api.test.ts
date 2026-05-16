@@ -152,7 +152,7 @@ describe('api.sendMessage', () => {
 
 describe('isErrorReply', () => {
   it('returns true for backend error replies starting with ⏳', () => {
-    expect(isErrorReply('⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.')).toBe(true);
+    expect(isErrorReply('⏳ The AI service is experiencing high demand. Please wait 30 seconds and try again.')).toBe(true);
     expect(isErrorReply('⏳ The request took too long to complete.')).toBe(true);
   });
 

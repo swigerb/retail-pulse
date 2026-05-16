@@ -89,7 +89,7 @@ public class RetailPulseAgentTests
 
         Contracts.ChatResponse response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-429"));
 
-        response.Reply.Should().Be("⏳ The AI service is temporarily rate-limited. Please wait a moment and try again.");
+        response.Reply.Should().Be("⏳ The AI service is experiencing high demand. Please wait 30 seconds and try again.");
         response.SessionId.Should().Be("session-429");
         response.Spans.Should().BeEmpty();
         response.Charts.Should().BeNull();

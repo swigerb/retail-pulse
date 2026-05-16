@@ -114,7 +114,7 @@ public class ChatEndpointErrorTests : IAsyncDisposable
                                 return Results.Json(
                                     new
                                     {
-                                        error = "The AI service is temporarily rate-limited. Please wait a moment and try again.",
+                                        error = "The AI service is experiencing high demand. Please wait 30 seconds and try again.",
                                         code = "rate_limited"
                                     },
                                     statusCode: StatusCodes.Status429TooManyRequests);
@@ -180,7 +180,7 @@ public class ChatEndpointErrorTests : IAsyncDisposable
                             {
                                 logger.LogWarning(ex, "Rate-limited (429) streaming");
                                 return Results.Json(
-                                    new { error = "The AI service is temporarily rate-limited. Please wait a moment and try again.", code = "rate_limited" },
+                                    new { error = "The AI service is experiencing high demand. Please wait 30 seconds and try again.", code = "rate_limited" },
                                     statusCode: StatusCodes.Status429TooManyRequests);
                             }
                             catch (ClientResultException ex)
@@ -229,7 +229,7 @@ public class ChatEndpointErrorTests : IAsyncDisposable
         resp.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
         ErrorResponse body = await ReadErrorAsync(resp);
         body.Code.Should().Be("rate_limited");
-        body.Error.Should().Contain("rate-limited");
+        body.Error.Should().Contain("high demand");
     }
 
     [Fact]
@@ -261,7 +261,7 @@ public class ChatEndpointErrorTests : IAsyncDisposable
         resp.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
         ErrorResponse body = await ReadErrorAsync(resp);
         body.Code.Should().Be("rate_limited");
-        body.Error.Should().Contain("rate-limited");
+        body.Error.Should().Contain("high demand");
     }
 
     [Fact]
