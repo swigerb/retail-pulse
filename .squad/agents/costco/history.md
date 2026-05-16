@@ -4,6 +4,16 @@
 
 ## Learnings
 
+### 2026-05-16 — Timeout math must be internally consistent
+
+1. **Timeout budget arithmetic:** MaxIterations × NetworkTimeout must fit within the request-level timeout. The old config (2 × 90s = 180s vs 150s request cap) guaranteed the second iteration would always be cancelled by the request CTS. Always validate the math: `MaxIterations * NetworkTimeout < RequestTimeout`.
+
+2. **Disable Azure SDK retries for interactive endpoints:** The SDK's default retry policy retries timed-out HTTP calls, doubling user wait time. For interactive chat endpoints, set `ClientRetryPolicy(maxRetries: 0)` — let the user retry manually rather than silently doubling latency behind the scenes.
+
+3. **CacheWarmingService is safe:** It only does a write/read/delete health probe with AgentId `"startup-probe"`. The `cache-warming` guard in ChatEndpoints (line 74) is a defensive check that's no longer needed since the service was refactored, but harmless to keep.
+
+4. **AgentExecutionPipeline timeout handling is solid:** `HandleTimeoutError` correctly sets `error.type=timeout` telemetry tags, records metrics, and returns a user-friendly message. Both `TaskCanceledException` (SDK internal) and `OperationCanceledException` (request CTS) paths are covered with distinct `when` guards.
+
 ### 2026-05-15 — Response sanitization and telemetry accuracy
 
 1. **response.Text leakage:** Microsoft.Extensions.AI's `ChatResponse.Text` returns raw text content from the final assistant message. If the model hallucinates function call syntax as text (e.g., `to=functions.ToolName` with garbled characters), it passes straight through to the user. Always sanitize before returning.
