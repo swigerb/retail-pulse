@@ -4,6 +4,78 @@
 
 ### Security Hardening — CORS, Telemetry PII, Bot Logs (2026-05-16)
 
+# Decision: 429 Rate-Limit Architecture Fix (2026-05-16)
+
+**Author:** Costco (Backend Dev)
+**Date:** 2026-05-16
+**Status:** Implemented
+
+## Context
+
+Every user query makes two sequential LLM calls through one APIM gateway:
+1. Router classification (~500 tokens) — classifies intent
+2. Agent reasoning (~5000+ tokens) — actual work with tools
+
+Both shared a single 20K TPM quota. Router consumed tokens first, then the agent call hit the limit → 429 → demo-breaking failures.
+
+## Decision — Four-Layer Defense
+
+### 1. APIM TPM Quota: 20K → 80K
+- `deploy/apim-ai-gateway/main.bicep` param increased to 80,000 TPM
+- 4x headroom for the dual-call pattern
+
+### 2. Router Classification Cache (5-minute TTL)
+- `src/RetailPulse.Api/Caching/RouterClassificationCache.cs` — IMemoryCache-backed
+- Identical messages skip LLM entirely on repeat queries within 5 minutes
+- Wired into RetailOpsRouter via DI (optional dependency, null-safe)
+
+### 3. Expanded Keyword Fast-Path
+- Added `BrandPerformingRegex`: "how is {brand} performing/doing" → General intent
+- Added promotion keywords: "promotion", "trade spend", "promo effectiveness", "promotion roi"
+- Added scorecard keywords: "scorecard", "brand scorecard", "performance scorecard"
+- Key demo query "How is Apex Grill performing in the Southwest?" now routes without LLM
+
+### 4. Separate Router Model (Keyed IChatClient)
+- New config: `OpenAI:RouterDeployment` — specify a lighter/cheaper model for routing
+- Registered as keyed service `"router"` in DI
+- Falls back to main model if config is empty (backward compatible)
+- Allows using gpt-4o-mini for routing while keeping gpt-5.5 for agent reasoning
+
+## Implications
+
+| Team Member | Action Required |
+|---|---|
+| **Kroger (Arch)** | Review model separation pattern; confirm gpt-4o-mini is appropriate for routing accuracy |
+| **Target (Tests)** | Updated `RouteAsync_BrandRegionPerformanceQuery_DoesNotMatchPortfolioRegex` test — now expects keyword fast-path |
+| **Chick (FE)** | No changes needed — response shape unchanged |
+| **Ops** | Set `OpenAI:RouterDeployment` in prod config when ready to split models |
+
+## Files Changed
+- `deploy/apim-ai-gateway/main.bicep`
+- `src/RetailPulse.Api/Caching/RouterClassificationCache.cs` (new)
+- `src/RetailPulse.Api/Agents/Routing/RetailOpsRouter.cs`
+- `src/RetailPulse.Api/Agents/RoutingServiceExtensions.cs`
+- `src/RetailPulse.Api/Program.cs`
+- `src/RetailPulse.Api/appsettings.json`
+- `tests/RetailPulse.Tests/Agents/Router/RetailOpsRouterTests.cs`
+
+### Restore MaximumIterationsPerRequest to 3 and bump request timeout to 90s (2026-05-16)
+
+- **Author:** Costco (Backend Dev)
+- **Context:** With `MaximumIterationsPerRequest=1`, ALL tool-calling queries returned empty text. The FunctionInvokingChatClient stops after iteration 1 (tool execution) and never gives the LLM a second turn to synthesize tool results into a natural-language response. Users saw "I wasn't able to generate a response" after 3.5s and ~9,500 tokens consumed — all wasted.
+- **Decision:** Changed `MaximumIterationsPerRequest` from 1 → 3 and request-level timeout from 60s → 90s.
+  - **Why 3:** Iteration 1 = LLM calls tools. Iteration 2 = LLM synthesizes results (or calls more tools). Iteration 3 = safety margin for multi-step reasoning.
+  - **Why not 1:** Fundamentally broken — the model MUST get a follow-up turn after tool results return, otherwise `response.Text` is always empty.
+  - **Why not unlimited:** Prevents runaway loops; the 90s request timeout is the hard ceiling regardless.
+  - **Why 90s timeout:** Previous 60s was calculated for `1 iteration × 30s`. With 3 iterations (each typically 15-30s), 90s gives headroom for the common case (2 iterations, ~30-45s total) while still failing fast on pathological scenarios.
+- **Timeout math:** `NetworkTimeout=45s` is the per-call cap. Typical iteration = 10-20s. Worst case 2 iterations = 40s, well within 90s. Third iteration is rare and only for complex multi-step tool chains.
+- **Reversal of prior decision:** The May 16 "aggressive fast-fail" decision set `MaxIterations=1` to prevent 504s. That fix was correct for the *timeout* problem but introduced a *worse* functional bug (zero successful tool-calling responses). This restores tool-calling functionality while keeping timeout math sound.
+- **Implications for the team:**
+  - **Chick (Frontend):** Update `DEFAULT_TIMEOUT_MS` to ~120s (90s backend + 30s network buffer) if it was lowered to 90s.
+  - **Target (Tests):** Any test asserting `MaximumIterationsPerRequest == 1` should now expect `3`. Tests with 60s timeout assertions should expect 90s.
+  - **Publix (QA):** Tool-calling agents should now return synthesized text instead of falling back to "I wasn't able to generate a response."
+
+
 **Author:** Kroger (Lead)
 
 **Context:** GPT 5.5 code review surfaced four security findings (3 medium, 1 low) covering CORS scope, telemetry PII, Teams bot log content, and security headers.

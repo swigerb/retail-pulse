@@ -1,5 +1,28 @@
 # Costco — History
 
+## Recent Work (2026-05-18)
+
+### 2026-05-18 — Fixed Apex Grill Southwest data call (lightweight path)
+
+**Status:** ✅ Complete — Build passed, tests passing
+
+**Issue:** The default demo query "How is Apex Grill performing in the Southwest?" failed silently. Backend returned empty dataset.
+
+**Root Cause:** The lightweight performance lookup path (keyword fast-path in RetailOpsRouter) treated `quarter` and `period` query parameters as mandatory in validation, but the router was omitting them for default queries. Contract mismatch: DepletionStatsTool accepts optional parameters, but the endpoint validation required them.
+
+**Fix (src/RetailPulse.Api/):**
+- **Tools/DepletionStatsTool.cs:** Made `quarter` and `period` truly optional (not just nullable) in the parameter schema. When omitted, the tool returns all historical data for the brand/region pair.
+- **Added regression test:** `DemandForecastAgentTests.PerformanceLookup_WithoutQuarterOrPeriod_ReturnsValidData` ensures future changes don't reintroduce the requirement.
+- **Verified:** Apex Grill + Southwest now returns valid depletion stats (last 52 weeks).
+
+**Build & Tests:** 0 errors. 1,886+ tests pass (including new regression test).
+
+**Decision:** No new decisions created — this was a bug fix, not an architecture change. The four-layer 429 defense and MaxIterations restoration decisions from earlier sessions are the guiding changes.
+
+**Learnings:**
+1. **Endpoint default alignment:** Lightweight keyword-matched routes skip the full agent pipeline and go directly to data tools. Their parameter defaults must exactly match the tool definitions in both the proxy layer (API) and the MCP layer (McpServer).
+2. **Test-driven discovery:** This failure was surfaced by running the default demo prompts (DemoReadinessTests.cs) from the UI — a pattern Target (Tester) established in Sprint 1.1.
+
 ## Recent Work (2026-05-16)
 
 ### 2026-05-16 — Fixed 504 timeout demo blocker
@@ -68,6 +91,14 @@
 3. **Routing confidence ≠ answer confidence:** `RoutingInfo.Confidence` (the "84%" badge) is the router LLM's self-reported confidence about intent classification, not data quality. It's derived from the JSON response of the classification prompt. Keyword fast-path matches get a fixed 0.95. LLM-classified intents get whatever the model reports. Frontend should clarify this distinction.
 
 4. **68s with 2 tool calls:** Single `GetResponseAsync` handles the full loop (model → request tools → SDK invokes tools → feeds results back → model synthesizes). No parallelization within the SDK pattern. Improvement requires manual tool orchestration (call model, parse tool requests, invoke tools in parallel, feed back results).
+
+### 2026-05-18T09:55:41.150-04:00 — Keep backend tool defaults aligned end-to-end
+
+1. **Single-brand performance queries route to GeneralAgent:** `RetailOpsRouter.BrandPerformingRegex()` intentionally sends prompts like "How is Apex Grill performing in the Southwest?" down the lightweight GeneralAgent path, where `DepletionStatsTool` is the primary structured lookup (`src\RetailPulse.Api\Agents\Routing\RetailOpsRouter.cs`, `src\RetailPulse.Api\Program.cs`).
+
+2. **Brand and region matching are already flexible:** `RetailPulseDb.GetDepletionStats` uses SQLite `LIKE` queries against `COLLATE NOCASE` columns, so tenant brands/regions such as `Apex Grill` and `Southwest` work with partial and case-insensitive input. The failure mode was not missing simulated data; it was a contract mismatch in the API proxy tool (`src\RetailPulse.McpServer\Data\RetailPulseDb.cs`).
+
+3. **Proxy-tool defaults must match MCP/REST defaults:** `src\RetailPulse.Api\Tools\DepletionStatsTool.cs` must keep its optional parameters aligned with `src\RetailPulse.McpServer\Tools\GetDepletionStatsTool.cs` and `src\RetailPulse.McpServer\Program.cs`. If the proxy marks a parameter required while the MCP tool treats it as optional, model tool invocation can fail before the HTTP call is ever made.
 
 ## 2026-05-15 — Demo blocker: chat endpoint infinite spin
 
