@@ -2,6 +2,19 @@
 
 ## Recent Work (2026-05-18)
 
+### 2026-05-18 — Decision merged: Simple Depletion Lookups Use GeneralAgent
+
+**Status:** ✅ Decision finalized
+
+Scribe merged the inbox decision into `.squad/decisions.md`. This decision consolidates the findings from the Apex Grill fix and fast-path improvements:
+- Route single-brand performance/depletion queries (e.g., "Show me Pinnacle Hardware stats") to `GeneralAgent` via keyword fast-paths
+- `GeneralAgent.GetDepletionStats` is a single MCP call; `DemandForecastAgent` orchestration adds unnecessary latency for straightforward fact lookups
+- `DemandForecastAgent` remains the right path for forecast, seasonality, and risk-analysis questions
+
+**Implications for future work:**
+- Frontend still uses `/api/chat` (not `/api/chat/stream`), so streaming is a separate follow-up
+- Router keyword patterns should continue to grow as new intent categories are discovered
+
 ### 2026-05-18 — Fixed Apex Grill Southwest data call (lightweight path)
 
 **Status:** ✅ Complete — Build passed, tests passing
@@ -22,6 +35,8 @@
 **Learnings:**
 1. **Endpoint default alignment:** Lightweight keyword-matched routes skip the full agent pipeline and go directly to data tools. Their parameter defaults must exactly match the tool definitions in both the proxy layer (API) and the MCP layer (McpServer).
 2. **Test-driven discovery:** This failure was surfaced by running the default demo prompts (DemoReadinessTests.cs) from the UI — a pattern Target (Tester) established in Sprint 1.1.
+3. **2026-05-18T10:19:43.385-04:00 — Route simple depletion lookups to GeneralAgent:** `src\RetailPulse.Api\Agents\Routing\RetailOpsRouter.cs` should fast-path single-brand performance/depletion prompts like "Show me Pinnacle Hardware depletion stats in the Midwest for Q1" to `general`, because `GeneralAgent` already has the direct `GetDepletionStats` tool while `DemandForecastAgent` adds prefetch + forecast workflow overhead.
+4. **2026-05-18T10:19:43.385-04:00 — Streaming gap is frontend-side, not backend-side:** Backend already exposes `/api/chat/stream` and SignalR token events (`src\RetailPulse.Api\Endpoints\ChatEndpoints.cs`, `src\RetailPulse.Api\Hubs\StreamingHub.cs`), but `src\RetailPulse.Web\src\services\api.ts` still posts to `/api/chat`, so the UI waits for the full JSON payload even though progress updates arrive.
 
 ## Recent Work (2026-05-16)
 

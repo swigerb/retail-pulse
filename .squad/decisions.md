@@ -2,6 +2,30 @@
 
 ## Active Decisions
 
+### Simple Depletion Lookups Use GeneralAgent (2026-05-18)
+
+**Author:** Costco (Backend Dev)  
+**Status:** Proposed
+
+#### Context
+The query "Show me Pinnacle Hardware depletion stats in the Midwest for Q1" was routing to `DemandForecastAgent`, which adds predictive prefetch and a multi-step forecast workflow before answering. For simple single-brand depletion/performance lookups, that extra orchestration materially increases latency without improving answer quality.
+
+#### Decision
+Route simple single-brand performance/depletion lookups to `GeneralAgent` via router keyword fast-paths.
+
+#### Why
+`GeneralAgent` already has the direct `GetDepletionStats` tool and can answer these factual requests with one MCP call. `DemandForecastAgent` is still the right path for true forecast, seasonality, and risk-analysis questions, but not for straightforward depletion-stat lookups.
+
+#### Scope
+- `src\RetailPulse.Api\Agents\Routing\RetailOpsRouter.cs`
+- `tests\RetailPulse.Tests\Agents\Router\DemoQuerySmokeTests.cs`
+- `tests\RetailPulse.Tests\Integration\DemoReadinessTests.cs`
+
+#### Implications
+- **Chick (Frontend):** Backend now returns faster for simple depletion/performance prompts, but the chat UI still uses `/api/chat` rather than `/api/chat/stream`, so first-token streaming remains a separate UX improvement.
+- **Publix (QA):** Validate that single-brand depletion/performance demo prompts no longer show long "Demand Forecast Agent is reasoning..." stalls.
+- **Kroger (Lead):** If we want true live typing, prioritize wiring the existing streaming endpoint/hub into the chat panel in a follow-up.
+
 ### Security Hardening — CORS, Telemetry PII, Bot Logs (2026-05-16)
 
 # Decision: 429 Rate-Limit Architecture Fix (2026-05-16)
