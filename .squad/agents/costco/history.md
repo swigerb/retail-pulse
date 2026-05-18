@@ -2,6 +2,23 @@
 
 ## Recent Work (2026-05-18)
 
+### 2026-05-18T14:48:13Z — Fixed SQLite UNIQUE constraint in DurableAuditLog
+
+**Status:** ✅ Complete — Build passed, 1,886+ tests pass (including regression test)
+
+**Issue:** DurableAuditLog was generating duplicate primary keys due to ID truncation. The pattern `$"{sessionId}-{Guid.NewGuid():N}"[..32]` was prepending sessionId to a GUID, then truncating to 32 chars. Since the GUID itself was exactly 32 chars, the truncation discarded it entirely, causing all audit entries in the same session to have identical IDs. SQLite rejected the duplicates on writes 2+.
+
+**Root Cause:** ID generation relied on truncation-preserved uniqueness, but the GUID was the portion that got removed. The full sessionId was not guaranteed unique across requests.
+
+**Fix (src/RetailPulse.Api/):**
+- **Endpoints/ChatEndpoints.cs:** Changed `DurableAuditLog.LogAsync(id: $"{sessionId}-{Guid.NewGuid():N}"[..32], ...)` to `id: Guid.NewGuid().ToString("N")`
+- **Rationale:** Use a standalone GUID for the primary key. The `session_id` column still tracks the session for grouping audit entries, but the primary key is independent and guaranteed unique.
+- **Added regression test:** `ChatEndpointTests.AuditLog_MultipleEntriesSameSession_AllUnique` ensures repeated audit writes in one session don't collide.
+
+**Build & Tests:** 0 errors. 1,886+ tests pass (including new regression test).
+
+**Learning for the team:** Avoid prefix-plus-truncate patterns for unique identifiers. If a max length is required, ensure the preserved portion is uniquely identifiable on its own (not the discarded suffix).
+
 ### 2026-05-18 — Decision merged: Simple Depletion Lookups Use GeneralAgent
 
 **Status:** ✅ Decision finalized
@@ -32,13 +49,7 @@ Scribe merged the inbox decision into `.squad/decisions.md`. This decision conso
 
 **Decision:** No new decisions created — this was a bug fix, not an architecture change. The four-layer 429 defense and MaxIterations restoration decisions from earlier sessions are the guiding changes.
 
-**Learnings:**
-1. **Endpoint default alignment:** Lightweight keyword-matched routes skip the full agent pipeline and go directly to data tools. Their parameter defaults must exactly match the tool definitions in both the proxy layer (API) and the MCP layer (McpServer).
-2. **Test-driven discovery:** This failure was surfaced by running the default demo prompts (DemoReadinessTests.cs) from the UI — a pattern Target (Tester) established in Sprint 1.1.
-3. **2026-05-18T10:19:43.385-04:00 — Route simple depletion lookups to GeneralAgent:** `src\RetailPulse.Api\Agents\Routing\RetailOpsRouter.cs` should fast-path single-brand performance/depletion prompts like "Show me Pinnacle Hardware depletion stats in the Midwest for Q1" to `general`, because `GeneralAgent` already has the direct `GetDepletionStats` tool while `DemandForecastAgent` adds prefetch + forecast workflow overhead.
-4. **2026-05-18T10:19:43.385-04:00 — Streaming gap is frontend-side, not backend-side:** Backend already exposes `/api/chat/stream` and SignalR token events (`src\RetailPulse.Api\Endpoints\ChatEndpoints.cs`, `src\RetailPulse.Api\Hubs\StreamingHub.cs`), but `src\RetailPulse.Web\src\services\api.ts` still posts to `/api/chat`, so the UI waits for the full JSON payload even though progress updates arrive.
-
-## Recent Work (2026-05-16)
+## Learnings
 
 ### 2026-05-16 — Fixed 504 timeout demo blocker
 
@@ -69,51 +80,14 @@ Scribe merged the inbox decision into `.squad/decisions.md`. This decision conso
 
 ## Learnings
 
-### 2026-05-16 — Four-layer 429 defense architecture
+### 2026-05-18T10:48:13.452-04:00 — Audit log IDs must stay independently unique
 
-1. **Dual-call pattern demands quota headroom:** Router + agent through one APIM gateway means the effective TPM needed is 2× what a single-call system requires. 20K TPM with ~5500 tokens per query pair means ~3.6 queries/minute max — insufficient for demo scenarios. 80K gives room for parallel users.
+1. **Use standalone GUIDs for capped audit IDs:** `src\RetailPulse.Api\Endpoints\ChatEndpoints.cs` should generate audit-log primary keys with `Guid.NewGuid().ToString("N")`. Prefixing a full `sessionId` and then truncating to 32 characters can discard the unique suffix entirely, causing repeated primary keys for every write in the same session.
 
-2. **Router classification is highly cacheable:** Intent classification for the same query is deterministic within a session. A 5-minute IMemoryCache TTL eliminates all repeat-query LLM calls. SHA256 hash of normalized message → cache key works well (same pattern as InMemoryResponseCache).
+2. **Never rely on truncated suffix entropy:** If an identifier has a hard max length, uniqueness has to live in the part that survives truncation. Avoid prefix-plus-truncate patterns unless the preserved portion is provably unique on its own.
 
-3. **Keyed services for model separation:** DI keyed services (`AddKeyedSingleton<IChatClient>("router", ...)`) cleanly separate the router's lighter model from the main agent model. Backward-compatible: if config key is empty, register the same instance under both keys.
-
-4. **Regex keyword expansion reduces LLM dependency:** "How is Apex Grill performing in the Southwest?" was the #1 demo query hitting the LLM router. A simple `BrandPerformingRegex` (excluding portfolio patterns) routes it instantly. Every keyword match = one fewer LLM call = ~500 tokens saved from the quota.
-
-### 2026-05-16 — Rate-limit (429) error handling at endpoint level
-
-1. **Two-layer 429 defense needed:** `AgentExecutionPipeline` catches `ClientResultException(429)` during agent execution, but the router classification call in `ChatEndpoints` is OUTSIDE that try/catch. A 429 during routing crashes to the generic `Exception` handler (503) or the debugger. Always add `ClientResultException` catches at the endpoint level too.
-
-2. **Strip routing metadata from error responses:** When the pipeline returns an error response (⏳/⚠️ prefix), the endpoint was still attaching `RoutingInfo` (showing "78% confidence"). This is misleading — confidence about intent classification is irrelevant when the answer is an error message. Detect error replies by prefix and null out `Routing`.
-
-3. **`ClientResultException.Status` maps to HTTP status codes:** For non-429 errors (500, 503 from APIM), forward the status code rather than always returning 503. This gives the frontend more signal for retry logic.
-
-### 2026-05-16 — Timeout math must be internally consistent
-
-1. **Timeout budget arithmetic:** MaxIterations × NetworkTimeout must fit within the request-level timeout. The old config (2 × 90s = 180s vs 150s request cap) guaranteed the second iteration would always be cancelled by the request CTS. Always validate the math: `MaxIterations * NetworkTimeout < RequestTimeout`.
-
-2. **Disable Azure SDK retries for interactive endpoints:** The SDK's default retry policy retries timed-out HTTP calls, doubling user wait time. For interactive chat endpoints, set `ClientRetryPolicy(maxRetries: 0)` — let the user retry manually rather than silently doubling latency behind the scenes.
-
-3. **CacheWarmingService is safe:** It only does a write/read/delete health probe with AgentId `"startup-probe"`. The `cache-warming` guard in ChatEndpoints (line 74) is a defensive check that's no longer needed since the service was refactored, but harmless to keep.
-
-4. **AgentExecutionPipeline timeout handling is solid:** `HandleTimeoutError` correctly sets `error.type=timeout` telemetry tags, records metrics, and returns a user-friendly message. Both `TaskCanceledException` (SDK internal) and `OperationCanceledException` (request CTS) paths are covered with distinct `when` guards.
-
-### 2026-05-15 — Response sanitization and telemetry accuracy
-
-1. **response.Text leakage:** Microsoft.Extensions.AI's `ChatResponse.Text` returns raw text content from the final assistant message. If the model hallucinates function call syntax as text (e.g., `to=functions.ToolName` with garbled characters), it passes straight through to the user. Always sanitize before returning.
-
-2. **Tool call timing was fabricated:** The old `perToolMs = thoughtDurationMs / toolCount` divided total time evenly across tools — producing identical fake numbers (e.g., both tools showing exactly 34273ms). The SDK's auto-invocation pattern (`GetResponseAsync` with tools) doesn't expose individual tool durations. Report 0ms for individual tool_call spans and rely on the parent "thought" span for real wall-clock.
-
-3. **Routing confidence ≠ answer confidence:** `RoutingInfo.Confidence` (the "84%" badge) is the router LLM's self-reported confidence about intent classification, not data quality. It's derived from the JSON response of the classification prompt. Keyword fast-path matches get a fixed 0.95. LLM-classified intents get whatever the model reports. Frontend should clarify this distinction.
-
-4. **68s with 2 tool calls:** Single `GetResponseAsync` handles the full loop (model → request tools → SDK invokes tools → feeds results back → model synthesizes). No parallelization within the SDK pattern. Improvement requires manual tool orchestration (call model, parse tool requests, invoke tools in parallel, feed back results).
-
-### 2026-05-18T09:55:41.150-04:00 — Keep backend tool defaults aligned end-to-end
-
-1. **Single-brand performance queries route to GeneralAgent:** `RetailOpsRouter.BrandPerformingRegex()` intentionally sends prompts like "How is Apex Grill performing in the Southwest?" down the lightweight GeneralAgent path, where `DepletionStatsTool` is the primary structured lookup (`src\RetailPulse.Api\Agents\Routing\RetailOpsRouter.cs`, `src\RetailPulse.Api\Program.cs`).
-
-2. **Brand and region matching are already flexible:** `RetailPulseDb.GetDepletionStats` uses SQLite `LIKE` queries against `COLLATE NOCASE` columns, so tenant brands/regions such as `Apex Grill` and `Southwest` work with partial and case-insensitive input. The failure mode was not missing simulated data; it was a contract mismatch in the API proxy tool (`src\RetailPulse.McpServer\Data\RetailPulseDb.cs`).
-
-3. **Proxy-tool defaults must match MCP/REST defaults:** `src\RetailPulse.Api\Tools\DepletionStatsTool.cs` must keep its optional parameters aligned with `src\RetailPulse.McpServer\Tools\GetDepletionStatsTool.cs` and `src\RetailPulse.McpServer\Program.cs`. If the proxy marks a parameter required while the MCP tool treats it as optional, model tool invocation can fail before the HTTP call is ever made.
+### Earlier sessions (2026-05-16 & 2026-05-15)
+See history-archive.md for four-layer 429 defense, timeout math, response sanitization, tool defaults alignment, and other learnings from prior sessions.
 
 ## 2026-05-15 — Demo blocker: chat endpoint infinite spin
 
