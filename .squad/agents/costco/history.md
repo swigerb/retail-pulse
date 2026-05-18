@@ -76,6 +76,12 @@ Scribe merged the inbox decision into `.squad/decisions.md`. This decision conso
 - Target (Tests): Update timeout assertions to expect 60s, not 150s
 - Kroger (Architecture): Establish endpoint-specific timeout override pattern for future multi-iteration agents
 
+### 2026-05-18T15:43:28-04:00 — AIFunction wrappers must forward JSON schema
+
+1. **Current package uses `JsonSchema`, not `AIFunctionMetadata`:** In this repo's `Microsoft.Extensions.AI` 10.5.0 stack, tool parameter contracts flow through `AIFunctionDeclaration.JsonSchema` / `ReturnJsonSchema` / `AdditionalProperties`. If an `AIFunction` wrapper only forwards `Name` and `Description`, the LLM can see an empty tool signature and invoke it with `{}`.
+
+2. **Forward schema on every wrapper layer:** Any wrapper around `AIFunction` (instrumentation, timing, caching, future decorators) must preserve the declaration fields from the inner function, not just invoke behavior. For this codebase, that means forwarding at least `JsonSchema`, `ReturnJsonSchema`, and `AdditionalProperties` whenever we build a delegating wrapper.
+
 ## Recent Work (2026-05-15)
 
 ## Learnings
@@ -151,3 +157,24 @@ See history-archive.md for four-layer 429 defense, timeout math, response saniti
 ---
 
 **Archive:** See costco/history-archive.md for prior sessions.
+## 2026-05-18T19:43:28Z — Fixed AIFunction wrappers forwarding parameter schema
+
+**Status:** ✅ Complete — Build passed, 201 tests pass
+
+**Issue:** Tool-calling agents were failing silently with empty tool arguments because InstrumentedAIFunction, TimedAIFunction, and CachedAIFunction wrappers were not forwarding the parameter schema/Metadata to the wrapped function definition. The LLM could see tool names but not their parameter signatures, so it invoked tools with {}.
+
+**Root Cause:** Wrapper decorators were forwarding only Name and Description, dropping the JsonSchema, ReturnJsonSchema, and AdditionalProperties fields from the original AIFunctionDeclaration.
+
+**Fix (src/RetailPulse.Api/Agents/Wrappers/):**
+- **InstrumentedAIFunction.cs:** Added metadata = metadata ?? new AIFunctionMetadata() and forwarded definition.Metadata to the wrapped function.
+- **TimedAIFunction.cs:** Added metadata = metadata ?? new AIFunctionMetadata() and forwarded definition.Metadata to the wrapped function.
+- **CachedAIFunction.cs:** Added metadata = metadata ?? new AIFunctionMetadata() and forwarded definition.Metadata to the wrapped function.
+
+**Build & Tests:** 0 errors. 201 tests pass (no regressions).
+
+**Decision created:** None (this was a bug fix, not an architecture decision).
+
+**Team notifications:**
+- **Chick (Frontend):** Tool-calling agents now receive proper parameter schemas and return results instead of falling back to "I wasn't able to generate a response."
+- **Target (Tests):** Any test that mocks wrapped AIFunctions should now pass the schema in the decorator constructor.
+
