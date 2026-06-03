@@ -57,3 +57,22 @@ See history-archive.md for sessions prior to 2026-06-03. Archived entries includ
 - `Asp.Versioning.Http` v10 is a drop-in for projects using only the Minimal API integration with `UrlSegmentApiVersionReader`. The breaking-change risk lives in `Asp.Versioning.Mvc` and `Asp.Versioning.ApiExplorer`, neither of which we ship.
 - General pattern for ""too risky"" deferred bumps: re-check whether the risk surface (MVC/ApiExplorer integration) actually applies to our project before assuming a multi-major skip is dangerous.
 - NuGet skipped the 9.x line entirely for this package — the v10 jump from v8 is one release in practice, not two.
+
+### 2026-06-03T13:04:29-04:00 — coverlet.collector 6.0.4 → 10.0.1
+
+**Status:** ✅ Complete — Build clean (0 warnings), 1,937 tests pass, OpenCover XML produced; new guardrail tests (4) + verify-coverage-collection.ps1 (cobertura, opencover, ExcludeByAttribute filter) all green.
+
+**What changed:** Bumped `coverlet.collector` in `Directory.Packages.props` from 6.0.4 → 10.0.1. Only one consumer: `tests/RetailPulse.Tests/RetailPulse.Tests.csproj`. No `coverlet.msbuild`, no `coverlet.console`, no `.runsettings` files in the repo.
+
+**Migration impact:** ZERO config changes required. The VSTest data collector contract (`--collect:"XPlat Code Coverage"` with `DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover`) is unchanged in v10. CI workflow (.github/workflows/ci.yml lines 40-62) and the `coverage.opencover.xml` artifact path still work as-is. ExcludeByAttribute filter syntax is also unchanged.
+
+**What v10 actually changed (per release notes v8.0.0 → v10.0.1):**
+- New MTP (Microsoft Testing Platform) integration extension (coverlet.MTP) — opt-in, not relevant for our VSTest-based xunit setup.
+- New --coverlet-file-prefix option for unique report filenames in AzDO/MTP scenarios.
+- .NET 9 / .NET 10 target support added (this is why we need v10 — older coverlet would fail to instrument net10.0 cleanly going forward).
+- Bug fixes for async/IAsyncEnumerable branch coverage, is/and pattern-matching branches, LibraryImport/DllImport bodies, and CompilerGenerated tracker attributes.
+- No removed CLI flags, no removed MSBuild properties, no removed configuration keys for the VSTest collector path.
+
+**Why the prior "four-major-skip" framing overstated risk:** Coverlet's version jumps (3→6→8→10) have repeatedly been release-numbering bumps rather than breaking-API events for the *collector* package on the VSTest path. The breaking surface for v8/v10 is centered on the new MTP extension and msbuild-integration internals, neither of which we consume.
+
+**Stray-file note:** The working tree had two untracked files prepared for this upgrade (`tests/RetailPulse.Tests/Tooling/CoverletCollectorConfigurationTests.cs` and `tests/verify-coverage-collection.ps1`). They are high-quality guardrails — kept, used to validate the upgrade, and committed alongside the bump. The PS1 script tolerates PowerShell's array-splat quoting on the `--collect` argument (no embedded quotes needed).
