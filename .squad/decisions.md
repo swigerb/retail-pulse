@@ -31,6 +31,42 @@ NuGet also skipped a public 9.x line for this package, so the "two-major skip" w
 **Heuristic to remember:**
 Before deferring a major-version package bump as "too risky," check whether the risk surface (e.g. MVC integration, ApiExplorer integration) is actually consumed by the project. A multi-major skip on a slice you don't use is often a one-line change.
 
+### 2026-06-03T15:29:50Z: Span type tags on TraceSpan telemetry
+
+**By:** Costco (Backend Dev)
+
+Every backend-created `TraceSpan` must populate `Tags["span.type"]` with one of the frontend-supported values: `routing`, `agent`, `tool`, `memory`, or `approval`.
+
+**Why:**
+`TelemetryPushBackgroundService` derives the serialized span `type` from `Tags["span.type"]`, defaulting to `generic` when the tag is missing. The Trace Dashboard depends on that normalized `type` field for counters and filtering, so omitted tags silently break UI telemetry features.
+
+**Current mapping:**
+- `router.*` → `routing`
+- `agent.*` → `agent`
+- `tool.*` → `tool`
+- `memory.*` → `memory`
+- `approval.*` → `approval`
+
+**Team impact:**
+- **Costco / backend:** treat `span.type` as required schema, not optional metadata, on all future `TraceSpan` producers.
+- **Chick / frontend:** dashboard filters and counters can rely on backend-emitted span types matching the shared union.
+- **Publix / QA:** telemetry regressions should verify counts by `type`, not just span presence.
+
+### 2026-06-03T15:35:00Z: Span type telemetry tests
+
+**By:** Publix (QA)
+
+Publix added a mixed test strategy for the span-type regression:
+- a static contract test that inspects the production TraceSpan creation sites in `ChatEndpoints.cs` and `MemoryExtractionBackgroundService.cs`
+- a runtime test that verifies `TelemetryPushBackgroundService` forwards `Tags["span.type"]` into the frontend payload's `type` field
+- dashboard tests that assert unique tool counting and tool distribution rendering from `type: "tool"` spans
+
+**Why:**
+Hosting the full production chat endpoint in tests is expensive and tightly coupled to Azure-dependent startup wiring. Static contract coverage keeps the test focused on the exact span-emission lines Costco changed, while the runtime push test proves the frontend-facing payload still depends on that tag.
+
+**Impact:**
+If a future edit removes or renames a `span.type` tag on routing, agent, tool, or memory spans, the backend contract suite will fail before the dashboard silently regresses back to `Unique Tools = 0`.
+
 ### 2026-06-03T13:04:29Z: coverlet.collector upgraded 6.0.4 → 10.0.1 (deferral resolved)
 
 **By:** Costco (Backend Dev)
