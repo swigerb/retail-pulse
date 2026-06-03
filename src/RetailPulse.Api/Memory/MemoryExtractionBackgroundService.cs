@@ -60,6 +60,7 @@ public sealed class MemoryExtractionBackgroundService : BackgroundService
                         DurationMs: (storeEnd - storeStart).TotalMilliseconds,
                         Tags: new Dictionary<string, string>
                         {
+                            ["span.type"] = "memory",
                             ["memory.user_id"] = item.UserId,
                             ["memory.entries_stored"] = "extracted"
                         }));
