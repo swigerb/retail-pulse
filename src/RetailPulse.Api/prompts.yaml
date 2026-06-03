@@ -21,6 +21,7 @@ agents:
       - "memory/management" — Requests to forget, clear, or reset conversation memory.
         Phrases like "forget everything", "clear my history", "start fresh",
         "reset my context", "forget what I told you".
+        ⚠️ NOT "remember that..." or "remember this..." — those are store intents handled by the normal pipeline.
       - "council/health" — Questions about overall brand health, portfolio health
         assessments, cross-domain health checks, or requests that need input from
         multiple specialist domains simultaneously. Phrases like "how healthy is",

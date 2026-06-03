@@ -484,6 +484,53 @@ public class RetailOpsRouterTests
         result.Confidence.Should().BeGreaterThanOrEqualTo(0.6);
     }
 
+    [Theory]
+    [InlineData("Forget everything about me")]
+    [InlineData("Please clear my history")]
+    [InlineData("Let's start fresh")]
+    [InlineData("Reset my context before we continue")]
+    [InlineData("Forget what I told you earlier")]
+    public async Task RouteAsync_MemoryManagementDestructiveKeywords_HitKeywordFastPath(string message)
+    {
+        var mockClient = new Mock<IChatClient>();
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithMemoryIntent();
+        RetailOpsRouter router = CreateRouter(mockClient.Object, specialists);
+
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
+
+        result.Intent.Should().Be(AgentIntent.MemoryManagement);
+        result.Confidence.Should().Be(0.95);
+        mockClient.Verify(x => x.GetResponseAsync(
+            It.IsAny<IEnumerable<ChatMessage>>(),
+            It.IsAny<ChatOptions>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RouteAsync_RememberThis_DoesNotHitMemoryManagementKeywordFastPath()
+    {
+        var mockClient = new Mock<IChatClient>();
+        mockClient
+            .Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant,
+                    $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.75,\"intents\":[\"{AgentIntent.General}\"]}}")));
+
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithMemoryIntent();
+        RetailOpsRouter router = CreateRouter(mockClient.Object, specialists);
+
+        RoutingDecision result = await router.RouteAsync("Remember this: ClearDesk is trending up", null, null, null);
+
+        result.Intent.Should().Be(AgentIntent.General);
+        mockClient.Verify(x => x.GetResponseAsync(
+            It.IsAny<IEnumerable<ChatMessage>>(),
+            It.IsAny<ChatOptions>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task RouteAsync_PortfolioPerformingQuery_HitsKeywordFastPath()
     {
@@ -662,6 +709,19 @@ public class RetailOpsRouterTests
         margin.Setup(s => s.SupportedIntents).Returns([AgentIntent.MarginAnalysis]);
 
         return [general.Object, council.Object, planogram.Object, scorecard.Object, storeOps.Object, margin.Object];
+    }
+
+    private static List<ISpecialistAgent> CreateSpecialistsWithMemoryIntent()
+    {
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+
+        var memory = new Mock<ISpecialistAgent>();
+        memory.Setup(s => s.Key).Returns("memory-management");
+        memory.Setup(s => s.DisplayName).Returns("Memory Management");
+        memory.Setup(s => s.SupportedIntents).Returns([AgentIntent.MemoryManagement]);
+
+        specialists.Add(memory.Object);
+        return specialists;
     }
 
     private static RetailOpsRouter CreateRouter(

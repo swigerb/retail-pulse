@@ -93,7 +93,7 @@ public partial class RetailOpsRouter : IAgentRouter
         (AgentIntent.MarginAnalysis, ["margin analysis", "profitability", "cost structure", "gross margin"]),
         (AgentIntent.Planogram, ["planogram", "shelf space", "shelf placement"]),
         (AgentIntent.StoreOps, ["store operations", "store performance", "retail ops"]),
-        (AgentIntent.MemoryManagement, ["remember this", "what do you know about me", "forget about"]),
+        (AgentIntent.MemoryManagement, ["forget everything", "clear my history", "start fresh", "reset my context", "forget what I told you"]),
         (AgentIntent.PromotionTrade, ["promotion", "trade spend", "promo effectiveness", "promotion roi"]),
         (AgentIntent.Scorecard, ["scorecard", "brand scorecard", "performance scorecard"]),
     ];
