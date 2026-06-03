@@ -178,3 +178,39 @@ See history-archive.md for four-layer 429 defense, timeout math, response saniti
 - **Chick (Frontend):** Tool-calling agents now receive proper parameter schemas and return results instead of falling back to "I wasn't able to generate a response."
 - **Target (Tests):** Any test that mocks wrapped AIFunctions should now pass the schema in the decorator constructor.
 
+
+### 2026-06-03T11:13:12.666-04:00 — NuGet & Aspire package upgrade sweep
+
+**Status:** Build clean (0 warnings), 1,926 tests pass.
+
+**Upgraded in Directory.Packages.props:**
+- Aspire.Hosting.Azure.AppContainers 13.3.3 to 13.4.0 (already on the 13.x line; no Aspire major bump available)
+- Azure.AI.Projects 2.0.0 to 2.0.1
+- Azure.Monitor.OpenTelemetry.AspNetCore 1.4.0 to 1.5.0
+- Microsoft.Agents.AI (+ Abstractions, OpenAI) 1.2.0 to 1.8.0
+- Microsoft.Agents.* (TeamsBot stack) 1.4.83 to 1.5.184
+- Microsoft.AspNetCore.OpenApi 10.0.6 to 10.0.8
+- Microsoft.AspNetCore.SignalR.Client 10.0.6 to 10.0.8
+- Microsoft.Bcl.Memory 10.0.4 to 10.0.7 (forced by Microsoft.Agents.Connector 1.5.184 transitive)
+- Microsoft.Data.Sqlite 9.0.6 to 10.0.8 (major; aligns with .NET 10)
+- Microsoft.Extensions.AI 10.5.0 to 10.6.0
+- Microsoft.Extensions.Http.Resilience 10.1.0 to 10.6.0
+- Microsoft.Extensions.ServiceDiscovery 10.1.0 to 10.6.0
+- Microsoft.IdentityModel.Protocols.OpenIdConnect 8.15.0 to 8.18.0
+- ModelContextProtocol.AspNetCore 1.2.0 to 1.3.0
+- OpenTelemetry.Extensions.Hosting 1.15.2 to 1.15.3
+- YamlDotNet 17.0.1 to 18.0.0 (major; build/tests clean)
+- NBomber 6.0.0 to 6.4.1, NBomber.Http 6.0.0 to 6.2.0
+- BenchmarkDotNet 0.14.0 to 0.15.8
+- FluentAssertions 8.9.0 to 8.10.0
+- Microsoft.NET.Test.Sdk 17.14.1 to 18.6.0 (major; tests pass)
+- xunit.runner.visualstudio 3.1.4 to 3.1.5
+
+**Skipped deliberately:**
+- Asp.Versioning.Http 8.1.0 to 10.0.0 — two-major-version skip with known breaking API changes; defer to a focused task that updates endpoint version conventions.
+- coverlet.collector 6.0.4 to 10.0.1 — extreme major jump with breaking collector configuration; defer to a focused task with coverage validation.
+
+**Learnings:**
+1. **Microsoft.IdentityModel.Protocols.OpenIdConnect lags JWT package**: latest is 8.19.x, but System.IdentityModel.Tokens.Jwt only publishes through 8.18.0. Bumping OpenIdConnect to 8.19.1 fails NU1102. Pin to 8.18.0 until the JWT package catches up.
+2. **Microsoft.Agents.Builder 1.5.184 transitive bump**: requires Microsoft.Bcl.Memory greater-or-equal 10.0.7. Centrally bump Bcl.Memory whenever bumping the Agents stack.
+3. **Aspire stays on 13.x**: latest stable for Aspire.Hosting.Azure.AppContainers is 13.4.0 — already current after this sweep. NodeJs hosting deliberately left at 9.5.2 (its own release cadence).
