@@ -128,6 +128,7 @@ public static class ChatEndpoints
                         DurationMs: (classifyEnd - classifyStart).TotalMilliseconds,
                         Tags: new Dictionary<string, string>
                         {
+                            ["span.type"] = "routing",
                             ["router.intent"] = decision.Intent,
                             ["router.confidence"] = decision.Confidence.ToString("F2", CultureInfo.InvariantCulture)
                         }));
@@ -162,6 +163,7 @@ public static class ChatEndpoints
                         DurationMs: (selectEnd - selectStart).TotalMilliseconds,
                         Tags: new Dictionary<string, string>
                         {
+                            ["span.type"] = "routing",
                             ["router.selected_agent"] = specialist.Key,
                             ["router.selected_agent_name"] = specialist.DisplayName
                         }));
@@ -205,6 +207,7 @@ public static class ChatEndpoints
                         DurationMs: memoryDurationMs,
                         Tags: new Dictionary<string, string>
                         {
+                            ["span.type"] = "memory",
                             ["memory.user_id"] = userId,
                             ["memory.entries_recalled"] = memoryContext is not null ? "context_found" : "none"
                         }));
@@ -353,6 +356,7 @@ public static class ChatEndpoints
                         OutputTokens: outputTokens,
                         Tags: new Dictionary<string, string>
                         {
+                            ["span.type"] = "agent",
                             ["agent.name"] = specialist.Key,
                             ["agent.tools_called_count"] = toolsCalledCount.ToString(CultureInfo.InvariantCulture),
                             ["agent.token_input"] = inputTokens.ToString(CultureInfo.InvariantCulture),
@@ -376,6 +380,7 @@ public static class ChatEndpoints
                             DurationMs: span.DurationMs,
                             Tags: new Dictionary<string, string>
                             {
+                                ["span.type"] = "tool",
                                 ["tool.name"] = span.Name,
                                 ["tool.duration_ms"] = span.DurationMs.ToString("F0", CultureInfo.InvariantCulture),
                                 ["tool.result_size"] = span.Detail?.Length > 0 ? $"{span.Detail.Length} chars" : ""
