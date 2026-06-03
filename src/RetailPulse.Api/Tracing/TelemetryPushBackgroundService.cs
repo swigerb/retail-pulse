@@ -43,6 +43,7 @@ public sealed class TelemetryPushBackgroundService : BackgroundService
                             traceId = item.TraceId,
                             intent = item.Intent,
                             agentName = item.AgentName,
+                            model = item.Model,
                             startTime = item.Timestamp
                         }, linkedCts.Token);
                         break;

@@ -257,7 +257,12 @@ export function TraceTimeline({ trace }: TraceTimelineProps) {
           </Badge>
         </div>
         <div className={styles.headerStats}>
-          <span className={styles.statItem}>🤖 {trace.agentName}</span>
+          <span className={styles.statItem}>🤖 {trace.model
+            || (trace.spans ?? [])
+                .find(s => s.type === 'agent' && s.attributes?.['llm.model'])
+                ?.attributes?.['llm.model']
+            || trace.agentName
+            || 'Unknown'}</span>
           <span className={styles.statItem}>⏱️ {formatDuration(trace.totalDurationMs)}</span>
           <span className={styles.statItem}>🪙 {formatTokens(trace.totalTokens)}</span>
         </div>

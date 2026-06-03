@@ -240,19 +240,39 @@ export function Dashboard() {
     conn.off('trace_started');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     conn.on('trace_started', (data: any) => {
-      const trace: Trace = {
-        traceId: data.traceId || data.id,
-        intent: data.intent || 'Processing...',
-        agentName: data.agentName || 'Unknown',
-        startTime: data.timestamp || data.startTime || new Date().toISOString(),
-        status: 'in_progress',
-        totalDurationMs: data.totalDurationMs || 0,
-        totalTokens: data.totalTokens || 0,
-        totalCostUsd: data.totalCostUsd || 0,
-        spans: data.spans || [],
-      };
+      const traceId = data.traceId || data.id;
+      if (!traceId) return;
+      const incomingIntent = data.intent;
+      const incomingAgent = data.agentName;
+      const incomingModel = data.model;
       setTraces(prev => {
-        if (prev.some(t => t.traceId === trace.traceId)) return prev;
+        const existing = prev.find(t => t.traceId === traceId);
+        if (existing) {
+          // Enrich the existing trace if this trace_started carries richer metadata
+          // (the first event from CaptureSpan has nulls; the EmitTraceStarted call
+          // that follows routing carries the real intent/agent/model).
+          if (!incomingIntent && !incomingAgent && !incomingModel) return prev;
+          return prev.map(t =>
+            t.traceId !== traceId ? t : {
+              ...t,
+              intent: incomingIntent || t.intent,
+              agentName: incomingAgent || t.agentName,
+              model: incomingModel || t.model,
+            }
+          );
+        }
+        const trace: Trace = {
+          traceId,
+          intent: incomingIntent || 'Processing...',
+          agentName: incomingAgent || 'Unknown',
+          model: incomingModel,
+          startTime: data.timestamp || data.startTime || new Date().toISOString(),
+          status: 'in_progress',
+          totalDurationMs: data.totalDurationMs || 0,
+          totalTokens: data.totalTokens || 0,
+          totalCostUsd: data.totalCostUsd || 0,
+          spans: data.spans || [],
+        };
         const next = [trace, ...prev];
         return next.length > MAX_TRACES ? next.slice(0, MAX_TRACES) : next;
       });
@@ -269,9 +289,17 @@ export function Dashboard() {
         // New backend shape: nested span object
         traceId = data.traceId;
         span = data.span;
+        // Backend serializes span tags as `tags`; TS type expects `attributes`.
+        // Map so consumers reading attributes['llm.model'] work.
+        const rawTags = (data.span as { tags?: Record<string, string>; attributes?: Record<string, string> }).tags
+          ?? (data.span as { attributes?: Record<string, string> }).attributes;
+        if (rawTags && !span.attributes) {
+          span = { ...span, attributes: rawTags };
+        }
       } else if (data?.TraceId || data?.traceId || data?.SpanId || data?.spanId) {
         // Current backend shape: flat fields (PascalCase or camelCase)
         traceId = data.TraceId || data.traceId;
+        const flatTags = data.Tags || data.tags;
         span = {
           id: data.SpanId || data.spanId,
           name: data.OperationName || data.operationName || 'Unknown',
@@ -282,6 +310,7 @@ export function Dashboard() {
           outputTokens: data.OutputTokens || data.outputTokens,
           estimatedCostUsd: data.EstimatedCostUsd || data.estimatedCostUsd,
           parentId: data.ParentId || data.parentId,
+          attributes: flatTags,
         };
       } else {
         return; // Unrecognized shape, skip
@@ -316,6 +345,7 @@ export function Dashboard() {
           totalCostUsd: data.totalCostUsd || t.totalCostUsd,
           intent: data.intent || (t.intent === 'Processing...' ? 'Completed' : t.intent),
           agentName: data.agentName || (t.agentName === 'Unknown' ? undefined : t.agentName) || t.agentName,
+          model: data.model || t.model,
         };
       }));
     });

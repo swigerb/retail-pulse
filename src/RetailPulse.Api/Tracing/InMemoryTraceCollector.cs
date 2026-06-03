@@ -83,7 +83,7 @@ public class InMemoryTraceCollector : ITraceCollector
     /// Call this after routing completes so the frontend receives intent/agent context.
     /// This supplements the initial trace_started emitted by CaptureSpan.
     /// </summary>
-    public void EmitTraceStarted(string traceId, DateTimeOffset startTime, string? intent = null, string? agentName = null) => _pushChannel?.TryWrite(new TelemetryPushItem("trace_started", TraceId: traceId, Timestamp: startTime, Intent: intent, AgentName: agentName));
+    public void EmitTraceStarted(string traceId, DateTimeOffset startTime, string? intent = null, string? agentName = null, string? model = null) => _pushChannel?.TryWrite(new TelemetryPushItem("trace_started", TraceId: traceId, Timestamp: startTime, Intent: intent, AgentName: agentName, Model: model));
 
     public IReadOnlyList<TraceSpan>? GetSpans(string traceId) => !_traces.TryGetValue(traceId, out ConcurrentBag<TraceSpan>? bag) ? null : [.. bag.OrderBy(s => s.StartTime)];
 

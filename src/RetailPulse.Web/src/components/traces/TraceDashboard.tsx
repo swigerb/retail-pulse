@@ -277,6 +277,13 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
           const displayAgent = trace.agentName === 'Unknown'
             ? (trace.spans ?? []).find(s => s.type === 'agent')?.name || trace.agentName
             : trace.agentName;
+          // Model name comes from the trace_started SignalR event (specialist.Model)
+          // or as a fallback from the llm.model tag on the agent.{name}.process span.
+          const displayModel = trace.model
+            || (trace.spans ?? [])
+                .find(s => s.type === 'agent' && s.attributes?.['llm.model'])
+                ?.attributes?.['llm.model']
+            || 'Unknown model';
 
           return (
             <div
@@ -292,6 +299,7 @@ export function TraceDashboard({ traces, maxDisplay = 20 }: TraceDashboardProps)
               </span>
               <span className={styles.traceIntent}>{displayIntent}</span>
               <span className={styles.traceAgent}>{displayAgent}</span>
+              <span className={styles.traceAgent} title={`Model: ${displayModel}`}>{displayModel}</span>
               <span className={styles.traceDuration}>{formatDuration(displayDuration)}</span>
               <span className={styles.traceCost}>{formatCost(displayCost)}</span>
               <Badge appearance="filled" color={trace.status === 'completed' ? 'success' : trace.status === 'error' ? 'danger' : 'warning'} style={{ fontSize: '9px' }}>
