@@ -35,6 +35,26 @@
 
 ## Recent Work (2026-06-03, continued)
 
+### 2026-06-03T19:40:00Z — Span Type Telemetry Tests
+
+**Status:** ✅ Complete — Commit 0f4111c, 1,949 backend + 278 frontend tests pass
+
+**What:** Added comprehensive test coverage for span type telemetry end-to-end:
+- **TraceSpanTypeContractTests.cs** (8 xUnit tests): Static contract verification inspecting exact `TraceSpan` creation sites in `ChatEndpoints.cs` and `MemoryExtractionBackgroundService.cs` for `Tags["span.type"]` population
+- **Dashboard telemetry tests** (3 Vitest tests): Runtime validation that `TelemetryPushBackgroundService` correctly forwards `Tags["span.type"]` into frontend payload's `type` field, then asserts tool counters and distribution rendering work correctly
+
+**Why mixed strategy:**
+Hosting full production chat endpoint in tests is expensive and tightly coupled to Azure startup wiring. Static contract tests keep focus on exact span-emission lines Costco changed. Runtime push tests prove frontend-facing payload still depends on that tag.
+
+**Team Impact:**
+- If future edit removes or renames `span.type` tag on routing/agent/tool/memory spans, backend contract suite will fail immediately
+- Dashboard telemetry regression (Unique Tools counter → 0) is now contractually protected
+- Future tool telemetry changes caught before reaching UI
+
+**Decision Documented:** "Span type telemetry tests" in decisions.md.
+
+---
+
 ### 2026-06-03T17:04:29Z — Coverage Validation & Decision Archive
 
 **Status:** ✅ All guardrail tests pass on v10.0.1; coverage pipeline green end-to-end

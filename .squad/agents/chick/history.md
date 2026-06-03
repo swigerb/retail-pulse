@@ -1,5 +1,16 @@
 # Chick — History
 
+## 🔔 Notification — 2026-06-03 Span Type Telemetry Complete
+
+Backend span type telemetry is now live and contracted:
+- **Costco fixed "Unique Tools" = 0** by adding `span.type` tags to all TraceSpan objects (commit a1787df)
+- **Publix added regression tests** to prevent future silent breakages (commit 0f4111c)
+- **Frontend impact:** ZERO — no code changes needed. Trace Dashboard counters/filters will now work correctly.
+
+**See:** `.squad/decisions.md` — "Span type tags on TraceSpan telemetry" and "Span type telemetry tests"
+
+---
+
 ## Notification — 2026-05-16 Timeout Fix from Costco
 
 🔔 **Action Required:** Update `DEFAULT_TIMEOUT_MS` in `src/RetailPulse.Web/src/services/api.ts` from **180s** to **~90s** to align with new backend timeout ceiling.

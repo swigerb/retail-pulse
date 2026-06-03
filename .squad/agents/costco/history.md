@@ -2,6 +2,31 @@
 
 ## Recent Work (2026-06-03)
 
+### 2026-06-03T19:40:00Z — Span Type Tags on TraceSpan Telemetry
+
+**Status:** ✅ Complete — Commit a1787df, 1,926 tests pass
+
+**Issue:** "Unique Tools" counter on Trace Dashboard was always showing 0, preventing tool usage telemetry from being visible.
+
+**Root Cause:** Backend `TraceSpan` objects were not populating `Tags["span.type"]`, so `TelemetryPushBackgroundService` defaulted all spans to `generic`, breaking the frontend's span type filtering and counting logic.
+
+**Solution:** Added `span.type` tag population to all `TraceSpan` creation sites:
+- **ChatEndpoints.cs:** routing, agent, tool, memory spans
+- **MemoryExtractionBackgroundService.cs:** memory extraction spans
+
+**Impact:** 
+- Trace Dashboard now correctly displays unique tool counts and tool distribution
+- Backend telemetry now has contractually-required span type coverage
+- QA has static + runtime regression protection via decision "Span type telemetry tests"
+
+**Decision Documented:** "Span type tags on TraceSpan telemetry" in decisions.md — backend must treat `span.type` as required schema on all future `TraceSpan` producers.
+
+**Team Coordination:**
+- Publix added contract tests to prevent future regressions
+- Chick aware of backend telemetry change (no FE code changes required)
+
+---
+
 ### 2026-06-03T17:51:01Z — Trace Dashboard Model Name Fix
 
 **Status:** ✅ Complete — Commit 699e2fb, Tests pass
