@@ -31,3 +31,20 @@
 - Coverlet upgrade validation pattern (`tests/RetailPulse.Tests/Tooling/CoverletCollectorConfigurationTests.cs` + `tests/verify-coverage-collection.ps1`, 2026-06-03): xUnit-only tests must be *static* — they can inspect `Directory.Packages.props`, the test `.csproj`, the CI workflow, and any pre-existing TestResults artifacts, but they must NOT shell out to `dotnet test` themselves or you re-enter the test runner. The end-to-end exercise lives in a separate PowerShell script that runs `dotnet test --collect "XPlat Code Coverage"` (cobertura), then again with `Format=opencover` (CI parity), then once more with `ExcludeByAttribute=GeneratedCodeAttribute,CompilerGeneratedAttribute` to prove filter config compatibility. Parsing the XML for `<package>/<class>/<method>/<line>` counts (cobertura) and `<Summary numClasses/numMethods>` (OpenCover) catches "report exists but is empty" regressions.
 - PowerShell + `dotnet test` quoting gotcha: passing `--collect:"XPlat Code Coverage"` as a single splatted array element strips the embedded quotes and MSBuild then sees `XPlat Code Coverage` as a property name (MSB4177 invalid character " "). Use the space-separated form `"--collect", "XPlat Code Coverage"` so PowerShell quotes the value automatically when invoking the native process.
 - coverlet.collector v6.0.4 → v10.0.1 was a clean upgrade for our pipeline: cobertura and opencover outputs both parse, `ExcludeByAttribute` still consumes the same wire format, CI's `--collect "XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover` invocation still produces `coverage.opencover.xml`. One observable difference worth noting: v10's OpenCover summary reports the full class count (582) where v6 only reported a subset (136) for the same scope — downstream consumers comparing absolute coverage numbers across the upgrade should expect higher class/method counts in v10.
+
+## Recent Work (2026-06-03, continued)
+
+### 2026-06-03T17:04:29Z — Coverage Validation & Decision Archive
+
+**Status:** ✅ All guardrail tests pass on v10.0.1; coverage pipeline green end-to-end
+
+**What happened:**
+- Scribe merged 2 inbox decision files (ASP.Versioning, coverlet upgrades) into decisions.md
+- Publix's guardrail test suite (`CoverletCollectorConfigurationTests.cs`, 4 tests) validated v10.0.1 compatibility
+- verify-coverage-collection.ps1 script confirmed OpenCover XML format, cobertura format, and ExcludeByAttribute filter config
+
+**Team notifications:**
+- Costco (Backend): Coverage pipeline is green; safe to ship v10.0.1
+- Kroger (Lead): Both deferred bumps from 2026-06-03 sweep are CLOSED
+
+**Commit:** dabe9ff

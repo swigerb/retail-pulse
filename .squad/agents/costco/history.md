@@ -76,3 +76,19 @@ See history-archive.md for sessions prior to 2026-06-03. Archived entries includ
 **Why the prior "four-major-skip" framing overstated risk:** Coverlet's version jumps (3→6→8→10) have repeatedly been release-numbering bumps rather than breaking-API events for the *collector* package on the VSTest path. The breaking surface for v8/v10 is centered on the new MTP extension and msbuild-integration internals, neither of which we consume.
 
 **Stray-file note:** The working tree had two untracked files prepared for this upgrade (`tests/RetailPulse.Tests/Tooling/CoverletCollectorConfigurationTests.cs` and `tests/verify-coverage-collection.ps1`). They are high-quality guardrails — kept, used to validate the upgrade, and committed alongside the bump. The PS1 script tolerates PowerShell's array-splat quoting on the `--collect` argument (no embedded quotes needed).
+
+### 2026-06-03T17:04:29Z — Session Summary & Decision Archive
+
+**Status:** ✅ Both deferred bumps (Asp.Versioning.Http, coverlet.collector) documented and escalated to decisions.md
+
+**What happened:**
+- Scribe merged 2 inbox decision files (`costco-asp-versioning-v10-upgrade.md`, `costco-coverlet-v10-upgrade.md`) into decisions.md
+- Both upgrades are now recorded as active decisions with full team impact analysis
+- Orchestration logs created for Costco and Publix (session recording)
+
+**Team notifications:**
+- Kroger (Lead): "Deferred major-version package bumps (2026-06-03)" decision is now CLOSED — both bumps are done
+- Publix (QA): Coverage pipeline validated; no action item
+- Chick (Frontend): No client regen required; URL conventions stable
+
+**Commits:** 4e63ebd (Asp.Versioning), dabe9ff (coverlet)
