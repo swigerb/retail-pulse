@@ -54,6 +54,32 @@ See history-archive.md for sessions prior to 2026-06-03. Archived entries includ
 
 ## Learnings
 
+### 2026-06-03T13:41:53-04:00 — Trace Dashboard "Unknown" LLM model fix
+
+**Status:** ✅ Complete — Build clean (0 warnings), 27 telemetry tests pass, 31 frontend Dashboard tests pass (including 6 TraceDashboard).
+
+**Symptom:** Trace Dashboard rendered "Unknown" in both the trace row header (`Unknown 47.42s $0.00`) and the span detail (`🤖 Unknown`) instead of the LLM model name (e.g. `gpt-4o-mini`).
+
+**Root cause — three independent gaps in the telemetry pipeline:**
+
+1. **`InMemoryTraceCollector.CaptureSpan`** emits an initial `trace_started` push with `Intent=null, AgentName=null` (before routing classifies the message). The Dashboard `trace_started` SignalR handler was a *dedup-by-traceId noop* on the second event, so the later enriched `EmitTraceStarted` from `ChatEndpoints` (carrying `specialist.DisplayName`) was silently dropped. The trace's `agentName` stayed `'Unknown'` forever.
+2. **`TelemetryPushItem` / SignalR `trace_started` payload** never carried the model name at all. `specialist.Model` was available on every `ISpecialistAgent` but nothing read it.
+3. **`agent.{specialist.Key}.process` span** had no `llm.model` tag — even if the FE wanted to fall back to span attributes, the data wasn't there.
+
+**Plus a 4th, latent bug:** The backend serializes span attributes as `tags`, but the FE TS `TraceSpan` type uses `attributes`. `Dashboard.tsx`'s `span_completed` handler was dropping them entirely on both nested and flat shapes, so *any* span tag (not just `llm.model`) was invisible to the UI.
+
+**Fix — end-to-end plumbing:**
+
+- `TelemetryPushChannel.cs` — added optional `string? Model = null` to `TelemetryPushItem` record (backward-compatible; tests use named params).
+- `InMemoryTraceCollector.EmitTraceStarted` — added `model` parameter, forwarded into the push item.
+- `TelemetryPushBackgroundService` — included `model = item.Model` in the SignalR `trace_started` payload.
+- `ChatEndpoints` — passes `specialist.Model` to `EmitTraceStarted`; adds `llm.model` tag to both the `Activity` and the `TraceSpan` for `agent.{key}.process`.
+- `Trace` TS type — added `model?: string`.
+- `Dashboard.tsx` — rewrote `trace_started` handler to **merge** into an existing trace instead of dedup-skip (this was the actual UI bug fix; the missing model field was the second half). Also mapped backend `tags` → FE `attributes` in `span_completed` so span attributes become accessible.
+- `TraceDashboard.tsx` row + `TraceTimeline.tsx` header — display `trace.model`, falling back to the `llm.model` attribute on the agent span, then `'Unknown model'` / agentName.
+
+**Key takeaway:** When a SignalR event handler does dedup-by-ID and the producer emits the same event twice (once early, once enriched), the second one is invisible. Either merge (preferred when enrichment is the intent) or move the second emission to a distinct event type. The "Unknown" bug *looked* like a missing field but was 50% a state-update bug — adding the `model` field without fixing the merge wouldn't have rendered it either.
+
 - `Asp.Versioning.Http` v10 is a drop-in for projects using only the Minimal API integration with `UrlSegmentApiVersionReader`. The breaking-change risk lives in `Asp.Versioning.Mvc` and `Asp.Versioning.ApiExplorer`, neither of which we ship.
 - General pattern for ""too risky"" deferred bumps: re-check whether the risk surface (MVC/ApiExplorer integration) actually applies to our project before assuming a multi-major skip is dangerous.
 - NuGet skipped the 9.x line entirely for this package — the v10 jump from v8 is one release in practice, not two.

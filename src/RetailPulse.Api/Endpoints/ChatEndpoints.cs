@@ -176,7 +176,7 @@ public static class ChatEndpoints
                     routingDurationMs);
 
                 // Emit trace_started with routing metadata for frontend telemetry panel
-                traceCollector.EmitTraceStarted(traceId, traceStartTime, decision.Intent, specialist.DisplayName);
+                traceCollector.EmitTraceStarted(traceId, traceStartTime, decision.Intent, specialist.DisplayName, specialist.Model);
 
                 logger.LogInformation(
                     "Routing to {AgentKey} ({DisplayName}) — intent: {Intent}, confidence: {Confidence:F2}, traceId: {TraceId}",
@@ -339,6 +339,7 @@ public static class ChatEndpoints
                     agentActivity?.SetTag("agent.tools_called_count", toolsCalledCount);
                     agentActivity?.SetTag("agent.token_input", inputTokens);
                     agentActivity?.SetTag("agent.token_output", outputTokens);
+                    agentActivity?.SetTag("llm.model", specialist.Model);
 
                     traceCollector.CaptureSpan(new TraceSpan(
                         SpanId: Guid.NewGuid().ToString("N")[..16],
@@ -355,7 +356,8 @@ public static class ChatEndpoints
                             ["agent.name"] = specialist.Key,
                             ["agent.tools_called_count"] = toolsCalledCount.ToString(CultureInfo.InvariantCulture),
                             ["agent.token_input"] = inputTokens.ToString(CultureInfo.InvariantCulture),
-                            ["agent.token_output"] = outputTokens.ToString(CultureInfo.InvariantCulture)
+                            ["agent.token_output"] = outputTokens.ToString(CultureInfo.InvariantCulture),
+                            ["llm.model"] = specialist.Model
                         }));
                 }
 

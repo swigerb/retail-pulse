@@ -188,6 +188,7 @@ export interface Trace {
   traceId: string;
   intent: string;
   agentName: string;
+  model?: string;
   startTime: string;
   totalDurationMs: number;
   totalTokens: number;

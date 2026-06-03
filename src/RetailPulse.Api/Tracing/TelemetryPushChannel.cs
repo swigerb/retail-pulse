@@ -12,7 +12,8 @@ public sealed record TelemetryPushItem(
     string? TraceId = null,
     DateTimeOffset? Timestamp = null,
     string? Intent = null,
-    string? AgentName = null);
+    string? AgentName = null,
+    string? Model = null);
 
 /// <summary>
 /// Bounded channel for SignalR telemetry push work items.
