@@ -2,6 +2,25 @@
 
 ## Recent Work (2026-06-03)
 
+### 2026-06-03T17:51:01Z — Trace Dashboard Model Name Fix
+
+**Status:** ✅ Complete — Commit 699e2fb, Tests pass
+
+**Issue:** Trace Dashboard displayed "Unknown" for model names despite backend telemetry having the data.
+
+**Root Cause:**
+1. Backend never sent `specialist.Model` on `trace_started` event
+2. Frontend dedup logic skipped enriched events, preventing model enrichment
+
+**Solution:**
+- Threaded `Model` through full stack: `TelemetryPushItem` → SignalR → TypeScript types
+- Added `llm.model` span attribute to backend telemetry pipeline
+- Rewrote frontend event handler to merge instead of skip enriched events
+
+**Impact:** Model names now correctly propagate from backend instrumentation to frontend display across all trace types.
+
+---
+
 ### 2026-06-03T15:13:12Z — NuGet + .NET Aspire Upgrade Sweep
 
 **Status:** ✅ Complete — Build clean, 1,926 tests pass, committed
