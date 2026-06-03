@@ -2,6 +2,26 @@
 
 ## Recent Work (2026-06-03)
 
+### 2026-06-03T21:45:00Z — Memory Store Routing Restored
+
+**Status:** ✅ Complete — explicit "remember that/this" commands route back to `MemoryManagementAgent`, build clean, 117 memory/prompt/router tests pass
+
+**Issue:** Explicit store commands like "Remember that ClearDesk is trending..." were falling through to `general/fallback`, so the Memory Panel stayed empty even though `MemoryManagementAgent` had a working `IsStoreIntent()` → `StoreAsync()` path.
+
+**Root Cause:** Commit `2810ed0` removed store-intent phrases from both router keyword fast-paths and the router prompt, leaving no route for explicit memory store commands to reach `MemoryManagementAgent`.
+
+**Solution:**
+- Restored `remember that` and `remember this` keyword routing to `AgentIntent.MemoryManagement`
+- Updated the router prompt to classify both explicit store and clear/forget commands as `memory/management`
+- Flipped router regression tests to assert fast-path routing for store commands while keeping non-command preference text on the normal pipeline
+
+**Impact:**
+- `Remember that ...` now reaches `MemoryManagementAgent`, where the agent's store-vs-clear discrimination safely chooses `StoreAsync()`
+- Destructive commands like `Forget everything` still route to the same specialist and remain handled by the destructive path
+- Ambient preference statements like `I'm focused on the Spirits category...` still avoid keyword routing and stay on the general path
+
+---
+
 ### 2026-06-03T20:06:00Z — Memory Management Router Defense-in-Depth
 
 **Status:** ✅ Complete — Commit part of `2810ed0`, 1,972 tests pass

@@ -506,29 +506,23 @@ public class RetailOpsRouterTests
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact]
-    public async Task RouteAsync_RememberThis_DoesNotHitMemoryManagementKeywordFastPath()
+    [Theory]
+    [InlineData("Remember this: ClearDesk is trending up")]
+    [InlineData("Remember that ClearDesk is trending up")]
+    public async Task RouteAsync_RememberStoreCommands_HitMemoryManagementKeywordFastPath(string message)
     {
         var mockClient = new Mock<IChatClient>();
-        mockClient
-            .Setup(x => x.GetResponseAsync(
-                It.IsAny<IEnumerable<ChatMessage>>(),
-                It.IsAny<ChatOptions>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
-                new ChatMessage(ChatRole.Assistant,
-                    $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.75,\"intents\":[\"{AgentIntent.General}\"]}}")));
-
         List<ISpecialistAgent> specialists = CreateSpecialistsWithMemoryIntent();
         RetailOpsRouter router = CreateRouter(mockClient.Object, specialists);
 
-        RoutingDecision result = await router.RouteAsync("Remember this: ClearDesk is trending up", null, null, null);
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
 
-        result.Intent.Should().Be(AgentIntent.General);
+        result.Intent.Should().Be(AgentIntent.MemoryManagement);
+        result.Confidence.Should().Be(0.95);
         mockClient.Verify(x => x.GetResponseAsync(
             It.IsAny<IEnumerable<ChatMessage>>(),
             It.IsAny<ChatOptions>(),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
