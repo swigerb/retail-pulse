@@ -118,6 +118,19 @@ See costco/history.md entry for full list. Notable majors that did go through cl
 - **Microsoft.IdentityModel.Protocols.OpenIdConnect** pinned at 8.18.0 (latest is 8.19.1) because its peer `System.IdentityModel.Tokens.Jwt` only publishes through 8.18.0 — bumping OIDC further causes NU1102.
 - **Microsoft.Bcl.Memory** bumped to 10.0.7 to satisfy `Microsoft.Agents.Connector 1.5.184` transitive requirement; future Agents stack bumps may continue pulling Bcl.Memory forward.
 
+### 2026-06-03T16:06:00Z: Memory-management routing must fail closed on destructive intent only
+
+**By:** Costco (Backend Dev)
+
+The `memory/management` router intent and `MemoryManagementAgent` should treat only explicit destructive phrases as clear/reset actions. Any message starting with `remember` must be handled as a store request if it reaches the memory-management agent, even if routing misclassifies it.
+
+**Why:**
+This bug showed that a single over-broad keyword or prompt description can turn a benign "remember that..." request into destructive data loss. The specialist now acts as a defense-in-depth layer so misrouting cannot wipe user memory.
+
+**Team impact:**
+- **Costco / backend:** Router keyword patterns and prompt wording must stay destructive-only.
+- **Publix / QA:** Future memory-management changes should preserve store-vs-clear discrimination in the specialist, not rely solely on routing. Treat "remember ..." as a regression case.
+
 ## Governance
 
 - All meaningful changes require team consensus

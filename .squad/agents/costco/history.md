@@ -2,6 +2,32 @@
 
 ## Recent Work (2026-06-03)
 
+### 2026-06-03T20:06:00Z — Memory Management Router Defense-in-Depth
+
+**Status:** ✅ Complete — Commit part of `2810ed0`, 1,972 tests pass
+
+**Issue:** Router misclassification could cause benign "remember ..." store requests to trigger destructive clear/reset operations in `MemoryManagementAgent`, causing data loss.
+
+**Root Cause:** `memory/management` router keyword patterns were over-broad, and agent specialist had no fail-closed logic for ambiguous intent.
+
+**Solution:**
+- Removed "remember" and store-intent keywords from `memory/management` router patterns
+- Updated `MemoryManagementAgent` prompt to validate intent before destructive operations — only explicit clear/reset phrases trigger data loss
+- Added store-vs-clear discrimination to specialist agent as defense-in-depth layer against routing errors
+
+**Impact:**
+- Router now fail-closed on store intents — misrouting cannot cascade to destructive actions
+- Defense-in-depth: specialist agent validates intent independent of routing classification
+- Regression protection in place (Publix added 17 memory routing tests)
+
+**Team Impact:**
+- **Publix (QA):** Treat "remember ..." as regression case in any memory-management edit; guard store/clear discrimination
+- **Router/MemoryManagementAgent maintainers:** Keyword patterns stay destructive-only; specialist must remain store-vs-clear validator
+
+**Decision Documented:** "Memory-management routing must fail closed on destructive intent only" in decisions.md.
+
+---
+
 ### 2026-06-03T19:40:00Z — Span Type Tags on TraceSpan Telemetry
 
 **Status:** ✅ Complete — Commit a1787df, 1,926 tests pass
