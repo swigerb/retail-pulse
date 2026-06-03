@@ -59,10 +59,12 @@ public class DemoQuerySmokeTests
     [InlineData("How is Coastline Tacos doing in the West Coast?")]
     [InlineData("How is FreshMart performing in the Northeast?")]
     [InlineData("How is Pinnacle Hardware doing this quarter?")]
-    public async Task BrandPerformingQueries_AllRouteViaKeywordFastPath(string query)
+    [InlineData("Show me Pinnacle Hardware depletion stats in the Midwest for Q1")]
+    [InlineData("How are FreshMart depletions trending in the Northeast this quarter?")]
+    public async Task SimpleBrandLookupQueries_AllRouteViaKeywordFastPath(string query)
     {
-        // All single-brand performance queries must hit BrandPerformingRegex.
-        // This prevents regression if the regex pattern is narrowed.
+        // Simple single-brand performance and depletion lookups must stay on the
+        // GeneralAgent fast-path so they avoid the slower forecasting workflow.
         Mock<IChatClient> mockClient = CreateTrackedMockChatClient();
         RetailOpsRouter router = CreateRouterWithGeneralSpecialist(mockClient.Object);
 

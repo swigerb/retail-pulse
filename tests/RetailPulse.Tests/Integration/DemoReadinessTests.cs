@@ -44,7 +44,7 @@ public class DemoReadinessTests
         { "general", "Show me field sentiment for our top 3 brands in the Southeast", AgentIntent.SentimentField },
 
         // ── Grocery (🛒) ───────────────────────────────────────────────────
-        { "grocery", "How are FreshMart depletions trending in the Northeast this quarter?", AgentIntent.DemandForecasting },
+        { "grocery", "How are FreshMart depletions trending in the Northeast this quarter?", AgentIntent.General },
         { "grocery", "Compare Harvest Table vs FreshMart sell-through rates by region", AgentIntent.DemandForecasting },
         { "grocery", "What is the field sentiment for Harvest Table Meal Kits in the Midwest?", AgentIntent.SentimentField },
 
@@ -58,18 +58,18 @@ public class DemoReadinessTests
         { "qsr", "What is the field sentiment for Coastline Tacos in the West Coast?", AgentIntent.SentimentField },
 
         // ── Home Improvement (🏠) ──────────────────────────────────────────
-        { "home", "Show me Pinnacle Hardware depletion stats in the Midwest for Q1", AgentIntent.DemandForecasting },
+        { "home", "Show me Pinnacle Hardware depletion stats in the Midwest for Q1", AgentIntent.General },
         // NOTE: "How is Summit Outdoor performing..." matches BrandPerformingRegex → General
         { "home", "How is Summit Outdoor performing in the Southeast vs West Coast?", AgentIntent.General },
         { "home", "What is the field sentiment for Pinnacle Hardware Power Tools in the Southwest?", AgentIntent.SentimentField },
 
         // ── Office Supply (📎) ─────────────────────────────────────────────
-        { "office", "How are ClearDesk depletions trending in the Northeast this quarter?", AgentIntent.DemandForecasting },
+        { "office", "How are ClearDesk depletions trending in the Northeast this quarter?", AgentIntent.General },
         { "office", "Compare ClearDesk Technology vs Paper Products sell-through by region", AgentIntent.DemandForecasting },
         { "office", "What is the field sentiment for ClearDesk in the Southeast?", AgentIntent.SentimentField },
 
         // ── Furniture (🛋️) ────────────────────────────────────────────────
-        { "furniture", "Show me Urban Living depletion trends across all regions this quarter", AgentIntent.DemandForecasting },
+        { "furniture", "Show me Urban Living depletion trends across all regions this quarter", AgentIntent.General },
         { "furniture", "Compare Foundry Home vs Urban Living performance in the West Coast", AgentIntent.DemandForecasting },
         { "furniture", "What is the field sentiment for Urban Living in the Pacific Northwest?", AgentIntent.SentimentField },
 

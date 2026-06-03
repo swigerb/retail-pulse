@@ -90,6 +90,33 @@ public class ToolTests
             .Should().Contain("MCP server not reachable");
     }
 
+    [Fact]
+    public async Task DepletionStatsTool_DefaultPeriod_IsYTD()
+    {
+        Uri? capturedUri = null;
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("{}")
+            });
+
+        var client = new HttpClient(handler.Object) { BaseAddress = new Uri("http://localhost:5000") };
+        var tool = new DepletionStatsTool(client);
+
+        await tool.GetDepletionStats("Apex Grill", "Southwest");
+
+        capturedUri.Should().NotBeNull();
+        capturedUri.Query.Should().Contain("period=YTD",
+            "DepletionStatsTool defaults the period parameter to YTD when none is supplied");
+    }
+
     // -------------------------- PortfolioDepletionStatsTool --------------------------
 
     [Fact]

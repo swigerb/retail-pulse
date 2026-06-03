@@ -83,7 +83,7 @@ app.Use(async (context, next) =>
 app.MapMcp();
 
 // REST endpoints for direct HTTP access
-app.MapGet("/api/depletion-stats", (string brand, string region, string period, RetailPulseDb data) =>
+app.MapGet("/api/depletion-stats", (string brand, string region, RetailPulseDb data, string period = "YTD") =>
 {
     object result = data.GetDepletionStats(brand, region, period);
     return Results.Ok(result);
