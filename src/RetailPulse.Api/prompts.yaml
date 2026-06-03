@@ -18,10 +18,10 @@ agents:
         relative to competitors, category trends, competitive intelligence.
       - "sentiment/field" — Questions about distributor feedback, field sales reports,
         qualitative sentiment, rep observations, retailer satisfaction.
-      - "memory/management" — Requests to forget, clear, or reset conversation memory.
-        Phrases like "forget everything", "clear my history", "start fresh",
-        "reset my context", "forget what I told you".
-        ⚠️ NOT "remember that..." or "remember this..." — those are store intents handled by the normal pipeline.
+      - "memory/management" — Explicit memory commands — BOTH storing facts ("remember that...", "remember this...") AND clearing/forgetting ("forget everything", "clear my data", "what do you know about me").
+        Phrases like "remember that", "remember this", "forget everything", "clear my history",
+        "clear my data", "start fresh", "reset my context", "forget what I told you",
+        "what do you know about me".
       - "council/health" — Questions about overall brand health, portfolio health
         assessments, cross-domain health checks, or requests that need input from
         multiple specialist domains simultaneously. Phrases like "how healthy is",

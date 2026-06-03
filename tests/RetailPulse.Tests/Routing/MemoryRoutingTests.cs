@@ -13,9 +13,18 @@ public class MemoryRoutingTests
     [Theory]
     [InlineData("Remember that ClearDesk is trending positive")]
     [InlineData("Remember this for next time: margins are up")]
+    public void TryKeywordClassify_StorePhrases_RouteToMemoryManagement(string message)
+    {
+        object? classification = TryKeywordClassify(message);
+
+        classification.Should().NotBeNull();
+        GetIntent(classification).Should().Be(AgentIntent.MemoryManagement);
+    }
+
+    [Theory]
     [InlineData("What do you remember about ClearDesk?")]
     [InlineData("I'm focused on the Spirits category, especially premium tequila positioning")]
-    public void TryKeywordClassify_StoreAndRecallPhrases_DoNotRouteToMemoryManagement(string message)
+    public void TryKeywordClassify_RecallAndPreferencePhrases_DoNotRouteToMemoryManagement(string message)
     {
         object? classification = TryKeywordClassify(message);
 
@@ -25,9 +34,11 @@ public class MemoryRoutingTests
     [Theory]
     [InlineData("Forget everything")]
     [InlineData("Clear my history")]
+    [InlineData("Clear my data")]
     [InlineData("Start fresh")]
     [InlineData("Reset my context")]
     [InlineData("Forget what I told you")]
+    [InlineData("What do you know about me?")]
     public void TryKeywordClassify_ClearPhrases_RouteToMemoryManagement(string message)
     {
         object? classification = TryKeywordClassify(message);
