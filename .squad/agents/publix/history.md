@@ -35,6 +35,26 @@
 
 ## Recent Work (2026-06-03, continued)
 
+### 2026-06-03T20:06:00Z — Memory Routing Defense-in-Depth Tests
+
+**Status:** ✅ Complete — Commit part of `2810ed0`, 1,972 tests pass (includes 17 new memory routing tests)
+
+**What:** Wrote 17 regression tests covering memory router + `MemoryManagementAgent` store-vs-clear discrimination:
+- Router keyword pattern validation (confirms "remember" excluded from `memory/management` intents)
+- Agent specialist behavior: benign "remember" → store, explicit clear/reset → destruct
+- Edge cases: ambiguous routing followed by specialist validation
+
+**Why:** Defense-in-depth test strategy — guard both router classification AND specialist validation to prevent benign requests from triggering data loss.
+
+**Team Impact:**
+- Memory routing regression cases are now contractually protected
+- Future router or specialist changes will fail immediately if store-vs-clear logic degrades
+- Misclassification by router cannot silently cascade (specialist acts as gatekeeper)
+
+**Commit:** Part of `2810ed0`
+
+---
+
 ### 2026-06-03T19:40:00Z — Span Type Telemetry Tests
 
 **Status:** ✅ Complete — Commit 0f4111c, 1,949 backend + 278 frontend tests pass
