@@ -1,11 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import { TraceDashboard } from '../components/traces';
 import type { Trace } from '../types';
 
 function wrap(ui: React.ReactNode) {
   return <FluentProvider theme={teamsDarkTheme}>{ui}</FluentProvider>;
+}
+
+function expectStatValue(label: string, value: string) {
+  const stat = screen.getByText(label).parentElement;
+  expect(stat).not.toBeNull();
+  expect(within(stat!).getByText(value)).toBeInTheDocument();
 }
 
 describe('TraceDashboard', () => {
@@ -42,9 +48,57 @@ describe('TraceDashboard', () => {
     expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('counts tool_call span types as tools', () => {
+  it('counts distinct tool spans and renders tool usage distribution', () => {
     const trace: Trace = {
       traceId: 'trace-2',
+      intent: 'Demand analysis',
+      agentName: 'Demand Forecast Agent',
+      startTime: '2026-05-15T01:39:53Z',
+      status: 'completed',
+      totalDurationMs: 5000,
+      totalTokens: 1000,
+      totalCostUsd: 0.005,
+      spans: [
+        { id: 's1', name: 'GetDemand', type: 'tool', startTime: '2026-05-15T01:39:53Z', durationMs: 2000 },
+        { id: 's2', name: 'GetSupply', type: 'tool', startTime: '2026-05-15T01:39:55Z', durationMs: 1500 },
+        { id: 's3', name: 'GetDemand', type: 'tool', startTime: '2026-05-15T01:39:57Z', durationMs: 1000 },
+        { id: 's4', name: 'router.classify', type: 'routing', startTime: '2026-05-15T01:39:58Z', durationMs: 500 },
+      ],
+    };
+
+    render(wrap(<TraceDashboard traces={[trace]} />));
+
+    expectStatValue('Unique Tools', '2');
+    expect(screen.getByText('Tool Usage Distribution')).toBeInTheDocument();
+    expect(screen.getByText(/GetDemand \(2\)/)).toBeInTheDocument();
+    expect(screen.getByText(/GetSupply \(1\)/)).toBeInTheDocument();
+  });
+
+  it('shows zero unique tools and hides distribution when no tool spans exist', () => {
+    const trace: Trace = {
+      traceId: 'trace-2b',
+      intent: 'Demand analysis',
+      agentName: 'Demand Forecast Agent',
+      startTime: '2026-05-15T01:39:53Z',
+      status: 'completed',
+      totalDurationMs: 5000,
+      totalTokens: 1000,
+      totalCostUsd: 0.005,
+      spans: [
+        { id: 's1', name: 'router.classify', type: 'routing', startTime: '2026-05-15T01:39:53Z', durationMs: 1000 },
+        { id: 's2', name: 'agent.general.process', type: 'agent', startTime: '2026-05-15T01:39:54Z', durationMs: 4000 },
+      ],
+    };
+
+    render(wrap(<TraceDashboard traces={[trace]} />));
+
+    expectStatValue('Unique Tools', '0');
+    expect(screen.queryByText('Tool Usage Distribution')).not.toBeInTheDocument();
+  });
+
+  it('counts tool_call span types as tools', () => {
+    const trace: Trace = {
+      traceId: 'trace-2c',
       intent: 'Demand analysis',
       agentName: 'Demand Forecast Agent',
       startTime: '2026-05-15T01:39:53Z',
@@ -59,8 +113,7 @@ describe('TraceDashboard', () => {
     };
 
     render(wrap(<TraceDashboard traces={[trace]} />));
-    // 2 unique tools should be counted (appears in stats and possibly other places)
-    expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1);
+    expectStatValue('Unique Tools', '2');
   });
 
   it('displays "Completed" instead of "Processing..." for completed traces', () => {
