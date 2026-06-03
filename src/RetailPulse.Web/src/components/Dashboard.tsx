@@ -112,6 +112,7 @@ export function Dashboard() {
   const [totalDurationMs, setTotalDurationMs] = useState<number | undefined>();
   const [totalTokenUsage, setTotalTokenUsage] = useState<TokenUsage | undefined>();
   const [routingHistory, setRoutingHistory] = useState<RoutingInfo[]>([]);
+  const [memoryRefreshKey, setMemoryRefreshKey] = useState(0);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRequest[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -367,6 +368,7 @@ export function Dashboard() {
   }, []);
 
   const handleResponseReceived = useCallback((response: { totalDurationMs?: number; tokenUsage?: TokenUsage; routing?: RoutingInfo }) => {
+    setMemoryRefreshKey(prev => prev + 1);
     setTotalDurationMs(prev => (prev ?? 0) + (response.totalDurationMs ?? 0));
     if (response.routing) {
       setRoutingHistory(prev => [...prev, response.routing!]);
@@ -658,7 +660,7 @@ export function Dashboard() {
               </CollapsibleSection>
             )}
             <CollapsibleSection title="Memory">
-              <MemoryPanel />
+              <MemoryPanel refreshKey={memoryRefreshKey} />
             </CollapsibleSection>
             {traces.length > 0 && (
               <CollapsibleSection title="Trace Dashboard">

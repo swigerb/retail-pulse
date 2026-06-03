@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import { MemoryPanel } from '../components/MemoryPanel';
@@ -128,5 +128,22 @@ describe('MemoryPanel', () => {
   it('shows total count badge', () => {
     render(wrap(<MemoryPanel entries={mockEntries} />));
     expect(screen.getByText('5')).toBeInTheDocument();
+  });
+
+  it('re-fetches managed memories when refreshKey changes', async () => {
+    const { fetchMemories } = await import('../services/memoryApi');
+    vi.mocked(fetchMemories)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([mockEntries[0]]);
+
+    const { rerender } = render(wrap(<MemoryPanel refreshKey={0} />));
+
+    await waitFor(() => expect(fetchMemories).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('No memories stored yet')).toBeInTheDocument());
+
+    rerender(wrap(<MemoryPanel refreshKey={1} />));
+
+    await waitFor(() => expect(fetchMemories).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('User prefers Southeast region data')).toBeInTheDocument();
   });
 });

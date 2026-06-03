@@ -169,9 +169,11 @@ function formatExpiresIn(dateStr?: string): string | null {
 export interface MemoryPanelProps {
   /** If provided, panel uses these entries instead of fetching */
   entries?: MemoryEntry[];
+  /** Triggers a re-fetch when the panel manages its own entries */
+  refreshKey?: number;
 }
 
-export function MemoryPanel({ entries: externalEntries }: MemoryPanelProps = {}) {
+export function MemoryPanel({ entries: externalEntries, refreshKey }: MemoryPanelProps = {}) {
   const [entries, setEntries] = useState<MemoryEntry[]>(externalEntries ?? []);
   const [loading, setLoading] = useState(!externalEntries);
   const [error, setError] = useState<string | null>(null);
@@ -191,7 +193,7 @@ export function MemoryPanel({ entries: externalEntries }: MemoryPanelProps = {})
       .catch(err => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [externalEntries]);
+  }, [externalEntries, refreshKey]);
 
   const handleForget = useCallback(async (id: string) => {
     try {
