@@ -7,6 +7,54 @@
 **What:** The project owner's name is Brian Swiger (not "Brady"). Always address them as Brian.
 **Why:** User request — captured for team memory
 
+### 2026-06-03T11:22:49Z: Asp.Versioning.Http upgraded 8.1.0 → 10.0.0 (deferral resolved)
+
+**By:** Costco (Backend Dev)
+
+The 2026-06-03 NuGet sweep deferred this bump as "too risky." It turned out to be a drop-in upgrade for our project.
+
+**Outcome:**
+- Single line change in `Directory.Packages.props` (8.1.0 → 10.0.0). No code changes.
+- `dotnet build`: 0 warnings, 0 errors.
+- `dotnet test`: 1,925/1,926 pass (one unrelated flake in `OTelRoutingSpanTests.RoutingSpan_EmitsIntentTag` — passes in isolation; LLM intent routing, not versioning).
+
+**Why the deferral over-estimated risk:**
+The original concern was "URL segment/header convention breakage." Those breakages live in `Asp.Versioning.Mvc` and `Asp.Versioning.ApiExplorer`. We ship neither — we only use `Asp.Versioning.Http` for Minimal API endpoint groups with `UrlSegmentApiVersionReader`. The API surface we touch (`AddApiVersioning`, `ApiVersion`, `UrlSegmentApiVersionReader`, `DefaultApiVersion`, `ReportApiVersions`) is unchanged in v10.
+
+NuGet also skipped a public 9.x line for this package, so the "two-major skip" was actually a single release in practice.
+
+**Team impact:**
+- **Chick (Frontend):** No client regeneration required. URL convention unchanged: `/api/v{n}/...`. Default version still 1.0. `api-supported-versions` / `api-deprecated-versions` reporter headers unchanged.
+- **Publix (QA):** No regression contract sweep needed for this bump; existing `ApiVersioningTests` cover us.
+- **Kroger (Lead):** The remaining deferred item from the 2026-06-03 sweep is `coverlet.collector 6 → 10`, which still needs a CI coverage pipeline owner before bumping.
+
+**Heuristic to remember:**
+Before deferring a major-version package bump as "too risky," check whether the risk surface (e.g. MVC integration, ApiExplorer integration) is actually consumed by the project. A multi-major skip on a slice you don't use is often a one-line change.
+
+### 2026-06-03T13:04:29Z: coverlet.collector upgraded 6.0.4 → 10.0.1 (deferral resolved)
+
+**By:** Costco (Backend Dev)
+
+The second deferred bump from the 2026-06-03 NuGet sweep is now resolved.
+`coverlet.collector` was upgraded **6.0.4 → 10.0.1** in `Directory.Packages.props`.
+
+**Why it's safe:**
+- Only one consumer in the repo: `tests/RetailPulse.Tests/RetailPulse.Tests.csproj`.
+- No `coverlet.msbuild`, no `coverlet.console`, no `.runsettings` files.
+- CI uses the stable VSTest collector contract (`--collect:"XPlat Code Coverage"` + `DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover`), which is **unchanged** in v10.
+- v10 release notes do not remove any CLI flag, MSBuild property, or collector config key that we rely on. The "breaking" surface in v8/v10 is in the new `coverlet.MTP` extension and msbuild-integration internals, neither of which we use.
+
+**Validation:**
+- `dotnet restore` — clean
+- `dotnet build --configuration Release` — 0 warnings, 0 errors
+- `dotnet test --collect:"XPlat Code Coverage" ... Format=opencover` — **1,937 tests pass**, `coverage.opencover.xml` produced at the expected path with valid `<CoverageSession>` content.
+- The pre-existing "Unable to find a datacollector" warning on `RetailPulse.LoadTests` is unchanged (that project doesn't reference `coverlet.collector` — same behavior on v6).
+
+**Team impact:**
+- **Publix (QA):** Coverage pipeline is green end-to-end; no action needed.
+- **Kroger (Lead):** Both deferred bumps from the 2026-06-03 sweep are now closed. The "Deferred major-version package bumps" decision can be marked resolved.
+- **Chick (Frontend):** No impact.
+
 # Deferred major-version package bumps (2026-06-03)
 
 **Author:** Costco (Backend Dev)
