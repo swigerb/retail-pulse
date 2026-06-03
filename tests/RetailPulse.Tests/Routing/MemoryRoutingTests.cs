@@ -14,6 +14,7 @@ public class MemoryRoutingTests
     [InlineData("Remember that ClearDesk is trending positive")]
     [InlineData("Remember this for next time: margins are up")]
     [InlineData("What do you remember about ClearDesk?")]
+    [InlineData("I'm focused on the Spirits category, especially premium tequila positioning")]
     public void TryKeywordClassify_StoreAndRecallPhrases_DoNotRouteToMemoryManagement(string message)
     {
         object? classification = TryKeywordClassify(message);
