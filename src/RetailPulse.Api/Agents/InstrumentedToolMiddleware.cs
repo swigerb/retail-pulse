@@ -55,6 +55,9 @@ internal sealed class InstrumentedAIFunction : AIFunction
 
     public override string Name => _inner.Name;
     public override string Description => _inner.Description;
+    public override System.Text.Json.JsonElement JsonSchema => _inner.JsonSchema;
+    public override System.Text.Json.JsonElement? ReturnJsonSchema => _inner.ReturnJsonSchema;
+    public override IReadOnlyDictionary<string, object?> AdditionalProperties => _inner.AdditionalProperties;
 
     protected override async ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
@@ -137,6 +140,9 @@ internal sealed class TimedAIFunction : AIFunction
 
     public override string Name => _inner.Name;
     public override string Description => _inner.Description;
+    public override System.Text.Json.JsonElement JsonSchema => _inner.JsonSchema;
+    public override System.Text.Json.JsonElement? ReturnJsonSchema => _inner.ReturnJsonSchema;
+    public override IReadOnlyDictionary<string, object?> AdditionalProperties => _inner.AdditionalProperties;
 
     protected override async ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,

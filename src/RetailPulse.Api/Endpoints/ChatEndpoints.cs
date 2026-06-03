@@ -409,7 +409,7 @@ public static class ChatEndpoints
                         DateTime.UtcNow), ct);
 
                     await auditLog.LogAsync(new AuditEntry(
-                        $"{sessionId}-{Guid.NewGuid():N}"[..32],
+                        CreateAuditEntryId(),
                         DateTime.UtcNow, userId, specialist.Key,
                         $"chat.{decision.Intent}",
                         request.Message[..Math.Min(200, request.Message.Length)],
@@ -786,6 +786,8 @@ public static class ChatEndpoints
 
         return app;
     }
+
+    private static string CreateAuditEntryId() => Guid.NewGuid().ToString("N");
 
     private static string ExtractBrand(string message, TenantConfiguration tenant)
     {

@@ -52,6 +52,33 @@ public partial class RetailOpsRouter : IAgentRouter
     private static partial Regex BrandPerformingRegex();
 
     /// <summary>
+    /// Matches single-brand depletion lookup prompts like "Show me Pinnacle Hardware depletion stats in the Midwest for Q1"
+    /// and keeps them on the lightweight GeneralAgent path (single MCP call) instead of the slower forecasting workflow.
+    /// </summary>
+    [GeneratedRegex(@"(?:show me|give me|what(?:'s| is| are)?|how(?:'s| is| are)?) .+ depletion stats", RegexOptions.IgnoreCase)]
+    private static partial Regex BrandDepletionStatsRegex();
+
+    /// <summary>
+    /// Matches simple single-brand depletion trend lookups like "How are FreshMart depletions trending in the Northeast?"
+    /// so they use the factual depletion path instead of forecast/seasonality/risk tool chains.
+    /// </summary>
+    [GeneratedRegex(@"(?:how are|show me|give me) .+ depletion trends?|how are .+ depletions trending", RegexOptions.IgnoreCase)]
+    private static partial Regex BrandDepletionTrendRegex();
+
+    private static readonly string[] _complexDemandIndicators =
+    [
+        "compare",
+        "forecast",
+        "predict",
+        "seasonal",
+        "seasonality",
+        "risk",
+        "risks",
+        "portfolio",
+        "all brands"
+    ];
+
+    /// <summary>
     /// Keyword patterns mapped to their intent. Each entry has "strong" keywords that match
     /// unambiguously on their own, regardless of message length or context. Short or generic
     /// keywords that could fire on ambiguous queries are excluded — the LLM handles those.
@@ -226,18 +253,17 @@ public partial class RetailOpsRouter : IAgentRouter
     private static IntentClassification? TryKeywordClassify(string message)
     {
         // Portfolio-level "performing" queries → council (multi-agent synthesis)
-        // Single-brand queries like "How is Apex Grill performing in the Southwest?"
-        // intentionally fall through to the brand regex below → routes to GeneralAgent
-        // (1 tool call) instead of the Consensus Council (4+ LLM roundtrips).
+        // Single-brand queries intentionally fall through to the lightweight GeneralAgent
+        // path (1 MCP call) instead of the slower Demand Forecast agent workflow.
         if (PortfolioPerformingRegex().IsMatch(message))
         {
             return new IntentClassification(
                 AgentIntent.PortfolioHealth, _keywordMatchConfidence, [AgentIntent.PortfolioHealth]);
         }
 
-        // Single-brand performance queries: "how is Apex Grill performing in the Southwest?"
-        // These are simple data lookups → General intent (one tool call)
-        if (BrandPerformingRegex().IsMatch(message) && !PortfolioPerformingRegex().IsMatch(message))
+        // Simple single-brand performance/depletion lookups should bypass the LLM router
+        // and skip the forecast tool chain entirely.
+        if (IsSimpleSingleBrandLookup(message))
         {
             return new IntentClassification(
                 AgentIntent.General, _keywordMatchConfidence, [AgentIntent.General]);
@@ -255,6 +281,18 @@ public partial class RetailOpsRouter : IAgentRouter
         }
 
         return null;
+    }
+
+    private static bool IsSimpleSingleBrandLookup(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return false;
+
+        string lower = $" {message.ToLowerInvariant()} ";
+        return !_complexDemandIndicators.Any(lower.Contains)
+            && (BrandPerformingRegex().IsMatch(message)
+                || BrandDepletionStatsRegex().IsMatch(message)
+                || BrandDepletionTrendRegex().IsMatch(message));
     }
 
     private async Task<IntentClassification> ClassifyIntentAsync(
