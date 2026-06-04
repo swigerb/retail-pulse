@@ -131,6 +131,35 @@ This bug showed that a single over-broad keyword or prompt description can turn 
 - **Costco / backend:** Router keyword patterns and prompt wording must stay destructive-only.
 - **Publix / QA:** Future memory-management changes should preserve store-vs-clear discrimination in the specialist, not rely solely on routing. Treat "remember ..." as a regression case.
 
+### 2026-06-04T12:49:32Z: UserId Resolution Must Go Through `UserIdentity.Resolve`
+
+**By:** Costco (Backend Dev)
+
+The Memory Panel was structurally empty for every user because the chat write path and the `/api/memory` read path resolved `userId` from two different sources. In dev mode, `DevelopmentAuthHandler` stamps an `oid="00000000-…"` claim, while the chat endpoint read `request.User?.ObjectId ?? "anonymous"` from the request body (always null). Writes landed under `anonymous`; reads queried `00000000-…`. The two surfaces could not see each other's data.
+
+**Decision:**
+Every endpoint, middleware, and agent that needs a `userId` must resolve it through `RetailPulse.Api.Auth.UserIdentity.Resolve(ClaimsPrincipal?, string?)`. Direct reads of claims or hand-rolled fallbacks are no longer acceptable for identity that touches the memory store, audit log, or per-user persistence.
+
+**Resolution priority (fixed):**
+1. Explicit body `ObjectId` (when present and non-whitespace)
+2. `oid` claim — short form or `http://schemas.microsoft.com/identity/claims/objectidentifier`
+3. `"anonymous"` (constant `UserIdentity.AnonymousUserId`)
+
+Endpoints that mutate a `ChatRequest` should also normalize `request.User` with the resolved id before passing to specialist agents.
+
+**Files touched:**
+- **New:** `src/RetailPulse.Api/Auth/UserIdentity.cs`
+- `src/RetailPulse.Api/Endpoints/MemoryEndpoints.cs`
+- `src/RetailPulse.Api/Endpoints/ChatEndpoints.cs`
+- **New:** `tests/RetailPulse.Tests/Endpoints/UserIdentityTests.cs` (7 tests)
+
+**Team impact:**
+- **Costco / backend:** Any new endpoint persisting per-user data (memory, audit, preferences, feedback) must use the helper. Auth mode swaps (Dev → Test → Prod) are now centralized.
+- **Publix / QA:** HTTP-level integration tests for `/api/memory` can now verify write/read paths see the same user.
+- **Chick / frontend:** Response shape for memory operations now consistently matches `types/index.ts` union.
+
+**Verification:** POST `/api/chat` "Remember that …" → GET `/api/memory` returns stored entry. Full suite 1,992 passing (+7 new tests).
+
 ## Governance
 
 - All meaningful changes require team consensus
