@@ -20,15 +20,15 @@ public class TraceSpanTypeContractTests
     private static readonly string RepoRoot = FindRepoRoot();
 
     [Theory]
-    [InlineData("src\\RetailPulse.Api\\Endpoints\\ChatEndpoints.cs", "OperationName:\\s*\"router\\.classify\"", "routing")]
-    [InlineData("src\\RetailPulse.Api\\Endpoints\\ChatEndpoints.cs", "OperationName:\\s*\"router\\.select_agent\"", "routing")]
-    [InlineData("src\\RetailPulse.Api\\Endpoints\\ChatEndpoints.cs", "OperationName:\\s*\"memory\\.recall\"", "memory")]
-    [InlineData("src\\RetailPulse.Api\\Endpoints\\ChatEndpoints.cs", "OperationName:\\s*\\$\"agent\\.\\{specialist\\.Key\\}\\.process\"", "agent")]
-    [InlineData("src\\RetailPulse.Api\\Endpoints\\ChatEndpoints.cs", "OperationName:\\s*\\$\"tool\\.\\{span\\.Name\\}\"", "tool")]
-    [InlineData("src\\RetailPulse.Api\\Memory\\MemoryExtractionBackgroundService.cs", "OperationName:\\s*\"memory\\.store\"", "memory")]
+    [InlineData("src/RetailPulse.Api/Endpoints/ChatEndpoints.cs", "OperationName:\\s*\"router\\.classify\"", "routing")]
+    [InlineData("src/RetailPulse.Api/Endpoints/ChatEndpoints.cs", "OperationName:\\s*\"router\\.select_agent\"", "routing")]
+    [InlineData("src/RetailPulse.Api/Endpoints/ChatEndpoints.cs", "OperationName:\\s*\"memory\\.recall\"", "memory")]
+    [InlineData("src/RetailPulse.Api/Endpoints/ChatEndpoints.cs", "OperationName:\\s*\\$\"agent\\.\\{specialist\\.Key\\}\\.process\"", "agent")]
+    [InlineData("src/RetailPulse.Api/Endpoints/ChatEndpoints.cs", "OperationName:\\s*\\$\"tool\\.\\{span\\.Name\\}\"", "tool")]
+    [InlineData("src/RetailPulse.Api/Memory/MemoryExtractionBackgroundService.cs", "OperationName:\\s*\"memory\\.store\"", "memory")]
     public void ProductionTraceSpanCreation_SetsExpectedSpanTypeTag(string relativePath, string operationPattern, string expectedType)
     {
-        string fullPath = Path.Combine(RepoRoot, relativePath);
+        string fullPath = Path.Combine(RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
         File.Exists(fullPath).Should().BeTrue($"expected source file '{relativePath}' to exist");
 
         string source = File.ReadAllText(fullPath);
@@ -131,10 +131,10 @@ public class TraceSpanTypeContractTests
 
     private static async Task RunServiceAsync(TelemetryPushBackgroundService service, CancellationToken cancellationToken)
     {
-        var method = typeof(TelemetryPushBackgroundService).GetMethod("ExecuteAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        System.Reflection.MethodInfo? method = typeof(TelemetryPushBackgroundService).GetMethod("ExecuteAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
         method.Should().NotBeNull();
 
-        var task = method.Invoke(service, [cancellationToken]).Should().BeAssignableTo<Task>().Subject;
+        var task = (Task)method!.Invoke(service, [cancellationToken])!;
         await task;
     }
 }
