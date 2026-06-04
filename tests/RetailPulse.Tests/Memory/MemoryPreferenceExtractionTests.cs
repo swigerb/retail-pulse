@@ -19,7 +19,10 @@ public class MemoryPreferenceExtractionTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatResponse(
                 new ChatMessage(ChatRole.Assistant,
-                    """{"summary":"User expressed focus on Spirits category and premium tequila positioning","entities":["Spirits","premium tequila"],"preference":"Focused on Spirits category, especially premium tequila positioning"}""")));
+#pragma warning disable JSON002 // Probable JSON string detected — intentional test fixture
+                    """{"summary":"User expressed focus on Spirits category and premium tequila positioning","entities":["Spirits","premium tequila"],"preference":"Focused on Spirits category, especially premium tequila positioning"}"""
+#pragma warning restore JSON002
+                    )));
 
         var extraction = new MemoryExtractionService(chatClient.Object, NullLogger<MemoryExtractionService>.Instance);
 
