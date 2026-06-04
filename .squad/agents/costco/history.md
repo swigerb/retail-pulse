@@ -2,6 +2,26 @@
 
 ## Recent Work (2026-06-03)
 
+### 2026-06-03T21:25:19-04:00 — Memory Routing Priority Beats Brand Lookup
+
+**Status:** ✅ Complete — memory commands now short-circuit router keyword classification before portfolio/general brand fast-paths; targeted build + memory/router suites pass
+
+**Issue:** Explicit memory directives like "Remember that ClearDesk depletions are trending in the Northeast this quarter" could be intercepted by lightweight brand/performance shortcuts before the router reached memory keyword handling.
+
+**Root Cause:** `RetailOpsRouter.TryKeywordClassify()` evaluated portfolio and single-brand shortcut checks ahead of memory intent detection, so memory directives did not have absolute routing priority.
+
+**Solution:**
+- Added `IsMemoryCommand()` as the first gate in `TryKeywordClassify()`
+- Preserved existing behavior for portfolio and simple single-brand lookups after the memory early exit
+- Expanded router regressions to cover `remember ...` commands that also contain trend/depletion language
+
+**Impact:**
+- Store/forget/reset directives now always route to `MemoryManagementAgent` even when they mention brands, trends, or depletion phrasing
+- Ordinary single-brand performance/depletion questions still stay on the lightweight `General` path
+- No change to `MemoryExtractionService`: Azure content-filter hits already degrade safely to warning + skip
+
+---
+
 ### 2026-06-03T21:45:00Z — Memory Store Routing Restored
 
 **Status:** ✅ Complete — explicit "remember that/this" commands route back to `MemoryManagementAgent`, build clean, 117 memory/prompt/router tests pass

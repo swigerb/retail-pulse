@@ -509,6 +509,7 @@ public class RetailOpsRouterTests
     [Theory]
     [InlineData("Remember this: ClearDesk is trending up")]
     [InlineData("Remember that ClearDesk is trending up")]
+    [InlineData("Remember that ClearDesk depletions are trending in the Northeast this quarter")]
     public async Task RouteAsync_RememberStoreCommands_HitMemoryManagementKeywordFastPath(string message)
     {
         var mockClient = new Mock<IChatClient>();
