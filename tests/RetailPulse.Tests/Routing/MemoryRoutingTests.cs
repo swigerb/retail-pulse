@@ -13,6 +13,8 @@ public class MemoryRoutingTests
     [Theory]
     [InlineData("Remember that ClearDesk is trending positive")]
     [InlineData("Remember this for next time: margins are up")]
+    [InlineData("Remember ClearDesk is trending modestly positive in the Northeast this quarter")]
+    [InlineData("Remember that ClearDesk depletions are trending in the Northeast this quarter")]
     public void TryKeywordClassify_StorePhrases_RouteToMemoryManagement(string message)
     {
         object? classification = TryKeywordClassify(message);

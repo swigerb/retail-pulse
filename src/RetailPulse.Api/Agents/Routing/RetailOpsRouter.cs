@@ -252,6 +252,14 @@ public partial class RetailOpsRouter : IAgentRouter
     /// </summary>
     private static IntentClassification? TryKeywordClassify(string message)
     {
+        // Memory commands have absolute priority — must not be intercepted by
+        // brand-lookup shortcuts or portfolio regex patterns.
+        if (IsMemoryCommand(message))
+        {
+            return new IntentClassification(
+                AgentIntent.MemoryManagement, _keywordMatchConfidence, [AgentIntent.MemoryManagement]);
+        }
+
         // Portfolio-level "performing" queries → council (multi-agent synthesis)
         // Single-brand queries intentionally fall through to the lightweight GeneralAgent
         // path (1 MCP call) instead of the slower Demand Forecast agent workflow.
@@ -281,6 +289,19 @@ public partial class RetailOpsRouter : IAgentRouter
         }
 
         return null;
+    }
+
+    private static bool IsMemoryCommand(string message)
+    {
+        string lower = message.ToLowerInvariant();
+
+        // Store intents
+        if (lower.StartsWith("remember that") || lower.StartsWith("remember this") || lower.StartsWith("remember "))
+            return true;
+
+        // Destructive intents
+        return lower.Contains("forget") || lower.Contains("clear my") || lower.Contains("start fresh")
+            || lower.Contains("reset my context") || lower.Contains("what do you know about me");
     }
 
     private static bool IsSimpleSingleBrandLookup(string message)
