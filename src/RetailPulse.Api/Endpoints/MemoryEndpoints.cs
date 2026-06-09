@@ -1,3 +1,4 @@
+using RetailPulse.Api.Auth;
 using RetailPulse.Contracts.Memory;
 
 namespace RetailPulse.Api.Endpoints;
@@ -15,9 +16,7 @@ public static class MemoryEndpoints
 
         group.MapGet("/", async (IConversationMemory memory, HttpContext httpContext, CancellationToken ct) =>
         {
-            string userId = httpContext.User.FindFirst("oid")?.Value
-                      ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                      ?? "anonymous";
+            string userId = UserIdentity.Resolve(httpContext.User);
 
             IReadOnlyList<MemoryEntry> entries = await memory.RecallAsync(userId, query: null, maxResults: 100, ct);
 
@@ -25,13 +24,14 @@ public static class MemoryEndpoints
             {
                 id = e.Id,
                 content = e.Content,
-                createdAt = e.CreatedAt.ToString("o"),
+                storedAt = e.CreatedAt.ToString("o"),
+                expiresAt = e.ExpiresAt.ToString("o"),
                 type = e.Type switch
                 {
-                    MemoryType.ConversationSummary => "fact",
+                    MemoryType.ConversationSummary => "conversation",
                     MemoryType.UserPreference => "preference",
-                    MemoryType.EntityMention => "context",
-                    _ => "fact"
+                    MemoryType.EntityMention => "entity",
+                    _ => "conversation"
                 }
             });
 
@@ -42,15 +42,23 @@ public static class MemoryEndpoints
 
         group.MapDelete("/{id}", async (string id, IConversationMemory memory, HttpContext httpContext, CancellationToken ct) =>
         {
-            string userId = httpContext.User.FindFirst("oid")?.Value
-                      ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                      ?? "anonymous";
+            string userId = UserIdentity.Resolve(httpContext.User);
 
             await memory.ForgetEntryAsync(userId, id, ct);
             return Results.NoContent();
         })
         .WithName("DeleteMemory")
         .WithSummary("Delete a single memory entry by ID");
+
+        group.MapDelete("/", async (IConversationMemory memory, HttpContext httpContext, CancellationToken ct) =>
+        {
+            string userId = UserIdentity.Resolve(httpContext.User);
+
+            await memory.ForgetAsync(userId, ct);
+            return Results.NoContent();
+        })
+        .WithName("DeleteAllMemories")
+        .WithSummary("Delete all memory entries for the current user");
 
         return app;
     }

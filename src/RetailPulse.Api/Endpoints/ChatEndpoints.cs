@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.AspNetCore.SignalR;
 using RetailPulse.Api.Agents;
+using RetailPulse.Api.Auth;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
@@ -52,7 +53,16 @@ public static class ChatEndpoints
             try
             {
                 string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
-                string userId = request.User?.ObjectId ?? "anonymous";
+                string userId = UserIdentity.Resolve(httpContext.User, request.User?.ObjectId);
+                // Normalise request.User so downstream agents resolve the same userId
+                // (MemoryManagementAgent reads request.User?.ObjectId — without this
+                // it would diverge from the /api/memory read path under dev auth).
+                request = request with
+                {
+                    User = request.User is null
+                        ? new UserContext(userId, httpContext.User?.Identity?.Name ?? "Anonymous", string.Empty)
+                        : request.User with { ObjectId = userId }
+                };
 
                 // ── Guardrails: input check ──────────────────────────────────────
                 GuardrailResult guardrailResult = await guardrails.CheckInputAsync(request, ct);
@@ -569,7 +579,13 @@ public static class ChatEndpoints
             try
             {
                 string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
-                string userId = request.User?.ObjectId ?? "anonymous";
+                string userId = UserIdentity.Resolve(httpContext.User, request.User?.ObjectId);
+                request = request with
+                {
+                    User = request.User is null
+                        ? new UserContext(userId, httpContext.User?.Identity?.Name ?? "Anonymous", string.Empty)
+                        : request.User with { ObjectId = userId }
+                };
 
                 // Guardrails input check
                 GuardrailResult guardrailResult = await guardrails.CheckInputAsync(request, ct);
