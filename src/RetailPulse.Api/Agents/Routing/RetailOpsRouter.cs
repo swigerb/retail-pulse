@@ -65,6 +65,13 @@ public partial class RetailOpsRouter : IAgentRouter
     [GeneratedRegex(@"(?:how are|show me|give me) .+ depletion trends?|how are .+ depletions trending", RegexOptions.IgnoreCase)]
     private static partial Regex BrandDepletionTrendRegex();
 
+    /// <summary>
+    /// Matches cross-region depletion comparison queries like "Compare depletion trends across all regions for this quarter".
+    /// These route directly to DemandForecasting (skipping the LLM router call) to save one AI roundtrip.
+    /// </summary>
+    [GeneratedRegex(@"compare\b.*depletion.*(?:region|all region|across)", RegexOptions.IgnoreCase)]
+    private static partial Regex CrossRegionDepletionCompareRegex();
+
     private static readonly string[] _complexDemandIndicators =
     [
         "compare",
@@ -267,6 +274,15 @@ public partial class RetailOpsRouter : IAgentRouter
         {
             return new IntentClassification(
                 AgentIntent.PortfolioHealth, _keywordMatchConfidence, [AgentIntent.PortfolioHealth]);
+        }
+
+        // Cross-region depletion comparisons: route directly to DemandForecasting,
+        // bypassing the LLM router call to save one AI roundtrip and reduce token
+        // consumption on queries that will already be token-heavy (multi-region data).
+        if (CrossRegionDepletionCompareRegex().IsMatch(message))
+        {
+            return new IntentClassification(
+                AgentIntent.DemandForecasting, _keywordMatchConfidence, [AgentIntent.DemandForecasting]);
         }
 
         // Simple single-brand performance/depletion lookups should bypass the LLM router

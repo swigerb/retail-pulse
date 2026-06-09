@@ -572,14 +572,15 @@ if (string.IsNullOrWhiteSpace(openAiApiKey))
 // NetworkTimeout caps a single HTTP attempt (one LLM roundtrip) to the AI Gateway.
 // 45s accommodates complex reasoning chains and tool-augmented responses that
 // legitimately take 15-30s. The 90s request-level timeout in /api/chat is the ceiling.
-// RetryPolicy: 1 retry handles genuine transient 429s (APIM bursts that clear in
-// seconds) without burning the full request budget. With 3 retries, exponential
-// backoff + Retry-After delays consumed the entire budget on persistent rate
-// limits, producing misleading 504 timeouts instead of fast 429 errors.
+// RetryPolicy: 2 retries with exponential backoff (respects Retry-After headers from
+// APIM). This handles transient 429 bursts from multi-tool queries (e.g. cross-region
+// comparisons that generate 4+ sequential LLM calls) without burning the full request
+// budget. The SDK's exponential backoff starts at ~800ms and caps individual waits at
+// ~4s, so 2 retries add at most ~8s — well within the 90s request-level ceiling.
 var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
 {
     NetworkTimeout = TimeSpan.FromSeconds(45),
-    RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 1)
+    RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 2)
 };
 
 var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(

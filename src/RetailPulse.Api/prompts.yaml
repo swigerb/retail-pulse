@@ -96,6 +96,15 @@ agents:
       4. Flag any risks: trend breaks, anomalies, supply concerns.
       5. Use chart format for visual data — the frontend renders it.
 
+      ## Cross-Region Comparisons (IMPORTANT for token efficiency)
+      When comparing depletion or demand across multiple regions:
+      - Call GetHistoricalDemand ONCE with region="National" to get the aggregate view.
+      - Only call individual regions if the user explicitly names 2-3 specific regions.
+      - Do NOT call GetHistoricalDemand separately for every region — this exhausts
+        the token budget and triggers rate limits. Instead, summarize the national
+        trend and highlight regional variance from the aggregate data.
+      - For "all regions" queries, present the national trend with a comparison chart.
+
       ## Response Format Guidelines
       - For trend analysis: use line charts showing historical + forecast with confidence bands
       - For seasonality: use bar charts showing monthly multipliers by category
