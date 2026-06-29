@@ -1,5 +1,28 @@
 # Chick — History
 
+## ✅ PR #1 Final Review — Memory Type Contract Verification (2026-06-29)
+
+**Task:** Verify frontend memory type contract matches backend changes in `MemoryEndpoints.cs`
+
+**Backend changes (from PR #1):**
+- `ConversationSummary` now serializes as `"conversation"` (was `"fact"`)
+- `EntityMention` now serializes as `"entity"` (was `"context"`)
+- New field: `expiresAt` (optional DateTime)
+
+**Frontend verification:**
+- ✅ `src/RetailPulse.Web/src/types/index.ts` — `MemoryType = 'conversation' | 'preference' | 'entity'` (CORRECT)
+- ✅ `MemoryEntry` interface includes `expiresAt?: string;` (CORRECT, optional, properly typed)
+- ✅ `MemoryPanel.tsx` — `MEMORY_TYPE_CONFIG` references all three types correctly
+- ✅ `formatExpiresIn()` helper displays expiration times correctly
+- ✅ No `any` type escapes in memory-related code
+- ✅ Build passes: `npm run build` completed successfully with 0 TypeScript errors
+
+**Outcome:** CONSISTENT — no changes needed. The frontend types have been correct since initial Sprint 1.3 memory feature implementation (commit 5a060c6). Backend and frontend contracts are fully aligned.
+
+**Impact:** PR #1 is cleared for merge from frontend contract perspective.
+
+---
+
 ## 🔔 Notification — 2026-06-04 Memory Store Fix from Costco
 
 Backend memory persistence bug is now fixed. The /api/memory endpoint now receives and returns consistent user identity across write/read paths.
