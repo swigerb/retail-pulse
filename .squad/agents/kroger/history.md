@@ -36,3 +36,31 @@
 ---
 
 **Archive:** See kroger/history-archive.md for detailed May 14 session work and prior sessions.
+
+## Learnings
+
+### 2026-06-29 — Board Cleanup: Stray Template Duplicates
+
+**Context:**
+The working tree on branch `squad/upgrade-deps-and-429-fix` accumulated 15 untracked `.md` files at the `.squad/` root directory—exact byte-for-byte duplicates of files in `.squad/templates/`. These were artifacts from a bad copy operation that cluttered the working tree.
+
+**Action Taken:**
+- Verified all 15 stray files were byte-identical to their template counterparts using MD5 hashing before deletion
+- All 15 deletions proceeded without issues (no differing files, no missing templates)
+- Committed the legitimate 6 tracked modifications (Squad v0.9.4 governance upgrade) separately from the cleanup
+- Final commit hash: `61516b8` on branch `squad/upgrade-deps-and-429-fix`
+
+**Key Insight:**
+Duplicate template files at root were 100% bit-for-bit identical—this strongly indicates a copy-and-paste artifact (e.g., from a script or prior workspace sync) rather than intentional variants. The `.squad/templates/` directory is the single source of truth for template content; any duplicates at root should be treated as erroneous clutter.
+
+**Files Deleted:**
+charter.md, constraint-tracking.md, copilot-instructions.md, fact-checker-charter.md, history.md, issue-lifecycle.md, mcp-config.md, multi-agent-format.md, orchestration-log.md, plugin-marketplace.md, raw-agent-output.md, roster.md, run-output.md, scribe-charter.md, skill.md
+
+**Commit Message:**
+```
+chore(squad): upgrade governance to v0.9.4 + remove stray template duplicates
+
+- Update squad.agent.md and squad.agent.md.template to v0.9.4 governance
+- Update copilot-instructions, routing, scribe-charter templates
+- Remove 15 stray template duplicates accidentally copied to .squad/ root
+```
