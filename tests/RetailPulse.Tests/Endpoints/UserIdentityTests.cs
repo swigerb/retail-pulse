@@ -12,33 +12,36 @@ namespace RetailPulse.Tests.Endpoints;
 public class UserIdentityTests
 {
     [Fact]
-    public void Resolve_PrefersBodyObjectId_OverClaim()
+    public void Resolve_PrefersOidClaim_OverBodyObjectId()
     {
-        ClaimsPrincipal principal = PrincipalWithOid("00000000-0000-0000-0000-000000000000");
+        ClaimsPrincipal principal = PrincipalWithOid("claim-oid");
 
-        string id = UserIdentity.Resolve(principal, bodyObjectId: "user-from-body");
+        string id = UserIdentity.Resolve(principal, bodyObjectId: "spoofed-user-from-body");
 
-        id.Should().Be("user-from-body");
+        id.Should().Be("claim-oid",
+            "authenticated claim must take priority to prevent request-body spoofing");
     }
 
     [Fact]
-    public void Resolve_FallsBackToOidClaim_WhenBodyMissing()
+    public void Resolve_UsesBodyObjectId_WhenNoClaim()
     {
-        ClaimsPrincipal principal = PrincipalWithOid("00000000-0000-0000-0000-000000000000");
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Name, "Alice")])); // No oid claim
 
-        string id = UserIdentity.Resolve(principal, bodyObjectId: null);
+        string id = UserIdentity.Resolve(principal, bodyObjectId: "body-fallback");
 
-        id.Should().Be("00000000-0000-0000-0000-000000000000");
+        id.Should().Be("body-fallback");
     }
 
     [Fact]
-    public void Resolve_FallsBackToOidClaim_WhenBodyIsWhitespace()
+    public void Resolve_PrefersOidClaim_EvenWhenBodyIsNonWhitespace()
     {
         ClaimsPrincipal principal = PrincipalWithOid("real-oid");
 
-        string id = UserIdentity.Resolve(principal, bodyObjectId: "   ");
+        string id = UserIdentity.Resolve(principal, bodyObjectId: "non-empty-body");
 
-        id.Should().Be("real-oid");
+        id.Should().Be("real-oid",
+            "claim takes priority even when body is present");
     }
 
     [Fact]
