@@ -30,12 +30,6 @@ public static class UserIdentity
         string? oid = principal?.FindFirst("oid")?.Value
             ?? principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
 
-        if (!string.IsNullOrWhiteSpace(oid))
-            return oid;
-
-        if (!string.IsNullOrWhiteSpace(bodyObjectId))
-            return bodyObjectId;
-
-        return AnonymousUserId;
+        return !string.IsNullOrWhiteSpace(oid) ? oid : !string.IsNullOrWhiteSpace(bodyObjectId) ? bodyObjectId : AnonymousUserId;
     }
 }
