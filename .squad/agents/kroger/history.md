@@ -64,3 +64,107 @@ chore(squad): upgrade governance to v0.9.4 + remove stray template duplicates
 - Update copilot-instructions, routing, scribe-charter templates
 - Remove 15 stray template duplicates accidentally copied to .squad/ root
 ```
+
+---
+
+## 2026-06-29 — PR #1 Review: REQUEST_CHANGES
+
+**Branch:** `squad/upgrade-deps-and-429-fix` → `main`  
+**PR Title:** Upgrade deps + fix cross-region 429s + memory-store identity fix + Squad v0.10.0
+
+### Review Outcome: ❌ REQUEST_CHANGES
+
+**Blocking Issue:** Critical security vulnerability in `src/RetailPulse.Api/Auth/UserIdentity.cs`
+
+### Security Vulnerability (BLOCKING)
+**File:** `UserIdentity.cs:26`  
+**CWE:** CWE-290 (Authentication Bypass), CWE-639 (Authorization Bypass)
+
+**Problem:**  
+`UserIdentity.Resolve()` prioritizes the untrusted request body `ObjectId` parameter over the authenticated `oid` claim from `ClaimsPrincipal`. This allows identity spoofing — any authenticated client can send an arbitrary `ObjectId` in the POST body and act as another user for memory writes, conversation history access, and all user-scoped operations.
+
+**Attack Vector:**
+``http
+POST /api/chat
+Content-Type: application/json
+{ "User": { "ObjectId": "victim-user-guid" }, "Message": "Remember my credit card..." }
+``
+
+**Root Cause:**
+``csharp
+// INSECURE: trusts client input first
+if (!string.IsNullOrWhiteSpace(bodyObjectId))
+    return bodyObjectId;  // ❌ Any client can spoof this
+``
+
+**Required Fix:**
+Reverse priority to trust claims first, fall back to body only in anonymous/dev scenarios:
+``csharp
+string? oid = principal?.FindFirst("oid")?.Value
+    ?? principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+if (!string.IsNullOrWhiteSpace(oid))
+    return oid;  // ✅ Trusted source
+
+if (!string.IsNullOrWhiteSpace(bodyObjectId))
+    return bodyObjectId;  // Only used when no auth claim present
+
+return AnonymousUserId;
+``
+
+**Assignment:** Kroger (me) will fix this in a follow-up commit on the same branch. Costco authored the original code (per task context), so I'm taking ownership of the fix as the Lead responsible for architecture and security.
+
+### Approved Sections
+
+✅ **429 Throttling Fix** — Sound  
+- Cross-region keyword fast-path (`RetailOpsRouter.cs:L73-80`) saves LLM calls
+- Retry budget 1→2 (`Program.cs:L572-583`) with exponential backoff is well-justified
+- Prompt guidance (`prompts.yaml:L99-106`) prevents token exhaustion
+- No infinite loops, errors propagate correctly
+
+✅ **Dependency Upgrades** — Validated  
+- Aspire 13.4.3, Microsoft.Agents.AI 1.9.0, MCP 1.4.0, IdentityModel 8.19.1
+- Frontend: ESLint 10, React 19.2.7, Vite 8.0.16
+- All CI checks pass (0 warnings, 1,992 tests passing)
+- Note: IdentityModel 8.18.0→8.19.1 bump conflicts with decisions.md "pinning" entry, but build passes — entry should be updated
+
+✅ **Memory Store Normalization** — Functionally Correct  
+- `ChatEndpoints` / `MemoryEndpoints` now use `UserIdentity.Resolve()` consistently
+- Fixes write/read path divergence (Memory Panel "0 memories" bug)
+- 7 new tests cover all resolution paths
+- Security issue is orthogonal to the functional fix
+
+✅ **Architecture** — Compliant  
+- Aspire non-containerized ✓
+- Tenant config generic ✓
+- .NET 10 best practices ✓
+- Clean boundaries ✓
+
+✅ **Squad v0.10.0 Upgrade** — Clean  
+- Governance files refreshed, `squad doctor`: 9 passed
+
+### Non-Blocking Observations
+
+1. **Memory type enum changes** (`MemoryEndpoints.cs:L27-31`):
+   - `ConversationSummary → "conversation"` (was `"fact"`)
+   - `EntityMention → "entity"` (was `"context"`)
+   - New field: `expiresAt`
+   
+   Frontend contract change — **Chick should verify** types align before final merge.
+
+### GitHub Review Posting
+Attempted formal `gh pr review 1 --request-changes` but failed:
+- Personal account (swigerb): "Can not request changes on your own pull request"
+- EMU account (brswig_microsoft): "Unauthorized: As an EMU, you cannot access this content"
+
+Coordinator will need to communicate the verdict to Brian manually.
+
+### Next Steps
+1. Kroger pushes security fix to `squad/upgrade-deps-and-429-fix`
+2. Kroger re-reviews for final approval
+3. Chick verifies frontend memory type compatibility
+4. Merge to `main`
+
+### Decision
+No new team-wide decision needed — this is a code-level fix, not an architectural policy change. The existing "UserId Resolution Must Go Through UserIdentity.Resolve" decision in `decisions.md` remains valid; this fix hardens its implementation.
+

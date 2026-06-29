@@ -131,21 +131,19 @@ This bug showed that a single over-broad keyword or prompt description can turn 
 - **Costco / backend:** Router keyword patterns and prompt wording must stay destructive-only.
 - **Publix / QA:** Future memory-management changes should preserve store-vs-clear discrimination in the specialist, not rely solely on routing. Treat "remember ..." as a regression case.
 
-### 2026-06-04T12:49:32Z: UserId Resolution Must Go Through `UserIdentity.Resolve`
+### 2026-06-04T12:49:32Z: UserId Resolution Must Go Through `UserIdentity.Resolve` (Superseded 2026-06-29)
 
 **By:** Costco (Backend Dev)
 
 The Memory Panel was structurally empty for every user because the chat write path and the `/api/memory` read path resolved `userId` from two different sources. In dev mode, `DevelopmentAuthHandler` stamps an `oid="00000000-…"` claim, while the chat endpoint read `request.User?.ObjectId ?? "anonymous"` from the request body (always null). Writes landed under `anonymous`; reads queried `00000000-…`. The two surfaces could not see each other's data.
 
-**Decision:**
+**Decision (Original):**
 Every endpoint, middleware, and agent that needs a `userId` must resolve it through `RetailPulse.Api.Auth.UserIdentity.Resolve(ClaimsPrincipal?, string?)`. Direct reads of claims or hand-rolled fallbacks are no longer acceptable for identity that touches the memory store, audit log, or per-user persistence.
 
-**Resolution priority (fixed):**
+**Resolution priority (original, body-first):**
 1. Explicit body `ObjectId` (when present and non-whitespace)
 2. `oid` claim — short form or `http://schemas.microsoft.com/identity/claims/objectidentifier`
 3. `"anonymous"` (constant `UserIdentity.AnonymousUserId`)
-
-Endpoints that mutate a `ChatRequest` should also normalize `request.User` with the resolved id before passing to specialist agents.
 
 **Files touched:**
 - **New:** `src/RetailPulse.Api/Auth/UserIdentity.cs`
@@ -153,12 +151,54 @@ Endpoints that mutate a `ChatRequest` should also normalize `request.User` with 
 - `src/RetailPulse.Api/Endpoints/ChatEndpoints.cs`
 - **New:** `tests/RetailPulse.Tests/Endpoints/UserIdentityTests.cs` (7 tests)
 
-**Team impact:**
-- **Costco / backend:** Any new endpoint persisting per-user data (memory, audit, preferences, feedback) must use the helper. Auth mode swaps (Dev → Test → Prod) are now centralized.
-- **Publix / QA:** HTTP-level integration tests for `/api/memory` can now verify write/read paths see the same user.
-- **Chick / frontend:** Response shape for memory operations now consistently matches `types/index.ts` union.
-
 **Verification:** POST `/api/chat` "Remember that …" → GET `/api/memory` returns stored entry. Full suite 1,992 passing (+7 new tests).
+
+**⚠️ SECURITY NOTICE — See 2026-06-29 decision below for critical update**
+
+### 2026-06-29T16:30:27Z: UserIdentity Resolution: Claim-First for Security (Anti-Spoofing Fix)
+
+**By:** Kroger (Lead)  
+**Supersedes:** 2026-06-04 "UserId Resolution Must Go Through `UserIdentity.Resolve`" (priority order reversed for security)
+
+**Summary:** Reversed the `UserIdentity.Resolve` priority order to **claim-first** to prevent request-body spoofing attacks. The authenticated `oid` claim is now trusted over request-body values, closing a HIGH-severity identity-spoofing vulnerability.
+
+**New Priority (Security-First):**
+1. **`oid` claim** (short form `"oid"` OR full schema `http://schemas.microsoft.com/identity/claims/objectidentifier`)
+2. **Explicit request body `ObjectId`** (used only when no claim present)
+3. **`"anonymous"` constant** (fallback when neither is available)
+
+**Why This Matters:**
+Request-body spoofing risk — the previous body-first priority allowed a malicious request to send an arbitrary `ObjectId` in the request body, which would override the authenticated claim. This is dangerous because:
+- An attacker could forge requests claiming to be a different user
+- Per-user memory, audit logs, and preferences could be polluted or mixed
+
+**Solution:** Claims are cryptographically signed by the auth provider (AAD in production, dev auth handler in dev). They cannot be forged by the requester. Request-body values are untrusted input.
+
+**Dev Mode Behavior (Unchanged):**
+In development mode, the `DevelopmentAuthHandler` stamps the `oid` claim with `"00000000-0000-0000-0000-000000000000"`. Both the chat write path and memory read path now resolve to the same claim, which keeps the original bug fix (Memory Panel showing "0 entries") while closing the security hole.
+
+**Code Changes:**
+- **`src/RetailPulse.Api/Auth/UserIdentity.cs`**: Reversed priority in `Resolve()` method; updated docstring to explain anti-spoofing rationale.
+- **`tests/RetailPulse.Tests/Endpoints/UserIdentityTests.cs`**:
+  - Renamed `Resolve_PrefersBodyObjectId_OverClaim` → `Resolve_PrefersOidClaim_OverBodyObjectId`
+  - Updated assertion: claim now wins
+  - Added regression test case: spoofed body value is ignored when claim present
+  - Renamed fallback test cases to reflect claim priority
+
+**Test Results:** 7/7 UserIdentity tests pass; 16/16 ChatEndpoints + MemoryEndpoints identity tests pass (no regressions).
+
+**Security Property Verified (Publix QA):** An attacker CANNOT spoof identity by injecting a fake `ObjectId` into the request body when an authenticated claim is present. The claim always wins. Anti-spoofing test `Resolve_PrefersOidClaim_OverBodyObjectId` explicitly proves this by passing conflicting values and asserting claim precedence.
+
+**Team Impact:**
+- **Backend / API authors:** All new endpoints using `UserIdentity.Resolve()` now benefit from anti-spoofing protection automatically. No behavior change to the resolve signature.
+- **QA / Publix:** The security assumption (claims cannot be forged) is now enforced by code. Future auth-related regressions should verify that claim priority is never bypassed.
+- **Frontend / Chick:** No impact — the identity resolution happens server-side only.
+
+**Stale Docs Fixed:** The earlier decision noted *"Microsoft.IdentityModel.Protocols.OpenIdConnect pinned at 8.18.0 (latest is 8.19.1)"* — this pin is no longer necessary; build validation confirms dependency constraints resolved. The package can move to 8.19.1; the hard pin should be removed.
+
+**Next Steps:** This decision corrects the security-critical 2026-06-04 decision. The priority change is permanent and reflects the security-first design of the auth subsystem.
+
+---
 
 ### 2026-06-29T14:32:01Z: Board Cleanup: Stray Template Duplicates Removed
 
