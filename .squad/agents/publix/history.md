@@ -89,3 +89,32 @@ Hosting full production chat endpoint in tests is expensive and tightly coupled 
 - Kroger (Lead): Both deferred bumps from 2026-06-03 sweep are CLOSED
 
 **Commit:** dabe9ff
+
+---
+
+### 2026-06-29T16:35:00Z — PR #1 Final Security Gate: Identity-Spoofing Fix Validation
+
+**Status:** ✅ APPROVED — commit cc4a28e passes independent review
+
+**What:** Independent validation of Kroger's anti-spoofing fix (HIGH severity). He identified and fixed an identity-spoofing vulnerability where request-body `ObjectId` could override authenticated claims, potentially letting unauthenticated users impersonate others.
+
+**The Fix (commit cc4a28e):**
+- `src/RetailPulse.Api/Auth/UserIdentity.cs`: Reversed resolution priority to CLAIM-FIRST: (1) authenticated `oid` claim (short + MS schema form), (2) request-body `ObjectId` as fallback only when no claim, (3) `AnonymousUserId`
+- `tests/RetailPulse.Tests/Endpoints/UserIdentityTests.cs`: Added anti-spoofing regression test (`Resolve_PrefersOidClaim_OverBodyObjectId`) proving claim with DIFFERENT body value → claim wins
+
+**Validation performed:**
+1. **Code review** — Confirmed `UserIdentity.Resolve()` checks `!string.IsNullOrWhiteSpace(oid)` BEFORE examining body. No bypass detected (empty-claim handling cannot let body win).
+2. **Test scrutiny** — Anti-spoofing test EXPLICITLY passes claim=`"claim-oid"` + body=`"spoofed-user-from-body"`, then asserts `id.Should().Be("claim-oid")`. Test rationale explicitly states: "authenticated claim must take priority to prevent request-body spoofing."
+3. **Suite validation** — All 7 UserIdentity tests PASS (21 ms); full suite 1992/1992 PASS (75s).
+4. **Original bug check** — Confirmed dev-mode consistency: ChatEndpoints (write path) and MemoryEndpoints (read path) both resolve to the same `oid` claim when body is null. Original memory-store bug stays fixed.
+
+**Security property verified:** An attacker cannot spoof identity by injecting a fake `ObjectId` into the request body when an authenticated claim is present. The claim always wins.
+
+**Team Impact:**
+- PR #1 cleared for merge to main
+- Identity-spoofing vector is closed
+- Regression test ensures future edits cannot silently revert to body-first priority
+
+**Reviewer:** Publix (Tester) — independent review required because Kroger (Lead) is the fix author and cannot self-certify security patches.
+
+**Commit:** cc4a28e
