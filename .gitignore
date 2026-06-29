@@ -52,3 +52,4 @@ appsettings.*.local.json
 
 # Azure Developer CLI
 .azure/
+.squad/.cache/
