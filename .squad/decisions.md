@@ -160,6 +160,27 @@ Endpoints that mutate a `ChatRequest` should also normalize `request.User` with 
 
 **Verification:** POST `/api/chat` "Remember that …" → GET `/api/memory` returns stored entry. Full suite 1,992 passing (+7 new tests).
 
+### 2026-06-29T14:32:01Z: Board Cleanup: Stray Template Duplicates Removed
+
+**By:** Kroger (Lead)
+
+Removed 15 stray untracked `.md` files from `.squad/` root that were byte-identical duplicates of files in `.squad/templates/`. These were artifacts from a bad copy operation. All deletions verified by MD5 hash comparison before removal.
+
+**Validation:**
+- All 15 stray files were 100% byte-identical (MD5) to their template counterparts
+- No differing files; no missing template matches
+- Working tree now shows only legitimate 6-file governance upgrade (Squad v0.9.4)
+- Final commit: `61516b8` on `squad/upgrade-deps-and-429-fix`
+
+**Files deleted:**
+charter.md, constraint-tracking.md, copilot-instructions.md, fact-checker-charter.md, history.md, issue-lifecycle.md, mcp-config.md, multi-agent-format.md, orchestration-log.md, plugin-marketplace.md, raw-agent-output.md, roster.md, run-output.md, scribe-charter.md, skill.md
+
+**Team impact:**
+None. This was pure cleanup of accidental clutter; no functional or architectural changes.
+
+**Template integrity:**
+Confirmed: `.squad/templates/` is the single source of truth for all Squad template content. Any future duplicates at `.squad/` root should be treated as erroneous and removed after hash verification.
+
 ## Governance
 
 - All meaningful changes require team consensus
