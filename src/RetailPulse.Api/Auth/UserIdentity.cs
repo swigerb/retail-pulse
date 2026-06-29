@@ -21,17 +21,21 @@ public static class UserIdentity
 
     /// <summary>
     /// Resolves the canonical userId for memory/audit purposes.
-    /// Priority: explicit body value → authenticated "oid" claim
-    /// (either short or MS schema form) → "anonymous".
+    /// Priority: authenticated "oid" claim (either short or MS schema form) →
+    /// explicit body value (fallback only when no claim) → "anonymous".
+    /// Claims are trusted first to prevent request-body spoofing attacks.
     /// </summary>
     public static string Resolve(ClaimsPrincipal? principal, string? bodyObjectId = null)
     {
-        if (!string.IsNullOrWhiteSpace(bodyObjectId))
-            return bodyObjectId;
-
         string? oid = principal?.FindFirst("oid")?.Value
             ?? principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
 
-        return !string.IsNullOrWhiteSpace(oid) ? oid : AnonymousUserId;
+        if (!string.IsNullOrWhiteSpace(oid))
+            return oid;
+
+        if (!string.IsNullOrWhiteSpace(bodyObjectId))
+            return bodyObjectId;
+
+        return AnonymousUserId;
     }
 }
