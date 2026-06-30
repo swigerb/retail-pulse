@@ -297,3 +297,26 @@ The web dashboard now keeps **Real-Time Telemetry always visible** (relabeled "R
 **Local prerequisite:** VS users need the Node.js development workload installed.
 **Shipped:** PR #8 → main (0a56fcf).
 **Why:** User asked why the web project wasn't visible in VS; root cause was a missing MSBuild project file and no slnx entry.
+
+### 2026-06-30T16:54:45-04:00: Observability Cost Dashboard uses live endpoint fan-out
+
+**By:** Kroger (Lead), Costco (Backend), Chick (Frontend), Publix (QA)
+
+The Cost Dashboard was blank because the frontend treated `GET /api/observability/costs` as if it returned `trend`, `agentBreakdown`, and `topTools`. That endpoint returns only the summary `CostSummary`. The dashboard now fans out to the dedicated endpoints and assembles the existing frontend `CostDashboardData` shape:
+
+- `GET /api/observability/costs?period=` -> summary, with `avgCostPerRequest` computed from total cost/request count.
+- `GET /api/observability/costs/agents?period=` -> agent breakdown.
+- `GET /api/observability/costs/trend?days=` -> trend buckets; frontend translates `today/week/month` to `1/7/30` days and formats dates for the chart.
+- `GET /api/observability/costs/tools?period=` -> top tools.
+
+Top Tools required a new backend endpoint because `UsageEvent` records tool names but has no duration data. The source of truth is now `ITraceCollector`: `ToolUsageStat` is derived from trace spans whose operation starts with `tool.`, grouping by `Tags["tool.name"]` or the operation suffix and aggregating call count, total tokens, and average duration.
+
+The dashboard now refreshes every 10 seconds while mounted and shows empty states for idle trend, agent breakdown, and top tools. Idle all-zero trend buckets are treated as empty; genuinely nonzero low values still render.
+
+**Validation:** backend suite passed (RetailPulse.Tests 1,998 passed; LoadTests 2 skipped); frontend suite passed (285 tests); frontend build passed. Publix initially rejected the all-zero trend empty-state behavior, then re-approved after Chick's targeted fix.
+
+**Team impact:**
+- **Backend / Costco:** Tool usage statistics belong in tracing, not cost usage events, whenever duration is required.
+- **Frontend / Chick:** Observability summary endpoints must not be assumed to contain nested dashboard collections; call the dedicated endpoints and map fields explicitly.
+- **QA / Publix:** Contract validation for observability dashboards should include idle/empty states and cross-endpoint field names.
+

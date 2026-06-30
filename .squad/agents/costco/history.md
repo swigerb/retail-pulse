@@ -97,3 +97,15 @@ Detailed work from June 3, May 18, May 16, and May 15 available in **history-arc
 - Asp.Versioning.Http 8.1.0 → 10.0.0 upgrade analysis
 - coverlet.collector 6.0.4 → 10.0.1 upgrade analysis
 - Older telemetry, timeout, and API session work
+
+---
+
+### 2026-06-30T16:54:45-04:00 — Observability Cost Dashboard Top Tools Endpoint
+
+**Status:** ✅ Complete — backend suite passed (RetailPulse.Tests 1,998 passed; LoadTests 2 skipped)
+
+**What:** Added `ToolUsageStat`, `ITraceCollector.GetToolStats`, the `InMemoryTraceCollector` aggregation, and `GET /api/observability/costs/tools`.
+
+**Why:** The Cost Dashboard was broken because the frontend read `trend`, `agentBreakdown`, and `topTools` from the summary-only `/costs` response instead of calling the dedicated endpoints. Top Tools needed a new tracing-backed endpoint because `UsageEvent` has tool names but no duration; duration lives on tool trace spans.
+
+**Team impact:** Duration-aware tool usage stats should be sourced from `ITraceCollector`, not `ICostTracker` usage events.
