@@ -433,6 +433,8 @@ The SignalR `TelemetryHub` streams agent execution spans to connected clients in
 
 The React dashboard renders these as an interactive span timeline alongside the chat panel.
 
+The web app navigation is intentionally minimal by default: Chat, Real-Time Telemetry, and Observability. Real-Time Telemetry is always available, while Observability remains enabled by default for the AI Gateway via Azure APIM view of costs, token usage, and metrics. Secondary demo tabs such as Campaign Planner, Competitive, Knowledge Base, Health Council, Security, Cards, Stores, Financials, and Portfolio are gated behind `VITE_FEATURE_*` flags; copy `src/RetailPulse.Web/.env.example` to `.env.local` to enable them locally.
+
 ---
 
 ## Configuration
