@@ -23,6 +23,22 @@ Available flags:
 | `VITE_FEATURE_PORTFOLIO` | `false` | Portfolio |
 | `VITE_FEATURE_OBSERVABILITY` | `true` | Observability |
 
+## Visual Studio integration
+
+This project appears in the `RetailPulse.slnx` solution via a JavaScript project
+file (`RetailPulse.Web.esproj`, using `Microsoft.VisualStudio.JavaScript.SDK`) so
+it shows up in Solution Explorer. The project is **built and run with npm/Vite,
+not with `dotnet`**:
+
+- At runtime the Aspire AppHost launches it (`AddNpmApp` → `npm run dev`).
+- CI builds it in a dedicated frontend job (`npm install` + `npm run build`).
+
+The `.esproj` is intentionally configured as visibility-only
+(`ShouldRunNpmInstall=false`, `ShouldRunBuildScript=false`), so a solution-wide
+`dotnet build`/`dotnet restore` (and the .NET CI job) never invokes Node/npm.
+Use the npm scripts below (or the VS UI) to install, build, run, and test the app.
+VS users need the Node.js workload installed locally.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)

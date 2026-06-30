@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.VisualStudio.JavaScript.SDK/1.0.5906584">
+
+  <PropertyGroup>
+    <!--
+      Visibility-only project so Visual Studio shows RetailPulse.Web in Solution
+      Explorer. The app is built and run via npm (Vite), NOT via dotnet/MSBuild:
+        - The Aspire AppHost launches it at runtime (AddNpmApp -> `npm run dev`).
+        - CI builds it in a dedicated frontend job (`npm install` + `npm run build`).
+
+      ShouldRunNpmInstall/ShouldRunBuildScript are disabled so that a solution
+      `dotnet build`/`dotnet restore` (including the .NET CI job) never invokes
+      Node/npm. Building this project explicitly inside VS still works via the
+      BuildCommand below.
+    -->
+    <ShouldRunNpmInstall>false</ShouldRunNpmInstall>
+    <ShouldRunBuildScript>false</ShouldRunBuildScript>
+    <StartupCommand>npm run dev</StartupCommand>
+    <BuildCommand>npm run build</BuildCommand>
+    <BuildOutputFolder>$(MSBuildProjectDirectory)\dist</BuildOutputFolder>
+  </PropertyGroup>
+
+</Project>
