@@ -245,16 +245,22 @@ The Teams bot requires an Entra ID (Azure AD) app registration for authenticatio
 
 ## Step 3: Configure the TeamsBot Service
 
-### 3.1 Copy Configuration Template
+### 3.1 Configuration
+
+The TeamsBot ships with a checked-in [`src/RetailPulse.TeamsBot/appsettings.json`](../src/RetailPulse.TeamsBot/appsettings.json)
+documenting every setting with safe placeholders. There is **no** example
+file to copy — edit the tracked config for non-secret values and provide
+secrets (notably the bot `ClientSecret`) via user-secrets or environment
+variables. Never commit a real `ClientSecret`.
 
 ```powershell
 cd src/RetailPulse.TeamsBot
-Copy-Item appsettings.example.json appsettings.json
+dotnet user-secrets set "Connections:BotServiceConnection:Settings:ClientSecret" "<your-secret>"
 ```
 
 ### 3.2 Fill in Configuration
 
-Edit `src/RetailPulse.TeamsBot/appsettings.json`:
+Edit `src/RetailPulse.TeamsBot/appsettings.json` (non-secret values only):
 
 ```json
 {

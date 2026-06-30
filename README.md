@@ -84,15 +84,17 @@ dotnet user-secrets set "OpenAI:ApiKey" "<your-api-key>" --project src/RetailPul
 > dotnet user-secrets set "OpenAI:Endpoint" "<your-azure-openai-endpoint>" --project src/RetailPulse.Api
 > ```
 
-> **Every setting in one place:** [`src/RetailPulse.Api/appsettings.Development.json`](src/RetailPulse.Api/appsettings.Development.json)
-> is checked in as the reference local-dev config — it's loaded automatically
-> in Development and documents all sections (OpenAI, Security, FoundryAgent,
-> ToolCache, TokenPricing, Observability, …) with safe defaults. Edit it
-> directly for non-secret tweaks; keep real secrets in user-secrets, **not**
-> in this committed file. For deployment, see
+> **Every setting in one place:** [`src/RetailPulse.Api/appsettings.json`](src/RetailPulse.Api/appsettings.json)
+> is the checked-in reference config — loaded in every environment and
+> documenting all sections (OpenAI, Security, FoundryAgent, ToolCache,
+> TokenPricing, Observability, …) with safe defaults. Edit it directly for
+> non-secret tweaks; keep real secrets in user-secrets, **not** in this
+> committed file. For deployment, see
 > [`appsettings.Production.json`](src/RetailPulse.Api/appsettings.Production.json),
 > which lists the production surface with placeholders (supply secrets via
-> environment variables or Azure Key Vault).
+> environment variables or Azure Key Vault). Each service
+> (`AppHost`, `McpServer`, `TeamsBot`) has its own committed
+> `appsettings.json` documenting just that service's settings.
 
 ### 4. Run with Aspire
 
