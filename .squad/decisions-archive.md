@@ -1067,3 +1067,15 @@ The AI model occasionally emits raw function call syntax (`to=functions.ToolName
 
 
 
+
+
+## Archive — 2026-06-30T16:40:20-04:00
+
+Entries archived from decisions.md (size 21,856 bytes; policy: archive when >= 20,480 bytes; entries older than 30 days).
+
+---
+
+### 2026-05-20T08:43:48Z: User directive
+**By:** Brian Swiger (via Copilot)
+**What:** The project owner's name is Brian Swiger (not "Brady"). Always address them as Brian.
+**Why:** User request — captured for team memory
