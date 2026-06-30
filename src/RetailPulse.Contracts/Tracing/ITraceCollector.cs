@@ -18,6 +18,11 @@ public record TraceSpan(
 );
 
 /// <summary>
+/// Aggregated usage statistics for a tool across captured trace spans.
+/// </summary>
+public record ToolUsageStat(string ToolName, int CallCount, int TotalTokens, double AvgDurationMs);
+
+/// <summary>
 /// Summary of a complete trace including all spans and aggregated metrics.
 /// </summary>
 public record TraceSummary(
@@ -92,6 +97,11 @@ public interface ITraceCollector
     /// Returns null if the trace ID is not found.
     /// </summary>
     StructuredTraceSummary? GetStructuredSummary(string traceId);
+
+    /// <summary>
+    /// Returns aggregated tool usage stats for tool spans captured since the cutoff.
+    /// </summary>
+    IReadOnlyList<ToolUsageStat> GetToolStats(DateTimeOffset since, int top = 10);
 
     /// <summary>
     /// Current number of traces stored in the ring buffer.

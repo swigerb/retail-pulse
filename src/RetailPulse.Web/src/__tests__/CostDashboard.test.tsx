@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import CostDashboard from '../components/observability/CostDashboard';
+import { fetchCostDashboard } from '../services/observabilityApi';
 import type { CostDashboardData } from '../types';
 
 // Mock recharts to avoid canvas issues in jsdom
@@ -54,6 +55,7 @@ const wrap = (ui: React.ReactNode) => (
 describe('CostDashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchCostDashboard).mockResolvedValue(mockData);
   });
 
   it('renders the cost dashboard container', async () => {
@@ -96,8 +98,49 @@ describe('CostDashboard', () => {
     });
   });
 
+  it('renders friendly empty states for idle chart sections', async () => {
+    vi.mocked(fetchCostDashboard).mockResolvedValueOnce({
+      summary: {
+        totalTokens: 0,
+        totalCost: 0,
+        requestCount: 0,
+        avgCostPerRequest: 0,
+      },
+      trend: [],
+      agentBreakdown: [],
+      topTools: [],
+    });
+
+    render(wrap(<CostDashboard />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('trend-empty')).toHaveTextContent('No data yet — start a chat to see activity.');
+      expect(screen.getByTestId('agent-breakdown-empty')).toHaveTextContent('No data yet — start a chat to see activity.');
+      expect(screen.getByTestId('tools-empty')).toHaveTextContent('No data yet — start a chat to see activity.');
+    });
+  });
+
+  it('treats zero-filled trend buckets as empty without hiding active sections', async () => {
+    vi.mocked(fetchCostDashboard).mockResolvedValueOnce({
+      ...mockData,
+      trend: [
+        { date: 'Jun 24', cost: 0, tokens: 0 },
+        { date: 'Jun 25', cost: 0, tokens: 0 },
+        { date: 'Jun 26', cost: 0, tokens: 0 },
+      ],
+    });
+
+    render(wrap(<CostDashboard />));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('trend-empty')).toHaveTextContent('No data yet — start a chat to see activity.');
+      expect(screen.queryByTestId('area-chart')).not.toBeInTheDocument();
+      expect(screen.getByTestId('bar-chart')).toBeInTheDocument();
+      expect(screen.getByTestId('tools-table')).toBeInTheDocument();
+    });
+  });
+
   it('changes period when tab is clicked', async () => {
-    const { fetchCostDashboard } = await import('../services/observabilityApi');
     render(wrap(<CostDashboard />));
     await waitFor(() => {
       expect(screen.getByText('Today')).toBeInTheDocument();

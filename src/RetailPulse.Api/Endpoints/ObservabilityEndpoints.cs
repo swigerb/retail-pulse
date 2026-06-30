@@ -60,6 +60,15 @@ public static class ObservabilityEndpoints
         })
         .WithName("GetCostsByAgent").RequireAuthorization().RequireRateLimiting("relaxed");
 
+        app.MapGet("/api/observability/costs/tools", (HttpContext http, ITraceCollector traceCollector) =>
+        {
+            string periodStr = http.Request.Query["period"].FirstOrDefault() ?? "week";
+            DateTimeOffset cutoff = GetCostPeriodCutoff(periodStr, DateTimeOffset.UtcNow);
+            IReadOnlyList<ToolUsageStat> stats = traceCollector.GetToolStats(cutoff);
+            return Results.Ok(stats);
+        })
+        .WithName("GetToolStats").RequireAuthorization().RequireRateLimiting("relaxed");
+
         app.MapGet("/api/observability/costs/trend", async (HttpContext http, ICostTracker costTracker, CancellationToken ct) =>
         {
             string? daysStr = http.Request.Query["days"].FirstOrDefault();
@@ -184,5 +193,19 @@ public static class ObservabilityEndpoints
         .WithName("GetSessionTraces").RequireAuthorization().RequireRateLimiting("relaxed");
 
         return app;
+    }
+
+    internal static DateTimeOffset GetCostPeriodCutoff(string? period, DateTimeOffset nowUtc)
+    {
+        DateTimeOffset utcNow = nowUtc.ToUniversalTime();
+
+        return period?.ToLowerInvariant() switch
+        {
+            "today" => new DateTimeOffset(utcNow.Date, TimeSpan.Zero),
+            "week" => utcNow.AddDays(-7),
+            "month" => utcNow.AddDays(-30),
+            "all" => DateTimeOffset.MinValue,
+            _ => utcNow.AddDays(-7)
+        };
     }
 }
