@@ -50,6 +50,15 @@
     <PackageVersion Include="NBomber.Http" Version="6.2.0" />
     <!-- Benchmarks -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <!-- Security pins (transitive — close known advisories; remove when parents ship fixed deps) -->
+    <!-- GHSA-v5pm-xwqc-g5wc: Microsoft.OpenApi <= 2.7.4 (via Microsoft.AspNetCore.OpenApi) -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.7.5" />
+    <!-- GHSA-hv8m-jj95-wg3x: MessagePack < 2.5.301 (via Aspire AppHost / NBomber) -->
+    <PackageVersion Include="MessagePack" Version="2.5.301" />
+    <!-- GHSA-2m69-gcr7-jv3q: SQLitePCLRaw.lib.e_sqlite3 <= 2.1.11 (via Microsoft.Data.Sqlite) -->
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageVersion Include="SQLitePCLRaw.core" Version="3.0.3" />
+    <PackageVersion Include="SQLitePCLRaw.provider.e_sqlite3" Version="3.0.3" />
     <!-- Test -->
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="FluentAssertions" Version="8.10.0" />
