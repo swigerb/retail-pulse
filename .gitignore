@@ -36,11 +36,9 @@ ai-gateway-dev-portal/
 
 # Secrets — never commit
 appsettings.*.local.json
-**/appsettings.json
 **/appsettings.Development.json
-!**/appsettings.example.json
-# Checked-in reference config for the API (safe defaults; real secrets go in user-secrets)
-!src/RetailPulse.Api/appsettings.Development.json
+# Per-project base appsettings.json is the checked-in reference config
+# (safe defaults only; real secrets live in user-secrets / env / Key Vault).
 
 # Squad: ignore runtime state (logs, inbox, sessions)
 .squad/orchestration-log/
