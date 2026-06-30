@@ -84,6 +84,15 @@ dotnet user-secrets set "OpenAI:ApiKey" "<your-api-key>" --project src/RetailPul
 > dotnet user-secrets set "OpenAI:Endpoint" "<your-azure-openai-endpoint>" --project src/RetailPulse.Api
 > ```
 
+> **Want every setting in one place?** Copy the fully-commented template to a
+> local (git-ignored) override and tweak as needed:
+> ```bash
+> cp src/RetailPulse.Api/appsettings.example.json src/RetailPulse.Api/appsettings.Development.json
+> ```
+> It documents all sections (OpenAI, Security, FoundryAgent, ToolCache,
+> TokenPricing, Observability, …) with safe Development defaults. Keep real
+> secrets in user-secrets, not in the committed example.
+
 ### 4. Run with Aspire
 
 ```bash
