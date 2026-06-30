@@ -5,7 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Aspire -->
-    <PackageVersion Include="Aspire.Hosting.Azure.AppContainers" Version="13.4.3" />
+    <PackageVersion Include="Aspire.Hosting.Azure.AppContainers" Version="13.4.6" />
     <PackageVersion Include="Aspire.Hosting.NodeJs" Version="9.5.2" />
     <!-- Azure / AI -->
     <PackageVersion Include="Azure.AI.Agents.Persistent" Version="1.1.0" />
@@ -53,8 +53,8 @@
     <!-- Security pins (transitive — close known advisories; remove when parents ship fixed deps) -->
     <!-- GHSA-v5pm-xwqc-g5wc: Microsoft.OpenApi <= 2.7.4 (via Microsoft.AspNetCore.OpenApi) -->
     <PackageVersion Include="Microsoft.OpenApi" Version="2.7.5" />
-    <!-- GHSA-hv8m-jj95-wg3x: MessagePack < 2.5.301 (via Aspire AppHost / NBomber) -->
-    <PackageVersion Include="MessagePack" Version="2.5.301" />
+    <!-- GHSA-hv8m-jj95-wg3x: MessagePack < 2.5.301 (via Aspire AppHost / NBomber). Floor raised to 2.5.302 for Aspire 13.4.6 (StreamJsonRpc 2.25.29). -->
+    <PackageVersion Include="MessagePack" Version="2.5.302" />
     <!-- GHSA-2m69-gcr7-jv3q: SQLitePCLRaw.lib.e_sqlite3 <= 2.1.11 (via Microsoft.Data.Sqlite) -->
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageVersion Include="SQLitePCLRaw.core" Version="3.0.3" />
