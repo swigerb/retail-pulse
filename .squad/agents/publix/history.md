@@ -118,3 +118,15 @@ Hosting full production chat endpoint in tests is expensive and tightly coupled 
 **Reviewer:** Publix (Tester) — independent review required because Kroger (Lead) is the fix author and cannot self-certify security patches.
 
 **Commit:** cc4a28e
+
+---
+
+### 2026-06-30T16:54:45-04:00 — Observability Cost Dashboard Contract Validation
+
+**Status:** ✅ PASS after targeted frontend fix
+
+**What:** Validated the cross-boundary contract for `/costs`, `/costs/agents`, `/costs/trend?days=`, and `/costs/tools?period=` plus full backend/frontend suites. First pass failed because idle all-zero trend buckets rendered a chart instead of the empty state. After Chick fixed trend presence detection, re-review passed.
+
+**Validation:** backend suite 1,998 passed / 2 skipped; frontend suite 285 passed; frontend build passed.
+
+**Lesson:** Observability dashboard tests must verify that the frontend calls dedicated endpoints for trend/agent/tool data and that idle all-zero trend data renders an empty state, not a misleading zero-line chart.
