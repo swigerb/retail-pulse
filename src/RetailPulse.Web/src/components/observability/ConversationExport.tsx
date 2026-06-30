@@ -353,12 +353,12 @@ export default function ConversationExport() {
                   <td className={styles.tableCell}>{session.messageCount}</td>
                   <td className={styles.tableCell}>
                     <div className={styles.agentPills}>
-                      {session.agentsUsed.map(agent => (
+                      {session.agentsUsed?.map(agent => (
                         <span key={agent} className={styles.agentPill}>{agent}</span>
                       ))}
                     </div>
                   </td>
-                  <td className={styles.tableCellMuted}>{session.totalTokens.toLocaleString()}</td>
+                  <td className={styles.tableCellMuted}>{(session.totalTokens ?? 0).toLocaleString()}</td>
                   <td className={styles.actionCell}>
                     <button
                       className={styles.actionBtn}

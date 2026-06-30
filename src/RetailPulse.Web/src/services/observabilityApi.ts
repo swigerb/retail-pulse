@@ -13,21 +13,80 @@ export async function fetchCostDashboard(
   period: ObservabilityPeriod,
   signal?: AbortSignal,
 ): Promise<CostDashboardData> {
-  const res = await fetch(`${BASE}/costs?period=${period}`, { signal });
-  if (!res.ok) throw new Error(`Cost data fetch failed: ${res.status}`);
-  const raw = await res.json();
-  // Backend may return flat summary fields or nested structure
-  const summary = raw.summary ?? {
-    totalTokens: raw.totalTokens ?? 0,
-    totalCost: raw.totalCost ?? 0,
-    requestCount: raw.requestCount ?? 0,
-    avgCostPerRequest: raw.avgCostPerRequest ?? (raw.requestCount ? raw.totalCost / raw.requestCount : 0),
+  const daysByPeriod: Record<ObservabilityPeriod, number> = {
+    today: 1,
+    week: 7,
+    month: 30,
   };
+
+  const safeFetchJson = async (url: string, required = false): Promise<unknown> => {
+    try {
+      const res = await fetch(url, { signal });
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        if (required) throw new Error(`Cost data fetch failed: ${res.status}`);
+        return null;
+      }
+      return res.json();
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') throw e;
+      if (required) throw e;
+      return null;
+    }
+  };
+
+  const [summaryRaw, agentsRaw, trendRaw, toolsRaw] = await Promise.all([
+    safeFetchJson(`${BASE}/costs?period=${period}`, true),
+    safeFetchJson(`${BASE}/costs/agents?period=${period}`),
+    safeFetchJson(`${BASE}/costs/trend?days=${daysByPeriod[period]}`),
+    safeFetchJson(`${BASE}/costs/tools?period=${period}`),
+  ]);
+
+  const raw = (summaryRaw ?? {}) as Partial<CostDashboardData['summary']> & { summary?: Partial<CostDashboardData['summary']> };
+  const summarySource = raw.summary ?? raw;
+  const requestCount = summarySource.requestCount ?? 0;
+  const totalCost = summarySource.totalCost ?? 0;
+  const summary = {
+    totalTokens: summarySource.totalTokens ?? 0,
+    totalCost,
+    requestCount,
+    avgCostPerRequest: summarySource.avgCostPerRequest ?? (requestCount ? totalCost / requestCount : 0),
+  };
+
+  const agentBreakdown = Array.isArray(agentsRaw)
+    ? agentsRaw.map(agent => ({
+      agentName: agent?.agentId ?? '',
+      totalCost: agent?.cost ?? 0,
+      totalTokens: agent?.tokens ?? 0,
+      requestCount: agent?.requests ?? 0,
+    }))
+    : [];
+
+  const trendDays = (trendRaw as { days?: Array<{ date?: string; cost?: number; tokens?: number }> } | null)?.days;
+  const trend = Array.isArray(trendDays)
+    ? trendDays.map(day => ({
+      date: day?.date
+        ? new Date(day.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : '',
+      cost: day?.cost ?? 0,
+      tokens: day?.tokens ?? 0,
+    }))
+    : [];
+
+  const topTools = Array.isArray(toolsRaw)
+    ? toolsRaw.map(tool => ({
+      toolName: tool?.toolName ?? '',
+      callCount: tool?.callCount ?? 0,
+      totalTokens: tool?.totalTokens ?? 0,
+      avgDurationMs: tool?.avgDurationMs ?? 0,
+    }))
+    : [];
+
   return {
     summary,
-    trend: raw.trend ?? [],
-    agentBreakdown: raw.agentBreakdown ?? [],
-    topTools: raw.topTools ?? [],
+    trend,
+    agentBreakdown,
+    topTools,
   };
 }
 
@@ -71,7 +130,16 @@ export async function fetchExportSessions(signal?: AbortSignal): Promise<ExportS
   if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Sessions fetch failed: ${res.status}`);
   const data = await res.json();
-  return Array.isArray(data) ? data : [];
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((session): session is Partial<ExportSession> => typeof session === 'object' && session !== null)
+    .map(session => ({
+      sessionId: session.sessionId ?? '',
+      startTime: session.startTime ?? '',
+      messageCount: session.messageCount ?? 0,
+      agentsUsed: Array.isArray(session.agentsUsed) ? session.agentsUsed : [],
+      totalTokens: session.totalTokens ?? 0,
+    }));
 }
 
 export async function fetchExportPreview(
