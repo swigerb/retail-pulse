@@ -194,6 +194,27 @@ public class InMemoryTraceCollector : ITraceCollector
         return summaries;
     }
 
+    public IReadOnlyList<ToolUsageStat> GetToolStats(DateTimeOffset since, int top = 10)
+    {
+        if (top <= 0)
+            return [];
+
+        TraceSpan[] spans = [.. _traces.Values.SelectMany(bag => bag.ToArray())];
+
+        return [.. spans
+            .Where(span => span.StartTime >= since && IsToolSpan(span))
+            .GroupBy(GetToolName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new ToolUsageStat(
+                group.Key,
+                group.Count(),
+                group.Sum(span => span.InputTokens + span.OutputTokens),
+                group.Average(span => span.DurationMs)))
+            .OrderByDescending(stat => stat.CallCount)
+            .ThenByDescending(stat => stat.TotalTokens)
+            .ThenBy(stat => stat.ToolName, StringComparer.OrdinalIgnoreCase)
+            .Take(top)];
+    }
+
     /// <summary>
     /// Notifies SignalR clients that a trace is complete. Call after all spans
     /// for a request have been captured.
@@ -246,4 +267,21 @@ public class InMemoryTraceCollector : ITraceCollector
 
     private static string? GetTag(IDictionary<string, string> tags, string key)
         => tags.TryGetValue(key, out string? value) ? value : null;
+
+    private static bool IsToolSpan(TraceSpan span)
+        => span.OperationName.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)
+            || (span.Tags is not null
+                && span.Tags.TryGetValue("span.type", out string? spanType)
+                && string.Equals(spanType, "tool", StringComparison.OrdinalIgnoreCase));
+
+    private static string GetToolName(TraceSpan span)
+    {
+        return span.Tags is not null
+            && span.Tags.TryGetValue("tool.name", out string? toolName)
+            && !string.IsNullOrWhiteSpace(toolName)
+                ? toolName
+                : span.OperationName.StartsWith("tool.", StringComparison.OrdinalIgnoreCase)
+                    ? span.OperationName["tool.".Length..]
+                    : span.OperationName;
+    }
 }
