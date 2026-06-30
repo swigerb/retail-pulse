@@ -39,6 +39,8 @@ appsettings.*.local.json
 **/appsettings.json
 **/appsettings.Development.json
 !**/appsettings.example.json
+# Checked-in reference config for the API (safe defaults; real secrets go in user-secrets)
+!src/RetailPulse.Api/appsettings.Development.json
 
 # Squad: ignore runtime state (logs, inbox, sessions)
 .squad/orchestration-log/
