@@ -84,14 +84,15 @@ dotnet user-secrets set "OpenAI:ApiKey" "<your-api-key>" --project src/RetailPul
 > dotnet user-secrets set "OpenAI:Endpoint" "<your-azure-openai-endpoint>" --project src/RetailPulse.Api
 > ```
 
-> **Want every setting in one place?** Copy the fully-commented template to a
-> local (git-ignored) override and tweak as needed:
-> ```bash
-> cp src/RetailPulse.Api/appsettings.example.json src/RetailPulse.Api/appsettings.Development.json
-> ```
-> It documents all sections (OpenAI, Security, FoundryAgent, ToolCache,
-> TokenPricing, Observability, …) with safe Development defaults. Keep real
-> secrets in user-secrets, not in the committed example.
+> **Every setting in one place:** [`src/RetailPulse.Api/appsettings.Development.json`](src/RetailPulse.Api/appsettings.Development.json)
+> is checked in as the reference local-dev config — it's loaded automatically
+> in Development and documents all sections (OpenAI, Security, FoundryAgent,
+> ToolCache, TokenPricing, Observability, …) with safe defaults. Edit it
+> directly for non-secret tweaks; keep real secrets in user-secrets, **not**
+> in this committed file. For deployment, see
+> [`appsettings.Production.json`](src/RetailPulse.Api/appsettings.Production.json),
+> which lists the production surface with placeholders (supply secrets via
+> environment variables or Azure Key Vault).
 
 ### 4. Run with Aspire
 
