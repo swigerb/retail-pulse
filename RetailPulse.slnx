@@ -6,6 +6,7 @@
     <Project Path="src/RetailPulse.McpServer/RetailPulse.McpServer.csproj" />
     <Project Path="src/RetailPulse.ServiceDefaults/RetailPulse.ServiceDefaults.csproj" />
     <Project Path="src/RetailPulse.TeamsBot/RetailPulse.TeamsBot.csproj" />
+    <Project Path="src/RetailPulse.Web/RetailPulse.Web.esproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/RetailPulse.Tests/RetailPulse.Tests.csproj" />
