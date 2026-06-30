@@ -24,6 +24,7 @@ import { MarginWaterfall, MarginDrivers } from './margin';
 import { PortfolioScorecard, BrandScoreCard, ExplanationPanel } from './scorecard';
 import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData } from '../types';
 import { connectTelemetryHub } from '../services/telemetryHub';
+import { featureFlags } from '../config/featureFlags';
 
 const DRAWER_WIDTH_PX = 560;
 const DRAWER_BREAKPOINT_PX = 768;
@@ -428,86 +429,106 @@ export function Dashboard() {
             pendingApprovals={pendingApprovals}
             onClick={() => setTelemetryOpen(true)}
           />
-          <Button
-            appearance={activeView === 'promo' ? 'primary' : 'subtle'}
-            icon={<TargetArrow24Regular />}
-            onClick={() => setActiveView(prev => prev === 'promo' ? 'chat' : 'promo')}
-            style={activeView === 'promo' ? { backgroundColor: '#22c55e', borderColor: '#22c55e' } : undefined}
-          >
-            {activeView === 'promo' ? 'Back to Chat' : 'Campaign Planner'}
-          </Button>
-          <Button
-            appearance={activeView === 'competitive' ? 'primary' : 'subtle'}
-            icon={<Shield24Regular />}
-            onClick={() => setActiveView(prev => prev === 'competitive' ? 'chat' : 'competitive')}
-            style={activeView === 'competitive' ? { backgroundColor: '#ef4444', borderColor: '#ef4444' } : undefined}
-          >
-            {activeView === 'competitive' ? 'Back to Chat' : 'Competitive'}
-          </Button>
-          <Button
-            appearance={activeView === 'knowledge' ? 'primary' : 'subtle'}
-            icon={<Library24Regular />}
-            onClick={() => setActiveView(prev => prev === 'knowledge' ? 'chat' : 'knowledge')}
-            style={activeView === 'knowledge' ? { backgroundColor: '#06b6d4', borderColor: '#06b6d4' } : undefined}
-          >
-            {activeView === 'knowledge' ? 'Back to Chat' : 'Knowledge Base'}
-          </Button>
-          <Button
-            appearance={activeView === 'council' ? 'primary' : 'subtle'}
-            icon={<HeartPulse24Regular />}
-            onClick={() => setActiveView(prev => prev === 'council' ? 'chat' : 'council')}
-            style={activeView === 'council' ? { backgroundColor: '#0f7b0f', borderColor: '#0f7b0f' } : undefined}
-          >
-            {activeView === 'council' ? 'Back to Chat' : 'Health Council'}
-          </Button>
-          <Button
-            appearance={activeView === 'security' ? 'primary' : 'subtle'}
-            icon={<ShieldCheckmark24Regular />}
-            onClick={() => setActiveView(prev => prev === 'security' ? 'chat' : 'security')}
-            style={activeView === 'security' ? { backgroundColor: '#f59e0b', borderColor: '#f59e0b' } : undefined}
-          >
-            {activeView === 'security' ? 'Back to Chat' : 'Security'}
-          </Button>
-          <Button
-            appearance={activeView === 'cards' ? 'primary' : 'subtle'}
-            icon={<CardUi24Regular />}
-            onClick={() => setActiveView(prev => prev === 'cards' ? 'chat' : 'cards')}
-            style={activeView === 'cards' ? { backgroundColor: '#3b82f6', borderColor: '#3b82f6' } : undefined}
-          >
-            {activeView === 'cards' ? 'Back to Chat' : 'Cards'}
-          </Button>
-          <Button
-            appearance={activeView === 'observability' ? 'primary' : 'subtle'}
-            icon={<Eye24Regular />}
-            onClick={() => setActiveView(prev => prev === 'observability' ? 'chat' : 'observability')}
-            style={activeView === 'observability' ? { backgroundColor: '#06b6d4', borderColor: '#06b6d4' } : undefined}
-          >
-            {activeView === 'observability' ? 'Back to Chat' : 'Observability'}
-          </Button>
-          <Button
-            appearance={activeView === 'stores' ? 'primary' : 'subtle'}
-            icon={<Building24Regular />}
-            onClick={() => setActiveView(prev => prev === 'stores' ? 'chat' : 'stores')}
-            style={activeView === 'stores' ? { backgroundColor: '#22c55e', borderColor: '#22c55e' } : undefined}
-          >
-            {activeView === 'stores' ? 'Back to Chat' : 'Stores'}
-          </Button>
-          <Button
-            appearance={activeView === 'financials' ? 'primary' : 'subtle'}
-            icon={<Money24Regular />}
-            onClick={() => setActiveView(prev => prev === 'financials' ? 'chat' : 'financials')}
-            style={activeView === 'financials' ? { backgroundColor: '#3b82f6', borderColor: '#3b82f6' } : undefined}
-          >
-            {activeView === 'financials' ? 'Back to Chat' : 'Financials'}
-          </Button>
-          <Button
-            appearance={activeView === 'portfolio' ? 'primary' : 'subtle'}
-            icon={<Star24Regular />}
-            onClick={() => setActiveView(prev => prev === 'portfolio' ? 'chat' : 'portfolio')}
-            style={activeView === 'portfolio' ? { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' } : undefined}
-          >
-            {activeView === 'portfolio' ? 'Back to Chat' : 'Portfolio'}
-          </Button>
+          {featureFlags.campaignPlanner && (
+            <Button
+              appearance={activeView === 'promo' ? 'primary' : 'subtle'}
+              icon={<TargetArrow24Regular />}
+              onClick={() => setActiveView(prev => prev === 'promo' ? 'chat' : 'promo')}
+              style={activeView === 'promo' ? { backgroundColor: '#22c55e', borderColor: '#22c55e' } : undefined}
+            >
+              {activeView === 'promo' ? 'Back to Chat' : 'Campaign Planner'}
+            </Button>
+          )}
+          {featureFlags.competitive && (
+            <Button
+              appearance={activeView === 'competitive' ? 'primary' : 'subtle'}
+              icon={<Shield24Regular />}
+              onClick={() => setActiveView(prev => prev === 'competitive' ? 'chat' : 'competitive')}
+              style={activeView === 'competitive' ? { backgroundColor: '#ef4444', borderColor: '#ef4444' } : undefined}
+            >
+              {activeView === 'competitive' ? 'Back to Chat' : 'Competitive'}
+            </Button>
+          )}
+          {featureFlags.knowledgeBase && (
+            <Button
+              appearance={activeView === 'knowledge' ? 'primary' : 'subtle'}
+              icon={<Library24Regular />}
+              onClick={() => setActiveView(prev => prev === 'knowledge' ? 'chat' : 'knowledge')}
+              style={activeView === 'knowledge' ? { backgroundColor: '#06b6d4', borderColor: '#06b6d4' } : undefined}
+            >
+              {activeView === 'knowledge' ? 'Back to Chat' : 'Knowledge Base'}
+            </Button>
+          )}
+          {featureFlags.healthCouncil && (
+            <Button
+              appearance={activeView === 'council' ? 'primary' : 'subtle'}
+              icon={<HeartPulse24Regular />}
+              onClick={() => setActiveView(prev => prev === 'council' ? 'chat' : 'council')}
+              style={activeView === 'council' ? { backgroundColor: '#0f7b0f', borderColor: '#0f7b0f' } : undefined}
+            >
+              {activeView === 'council' ? 'Back to Chat' : 'Health Council'}
+            </Button>
+          )}
+          {featureFlags.security && (
+            <Button
+              appearance={activeView === 'security' ? 'primary' : 'subtle'}
+              icon={<ShieldCheckmark24Regular />}
+              onClick={() => setActiveView(prev => prev === 'security' ? 'chat' : 'security')}
+              style={activeView === 'security' ? { backgroundColor: '#f59e0b', borderColor: '#f59e0b' } : undefined}
+            >
+              {activeView === 'security' ? 'Back to Chat' : 'Security'}
+            </Button>
+          )}
+          {featureFlags.cards && (
+            <Button
+              appearance={activeView === 'cards' ? 'primary' : 'subtle'}
+              icon={<CardUi24Regular />}
+              onClick={() => setActiveView(prev => prev === 'cards' ? 'chat' : 'cards')}
+              style={activeView === 'cards' ? { backgroundColor: '#3b82f6', borderColor: '#3b82f6' } : undefined}
+            >
+              {activeView === 'cards' ? 'Back to Chat' : 'Cards'}
+            </Button>
+          )}
+          {featureFlags.observability && (
+            <Button
+              appearance={activeView === 'observability' ? 'primary' : 'subtle'}
+              icon={<Eye24Regular />}
+              onClick={() => setActiveView(prev => prev === 'observability' ? 'chat' : 'observability')}
+              style={activeView === 'observability' ? { backgroundColor: '#06b6d4', borderColor: '#06b6d4' } : undefined}
+            >
+              {activeView === 'observability' ? 'Back to Chat' : 'Observability'}
+            </Button>
+          )}
+          {featureFlags.stores && (
+            <Button
+              appearance={activeView === 'stores' ? 'primary' : 'subtle'}
+              icon={<Building24Regular />}
+              onClick={() => setActiveView(prev => prev === 'stores' ? 'chat' : 'stores')}
+              style={activeView === 'stores' ? { backgroundColor: '#22c55e', borderColor: '#22c55e' } : undefined}
+            >
+              {activeView === 'stores' ? 'Back to Chat' : 'Stores'}
+            </Button>
+          )}
+          {featureFlags.financials && (
+            <Button
+              appearance={activeView === 'financials' ? 'primary' : 'subtle'}
+              icon={<Money24Regular />}
+              onClick={() => setActiveView(prev => prev === 'financials' ? 'chat' : 'financials')}
+              style={activeView === 'financials' ? { backgroundColor: '#3b82f6', borderColor: '#3b82f6' } : undefined}
+            >
+              {activeView === 'financials' ? 'Back to Chat' : 'Financials'}
+            </Button>
+          )}
+          {featureFlags.portfolio && (
+            <Button
+              appearance={activeView === 'portfolio' ? 'primary' : 'subtle'}
+              icon={<Star24Regular />}
+              onClick={() => setActiveView(prev => prev === 'portfolio' ? 'chat' : 'portfolio')}
+              style={activeView === 'portfolio' ? { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' } : undefined}
+            >
+              {activeView === 'portfolio' ? 'Back to Chat' : 'Portfolio'}
+            </Button>
+          )}
           <Button
             appearance="subtle"
             icon={<Add24Regular />}
@@ -522,37 +543,37 @@ export function Dashboard() {
             aria-expanded={telemetryOpen}
             aria-controls="telemetry-drawer"
           >
-            {telemetryOpen ? 'Close' : 'Telemetry'}
+            {telemetryOpen ? 'Close' : 'Real-Time Telemetry'}
           </Button>
         </div>
       </header>
 
       <main className={styles.main}>
         <div className={`${styles.chatContainer} ${telemetryOpen ? styles.chatContainerOpen : ''}`}>
-          {activeView === 'promo' ? (
+          {activeView === 'promo' && featureFlags.campaignPlanner ? (
             <div style={{ overflow: 'auto', height: '100%' }}>
               <PromoTaskModule />
             </div>
-          ) : activeView === 'competitive' ? (
+          ) : activeView === 'competitive' && featureFlags.competitive ? (
             <CompetitiveDashboard />
-          ) : activeView === 'knowledge' ? (
+          ) : activeView === 'knowledge' && featureFlags.knowledgeBase ? (
             <KnowledgeBasePanel />
-          ) : activeView === 'council' ? (
+          ) : activeView === 'council' && featureFlags.healthCouncil ? (
             <CouncilPanel />
-          ) : activeView === 'security' ? (
+          ) : activeView === 'security' && featureFlags.security ? (
             <div style={{ overflow: 'auto', height: '100%' }}>
               <GuardrailsDashboard />
               <GuardrailsConfig />
             </div>
-          ) : activeView === 'cards' ? (
+          ) : activeView === 'cards' && featureFlags.cards ? (
             <div style={{ overflow: 'auto', height: '100%' }}>
               <AdaptiveCardPanel />
             </div>
-          ) : activeView === 'observability' ? (
+          ) : activeView === 'observability' && featureFlags.observability ? (
             <div style={{ overflow: 'auto', height: '100%' }}>
               <ObservabilityPanel />
             </div>
-          ) : activeView === 'stores' ? (
+          ) : activeView === 'stores' && featureFlags.stores ? (
             <div style={{ overflow: 'auto', height: '100%', padding: '20px' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '16px', fontSize: '20px' }}>🏪 Store Operations</h2>
               <StoreHeatmap stores={demoStores} onStoreClick={(id) => setSelectedStore(demoStores.find(s => s.storeId === id) ?? null)} />
@@ -565,7 +586,7 @@ export function Dashboard() {
               </div>
               <StoreDetailDialog store={selectedStore} open={!!selectedStore} onClose={() => setSelectedStore(null)} />
             </div>
-          ) : activeView === 'financials' ? (
+          ) : activeView === 'financials' && featureFlags.financials ? (
             <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>💰 Financials</h2>
               <MarginWaterfall steps={demoWaterfall} title="Q1 2026 P&L Waterfall" />
@@ -574,7 +595,7 @@ export function Dashboard() {
                 <MarginDrivers drivers={demoDrivers} />
               </div>
             </div>
-          ) : activeView === 'portfolio' ? (
+          ) : activeView === 'portfolio' && featureFlags.portfolio ? (
             <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>⭐ Portfolio Scorecard</h2>
               {selectedBrand ? (
