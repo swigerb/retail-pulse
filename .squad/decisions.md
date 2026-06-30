@@ -251,6 +251,42 @@ Added transitive security pins in `Directory.Packages.props` (CentralPackageTran
 - **Frontend / Chick:** Always commit a refreshed `package-lock.json` alongside `package.json` changes. A drifted lockfile breaks `npm ci` in CI and fresh clones, and silently breaks the Aspire-orchestrated web launch.
 - **All:** If the web app fails to launch with `'vite' is not recognized`, the fix is dependency installation in `src/RetailPulse.Web` — check lockfile sync first.
 
+### 2026-06-30: Single source of truth for configuration = tracked base appsettings.json
+
+**By:** Costco (Backend Dev) — folded in by Scribe from PR #5 · **Supersedes:** the PR #4 decision (checked-in `appsettings.Development.json`)
+
+Configuration was fragmented: the Api had a checked-in `appsettings.Development.json`, and AppHost/McpServer/TeamsBot each carried an `appsettings.example.json` that was mostly duplicated boilerplate (and stale in McpServer's case — it omitted the `ApiKey` section that project actually reads).
+
+**Decision:**
+- Each project's committed **base `appsettings.json`** is the single, reference configuration: safe non-secret defaults with explanatory `//` comments.
+- **Development files are not tracked.** `.gitignore` ignores `appsettings.Development.json` and `appsettings.*.local.json`; the base `appsettings.json` and `appsettings.Production.json` are tracked.
+- **All `appsettings.example.json` files are deleted** — the tracked base file is the example.
+- **Secrets never live in committed files.** Use user-secrets (local) and environment variables / Azure Key Vault (deployed). Config key `:` → env `__`.
+
+**Rationale:** Removes redundant/stale duplicate files, gives one authoritative place per service, and keeps secrets out of git. Behavior is unchanged (base keeps the dev APIM gateway default for `OpenAI:Endpoint`, overridden by Production.json).
+
+**Validation:** PR #5 → main. JSON validated under config-provider options (comment-skip + trailing commas); secret scan clean; AppHost build 0/0.
+
+**Team impact:**
+- **Backend / Costco:** Edit the tracked base `appsettings.json` for non-secret tweaks; never commit a real secret.
+- **All:** To set local secrets, use `dotnet user-secrets`; there is no longer an example file to copy.
+
+### 2026-06-30: Telemetry-first web navigation
+
+**By:** Chick (Frontend Dev) — folded in by Scribe from PR #7
+
+The web dashboard now keeps **Real-Time Telemetry always visible** (relabeled "Real-Time Telemetry"; it was previously pushed off-screen by header overflow), leaves **Observability enabled by default** for the AI Gateway / Azure APIM cost and token-usage metrics view, and **gates secondary demo tabs behind `VITE_FEATURE_*` flags** (Campaign Planner, Competitive, Knowledge Base, Health Council, Security, Cards, Stores, Financials, Portfolio — all default off).
+
+**Why:** Keeps the app centered on live telemetry and AI Gateway metrics — the core project focus — while preserving optional panels for targeted demos when explicitly enabled. Both the nav button and its view render are flag-guarded (a disabled view can never display; falls back to Chat).
+
+**Config:** Feature flags live in `src/RetailPulse.Web/src/config/featureFlags.ts`, documented in `src/RetailPulse.Web/.env.example`. Copy to `.env.local` and set a flag to `true`/`1` to enable a tab.
+
+**Validation:** tsc 0 errors; 279/279 frontend tests; production build succeeds.
+
+**Team impact:**
+- **Frontend / Chick:** New nav features must be added as a `VITE_FEATURE_*` flag (default off) unless they are core telemetry/observability.
+- **All:** The default app view is Chat + Real-Time Telemetry + Observability only.
+
 ## Governance
 
 - All meaningful changes require team consensus
