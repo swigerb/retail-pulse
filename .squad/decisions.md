@@ -2,11 +2,6 @@
 
 ## Active Decisions
 
-### 2026-05-20T08:43:48Z: User directive
-**By:** Brian Swiger (via Copilot)
-**What:** The project owner's name is Brian Swiger (not "Brady"). Always address them as Brian.
-**Why:** User request — captured for team memory
-
 ### 2026-06-03T11:22:49Z: Asp.Versioning.Http upgraded 8.1.0 → 10.0.0 (deferral resolved)
 
 **By:** Costco (Backend Dev)
@@ -292,3 +287,13 @@ The web dashboard now keeps **Real-Time Telemetry always visible** (relabeled "R
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
+### 2026-06-30: RetailPulse.Web visibility via JavaScript .esproj
+**By:** Costco (Backend), requested by Brian Swiger
+**What:** Add `src/RetailPulse.Web/RetailPulse.Web.esproj` (Microsoft.VisualStudio.JavaScript.SDK 1.0.5906584) and reference it in `RetailPulse.slnx` so the React/Vite web app appears in Visual Studio Solution Explorer.
+**Design — visibility-only:** `ShouldRunNpmInstall=false` and `ShouldRunBuildScript=false`. A solution-wide `dotnet build`/`dotnet restore` (and the .NET CI job in ci.yml) must NEVER invoke Node/npm. The separate `npm` frontend CI job remains the sole owner of install/build. F5 uses `StartupCommand=npm run dev`; `BuildCommand=npm run build`; output `dist`.
+**Out of scope:** AppHost unchanged — `AddNpmApp("frontend", "../RetailPulse.Web", "dev")` still drives runtime; the esproj is purely for VS visibility. Aspire runtime behavior is identical.
+**Validated (CI parity, local):** restore ok; build -c Release 0/0 with npm not invoked; `dotnet list package --vulnerable` 0 vulnerable; `dotnet format --verify-no-changes` exit 0 (harmless ".esproj not associated with a language" info message, non-failing).
+**Local prerequisite:** VS users need the Node.js development workload installed.
+**Shipped:** PR #8 → main (0a56fcf).
+**Why:** User asked why the web project wasn't visible in VS; root cause was a missing MSBuild project file and no slnx entry.
