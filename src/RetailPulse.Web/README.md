@@ -2,6 +2,27 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Feature flags / Navigation
+
+Retail Pulse keeps the default web navigation focused on **Chat**, **Real-Time Telemetry**, and **Observability**. Real-Time Telemetry is always visible and streams live agent spans, token totals, and cost estimates. Observability is enabled by default because it shows the AI Gateway via Azure APIM story: costs, token usage, and operational metrics.
+
+Secondary demo tabs are configuration-gated and hidden by default. To enable optional tabs locally, copy `.env.example` to `.env.local` and set the matching `VITE_FEATURE_*` flag to `true` or `1`.
+
+Available flags:
+
+| Flag | Default | Tab |
+|------|---------|-----|
+| `VITE_FEATURE_CAMPAIGN_PLANNER` | `false` | Campaign Planner |
+| `VITE_FEATURE_COMPETITIVE` | `false` | Competitive |
+| `VITE_FEATURE_KNOWLEDGE_BASE` | `false` | Knowledge Base |
+| `VITE_FEATURE_HEALTH_COUNCIL` | `false` | Health Council |
+| `VITE_FEATURE_SECURITY` | `false` | Security |
+| `VITE_FEATURE_CARDS` | `false` | Cards |
+| `VITE_FEATURE_STORES` | `false` | Stores |
+| `VITE_FEATURE_FINANCIALS` | `false` | Financials |
+| `VITE_FEATURE_PORTFOLIO` | `false` | Portfolio |
+| `VITE_FEATURE_OBSERVABILITY` | `true` | Observability |
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
