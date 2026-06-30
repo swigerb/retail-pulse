@@ -73,3 +73,30 @@ See **history-archive.md** for detailed session work entries from May 14-16, inc
 - Trace Dashboard & Chat Sanitization
 - Suppress routing metadata on errors
 - Frontend Code Review Fixes
+
+---
+
+## ✅ Observability Conversation Export Crash Fix (2026-06-30)
+
+**Task:** Fix Observability → Conversation Export crash: `Cannot read properties of undefined (reading 'toLocaleString')`.
+
+**Changes:**
+- `fetchExportSessions` now defensively normalizes export session fields in `observabilityApi.ts`.
+- `ConversationExport.tsx` guards missing `agentsUsed` and `totalTokens` before rendering.
+- Added regression coverage in `ConversationExport.test.tsx` and `observabilityApi.test.ts`.
+
+**Validation:** Frontend suite passed, 281/281 tests; build clean.
+
+**Lesson:** `fetchExportSessions` previously lacked the defensive field normalization that its sibling observability fetchers use; that gap caused the crash.
+
+---
+
+## ✅ Observability Cost Dashboard Endpoint Fan-Out (2026-06-30)
+
+**Task:** Fix blank/non-live Cost Dashboard data and idle empty states.
+
+**Changes:** `fetchCostDashboard` now fans out to `/costs`, `/costs/agents`, `/costs/trend`, and `/costs/tools`; `CostDashboard` refreshes every 10 seconds and renders empty states for idle trend/agents/tools. Chick also fixed Publix's reviewer-found defect where all-zero trend buckets rendered a zero-line chart instead of the empty state.
+
+**Validation:** Frontend suite passed, 285/285 tests.
+
+**Lesson:** The Cost Dashboard broke because the frontend read `trend`, `agentBreakdown`, and `topTools` off the summary-only `/costs` response. Top Tools required the new backend tracing endpoint because `UsageEvent` lacks duration.

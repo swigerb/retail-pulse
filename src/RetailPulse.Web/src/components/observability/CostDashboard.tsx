@@ -182,6 +182,15 @@ const useStyles = makeStyles({
     borderRadius: '12px',
     padding: '20px',
   },
+  emptyState: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '220px',
+    color: 'var(--color-text-muted)',
+    fontSize: '14px',
+    textAlign: 'center',
+  },
 });
 
 const METRIC_CARDS = [
@@ -216,21 +225,36 @@ export default function CostDashboard() {
   const [data, setData] = useState<CostDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasTrend = data?.trend.some(d => d.cost > 0 || d.tokens > 0) ?? false;
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetchCostDashboard(period, controller.signal)
-      .then(result => {
-        setData(result);
-        setError(null);
-        setLoading(false);
-      })
-      .catch(e => {
-        if (controller.signal.aborted) return;
-        setError(e instanceof Error ? e.message : 'Failed to load cost data');
-        setLoading(false);
-      });
-    return () => { controller.abort(); };
+    let controller: AbortController | null = null;
+
+    const load = (showLoading: boolean) => {
+      controller?.abort();
+      controller = new AbortController();
+      const currentController = controller;
+      if (showLoading) setLoading(true);
+      fetchCostDashboard(period, currentController.signal)
+        .then(result => {
+          setData(result);
+          setError(null);
+          setLoading(false);
+        })
+        .catch(e => {
+          if (currentController.signal.aborted) return;
+          setError(e instanceof Error ? e.message : 'Failed to load cost data');
+          setLoading(false);
+        });
+    };
+
+    load(true);
+    const intervalId = window.setInterval(() => load(false), 10000);
+
+    return () => {
+      controller?.abort();
+      window.clearInterval(intervalId);
+    };
   }, [period]);
 
   const handlePeriodChange = (p: ObservabilityPeriod) => {
@@ -290,105 +314,117 @@ export default function CostDashboard() {
             {/* Trend Chart */}
             <div className={styles.chartHalf}>
               <div className={styles.chartTitle}>📈 Cost Trend</div>
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={data.trend}>
-                  <defs>
-                    <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={OBSERVABILITY_COLORS.trendLine} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={OBSERVABILITY_COLORS.trendLine} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={OBSERVABILITY_COLORS.gridLine} />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
-                    axisLine={{ stroke: OBSERVABILITY_COLORS.gridLine }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
-                    axisLine={{ stroke: OBSERVABILITY_COLORS.gridLine }}
-                    tickLine={false}
-                    tickFormatter={(v: number) => `$${v.toFixed(2)}`}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area
-                    type="monotone"
-                    dataKey="cost"
-                    stroke={OBSERVABILITY_COLORS.trendLine}
-                    strokeWidth={2}
-                    fill="url(#costGradient)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {!hasTrend ? (
+                <div className={styles.emptyState} data-testid="trend-empty">No data yet — start a chat to see activity.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={data.trend}>
+                    <defs>
+                      <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={OBSERVABILITY_COLORS.trendLine} stopOpacity={0.3} />
+                        <stop offset="95%" stopColor={OBSERVABILITY_COLORS.trendLine} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={OBSERVABILITY_COLORS.gridLine} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
+                      axisLine={{ stroke: OBSERVABILITY_COLORS.gridLine }}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
+                      axisLine={{ stroke: OBSERVABILITY_COLORS.gridLine }}
+                      tickLine={false}
+                      tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area
+                      type="monotone"
+                      dataKey="cost"
+                      stroke={OBSERVABILITY_COLORS.trendLine}
+                      strokeWidth={2}
+                      fill="url(#costGradient)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
 
             {/* Agent Breakdown */}
             <div className={styles.chartHalf}>
               <div className={styles.chartTitle}>🤖 Agent Cost Breakdown</div>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={data.agentBreakdown} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke={OBSERVABILITY_COLORS.gridLine} horizontal={false} />
-                  <XAxis
-                    type="number"
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
-                    axisLine={{ stroke: OBSERVABILITY_COLORS.gridLine }}
-                    tickLine={false}
-                    tickFormatter={(v: number) => `$${v.toFixed(2)}`}
-                  />
-                  <YAxis
-                    dataKey="agentName"
-                    type="category"
-                    tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
-                    axisLine={{ stroke: OBSERVABILITY_COLORS.gridLine }}
-                    tickLine={false}
-                    width={110}
-                  />
-                  <Tooltip
-                    labelFormatter={(label: React.ReactNode) => String(label)}
-                    formatter={(value) => [`$${Number(value).toFixed(4)}`, 'Cost']}
-                    contentStyle={{
-                      background: 'var(--color-bg-elevated)',
-                      border: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      color: 'var(--color-text)',
-                    }}
-                  />
-                  <Bar
-                    dataKey="totalCost"
-                    fill={OBSERVABILITY_COLORS.barFill}
-                    radius={[0, 6, 6, 0]}
-                    maxBarSize={28}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              {data.agentBreakdown.length === 0 ? (
+                <div className={styles.emptyState} data-testid="agent-breakdown-empty">No data yet — start a chat to see activity.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={data.agentBreakdown} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke={OBSERVABILITY_COLORS.gridLine} horizontal={false} />
+                    <XAxis
+                      type="number"
+                      tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
+                      axisLine={{ stroke: OBSERVABILITY_COLORS.gridLine }}
+                      tickLine={false}
+                      tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+                    />
+                    <YAxis
+                      dataKey="agentName"
+                      type="category"
+                      tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
+                      axisLine={{ stroke: OBSERVABILITY_COLORS.gridLine }}
+                      tickLine={false}
+                      width={110}
+                    />
+                    <Tooltip
+                      labelFormatter={(label: React.ReactNode) => String(label)}
+                      formatter={(value) => [`$${Number(value).toFixed(4)}`, 'Cost']}
+                      contentStyle={{
+                        background: 'var(--color-bg-elevated)',
+                        border: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: 'var(--color-text)',
+                      }}
+                    />
+                    <Bar
+                      dataKey="totalCost"
+                      fill={OBSERVABILITY_COLORS.barFill}
+                      radius={[0, 6, 6, 0]}
+                      maxBarSize={28}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
           {/* Top Tools Table */}
           <div className={styles.chartSection}>
             <div className={styles.chartTitle}>🔧 Top Tools</div>
-            <table className={styles.toolsTable} data-testid="tools-table">
-              <thead>
-                <tr>
-                  <th className={styles.tableHead}>Tool</th>
-                  <th className={styles.tableHead}>Calls</th>
-                  <th className={styles.tableHead}>Total Tokens</th>
-                  <th className={styles.tableHead}>Avg Duration</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.topTools.map(tool => (
-                  <tr key={tool.toolName}>
-                    <td className={styles.tableCell} style={{ fontWeight: 600 }}>{tool.toolName}</td>
-                    <td className={styles.tableCellMuted}>{tool.callCount.toLocaleString()}</td>
-                    <td className={styles.tableCellMuted}>{tool.totalTokens.toLocaleString()}</td>
-                    <td className={styles.tableCellMuted}>{tool.avgDurationMs.toFixed(0)}ms</td>
+            {data.topTools.length === 0 ? (
+              <div className={styles.emptyState} data-testid="tools-empty">No data yet — start a chat to see activity.</div>
+            ) : (
+              <table className={styles.toolsTable} data-testid="tools-table">
+                <thead>
+                  <tr>
+                    <th className={styles.tableHead}>Tool</th>
+                    <th className={styles.tableHead}>Calls</th>
+                    <th className={styles.tableHead}>Total Tokens</th>
+                    <th className={styles.tableHead}>Avg Duration</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.topTools.map(tool => (
+                    <tr key={tool.toolName}>
+                      <td className={styles.tableCell} style={{ fontWeight: 600 }}>{tool.toolName}</td>
+                      <td className={styles.tableCellMuted}>{tool.callCount.toLocaleString()}</td>
+                      <td className={styles.tableCellMuted}>{tool.totalTokens.toLocaleString()}</td>
+                      <td className={styles.tableCellMuted}>{tool.avgDurationMs.toFixed(0)}ms</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </>
       )}

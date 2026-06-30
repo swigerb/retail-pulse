@@ -2,11 +2,6 @@
 
 ## Active Decisions
 
-### 2026-05-20T08:43:48Z: User directive
-**By:** Brian Swiger (via Copilot)
-**What:** The project owner's name is Brian Swiger (not "Brady"). Always address them as Brian.
-**Why:** User request — captured for team memory
-
 ### 2026-06-03T11:22:49Z: Asp.Versioning.Http upgraded 8.1.0 → 10.0.0 (deferral resolved)
 
 **By:** Costco (Backend Dev)
@@ -292,3 +287,36 @@ The web dashboard now keeps **Real-Time Telemetry always visible** (relabeled "R
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
+### 2026-06-30: RetailPulse.Web visibility via JavaScript .esproj
+**By:** Costco (Backend), requested by Brian Swiger
+**What:** Add `src/RetailPulse.Web/RetailPulse.Web.esproj` (Microsoft.VisualStudio.JavaScript.SDK 1.0.5906584) and reference it in `RetailPulse.slnx` so the React/Vite web app appears in Visual Studio Solution Explorer.
+**Design — visibility-only:** `ShouldRunNpmInstall=false` and `ShouldRunBuildScript=false`. A solution-wide `dotnet build`/`dotnet restore` (and the .NET CI job in ci.yml) must NEVER invoke Node/npm. The separate `npm` frontend CI job remains the sole owner of install/build. F5 uses `StartupCommand=npm run dev`; `BuildCommand=npm run build`; output `dist`.
+**Out of scope:** AppHost unchanged — `AddNpmApp("frontend", "../RetailPulse.Web", "dev")` still drives runtime; the esproj is purely for VS visibility. Aspire runtime behavior is identical.
+**Validated (CI parity, local):** restore ok; build -c Release 0/0 with npm not invoked; `dotnet list package --vulnerable` 0 vulnerable; `dotnet format --verify-no-changes` exit 0 (harmless ".esproj not associated with a language" info message, non-failing).
+**Local prerequisite:** VS users need the Node.js development workload installed.
+**Shipped:** PR #8 → main (0a56fcf).
+**Why:** User asked why the web project wasn't visible in VS; root cause was a missing MSBuild project file and no slnx entry.
+
+### 2026-06-30T16:54:45-04:00: Observability Cost Dashboard uses live endpoint fan-out
+
+**By:** Kroger (Lead), Costco (Backend), Chick (Frontend), Publix (QA)
+
+The Cost Dashboard was blank because the frontend treated `GET /api/observability/costs` as if it returned `trend`, `agentBreakdown`, and `topTools`. That endpoint returns only the summary `CostSummary`. The dashboard now fans out to the dedicated endpoints and assembles the existing frontend `CostDashboardData` shape:
+
+- `GET /api/observability/costs?period=` -> summary, with `avgCostPerRequest` computed from total cost/request count.
+- `GET /api/observability/costs/agents?period=` -> agent breakdown.
+- `GET /api/observability/costs/trend?days=` -> trend buckets; frontend translates `today/week/month` to `1/7/30` days and formats dates for the chart.
+- `GET /api/observability/costs/tools?period=` -> top tools.
+
+Top Tools required a new backend endpoint because `UsageEvent` records tool names but has no duration data. The source of truth is now `ITraceCollector`: `ToolUsageStat` is derived from trace spans whose operation starts with `tool.`, grouping by `Tags["tool.name"]` or the operation suffix and aggregating call count, total tokens, and average duration.
+
+The dashboard now refreshes every 10 seconds while mounted and shows empty states for idle trend, agent breakdown, and top tools. Idle all-zero trend buckets are treated as empty; genuinely nonzero low values still render.
+
+**Validation:** backend suite passed (RetailPulse.Tests 1,998 passed; LoadTests 2 skipped); frontend suite passed (285 tests); frontend build passed. Publix initially rejected the all-zero trend empty-state behavior, then re-approved after Chick's targeted fix.
+
+**Team impact:**
+- **Backend / Costco:** Tool usage statistics belong in tracing, not cost usage events, whenever duration is required.
+- **Frontend / Chick:** Observability summary endpoints must not be assumed to contain nested dashboard collections; call the dedicated endpoints and map fields explicitly.
+- **QA / Publix:** Contract validation for observability dashboards should include idle/empty states and cross-endpoint field names.
+
