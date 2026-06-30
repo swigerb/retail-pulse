@@ -221,6 +221,36 @@ None. This was pure cleanup of accidental clutter; no functional or architectura
 **Template integrity:**
 Confirmed: `.squad/templates/` is the single source of truth for all Squad template content. Any future duplicates at `.squad/` root should be treated as erroneous and removed after hash verification.
 
+### 2026-06-30: Pinned three transitive packages to close HIGH-severity NuGet advisories
+
+**By:** Costco (Backend Dev) — folded in by Scribe from PR #2
+
+Added transitive security pins in `Directory.Packages.props` (CentralPackageTransitivePinningEnabled is on):
+- `Microsoft.OpenApi` → **2.7.5** (was 2.0.0 via `Microsoft.AspNetCore.OpenApi`) — closes GHSA-v5pm-xwqc-g5wc (circular schema reference DoS). Stayed in the 2.x line; patched range is `>= 2.7.5`, avoiding the breaking 3.x API jump.
+- `MessagePack` → **2.5.301** (was 2.5.192 via Aspire AppHost / NBomber) — closes GHSA-hv8m-jj95-wg3x (LZ4 AccessViolationException on bad input). Stayed in 2.x; patched at 2.5.301.
+- `SQLitePCLRaw.bundle_e_sqlite3` / `.core` / `.provider.e_sqlite3` → **3.0.3** (was 2.1.11 via `Microsoft.Data.Sqlite 10.0.8`) — closes GHSA-2m69-gcr7-jv3q (vulnerable bundled SQLite). The 2.x line has **no patched release**; the 3.0.x wrappers swap the native lib from `SQLitePCLRaw.lib.e_sqlite3 2.1.11` to `SourceGear.sqlite3 3.50.4.5`, dropping the vulnerable package from the graph entirely.
+
+**Validation:** `dotnet list package --vulnerable --include-transitive` → 0 vulnerable (was 3 HIGH); Release build 0/0; 1,992/1,992 tests pass including SQLite-backed paths on the new 3.x provider.
+
+**Team impact:**
+- **Backend / Costco:** These are interim pins. Remove each once the parent ships a build referencing the fixed dependency directly (esp. `Microsoft.Data.Sqlite` → SQLitePCLRaw 3.x, `Microsoft.AspNetCore.OpenApi` → OpenApi >= 2.7.5).
+- **QA / Publix:** SQLite provider went 2.1.11 → 3.0.x (native engine 3.50.x). Existing persistence/memory-store regression tests cover this; no schema or API change.
+- **Frontend / Chick:** No impact.
+
+**Heuristic to remember:** When an advisory lists `first_patched_version: null` for a 2.x package (as with `SQLitePCLRaw.lib.e_sqlite3`), check whether the next major line repackaged the vulnerable component under a new id — pinning the new-line wrappers can remove the bad package from the graph instead of waiting for a non-existent 2.x patch.
+
+### 2026-06-30: Frontend lockfile must stay in sync; web launch depends on it
+
+**By:** Chick (Frontend Dev) — folded in by Scribe from PR #2
+
+`src/RetailPulse.Web/package-lock.json` had drifted out of sync with `package.json` (missing transitive deps such as `@emnapi/core`), which broke `npm ci` and the Aspire `npm run dev` launch step — the dev server failed with `'vite' is not recognized` because dependencies were never installed. Resynced the lockfile via `npm install` and ran `npm audit fix`, closing a HIGH `undici` advisory (GHSA-vmh5-mc38-953g + 6 related).
+
+**Validation:** `npm audit` → 0 vulnerabilities; `npm run build` OK; 279/279 frontend tests pass; vite dev server verified serving on :5173.
+
+**Team impact:**
+- **Frontend / Chick:** Always commit a refreshed `package-lock.json` alongside `package.json` changes. A drifted lockfile breaks `npm ci` in CI and fresh clones, and silently breaks the Aspire-orchestrated web launch.
+- **All:** If the web app fails to launch with `'vite' is not recognized`, the fix is dependency installation in `src/RetailPulse.Web` — check lockfile sync first.
+
 ## Governance
 
 - All meaningful changes require team consensus
