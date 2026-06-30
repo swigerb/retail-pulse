@@ -491,7 +491,7 @@ export interface CostTrendPoint {
   date: string;
   cost: number;
   tokens: number;
-  requests: number;
+  requests?: number;
 }
 
 export interface AgentCostBreakdown {
