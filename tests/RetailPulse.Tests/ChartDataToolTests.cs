@@ -344,4 +344,62 @@ public class ChartDataToolTests
 
         charts.Should().BeEmpty("an error result must not produce any chart");
     }
+
+    [Fact]
+    public async Task CreateChart_AlternateChartJsSchema_NormalizesToSuccess()
+    {
+        // Well-formed JSON but the model-invented Chart.js-style schema
+        // (data:{labels,series}) that strict ChartSpec binding cannot handle.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "bar",
+                "title": "Consolidation Check 2026-08-05",
+                "data": {
+                    "labels": ["ClearDesk Vodka", "Sierra Gold Tequila", "Apex Reserve"],
+                    "series": [
+                        {"name": "Depletion Velocity", "values": [12.5, 9.8, 7.2]}
+                    ]
+                },
+                "options": {"orientation": "horizontal", "xAxisLabel": "Cases per Week", "yAxisLabel": "Brand"}
+            }
+            """;
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeTrue(
+            "an alternate-schema payload is bound via the normalizer, not strict deserialization");
+        JsonElement chart = doc.RootElement.GetProperty("chart");
+        chart.GetProperty("Type").GetString().Should().Be("horizontalBar");
+        chart.GetProperty("Title").GetString().Should().Be("Consolidation Check 2026-08-05");
+        JsonElement values = chart.GetProperty("Data")[0].GetProperty("Values");
+        values.GetArrayLength().Should().Be(3);
+        values[0].GetProperty("X").GetString().Should().Be("ClearDesk Vodka");
+        values[0].GetProperty("Y").GetDouble().Should().Be(12.5);
+    }
+
+    [Fact]
+    public async Task CreateChart_AlternateSchema_FlowsIntoChartsList()
+    {
+        // Cross-boundary contract: the normalized alternate-schema chart must land in
+        // the real AgentExecutionPipeline.ExtractChartSpecs Charts list.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {"type":"line","title":"Trend","data":{"labels":["Jan","Feb"],"series":[{"name":"BrandA","values":[10,20]}]}}
+            """;
+
+        string toolOutput = await tool.CreateChart(spec);
+        var response = new Microsoft.Extensions.AI.ChatResponse(
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-chart-3", toolOutput)]));
+
+        List<ChartSpec> charts = AgentExecutionPipeline.ExtractChartSpecs(response);
+
+        charts.Should().ContainSingle();
+        charts[0].Type.Should().Be("line");
+        charts[0].Data[0].Values.Should().HaveCount(2);
+        charts[0].Data[0].Values[1].X.Should().Be("Feb");
+        charts[0].Data[0].Values[1].Y.Should().Be(20);
+    }
 }

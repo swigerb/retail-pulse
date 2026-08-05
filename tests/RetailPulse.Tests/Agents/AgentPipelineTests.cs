@@ -344,4 +344,102 @@ public class AgentPipelineTests
     }
 
     #endregion
+
+    #region ExtractInlineCharts — chart JSON echoed as prose
+
+    // The exact failure from the production screenshot: the model narrated its
+    // CreateChart payload as raw JSON at the top of the reply, using the alternate
+    // Chart.js-style schema (data:{labels,series}) that the tool path cannot bind.
+    private const string ScreenshotReply =
+        """
+        {"type":"bar","title":"Consolidation Check 2026-08-05","data":{"labels":["ClearDesk Vodka","Sierra Gold Tequila","Apex Reserve"],"series":[{"name":"Depletion Velocity","values":[12.5,9.8,7.2]}]},"options":{"orientation":"horizontal","xAxisLabel":"Cases per Week","yAxisLabel":"Brand"}}
+
+        Here's the depletion velocity comparison for all spirits brands in the Northeast. ClearDesk Vodka leads at 12.5 cases per week.
+        """;
+
+    [Fact]
+    public void ExtractInlineCharts_ScreenshotPayload_StripsRawJsonFromReply()
+    {
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(ScreenshotReply);
+
+        result.Reply.Should().NotContain("\"type\":\"bar\"");
+        result.Reply.Should().NotContain("\"series\"");
+        result.Reply.Should().NotContain("\"labels\"");
+        result.Reply.Should().NotContain("{");
+        result.Reply.Should().Contain("Here's the depletion velocity comparison");
+        result.Reply.Should().Contain("ClearDesk Vodka leads at 12.5 cases per week.");
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_ScreenshotPayload_ReturnsStructuredChart()
+    {
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(ScreenshotReply);
+
+        result.Charts.Should().ContainSingle("the inline chart JSON must become structured chart data");
+        ChartSpec chart = result.Charts[0];
+        chart.Type.Should().Be("horizontalBar", "options.orientation=horizontal maps a bar to horizontalBar");
+        chart.Title.Should().Be("Consolidation Check 2026-08-05");
+        chart.XAxisTitle.Should().Be("Cases per Week");
+        chart.YAxisTitle.Should().Be("Brand");
+        chart.Data.Should().ContainSingle();
+        chart.Data[0].Legend.Should().Be("Depletion Velocity");
+        chart.Data[0].Values.Should().HaveCount(3);
+        chart.Data[0].Values[0].X.Should().Be("ClearDesk Vodka");
+        chart.Data[0].Values[0].Y.Should().Be(12.5);
+        chart.Data[0].Values[2].X.Should().Be("Apex Reserve");
+        chart.Data[0].Values[2].Y.Should().Be(7.2);
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_CanonicalInlineJson_StripsAndExtracts()
+    {
+        string reply =
+            """
+            Here is the breakdown.
+
+            {"type":"bar","title":"Monthly Sales","xAxisTitle":"Month","yAxisTitle":"Cases","data":[{"legend":"Sierra Gold","values":[{"x":"Jan","y":1200},{"x":"Feb","y":1450}]}]}
+            """;
+
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(reply);
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("bar");
+        result.Charts[0].Title.Should().Be("Monthly Sales");
+        result.Reply.Should().Be("Here is the breakdown.");
+        result.Reply.Should().NotContain("{");
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_CleanProse_ReturnedUnchangedWithNoCharts()
+    {
+        string reply = "Depletion velocity for spirits brands in the Northeast is trending up 4% this quarter.";
+
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(reply);
+
+        result.Reply.Should().Be(reply);
+        result.Charts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_NonChartJson_LeftUntouched()
+    {
+        // Well-formed JSON that is not a chart must be surfaced, not silently hidden.
+        string reply = """The raw metric payload was {"brand":"Apex Grill","region":"Northeast","velocity":7.2} for reference.""";
+
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(reply);
+
+        result.Charts.Should().BeEmpty("non-chart JSON must not be treated as a chart");
+        result.Reply.Should().Contain("\"brand\":\"Apex Grill\"", "arbitrary JSON is left visible, not stripped");
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_EmptyReply_ReturnsEmpty()
+    {
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(string.Empty);
+
+        result.Reply.Should().BeEmpty();
+        result.Charts.Should().BeEmpty();
+    }
+
+    #endregion
 }

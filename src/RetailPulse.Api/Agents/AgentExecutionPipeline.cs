@@ -162,6 +162,16 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         List<ChartSpec> charts = ExtractChartSpecs(response);
 
+        // Recover chart specs the model echoed as raw JSON in its prose (and strip
+        // that JSON so it never reaches the chat bubble). Promote recovered charts
+        // only when the tool path produced none, to avoid duplicate renders.
+        InlineChartExtraction inlineCharts = ExtractInlineCharts(reply);
+        reply = inlineCharts.Reply;
+        if (charts.Count == 0 && inlineCharts.Charts.Count > 0)
+        {
+            charts = inlineCharts.Charts;
+        }
+
         using Activity? responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
         long responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
         await collector.RecordSpanAsync(
@@ -326,6 +336,16 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         string reply = SanitizeReplyText(string.IsNullOrWhiteSpace(rawText) ? context.FallbackReply : rawText);
 
         List<ChartSpec> charts = ExtractChartSpecs(response);
+
+        // Recover chart specs the model echoed as raw JSON in its prose (and strip
+        // that JSON so it never reaches the chat bubble or the streamed tokens).
+        // Promote recovered charts only when the tool path produced none.
+        InlineChartExtraction inlineCharts = ExtractInlineCharts(reply);
+        reply = inlineCharts.Reply;
+        if (charts.Count == 0 && inlineCharts.Charts.Count > 0)
+        {
+            charts = inlineCharts.Charts;
+        }
 
         // Stream the reply token-by-token via StreamingHub for progressive rendering
         await StreamReplyAsync(sessionId, context.AgentName, reply, ct);

@@ -44,4 +44,51 @@ describe('sanitizeMessage', () => {
     expect(result).not.toMatch(/\n{3,}/);
     expect(result).toContain('Actual content.');
   });
+
+  describe('chart-spec JSON stripping (screenshot regression)', () => {
+    // The exact production failure: the model narrated its CreateChart payload as
+    // raw JSON (alternate Chart.js-style schema) at the top of the reply.
+    const screenshotJson =
+      '{"type":"bar","title":"Consolidation Check 2026-08-05","data":{"labels":["ClearDesk Vodka","Sierra Gold Tequila"],"series":[{"name":"Depletion Velocity","values":[12.5,9.8]}]},"options":{"orientation":"horizontal"}}';
+
+    it('strips a leading chart-spec JSON block from prose', () => {
+      const msg = `${screenshotJson}\n\nHere's the depletion velocity comparison for spirits brands in the Northeast.`;
+      const result = sanitizeMessage(msg);
+      expect(result).not.toContain('"type":"bar"');
+      expect(result).not.toContain('"series"');
+      expect(result).not.toContain('{');
+      expect(result).toBe("Here's the depletion velocity comparison for spirits brands in the Northeast.");
+    });
+
+    it('strips a canonical-schema chart-spec JSON block', () => {
+      const msg =
+        'Here is the chart.\n\n{"type":"line","title":"Trend","data":[{"legend":"BrandA","values":[{"x":"Jan","y":10}]}]}';
+      const result = sanitizeMessage(msg);
+      expect(result).toBe('Here is the chart.');
+    });
+
+    it('strips chart JSON wrapped in a code fence, leaving no empty fence', () => {
+      const msg = '```json\n' + screenshotJson + '\n```\n\nProse after the chart.';
+      const result = sanitizeMessage(msg);
+      expect(result).not.toContain('```');
+      expect(result).not.toContain('"labels"');
+      expect(result).toContain('Prose after the chart.');
+    });
+
+    it('does not strip non-chart JSON the user may be discussing', () => {
+      const msg = 'The payload was {"brand":"Apex Grill","region":"Northeast","velocity":7.2} for reference.';
+      expect(sanitizeMessage(msg)).toBe(msg);
+    });
+
+    it('does not strip JSON lacking a recognized chart type', () => {
+      const msg = 'Config: {"type":"radar","title":"Unsupported","data":[]}';
+      // "radar" is not a renderable chart type, so it is surfaced, not hidden.
+      expect(sanitizeMessage(msg)).toContain('"type":"radar"');
+    });
+
+    it('leaves prose-only chart discussion untouched', () => {
+      const msg = 'A bar chart would show depletion velocity by brand across the Northeast region.';
+      expect(sanitizeMessage(msg)).toBe(msg);
+    });
+  });
 });
