@@ -77,7 +77,12 @@ builder.Services.Configure<KnowledgeOptions>(builder.Configuration.GetSection(Kn
 builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
 // Load tenant configuration
-string tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
+string tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "tenant.yaml");
+if (!File.Exists(tenantConfigPath))
+{
+    tenantConfigPath = Path.GetFullPath(
+        Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml"));
+}
 var tenantProvider = new FileTenantProvider(tenantConfigPath);
 builder.Services.AddSingleton<ITenantProvider>(tenantProvider);
 
@@ -91,16 +96,13 @@ builder.Services.AddSignalR()
     .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 
 // ── CORS — split policies for Development vs Production ─────────────────
-// Development CORS is restricted to known local frontend origins (Vite dev server on 5173,
-// alternative dev port 5100). Allowing any origin in dev would let a malicious local site
-// hit the API on behalf of the developer. Production origins come from configuration.
-string[] corsDevOrigins =
-[
-    "http://localhost:5173", "https://localhost:5173",
-    "http://localhost:5100", "https://localhost:5100"
-];
-string[] corsProdOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>()
+// Development includes known local origins plus explicitly configured deployed
+// origins. This keeps the fixed synthetic demo identity while allowing the SWA
+// frontend to connect directly to ACA for SignalR, which SWA does not proxy.
+string[] configuredCorsOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>()
     ?? [];
+string[] corsDevOrigins = CorsOriginResolver.ForDevelopment(configuredCorsOrigins);
+string[] corsProdOrigins = configuredCorsOrigins;
 
 builder.Services.AddCors(options =>
 {
@@ -149,7 +151,15 @@ else
         });
 }
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    if (!requireAuth)
+    {
+        options.DefaultPolicy = new AuthorizationPolicyBuilder()
+            .RequireAssertion(_ => true)
+            .Build();
+    }
+});
 
 // ── Rate Limiting ───────────────────────────────────────────────────────
 builder.Services.AddRateLimiter(options =>
@@ -478,7 +488,8 @@ builder.Services.AddScoped(sp =>
 });
 
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
-string approvalDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "approvals.db");
+string dataDirectory = Path.Combine(Path.GetTempPath(), "retailpulse");
+string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>
     new SqliteApprovalGate(approvalDbPath, sp.GetRequiredService<ILogger<SqliteApprovalGate>>()));
 
@@ -491,11 +502,11 @@ builder.Services.AddScoped(sp =>
 
 // Conversation memory — SQLite-backed, per-user, with configurable TTL
 // Conversation memory — SQLite-backed with bounded-channel background extraction
-string memoryDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "memory.db");
+string memoryDbPath = Path.Combine(dataDirectory, "memory.db");
 builder.Services.AddConversationMemory(memoryDbPath);
 
 // Proactive alerts — background anomaly detection with SQLite persistence
-string alertsDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "alerts.db");
+string alertsDbPath = Path.Combine(dataDirectory, "alerts.db");
 builder.Services.AddProactiveAlerts(alertsDbPath);
 
 // Distributed tracing — in-memory ring buffer with bounded-channel SignalR push
@@ -544,7 +555,7 @@ builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<In
 // Observability Suite — cost tracking, audit log, conversation export
 builder.Services.AddSingleton<InMemoryCostTracker>();
 builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<InMemoryCostTracker>());
-string auditDbPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "audit.db");
+string auditDbPath = Path.Combine(dataDirectory, "audit.db");
 builder.Services.AddSingleton(_ => new DurableAuditLog(auditDbPath));
 builder.Services.AddSingleton<IAuditLog>(sp => sp.GetRequiredService<DurableAuditLog>());
 builder.Services.AddSingleton<ConversationExporter>();
@@ -560,8 +571,9 @@ string openAiEndpoint = builder.Configuration["OpenAI:Endpoint"]
     ?? throw new InvalidOperationException(
         "Configuration value 'OpenAI:Endpoint' is required outside of Development.");
 
+bool useManagedIdentity = builder.Configuration.GetValue("OpenAI:UseManagedIdentity", false);
 string? openAiApiKey = builder.Configuration["OpenAI:ApiKey"];
-if (string.IsNullOrWhiteSpace(openAiApiKey))
+if (!useManagedIdentity && string.IsNullOrWhiteSpace(openAiApiKey))
 {
     openAiApiKey = builder.Environment.IsDevelopment()
         ? "demo-key"
@@ -583,10 +595,15 @@ var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
     RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 2)
 };
 
-var azureClient = new Azure.AI.OpenAI.AzureOpenAIClient(
-    new Uri(openAiEndpoint),
-    new System.ClientModel.ApiKeyCredential(openAiApiKey),
-    azureClientOptions);
+Azure.AI.OpenAI.AzureOpenAIClient azureClient = useManagedIdentity
+    ? new Azure.AI.OpenAI.AzureOpenAIClient(
+        new Uri(openAiEndpoint),
+        new Azure.Identity.DefaultAzureCredential(),
+        azureClientOptions)
+    : new Azure.AI.OpenAI.AzureOpenAIClient(
+        new Uri(openAiEndpoint),
+        new System.ClientModel.ApiKeyCredential(openAiApiKey!),
+        azureClientOptions);
 
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDef.Model).AsIChatClient())

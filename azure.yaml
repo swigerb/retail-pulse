@@ -17,11 +17,23 @@ services:
     language: dotnet
   frontend:
     project: ./src/RetailPulse.Web
-    host: appservice
+    host: staticwebapp
     language: js
     dist: dist
 hooks:
   preprovision:
-    shell: sh
-    run: azd-hooks/preprovision.sh
+    windows:
+      shell: pwsh
+      run: ./azd-hooks/preprovision.ps1
+    posix:
+      shell: sh
+      run: ./azd-hooks/preprovision.sh
+    continueOnError: false
+  postprovision:
+    windows:
+      shell: pwsh
+      run: ./azd-hooks/postprovision.ps1
+    posix:
+      shell: sh
+      run: ./azd-hooks/postprovision.sh
     continueOnError: false

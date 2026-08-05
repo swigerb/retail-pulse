@@ -168,3 +168,13 @@ Coordinator will need to communicate the verdict to Brian manually.
 ### Decision
 No new team-wide decision needed — this is a code-level fix, not an architectural policy change. The existing "UserId Resolution Must Go Through UserIdentity.Resolve" decision in `decisions.md` remains valid; this fix hardens its implementation.
 
+
+---
+
+### 2026-08-05T09:57:34-04:00 — Architecture gate: Issue #11 secretless-ACR deployment
+
+**Status:** ✅ APPROVE (final). Independent architecture/code review of Costco's dedicated-ACR, outputs, and postprovision hooks.
+
+**Notes:** Initial APPROVE with two notes — document the RBAC prerequisite and placeholder-image behavior. Final recheck APPROVE after Costco corrected operational docs.
+
+**Team impact:** Secretless system-identity ACR pull is the deployment standard; RBAC sequencing and placeholder-image behavior must stay documented in `docs/deployment-azd.md`.
