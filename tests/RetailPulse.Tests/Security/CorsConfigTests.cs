@@ -9,20 +9,14 @@ namespace RetailPulse.Tests.Security;
 public class CorsConfigTests
 {
     [Fact]
-    public async Task DevelopmentCors_AllowsAnyOrigin()
+    public void DevelopmentCors_IncludesLocalAndConfiguredOrigins()
     {
-        // The "Development" CORS policy uses AllowAnyOrigin(), AllowAnyHeader(), AllowAnyMethod()
-        string policyName = "Development";
-        policyName.Should().Be("Development");
+        string[] origins = RetailPulse.Api.Security.CorsOriginResolver.ForDevelopment(
+            ["https://demo.azurestaticapps.net", "https://demo.azurestaticapps.net", ""]);
 
-        bool allowsAnyOrigin = true;
-        bool allowsAnyHeader = true;
-        bool allowsAnyMethod = true;
-
-        allowsAnyOrigin.Should().BeTrue("Development CORS allows any origin");
-        allowsAnyHeader.Should().BeTrue("Development CORS allows any header");
-        allowsAnyMethod.Should().BeTrue("Development CORS allows any method");
-        await Task.CompletedTask;
+        origins.Should().Contain("http://localhost:5173");
+        origins.Should().Contain("https://demo.azurestaticapps.net");
+        origins.Should().OnlyHaveUniqueItems();
     }
 
     [Fact]

@@ -1,7 +1,10 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Tools;
+using RetailPulse.Contracts;
 
 namespace RetailPulse.Tests;
 
@@ -115,5 +118,228 @@ public class ChartDataToolTests
 
         var doc = JsonDocument.Parse(result);
         doc.RootElement.TryGetProperty("error", out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateChart_ValidJson_ReportsNotRecovered()
+    {
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """{"type":"bar","title":"Ok","data":[{"legend":"S1","values":[{"x":"a","y":1}]}]}""";
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeFalse(
+            "a strictly valid payload is not a recovery");
+    }
+
+    [Fact]
+    public async Task CreateChart_UnterminatedObject_RecoversLeadingData()
+    {
+        ChartDataTool tool = CreateTool();
+        // Truncated mid-second-datapoint: the container is never closed.
+        string truncated =
+            """{"type":"bar","title":"Depletion Velocity","xAxisTitle":"Brand","data":[{"legend":"ClearDesk","color":"#1B4D7A","values":[{"x":"Northeast","y":12.5},{"x":"Nor""";
+
+        string result = await tool.CreateChart(truncated);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeTrue();
+        JsonElement chart = doc.RootElement.GetProperty("chart");
+        chart.GetProperty("Type").GetString().Should().Be("bar");
+        chart.GetProperty("Title").GetString().Should().Be("Depletion Velocity");
+        JsonElement series = chart.GetProperty("Data");
+        series.GetArrayLength().Should().Be(1);
+        JsonElement values = series[0].GetProperty("Values");
+        values.GetArrayLength().Should().Be(1, "only the complete leading datapoint is salvaged");
+        values[0].GetProperty("X").GetString().Should().Be("Northeast");
+        values[0].GetProperty("Y").GetDouble().Should().Be(12.5);
+    }
+
+    [Fact]
+    public async Task CreateChart_ArrayTruncatedMidDatapoint_DropsIncompletePoint()
+    {
+        ChartDataTool tool = CreateTool();
+        // Second datapoint has an x but the y value is cut off.
+        string truncated =
+            """{"type":"line","title":"Trend","data":[{"legend":"BrandA","values":[{"x":"Jan","y":10},{"x":"Feb","y":""";
+
+        string result = await tool.CreateChart(truncated);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeTrue();
+        JsonElement values = doc.RootElement.GetProperty("chart").GetProperty("Data")[0].GetProperty("Values");
+        values.GetArrayLength().Should().Be(1, "the datapoint missing y must be dropped, not fabricated");
+        values[0].GetProperty("X").GetString().Should().Be("Jan");
+    }
+
+    [Fact]
+    public async Task CreateChart_TruncatedString_TitleCutOff_ReturnsError()
+    {
+        ChartDataTool tool = CreateTool();
+        // The title string is truncated before any usable data exists.
+        string truncated = """{"type":"bar","title":"Depletion Veloc""";
+
+        string result = await tool.CreateChart(truncated);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.TryGetProperty("error", out _).Should().BeTrue(
+            "no usable chart data could be recovered");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateChart_TruncatedStringMidDatapoint_RecoversPriorPoints()
+    {
+        ChartDataTool tool = CreateTool();
+        // The x label of the last datapoint is a truncated string.
+        string truncated =
+            """{"type":"bar","title":"Velocity","data":[{"legend":"BrandA","values":[{"x":"NE","y":5},{"x":"Mid""";
+
+        string result = await tool.CreateChart(truncated);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeTrue();
+        JsonElement values = doc.RootElement.GetProperty("chart").GetProperty("Data")[0].GetProperty("Values");
+        values.GetArrayLength().Should().Be(1);
+        values[0].GetProperty("X").GetString().Should().Be("NE");
+    }
+
+    [Fact]
+    public async Task CreateChart_FencedTruncatedJson_RecoversData()
+    {
+        ChartDataTool tool = CreateTool();
+        // Model wrapped output in a markdown fence and got cut off (no closing fence).
+        string truncated =
+            "```json\n" +
+            """{"type":"bar","title":"Spirits NE","data":[{"legend":"ClearDesk","values":[{"x":"NE","y":8.3}""";
+
+        string result = await tool.CreateChart(truncated);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeTrue();
+        JsonElement chart = doc.RootElement.GetProperty("chart");
+        chart.GetProperty("Title").GetString().Should().Be("Spirits NE");
+        chart.GetProperty("Data")[0].GetProperty("Values")[0].GetProperty("Y").GetDouble().Should().Be(8.3);
+    }
+
+    [Fact]
+    public async Task CreateChart_FencedValidJson_Succeeds()
+    {
+        ChartDataTool tool = CreateTool();
+        string fenced =
+            "```json\n" +
+            """{"type":"bar","title":"Fenced","data":[{"legend":"S1","values":[{"x":"a","y":1}]}]}""" +
+            "\n```";
+
+        string result = await tool.CreateChart(fenced);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeTrue(
+            "fenced JSON is not strictly valid input, so it goes through the recovery path");
+        doc.RootElement.GetProperty("chart").GetProperty("Data")[0]
+            .GetProperty("Values").GetArrayLength().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CreateChart_TruncatedBeforeAnyDatapoint_ReturnsError()
+    {
+        ChartDataTool tool = CreateTool();
+        // Structurally recoverable to {"type":"bar","title":"X","data":[]} but no data.
+        string truncated = """{"type":"bar","title":"X","data":[{"legend":"BrandA","values":[{"x":"NE""";
+
+        string result = await tool.CreateChart(truncated);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.TryGetProperty("error", out _).Should().BeTrue(
+            "a datapoint with no y is not usable and there is no other data");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateChart_GarbageAfterBrace_ReturnsError()
+    {
+        ChartDataTool tool = CreateTool();
+
+        string result = await tool.CreateChart("{ not : valid");
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.TryGetProperty("error", out _).Should().BeTrue();
+        doc.RootElement.GetProperty("message").GetString().Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task CreateChart_RecoveredData_FlowsThroughChartExtraction()
+    {
+        // End-to-end contract check: a recovered payload must still match the shape
+        // that AgentExecutionPipeline.ExtractChartSpecs consumes (status=success + chart).
+        ChartDataTool tool = CreateTool();
+        string truncated =
+            """{"type":"bar","title":"Spirits","data":[{"legend":"ClearDesk","values":[{"x":"NE","y":8.3}""";
+
+        string result = await tool.CreateChart(truncated);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        JsonElement chartElement = doc.RootElement.GetProperty("chart");
+        ChartSpec? chart = JsonSerializer.Deserialize<ChartSpec>(
+            chartElement.GetRawText(),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        chart.Should().NotBeNull();
+        chart.Type.Should().Be("bar");
+        chart.Data.Should().ContainSingle();
+        chart.Data[0].Values.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ExtractChartSpecs_RecoveredTruncatedChart_FlowsIntoChartsList()
+    {
+        // Full cross-boundary contract: the recovered CreateChart payload must be
+        // consumed by the REAL AgentExecutionPipeline.ExtractChartSpecs and land as a
+        // single ChartSpec in the response Charts list (not re-implemented inline).
+        ChartDataTool tool = CreateTool();
+        string truncated =
+            """{"type":"bar","title":"Spirits NE","data":[{"legend":"ClearDesk","values":[{"x":"NE","y":8.3}""";
+
+        string toolOutput = await tool.CreateChart(truncated);
+
+        var response = new Microsoft.Extensions.AI.ChatResponse(
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-chart-1", toolOutput)]));
+
+        List<ChartSpec> charts = AgentExecutionPipeline.ExtractChartSpecs(response);
+
+        charts.Should().ContainSingle("the recovered singular chart must flow into the Charts list");
+        charts[0].Type.Should().Be("bar");
+        charts[0].Title.Should().Be("Spirits NE");
+        charts[0].Data.Should().ContainSingle();
+        charts[0].Data[0].Values.Should().ContainSingle();
+        charts[0].Data[0].Values[0].X.Should().Be("NE");
+        charts[0].Data[0].Values[0].Y.Should().Be(8.3);
+    }
+
+    [Fact]
+    public async Task ExtractChartSpecs_StructuredError_ProducesNoCharts()
+    {
+        // A conservative, unrecoverable result must be a structured error and must NOT
+        // be surfaced as a chart by the real consumer (charts=null, not a broken chart).
+        ChartDataTool tool = CreateTool();
+        string truncated = """{"type":"bar","title":"Depletion Veloc""";
+
+        string toolOutput = await tool.CreateChart(truncated);
+        JsonDocument.Parse(toolOutput).RootElement.TryGetProperty("error", out _).Should().BeTrue(
+            "the payload is unrecoverable and must be a structured error");
+
+        var response = new Microsoft.Extensions.AI.ChatResponse(
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-chart-2", toolOutput)]));
+
+        List<ChartSpec> charts = AgentExecutionPipeline.ExtractChartSpecs(response);
+
+        charts.Should().BeEmpty("an error result must not produce any chart");
     }
 }

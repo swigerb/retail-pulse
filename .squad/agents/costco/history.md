@@ -109,3 +109,15 @@ Detailed work from June 3, May 18, May 16, and May 15 available in **history-arc
 **Why:** The Cost Dashboard was broken because the frontend read `trend`, `agentBreakdown`, and `topTools` from the summary-only `/costs` response instead of calling the dedicated endpoints. Top Tools needed a new tracing-backed endpoint because `UsageEvent` has tool names but no duration; duration lives on tool trace spans.
 
 **Team impact:** Duration-aware tool usage stats should be sourced from `ITraceCollector`, not `ICostTracker` usage events.
+
+---
+
+### 2026-08-05T09:57:34-04:00 — Issue #11: Secretless ACR image pull for Container Apps
+
+**Status:** ✅ Complete — Bicep validated (no artifact), hooks syntax-checked, deployment-contract tests 39/39. Publix + Kroger both APPROVE.
+
+**What:** Dedicated Basic-SKU ACR (`infra/modules/container-registry.bicep`, `adminUserEnabled: false`) with `AZURE_CONTAINER_REGISTRY_ENDPOINT`/`_NAME`/`_RESOURCE_ID` outputs from `infra/main.bicep`, plus cross-platform postprovision hooks (`azd-hooks/postprovision.ps1`/`.sh`) that idempotently grant `AcrPull` to API/MCP/TeamsBot system identities and set `az containerapp registry set --identity system`.
+
+**Why:** System-identity Container Apps lost registry config after Bicep provisioning (UNAUTHORIZED pull). The self-pull binding is circular in one Bicep pass; a postprovision hook breaks the cycle and re-asserts idempotently on every `azd up`/`provision`.
+
+**Team impact:** New Container Apps must use a system identity AND be added to the app list in BOTH hooks. Decision recorded in decisions.md; guardrails in `DeploymentContractTests.cs`; ops docs in `docs/deployment-azd.md`.

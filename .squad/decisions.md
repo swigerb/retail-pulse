@@ -2,6 +2,37 @@
 
 ## Active Decisions
 
+### 2026-08-05: Dedicated Basic ACR + postprovision hook for secretless Container Apps image pull
+
+**By:** Costco (Backend Dev)
+
+**What:** Retail Pulse now provisions its own **Basic-SKU Azure Container Registry**
+(`infra/modules/container-registry.bicep`, `adminUserEnabled: false`) and emits
+`AZURE_CONTAINER_REGISTRY_ENDPOINT` / `_NAME` / `_RESOURCE_ID` from `infra/main.bicep`.
+A cross-platform **postprovision hook** (`azd-hooks/postprovision.ps1` + `.sh`, wired in
+`azure.yaml`, `continueOnError: false`) idempotently grants `AcrPull` to each of the three
+Container Apps' system-assigned identities and runs `az containerapp registry set --identity
+system` — no registry secrets, no admin user.
+
+**Why:** After Bicep provisioning during `azd up`, the three system-identity Container Apps
+lost their registry configuration and the API failed pulling from `*.azurecr.io` with
+`UNAUTHORIZED`. Binding an app to pull from ACR via its *own* system identity is circular in
+a single Bicep pass (principalId doesn't exist until the app is created; the AcrPull grant
+the registry binding needs depends on that principalId), and a re-provision can strip the
+registry block azd set during deploy. Doing it in a postprovision hook breaks the cycle and
+re-asserts state on every `azd up`/`azd provision`, so clean and repeated deploys are
+self-contained and idempotent.
+
+**Team impact:**
+- azd now pushes images to the dedicated ACR (via `AZURE_CONTAINER_REGISTRY_ENDPOINT`), not
+  an implicit one. `azd up` / `azd provision` / `azd deploy` require no manual registry steps.
+- Any new Container App added to `infra/modules/container-apps.bicep` must (a) use a
+  system-assigned identity and (b) be added to the app list in **both** postprovision hooks so
+  it gets `AcrPull` + system-identity registry auth.
+- Deployment identity/RBAC sequencing, outputs, and operational notes are documented in
+  `docs/deployment-azd.md` ("Container images & secretless registry pull").
+- Guardrails: `tests/RetailPulse.Tests/Deployment/DeploymentContractTests.cs`.
+
 ### 2026-06-03T11:22:49Z: Asp.Versioning.Http upgraded 8.1.0 → 10.0.0 (deferral resolved)
 
 **By:** Costco (Backend Dev)

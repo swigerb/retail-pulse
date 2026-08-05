@@ -130,3 +130,13 @@ Hosting full production chat endpoint in tests is expensive and tightly coupled 
 **Validation:** backend suite 1,998 passed / 2 skipped; frontend suite 285 passed; frontend build passed.
 
 **Lesson:** Observability dashboard tests must verify that the frontend calls dedicated endpoints for trend/agent/tool data and that idle all-zero trend data renders an empty state, not a misleading zero-line chart.
+
+---
+
+### 2026-08-05T09:57:34-04:00 — Quality gate: Issue #11 secretless-ACR deployment
+
+**Status:** ✅ APPROVE (final). Independent quality review of Costco's dedicated-ACR + postprovision-hook work.
+
+**Notes:** Initial APPROVE with one cosmetic note — narrow the BCP334 suppression. Final recheck APPROVE after correction.
+
+**Heuristic:** Prefer narrowly-scoped Bicep linter suppressions over blanket ones.
