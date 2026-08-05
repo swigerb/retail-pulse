@@ -19,7 +19,7 @@ Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI t
 
 **Key differentiator:** Retail Pulse is **tenant-configurable**. Define your company, brands, regions, and theme in a single `tenant.yaml` file and the entire platform adapts. No code changes required.
 
-**Built with:** .NET Aspire, Microsoft AI Framework (MAF), Model Context Protocol (MCP), React + Vite, Azure Bot Framework, Azure API Management (AI Gateway).
+**Built with:** .NET Aspire, Microsoft AI Framework (MAF), Model Context Protocol (MCP), React + Vite, Azure Container Apps, Azure Static Web Apps, Azure Bot Framework, and Azure API Management (AI Gateway).
 
 ---
 
@@ -205,7 +205,7 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 
 ---
 
-## Technology Stack
+## Technology stack
 
 | Layer | Technology | Version | Purpose |
 |-------|-----------|---------|---------|
@@ -223,7 +223,7 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 | **Monitoring** | Azure Application Insights | — | Production telemetry and traces |
 | **Gateway** | Azure API Management | — | Token metering, rate limiting, audit |
 | **Backend hosting** | Azure Container Apps | — | Runs the API, MCP Server, and Teams Bot as containers; scales to zero when idle |
-| **Frontend hosting** | Azure Static Web Apps | — | Serves the React/Vite static build; calls the Container Apps API directly over CORS |
+| **Frontend hosting** | Azure Static Web Apps | — | Serves the React/Vite static build; proxies REST `/api` requests to the linked Container Apps backend while SignalR connects directly to the Container Apps API |
 | **Container registry** | Azure Container Registry (Basic) | — | Stores backend images; Container Apps pull them with managed identity (no admin secrets) |
 | **Testing** | xUnit + Vitest | — | Backend + frontend tests |
 
