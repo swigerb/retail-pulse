@@ -344,4 +344,285 @@ public class AgentPipelineTests
     }
 
     #endregion
+
+    #region ExtractInlineCharts — chart JSON echoed as prose
+
+    // The exact failure from the production screenshot: the model narrated its
+    // CreateChart payload as raw JSON at the top of the reply, using the alternate
+    // Chart.js-style schema (data:{labels,series}) that the tool path cannot bind.
+    private const string ScreenshotReply =
+        """
+        {"type":"bar","title":"Consolidation Check 2026-08-05","data":{"labels":["ClearDesk Vodka","Sierra Gold Tequila","Apex Reserve"],"series":[{"name":"Depletion Velocity","values":[12.5,9.8,7.2]}]},"options":{"orientation":"horizontal","xAxisLabel":"Cases per Week","yAxisLabel":"Brand"}}
+
+        Here's the depletion velocity comparison for all spirits brands in the Northeast. ClearDesk Vodka leads at 12.5 cases per week.
+        """;
+
+    [Fact]
+    public void ExtractInlineCharts_ScreenshotPayload_StripsRawJsonFromReply()
+    {
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(ScreenshotReply);
+
+        result.Reply.Should().NotContain("\"type\":\"bar\"");
+        result.Reply.Should().NotContain("\"series\"");
+        result.Reply.Should().NotContain("\"labels\"");
+        result.Reply.Should().NotContain("{");
+        result.Reply.Should().Contain("Here's the depletion velocity comparison");
+        result.Reply.Should().Contain("ClearDesk Vodka leads at 12.5 cases per week.");
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_ScreenshotPayload_ReturnsStructuredChart()
+    {
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(ScreenshotReply);
+
+        result.Charts.Should().ContainSingle("the inline chart JSON must become structured chart data");
+        ChartSpec chart = result.Charts[0];
+        chart.Type.Should().Be("horizontalBar", "options.orientation=horizontal maps a bar to horizontalBar");
+        chart.Title.Should().Be("Consolidation Check 2026-08-05");
+        chart.XAxisTitle.Should().Be("Cases per Week");
+        chart.YAxisTitle.Should().Be("Brand");
+        chart.Data.Should().ContainSingle();
+        chart.Data[0].Legend.Should().Be("Depletion Velocity");
+        chart.Data[0].Values.Should().HaveCount(3);
+        chart.Data[0].Values[0].X.Should().Be("ClearDesk Vodka");
+        chart.Data[0].Values[0].Y.Should().Be(12.5);
+        chart.Data[0].Values[2].X.Should().Be("Apex Reserve");
+        chart.Data[0].Values[2].Y.Should().Be(7.2);
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_CanonicalInlineJson_StripsAndExtracts()
+    {
+        string reply =
+            """
+            Here is the breakdown.
+
+            {"type":"bar","title":"Monthly Sales","xAxisTitle":"Month","yAxisTitle":"Cases","data":[{"legend":"Sierra Gold","values":[{"x":"Jan","y":1200},{"x":"Feb","y":1450}]}]}
+            """;
+
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(reply);
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("bar");
+        result.Charts[0].Title.Should().Be("Monthly Sales");
+        result.Reply.Should().Be("Here is the breakdown.");
+        result.Reply.Should().NotContain("{");
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_CleanProse_ReturnedUnchangedWithNoCharts()
+    {
+        string reply = "Depletion velocity for spirits brands in the Northeast is trending up 4% this quarter.";
+
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(reply);
+
+        result.Reply.Should().Be(reply);
+        result.Charts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_NonChartJson_LeftUntouched()
+    {
+        // Well-formed JSON that is not a chart must be surfaced, not silently hidden.
+        string reply = """The raw metric payload was {"brand":"Apex Grill","region":"Northeast","velocity":7.2} for reference.""";
+
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(reply);
+
+        result.Charts.Should().BeEmpty("non-chart JSON must not be treated as a chart");
+        result.Reply.Should().Contain("\"brand\":\"Apex Grill\"", "arbitrary JSON is left visible, not stripped");
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_EmptyReply_ReturnsEmpty()
+    {
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(string.Empty);
+
+        result.Reply.Should().BeEmpty();
+        result.Charts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ExtractInlineCharts_FencedFullConfigVariant_StripsFenceAndExtracts()
+    {
+        // Third real-world variant observed live: a ```json fenced block using the
+        // full-config schema (top-level series + xAxis.categories). The fence and JSON
+        // must be removed from the reply and promoted to a structured chart.
+        string reply =
+            """
+            Here's the bar chart comparing depletion velocity for all spirits brands in the Northeast.
+
+            ```json
+            {"type":"bar","title":"Depletion Velocity","xAxis":{"label":"Brand","categories":["Sierra Gold","Ridgeline","Summit"]},"yAxis":{"label":"Avg Weekly Volume"},"series":[{"name":"Avg Weekly Volume","data":[1893.2,2109.5,2296.3]}]}
+            ```
+            """;
+
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(reply);
+
+        result.Reply.Should().NotContain("{");
+        result.Reply.Should().NotContain("```");
+        result.Reply.Should().Contain("Here's the bar chart comparing depletion velocity");
+        result.Charts.Should().ContainSingle();
+        ChartSpec chart = result.Charts[0];
+        chart.Type.Should().Be("bar");
+        chart.XAxisTitle.Should().Be("Brand");
+        chart.YAxisTitle.Should().Be("Avg Weekly Volume");
+        chart.Data.Should().ContainSingle();
+        chart.Data[0].Values.Should().HaveCount(3);
+        chart.Data[0].Values[0].X.Should().Be("Sierra Gold");
+        chart.Data[0].Values[0].Y.Should().Be(1893.2);
+        chart.Data[0].Values[2].X.Should().Be("Summit");
+        chart.Data[0].Values[2].Y.Should().Be(2296.3);
+    }
+
+    #endregion
+
+    #region MergeInlineCharts — dedup of inline echoes vs. distinct charts
+
+    private static ChartSpec BarChart(string title, string legend, params (string X, double Y)[] points) =>
+        new()
+        {
+            Type = "bar",
+            Title = title,
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = legend,
+                    Values = [.. points.Select(p => new ChartDataPoint { X = p.X, Y = p.Y })],
+                },
+            ],
+        };
+
+    [Fact]
+    public void MergeInlineCharts_NoInlineCharts_ReturnsToolChartsUnchanged()
+    {
+        var tool = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, []);
+
+        merged.Should().BeSameAs(tool, "no inline charts means the tool set is returned as-is");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_DuplicateEcho_IsSuppressed()
+    {
+        // The model called the tool AND echoed the identical chart JSON in prose.
+        // The echo must not produce a second, duplicate render.
+        var tool = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10), ("Feb", 12)) };
+        var inline = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10), ("Feb", 12)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, inline);
+
+        merged.Should().ContainSingle("a genuine duplicate of a tool-produced chart is suppressed");
+        merged[0].Title.Should().Be("Sales");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_DistinctInlineChart_IsPreserved()
+    {
+        // Tool produced chart A; prose contained a DIFFERENT valid chart B. Both
+        // must survive — B must not be silently dropped just because A exists.
+        var tool = new List<ChartSpec> { BarChart("Chart A", "A", ("Jan", 10)) };
+        var inline = new List<ChartSpec> { BarChart("Chart B", "B", ("Feb", 20)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, inline);
+
+        merged.Should().HaveCount(2);
+        merged.Select(c => c.Title).Should().Equal("Chart A", "Chart B");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_NoToolCharts_PromotesAllInline()
+    {
+        var inline = new List<ChartSpec> { BarChart("Only", "A", ("Jan", 10)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts([], inline);
+
+        merged.Should().ContainSingle();
+        merged[0].Title.Should().Be("Only");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_MixedDuplicateAndDistinct_KeepsOnlyDistinct()
+    {
+        // Prose echoed the tool chart (suppress) plus a distinct chart (keep).
+        var tool = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10)) };
+        var inline = new List<ChartSpec>
+        {
+            BarChart("Sales", "A", ("Jan", 10)),   // duplicate echo
+            BarChart("Forecast", "B", ("Feb", 20)), // distinct
+        };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, inline);
+
+        merged.Should().HaveCount(2);
+        merged.Select(c => c.Title).Should().Equal("Sales", "Forecast");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_DuplicateInlineCharts_AreCollapsed()
+    {
+        // Two identical inline charts (no tool charts) collapse to one.
+        var inline = new List<ChartSpec>
+        {
+            BarChart("Sales", "A", ("Jan", 10)),
+            BarChart("Sales", "A", ("Jan", 10)),
+        };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts([], inline);
+
+        merged.Should().ContainSingle("identical inline charts must not double-render");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_SameTitleDifferentData_IsNotADuplicate()
+    {
+        // Same title but different datapoints is a distinct chart, not an echo.
+        var tool = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10)) };
+        var inline = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 99)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, inline);
+
+        merged.Should().HaveCount(2, "differing datapoints make it a distinct chart, not a duplicate");
+    }
+
+    #endregion
+
+    #region ChartSpecSemanticComparer — content-based equality
+
+    [Fact]
+    public void ChartSpecSemanticComparer_IdenticalContent_AreEqual()
+    {
+        ChartSpec a = BarChart("Sales", "A", ("Jan", 10), ("Feb", 12));
+        ChartSpec b = BarChart("Sales", "A", ("Jan", 10), ("Feb", 12));
+
+        Api.Charts.ChartSpecSemanticComparer.Instance.Equals(a, b)
+            .Should().BeTrue("structurally identical charts from different sources are equal");
+        Api.Charts.ChartSpecSemanticComparer.Instance.GetHashCode(a)
+            .Should().Be(Api.Charts.ChartSpecSemanticComparer.Instance.GetHashCode(b));
+    }
+
+    [Fact]
+    public void ChartSpecSemanticComparer_DifferentValues_AreNotEqual()
+    {
+        ChartSpec a = BarChart("Sales", "A", ("Jan", 10));
+        ChartSpec b = BarChart("Sales", "A", ("Jan", 11));
+
+        Api.Charts.ChartSpecSemanticComparer.Instance.Equals(a, b).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ChartSpecSemanticComparer_DefaultRecordEquality_WouldFail_ButComparerSucceeds()
+    {
+        // Guards the reason this comparer exists: record equality compares the
+        // List<> members by reference, so two equal-content charts are NOT equal
+        // under the compiler-generated Equals.
+        ChartSpec a = BarChart("Sales", "A", ("Jan", 10));
+        ChartSpec b = BarChart("Sales", "A", ("Jan", 10));
+
+        a.Equals(b).Should().BeFalse("record equality compares List<> Data by reference");
+        Api.Charts.ChartSpecSemanticComparer.Instance.Equals(a, b).Should().BeTrue();
+    }
+
+    #endregion
 }

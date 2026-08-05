@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using RetailPulse.Api.Charts;
 using RetailPulse.Contracts;
 
 namespace RetailPulse.Api.Tools;
@@ -38,6 +39,21 @@ public class ChartDataTool
                 return Task.FromResult(JsonSerializer.Serialize(new { error = "Invalid chart specification" }));
             }
 
+            // Strict binding succeeds structurally even when the model used a
+            // non-canonical schema (e.g. top-level series + xAxis), leaving Data empty.
+            // Recover the real series via the normalizer before returning an empty chart.
+            if (spec.Data.Count == 0
+                && ChartSpecNormalizer.TryNormalize(chartSpecJson, out ChartSpec? enriched)
+                && enriched is not null
+                && enriched.Data.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Enriched chart spec from non-canonical schema: {Type} - {Title} with {SeriesCount} series",
+                    enriched.Type, enriched.Title, enriched.Data.Count);
+
+                return Task.FromResult(JsonSerializer.Serialize(new { status = "success", chart = enriched, recovered = true }));
+            }
+
             _logger.LogInformation("Chart created: {Type} - {Title} with {SeriesCount} series", spec.Type, spec.Title, spec.Data.Count);
 
             return Task.FromResult(JsonSerializer.Serialize(new { status = "success", chart = spec, recovered = false }));
@@ -60,6 +76,18 @@ public class ChartDataTool
     private string TryRecover(string raw, JsonException originalError)
     {
         string cleaned = StripMarkdownFences(raw);
+
+        // The payload may be well-formed but use a non-canonical, model-invented
+        // schema (e.g. Chart.js-style data:{labels,series}). Normalize that shape
+        // before falling back to truncation repair.
+        if (ChartSpecNormalizer.TryNormalize(cleaned, out ChartSpec? normalized) && normalized is not null)
+        {
+            _logger.LogInformation(
+                "Normalized non-canonical chart spec: {Type} - {Title} with {SeriesCount} series",
+                normalized.Type, normalized.Title, normalized.Data.Count);
+
+            return JsonSerializer.Serialize(new { status = "success", chart = normalized, recovered = true });
+        }
 
         string? repaired = RepairTruncatedJson(cleaned);
         if (repaired is not null)
