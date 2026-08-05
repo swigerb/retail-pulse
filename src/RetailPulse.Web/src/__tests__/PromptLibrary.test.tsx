@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import { PromptLibrary } from '../components/PromptLibrary';
@@ -34,14 +34,19 @@ describe('PromptLibrary', () => {
 
     await user.click(screen.getByRole('button', { name: /Prompt ideas/i }));
 
-    // Dialog surface exposes an accessible name.
-    const dialog = await screen.findByRole('dialog', { name: /Prompt library/i });
+    // Dialog surface exposes an accessible name and is a modal dialog.
+    // Note: Fluent's trap-focus modal can nondeterministically apply aria-hidden
+    // to the active surface under jsdom, so query with hidden:true and assert the
+    // real ARIA contract (role + accessible name + aria-modal) on the element.
+    const dialog = await screen.findByRole('dialog', { name: /Prompt library/i, hidden: true });
     expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
 
+    const panel = within(dialog);
     // Category filters live in a labeled group; "All" is selected by default.
-    expect(screen.getByRole('group', { name: /Prompt categories/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /🏪 All/i })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: /🛒 Grocery/i })).toHaveAttribute('aria-pressed', 'false');
+    expect(panel.getByRole('group', { name: /Prompt categories/i, hidden: true })).toBeInTheDocument();
+    expect(panel.getByRole('button', { name: /🏪 All/i, hidden: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(panel.getByRole('button', { name: /🛒 Grocery/i, hidden: true })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('filters prompts when a category is selected', async () => {
@@ -50,16 +55,19 @@ describe('PromptLibrary', () => {
 
     await user.click(screen.getByRole('button', { name: /Prompt ideas/i }));
 
+    const dialog = await screen.findByRole('dialog', { name: /Prompt library/i, hidden: true });
+    const panel = within(dialog);
+
     // "All" view surfaces prompts from multiple categories.
-    expect(await screen.findByRole('button', { name: GENERAL_PROMPT })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: GROCERY_PROMPT })).toBeInTheDocument();
+    expect(panel.getByRole('button', { name: GENERAL_PROMPT, hidden: true })).toBeInTheDocument();
+    expect(panel.getByRole('button', { name: GROCERY_PROMPT, hidden: true })).toBeInTheDocument();
 
     // Selecting Grocery narrows the list to that category only.
-    await user.click(screen.getByRole('button', { name: /🛒 Grocery/i }));
-    expect(screen.getByRole('button', { name: /🛒 Grocery/i })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: GROCERY_PROMPT })).toBeInTheDocument();
+    await user.click(panel.getByRole('button', { name: /🛒 Grocery/i, hidden: true }));
+    expect(panel.getByRole('button', { name: /🛒 Grocery/i, hidden: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(panel.getByRole('button', { name: GROCERY_PROMPT, hidden: true })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: GENERAL_PROMPT })).not.toBeInTheDocument();
+      expect(panel.queryByRole('button', { name: GENERAL_PROMPT, hidden: true })).not.toBeInTheDocument();
     });
   });
 
@@ -69,14 +77,15 @@ describe('PromptLibrary', () => {
     renderLibrary({ onSelect });
 
     await user.click(screen.getByRole('button', { name: /Prompt ideas/i }));
-    await user.click(await screen.findByRole('button', { name: GENERAL_PROMPT }));
+    const dialog = await screen.findByRole('dialog', { name: /Prompt library/i, hidden: true });
+    await user.click(within(dialog).getByRole('button', { name: GENERAL_PROMPT, hidden: true }));
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith(GENERAL_PROMPT);
 
     // Panel dismisses after a selection.
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: /Prompt library/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /Prompt library/i, hidden: true })).not.toBeInTheDocument();
     });
   });
 
@@ -89,11 +98,11 @@ describe('PromptLibrary', () => {
     expect(trigger).toHaveFocus();
 
     await user.keyboard('{Enter}');
-    expect(await screen.findByRole('dialog', { name: /Prompt library/i })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: /Prompt library/i, hidden: true })).toBeInTheDocument();
 
     await user.keyboard('{Escape}');
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: /Prompt library/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: /Prompt library/i, hidden: true })).not.toBeInTheDocument();
     });
     // Focus returns to the trigger for a smooth keyboard flow.
     expect(trigger).toHaveFocus();
