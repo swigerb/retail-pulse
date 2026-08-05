@@ -333,6 +333,11 @@ same per-OS selection) wires secretless ACR pull for the three Container Apps,
 idempotently links SWA `/api` traffic to ACA, and applies the synthetic-demo runtime
 settings (managed-identity model endpoint, MCP/API URLs, CORS origin, demo auth mode,
 and Teams bot API URL).
+
+The prompt model remains `gpt-5.4-mini`; Azure deployment selection is separate:
+`OpenAI__Deployment=gpt-5.4-mini-2026-03-17`. Versioned deployment names make
+upgrades explicit without coupling prompt semantics or token-pricing keys to an
+infrastructure alias.
 Both hook pairs are wired with `continueOnError: false`, so a failure aborts the
 deploy loudly rather than proceeding with a broken registry configuration.
 
