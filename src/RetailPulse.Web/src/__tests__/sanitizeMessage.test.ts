@@ -100,5 +100,70 @@ describe('sanitizeMessage', () => {
       const msg = 'A bar chart would show depletion velocity by brand across the Northeast region.';
       expect(sanitizeMessage(msg)).toBe(msg);
     });
+
+    describe('bindability: prose JSON with no renderable datapoint is preserved', () => {
+      // The reviewer's proven leak examples: recognized type + title but the
+      // backend rejects them (no bindable datapoint), so the frontend must NOT
+      // silently delete the surrounding prose.
+      it('keeps an empty-data array payload (data: [])', () => {
+        const msg =
+          'For reference an empty chart payload looks like {"type":"bar","title":"Placeholder","data":[]} when no data is bound yet.';
+        expect(sanitizeMessage(msg)).toBe(msg);
+      });
+
+      it('keeps a null-data payload (data: null)', () => {
+        const msg = 'The schema example is {"type":"line","title":"Example","data":null} in the docs.';
+        expect(sanitizeMessage(msg)).toBe(msg);
+      });
+
+      it('keeps a non-renderable object-data payload (data: {id:1})', () => {
+        const msg = 'The webhook shape is {"type":"table","title":"Row","data":{"id":1}} for reference.';
+        expect(sanitizeMessage(msg)).toBe(msg);
+      });
+
+      it('keeps a canonical payload whose series carry no numeric values', () => {
+        const msg =
+          'Placeholder: {"type":"bar","title":"Empty","data":[{"legend":"A","values":[]}]} has no points yet.';
+        expect(sanitizeMessage(msg)).toBe(msg);
+      });
+
+      it('keeps a full-config payload whose series data is empty', () => {
+        const msg =
+          'Skeleton: {"type":"bar","title":"Skeleton","series":[{"name":"A","data":[]}]} awaits binding.';
+        expect(sanitizeMessage(msg)).toBe(msg);
+      });
+    });
+
+    describe('bindability: prose JSON with a real datapoint is still stripped', () => {
+      it('strips a canonical payload with {x,y} points', () => {
+        const msg =
+          'Here is the chart.\n\n{"type":"line","title":"Trend","data":[{"legend":"BrandA","values":[{"x":"Jan","y":10}]}]}';
+        expect(sanitizeMessage(msg)).toBe('Here is the chart.');
+      });
+
+      it('strips a labels/series data-object payload', () => {
+        const msg =
+          '{"type":"bar","title":"Depletion","data":{"labels":["A","B"],"series":[{"name":"Velocity","values":[12.5,9.8]}]}}\n\nThe comparison follows.';
+        expect(sanitizeMessage(msg)).toBe('The comparison follows.');
+      });
+
+      it('strips a single-series data-object payload (labels + values)', () => {
+        const msg =
+          '{"type":"pie","title":"Share","data":{"labels":["A","B"],"values":[60,40]}}\n\nMarket share above.';
+        expect(sanitizeMessage(msg)).toBe('Market share above.');
+      });
+
+      it('strips a full-config payload (top-level series + xAxis.categories)', () => {
+        const msg =
+          '{"type":"bar","title":"Avg","xAxis":{"label":"Brand","categories":["A","B"]},"series":[{"name":"Vol","data":[1893.2,2296.3]}]}\n\nBar chart above.';
+        expect(sanitizeMessage(msg)).toBe('Bar chart above.');
+      });
+
+      it('strips a payload whose values are numeric strings', () => {
+        const msg =
+          '{"type":"bar","title":"Coerced","data":[{"legend":"A","values":[{"x":"Jan","y":"10"}]}]}\n\nDone.';
+        expect(sanitizeMessage(msg)).toBe('Done.');
+      });
+    });
   });
 });

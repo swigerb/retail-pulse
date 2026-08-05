@@ -163,14 +163,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         List<ChartSpec> charts = ExtractChartSpecs(response);
 
         // Recover chart specs the model echoed as raw JSON in its prose (and strip
-        // that JSON so it never reaches the chat bubble). Promote recovered charts
-        // only when the tool path produced none, to avoid duplicate renders.
+        // that JSON so it never reaches the chat bubble). Merge distinct recovered
+        // charts into the tool-produced set, suppressing only genuine duplicates of
+        // charts the tool already produced (a common echo) so a distinct inline
+        // chart is not silently dropped.
         InlineChartExtraction inlineCharts = ExtractInlineCharts(reply);
         reply = inlineCharts.Reply;
-        if (charts.Count == 0 && inlineCharts.Charts.Count > 0)
-        {
-            charts = inlineCharts.Charts;
-        }
+        charts = MergeInlineCharts(charts, inlineCharts.Charts);
 
         using Activity? responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
         long responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
@@ -339,13 +338,12 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         // Recover chart specs the model echoed as raw JSON in its prose (and strip
         // that JSON so it never reaches the chat bubble or the streamed tokens).
-        // Promote recovered charts only when the tool path produced none.
+        // Merge distinct recovered charts into the tool-produced set, suppressing
+        // only genuine duplicates of tool-produced charts so streaming stays
+        // consistent with the non-streaming path.
         InlineChartExtraction inlineCharts = ExtractInlineCharts(reply);
         reply = inlineCharts.Reply;
-        if (charts.Count == 0 && inlineCharts.Charts.Count > 0)
-        {
-            charts = inlineCharts.Charts;
-        }
+        charts = MergeInlineCharts(charts, inlineCharts.Charts);
 
         // Stream the reply token-by-token via StreamingHub for progressive rendering
         await StreamReplyAsync(sessionId, context.AgentName, reply, ct);

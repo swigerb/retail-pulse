@@ -75,24 +75,120 @@ function findJsonObjectSpans(text: string): Array<[number, number]> {
   return spans;
 }
 
+// Property names the backend ChartSpecNormalizer accepts for a datapoint's x/y.
+// Mirrored here so frontend bindability matches backend strictness exactly.
+const POINT_Y_KEYS = ['y', 'value', 'count'];
+
+/**
+ * Parses a value to a finite number the same way the backend does: numeric
+ * JSON values and numeric strings bind; everything else (null, bool, empty
+ * string, non-numeric text) does not.
+ */
+function toBindableNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+// A datapoint object binds only when it carries a numeric y/value/count, matching
+// ChartSpecNormalizer.TryGetPointY (x is optional and falls back to an index).
+function pointObjectHasValue(point: Record<string, unknown>): boolean {
+  return POINT_Y_KEYS.some((key) => key in point && toBindableNumber(point[key]) !== null);
+}
+
+// A "values"/"data" array yields a bindable point when any element is a bindable
+// number or an object with a numeric y/value/count — mirrors BuildSeriesFromValues.
+function valuesArrayHasPoint(values: unknown): boolean {
+  if (!Array.isArray(values)) return false;
+  return values.some((v) =>
+    v !== null && typeof v === 'object' && !Array.isArray(v)
+      ? pointObjectHasValue(v as Record<string, unknown>)
+      : toBindableNumber(v) !== null,
+  );
+}
+
+// A single series object binds when its "values" (preferred) or "data" array
+// yields at least one point — mirrors ChartSpecNormalizer.BuildSeries.
+function seriesObjectHasPoint(series: Record<string, unknown>): boolean {
+  const values = 'values' in series ? series.values : 'data' in series ? series.data : undefined;
+  return valuesArrayHasPoint(values);
+}
+
+// A top-level/inner "series" array binds when any entry (a bare number array or a
+// { name, values|data } object) yields a point — mirrors SeriesFromSeriesArray.
+function seriesArrayHasPoint(seriesArray: unknown[]): boolean {
+  return seriesArray.some((entry) => {
+    if (Array.isArray(entry)) return valuesArrayHasPoint(entry);
+    if (entry !== null && typeof entry === 'object') {
+      return seriesObjectHasPoint(entry as Record<string, unknown>);
+    }
+    return false;
+  });
+}
+
+/**
+ * Returns true when the chart object has at least one actually bindable
+ * datapoint across the schemas the backend ChartSpecNormalizer supports:
+ *  - canonical: `data: [{ legend, values: [{ x, y } | number] }]`
+ *  - labels/series object: `data: { labels, series: [{ name, values }] }`
+ *    (or a single-series `data: { labels, values }`)
+ *  - full-config: top-level `series: [{ name, data | values }]`
+ *
+ * Empty/null/non-renderable payloads (e.g. `data: []`, `data: null`,
+ * `data: { id: 1 }`) yield false so the prose is left visible, exactly as the
+ * backend rejects them.
+ */
+function chartHasBindableData(obj: Record<string, unknown>): boolean {
+  if ('data' in obj) {
+    const data = obj.data;
+    if (Array.isArray(data)) {
+      return data.some(
+        (el) =>
+          el !== null &&
+          typeof el === 'object' &&
+          !Array.isArray(el) &&
+          seriesObjectHasPoint(el as Record<string, unknown>),
+      );
+    }
+    if (data !== null && typeof data === 'object') {
+      const dataObj = data as Record<string, unknown>;
+      if (Array.isArray(dataObj.series)) return seriesArrayHasPoint(dataObj.series);
+      if ('values' in dataObj) return valuesArrayHasPoint(dataObj.values);
+      return false;
+    }
+    // data is null or a primitive — nothing bindable.
+    return false;
+  }
+
+  return Array.isArray(obj.series) ? seriesArrayHasPoint(obj.series) : false;
+}
+
 /**
  * Returns true when a parsed value looks like a chart specification the backend
  * should have promoted to structured `charts` — a recognized chart `type`, a
- * non-empty `title`, and a `data` payload. Strict on purpose so arbitrary JSON
- * the user may be discussing is left visible.
+ * non-empty `title`, and at least one bindable datapoint. Deliberately mirrors
+ * the backend ChartSpecNormalizer so arbitrary, empty, or non-renderable JSON
+ * (which the backend rejects and leaves visible) is never silently deleted.
  */
 function looksLikeChartSpec(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false;
   const obj = value as Record<string, unknown>;
   const type = obj.type;
   const title = obj.title;
-  return (
-    typeof type === 'string' &&
-    CHART_TYPES.has(type.trim().toLowerCase()) &&
-    typeof title === 'string' &&
-    title.trim().length > 0 &&
-    ('data' in obj || Array.isArray(obj.series))
-  );
+  if (
+    typeof type !== 'string' ||
+    !CHART_TYPES.has(type.trim().toLowerCase()) ||
+    typeof title !== 'string' ||
+    title.trim().length === 0
+  ) {
+    return false;
+  }
+  return chartHasBindableData(obj);
 }
 
 /**

@@ -475,4 +475,154 @@ public class AgentPipelineTests
     }
 
     #endregion
+
+    #region MergeInlineCharts — dedup of inline echoes vs. distinct charts
+
+    private static ChartSpec BarChart(string title, string legend, params (string X, double Y)[] points) =>
+        new()
+        {
+            Type = "bar",
+            Title = title,
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = legend,
+                    Values = [.. points.Select(p => new ChartDataPoint { X = p.X, Y = p.Y })],
+                },
+            ],
+        };
+
+    [Fact]
+    public void MergeInlineCharts_NoInlineCharts_ReturnsToolChartsUnchanged()
+    {
+        var tool = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, []);
+
+        merged.Should().BeSameAs(tool, "no inline charts means the tool set is returned as-is");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_DuplicateEcho_IsSuppressed()
+    {
+        // The model called the tool AND echoed the identical chart JSON in prose.
+        // The echo must not produce a second, duplicate render.
+        var tool = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10), ("Feb", 12)) };
+        var inline = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10), ("Feb", 12)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, inline);
+
+        merged.Should().ContainSingle("a genuine duplicate of a tool-produced chart is suppressed");
+        merged[0].Title.Should().Be("Sales");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_DistinctInlineChart_IsPreserved()
+    {
+        // Tool produced chart A; prose contained a DIFFERENT valid chart B. Both
+        // must survive — B must not be silently dropped just because A exists.
+        var tool = new List<ChartSpec> { BarChart("Chart A", "A", ("Jan", 10)) };
+        var inline = new List<ChartSpec> { BarChart("Chart B", "B", ("Feb", 20)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, inline);
+
+        merged.Should().HaveCount(2);
+        merged.Select(c => c.Title).Should().Equal("Chart A", "Chart B");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_NoToolCharts_PromotesAllInline()
+    {
+        var inline = new List<ChartSpec> { BarChart("Only", "A", ("Jan", 10)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts([], inline);
+
+        merged.Should().ContainSingle();
+        merged[0].Title.Should().Be("Only");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_MixedDuplicateAndDistinct_KeepsOnlyDistinct()
+    {
+        // Prose echoed the tool chart (suppress) plus a distinct chart (keep).
+        var tool = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10)) };
+        var inline = new List<ChartSpec>
+        {
+            BarChart("Sales", "A", ("Jan", 10)),   // duplicate echo
+            BarChart("Forecast", "B", ("Feb", 20)), // distinct
+        };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, inline);
+
+        merged.Should().HaveCount(2);
+        merged.Select(c => c.Title).Should().Equal("Sales", "Forecast");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_DuplicateInlineCharts_AreCollapsed()
+    {
+        // Two identical inline charts (no tool charts) collapse to one.
+        var inline = new List<ChartSpec>
+        {
+            BarChart("Sales", "A", ("Jan", 10)),
+            BarChart("Sales", "A", ("Jan", 10)),
+        };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts([], inline);
+
+        merged.Should().ContainSingle("identical inline charts must not double-render");
+    }
+
+    [Fact]
+    public void MergeInlineCharts_SameTitleDifferentData_IsNotADuplicate()
+    {
+        // Same title but different datapoints is a distinct chart, not an echo.
+        var tool = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 10)) };
+        var inline = new List<ChartSpec> { BarChart("Sales", "A", ("Jan", 99)) };
+
+        List<ChartSpec> merged = AgentExecutionPipeline.MergeInlineCharts(tool, inline);
+
+        merged.Should().HaveCount(2, "differing datapoints make it a distinct chart, not a duplicate");
+    }
+
+    #endregion
+
+    #region ChartSpecSemanticComparer — content-based equality
+
+    [Fact]
+    public void ChartSpecSemanticComparer_IdenticalContent_AreEqual()
+    {
+        ChartSpec a = BarChart("Sales", "A", ("Jan", 10), ("Feb", 12));
+        ChartSpec b = BarChart("Sales", "A", ("Jan", 10), ("Feb", 12));
+
+        Api.Charts.ChartSpecSemanticComparer.Instance.Equals(a, b)
+            .Should().BeTrue("structurally identical charts from different sources are equal");
+        Api.Charts.ChartSpecSemanticComparer.Instance.GetHashCode(a)
+            .Should().Be(Api.Charts.ChartSpecSemanticComparer.Instance.GetHashCode(b));
+    }
+
+    [Fact]
+    public void ChartSpecSemanticComparer_DifferentValues_AreNotEqual()
+    {
+        ChartSpec a = BarChart("Sales", "A", ("Jan", 10));
+        ChartSpec b = BarChart("Sales", "A", ("Jan", 11));
+
+        Api.Charts.ChartSpecSemanticComparer.Instance.Equals(a, b).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ChartSpecSemanticComparer_DefaultRecordEquality_WouldFail_ButComparerSucceeds()
+    {
+        // Guards the reason this comparer exists: record equality compares the
+        // List<> members by reference, so two equal-content charts are NOT equal
+        // under the compiler-generated Equals.
+        ChartSpec a = BarChart("Sales", "A", ("Jan", 10));
+        ChartSpec b = BarChart("Sales", "A", ("Jan", 10));
+
+        a.Equals(b).Should().BeFalse("record equality compares List<> Data by reference");
+        Api.Charts.ChartSpecSemanticComparer.Instance.Equals(a, b).Should().BeTrue();
+    }
+
+    #endregion
 }

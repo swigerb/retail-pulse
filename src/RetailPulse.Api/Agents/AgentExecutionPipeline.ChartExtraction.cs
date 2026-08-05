@@ -35,6 +35,35 @@ public partial class AgentExecutionPipeline
     internal readonly record struct InlineChartExtraction(string Reply, List<ChartSpec> Charts);
 
     /// <summary>
+    /// Merges charts recovered from the reply prose into the charts produced by
+    /// the tool path, appending only those inline charts that are not a semantic
+    /// duplicate of a chart already present (whether tool-produced or an earlier
+    /// inline chart). This preserves a distinct chart the model narrated in prose
+    /// alongside a different tool-produced chart, while suppressing the common
+    /// case where the model echoes the same chart it already emitted as a tool
+    /// call. Deduplication uses <see cref="ChartSpecSemanticComparer"/> so it is
+    /// based on chart content, not object identity or serialized form.
+    /// </summary>
+    internal static List<ChartSpec> MergeInlineCharts(List<ChartSpec> toolCharts, IReadOnlyList<ChartSpec> inlineCharts)
+    {
+        if (inlineCharts.Count == 0)
+        {
+            return toolCharts;
+        }
+
+        var merged = new List<ChartSpec>(toolCharts);
+        foreach (ChartSpec inlineChart in inlineCharts)
+        {
+            bool isDuplicate = merged.Any(existing => ChartSpecSemanticComparer.Instance.Equals(existing, inlineChart));
+            if (!isDuplicate)
+            {
+                merged.Add(inlineChart);
+            }
+        }
+        return merged;
+    }
+
+    /// <summary>
     /// Removes chart-spec JSON blocks embedded in the reply prose and returns the
     /// normalized <see cref="ChartSpec"/> instances recovered from them.
     /// </summary>
