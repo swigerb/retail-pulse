@@ -222,6 +222,9 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 | **Observability** | OpenTelemetry + Aspire Dashboard | — | Distributed traces, metrics, logs |
 | **Monitoring** | Azure Application Insights | — | Production telemetry and traces |
 | **Gateway** | Azure API Management | — | Token metering, rate limiting, audit |
+| **Backend hosting** | Azure Container Apps | — | Runs the API, MCP Server, and Teams Bot as containers; scales to zero when idle |
+| **Frontend hosting** | Azure Static Web Apps | — | Serves the React/Vite static build; calls the Container Apps API directly over CORS |
+| **Container registry** | Azure Container Registry (Basic) | — | Stores backend images; Container Apps pull them with managed identity (no admin secrets) |
 | **Testing** | xUnit + Vitest | — | Backend + frontend tests |
 
 ---
@@ -268,7 +271,7 @@ retail-pulse/
 │   └── generate-traffic.ps1          # Load testing
 ├── infra/                            # Azure infrastructure (Bicep, used by azd)
 │   ├── main.bicep                    # Subscription-scoped orchestrator
-│   └── modules/                      # App Insights, Container Apps Env, App Service
+│   └── modules/                      # Monitoring, Container Apps Env, Container Apps, Container Registry, Static Web App
 ├── azd-hooks/                        # Azure Developer CLI lifecycle hooks
 ├── azure.yaml                        # Azure Developer CLI project file
 ├── ai-gateway-dev-portal/            # AI Gateway Dev Portal (APIM observability)
@@ -333,8 +336,9 @@ azd up
 ```
 
 This deploys:
-- **Backend** (API, McpServer, TeamsBot) → Azure Container Apps
-- **Frontend** (React/Vite) → Azure App Service (Node 20 LTS)
+- **Backend** (API, MCP Server, Teams Bot) → Azure Container Apps. Each app runs under a system-assigned managed identity and scales to zero when idle.
+- **Frontend** (React/Vite static build) → Azure Static Web Apps. The build injects the Container Apps API origin, so the SPA calls the API directly and opens the SignalR telemetry connection against that origin. The Static Web App also links the API as its `/api` backend, so relative `/api/*` calls stay same-origin.
+- **Container images** → a dedicated Azure Container Registry (Basic). Container Apps pull images with their managed identities, so no registry admin secrets are stored.
 - **Monitoring** → Application Insights + Log Analytics
 
 See [docs/deployment-azd.md](docs/deployment-azd.md) for full documentation.

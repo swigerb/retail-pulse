@@ -526,7 +526,7 @@ This starts:
 
 For production deployment, replace local URLs with Azure-hosted endpoints:
 
-1. **Deploy the API, MCP Server, and TeamsBot** to Azure App Service or Container Apps
+1. **Deploy the API, MCP Server, and Teams Bot** to Azure Container Apps (the target the `azd up` flow provisions)
 2. **Update Azure Bot messaging endpoint** to point to your production URL
 3. **Update Teams manifest** with production domain and re-upload the app package
 4. **Configure Application Insights** for production telemetry
