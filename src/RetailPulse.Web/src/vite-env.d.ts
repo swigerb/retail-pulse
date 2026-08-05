@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  readonly VITE_API_ORIGIN?: string;
   readonly VITE_FEATURE_CAMPAIGN_PLANNER?: string;
   readonly VITE_FEATURE_COMPETITIVE?: string;
   readonly VITE_FEATURE_KNOWLEDGE_BASE?: string;

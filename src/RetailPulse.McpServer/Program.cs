@@ -8,11 +8,16 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 
 // Load tenant configuration
-string tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml");
+string tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "tenant.yaml");
+if (!File.Exists(tenantConfigPath))
+{
+    tenantConfigPath = Path.GetFullPath(
+        Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml"));
+}
 builder.Services.AddSingleton<ITenantProvider>(new FileTenantProvider(tenantConfigPath));
 
 // Register SQLite-backed data store (seeds from tenant.yaml on first run)
-string dbPath = Path.Combine(builder.Environment.ContentRootPath, "data", "retailpulse.db");
+string dbPath = Path.Combine(Path.GetTempPath(), "retailpulse", "retailpulse.db");
 builder.Services.AddSingleton(sp =>
     new RetailPulseDb(sp.GetRequiredService<ITenantProvider>(), dbPath, tenantConfigPath));
 

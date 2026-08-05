@@ -23,31 +23,25 @@ builder.AddAgent<RetailPulseAgent>();
 builder.Services.AddSingleton<IStorage, MemoryStorage>();
 builder.Services.AddControllers();
 
-// HttpClient for calling RetailPulse API via Aspire service discovery
+string apiBaseUrl = builder.Configuration["services:api:https:0"]
+    ?? builder.Configuration["services:api:http:0"]
+    ?? builder.Configuration["TeamsBot:ApiBaseUrl"]
+    ?? (builder.Environment.IsDevelopment() ? "http://localhost:5000" : null)
+    ?? throw new InvalidOperationException(
+        "TeamsBot could not resolve the RetailPulse API base URL. " +
+        "Configure 'TeamsBot:ApiBaseUrl' or run under Aspire.");
+
+// HttpClient for calling RetailPulse API via Aspire service discovery or explicit deployment URL
 builder.Services.AddHttpClient("RetailPulseApi", client =>
 {
-    client.BaseAddress = new Uri("https+http://api"); // Aspire service discovery
+    client.BaseAddress = new Uri(apiBaseUrl);
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
 
 // SignalR client for telemetry hub via Aspire service discovery
 builder.Services.AddSingleton(sp =>
 {
-    // Prefer Aspire service discovery; in non-Aspire/non-Development the API
-    // URL must be explicitly configured via TeamsBot:ApiBaseUrl.
-    string? apiUrl = builder.Configuration["services:api:https:0"]
-        ?? builder.Configuration["services:api:http:0"]
-        ?? builder.Configuration["TeamsBot:ApiBaseUrl"]
-        ?? (builder.Environment.IsDevelopment() ? "http://localhost:5000" : null);
-
-    if (string.IsNullOrWhiteSpace(apiUrl))
-    {
-        throw new InvalidOperationException(
-            "TeamsBot could not resolve the RetailPulse API base URL. " +
-            "Configure 'TeamsBot:ApiBaseUrl' or run under Aspire (which sets 'services:api:https:0').");
-    }
-
-    string telemetryUrl = $"{apiUrl.TrimEnd('/')}/hubs/telemetry";
+    string telemetryUrl = $"{apiBaseUrl.TrimEnd('/')}/hubs/telemetry";
 
     HubConnection connection = new HubConnectionBuilder()
         .WithUrl(telemetryUrl)
