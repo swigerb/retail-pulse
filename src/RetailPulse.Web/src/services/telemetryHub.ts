@@ -1,7 +1,8 @@
 import * as signalR from '@microsoft/signalr';
 import type { AgentSpan } from '../types';
+import { resolveTelemetryHubUrl } from '../config/telemetryHubUrl';
 
-const HUB_URL = '/hubs/telemetry';
+const HUB_URL = resolveTelemetryHubUrl();
 
 let connection: signalR.HubConnection | null = null;
 let startPromise: Promise<void> | null = null;

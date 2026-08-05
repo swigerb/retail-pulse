@@ -3,6 +3,7 @@ import { makeStyles } from '@fluentui/react-components';
 import * as signalR from '@microsoft/signalr';
 import { CARD_COLORS, CARD_TYPE_CONFIG, CARD_LIFECYCLE_CONFIG } from '../../constants/agentRouting';
 import { fetchActiveCards, submitVote } from '../../services/cardsApi';
+import { resolveTelemetryHubUrl } from '../../config/telemetryHubUrl';
 import type { AdaptiveCard, VoteChoice, DrillDownLevel } from '../../types';
 import CardLifecycleIndicator from './CardLifecycleIndicator';
 import VotingCard from './VotingCard';
@@ -215,7 +216,7 @@ export default function AdaptiveCardPanel() {
 
     try {
       connection = new signalR.HubConnectionBuilder()
-        .withUrl('/hubs/telemetry')
+        .withUrl(resolveTelemetryHubUrl())
         .withAutomaticReconnect()
         .build();
 

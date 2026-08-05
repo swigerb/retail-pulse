@@ -1,5 +1,6 @@
-#!/bin/sh
-# Pre-provision hook (POSIX/sh) — validates prerequisites before provision.
+$ErrorActionPreference = 'Stop'
+
+# Pre-provision hook (Windows/pwsh) — validates prerequisites before provision.
 #
 # The production frontend build runs during the frontend (Static Web Apps)
 # service deploy phase, which happens AFTER provisioning. That ordering is
@@ -8,15 +9,12 @@
 # preprovision time. Do NOT build the frontend here — azd builds and deploys
 # dist/ after provision, so building now would be both premature and redundant.
 
-set -e
+Write-Host 'Checking prerequisites...'
 
-echo 'Checking prerequisites...'
+foreach ($command in 'az', 'dotnet', 'node', 'npm') {
+    if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
+        throw "Required command '$command' is not installed or is not on PATH."
+    }
+}
 
-for cmd in az dotnet node npm; do
-    if ! command -v "$cmd" > /dev/null 2>&1; then
-        echo "Required command '$cmd' is not installed or is not on PATH." >&2
-        exit 1
-    fi
-done
-
-echo 'All prerequisites met. Proceeding with provisioning...'
+Write-Host 'All prerequisites met. Proceeding with provisioning...'
