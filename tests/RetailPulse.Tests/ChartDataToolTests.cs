@@ -402,4 +402,38 @@ public class ChartDataToolTests
         charts[0].Data[0].Values[1].X.Should().Be("Feb");
         charts[0].Data[0].Values[1].Y.Should().Be(20);
     }
+
+    [Fact]
+    public async Task CreateChart_FullConfigSchema_TopLevelSeriesAndXAxis_Normalizes()
+    {
+        // Third real-world variant observed live: top-level "series" with per-series
+        // "data":[numbers], category labels under xAxis.categories, and axis titles
+        // under xAxis.label / yAxis.label. No top-level "data" property at all.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "bar",
+                "title": "Depletion Velocity for Spirits Brands in the Northeast",
+                "xAxis": {"label": "Brand", "categories": ["Sierra Gold Tequila", "Ridgeline Bourbon", "Summit Vodka"]},
+                "yAxis": {"label": "Avg Weekly Volume", "format": "number"},
+                "series": [{"name": "Avg Weekly Volume", "data": [1893.2, 2109.5, 2296.3], "color": "#1B4D7A"}]
+            }
+            """;
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeTrue();
+        JsonElement chart = doc.RootElement.GetProperty("chart");
+        chart.GetProperty("Type").GetString().Should().Be("bar");
+        chart.GetProperty("XAxisTitle").GetString().Should().Be("Brand");
+        chart.GetProperty("YAxisTitle").GetString().Should().Be("Avg Weekly Volume");
+        JsonElement values = chart.GetProperty("Data")[0].GetProperty("Values");
+        values.GetArrayLength().Should().Be(3);
+        values[0].GetProperty("X").GetString().Should().Be("Sierra Gold Tequila");
+        values[0].GetProperty("Y").GetDouble().Should().Be(1893.2);
+        values[2].GetProperty("X").GetString().Should().Be("Summit Vodka");
+        values[2].GetProperty("Y").GetDouble().Should().Be(2296.3);
+    }
 }

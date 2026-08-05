@@ -39,6 +39,21 @@ public class ChartDataTool
                 return Task.FromResult(JsonSerializer.Serialize(new { error = "Invalid chart specification" }));
             }
 
+            // Strict binding succeeds structurally even when the model used a
+            // non-canonical schema (e.g. top-level series + xAxis), leaving Data empty.
+            // Recover the real series via the normalizer before returning an empty chart.
+            if (spec.Data.Count == 0
+                && ChartSpecNormalizer.TryNormalize(chartSpecJson, out ChartSpec? enriched)
+                && enriched is not null
+                && enriched.Data.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Enriched chart spec from non-canonical schema: {Type} - {Title} with {SeriesCount} series",
+                    enriched.Type, enriched.Title, enriched.Data.Count);
+
+                return Task.FromResult(JsonSerializer.Serialize(new { status = "success", chart = enriched, recovered = true }));
+            }
+
             _logger.LogInformation("Chart created: {Type} - {Title} with {SeriesCount} series", spec.Type, spec.Title, spec.Data.Count);
 
             return Task.FromResult(JsonSerializer.Serialize(new { status = "success", chart = spec, recovered = false }));

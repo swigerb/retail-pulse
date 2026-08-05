@@ -75,6 +75,16 @@ describe('sanitizeMessage', () => {
       expect(result).toContain('Prose after the chart.');
     });
 
+    it('strips the full-config variant (top-level series + xAxis.categories)', () => {
+      const fullConfig =
+        '{"type":"bar","title":"Depletion Velocity","xAxis":{"label":"Brand","categories":["Sierra Gold","Summit"]},"yAxis":{"label":"Avg Weekly Volume"},"series":[{"name":"Avg Weekly Volume","data":[1893.2,2296.3]}]}';
+      const msg = 'Here is the bar chart.\n\n```json\n' + fullConfig + '\n```';
+      const result = sanitizeMessage(msg);
+      expect(result).not.toContain('```');
+      expect(result).not.toContain('"series"');
+      expect(result).toBe('Here is the bar chart.');
+    });
+
     it('does not strip non-chart JSON the user may be discussing', () => {
       const msg = 'The payload was {"brand":"Apex Grill","region":"Northeast","velocity":7.2} for reference.';
       expect(sanitizeMessage(msg)).toBe(msg);

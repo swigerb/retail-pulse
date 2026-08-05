@@ -98,6 +98,17 @@ internal static class ChartSpecNormalizer
             orientation = GetStringOrNull(options, "orientation");
         }
 
+        // Full-config style: axis titles under xAxis/yAxis objects (e.g. xAxis.label).
+        if (root.TryGetProperty("xAxis", out JsonElement xAxisEl) && xAxisEl.ValueKind == JsonValueKind.Object)
+        {
+            xAxis ??= GetStringOrNull(xAxisEl, "label") ?? GetStringOrNull(xAxisEl, "title");
+        }
+        if (root.TryGetProperty("yAxis", out JsonElement yAxisEl) && yAxisEl.ValueKind == JsonValueKind.Object)
+        {
+            yAxis ??= GetStringOrNull(yAxisEl, "label") ?? GetStringOrNull(yAxisEl, "title");
+        }
+        orientation ??= GetStringOrNull(root, "orientation");
+
         List<ChartSeries> series = ExtractSeries(root, title);
         if (series.Count == 0)
         {
@@ -115,11 +126,53 @@ internal static class ChartSpecNormalizer
         return true;
     }
 
-    private static List<ChartSeries> ExtractSeries(JsonElement root, string chartTitle) =>
-        !root.TryGetProperty("data", out JsonElement data) ? []
-        : data.ValueKind == JsonValueKind.Array ? SeriesFromArray(data)
-        : data.ValueKind == JsonValueKind.Object ? SeriesFromLabelledObject(data, chartTitle)
-        : [];
+    private static List<ChartSeries> ExtractSeries(JsonElement root, string chartTitle)
+    {
+        if (root.TryGetProperty("data", out JsonElement data))
+        {
+            if (data.ValueKind == JsonValueKind.Array)
+            {
+                return SeriesFromArray(data);
+            }
+            if (data.ValueKind == JsonValueKind.Object)
+            {
+                return SeriesFromLabelledObject(data, chartTitle);
+            }
+        }
+
+        // Full-config (Chart.js-style) schema: a top-level "series" array paired with
+        // labels under xAxis.categories / top-level categories or labels. Each series
+        // carries its numbers under "data" or "values".
+        return root.TryGetProperty("series", out JsonElement topSeries) && topSeries.ValueKind == JsonValueKind.Array
+            ? SeriesFromSeriesArray(topSeries, GatherLabels(root), chartTitle)
+            : [];
+    }
+
+    // Collects category labels shared by all series, checking the common locations
+    // models use: top-level labels/categories, or xAxis.{categories,labels,data}.
+    private static List<string> GatherLabels(JsonElement root)
+    {
+        List<string>? labels = LabelsFrom(root, "labels") ?? LabelsFrom(root, "categories");
+        if (labels is null && root.TryGetProperty("xAxis", out JsonElement xAxisEl) && xAxisEl.ValueKind == JsonValueKind.Object)
+        {
+            labels = LabelsFrom(xAxisEl, "categories") ?? LabelsFrom(xAxisEl, "labels") ?? LabelsFrom(xAxisEl, "data");
+        }
+        return labels ?? [];
+    }
+
+    private static List<string>? LabelsFrom(JsonElement source, string property)
+    {
+        if (!source.TryGetProperty(property, out JsonElement el) || el.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+        var labels = new List<string>();
+        foreach (JsonElement label in el.EnumerateArray())
+        {
+            labels.Add(ElementToXString(label));
+        }
+        return labels;
+    }
 
     // Canonical schema: data is an array of series objects, each with a
     // legend/name and a values array of {x, y} points (or plain numbers).
@@ -163,34 +216,55 @@ internal static class ChartSpecNormalizer
             }
         }
 
-        var result = new List<ChartSeries>();
-
         if (dataObj.TryGetProperty("series", out JsonElement seriesEl) && seriesEl.ValueKind == JsonValueKind.Array)
         {
-            foreach (JsonElement s in seriesEl.EnumerateArray())
-            {
-                if (s.ValueKind != JsonValueKind.Object)
-                {
-                    continue;
-                }
-
-                string legend = GetStringOrNull(s, "name")
-                    ?? GetStringOrNull(s, "legend")
-                    ?? GetStringOrNull(s, "label")
-                    ?? $"Series {result.Count + 1}";
-                string? color = GetStringOrNull(s, "color");
-
-                ChartSeries? built = BuildSeries(legend, color, s, labels);
-                if (built is not null)
-                {
-                    result.Add(built);
-                }
-            }
+            return SeriesFromSeriesArray(seriesEl, labels, chartTitle);
         }
-        else if (dataObj.TryGetProperty("values", out _))
+
+        var result = new List<ChartSeries>();
+        if (dataObj.TryGetProperty("values", out _))
         {
             // Single implicit series keyed by the chart title.
             ChartSeries? built = BuildSeries(chartTitle, null, dataObj, labels);
+            if (built is not null)
+            {
+                result.Add(built);
+            }
+        }
+
+        return result;
+    }
+
+    // Builds series from a "series" array of { name, values|data:[...] } objects,
+    // sharing the provided category labels across every series.
+    private static List<ChartSeries> SeriesFromSeriesArray(JsonElement seriesEl, List<string> labels, string chartTitle)
+    {
+        var result = new List<ChartSeries>();
+        foreach (JsonElement s in seriesEl.EnumerateArray())
+        {
+            if (s.ValueKind == JsonValueKind.Array)
+            {
+                // A bare array of numbers is an implicit single series.
+                ChartSeries? bare = BuildSeriesFromValues(chartTitle, null, s, labels);
+                if (bare is not null)
+                {
+                    result.Add(bare);
+                }
+                continue;
+            }
+
+            if (s.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            string legend = GetStringOrNull(s, "name")
+                ?? GetStringOrNull(s, "legend")
+                ?? GetStringOrNull(s, "label")
+                ?? $"Series {result.Count + 1}";
+            string? color = GetStringOrNull(s, "color");
+
+            ChartSeries? built = BuildSeries(legend, color, s, labels);
             if (built is not null)
             {
                 result.Add(built);
@@ -204,7 +278,12 @@ internal static class ChartSpecNormalizer
     {
         bool hasValues = seriesObj.TryGetProperty("values", out JsonElement valuesEl)
             || seriesObj.TryGetProperty("data", out valuesEl);
-        if (!hasValues || valuesEl.ValueKind != JsonValueKind.Array)
+        return !hasValues ? null : BuildSeriesFromValues(legend, color, valuesEl, labels);
+    }
+
+    private static ChartSeries? BuildSeriesFromValues(string legend, string? color, JsonElement valuesEl, List<string> labels)
+    {
+        if (valuesEl.ValueKind != JsonValueKind.Array)
         {
             return null;
         }

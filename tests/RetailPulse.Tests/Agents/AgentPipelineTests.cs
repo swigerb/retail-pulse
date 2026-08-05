@@ -441,5 +441,38 @@ public class AgentPipelineTests
         result.Charts.Should().BeEmpty();
     }
 
+    [Fact]
+    public void ExtractInlineCharts_FencedFullConfigVariant_StripsFenceAndExtracts()
+    {
+        // Third real-world variant observed live: a ```json fenced block using the
+        // full-config schema (top-level series + xAxis.categories). The fence and JSON
+        // must be removed from the reply and promoted to a structured chart.
+        string reply =
+            """
+            Here's the bar chart comparing depletion velocity for all spirits brands in the Northeast.
+
+            ```json
+            {"type":"bar","title":"Depletion Velocity","xAxis":{"label":"Brand","categories":["Sierra Gold","Ridgeline","Summit"]},"yAxis":{"label":"Avg Weekly Volume"},"series":[{"name":"Avg Weekly Volume","data":[1893.2,2109.5,2296.3]}]}
+            ```
+            """;
+
+        AgentExecutionPipeline.InlineChartExtraction result = AgentExecutionPipeline.ExtractInlineCharts(reply);
+
+        result.Reply.Should().NotContain("{");
+        result.Reply.Should().NotContain("```");
+        result.Reply.Should().Contain("Here's the bar chart comparing depletion velocity");
+        result.Charts.Should().ContainSingle();
+        ChartSpec chart = result.Charts[0];
+        chart.Type.Should().Be("bar");
+        chart.XAxisTitle.Should().Be("Brand");
+        chart.YAxisTitle.Should().Be("Avg Weekly Volume");
+        chart.Data.Should().ContainSingle();
+        chart.Data[0].Values.Should().HaveCount(3);
+        chart.Data[0].Values[0].X.Should().Be("Sierra Gold");
+        chart.Data[0].Values[0].Y.Should().Be(1893.2);
+        chart.Data[0].Values[2].X.Should().Be("Summit");
+        chart.Data[0].Values[2].Y.Should().Be(2296.3);
+    }
+
     #endregion
 }

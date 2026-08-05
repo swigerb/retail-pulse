@@ -91,7 +91,7 @@ function looksLikeChartSpec(value: unknown): boolean {
     CHART_TYPES.has(type.trim().toLowerCase()) &&
     typeof title === 'string' &&
     title.trim().length > 0 &&
-    'data' in obj
+    ('data' in obj || Array.isArray(obj.series))
   );
 }
 
