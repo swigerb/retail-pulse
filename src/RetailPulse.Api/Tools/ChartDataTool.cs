@@ -233,43 +233,43 @@ public class ChartDataTool
                     break;
 
                 case '"':
-                {
-                    bool isValue = IsValuePosition();
-                    int end = ScanString(input, i);
-                    if (end < 0)
                     {
-                        return Build(); // unterminated string — trim it
+                        bool isValue = IsValuePosition();
+                        int end = ScanString(input, i);
+                        if (end < 0)
+                        {
+                            return Build(); // unterminated string — trim it
+                        }
+                        i = end;
+                        if (isValue)
+                        {
+                            MarkValueCompleted();
+                            RecordSafePoint(i);
+                        }
+                        break;
                     }
-                    i = end;
-                    if (isValue)
-                    {
-                        MarkValueCompleted();
-                        RecordSafePoint(i);
-                    }
-                    break;
-                }
 
                 default:
-                {
-                    if (!IsValuePosition())
                     {
-                        return Build(); // non-string where an object key is required
+                        if (!IsValuePosition())
+                        {
+                            return Build(); // non-string where an object key is required
+                        }
+                        int end = ScanScalar(input, i);
+                        if (end < 0)
+                        {
+                            return Build(); // scalar ran to end of input — possibly truncated
+                        }
+                        string token = input[i..end];
+                        if (!IsValidScalar(token))
+                        {
+                            return Build();
+                        }
+                        i = end;
+                        MarkValueCompleted();
+                        RecordSafePoint(i);
+                        break;
                     }
-                    int end = ScanScalar(input, i);
-                    if (end < 0)
-                    {
-                        return Build(); // scalar ran to end of input — possibly truncated
-                    }
-                    string token = input[i..end];
-                    if (!IsValidScalar(token))
-                    {
-                        return Build();
-                    }
-                    i = end;
-                    MarkValueCompleted();
-                    RecordSafePoint(i);
-                    break;
-                }
             }
         }
 

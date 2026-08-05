@@ -11,7 +11,7 @@ public class CorsConfigTests
     [Fact]
     public void DevelopmentCors_IncludesLocalAndConfiguredOrigins()
     {
-        string[] origins = RetailPulse.Api.Security.CorsOriginResolver.ForDevelopment(
+        string[] origins = Api.Security.CorsOriginResolver.ForDevelopment(
             ["https://demo.azurestaticapps.net", "https://demo.azurestaticapps.net", ""]);
 
         origins.Should().Contain("http://localhost:5173");

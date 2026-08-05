@@ -229,12 +229,13 @@ public class ChartDataToolTests
     }
 
     [Fact]
+#pragma warning disable JSON002 // Deliberately wrapped in markdown fences.
     public async Task CreateChart_FencedValidJson_Succeeds()
     {
         ChartDataTool tool = CreateTool();
         string fenced =
             "```json\n" +
-            """{"type":"bar","title":"Fenced","data":[{"legend":"S1","values":[{"x":"a","y":1}]}]}""" +
+            /*lang=json,strict*/ """{"type":"bar","title":"Fenced","data":[{"legend":"S1","values":[{"x":"a","y":1}]}]}""" +
             "\n```";
 
         string result = await tool.CreateChart(fenced);
@@ -246,6 +247,7 @@ public class ChartDataToolTests
         doc.RootElement.GetProperty("chart").GetProperty("Data")[0]
             .GetProperty("Values").GetArrayLength().Should().Be(1);
     }
+#pragma warning restore JSON002
 
     [Fact]
     public async Task CreateChart_TruncatedBeforeAnyDatapoint_ReturnsError()
