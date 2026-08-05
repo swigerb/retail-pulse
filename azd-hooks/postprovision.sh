@@ -93,7 +93,8 @@ az containerapp update \
     --set-env-vars \
     "OpenAI__Endpoint=$AZURE_OPENAI_ENDPOINT" \
     'OpenAI__UseManagedIdentity=true' \
-    'OpenAI__RouterDeployment=gpt-5.4-mini' \
+    'OpenAI__Deployment=gpt-5.4-mini-2026-03-17' \
+    'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17' \
     "McpServer__BaseUrl=$AZURE_MCP_SERVER_APP_URL" \
     'Security__RequireAuth=false' \
     "Security__AllowedOrigins__0=$RETAIL_PULSE_FRONTEND_ORIGIN" \

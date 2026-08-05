@@ -605,8 +605,10 @@ Azure.AI.OpenAI.AzureOpenAIClient azureClient = useManagedIdentity
         new System.ClientModel.ApiKeyCredential(openAiApiKey!),
         azureClientOptions);
 
+string agentDeployment = builder.Configuration["OpenAI:Deployment"] ?? agentDef.Model;
+
 builder.Services.AddChatClient(
-    azureClient.GetChatClient(agentDef.Model).AsIChatClient())
+    azureClient.GetChatClient(agentDeployment).AsIChatClient())
     .UseFunctionInvocation(configure: client =>
         // Cap tool-call iterations: 3 allows the full tool-calling lifecycle:
         //   Iteration 1 — LLM decides to call tools (fast, ~5-10s).
@@ -631,7 +633,7 @@ builder.Services.AddChatClient(
 // This reduces TPM consumption on the shared quota since routing is a simple
 // JSON classification task (~500 tokens) that doesn't need the full reasoning model.
 string? routerDeployment = builder.Configuration["OpenAI:RouterDeployment"];
-if (!string.IsNullOrWhiteSpace(routerDeployment) && routerDeployment != agentDef.Model)
+if (!string.IsNullOrWhiteSpace(routerDeployment) && routerDeployment != agentDeployment)
 {
     IChatClient routerChatClient = azureClient.GetChatClient(routerDeployment).AsIChatClient();
     builder.Services.AddKeyedSingleton("router", routerChatClient);
