@@ -15,6 +15,20 @@ function renderLibrary(props: Partial<React.ComponentProps<typeof PromptLibrary>
   return { onSelect };
 }
 
+// The panel renders in a Fluent trap-focus Popover portal. Under jsdom (especially
+// in CI) tabster can nondeterministically apply aria-hidden to the active surface,
+// which hides it from default role queries. Text queries ignore aria-hidden, so we
+// anchor "is the panel open" on the heading text, then assert the real ARIA contract
+// (role=dialog + accessible name + aria-modal) on the actual surface element.
+async function openedPanel() {
+  const heading = await screen.findByText('Prompt library', { selector: 'h2' }, { timeout: 4000 });
+  const surface = heading.closest('[role="dialog"]') as HTMLElement;
+  expect(surface).not.toBeNull();
+  expect(surface).toHaveAttribute('aria-label', 'Prompt library');
+  expect(surface).toHaveAttribute('aria-modal', 'true');
+  return { surface, panel: within(surface) };
+}
+
 const GENERAL_PROMPT = 'Compare depletion trends across all regions for this quarter';
 const GROCERY_PROMPT = 'How are FreshMart depletions trending in the Northeast this quarter?';
 
@@ -34,15 +48,8 @@ describe('PromptLibrary', () => {
 
     await user.click(screen.getByRole('button', { name: /Prompt ideas/i }));
 
-    // Dialog surface exposes an accessible name and is a modal dialog.
-    // Note: Fluent's trap-focus modal can nondeterministically apply aria-hidden
-    // to the active surface under jsdom, so query with hidden:true and assert the
-    // real ARIA contract (role + accessible name + aria-modal) on the element.
-    const dialog = await screen.findByRole('dialog', { name: /Prompt library/i, hidden: true });
-    expect(dialog).toBeInTheDocument();
-    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    const { panel } = await openedPanel();
 
-    const panel = within(dialog);
     // Category filters live in a labeled group; "All" is selected by default.
     expect(panel.getByRole('group', { name: /Prompt categories/i, hidden: true })).toBeInTheDocument();
     expect(panel.getByRole('button', { name: /🏪 All/i, hidden: true })).toHaveAttribute('aria-pressed', 'true');
@@ -55,8 +62,7 @@ describe('PromptLibrary', () => {
 
     await user.click(screen.getByRole('button', { name: /Prompt ideas/i }));
 
-    const dialog = await screen.findByRole('dialog', { name: /Prompt library/i, hidden: true });
-    const panel = within(dialog);
+    const { panel } = await openedPanel();
 
     // "All" view surfaces prompts from multiple categories.
     expect(panel.getByRole('button', { name: GENERAL_PROMPT, hidden: true })).toBeInTheDocument();
@@ -77,15 +83,15 @@ describe('PromptLibrary', () => {
     renderLibrary({ onSelect });
 
     await user.click(screen.getByRole('button', { name: /Prompt ideas/i }));
-    const dialog = await screen.findByRole('dialog', { name: /Prompt library/i, hidden: true });
-    await user.click(within(dialog).getByRole('button', { name: GENERAL_PROMPT, hidden: true }));
+    const { panel } = await openedPanel();
+    await user.click(panel.getByRole('button', { name: GENERAL_PROMPT, hidden: true }));
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith(GENERAL_PROMPT);
 
     // Panel dismisses after a selection.
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: /Prompt library/i, hidden: true })).not.toBeInTheDocument();
+      expect(screen.queryByText('Prompt library', { selector: 'h2' })).not.toBeInTheDocument();
     });
   });
 
@@ -98,11 +104,11 @@ describe('PromptLibrary', () => {
     expect(trigger).toHaveFocus();
 
     await user.keyboard('{Enter}');
-    expect(await screen.findByRole('dialog', { name: /Prompt library/i, hidden: true })).toBeInTheDocument();
+    await openedPanel();
 
     await user.keyboard('{Escape}');
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: /Prompt library/i, hidden: true })).not.toBeInTheDocument();
+      expect(screen.queryByText('Prompt library', { selector: 'h2' })).not.toBeInTheDocument();
     });
     // Focus returns to the trigger for a smooth keyboard flow.
     expect(trigger).toHaveFocus();

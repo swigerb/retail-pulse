@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 
@@ -144,13 +144,16 @@ describe('ChatPanel', () => {
       totalDurationMs: 10,
     });
 
-    // Open the library and pick a prompt. Fluent's trap-focus popover applies
-    // aria-hidden to its surface across repeated jsdom renders in this file, so
-    // include hidden nodes when locating the prompt (the a11y contract itself is
-    // asserted in PromptLibrary.test.tsx, which runs in a clean document).
+    // Open the library and pick a prompt. Fluent's trap-focus popover renders in a
+    // portal and can nondeterministically apply aria-hidden to its surface under
+    // jsdom, so anchor on the heading text (immune to aria-hidden) with a generous
+    // timeout, then scope the prompt lookup to the surface including hidden nodes.
+    // The full a11y contract is asserted in PromptLibrary.test.tsx (clean document).
     await user.click(screen.getByRole('button', { name: /Prompt ideas/i }));
     const prompt = 'Compare depletion trends across all regions for this quarter';
-    await user.click(await screen.findByRole('button', { name: prompt, hidden: true }));
+    const heading = await screen.findByText('Prompt library', { selector: 'h2' }, { timeout: 4000 });
+    const surface = heading.closest('[role="dialog"]') as HTMLElement;
+    await user.click(within(surface).getByRole('button', { name: prompt, hidden: true }));
 
     // The chosen prompt is dispatched through the same safe send path.
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
