@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 
@@ -93,6 +93,72 @@ describe('ChatPanel', () => {
 
     // Assistant reply renders once the promise resolves.
     expect(await screen.findByText(/Sales were up 12% in Q1\./)).toBeInTheDocument();
+  });
+
+  it('keeps the Prompt ideas library control available before and after a message is sent', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({
+      reply: 'Here is your answer.',
+      sessionId: 'sess-lib',
+      spans: [],
+      totalDurationMs: 10,
+    });
+
+    renderPanel();
+
+    // Available on the empty welcome state, next to the composer.
+    expect(screen.getByRole('button', { name: /Prompt ideas/i })).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'hello');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    // Conversation has started (welcome chips are gone)…
+    expect(await screen.findByText(/Here is your answer\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Welcome to Retail Pulse/i)).not.toBeInTheDocument();
+
+    // …but the persistent prompt-library control remains next to the composer.
+    expect(screen.getByRole('button', { name: /Prompt ideas/i })).toBeInTheDocument();
+  });
+
+  it('sends a prompt chosen from the persistent library after the conversation started', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({
+      reply: 'First reply.',
+      sessionId: 'sess-lib2',
+      spans: [],
+      totalDurationMs: 10,
+    });
+
+    renderPanel();
+
+    // Start a conversation so the welcome state is gone.
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'kick off');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+    expect(await screen.findByText(/First reply\./)).toBeInTheDocument();
+
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({
+      reply: 'Library reply.',
+      sessionId: 'sess-lib2',
+      spans: [],
+      totalDurationMs: 10,
+    });
+
+    // Open the library and pick a prompt. Fluent's trap-focus popover renders in a
+    // portal and can nondeterministically apply aria-hidden to its surface under
+    // jsdom, so anchor on the heading text (immune to aria-hidden) with a generous
+    // timeout, then scope the prompt lookup to the surface including hidden nodes.
+    // The full a11y contract is asserted in PromptLibrary.test.tsx (clean document).
+    await user.click(screen.getByRole('button', { name: /Prompt ideas/i }));
+    const prompt = 'Compare depletion trends across all regions for this quarter';
+    const heading = await screen.findByText('Prompt library', { selector: 'h2' }, { timeout: 4000 });
+    const surface = heading.closest('[role="dialog"]') as HTMLElement;
+    await user.click(within(surface).getByRole('button', { name: prompt, hidden: true }));
+
+    // The chosen prompt is dispatched through the same safe send path.
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    expect(sendMessageMock.mock.calls[0][0]).toMatchObject({ message: prompt });
+    expect(await screen.findByText(/Library reply\./)).toBeInTheDocument();
   });
 
   it('shows a loading indicator while a request is in flight and clears it on completion', async () => {
