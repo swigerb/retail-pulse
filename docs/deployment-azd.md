@@ -359,7 +359,10 @@ identity provider) for non-demo environments.
 ### Frontend → API routing and SignalR
 
 The postprovision hook idempotently links the ACA API as the Static Web App backend,
-so existing relative `/api/*` requests remain same-origin and are proxied to ACA.
+so ordinary relative `/api/*` requests remain same-origin and are proxied to ACA.
+The long-running `/api/chat` request uses the exact `VITE_API_ORIGIN` ACA origin
+directly to avoid the linked-backend request timeout; the frontend attaches its
+Entra bearer token only to that exact origin and `/api` path.
 SWA linked backends do **not** proxy WebSockets, so SignalR deliberately bypasses the
 link and connects directly to the ACA API using `VITE_API_ORIGIN`.
 
