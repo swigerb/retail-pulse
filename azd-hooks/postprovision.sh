@@ -111,6 +111,7 @@ az containerapp update \
     'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17' \
     "McpServer__BaseUrl=$AZURE_MCP_SERVER_APP_URL" \
     'Security__RequireAuth=true' \
+    'Authentication__Mode=Entra' \
     "Security__AllowedOrigins__0=$RETAIL_PULSE_FRONTEND_ORIGIN" \
     "MicrosoftEntra__TenantId=$entra_tenant_id" \
     "MicrosoftEntra__ClientId=$entra_client_id" \
