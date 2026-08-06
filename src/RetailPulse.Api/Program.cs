@@ -489,7 +489,13 @@ builder.Services.AddScoped(sp =>
 });
 
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
-string dataDirectory = Path.Combine(Path.GetTempPath(), "retailpulse");
+// The data directory is where every durable SQLite store lives (approvals, memory,
+// alerts, costs, audit). Deployed ACA sets RETAIL_PULSE_DATA_DIRECTORY to the
+// mounted Azure Files share so this history survives replica replacement and
+// scale-to-zero; local development falls back to a temp directory. Resolution
+// fails fast (no silent ephemeral fallback) if a required durable path is missing
+// or unwritable — see DataDirectoryResolver.
+string dataDirectory = DataDirectoryResolver.Resolve(builder.Configuration, builder.Environment);
 string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>
     new SqliteApprovalGate(approvalDbPath, sp.GetRequiredService<ILogger<SqliteApprovalGate>>()));
@@ -554,8 +560,10 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<InMemoryAdaptiveCardState>());
 
 // Observability Suite — cost tracking, audit log, conversation export
-// Cost history is SQLite-backed so it survives process restarts and ACA
-// scale-to-zero (same shared writable data directory as audit.db / memory.db).
+// Cost history is SQLite-backed in the shared writable data directory (same as
+// audit.db / memory.db). When that directory is the mounted Azure Files share
+// (deployed ACA) history survives replica replacement and scale-to-zero; locally
+// it is an ephemeral temp directory. Single-writer only (API runs maxReplicas: 1).
 string costDbPath = Path.Combine(dataDirectory, "costs.db");
 builder.Services.AddSingleton(sp => new DurableCostTracker(
     costDbPath,

@@ -6,8 +6,10 @@ namespace RetailPulse.Api.Memory;
 
 /// <summary>
 /// SQLite-backed implementation of <see cref="IConversationMemory"/>.
-/// Uses WAL mode and connection pooling for thread-safety across
-/// concurrent users. Expired entries are cleaned up lazily on recall.
+/// Uses a shared cache and SMB-safe rollback journaling (see
+/// <see cref="Data.SqliteMount"/>) so it stays durable on the
+/// Azure Files mount; single-writer only (API runs maxReplicas: 1). Expired
+/// entries are cleaned up lazily on recall.
 /// </summary>
 public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
 {
@@ -41,7 +43,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
 
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
-            PRAGMA journal_mode=WAL;
+            PRAGMA journal_mode=DELETE;
 
             CREATE TABLE IF NOT EXISTS ConversationMemories (
                 Id          TEXT    NOT NULL,

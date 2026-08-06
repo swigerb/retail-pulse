@@ -7,7 +7,9 @@ namespace RetailPulse.Api.Alerts;
 
 /// <summary>
 /// SQLite-backed alert service — stores alerts, manages throttles and snoozes.
-/// Thread-safe via WAL mode (same pattern as SqliteApprovalGate / SqliteConversationMemory).
+/// Uses SMB-safe rollback journaling over a shared cache (same pattern as
+/// SqliteApprovalGate / SqliteConversationMemory); durable on the Azure Files
+/// mount, single-writer only (API runs maxReplicas: 1).
 /// </summary>
 public sealed class SqliteAlertService : IAlertService, IDisposable
 {

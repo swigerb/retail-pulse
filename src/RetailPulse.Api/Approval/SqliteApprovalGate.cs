@@ -6,8 +6,10 @@ namespace RetailPulse.Api.Approval;
 
 /// <summary>
 /// SQLite-backed implementation of <see cref="IApprovalGate"/>.
-/// Thread-safe — each operation opens its own connection from the shared WAL database.
-/// All database I/O uses async APIs with CancellationToken support.
+/// Thread-safe — each operation opens its own connection over a shared cache.
+/// Uses SMB-safe rollback journaling (see <see cref="Data.SqliteMount"/>)
+/// so it is durable on the Azure Files mount; single-writer only (API runs
+/// maxReplicas: 1). All database I/O uses async APIs with CancellationToken support.
 /// WaitForApprovalAsync uses exponential backoff instead of fixed-interval polling.
 /// </summary>
 public sealed class SqliteApprovalGate : IApprovalGate
@@ -49,7 +51,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
-            PRAGMA journal_mode=WAL;
+            PRAGMA journal_mode=DELETE;
 
             CREATE TABLE IF NOT EXISTS ApprovalRequests (
                 RequestId   TEXT PRIMARY KEY,

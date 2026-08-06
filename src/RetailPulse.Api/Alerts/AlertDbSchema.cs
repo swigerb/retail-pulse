@@ -6,7 +6,7 @@ namespace RetailPulse.Api.Alerts;
 internal static class AlertDbSchema
 {
     public const string CreateTables = """
-        PRAGMA journal_mode=WAL;
+        PRAGMA journal_mode=DELETE;
 
         CREATE TABLE IF NOT EXISTS Alerts (
             Id                TEXT PRIMARY KEY,

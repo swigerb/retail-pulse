@@ -433,31 +433,47 @@ The `/api/chat/stream` endpoint pushes tokens via SignalR as they are generated:
 
 | Component | Storage | Endpoint |
 |-----------|---------|----------|
-| **Cost Tracker** | SQLite (`data/costs.db`), bounded by `MaxCostEvents` + TTL pruning | `GET /api/observability/costs`, `/costs/agents`, `/costs/trend` |
-| **Audit Log** | SQLite (`data/audit.db`), hash-chained append-only | `GET /api/observability/audit`, `/audit/stats` |
+| **Cost Tracker** | SQLite (`costs.db` in the data directory), bounded by `MaxCostEvents` + TTL pruning | `GET /api/observability/costs`, `/costs/agents`, `/costs/trend` |
+| **Audit Log** | SQLite (`audit.db` in the data directory), hash-chained append-only | `GET /api/observability/audit`, `/audit/stats` |
 | **Conversation Export** | ConcurrentDictionary (in-memory, bounded) | `GET /api/observability/export/sessions`, `GET /api/observability/export/{id}/preview`, `POST /api/observability/export/{id}` |
 
 Model pricing table: gpt-5.4-mini ($0.15/$0.60 per 1M tokens), gpt-4o ($2.50/$10.00), claude-sonnet ($3.00/$15.00).
 
 > **Cost durability & scale-to-zero:** Cost history is written to a SQLite file
-> (`DurableCostTracker`) in the shared writable data directory
-> (`Path.GetTempPath()/retailpulse`), alongside `audit.db`, `memory.db`,
-> `approvals.db`, and `alerts.db`. It therefore inherits the **same durability
-> model as the audit log**: history survives process restarts and in-process
-> lifecycle churn (GC, request bursts) that used to wipe the in-memory
-> `ConcurrentBag` tracker. Cache hits are recorded as real requests but with zero
-> new model tokens and zero cost, so the dashboard reflects true consumption.
-> Each usage event is priced with `specialist.Model` (the actual model that
-> served the turn), not a hardcoded model name. Writes are serialized through a
-> semaphore and bounded on every insert (TTL prune + row cap), matching the
-> in-memory tracker's bounds.
+> (`DurableCostTracker`) in the shared writable data directory, alongside
+> `audit.db`, `memory.db`, `approvals.db`, and `alerts.db`. It therefore inherits
+> the **same durability model as the audit log**: history survives process
+> restarts and in-process lifecycle churn (GC, request bursts) that used to wipe
+> the in-memory `ConcurrentBag` tracker. Cache hits are recorded as real requests
+> but with zero new model tokens and zero cost, so the dashboard reflects true
+> consumption. Each usage event is priced with `specialist.Model` (the actual
+> model that served the turn), not a hardcoded model name. Writes are serialized
+> through a semaphore and bounded on every insert (TTL prune + row cap), matching
+> the in-memory tracker's bounds.
 >
-> **Caveat:** the data directory is container-local ephemeral storage
-> (`Path.GetTempPath()`), not an Azure Files mount, so — like every other SQLite
-> store in this app — history does **not** survive container replacement
-> (redeploy, or a full ACA scale-to-zero cycle that starts a fresh replica). To
-> make cost/audit history durable across replacements, mount a persistent volume
-> and point `dataDirectory` at it; no code change is required beyond the path.
+> **Durable across replica replacement (deployed):** The data directory is set by
+> `RETAIL_PULSE_DATA_DIRECTORY` (see `DataDirectoryResolver`). In deployed Azure
+> Container Apps it points at an **Azure Files share mounted at
+> `/mnt/retailpulse-data`**, so cost/audit/memory/approval/alert history now
+> survives real replica replacement and full scale-to-zero cycles — the defect
+> that previously lost everything under `Path.GetTempPath()`. Local development
+> leaves the variable unset and falls back to a temp directory. The resolver
+> **fails fast** (it never silently falls back to ephemeral storage) if a
+> configured durable path is missing or unwritable, and in a genuine Production
+> environment it refuses to start without a durable path.
+>
+> **Single-replica constraint:** SQLite over SMB (Azure Files) is safe only for a
+> single writer, so the API runs `minReplicas: 0`, `maxReplicas: 1`. The mounted
+> stores use SMB-safe rollback journaling (`journal_mode=DELETE`, not WAL, whose
+> `-shm` shared memory is unsupported on network filesystems). This is **not**
+> multi-replica-safe; do not raise `maxReplicas` while the stores share one mount.
+>
+> **Cost & cleanup:** the durable store is a single Standard_LRS StorageV2 account
+> with a 1 GiB file share (`Standard`/`TransactionOptimized`) — a few cents/month
+> at demo volumes. It is provisioned into the demo resource group and removed by
+> `azd down` with the rest of the stack. No secrets are persisted to it — only the
+> bounded app-data SQLite files. First deployment starts with an **empty** durable
+> store; previously accumulated ephemeral history is not recoverable.
 
 ### Collaborative Adaptive Cards
 

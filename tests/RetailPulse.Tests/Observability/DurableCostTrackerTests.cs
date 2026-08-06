@@ -9,10 +9,13 @@ namespace RetailPulse.Tests.Observability;
 
 /// <summary>
 /// Tests for <see cref="DurableCostTracker"/> — the SQLite-backed cost tracker
-/// that replaces the in-memory tracker so cost history survives process restarts
-/// and ACA scale-to-zero. Covers durability across restarts, truthful cache-hit
-/// semantics (a request is counted but no model tokens/cost), per-model cost
-/// attribution, and bounded pruning.
+/// that replaces the in-memory tracker so cost history survives process restarts.
+/// Whether it also survives an ACA replica replacement / scale-to-zero depends on
+/// the data directory being a persistent Azure Files mount (see
+/// <c>DataDirectoryResolver</c>); these tests exercise the store-level guarantee
+/// by reopening the same directory a fresh replica would remount. Also covers
+/// truthful cache-hit semantics (a request is counted but no model tokens/cost),
+/// per-model cost attribution, and bounded pruning.
 /// </summary>
 public sealed class DurableCostTrackerTests : IDisposable
 {
@@ -46,10 +49,17 @@ public sealed class DurableCostTrackerTests : IDisposable
     private DurableCostTracker CreateTracker(ObservabilityOptions? options = null) =>
         new(_dbPath, Options.Create(options ?? new ObservabilityOptions()), Pricing());
 
+    private DurableCostTracker CreateTrackerAt(string dbPath, ObservabilityOptions? options = null) =>
+        new(dbPath, Options.Create(options ?? new ObservabilityOptions()), Pricing());
+
     [Fact]
-    public async Task History_SurvivesRestart()
+    public async Task History_SurvivesProcessRestart_OnSameDataDirectory()
     {
-        // First "process" writes events, then disposes (simulating scale-to-zero).
+        // Proves the store-level guarantee: the DB file persists across process
+        // lifetimes. This does NOT prove temp storage survives ACA scale-to-zero —
+        // in production the same guarantee only holds because the data directory is
+        // an Azure Files mount. Here we reopen the identical path a restarted
+        // process would use.
         using (DurableCostTracker tracker = CreateTracker())
         {
             await tracker.TrackUsageAsync(new UsageEvent("demand-agent", "gpt-5.4-mini", 1_000, 500, "GetDepletions", DateTime.UtcNow));
@@ -63,6 +73,37 @@ public sealed class DurableCostTrackerTests : IDisposable
         summary.RequestCount.Should().Be(2);
         summary.TotalTokens.Should().Be(4_500);
         summary.TotalCost.Should().BeGreaterThan(0m);
+    }
+
+    [Fact]
+    public async Task ReplacementReplica_OnSameMountedDirectory_SeesPriorHistory()
+    {
+        // Simulate an ACA replica replacement / scale-to-zero: a dedicated
+        // directory stands in for the Azure Files mount. One "replica" writes cost
+        // events and is fully disposed (the old replica dies); a brand-new tracker
+        // instance — a fresh replica remounting the same share at the same path —
+        // must observe the prior history. Durability comes from the mounted
+        // directory, not the process, which is the whole point of the fix.
+        string mountDir = Path.Combine(Path.GetTempPath(), $"rp-mount-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(mountDir);
+        string mountedDbPath = Path.Combine(mountDir, "costs.db");
+        try
+        {
+            using (DurableCostTracker oldReplica = CreateTrackerAt(mountedDbPath))
+            {
+                await oldReplica.TrackUsageAsync(new UsageEvent("demand-agent", "claude-sonnet", 1_000_000, 1_000_000, null, DateTime.UtcNow));
+            }
+
+            using DurableCostTracker newReplica = CreateTrackerAt(mountedDbPath);
+            CostSummary summary = await newReplica.GetSummaryAsync(CostPeriod.All);
+
+            summary.RequestCount.Should().Be(1, "the fresh replica reads the durable store left by the old one");
+            summary.TotalCost.Should().BeApproximately(18.00m, 0.0001m);
+        }
+        finally
+        {
+            try { Directory.Delete(mountDir, recursive: true); } catch { /* best effort */ }
+        }
     }
 
     [Fact]

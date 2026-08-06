@@ -7,7 +7,17 @@ param environmentId string
 @description('Tags for resources')
 param tags object = {}
 
+@description('Managed-environment storage name (Azure Files) for durable API app data')
+param dataStorageName string
+
+@description('Mount path inside the API container for the durable Azure Files volume')
+param dataMountPath string = '/mnt/retailpulse-data'
+
 var placeholderImage = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+// Volume name is local to the container template; it binds to the environment
+// storage entry (dataStorageName) that maps to the Azure Files share.
+var dataVolumeName = 'retailpulse-data'
 
 resource api 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'ca-retailpulse-api'
@@ -38,6 +48,32 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
+          // Point the app's durable SQLite stores at the mounted Azure Files
+          // share. Defined here (not just in the postprovision hook) so a fresh
+          // `azd up` provisions a container that already fails fast if the mount
+          // is missing — it can never silently regress to ephemeral temp storage.
+          env: [
+            {
+              name: 'RETAIL_PULSE_DATA_DIRECTORY'
+              value: dataMountPath
+            }
+          ]
+          volumeMounts: [
+            {
+              volumeName: dataVolumeName
+              mountPath: dataMountPath
+            }
+          ]
+        }
+      ]
+      // Durable app data lives on Azure Files, so the API is a single-writer
+      // store: scale-to-zero is fine (history survives on the share) but max=1
+      // avoids two replicas writing the same SQLite files over SMB.
+      volumes: [
+        {
+          name: dataVolumeName
+          storageType: 'AzureFile'
+          storageName: dataStorageName
         }
       ]
       scale: {

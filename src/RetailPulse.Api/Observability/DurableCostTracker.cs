@@ -3,14 +3,24 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Configuration;
+using RetailPulse.Api.Data;
 using RetailPulse.Contracts.Observability;
 
 namespace RetailPulse.Api.Observability;
 
 /// <summary>
-/// SQLite-backed cost tracker whose history survives process restarts and
-/// Azure Container Apps scale-to-zero (the DB lives in the shared writable
-/// data directory alongside audit.db / memory.db).
+/// SQLite-backed cost tracker whose history survives process restarts and — when
+/// the data directory is a mounted Azure Files share — real Azure Container Apps
+/// replica replacement and scale-to-zero. The DB lives in the shared writable
+/// data directory alongside audit.db / memory.db (see <see cref="DataDirectoryResolver"/>).
+/// <para>
+/// Durability across replica replacement depends entirely on the data directory
+/// being persistent. In deployed ACA that is the Azure Files mount at
+/// <c>/mnt/retailpulse-data</c>; in local development it is an ephemeral temp
+/// directory. The store itself is single-writer safe only (the API runs
+/// <c>maxReplicas: 1</c>) and uses SMB-safe rollback journaling — see
+/// <see cref="SqliteMount"/>.
+/// </para>
 /// <para>
 /// Bounded like the in-memory tracker: on every write, events older than the
 /// configured TTL are pruned and the row count is capped at MaxCostEvents by
@@ -37,6 +47,7 @@ public sealed class DurableCostTracker : ICostTracker, IDisposable
 
         _connection = new SqliteConnection($"Data Source={dbPath}");
         _connection.Open();
+        SqliteMount.ApplySmbSafePragmas(_connection);
         InitializeSchema();
     }
 
