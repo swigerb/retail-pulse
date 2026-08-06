@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using RetailPulse.Api.Data;
 using RetailPulse.Contracts.Observability;
 
 namespace RetailPulse.Api.Security;
@@ -9,6 +10,9 @@ namespace RetailPulse.Api.Security;
 /// <summary>
 /// Append-only SQLite-backed audit log with tamper-detection via hash chain.
 /// Each entry's checksum = SHA256(previous_checksum + current_entry_json).
+/// History survives replica replacement/scale-to-zero only when the data
+/// directory is a persistent Azure Files mount; the store is single-writer
+/// (API runs maxReplicas: 1) and uses SMB-safe rollback journaling.
 /// </summary>
 public class DurableAuditLog : IAuditLog, IDisposable
 {
@@ -24,6 +28,7 @@ public class DurableAuditLog : IAuditLog, IDisposable
 
         _connection = new SqliteConnection($"Data Source={dbPath}");
         _connection.Open();
+        SqliteMount.ApplySmbSafePragmas(_connection);
         InitializeSchema();
         LoadLastChecksum();
     }

@@ -17,29 +17,12 @@ public class InMemoryCostTracker : ICostTracker
     private readonly ConcurrentQueue<UsageEvent> _events = new();
     private int _eventCount;
     private readonly ObservabilityOptions _options;
-    private readonly Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)> _modelPricing;
-
-    private static readonly (decimal InputPer1M, decimal OutputPer1M) _defaultPricing = (1.00m, 5.00m);
+    private readonly TokenPricing _pricing;
 
     public InMemoryCostTracker(IOptions<ObservabilityOptions> options, IConfiguration configuration)
     {
         _options = options.Value;
-        _modelPricing = BuildPricingTable(configuration);
-    }
-
-    private static Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)> BuildPricingTable(IConfiguration configuration)
-    {
-        var pricing = new Dictionary<string, (decimal InputPer1M, decimal OutputPer1M)>(StringComparer.OrdinalIgnoreCase);
-        IConfigurationSection section = configuration.GetSection("TokenPricing");
-
-        foreach (IConfigurationSection child in section.GetChildren())
-        {
-            decimal inputRate = child.GetValue<decimal>("InputPerMillion");
-            decimal outputRate = child.GetValue<decimal>("OutputPerMillion");
-            pricing[child.Key] = (inputRate, outputRate);
-        }
-
-        return pricing;
+        _pricing = TokenPricing.FromConfiguration(configuration);
     }
 
     public Task TrackUsageAsync(UsageEvent usage, CancellationToken ct = default)
@@ -133,11 +116,5 @@ public class InMemoryCostTracker : ICostTracker
         return [.. _events.Where(e => e.Timestamp >= cutoff)];
     }
 
-    private decimal CalculateCost(UsageEvent e)
-    {
-        (decimal InputPer1M, decimal OutputPer1M) = _modelPricing.GetValueOrDefault(e.Model, _defaultPricing);
-        decimal inputCost = e.InputTokens / 1_000_000m * InputPer1M;
-        decimal outputCost = e.OutputTokens / 1_000_000m * OutputPer1M;
-        return inputCost + outputCost;
-    }
+    private decimal CalculateCost(UsageEvent e) => _pricing.Calculate(e);
 }

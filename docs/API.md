@@ -946,7 +946,10 @@ Query the audit log with filters.
 | `action` | string | Filter by action type |
 | `limit` | int | Max entries (default: 50) |
 
-**Response (200):** Array of audit log entries.
+**Response (200):** Array of audit log entries. Each entry exposes `id`,
+`timestamp`, `userId`, `agentId` (opaque identifiers — not display names),
+`action`, `inputSummary`, `outputSummary`, `tokens`, and `durationMs` (numeric
+milliseconds, not a serialized `TimeSpan`).
 
 ---
 
@@ -962,19 +965,44 @@ Get audit log summary statistics.
 
 List all conversation sessions available for export.
 
-**Response (200):** Array of session metadata.
+**Response (200):** Array of session metadata. Each item exposes `sessionId`,
+`startTime` (session start, camelCase — not `startedAt`), `messageCount`,
+`agentsUsed`, and `totalTokens`.
+
+---
+
+### GET /api/observability/export/{sessionId}/preview
+
+Return session metadata plus a bounded, oldest-first slice of the conversation
+for in-UI preview.
+
+| Query Param | Type | Default | Description |
+|-------------|------|---------|-------------|
+| `max` | int | `20` | Max messages in the preview slice |
+
+**Response (200):** `{ sessionId, messages: [{ role, content, timestamp }], totalMessages }`
+where `totalMessages` is the true message count (which may exceed the returned
+slice). **Error:** `404` if the session does not exist — the endpoint never
+returns a silent empty-success body, so the UI surfaces missing sessions as real
+errors.
 
 ---
 
 ### POST /api/observability/export/{sessionId}
 
-Export a conversation session.
+Export a conversation session. The requested format may be supplied either in the
+JSON request body (`{ "format": "markdown" | "json" }`) or as a `format` query
+parameter; the body takes precedence.
 
-| Query Param | Type | Default | Description |
-|-------------|------|---------|-------------|
-| `format` | string | `"markdown"` | `markdown` or `json` |
+| Param | Location | Type | Default | Description |
+|-------|----------|------|---------|-------------|
+| `format` | body or query | string | `"markdown"` | `markdown` or `json` |
 
-**Response (200):** Exported conversation content. **Error:** `404` if session not found.
+**Response (200):** The raw exported document — **not** a JSON envelope. Markdown
+exports return `Content-Type: text/markdown; charset=utf-8` and JSON exports
+return `Content-Type: application/json; charset=utf-8`, both with
+`Content-Disposition: attachment; filename="session-<id>.<ext>"` so the browser
+downloads a correctly-typed file. **Error:** `404` if session not found.
 
 ---
 

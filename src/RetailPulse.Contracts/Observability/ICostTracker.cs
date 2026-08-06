@@ -12,7 +12,7 @@ public interface ICostTracker
     Task<CostTrend> GetTrendAsync(int days = 7, CancellationToken ct = default);
 }
 
-public record UsageEvent(string AgentId, string Model, int InputTokens, int OutputTokens, string? ToolName, DateTime Timestamp);
+public record UsageEvent(string AgentId, string Model, int InputTokens, int OutputTokens, string? ToolName, DateTime Timestamp, bool CacheHit = false);
 public record CostSummary(int TotalTokens, decimal TotalCost, int RequestCount, CostPeriod Period);
 public record AgentCostBreakdown(string AgentId, int Tokens, decimal Cost, int Requests, string TopTool);
 public record CostTrend(IReadOnlyList<DailyCost> Days);

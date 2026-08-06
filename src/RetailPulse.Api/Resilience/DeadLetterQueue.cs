@@ -2,12 +2,17 @@ using System.Globalization;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
+using RetailPulse.Api.Data;
 
 namespace RetailPulse.Api.Resilience;
 
 /// <summary>
 /// In-memory dead-letter queue backed by a SQLite file for durability.
 /// Stores failed operations for later replay.
+/// The backing connection is opened through <see cref="SqliteMount"/> so it
+/// carries the same centralized SMB-safe pragmas (busy_timeout, journal_mode,
+/// synchronous) as every other mounted store — this keeps it safe if the
+/// dead-letter database is ever relocated onto the durable Azure Files share.
 /// </summary>
 public sealed class DeadLetterQueue : IDisposable
 {
@@ -26,8 +31,7 @@ public sealed class DeadLetterQueue : IDisposable
             FullMode = BoundedChannelFullMode.DropOldest
         });
 
-        _db = new SqliteConnection($"Data Source={_dbPath}");
-        _db.Open();
+        _db = SqliteMount.Open($"Data Source={_dbPath}");
         InitializeDatabase();
     }
 

@@ -1,13 +1,18 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using RetailPulse.Api.Data;
 using RetailPulse.Contracts.Alerts;
 
 namespace RetailPulse.Api.Alerts;
 
 /// <summary>
 /// SQLite-backed alert service — stores alerts, manages throttles and snoozes.
-/// Thread-safe via WAL mode (same pattern as SqliteApprovalGate / SqliteConversationMemory).
+/// Every connection is opened through <see cref="SqliteMount"/>, which applies
+/// the centralized SMB-safe pragmas (busy_timeout, DELETE journaling,
+/// synchronous=FULL) — the same pattern as SqliteApprovalGate /
+/// SqliteConversationMemory; durable on the Azure Files mount, single-writer only
+/// (API runs maxReplicas: 1).
 /// </summary>
 public sealed class SqliteAlertService : IAlertService, IDisposable
 {
@@ -39,12 +44,11 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         InitializeSchema();
     }
 
-    private SqliteConnection OpenConnection() => new(_connectionString);
+    private SqliteConnection OpenConnection() => SqliteMount.Open(_connectionString);
 
     private void InitializeSchema()
     {
         using SqliteConnection conn = OpenConnection();
-        conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = AlertDbSchema.CreateTables;
         cmd.ExecuteNonQuery();
@@ -64,7 +68,6 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         DateTimeOffset cutoff = DateTimeOffset.UtcNow.AddHours(-24);
 
         using SqliteConnection conn = OpenConnection();
-        conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata
@@ -83,7 +86,6 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         DateTimeOffset snoozedUntil = DateTimeOffset.UtcNow.Add(duration);
 
         using SqliteConnection conn = OpenConnection();
-        conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO AlertSnoozes (UserId, AlertType, Brand, Region, SnoozedUntil)
@@ -101,7 +103,6 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     public Task DismissAsync(string alertId, string userId, CancellationToken ct = default)
     {
         using SqliteConnection conn = OpenConnection();
-        conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO AlertDismissals (AlertId, UserId, DismissedAt)
@@ -119,7 +120,6 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     public Task<IReadOnlyList<Alert>> GetHistoryAsync(string userId, int limit = 50, CancellationToken ct = default)
     {
         using SqliteConnection conn = OpenConnection();
-        conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata
@@ -141,7 +141,6 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
         DateTimeOffset cutoff = DateTimeOffset.UtcNow.Subtract(_defaultThrottleWindow);
 
         using SqliteConnection conn = OpenConnection();
-        conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT LastFiredAt FROM AlertThrottles
@@ -160,7 +159,6 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     internal void UpdateThrottle(string type, string brand, string region)
     {
         using SqliteConnection conn = OpenConnection();
-        conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO AlertThrottles (Type, Brand, Region, LastFiredAt)
@@ -177,7 +175,6 @@ public sealed class SqliteAlertService : IAlertService, IDisposable
     internal void PersistAlert(Alert alert)
     {
         using SqliteConnection conn = OpenConnection();
-        conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR IGNORE INTO Alerts (Id, Type, Severity, Title, Description, Brand, Region, RecommendedAction, DetectedAt, Metadata)
