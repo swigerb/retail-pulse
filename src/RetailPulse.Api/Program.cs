@@ -202,13 +202,17 @@ builder.Services.AddRateLimiter(options =>
     // by header spoofing. Fine-grained abuse control is enforced AFTER bootstrap by the per-subject
     // (immutable, server-minted sub) limits in AnonymousGuardMiddleware, which is the primary
     // control. Note: this window is replica-local; hosted Anonymous runs at maxReplicas=1.
+    //
+    // Config key: Anonymous:Bootstrap:GlobalPerMinute (conservative default 5). The legacy
+    // Anonymous:Bootstrap:PerIpPerMinute key is still honoured as a fallback for backward
+    // compatibility — it was never actually per-IP behind ACA, hence the rename.
     options.AddPolicy("anonymous-bootstrap", _ =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: "anonymous-bootstrap-global",
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = builder.Configuration.GetValue("Anonymous:Bootstrap:GlobalPerMinute",
-                    builder.Configuration.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 30)),
+                    builder.Configuration.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 5)),
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));

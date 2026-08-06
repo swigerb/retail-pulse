@@ -171,6 +171,12 @@ public sealed class AnonymousCapabilityTests
     [InlineData("GET", "/api/approvals")]
     [InlineData("GET", "/api/info")]
     [InlineData("GET", "/api/chat")]
+    // Sprint 1: the SignalR hubs are NOT part of the anonymous surface — connection and negotiate,
+    // both telemetry and streaming, are denied. Anonymous sessions get no real-time telemetry.
+    [InlineData("GET", "/hubs/telemetry")]
+    [InlineData("POST", "/hubs/telemetry/negotiate")]
+    [InlineData("GET", "/hubs/streaming")]
+    [InlineData("POST", "/hubs/streaming/negotiate")]
     public void CapabilityPolicy_DeniesEverythingOutsideAllowlist(string method, string path)
     {
         AnonymousCapabilityPolicy.IsBlocked(method, path).Should().BeTrue();
@@ -178,14 +184,11 @@ public sealed class AnonymousCapabilityTests
     }
 
     [Theory]
-    // The entire authenticated + bootstrap surface: chat POST, bootstrap POST, the two hubs, preflight.
+    // The entire authenticated + bootstrap surface is exactly two routes plus CORS preflight.
+    // No hub route is reachable in Anonymous mode.
     [InlineData("POST", "/api/chat")]
     [InlineData("POST", "/api/auth/anonymous/session")]
     [InlineData("OPTIONS", "/api/chat")]
-    [InlineData("GET", "/hubs/telemetry")]
-    [InlineData("POST", "/hubs/telemetry/negotiate")]
-    [InlineData("GET", "/hubs/streaming")]
-    [InlineData("POST", "/hubs/streaming/negotiate")]
     public void CapabilityPolicy_AllowsOnlyTheMinimalSurface(string method, string path)
     {
         AnonymousCapabilityPolicy.IsAllowed(method, path).Should().BeTrue();

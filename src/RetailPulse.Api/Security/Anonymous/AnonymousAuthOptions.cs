@@ -47,7 +47,10 @@ public sealed class AnonymousAuthOptions
     public int RequestTimeoutSeconds { get; init; } = 60;
 
     // ── Rate limits ──────────────────────────────────────────────────────────
-    public int BootstrapPerIpPerMinute { get; init; } = 5;
+    // Bootstrap is a single GLOBAL fixed window (not per-IP): behind ACA the client IP is the
+    // proxy's and X-Forwarded-For is forgeable, so a per-IP partition would collapse to one bucket
+    // anyway. Conservative default 5/min per replica. The legacy per-IP key is still honoured.
+    public int BootstrapGlobalPerMinute { get; init; } = 5;
     public int ChatPerSubjectPerMinute { get; init; } = 5;
     public int ChatPerIpPerMinute { get; init; } = 10;
 
@@ -107,7 +110,8 @@ public sealed class AnonymousAuthOptions
             MaxOutputTokens = section.GetValue("MaxOutputTokens", 512),
             MaxRequestBytes = section.GetValue("MaxRequestBytes", 16 * 1024),
             RequestTimeoutSeconds = section.GetValue("RequestTimeoutSeconds", 60),
-            BootstrapPerIpPerMinute = section.GetValue("Bootstrap:PerIpPerMinute", 5),
+            BootstrapGlobalPerMinute = section.GetValue("Bootstrap:GlobalPerMinute",
+                section.GetValue("Bootstrap:PerIpPerMinute", 5)),
             ChatPerSubjectPerMinute = section.GetValue("Chat:PerSubjectPerMinute", 5),
             ChatPerIpPerMinute = section.GetValue("Chat:PerIpPerMinute", 10),
             DailyMaxRequests = section.GetValue("Limits:DailyMaxRequests", 500),
@@ -127,7 +131,7 @@ public sealed class AnonymousAuthOptions
         RequireInRange(MaxOutputTokens, 1, 4096, "Anonymous:MaxOutputTokens");
         RequireInRange(MaxRequestBytes, 256, 1_000_000, "Anonymous:MaxRequestBytes");
         RequireInRange(RequestTimeoutSeconds, 1, 120, "Anonymous:RequestTimeoutSeconds");
-        RequirePositive(BootstrapPerIpPerMinute, "Anonymous:Bootstrap:PerIpPerMinute");
+        RequirePositive(BootstrapGlobalPerMinute, "Anonymous:Bootstrap:GlobalPerMinute");
         RequirePositive(ChatPerSubjectPerMinute, "Anonymous:Chat:PerSubjectPerMinute");
         RequirePositive(ChatPerIpPerMinute, "Anonymous:Chat:PerIpPerMinute");
 

@@ -137,7 +137,7 @@ public sealed class AnonymousAuthenticationTests
     // ── valid anonymous access ─────────────────────────────────────────────────
 
     [Fact]
-    public async Task ValidToken_ReachesChatAndHub()
+    public async Task ValidToken_ReachesChat_ButBothHubsAreForbidden()
     {
         using TestFixture fx = CreateServer();
         string token = Token(subject: "anon-ok");
@@ -145,9 +145,24 @@ public sealed class AnonymousAuthenticationTests
         // POST /api/chat is the single allowlisted authenticated REST capability.
         (await PostChatRaw(fx, token)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        // Hub: the token is supplied via ?access_token (WebSocket handshakes cannot set headers).
-        HttpResponseMessage hub = await fx.Client.GetAsync($"/hubs/telemetry?access_token={token}");
-        hub.StatusCode.Should().Be(HttpStatusCode.OK);
+        // Sprint 1: the SignalR hubs are NOT part of the anonymous surface. A VALID anonymous token
+        // is authenticated and satisfies the authorization policy, but the deny-by-default guard
+        // blocks the hub before the endpoint runs — 403 on both connection (GET, ?access_token) and
+        // negotiate (POST), for both telemetry and streaming. Anonymous gets no real-time telemetry.
+        foreach (string hub in new[] { "/hubs/telemetry", "/hubs/streaming" })
+        {
+            HttpResponseMessage connect = await fx.Client.GetAsync($"{hub}?access_token={token}");
+            connect.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                $"a valid anonymous token must be denied on the {hub} connection endpoint");
+
+            var negotiate = new HttpRequestMessage(HttpMethod.Post, $"{hub}/negotiate?access_token={token}")
+            {
+                Content = new StringContent(string.Empty),
+            };
+            HttpResponseMessage neg = await fx.Client.SendAsync(negotiate);
+            neg.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                $"a valid anonymous token must be denied on the {hub} negotiate endpoint");
+        }
     }
 
     // ── deny-by-default: the broad GET/observability/admin surface is 403 ───────
@@ -408,7 +423,7 @@ public sealed class AnonymousAuthenticationTests
                                 factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                                 {
                                     PermitLimit = config.GetValue("Anonymous:Bootstrap:GlobalPerMinute",
-                                        config.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 30)),
+                                        config.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 5)),
                                     Window = TimeSpan.FromMinutes(1),
                                     QueueLimit = 0,
                                 }));
@@ -453,8 +468,16 @@ public sealed class AnonymousAuthenticationTests
                         endpoints.MapPost("/api/approvals/{id}/respond", static (string id) => Results.Ok(new { id }))
                             .RequireAuthorization();
 
-                        // Hub stand-in (query-token path).
+                        // Hub stand-ins (query-token path). Both the connection (GET) and negotiate
+                        // (POST) endpoints for BOTH hubs require authorization but are NOT on the
+                        // anonymous allowlist, so the guard denies a valid anonymous token with 403.
                         endpoints.MapGet("/hubs/telemetry", static () => Results.Ok(new { hub = "telemetry" }))
+                            .RequireAuthorization();
+                        endpoints.MapPost("/hubs/telemetry/negotiate", static () => Results.Ok(new { negotiated = true }))
+                            .RequireAuthorization();
+                        endpoints.MapGet("/hubs/streaming", static () => Results.Ok(new { hub = "streaming" }))
+                            .RequireAuthorization();
+                        endpoints.MapPost("/hubs/streaming/negotiate", static () => Results.Ok(new { negotiated = true }))
                             .RequireAuthorization();
 
                         endpoints.MapGet("/health", static () => Results.Ok(new { status = "ok" })).AllowAnonymous();

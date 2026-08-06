@@ -11,6 +11,7 @@ using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.Prefetch;
 using RetailPulse.Api.Rag;
+using RetailPulse.Api.Security.Anonymous;
 using RetailPulse.Api.Tracing;
 using RetailPulse.Api.Validation;
 using RetailPulse.Contracts;
@@ -189,6 +190,50 @@ public static class ChatEndpoints
                             ["router.intent"] = decision.Intent,
                             ["router.confidence"] = decision.Confidence.ToString("F2", CultureInfo.InvariantCulture)
                         }));
+                }
+
+                // ── Anonymous intent hard-stops (before specialist selection / execution) ──
+                // These close two chat-internal bypasses that the anonymous write-tool filter and
+                // the cache/memory-disabled narrowing cannot reach, because they do not go through
+                // the tool set at all:
+                //
+                //  1) Memory management — the MemoryManagementAgent calls StoreAsync/ForgetAsync
+                //     DIRECTLY (no AI tools), so tool filtering never sees it. Refuse now so that
+                //     agent never runs: no model call, and zero memory rows are written.
+                //  2) Consensus council (portfolio health) — the council interception below fans out
+                //     multiple model calls via IConsensusCouncil and returns EARLY, bypassing the
+                //     single accounted budget/audit/guardrail path. Refuse now so the council is
+                //     never convened for an anonymous session.
+                //
+                // The council interception is the ONLY in-process alternate orchestrator reachable
+                // from POST /api/chat; the scorecard/escalation orchestrators are not registered as
+                // ISpecialistAgent and are reachable only via their own /api routes (all 403 for
+                // anonymous). Both refusals are deterministic (no model) — they cannot be defeated by
+                // a crafted keyword prompt because they fire on the router's own classification.
+                if (anonymous && AnonymousChatRestrictions.IsMemoryManagementIntent(decision))
+                {
+                    logger.LogInformation(
+                        "Anonymous memory-management request refused (no store/forget, no model) for session {SessionId}",
+                        sessionId);
+                    return Results.Ok(new ChatResponse(
+                        AnonymousChatRestrictions.MemoryRefusalMessage,
+                        sessionId,
+                        [],
+                        null,
+                        0));
+                }
+
+                if (anonymous && AnonymousChatRestrictions.IsCouncilIntent(decision))
+                {
+                    logger.LogInformation(
+                        "Anonymous portfolio-health/council request refused (no council model calls) for session {SessionId}",
+                        sessionId);
+                    return Results.Ok(new ChatResponse(
+                        AnonymousChatRestrictions.CouncilRefusalMessage,
+                        sessionId,
+                        [],
+                        null,
+                        0));
                 }
 
                 // Agent selection with tracing

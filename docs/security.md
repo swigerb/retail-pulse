@@ -88,17 +88,21 @@ Production pins `Authentication__Mode=Entra` explicitly in
 ### Anonymous mode (opt-in, fail-closed)
 
 Anonymous mode lets a future self-serve frontend (Sprint 3) reach a **single
-chat capability** — authenticated `POST /api/chat` plus the two SignalR hubs that
-carry that chat's telemetry/streaming — without an identity provider. It is
-additive and fail-closed. Hosted Anonymous **is permitted only behind an explicit
+chat capability** — authenticated `POST /api/chat` — without an identity provider.
+It is additive and fail-closed. In Sprint 1 the **SignalR hubs are NOT part of the
+anonymous surface**: anonymous sessions have no real-time telemetry or token
+streaming, and a valid anonymous token is denied `403` on both hubs. Hosted
+Anonymous **is permitted only behind an explicit
 opt-in** (`Anonymous:AllowHosted=true`); by default it is never deployed, and the
 **live deployment artifacts stay Entra**, proven so by deployment-contract tests.
 It is not deployed this sprint.
 
 - **Smallest useful surface (deny-by-default).** The anonymous surface is exactly
-  three things: the unauthenticated bootstrap, authenticated `POST /api/chat`, and
-  the `/hubs/telemetry` + `/hubs/streaming` hubs. **Every other (method, route) is
-  `403`** — there is **no blanket GET allowance**. Observability, admin, export,
+  **two routes**: the unauthenticated bootstrap and authenticated `POST /api/chat`.
+  **Every other (method, route) is
+  `403`** — there is **no blanket GET allowance**, and **both SignalR hubs
+  (`/hubs/telemetry`, `/hubs/streaming`) are denied** at connection and negotiate.
+  Observability, admin, export,
   memory, cards, approvals, guardrail logs, `/api/chat/stream`, council, scorecard,
   escalation and the message-extension endpoints are all forbidden. Read-only data
   (e.g. charts) is reached **through the filtered chat tool path**, never a direct
@@ -139,21 +143,30 @@ It is not deployed this sprint.
   cap and the write-capable-tool filter apply to the whole anonymous surface; there
   is no alternate orchestrator or billable route to escape them. History length is
   bounded per-message and in aggregate (validation `400` before the model).
-- **Hub session ownership (Finding 6).** For an anonymous caller a hub `JoinSession`
-  binds/verifies the session against the caller's immutable subject, so an anonymous
-  attacker cannot subscribe to another subject's telemetry/stream even with a known
-  session id. Card/approval hub groups are refused for Anonymous. Entra hub
-  behaviour is unchanged.
-- **ACA proxy / per-IP limitation.** Behind the Azure Container Apps ingress the
-  connection remote IP is the **proxy's**, not the client's, and `X-Forwarded-For`
+- **Chat-internal intent hard-stops.** Two in-process paths do not use the AI tool
+  set, so the write-tool filter cannot reach them; the endpoint refuses them by the
+  router's own classification, before specialist selection: a memory-management turn
+  (the `MemoryManagementAgent` calls `StoreAsync`/`ForgetAsync` directly) returns a
+  safe refusal with **no memory write and no model call**, and a portfolio-health turn
+  is refused **before the consensus-council interception**, so `ConveneAsync` is never
+  called and no unaccounted council model fan-out occurs.
+- **Hubs are not part of the anonymous surface.** A valid anonymous token is denied
+  `403` on both hubs (connection + negotiate), so no anonymous caller reaches a hub
+  group at all — this retires the global-broadcast and cross-subject group-collision
+  risk without touching the Entra hub telemetry path. **Entra hub behaviour is
+  unchanged.**
+- **ACA proxy / bootstrap limiter.** Behind the Azure Container Apps ingress the
+  connection remote IP is the proxy's, not the client's, and `X-Forwarded-For`
   is **not** trusted (it is forgeable and ACA gives no cryptographically verifiable
-  client-IP header). Per-IP limits therefore collapse to a global bucket in
-  practice; bootstrap is intentionally a single **global** conservative window and
-  the **primary** abuse control is the **per-subject** limit applied after bootstrap.
-- **Limitation.** Ceilings, rate-limit windows, and the hub session-ownership
-  registry are **replica-local, in-memory**, so hosted Anonymous is pinned to
+  client-IP header). The bootstrap limiter is therefore a per-replica **global**
+  window (config key `Anonymous:Bootstrap:GlobalPerMinute`, conservative default `5`;
+  the legacy `Anonymous:Bootstrap:PerIpPerMinute` key is still honoured as a
+  backward-compatible fallback), and the **primary** abuse control is the
+  **per-subject** limit applied after bootstrap.
+- **Limitation.** Ceilings and rate-limit windows are **replica-local, in-memory**,
+  so hosted Anonymous is pinned to
   `maxReplicas=1` with conservative limits and is **not** equivalent to
-  authenticated production; **all of these counters/bindings reset on restart or
+  authenticated production; **all of these counters reset on restart or
   replica replacement**.
 
 ### Development

@@ -49,23 +49,30 @@ Behavior for the `Entra` mode is identical to the pre-foundation implementation.
 Anonymous mode is an **opt-in, fail-closed** capability that is **not deployed by
 default** (hosted only behind an explicit `Anonymous:AllowHosted=true` opt-in).
 Identity is a server-minted, short-lived session token — never a client-supplied
-header or body value. The surface is **deny-by-default**: the only reachable routes
-are the unauthenticated bootstrap, authenticated `POST /api/chat`, and the two
-SignalR hubs. There is **no blanket GET allowance** — every other route is `403`.
+header or body value. The surface is **deny-by-default** and, for Sprint 1, reduced
+to exactly **two routes**: the unauthenticated bootstrap and the authenticated
+`POST /api/chat`. **The SignalR hubs are NOT part of the anonymous surface** — a
+valid anonymous token is denied `403` on both the telemetry and streaming hubs, at
+both the connection and negotiate endpoints. Anonymous sessions therefore have **no
+real-time telemetry or token streaming**; the Sprint 3 frontend does not start the
+hubs in anonymous mode. There is **no blanket GET allowance** — every other route is
+`403`.
 
 | Request | Credential | Expected result |
 |---------|-----------|-----------------|
 | `POST /api/auth/anonymous/session` (bootstrap) | none | 200 — mints a short-lived session token (random subject, `provider=Anonymous`, role `RetailPulse.Anonymous`, scope `chat_limited`, no PII, no refresh) |
 | `POST /api/auth/anonymous/session` (bootstrap) | none, over the global bootstrap limit | 429 |
 | `POST /api/chat` (within limits) | valid anonymous session token | 200 — the single allowlisted chat capability, output-token-capped, memory + response-cache disabled |
+| `POST /api/chat` classified as memory management (e.g. `remember that ...`, `forget everything`) | valid anonymous session token | 200 — standard safe refusal returned **before** the direct-write `MemoryManagementAgent` runs; no `StoreAsync`/`ForgetAsync`, no model call, no memory row written |
+| `POST /api/chat` classified as portfolio health / council | valid anonymous session token | 200 — standard safe refusal returned **before** the consensus-council interception; `IConsensusCouncil.ConveneAsync` is never called, so no council model calls and no accounting bypass |
 | Any broad GET / observability / admin / export / memory / cards / approvals / guardrail-log route (e.g. `GET /api/scorecard`, `GET /api/sessions`, `GET /api/audit`, `GET /api/memory`) | valid anonymous session token | 403 — not on the allowlist (deny-by-default). Read-only data is reached through the filtered chat tool path, not a direct operator endpoint |
 | Alternate LLM / orchestrator routes (`POST /api/chat/stream`, `POST /api/council/convene`) | valid anonymous session token | 403 — removed from the anonymous surface so all model use is accounted through `POST /api/chat` |
+| `/hubs/telemetry`, `/hubs/streaming` — connection (`GET ?access_token=`) | valid anonymous token | **403** — the hubs are not on the anonymous allowlist; the deny-by-default guard blocks the request before the hub runs |
+| `/hubs/telemetry/negotiate`, `/hubs/streaming/negotiate` — negotiate (`POST`) | valid anonymous token | **403** — negotiate is denied on both hubs, same as the connection endpoint |
 | Protected REST/hub | no token | 401 |
 | Protected REST/hub | malformed / expired / wrong issuer / wrong audience / wrong signature token | 401 |
 | Protected REST/hub | valid-signature token with `provider != Anonymous` (cross-provider) | 403 — the anonymous policy requires `provider=Anonymous` |
-| `/hubs/telemetry`, `/hubs/streaming` | valid anonymous token via `?access_token` | connects |
-| Hub `JoinSession` for a session owned by a **different** subject | valid anonymous token | rejected (`HubException`) — hub groups are namespaced to the caller's immutable subject (Finding 6). Entra behaviour unchanged |
-| Hub `JoinCard` (cards/approvals) | valid anonymous token | rejected — not part of the anonymous surface |
+| Hub behaviour for **Entra** callers | valid Entra token | unchanged — the anonymous scope reduction does not alter the Entra real-time surface |
 | REST endpoint | anonymous token via `?access_token` query string only | 401 (query token honored only on `/hubs/*`) |
 | Chat body carrying a spoofed `user.objectId` | valid anonymous token | ignored — identity is the immutable token `sub`; a body `objectId` is never honoured for an authenticated principal |
 | Chat tool invocation of a write-capable tool (e.g. `RequestApproval`) | valid anonymous token | Tool is not registered for the anonymous principal — never invoked |
@@ -75,13 +82,15 @@ SignalR hubs. There is **no blanket GET allowance** — every other route is `40
 | History over the per-message / aggregate bound | valid anonymous token | 400 — rejected by validation before the model |
 | `/health`, `/alive` | none | 200 |
 
-> **Scope & reset limitation.** The rate-limit windows, daily ceilings, and the hub
-> session-ownership registry are **replica-local, in-memory**. Hosted Anonymous is
-> therefore pinned to `maxReplicas=1`, and all of these counters/bindings **reset on
-> restart or replica replacement**. Behind the ACA ingress the connection IP is the
-> proxy's, not the client's, and `X-Forwarded-For` is not trusted — so the per-IP
-> limit is effectively global and the **primary** control is the per-subject limit
-> applied after bootstrap.
+> **Scope & reset limitation.** The rate-limit windows and daily ceilings are
+> **replica-local, in-memory**. Hosted Anonymous is therefore pinned to
+> `maxReplicas=1`, and all of these counters **reset on restart or replica
+> replacement**. Behind the ACA ingress the connection IP is the proxy's, not the
+> client's, and `X-Forwarded-For` is not trusted — so the **bootstrap limiter is a
+> per-replica global window** (config key `Anonymous:Bootstrap:GlobalPerMinute`,
+> conservative default `5`; the legacy `Anonymous:Bootstrap:PerIpPerMinute` key is
+> still honoured as a backward-compatible fallback), and the **primary** post-bootstrap
+> control is the per-subject chat limit.
 
 ## Environment behavior
 
@@ -118,9 +127,11 @@ running without configuration. It never applies outside Development.
 | Mode resolution (all rows above) | `tests/RetailPulse.Tests/Security/AuthenticationModeTests.cs` |
 | Entra wiring + GitHub fail closed at the factory; Anonymous factory wiring | `tests/RetailPulse.Tests/Security/AuthenticationModeTests.cs` |
 | Entra success / 401 / 403 / hubs | `tests/RetailPulse.Tests/Security/EntraAuthenticationTests.cs` |
-| Anonymous bootstrap, token validation, read-only 403, budget/rate breakers, isolation, threat cases | `tests/RetailPulse.Tests/Security/AnonymousAuthenticationTests.cs` |
-| Anonymous options fail-closed validation, token claims (no PII), capability policy, normalizer | `tests/RetailPulse.Tests/Security/AnonymousCapabilityTests.cs` |
-| REST + both hubs remain protected | `tests/RetailPulse.Tests/Security/EndpointAuthorizationCoverageTests.cs` |
+| Anonymous bootstrap, token validation, read-only 403, **both hubs 403 (connect + negotiate)**, budget/rate breakers, isolation, threat cases | `tests/RetailPulse.Tests/Security/AnonymousAuthenticationTests.cs` |
+| Anonymous options fail-closed validation, token claims (no PII), capability policy (hubs denied), normalizer | `tests/RetailPulse.Tests/Security/AnonymousCapabilityTests.cs` |
+| Chat-internal bypasses closed: memory-management refusal (zero memory mutation), council refusal (zero `ConveneAsync`), single accounted pipeline with truthful cost/audit | `tests/RetailPulse.Tests/Security/AnonymousChatInternalBypassTests.cs` |
+| Endpoint graph policy: anonymous surface is bootstrap + `POST /api/chat` only; both hubs denied; REST + hubs carry authorization metadata | `tests/RetailPulse.Tests/Security/EndpointAuthorizationCoverageTests.cs` |
+| Entra hub behaviour unchanged by the anonymous scope reduction | `tests/RetailPulse.Tests/Security/AnonymousHubOwnershipTests.cs` |
 | Normalized principal mapping | `tests/RetailPulse.Tests/Security/NormalizedPrincipalTests.cs` |
 | Production / hooks pinned to Entra, never GitHub/Anonymous; single-replica pin | `tests/RetailPulse.Tests/Deployment/ProviderNeutralDeploymentContractTests.cs` |
 

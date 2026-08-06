@@ -8,13 +8,21 @@ namespace RetailPulse.Api.Security.Anonymous;
 /// This is deliberately data — a named policy, not fragile per-endpoint or UI-level hiding — so
 /// the deny-by-default guard, the chat tool filter, and the tests all reason about the same
 /// allowlist. There is NO verb shortcut: a request is denied unless its exact (method, route) is
-/// on the closed <see cref="AllowedRoutes"/> allowlist (or one of the two allowed hubs). The
-/// entire anonymous surface is therefore: the unauthenticated bootstrap, the authenticated
-/// <c>POST /api/chat</c>, and the telemetry/streaming hubs that chat turn needs. Every other
-/// mapped endpoint — observability, admin, export, memory, cards, approvals, guardrail logs, and
-/// all broad GET reads — is denied (403). Read-only charts/data are reached through the filtered
-/// chat tool path, never a direct operator endpoint. Widening the surface requires an explicit
-/// addition here, reviewed against the runtime inventory tests.
+/// on the closed <see cref="_allowedRoutes"/> allowlist. The entire anonymous surface is exactly
+/// TWO routes: the unauthenticated bootstrap <c>POST /api/auth/anonymous/session</c> and the
+/// authenticated <c>POST /api/chat</c>.
+///
+/// Sprint 1 mandate: the SignalR hubs (<c>/hubs/telemetry</c>, <c>/hubs/streaming</c>) are NOT part
+/// of the anonymous surface. An anonymous session gets no real-time telemetry or token streaming —
+/// a valid anonymous token is denied (403) on both hub negotiate and connection endpoints. Removing
+/// the hubs eliminates the Clients.All / global-broadcast and hub group-namespace collision exposure
+/// entirely, without refactoring the shared (Entra) telemetry pipeline. The Sprint 3 anonymous
+/// frontend simply does not start the hubs.
+///
+/// Every other mapped endpoint — observability, admin, export, memory, cards, approvals, guardrail
+/// logs, all broad GET reads, and every hub route — is denied (403). Read-only charts/data are
+/// reached through the filtered chat tool path, never a direct operator endpoint. Widening the
+/// surface requires an explicit addition here, reviewed against the runtime inventory tests.
 /// </summary>
 public static class AnonymousCapabilityPolicy
 {
@@ -36,12 +44,6 @@ public static class AnonymousCapabilityPolicy
     /// <summary>The single authenticated REST capability of an anonymous session.</summary>
     public const string ChatRoute = "/api/chat";
 
-    /// <summary>Telemetry hub root — the anonymous chat UI subscribes to per-session spans here.</summary>
-    public const string TelemetryHubRoute = "/hubs/telemetry";
-
-    /// <summary>Streaming hub root — progressive token delivery for the anonymous chat turn.</summary>
-    public const string StreamingHubRoute = "/hubs/streaming";
-
     /// <summary>
     /// Tool method names that mutate state (create approvals/actions, write memory, etc.). These
     /// are stripped from the tool set exposed to an anonymous principal so the model can never
@@ -59,12 +61,12 @@ public static class AnonymousCapabilityPolicy
 
     /// <summary>
     /// The EXACT (method, route) pairs an authenticated anonymous principal may reach. This is a
-    /// closed allowlist — there is NO GET verb shortcut. Any request whose (method, path) is not
-    /// matched here (or a hub route, see <see cref="IsHubRoute"/>) is denied by default. Deliberately
-    /// minimal: the smallest useful surface is the authenticated chat POST plus the bootstrap
-    /// (which is unauthenticated via AllowAnonymous and therefore never reaches the guard, but is
-    /// listed for completeness). Read-only charts/data are served through the filtered chat tool
-    /// path, never through direct operator/observability endpoints.
+    /// closed allowlist — there is NO GET verb shortcut and NO hub route. Any request whose
+    /// (method, path) is not matched here is denied by default. The anonymous surface is exactly two
+    /// routes: the authenticated chat POST plus the bootstrap (which is unauthenticated via
+    /// AllowAnonymous and therefore never reaches the guard, but is listed for completeness).
+    /// Read-only charts/data are served through the filtered chat tool path, never through direct
+    /// operator/observability endpoints; real-time telemetry/streaming hubs are not exposed.
     /// </summary>
     private static readonly IReadOnlySet<(string Method, string Route)> _allowedRoutes =
         new HashSet<(string, string)>
@@ -72,9 +74,6 @@ public static class AnonymousCapabilityPolicy
             ("POST", BootstrapRoute),
             ("POST", ChatRoute),
         };
-
-    /// <summary>The two SignalR hub roots an anonymous chat session needs for telemetry/streaming.</summary>
-    private static readonly string[] _allowedHubRoutes = [TelemetryHubRoute, StreamingHubRoute];
 
     /// <summary>
     /// True when the principal is an authenticated Anonymous-provider session (used by the guard
@@ -89,42 +88,15 @@ public static class AnonymousCapabilityPolicy
             StringComparison.Ordinal);
 
     /// <summary>
-    /// True when the request targets one of the two allowed SignalR hubs. SignalR uses GET
-    /// (WebSocket upgrade / long-poll receive) and POST (negotiate / long-poll send) under the hub
-    /// path, so both verbs are permitted on the hub prefixes; cross-subject isolation for hub
-    /// groups is enforced separately in the hub itself (session-ownership binding).
-    /// </summary>
-    public static bool IsHubRoute(string method, string path)
-    {
-        if (!HttpMethods.IsGet(method) && !HttpMethods.IsPost(method) && !HttpMethods.IsOptions(method))
-        {
-            return false;
-        }
-
-        string normalized = Normalize(path);
-        foreach (string hub in _allowedHubRoutes)
-        {
-            if (normalized.Equals(hub, StringComparison.OrdinalIgnoreCase)
-                || normalized.StartsWith(hub + "/", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Deny-by-default authorization for an anonymous principal: returns true ONLY when the exact
-    /// (method, path) is on the closed allowlist or is an allowed hub route. Everything else —
-    /// including every GET to observability/admin/export/memory/cards/approvals/guardrail-log
-    /// endpoints — is denied (the guard returns 403).
+    /// (method, path) is on the closed allowlist. Everything else — including every hub route and
+    /// every GET to observability/admin/export/memory/cards/approvals/guardrail-log endpoints — is
+    /// denied (the guard returns 403).
     /// </summary>
     public static bool IsAllowed(string method, string path)
     {
         // CORS preflight carries no credentials/body and mutates nothing.
         return HttpMethods.IsOptions(method)
-            || IsHubRoute(method, path)
             || _allowedRoutes.Contains((method.ToUpperInvariant(), Normalize(path)));
     }
 

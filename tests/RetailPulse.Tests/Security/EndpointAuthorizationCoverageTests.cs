@@ -199,15 +199,16 @@ public sealed class EndpointAuthorizationCoverageTests
     }
 
     [Fact]
-    public async Task AnonymousCapabilityGraph_AllowsOnlyBootstrapChatAndHubs()
+    public async Task AnonymousCapabilityGraph_AllowsOnlyBootstrapAndChat()
     {
         await using WebApplication app = BuildRealEndpointGraph();
 
         // Walk the REAL compiled route table and, for every mapped (method, route) on the protected
         // surface, ask the production allowlist whether an anonymous principal may reach it. Only the
-        // bootstrap, POST /api/chat, and the two hubs may be reachable; everything else — every broad
-        // GET, observability/admin/export/memory/cards/approvals route, and every alternate LLM path
-        // (/api/chat/stream, /api/council/*) — must be denied.
+        // bootstrap and POST /api/chat may be reachable; everything else — every broad GET,
+        // observability/admin/export/memory/cards/approvals route, every alternate LLM path
+        // (/api/chat/stream, /api/council/*), AND both SignalR hubs (Sprint 1: no anonymous
+        // real-time telemetry/streaming) — must be denied.
         var allowed = new List<string>();
         foreach (RouteEndpoint e in ProtectedRoutes(app))
         {
@@ -225,10 +226,8 @@ public sealed class EndpointAuthorizationCoverageTests
 
         allowed.Should().OnlyContain(entry =>
             entry.Contains(AnonymousCapabilityPolicy.BootstrapRoute, StringComparison.OrdinalIgnoreCase)
-            || entry == $"POST {AnonymousCapabilityPolicy.ChatRoute}"
-            || entry.Contains("/hubs/telemetry", StringComparison.OrdinalIgnoreCase)
-            || entry.Contains("/hubs/streaming", StringComparison.OrdinalIgnoreCase),
-            "the anonymous surface is bootstrap + POST /api/chat + the two hubs only. Reachable set: "
+            || entry == $"POST {AnonymousCapabilityPolicy.ChatRoute}",
+            "the anonymous surface is bootstrap + POST /api/chat only (no hubs). Reachable set: "
             + string.Join(", ", allowed));
 
         // Prove the positive capabilities really are present (not a vacuous pass).
@@ -238,7 +237,11 @@ public sealed class EndpointAuthorizationCoverageTests
             entry => entry.Contains(AnonymousCapabilityPolicy.BootstrapRoute, StringComparison.OrdinalIgnoreCase),
             "the bootstrap route must be reachable for anonymous");
 
-        // And prove representative billable / observability / alternate-LLM routes are denied.
+        // Prove no hub route is reachable — negotiate (POST) and connection (GET), both hubs.
+        allowed.Should().NotContain(entry => entry.Contains("/hubs/", StringComparison.OrdinalIgnoreCase),
+            "no SignalR hub route may be reachable for anonymous in Sprint 1");
+
+        // And prove representative billable / observability / alternate-LLM / hub routes are denied.
         foreach ((string method, string route) in new[]
         {
             ("POST", "/api/chat/stream"),
@@ -249,6 +252,10 @@ public sealed class EndpointAuthorizationCoverageTests
             ("GET", "/api/audit"),
             ("GET", "/api/traces"),
             ("GET", "/api/dead-letter"),
+            ("GET", "/hubs/telemetry"),
+            ("POST", "/hubs/telemetry/negotiate"),
+            ("GET", "/hubs/streaming"),
+            ("POST", "/hubs/streaming/negotiate"),
         })
         {
             AnonymousCapabilityPolicy.IsBlocked(method, route).Should().BeTrue($"{method} {route} must be denied for anonymous");
