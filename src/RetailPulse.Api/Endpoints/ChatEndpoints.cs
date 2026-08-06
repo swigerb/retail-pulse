@@ -84,6 +84,35 @@ public static class ChatEndpoints
                     if (cached is not null && cached.AgentId != "cache-warming")
                     {
                         logger.LogInformation("Cache hit for session {SessionId}, key {CacheKey}", sessionId, cacheKey[..8]);
+
+                        // Track cache hits truthfully: a request happened and the audit/export
+                        // trail stays complete, but no new model tokens were consumed (zero cost).
+                        DateTime cacheHitAt = DateTime.UtcNow;
+                        await costTracker.TrackUsageAsync(new UsageEvent(
+                            cached.AgentId, "cache", 0, 0, null, cacheHitAt, CacheHit: true), ct);
+
+                        await auditLog.LogAsync(new AuditEntry(
+                            CreateAuditEntryId(),
+                            cacheHitAt, userId, cached.AgentId,
+                            "chat.cache_hit",
+                            request.Message[..Math.Min(200, request.Message.Length)],
+                            cached.Response[..Math.Min(200, cached.Response.Length)],
+                            0,
+                            TimeSpan.Zero), ct);
+
+                        await conversationExporter.TrackMessageAsync(sessionId, new TrackedMessage
+                        {
+                            Role = "user",
+                            Content = request.Message
+                        }, ct);
+                        await conversationExporter.TrackMessageAsync(sessionId, new TrackedMessage
+                        {
+                            Role = "assistant",
+                            Content = cached.Response,
+                            AgentId = cached.AgentId,
+                            Tokens = 0
+                        }, ct);
+
                         return Results.Ok(new ChatResponse(
                             cached.Response,
                             sessionId,
@@ -421,7 +450,7 @@ public static class ChatEndpoints
                         : TimeSpan.Zero;
 
                     await costTracker.TrackUsageAsync(new UsageEvent(
-                        specialist.Key, "gpt-4o", inputTokens, outputTokens,
+                        specialist.Key, specialist.Model, inputTokens, outputTokens,
                         response.Spans?.FirstOrDefault(s => s.Type == "tool_call")?.Name,
                         DateTime.UtcNow), ct);
 
@@ -452,7 +481,8 @@ public static class ChatEndpoints
                         Content = response.Reply,
                         AgentId = specialist.Key,
                         ToolCalls = toolCalls,
-                        DurationMs = response.TotalDurationMs.HasValue ? response.TotalDurationMs.Value : null
+                        DurationMs = response.TotalDurationMs.HasValue ? response.TotalDurationMs.Value : null,
+                        Tokens = inputTokens + outputTokens
                     }, ct);
                 }
 

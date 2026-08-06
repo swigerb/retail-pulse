@@ -147,12 +147,15 @@ export async function fetchExportPreview(
   signal?: AbortSignal,
 ): Promise<ExportPreview> {
   const res = await fetch(`${BASE}/export/${sessionId}/preview`, { signal });
-  if (res.status === 404) return { sessionId, messages: [], totalMessages: 0 };
+  if (res.status === 404) {
+    // No silent success fallback — a missing session is a real error the UI surfaces.
+    throw new Error(`Session '${sessionId}' not found`);
+  }
   if (!res.ok) throw new Error(`Preview fetch failed: ${res.status}`);
   const data = await res.json();
   return {
     sessionId: data?.sessionId ?? sessionId,
-    messages: data?.messages ?? [],
+    messages: Array.isArray(data?.messages) ? data.messages : [],
     totalMessages: data?.totalMessages ?? (data?.messages?.length ?? 0),
   };
 }

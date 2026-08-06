@@ -1,5 +1,13 @@
 import { useState, useEffect } from 'react';
-import { makeStyles } from '@fluentui/react-components';
+import {
+  makeStyles,
+  Button,
+  Menu,
+  MenuTrigger,
+  MenuList,
+  MenuItem,
+  MenuPopover,
+} from '@fluentui/react-components';
 import { OBSERVABILITY_COLORS } from '../../constants/agentRouting';
 import { fetchExportSessions, fetchExportPreview, exportSession } from '../../services/observabilityApi';
 import type { ExportSession, ExportPreview } from '../../types';
@@ -71,7 +79,7 @@ const useStyles = makeStyles({
     verticalAlign: 'middle',
     display: 'flex',
     gap: '6px',
-    position: 'relative',
+    alignItems: 'center',
   },
   actionBtn: {
     padding: '5px 12px',
@@ -83,34 +91,6 @@ const useStyles = makeStyles({
     fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
-    ':hover': {
-      background: 'rgba(255,255,255,0.06)',
-    },
-  },
-  dropdown:{
-    position: 'absolute',
-    top: '100%',
-    right: '14px',
-    background: 'var(--color-bg-elevated)',
-    border: `1px solid ${OBSERVABILITY_COLORS.cardBorder}`,
-    borderRadius: '8px',
-    padding: '4px',
-    zIndex: 50,
-    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: '140px',
-  },
-  dropdownItem: {
-    padding: '8px 14px',
-    borderRadius: '6px',
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--color-text)',
-    fontSize: '13px',
-    cursor: 'pointer',
-    textAlign: 'left',
-    transition: 'background 0.15s ease',
     ':hover': {
       background: 'rgba(255,255,255,0.06)',
     },
@@ -243,6 +223,7 @@ const useStyles = makeStyles({
 
 function formatTime(ts: string): string {
   const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString(undefined, {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
@@ -254,7 +235,6 @@ export default function ConversationExport() {
   const [sessions, setSessions] = useState<ExportSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [exportDropdown, setExportDropdown] = useState<string | null>(null);
   const [preview, setPreview] = useState<ExportPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -275,7 +255,6 @@ export default function ConversationExport() {
   }, []);
 
   const handleExport = async (sessionId: string, format: 'markdown' | 'json') => {
-    setExportDropdown(null);
     try {
       const blob = await exportSession(sessionId, format);
       const url = URL.createObjectURL(blob);
@@ -304,14 +283,6 @@ export default function ConversationExport() {
   };
 
   const closePreview = () => setPreview(null);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!exportDropdown) return;
-    const handler = () => setExportDropdown(null);
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, [exportDropdown]);
 
   return (
     <div className={styles.container} data-testid="conversation-export">
@@ -360,42 +331,43 @@ export default function ConversationExport() {
                   </td>
                   <td className={styles.tableCellMuted}>{(session.totalTokens ?? 0).toLocaleString()}</td>
                   <td className={styles.actionCell}>
-                    <button
-                      className={styles.actionBtn}
+                    <Button
+                      size="small"
+                      appearance="secondary"
                       onClick={() => handlePreview(session.sessionId)}
                       disabled={previewLoading}
                       data-testid={`preview-btn-${session.sessionId}`}
                     >
                       👁️ Preview
-                    </button>
-                    <div style={{ position: 'relative' }}>
-                      <button
-                        className={styles.actionBtn}
-                        onClick={e => {
-                          e.stopPropagation();
-                          setExportDropdown(prev => prev === session.sessionId ? null : session.sessionId);
-                        }}
-                        data-testid={`export-btn-${session.sessionId}`}
-                      >
-                        📥 Export ▾
-                      </button>
-                      {exportDropdown === session.sessionId && (
-                        <div className={styles.dropdown} data-testid={`export-dropdown-${session.sessionId}`}>
-                          <button
-                            className={styles.dropdownItem}
-                            onClick={e => { e.stopPropagation(); handleExport(session.sessionId, 'markdown'); }}
+                    </Button>
+                    <Menu positioning="below-end">
+                      <MenuTrigger disableButtonEnhancement>
+                        <Button
+                          size="small"
+                          appearance="secondary"
+                          data-testid={`export-btn-${session.sessionId}`}
+                          aria-label={`Export session ${session.sessionId}`}
+                        >
+                          📥 Export ▾
+                        </Button>
+                      </MenuTrigger>
+                      <MenuPopover data-testid={`export-dropdown-${session.sessionId}`}>
+                        <MenuList>
+                          <MenuItem
+                            onClick={() => handleExport(session.sessionId, 'markdown')}
+                            data-testid={`export-md-${session.sessionId}`}
                           >
                             📝 Markdown (.md)
-                          </button>
-                          <button
-                            className={styles.dropdownItem}
-                            onClick={e => { e.stopPropagation(); handleExport(session.sessionId, 'json'); }}
+                          </MenuItem>
+                          <MenuItem
+                            onClick={() => handleExport(session.sessionId, 'json')}
+                            data-testid={`export-json-${session.sessionId}`}
                           >
                             🗂️ JSON (.json)
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                          </MenuItem>
+                        </MenuList>
+                      </MenuPopover>
+                    </Menu>
                   </td>
                 </tr>
               ))}

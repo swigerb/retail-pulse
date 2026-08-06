@@ -16,7 +16,7 @@ public static class MemoryServiceExtensions
         this IServiceCollection services,
         string dbPath)
     {
-        // Singleton — SQLite WAL mode handles concurrent access
+        // Singleton — SQLite shared cache + SMB-safe rollback journaling
         services.AddSingleton<IConversationMemory>(sp =>
         {
             ILogger<SqliteConversationMemory> logger = sp.GetRequiredService<ILogger<SqliteConversationMemory>>();
