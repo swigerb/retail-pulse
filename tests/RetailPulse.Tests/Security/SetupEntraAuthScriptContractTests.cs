@@ -149,6 +149,17 @@ public partial class SetupEntraAuthScriptContractTests
     }
 
     [Fact]
+    public void PreviewPlaceholders_DoNotAssignToValidatedParameterVariables()
+    {
+        ScriptText.Should().NotContain("$appObjectId = if",
+            "PowerShell variables are case-insensitive, so assigning a preview placeholder to the validated -AppObjectId parameter fails before preview completes");
+        ScriptText.Should().NotContain("$clientId = if",
+            "PowerShell variables are case-insensitive, so assigning a preview placeholder to the validated -ClientId parameter fails before preview completes");
+        ScriptText.Should().Contain("$resolvedAppObjectId");
+        ScriptText.Should().Contain("$resolvedClientId");
+    }
+
+    [Fact]
     public void PartialFailure_SurfacesAsAThrownError_NotSilentSuccess()
     {
         // Stop-on-error plus an explicit non-zero-exit throw means a failed Graph call aborts

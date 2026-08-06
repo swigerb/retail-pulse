@@ -330,9 +330,9 @@ else {
 }
 
 # In preview with no pre-existing app we synthesize a placeholder so the plan reads clearly.
-$appObjectId = if ($app) { $app.id } else { '<new-app-object-id>' }
-$clientId = if ($app -and $app.appId) { $app.appId } else { '<new-client-id>' }
-$audience = "api://$clientId"
+$resolvedAppObjectId = if ($app) { $app.id } else { '<new-app-object-id>' }
+$resolvedClientId = if ($app -and $app.appId) { $app.appId } else { '<new-client-id>' }
+$audience = "api://$resolvedClientId"
 
 # --- 3. identifierUris (Application ID URI = api://{clientId}) -----------------
 Write-Section 'Application ID URI (audience)'
@@ -438,14 +438,14 @@ else {
 # --- 7. Service principal + assignmentRequired --------------------------------
 Write-Section 'Service principal (assignment required)'
 $sp = $null
-if ($clientId -and $clientId -notlike '<*') {
-    $spResp = Invoke-Graph -Method GET -Url "$graph/servicePrincipals?`$filter=appId eq '$clientId'&`$select=id,appId,appRoleAssignmentRequired"
+if ($resolvedClientId -and $resolvedClientId -notlike '<*') {
+    $spResp = Invoke-Graph -Method GET -Url "$graph/servicePrincipals?`$filter=appId eq '$resolvedClientId'&`$select=id,appId,appRoleAssignmentRequired"
     if ($spResp.value.Count -gt 0) { $sp = $spResp.value[0] }
 }
 if (-not $sp) {
-    Write-Plan "Create service principal for appId=$clientId with appRoleAssignmentRequired=true"
+    Write-Plan "Create service principal for appId=$resolvedClientId with appRoleAssignmentRequired=true"
     if ($Apply -and $app) {
-        $sp = Invoke-Graph -Method POST -Url "$graph/servicePrincipals" -Body @{ appId = $clientId }
+        $sp = Invoke-Graph -Method POST -Url "$graph/servicePrincipals" -Body @{ appId = $resolvedClientId }
         Invoke-Graph -Method PATCH -Url "$graph/servicePrincipals/$($sp.id)" -Body @{ appRoleAssignmentRequired = $true } | Out-Null
         Write-Done "Service principal created (id=$($sp.id)), assignment required = true"
     }
@@ -499,7 +499,7 @@ Write-Section 'Safe configuration output (non-secret)'
 $finalScope = "$audience/$ApiScopeName"
 [PSCustomObject]@{
     TenantId  = $TenantId
-    ClientId  = $clientId
+    ClientId  = $resolvedClientId
     Audience  = $audience
     ApiScope  = $ApiScopeName
     ApiScopeUri = $finalScope
@@ -508,11 +508,11 @@ $finalScope = "$audience/$ApiScopeName"
 
 Write-Host 'Next — wire these into azd (public identifiers only, safe to commit to your azd env):' -ForegroundColor Cyan
 Write-Host "  azd env set RETAIL_PULSE_ENTRA_TENANT_ID $TenantId"
-Write-Host "  azd env set RETAIL_PULSE_ENTRA_CLIENT_ID $clientId"
+Write-Host "  azd env set RETAIL_PULSE_ENTRA_CLIENT_ID $resolvedClientId"
 Write-Host "  azd env set RETAIL_PULSE_ENTRA_API_SCOPE $ApiScopeName"
 Write-Host "  azd env set RETAIL_PULSE_ENTRA_AUDIENCE $audience"
 Write-Host ''
-Write-Host "Then verify with: ./scripts/Verify-EntraAuth.ps1 -TenantId $TenantId -ClientId $clientId" -ForegroundColor Cyan
+Write-Host "Then verify with: ./scripts/Verify-EntraAuth.ps1 -TenantId $TenantId -ClientId $resolvedClientId" -ForegroundColor Cyan
 if (-not $Apply) {
     Write-Host "`nPreview complete. Re-run with -Apply to make these changes." -ForegroundColor Magenta
 }
