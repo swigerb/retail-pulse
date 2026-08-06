@@ -6,6 +6,7 @@ const originalFetch = globalThis.fetch;
 describe('api.sendMessage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   afterEach(() => {
@@ -68,6 +69,20 @@ describe('api.sendMessage', () => {
         { role: 'assistant', content: 'previous answer' },
       ],
     }));
+  });
+
+  it('uses the configured direct ACA origin for long-running chat', async () => {
+    vi.stubEnv('VITE_API_ORIGIN', 'https://api.example.test');
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ reply: 'ok', sessionId: 's', spans: [] }), { status: 200 })
+    ) as unknown as typeof fetch;
+
+    await sendMessage({ message: 'compare two brands' });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.example.test/api/chat',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 
   it('throws an Error containing the status when response is non-2xx', async () => {

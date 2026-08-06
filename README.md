@@ -223,7 +223,7 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 | **Monitoring** | Azure Application Insights | — | Production telemetry and traces |
 | **Gateway** | Azure API Management | — | Token metering, rate limiting, audit |
 | **Backend hosting** | Azure Container Apps | — | Runs the API, MCP Server, and Teams Bot as containers; scales to zero when idle |
-| **Frontend hosting** | Azure Static Web Apps | — | Serves the React/Vite static build; proxies REST `/api` requests to the linked Container Apps backend while SignalR connects directly to the Container Apps API |
+| **Frontend hosting** | Azure Static Web Apps | — | Serves the React/Vite static build; most REST requests use the linked Container Apps backend, while long-running chat and SignalR connect directly to the authenticated Container Apps API |
 | **Container registry** | Azure Container Registry (Basic) | — | Stores backend images; Container Apps pull them with managed identity (no admin secrets) |
 | **Testing** | xUnit + Vitest | — | Backend + frontend tests |
 

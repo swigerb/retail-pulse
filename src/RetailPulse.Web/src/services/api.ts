@@ -1,4 +1,5 @@
 import type { ChatRequest, ChatResponse, RoutingInfo } from '../types';
+import { resolveApiUrl } from '../config/apiOrigin';
 
 async function parseErrorBody(res: Response): Promise<string> {
   const contentType = res.headers.get('content-type') ?? '';
@@ -108,7 +109,10 @@ export async function sendMessage(
 
   let res: Response;
   try {
-    res = await fetch('/api/chat', {
+    // Chat can exceed the linked Static Web Apps backend timeout while a model
+    // completes tool calls. Use the exact configured ACA origin when present;
+    // local development retains the same-origin route.
+    res = await fetch(resolveApiUrl('/api/chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),

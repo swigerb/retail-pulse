@@ -1,5 +1,6 @@
 import { authConfig } from './authConfig';
 import { acquireApiToken } from './tokenService';
+import { resolveApiOrigin } from '../config/apiOrigin';
 
 /**
  * Global fetch interceptor that attaches the Entra bearer token to our protected `/api`
@@ -43,7 +44,7 @@ function requestUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
-/** True only for our own `/api` protected paths on the exact current origin. */
+/** True only for our own `/api` protected paths on an explicitly trusted origin. */
 function isProtectedApiPath(pathname: string): boolean {
   return pathname === PROTECTED_API_PREFIX || pathname.startsWith(`${PROTECTED_API_PREFIX}/`);
 }
@@ -78,9 +79,11 @@ export function isApiRequest(input: RequestInfo | URL): boolean {
     return false;
   }
 
-  // Exact same-origin only. This rejects trusted@evil, trusted.evil, suffix hosts,
-  // scheme/port mismatches, and cross-origin telemetry endpoints.
-  if (parsed.origin !== origin) {
+  // Exact-origin only: the SWA origin and the configured ACA API origin. This
+  // rejects trusted@evil, suffix hosts, scheme/port mismatches, and telemetry
+  // endpoints while allowing long-running chat to bypass the SWA proxy timeout.
+  const configuredApiOrigin = resolveApiOrigin(import.meta.env.VITE_API_ORIGIN);
+  if (parsed.origin !== origin && parsed.origin !== configuredApiOrigin) {
     return false;
   }
 
