@@ -28,6 +28,19 @@ function Get-RequiredEnv {
     return $value.Trim()
 }
 
+function Get-OptionalEnv {
+    param(
+        [Parameter(Mandatory)][string] $Name,
+        [Parameter(Mandatory)][string] $Default
+    )
+
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $Default
+    }
+    return $value.Trim()
+}
+
 function Invoke-Az {
     param([Parameter(Mandatory)][string[]] $Arguments, [Parameter(Mandatory)][string] $FailureMessage)
 
@@ -48,6 +61,14 @@ $mcpServerUrl   = Get-RequiredEnv 'AZURE_MCP_SERVER_APP_URL'
 $frontendOrigin = Get-RequiredEnv 'RETAIL_PULSE_FRONTEND_ORIGIN'
 $staticWebApp   = Get-RequiredEnv 'AZURE_STATIC_WEB_APP_NAME'
 $location       = Get-RequiredEnv 'AZURE_LOCATION'
+# Entra auth configuration. Tenant/client IDs are CONFIGURATION, not secrets; the
+# parent captures them via `azd env set` from the Setup-EntraAuth.ps1 output. These
+# are read with Get-RequiredEnv so a deploy fails fast rather than silently shipping
+# an anonymous, Development-mode API (the exact regression this hook now prevents).
+$entraTenantId  = Get-RequiredEnv 'RETAIL_PULSE_ENTRA_TENANT_ID'
+$entraClientId  = Get-RequiredEnv 'RETAIL_PULSE_ENTRA_CLIENT_ID'
+$entraApiScope  = Get-OptionalEnv 'RETAIL_PULSE_ENTRA_API_SCOPE' 'access_as_user'
+$entraAppRole   = Get-OptionalEnv 'RETAIL_PULSE_ENTRA_APP_ROLE'  'RetailPulse.User'
 $apps = @(
     (Get-RequiredEnv 'AZURE_API_APP_NAME'),
     (Get-RequiredEnv 'AZURE_MCP_SERVER_APP_NAME'),
@@ -91,8 +112,12 @@ foreach ($app in $apps) {
     Write-Host '   registry auth bound to system identity'
 }
 
-Write-Host 'Configuring synthetic-demo runtime settings...'
+Write-Host 'Configuring production auth + runtime settings for the API...'
 
+# The API is the security boundary for the SWA + ACA architecture. It deploys as
+# Production with real Entra JWT validation enabled (Security__RequireAuth=true).
+# ACA platform (Easy Auth) stays disabled below so the in-process JwtBearer handler
+# is the sole gate; direct ACA REST/SignalR are protected independent of SWA routing.
 Invoke-Az `
     -Arguments @(
         'containerapp', 'update',
@@ -104,9 +129,23 @@ Invoke-Az `
         'OpenAI__Deployment=gpt-5.4-mini-2026-03-17',
         'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17',
         "McpServer__BaseUrl=$mcpServerUrl",
-        'Security__RequireAuth=false',
+        'Security__RequireAuth=true',
         "Security__AllowedOrigins__0=$frontendOrigin",
-        'ASPNETCORE_ENVIRONMENT=Development',
+        "MicrosoftEntra__TenantId=$entraTenantId",
+        "MicrosoftEntra__ClientId=$entraClientId",
+        "MicrosoftEntra__ApiScope=$entraApiScope",
+        "MicrosoftEntra__AppRole=$entraAppRole",
+        # The governance hotfix removed the Azure Files durable mount, so there is no
+        # durable data-directory path to pin. Flipping the API to Production would
+        # otherwise fail closed in DataDirectoryResolver. This is a synthetic demo, so
+        # we explicitly opt in to a writable per-replica ephemeral data directory —
+        # honestly non-durable: observability history resets on replica replacement
+        # (see docs/deployment-azd.md). A future policy-compatible durable backing can
+        # drop this flag and configure a mounted durable path instead. This is NOT the
+        # durable-storage requirement flag; an explicit require-durable=true still
+        # fails closed.
+        'RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true',
+        'ASPNETCORE_ENVIRONMENT=Production',
         '--output', 'none'
     ) `
     -FailureMessage "Failed to configure API runtime settings for '$($apps[0])'" | Out-Null
@@ -126,11 +165,13 @@ if (-not ($linkedBackends | Where-Object { $_.backendResourceId -eq $apiResource
         -FailureMessage "Failed to link API '$($apps[0])' to Static Web App '$staticWebApp'" | Out-Null
 }
 
-# Linking enables the SWA identity provider and rejects anonymous direct ACA
-# traffic. This synthetic demo uses its fixed Development identity instead.
+# Linking enables the SWA identity provider on the /api proxy path, but ACA platform
+# (Easy Auth) is deliberately kept DISABLED: it would issue login redirects that break
+# bearer-token REST/SignalR clients calling ACA directly. The in-process Entra JwtBearer
+# handler (Security__RequireAuth=true above) is the real security boundary.
 Invoke-Az `
     -Arguments @('containerapp', 'auth', 'update', '--name', $apps[0], '--resource-group', $resourceGroup, '--enabled', 'false', '--output', 'none') `
-    -FailureMessage "Failed to disable Container Apps platform auth for the synthetic demo API '$($apps[0])'" | Out-Null
+    -FailureMessage "Failed to disable Container Apps platform auth for the API '$($apps[0])'" | Out-Null
 
 Invoke-Az `
     -Arguments @('containerapp', 'update', '--name', $apps[1], '--resource-group', $resourceGroup, '--set-env-vars', 'ASPNETCORE_ENVIRONMENT=Development', '--output', 'none') `
@@ -148,4 +189,4 @@ Invoke-Az `
     ) `
     -FailureMessage "Failed to configure Teams bot runtime settings for '$($apps[2])'" | Out-Null
 
-Write-Host 'Post-provision configuration complete: secretless ACR pull and synthetic-demo runtime settings are ready.'
+Write-Host 'Post-provision configuration complete: secretless ACR pull and production Entra auth runtime settings are ready.'

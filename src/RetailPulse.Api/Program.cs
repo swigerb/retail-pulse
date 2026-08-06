@@ -127,40 +127,14 @@ builder.Services.AddCors(options =>
 });
 
 // ── Authentication & Authorization ──────────────────────────────────────
-bool requireAuth = builder.Configuration.GetValue("Security:RequireAuth",
-    !builder.Environment.IsDevelopment());
-
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddAuthentication(DevelopmentAuthHandler.SchemeName)
-        .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthHandler>(
-            DevelopmentAuthHandler.SchemeName, _ => { })
-        .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-        {
-            // JWT scheme available but not default in dev — allows testing with real tokens
-            options.Authority = builder.Configuration["Security:JwtAuthority"];
-            options.TokenValidationParameters.ValidateAudience = false;
-        });
-}
-else
-{
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-        {
-            options.Authority = builder.Configuration["Security:JwtAuthority"];
-            options.Audience = builder.Configuration["Security:JwtAudience"];
-        });
-}
-
-builder.Services.AddAuthorization(options =>
-{
-    if (!requireAuth)
-    {
-        options.DefaultPolicy = new AuthorizationPolicyBuilder()
-            .RequireAssertion(_ => true)
-            .Build();
-    }
-});
+// Single, tenant-scoped Entra security boundary (see Security/AuthenticationSetup.cs):
+// Production validates real Entra JWTs pinned to the configured tenant/audience/issuer,
+// honours the access_token query param only for /hubs, and requires the app role + API
+// scope on every protected endpoint and hub. Development uses the synthetic handler. The
+// default policy is never permissive — no RequireAssertion(_ => true) when auth is on.
+EntraAuthOptions entraAuthOptions =
+    builder.Services.AddRetailPulseAuthentication(builder.Configuration, builder.Environment);
+builder.Services.AddRetailPulseAuthorization(entraAuthOptions);
 
 // ── Rate Limiting ───────────────────────────────────────────────────────
 builder.Services.AddRateLimiter(options =>
@@ -491,15 +465,16 @@ builder.Services.AddScoped(sp =>
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
 // The data directory is where every durable SQLite store lives (approvals, memory,
 // alerts, costs, audit). The deployed synthetic demo runs
-// ASPNETCORE_ENVIRONMENT=Development with no RETAIL_PULSE_DATA_DIRECTORY set, so the
-// resolver uses a writable per-replica temp directory: there is NO durable Azure
-// volume, because this tenant's governance blocks account-key Azure Files mounts
-// (see docs/deployment-azd.md). Observability history therefore lives only within
-// the current replica and resets on replacement. Resolution still fails fast (no
-// silent ephemeral fallback) when durability is EXPLICITLY required — a configured
-// RETAIL_PULSE_DATA_DIRECTORY that is unwritable, a truthy
-// RETAIL_PULSE_REQUIRE_DURABLE_STORAGE, or Production — preserving the guarantee for
-// any future policy-compatible durable backing. See DataDirectoryResolver.
+// ASPNETCORE_ENVIRONMENT=Production under Entra auth with no durable path, because
+// this tenant's governance blocks account-key Azure Files mounts (see
+// docs/deployment-azd.md). It therefore sets RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true
+// to explicitly opt in to a writable per-replica temp directory: there is NO durable
+// Azure volume, and observability history lives only within the current replica and
+// resets on replacement/redeploy. Resolution still fails fast (no silent ephemeral
+// fallback) when durability is EXPLICITLY required — a configured data directory that
+// is unwritable, a truthy RETAIL_PULSE_REQUIRE_DURABLE_STORAGE, or Production WITHOUT
+// the ephemeral opt-out — preserving the guarantee for any future policy-compatible
+// durable backing. See DataDirectoryResolver.
 string dataDirectory = DataDirectoryResolver.Resolve(builder.Configuration, builder.Environment);
 string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>

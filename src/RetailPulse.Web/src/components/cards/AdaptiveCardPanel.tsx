@@ -4,6 +4,7 @@ import * as signalR from '@microsoft/signalr';
 import { CARD_COLORS, CARD_TYPE_CONFIG, CARD_LIFECYCLE_CONFIG } from '../../constants/agentRouting';
 import { fetchActiveCards, submitVote } from '../../services/cardsApi';
 import { resolveTelemetryHubUrl } from '../../config/telemetryHubUrl';
+import { getHubAccessToken } from '../../auth/tokenService';
 import type { AdaptiveCard, VoteChoice, DrillDownLevel } from '../../types';
 import CardLifecycleIndicator from './CardLifecycleIndicator';
 import VotingCard from './VotingCard';
@@ -216,7 +217,11 @@ export default function AdaptiveCardPanel() {
 
     try {
       connection = new signalR.HubConnectionBuilder()
-        .withUrl(resolveTelemetryHubUrl())
+        .withUrl(resolveTelemetryHubUrl(), {
+          // Bearer token for the hub handshake (sent as ?access_token= on the WebSocket,
+          // which the API honours only for /hubs). Returns '' locally where no token is needed.
+          accessTokenFactory: getHubAccessToken,
+        })
         .withAutomaticReconnect()
         .build();
 

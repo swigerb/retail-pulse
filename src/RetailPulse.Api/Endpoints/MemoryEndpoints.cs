@@ -12,7 +12,15 @@ public static class MemoryEndpoints
 {
     public static WebApplication MapMemoryEndpoints(this WebApplication app)
     {
-        RouteGroupBuilder group = app.MapGroup("/api/memory").WithTags("Memory");
+        // Conversation memory is per-user, protected data — every route in this group
+        // requires the same authenticated user + app role + API scope policy as the rest
+        // of the API. The app already sets a deny-by-default FallbackPolicy (see
+        // AuthenticationSetup), so this group-level RequireAuthorization is explicit
+        // defense-in-depth that keeps the boundary obvious and independent of that global
+        // default.
+        RouteGroupBuilder group = app.MapGroup("/api/memory")
+            .WithTags("Memory")
+            .RequireAuthorization();
 
         group.MapGet("/", async (IConversationMemory memory, HttpContext httpContext, CancellationToken ct) =>
         {
