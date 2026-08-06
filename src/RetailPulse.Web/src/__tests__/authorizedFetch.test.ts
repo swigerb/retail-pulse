@@ -23,6 +23,7 @@ function jsonResponse(status: number): Response {
 let originalFetch: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
   acquireApiToken.mockReset();
   originalFetch = vi.fn().mockResolvedValue(jsonResponse(200));
   window.fetch = originalFetch as unknown as typeof window.fetch;
@@ -82,6 +83,16 @@ describe('isApiRequest', () => {
     expect(isApiRequest(`${location.origin}/api/chat`)).toBe(true);
   });
 
+  it('matches only the exact configured ACA API origin', async () => {
+    vi.stubEnv('VITE_API_ORIGIN', 'https://api.example.test');
+    const { isApiRequest } = await freshModule();
+
+    expect(isApiRequest('https://api.example.test/api/chat')).toBe(true);
+    expect(isApiRequest('https://api.example.test.evil.example/api/chat')).toBe(false);
+    expect(isApiRequest('https://api.example.test:444/api/chat')).toBe(false);
+    expect(isApiRequest('https://api.example.test/assets/app.js')).toBe(false);
+  });
+
   it('does not match encoded traversal or paths that escape /api', async () => {
     const { isApiRequest } = await freshModule();
     // `..` (raw or percent-encoded %2e%2e) is normalized by the URL parser. When it escapes
@@ -113,6 +124,18 @@ describe('installAuthorizedFetch', () => {
 
     expect(acquireApiToken).toHaveBeenCalledTimes(1);
     expect(authHeader()).toBe('Bearer tok-1');
+  });
+
+  it('attaches the bearer token to the exact configured ACA API origin', async () => {
+    vi.stubEnv('VITE_API_ORIGIN', 'https://api.example.test');
+    const { installAuthorizedFetch } = await freshModule();
+    acquireApiToken.mockResolvedValue('tok-direct');
+    installAuthorizedFetch();
+
+    await window.fetch('https://api.example.test/api/chat', { method: 'POST' });
+
+    expect(acquireApiToken).toHaveBeenCalledTimes(1);
+    expect(authHeader()?.endsWith('tok-direct')).toBe(true);
   });
 
   it('does not touch non-API requests or acquire a token for them', async () => {
