@@ -464,19 +464,22 @@ Model pricing table: gpt-5.4-mini ($0.15/$0.60 per 1M tokens), gpt-4o ($2.50/$10
 > deploy, restart, or scale-to-zero cold start). Export, audit, and cost
 > functionality all still work against the live replica's data; only cross-replica
 > durability is not guaranteed. The data directory is still resolved by
-> `DataDirectoryResolver`; the deployed demo runs `ASPNETCORE_ENVIRONMENT=Development`
-> with **no** `RETAIL_PULSE_DATA_DIRECTORY` set, so it uses the writable temp
-> fallback rather than being forced to a missing mount path.
+> `DataDirectoryResolver`; the deployed demo runs `ASPNETCORE_ENVIRONMENT=Production`
+> under Entra auth with **no** durable data directory set, so it **explicitly** sets
+> `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` to use the writable temp fallback rather
+> than being forced to a missing mount path or failing closed.
 >
 > **Fail-closed behavior is retained for a future durable path:** `DataDirectoryResolver`
 > still **fails fast** (it never silently falls back to ephemeral storage) when a
 > durable path is *explicitly* required — i.e. when `RETAIL_PULSE_DATA_DIRECTORY`
-> is set but unwritable, when `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE` is truthy, or
-> in `Production`. None of those are set on the current Development demo, so it boots
-> on temp. This preserves the guarantee for any future policy-compatible durable
-> backing (see the ranked options in `docs/deployment-azd.md`) and coordinates with
-> the pending auth PR, which flips the API to `Production` and must supply such a
-> path (or explicitly relax the requirement) to keep booting.
+> is set but unwritable, when `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE` is truthy (which
+> always wins over the ephemeral opt-out), or in `Production` **without** the explicit
+> `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` opt-out. The auth cutover (this PR) flips
+> the API to `Production` and resolves the resulting fail-closed startup by explicitly
+> acknowledging non-durable storage for the synthetic demo, **not** by reintroducing
+> Azure Files. This preserves the guarantee for any future policy-compatible durable
+> backing (see the ranked options in `docs/deployment-azd.md`), which can drop the
+> opt-out and supply a real durable path instead.
 >
 > **Single-writer & SMB-safe pragmas (retained helper):** The API runs
 > `minReplicas: 0`, `maxReplicas: 1`, so a single SQLite writer owns the files.

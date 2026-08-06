@@ -9,6 +9,25 @@ param environmentName string
 @description('Primary location for all resources')
 param location string
 
+// ── Entra external auth configuration (non-secret) ─────────────────────────
+// Supplied by the operator via `azd env set RETAIL_PULSE_ENTRA_*` and read by
+// main.bicepparam. These are public identifiers (tenant/client GUIDs, an API
+// scope name and audience) — never secrets — and are round-tripped below as
+// VITE_ENTRA_* outputs so the Vite frontend build embeds them into the SPA.
+// Empty by default: when unset the SPA builds without an auth gate (local dev)
+// and the API's RequireAuth stays governed by the azd hooks.
+@description('Entra tenant (directory) ID for the single-tenant SPA/API app registration')
+param entraTenantId string = ''
+
+@description('Entra application (client) ID of the SPA/API app registration')
+param entraClientId string = ''
+
+@description('Delegated API scope name exposed by the app (e.g. access_as_user)')
+param entraApiScope string = 'access_as_user'
+
+@description('API audience / Application ID URI (defaults to api://{clientId} when unset)')
+param entraAudience string = ''
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -112,3 +131,13 @@ output AZURE_FRONTEND_APP_URL string = staticWebApp.outputs.staticWebAppUrl
 output MCP_SERVER_BASE_URL string = containerApps.outputs.mcpServerUrl
 output RETAIL_PULSE_FRONTEND_ORIGIN string = staticWebApp.outputs.staticWebAppUrl
 output VITE_API_ORIGIN string = containerApps.outputs.apiUrl
+
+// - VITE_ENTRA_*: non-secret Entra identifiers read by the Vite frontend build
+//   (import.meta.env) so the deployed SPA can run MSAL PKCE sign-in against the
+//   single-tenant app registration. Round-tripped from the entra* params above.
+//   When left empty (local dev / not yet provisioned) the SPA builds without an
+//   auth gate and relies on the API's Development auth handler.
+output VITE_ENTRA_TENANT_ID string = entraTenantId
+output VITE_ENTRA_CLIENT_ID string = entraClientId
+output VITE_ENTRA_API_SCOPE string = entraApiScope
+output VITE_ENTRA_AUDIENCE string = empty(entraAudience) && !empty(entraClientId) ? 'api://${entraClientId}' : entraAudience

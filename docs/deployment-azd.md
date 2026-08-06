@@ -14,6 +14,7 @@ Retail Pulse supports one-command deployment to Azure using the [Azure Developer
 | Monitoring | Application Insights + Log Analytics | Full OpenTelemetry pipeline |
 | App data storage | Container-local temp (no durable volume) | The API's SQLite stores (cost/audit/memory/approvals/alerts) live in the replica's temp dir. **No Azure Files mount** — tenant governance forbids account-key CIFS mounts (see the incident note below), so observability history is per-replica and resets on replacement. |
 | AI Gateway | Azure API Management | Existing APIM Bicep in `deploy/apim-ai-gateway/` |
+| Authentication | Microsoft Entra ID | Single-tenant SPA/API app registration (MSAL PKCE). See [authentication-entra.md](./authentication-entra.md). Set `RETAIL_PULSE_ENTRA_*` before `azd provision`; the postprovision hook flips `RequireAuth` on and disables Easy Auth. |
 
 ## Prerequisites
 
@@ -268,9 +269,11 @@ in `infra/modules/container-apps.bicep`.
 The **API** persists its SQLite databases (audit, cost, memory, approvals, alerts)
 to the container's **local temporary directory** (resolved by
 `DataDirectoryResolver`). There is **no** durable Azure volume. The deployed demo
-runs `ASPNETCORE_ENVIRONMENT=Development` and does **not** set
-`RETAIL_PULSE_DATA_DIRECTORY`, so the resolver uses its writable Development temp
-fallback — it is never pointed at a missing mount path.
+runs `ASPNETCORE_ENVIRONMENT=Production` under Entra authentication and does **not**
+set a durable data directory. Because Production would otherwise fail closed (see
+below), it **explicitly** sets `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` — an
+honest opt-out that permits the writable temp fallback without claiming durability.
+It is never pointed at a missing mount path.
 
 **What this means for observability history:** cost/audit/memory/approval/alert
 history survives process restarts *within the same replica*, but it **resets when
@@ -280,18 +283,23 @@ unaffected**: every endpoint still works against the live replica's data; only
 cross-replica persistence is not provided. This is an honest downgrade from the
 (non-functional) durability the removed mount claimed.
 
-**Fail-closed behavior retained (and auth-PR coordination).** `DataDirectoryResolver`
-still refuses to fall back to temp when durability is *explicitly* required:
+**Fail-closed behavior retained.** `DataDirectoryResolver` still refuses to fall
+back to temp when durability is *explicitly* required — the ephemeral opt-out never
+weakens these:
 - `RETAIL_PULSE_DATA_DIRECTORY` set but absent/unwritable → startup fails.
-- `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE` truthy → startup fails without a writable path.
-- `ASPNETCORE_ENVIRONMENT=Production` with no configured path → startup fails.
+- `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE` truthy → startup fails without a writable
+  path, **even if** `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` (the require flag
+  always wins).
+- `ASPNETCORE_ENVIRONMENT=Production` with no configured path **and no**
+  `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` → startup fails.
 
-None of these are set on the current Development demo, so it boots on temp. The
-**pending auth PR flips the API to `Production`**; when it rebases on top of this
-hotfix it must either (a) provide a policy-compatible durable path (see options
-below) or (b) explicitly relax the Production requirement for the synthetic demo.
-This hotfix deliberately does **not** weaken the Production/required fail-closed
-path, so that coordination is a conscious choice rather than a silent regression.
+The auth cutover (this PR, rebased on top of the storage hotfix) flips the API to
+`Production`. It resolves the resulting fail-closed startup by option (b): it
+**explicitly** acknowledges non-durable storage via
+`RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` for the synthetic demo, rather than
+reintroducing the policy-incompatible Azure Files mount. The Production/required
+fail-closed path is **not** weakened — a future policy-compatible durable backing
+(see options below) can drop the opt-out and set a real durable path instead.
 
 The **MCP server** still writes its seeded retail dataset (`retailpulse.db`) under
 the OS temp directory. That is intentional and safe: it **re-seeds from

@@ -2,6 +2,12 @@
 
 > Security measures implemented in RetailPulse.
 
+> **User authentication:** production access is gated by Microsoft Entra ID
+> (single-tenant SPA/API app registration, MSAL PKCE, `RetailPulse.User` app role
+> required on every protected endpoint and hub). See
+> [authentication-entra.md](./authentication-entra.md) for the full boundary,
+> environment contract, and provisioning scripts.
+
 ---
 
 ## Security Headers
