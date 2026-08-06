@@ -119,7 +119,7 @@ builder.Services.AddCors(options =>
         {
             policy.WithOrigins(corsProdOrigins)
                 .WithMethods("GET", "POST", "PUT", "DELETE")
-                .WithHeaders("Content-Type", "Authorization", "X-Requested-With")
+                .WithHeaders("Content-Type", "Authorization", "X-Requested-With", "X-SignalR-User-Agent")
                 .AllowCredentials();
         }
         // If no origins configured, policy allows nothing (deny by default)
