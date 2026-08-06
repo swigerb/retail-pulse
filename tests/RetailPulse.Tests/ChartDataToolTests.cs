@@ -72,16 +72,38 @@ public class ChartDataToolTests
     }
 
     [Fact]
-    public async Task CreateChart_EmptyDataArray_StillSucceeds()
+    public async Task CreateChart_EmptyDataArray_ReturnsError()
     {
+        // Invariant: an empty chart (recognized type + title but no series) is NOT
+        // renderable and must be a structured diagnostic, never status:success — a
+        // success-shaped empty chart is exactly what produced the blank card (issue #32).
         ChartDataTool tool = CreateTool();
         string spec = /*lang=json,strict*/ """{"type":"bar","title":"Empty","data":[]}""";
 
         string result = await tool.CreateChart(spec);
 
         var doc = JsonDocument.Parse(result);
-        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
-        doc.RootElement.GetProperty("chart").GetProperty("Data").GetArrayLength().Should().Be(0);
+        doc.RootElement.TryGetProperty("status", out _).Should().BeFalse(
+            "an empty chart must not be reported as success");
+        doc.RootElement.TryGetProperty("error", out JsonElement err).Should().BeTrue();
+        err.GetString().Should().NotBeNullOrEmpty();
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateChart_SeriesWithNoValues_ReturnsError()
+    {
+        // Strict deserialization binds a legend-only series with zero datapoints
+        // (Data.Count == 1) — structurally valid but unrenderable. It must be rejected.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """{"type":"line","title":"No Points","data":[{"legend":"BrandA","values":[]}]}""";
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.TryGetProperty("status", out _).Should().BeFalse();
+        doc.RootElement.TryGetProperty("error", out _).Should().BeTrue(
+            "a series with no finite datapoints is not renderable");
     }
 
     [Theory]
@@ -435,5 +457,211 @@ public class ChartDataToolTests
         values[0].GetProperty("Y").GetDouble().Should().Be(1893.2);
         values[2].GetProperty("X").GetString().Should().Be("Summit Vodka");
         values[2].GetProperty("Y").GetDouble().Should().Be(2296.3);
+    }
+
+    // ---- Issue #32: two-brand / all-regions comparison must bind to two non-empty series ----
+
+    [Fact]
+    public async Task CreateChart_TwoBrandComparison_DataPointsSchema_BindsBothSeries()
+    {
+        // Exact live shape (issue #32): the Demand Forecast Agent emitted the
+        // "Coastline Tacos vs Apex Grill ... Across All Regions" comparison as a
+        // top-level series[] with per-series "dataPoints" and shared top-level
+        // "categories". Strict ChartSpec binding leaves Data empty (no "data" key),
+        // which previously returned success with an empty chart → blank card.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "groupedBar",
+                "title": "Coastline Tacos vs Apex Grill: Weekly Depletion Trend Across All Regions",
+                "xAxisTitle": "Region",
+                "yAxisTitle": "Weekly Depletions (cases)",
+                "categories": ["Northeast", "Southeast", "Midwest", "West", "Southwest"],
+                "series": [
+                    {"name": "Coastline Tacos", "dataPoints": [4200, 3800, 5100, 4700, 3300]},
+                    {"name": "Apex Grill", "dataPoints": [3900, 4100, 4600, 5200, 3000]}
+                ]
+            }
+            """;
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeTrue();
+        JsonElement chart = doc.RootElement.GetProperty("chart");
+        chart.GetProperty("Type").GetString().Should().Be("groupedBar");
+        JsonElement data = chart.GetProperty("Data");
+        data.GetArrayLength().Should().Be(2, "both brands must bind as their own series");
+        data[0].GetProperty("Legend").GetString().Should().Be("Coastline Tacos");
+        data[1].GetProperty("Legend").GetString().Should().Be("Apex Grill");
+        JsonElement s0 = data[0].GetProperty("Values");
+        s0.GetArrayLength().Should().Be(5, "the five regional categories must align to the first series");
+        s0[0].GetProperty("X").GetString().Should().Be("Northeast");
+        s0[0].GetProperty("Y").GetDouble().Should().Be(4200);
+        data[1].GetProperty("Values")[3].GetProperty("X").GetString().Should().Be("West");
+        data[1].GetProperty("Values")[3].GetProperty("Y").GetDouble().Should().Be(5200);
+    }
+
+    [Fact]
+    public async Task ExtractChartSpecs_TwoBrandComparison_FlowsBothSeriesIntoChartsList()
+    {
+        // Cross-boundary: the recovered two-series comparison must land in the real
+        // AgentExecutionPipeline.ExtractChartSpecs Charts list with both legends intact.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "line",
+                "title": "Coastline Tacos vs Apex Grill: Weekly Depletion Trend Across All Regions",
+                "categories": ["Northeast", "Southeast", "Midwest"],
+                "series": [
+                    {"name": "Coastline Tacos", "dataPoints": [4200, 3800, 5100]},
+                    {"name": "Apex Grill", "dataPoints": [3900, 4100, 4600]}
+                ]
+            }
+            """;
+
+        string toolOutput = await tool.CreateChart(spec);
+        var response = new Microsoft.Extensions.AI.ChatResponse(
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-cmp-1", toolOutput)]));
+
+        List<ChartSpec> charts = AgentExecutionPipeline.ExtractChartSpecs(response);
+
+        charts.Should().ContainSingle();
+        charts[0].Data.Should().HaveCount(2);
+        charts[0].Data.Select(s => s.Legend).Should().Equal("Coastline Tacos", "Apex Grill");
+        charts[0].Data.Should().OnlyContain(s => s.Values.Count == 3);
+    }
+
+    [Fact]
+    public async Task CreateChart_CanonicalTwoSeriesComparison_Succeeds()
+    {
+        // The canonical schema the tightened prompt steers models toward: one entry per
+        // series in "data", every series sharing the same "x" category labels.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "groupedBar",
+                "title": "Coastline Tacos vs Apex Grill by Region",
+                "data": [
+                    {"legend": "Coastline Tacos", "values": [{"x": "Northeast", "y": 4200}, {"x": "West", "y": 4700}]},
+                    {"legend": "Apex Grill", "values": [{"x": "Northeast", "y": 3900}, {"x": "West", "y": 5200}]}
+                ]
+            }
+            """;
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        doc.RootElement.GetProperty("recovered").GetBoolean().Should().BeFalse(
+            "the canonical schema binds via strict deserialization, not recovery");
+        doc.RootElement.GetProperty("chart").GetProperty("Data").GetArrayLength().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CreateChart_UnevenCategoriesAndSeries_KeepsAlignmentByIndex()
+    {
+        // Mismatched lengths: 3 categories but a series with only 2 points, and another
+        // with an extra 4th point. Points must stay aligned to the categories by index
+        // and the extra point falls back to an index label — never fabricated or dropped
+        // into the wrong category.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "line",
+                "title": "Uneven Comparison",
+                "categories": ["Q1", "Q2", "Q3"],
+                "series": [
+                    {"name": "BrandA", "values": [100, 200]},
+                    {"name": "BrandB", "values": [110, 210, 310, 410]}
+                ]
+            }
+            """;
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        JsonElement data = doc.RootElement.GetProperty("chart").GetProperty("Data");
+        data.GetArrayLength().Should().Be(2);
+        JsonElement a = data[0].GetProperty("Values");
+        a.GetArrayLength().Should().Be(2);
+        a[0].GetProperty("X").GetString().Should().Be("Q1");
+        a[1].GetProperty("X").GetString().Should().Be("Q2");
+        JsonElement b = data[1].GetProperty("Values");
+        b.GetArrayLength().Should().Be(4);
+        b[2].GetProperty("X").GetString().Should().Be("Q3");
+        b[3].GetProperty("X").GetString().Should().Be("4", "a point past the category list falls back to its 1-based index");
+    }
+
+    [Fact]
+    public async Task CreateChart_NumericStringValues_Bind()
+    {
+        // Models sometimes stringify the y values. Numeric strings must bind.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "bar",
+                "title": "Stringified Values",
+                "categories": ["NE", "SE"],
+                "series": [{"name": "BrandA", "dataPoints": ["1200.5", "980"]}]
+            }
+            """;
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        JsonElement values = doc.RootElement.GetProperty("chart").GetProperty("Data")[0].GetProperty("Values");
+        values[0].GetProperty("Y").GetDouble().Should().Be(1200.5);
+        values[1].GetProperty("Y").GetDouble().Should().Be(980);
+    }
+
+    [Fact]
+    public async Task CreateChart_NonFiniteValues_AreDroppedNotRendered()
+    {
+        // NaN / Infinity tokens are not bindable. A series whose only points are
+        // non-finite is dropped; if that leaves nothing renderable, it is an error.
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "line",
+                "title": "Non-finite",
+                "categories": ["A", "B"],
+                "series": [{"name": "BrandA", "dataPoints": ["NaN", "Infinity"]}]
+            }
+            """;
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.TryGetProperty("status", out _).Should().BeFalse();
+        doc.RootElement.TryGetProperty("error", out _).Should().BeTrue(
+            "non-finite values are not renderable and leave no usable data");
+    }
+
+    [Fact]
+    public async Task CreateChart_MixedFiniteAndNonFinite_KeepsFinitePoints()
+    {
+        ChartDataTool tool = CreateTool();
+        string spec = /*lang=json,strict*/ """
+            {
+                "type": "line",
+                "title": "Mixed",
+                "categories": ["A", "B", "C"],
+                "series": [{"name": "BrandA", "dataPoints": [10, "NaN", 30]}]
+            }
+            """;
+
+        string result = await tool.CreateChart(spec);
+
+        var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("success");
+        JsonElement values = doc.RootElement.GetProperty("chart").GetProperty("Data")[0].GetProperty("Values");
+        values.GetArrayLength().Should().Be(2, "the NaN point is dropped, the finite points kept");
+        values[0].GetProperty("Y").GetDouble().Should().Be(10);
+        values[1].GetProperty("X").GetString().Should().Be("C");
+        values[1].GetProperty("Y").GetDouble().Should().Be(30);
     }
 }

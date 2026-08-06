@@ -276,8 +276,14 @@ internal static class ChartSpecNormalizer
 
     private static ChartSeries? BuildSeries(string legend, string? color, JsonElement seriesObj, List<string> labels)
     {
+        // Accept the value array under any of the keys models realistically use for a
+        // series' numbers: canonical "values"/"data", plus CanvasJS-style "dataPoints"
+        // and the terse "points". Without this, a two-series comparison emitted as
+        // series:[{name, dataPoints:[...]}] binds to zero points and renders blank.
         bool hasValues = seriesObj.TryGetProperty("values", out JsonElement valuesEl)
-            || seriesObj.TryGetProperty("data", out valuesEl);
+            || seriesObj.TryGetProperty("data", out valuesEl)
+            || seriesObj.TryGetProperty("dataPoints", out valuesEl)
+            || seriesObj.TryGetProperty("points", out valuesEl);
         return !hasValues ? null : BuildSeriesFromValues(legend, color, valuesEl, labels);
     }
 
@@ -378,11 +384,14 @@ internal static class ChartSpecNormalizer
     {
         if (e.ValueKind == JsonValueKind.Number)
         {
-            return e.TryGetDouble(out value);
+            return e.TryGetDouble(out value) && double.IsFinite(value);
         }
         if (e.ValueKind == JsonValueKind.String)
         {
-            return double.TryParse(e.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+            // Reject non-finite tokens ("NaN", "Infinity") — they are not bindable and
+            // would otherwise pass double.TryParse and render as an empty/degenerate mark.
+            return double.TryParse(e.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+                && double.IsFinite(value);
         }
         value = 0;
         return false;

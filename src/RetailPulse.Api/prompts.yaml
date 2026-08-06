@@ -486,6 +486,21 @@ agents:
         ]
       }
       
+      For a multi-series comparison (e.g. two brands across the same regions or weeks),
+      emit ONE entry in "data" per series and give every series the SAME set of "x"
+      category labels so they align. Do NOT invent top-level "categories"/"series" arrays
+      or per-series "dataPoints" — always nest points under each series' "values":
+      {
+        "type": "groupedBar",
+        "title": "Brand A vs Brand B Weekly Depletions by Region",
+        "xAxisTitle": "Region",
+        "yAxisTitle": "Weekly Depletions (cases)",
+        "data": [
+          { "legend": "Brand A", "values": [{ "x": "Northeast", "y": 4200 }, { "x": "Southeast", "y": 3800 }] },
+          { "legend": "Brand B", "values": [{ "x": "Northeast", "y": 3900 }, { "x": "Southeast", "y": 4100 }] }
+        ]
+      }
+      
       ## Brands
       {tenant.brands}
       
