@@ -12,6 +12,7 @@ Retail Pulse supports one-command deployment to Azure using the [Azure Developer
 | Container Registry | Azure Container Registry (Basic) | Dedicated registry; Container Apps pull images via managed identity (no admin secrets) |
 | Frontend | Azure Static Web Apps | React/Vite static build (Standard SKU); calls the Container Apps API directly over CORS |
 | Monitoring | Application Insights + Log Analytics | Full OpenTelemetry pipeline |
+| Durable storage | Azure Storage (Standard_LRS StorageV2) + Azure Files share | 1 GiB SMB share mounted into the API at `/mnt/retailpulse-data` for durable SQLite (cost/audit/memory/approvals/alerts); durability enforced env-agnostically by `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=true` |
 | AI Gateway | Azure API Management | Existing APIM Bicep in `deploy/apim-ai-gateway/` |
 | Authentication | Microsoft Entra ID | Single-tenant SPA/API app registration (MSAL PKCE). See [authentication-entra.md](./authentication-entra.md). Set `RETAIL_PULSE_ENTRA_*` before `azd provision`; the postprovision hook flips `RequireAuth` on and disables Easy Auth. |
 
@@ -40,7 +41,7 @@ azd up
 ```
 
 This single command will:
-1. Provision all Azure resources (Container Registry, Container Apps Environment, Container Apps, Static Web App, App Insights, Log Analytics). Provisioning captures the API and frontend origins as azd environment values (`VITE_API_ORIGIN`, `RETAIL_PULSE_FRONTEND_ORIGIN`, `MCP_SERVER_BASE_URL`) and the dedicated registry coordinates (`AZURE_CONTAINER_REGISTRY_ENDPOINT`, `AZURE_CONTAINER_REGISTRY_NAME`, `AZURE_CONTAINER_REGISTRY_RESOURCE_ID`). A **postprovision hook** then binds each Container App's system-assigned identity to `AcrPull`, applies the synthetic-demo runtime environment, and disables ACA platform auth on the demo API.
+1. Provision all Azure resources (Container Registry, Storage account + Azure Files share, Container Apps Environment, Container Apps, Static Web App, App Insights, Log Analytics). Provisioning captures the API and frontend origins as azd environment values (`VITE_API_ORIGIN`, `RETAIL_PULSE_FRONTEND_ORIGIN`, `MCP_SERVER_BASE_URL`) and the dedicated registry coordinates (`AZURE_CONTAINER_REGISTRY_ENDPOINT`, `AZURE_CONTAINER_REGISTRY_NAME`, `AZURE_CONTAINER_REGISTRY_RESOURCE_ID`). A **postprovision hook** then binds each Container App's system-assigned identity to `AcrPull`, applies the synthetic-demo runtime environment, and disables ACA platform auth on the demo API.
 2. Build the .NET services and containerize them (pushed to the dedicated Container Registry)
 3. Deploy backend containers to Azure Container Apps (the postprovision hook has already applied the API's model, CORS, auth, and MCP settings)
 4. Build the React frontend (`npm run build`) **with `VITE_API_ORIGIN` injected from the provisioned API origin** and deploy `dist/` to Azure Static Web Apps
@@ -88,7 +89,8 @@ infra/
 └── modules/
     ├── monitoring.bicep        # App Insights + Log Analytics
     ├── container-registry.bicep # Dedicated Basic-SKU Azure Container Registry
-    ├── container-apps-env.bicep # Container Apps Environment
+    ├── storage.bicep           # Standard_LRS StorageV2 account + Azure Files share (durable app data)
+    ├── container-apps-env.bicep # Container Apps Environment (+ Azure Files storage registration)
     ├── container-apps.bicep     # API, MCP server, Teams Bot container apps
     └── static-web-app.bicep    # Standard-SKU static frontend hosting (direct-CORS to the API)
 ```
@@ -237,10 +239,12 @@ All three Container Apps use `minReplicas: 0` / `maxReplicas: 1`. Consequences:
 
 - **Cold start:** the first request after an idle period pays a container start +
   .NET warm-up penalty (several seconds).
-- **In-memory state is volatile:** the API keeps trace spans, cost tracking, the
-  streaming ring buffer, and the memory panel in singletons. When the API scales to
-  zero these reset. Background services (proactive alerts) only run while a replica is
-  live.
+- **In-memory state is volatile:** the API keeps trace spans, the streaming ring
+  buffer, the conversation-export sessions, and the live telemetry panel in
+  singletons. When the API scales to zero these reset. Background services
+  (proactive alerts) only run while a replica is live. **Durable** SQLite stores
+  (cost, audit, memory, approvals, alerts) are unaffected — they live on the
+  mounted Azure Files share (see below).
 - **SignalR:** the Teams Bot holds a persistent SignalR connection to the API telemetry
   hub, and the frontend connects to `/hubs/telemetry` and `/hubs/streaming`. An active
   SignalR/WebSocket connection keeps the API replica warm; once all clients disconnect
@@ -249,17 +253,53 @@ All three Container Apps use `minReplicas: 0` / `maxReplicas: 1`. Consequences:
 To keep the demo continuously warm (at higher cost) set the API's `minReplicas` to `1`
 in `infra/modules/container-apps.bicep`.
 
-### Ephemeral demo storage — data loss semantics
+### Durable API storage and ephemeral MCP storage — data semantics
 
-The API and MCP server write their SQLite databases under the OS temp directory
-(`Path.GetTempPath()/retailpulse` → `/tmp/retailpulse` on Linux containers):
-approvals, conversation memory, proactive alerts, audit log, and the seeded retail
-dataset. This is **writable but ephemeral** — every container restart, new revision, or
-scale-to-zero event **discards all of it**. The MCP server re-seeds `retailpulse.db`
-from `tenant.yaml` on first run, so demo retail data regenerates automatically;
-accumulated approvals/memory/audit/alerts do **not** survive. `maxReplicas: 1` avoids
-split-brain SQLite across replicas. For durable state, mount an Azure Files volume and
-point the DB paths at it.
+The **API** persists its SQLite databases (audit, cost, memory, approvals, alerts)
+to a durable **Azure Files** share, mounted at `/mnt/retailpulse-data` and selected
+via `RETAIL_PULSE_DATA_DIRECTORY`. This history now **survives** container restarts,
+new revisions, and full scale-to-zero cycles — fixing the earlier defect where the
+API wrote under `Path.GetTempPath()` and lost everything whenever a fresh replica
+started. `DataDirectoryResolver` **fails fast** if that path is missing or
+unwritable rather than silently reverting to ephemeral temp storage, so a broken
+mount surfaces as a startup error instead of quietly losing data.
+
+Because the deployed API runs with `ASPNETCORE_ENVIRONMENT=Development`, this
+fail-fast must **not** be gated on the environment. Deployment sets an explicit,
+environment-agnostic `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=true` env var alongside
+the mount — emitted by `main.bicep`, applied in `container-apps.bicep`, and
+re-asserted by the postprovision hooks. When the flag is truthy the resolver
+enforces the durable path regardless of environment, and a malformed value
+(anything other than `true`/`false`/`1`/`0`, case-insensitive) throws instead of
+silently downgrading. Local development leaves the flag unset (or `false`) and may
+fall back to a temp directory. PR #23 will later flip the deployed API to
+`Production`, but this durability guarantee is independent of that change and holds
+against the current `Development` deployment and future config drift.
+
+The **MCP server** still writes its seeded retail dataset (`retailpulse.db`) under
+the OS temp directory. That is intentional and safe: it **re-seeds from
+`tenant.yaml` on first run**, so the demo data regenerates automatically and needs
+no durable volume.
+
+Constraints and cost:
+
+- **Single writer:** SQLite over SMB is safe only for one replica, so the API keeps
+  `maxReplicas: 1`. Every mounted store opens through the centralized `SqliteMount`
+  helper, which applies the SMB-safe pragmas in order: `busy_timeout=10000` first
+  (so the journal switch waits rather than throwing `SQLITE_BUSY` under contention),
+  then `journal_mode=DELETE` (rollback journal, not WAL, whose `-shm` file is
+  unsupported over SMB), then `synchronous=FULL` (required for durability with a
+  DELETE journal — `NORMAL` is only safe under WAL). Do **not** raise `maxReplicas`
+  while the stores share one mount.
+- **Cost:** one Standard_LRS StorageV2 account with a 1 GiB `TransactionOptimized`
+  file share — a few cents/month at demo volumes.
+- **Cleanup:** the account lives in the demo resource group and is destroyed by
+  `azd down` with the rest of the stack. Only bounded app-data SQLite files are
+  written to it — never secrets or credentials (the account key is fetched inside
+  Bicep via `listKeys()` and never stored in the azd environment, logs, or repo).
+- **First deployment:** the durable store starts **empty**. Any history that
+  accumulated under the old ephemeral temp path is not migrated and is
+  unrecoverable — this is expected.
 
 ### Public-demo auth posture
 

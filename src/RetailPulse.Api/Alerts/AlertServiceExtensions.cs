@@ -13,7 +13,7 @@ public static class AlertServiceExtensions
     /// </summary>
     public static IServiceCollection AddProactiveAlerts(this IServiceCollection services, string dbPath)
     {
-        // Singleton alert store — WAL mode handles concurrency
+        // Singleton alert store — shared cache + SMB-safe rollback journaling
         services.AddSingleton(sp =>
             new SqliteAlertService(dbPath, sp.GetRequiredService<ILogger<SqliteAlertService>>()));
 

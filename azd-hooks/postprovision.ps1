@@ -59,6 +59,8 @@ $openAiEndpoint = Get-RequiredEnv 'AZURE_OPENAI_ENDPOINT'
 $apiUrl         = Get-RequiredEnv 'AZURE_API_APP_URL'
 $mcpServerUrl   = Get-RequiredEnv 'AZURE_MCP_SERVER_APP_URL'
 $frontendOrigin = Get-RequiredEnv 'RETAIL_PULSE_FRONTEND_ORIGIN'
+$dataDirectory  = Get-RequiredEnv 'RETAIL_PULSE_DATA_DIRECTORY'
+$requireDurable = Get-RequiredEnv 'RETAIL_PULSE_REQUIRE_DURABLE_STORAGE'
 $staticWebApp   = Get-RequiredEnv 'AZURE_STATIC_WEB_APP_NAME'
 $location       = Get-RequiredEnv 'AZURE_LOCATION'
 # Entra auth configuration. Tenant/client IDs are CONFIGURATION, not secrets; the
@@ -131,10 +133,13 @@ Invoke-Az `
         "McpServer__BaseUrl=$mcpServerUrl",
         'Security__RequireAuth=true',
         "Security__AllowedOrigins__0=$frontendOrigin",
+        "Security__AllowedOrigins__0=$frontendOrigin",
         "MicrosoftEntra__TenantId=$entraTenantId",
         "MicrosoftEntra__ClientId=$entraClientId",
         "MicrosoftEntra__ApiScope=$entraApiScope",
         "MicrosoftEntra__AppRole=$entraAppRole",
+        "RETAIL_PULSE_DATA_DIRECTORY=$dataDirectory",
+        "RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=$requireDurable",
         'ASPNETCORE_ENVIRONMENT=Production',
         '--output', 'none'
     ) `

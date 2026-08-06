@@ -32,6 +32,8 @@ require_env AZURE_MCP_SERVER_APP_URL
 require_env AZURE_TEAMS_BOT_APP_NAME
 require_env AZURE_OPENAI_ENDPOINT
 require_env RETAIL_PULSE_FRONTEND_ORIGIN
+require_env RETAIL_PULSE_DATA_DIRECTORY
+require_env RETAIL_PULSE_REQUIRE_DURABLE_STORAGE
 require_env AZURE_STATIC_WEB_APP_NAME
 require_env AZURE_LOCATION
 # Entra auth configuration. Tenant/client IDs are CONFIGURATION, not secrets; the
@@ -116,6 +118,8 @@ az containerapp update \
     "MicrosoftEntra__ClientId=$entra_client_id" \
     "MicrosoftEntra__ApiScope=$entra_api_scope" \
     "MicrosoftEntra__AppRole=$entra_app_role" \
+    "RETAIL_PULSE_DATA_DIRECTORY=$RETAIL_PULSE_DATA_DIRECTORY" \
+    "RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=$RETAIL_PULSE_REQUIRE_DURABLE_STORAGE" \
     'ASPNETCORE_ENVIRONMENT=Production' \
     --output none
 

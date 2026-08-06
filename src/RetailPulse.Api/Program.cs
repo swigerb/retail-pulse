@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Agents.Tools;
@@ -462,7 +463,16 @@ builder.Services.AddScoped(sp =>
 });
 
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
-string dataDirectory = Path.Combine(Path.GetTempPath(), "retailpulse");
+// The data directory is where every durable SQLite store lives (approvals, memory,
+// alerts, costs, audit). Deployed ACA sets RETAIL_PULSE_DATA_DIRECTORY to the
+// mounted Azure Files share so this history survives replica replacement and
+// scale-to-zero; local development falls back to a temp directory. Resolution
+// fails fast (no silent ephemeral fallback) when a required durable path is missing
+// or unwritable. Durability is required explicitly and environment-agnostically via
+// RETAIL_PULSE_REQUIRE_DURABLE_STORAGE (set true by Bicep alongside the mount), so
+// the deployed API stays safe even though it runs ASPNETCORE_ENVIRONMENT=Development
+// — see DataDirectoryResolver.
+string dataDirectory = DataDirectoryResolver.Resolve(builder.Configuration, builder.Environment);
 string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>
     new SqliteApprovalGate(approvalDbPath, sp.GetRequiredService<ILogger<SqliteApprovalGate>>()));
@@ -527,8 +537,16 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<InMemoryAdaptiveCardState>());
 
 // Observability Suite — cost tracking, audit log, conversation export
-builder.Services.AddSingleton<InMemoryCostTracker>();
-builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<InMemoryCostTracker>());
+// Cost history is SQLite-backed in the shared writable data directory (same as
+// audit.db / memory.db). When that directory is the mounted Azure Files share
+// (deployed ACA) history survives replica replacement and scale-to-zero; locally
+// it is an ephemeral temp directory. Single-writer only (API runs maxReplicas: 1).
+string costDbPath = Path.Combine(dataDirectory, "costs.db");
+builder.Services.AddSingleton(sp => new DurableCostTracker(
+    costDbPath,
+    sp.GetRequiredService<IOptions<ObservabilityOptions>>(),
+    sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<DurableCostTracker>());
 string auditDbPath = Path.Combine(dataDirectory, "audit.db");
 builder.Services.AddSingleton(_ => new DurableAuditLog(auditDbPath));
 builder.Services.AddSingleton<IAuditLog>(sp => sp.GetRequiredService<DurableAuditLog>());
