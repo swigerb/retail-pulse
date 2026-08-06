@@ -14,7 +14,7 @@ Retail Pulse supports one-command deployment to Azure using the [Azure Developer
 | Monitoring | Application Insights + Log Analytics | Full OpenTelemetry pipeline |
 | App data storage | Container-local temp (no durable volume) | The API's SQLite stores (cost/audit/memory/approvals/alerts) live in the replica's temp dir. **No Azure Files mount** — tenant governance forbids account-key CIFS mounts (see the incident note below), so observability history is per-replica and resets on replacement. |
 | AI Gateway | Azure API Management | Existing APIM Bicep in `deploy/apim-ai-gateway/` |
-| Authentication | Microsoft Entra ID | Single-tenant SPA/API app registration (MSAL PKCE). See [authentication-entra.md](./authentication-entra.md). Set `RETAIL_PULSE_ENTRA_*` before `azd provision`; the postprovision hook flips `RequireAuth` on and disables Easy Auth. |
+| Authentication | Microsoft Entra ID | Single-tenant SPA/API app registration (MSAL PKCE). See [authentication-entra.md](./authentication-entra.md). Set `RETAIL_PULSE_ENTRA_*` before `azd provision`; the postprovision hook flips `RequireAuth` on, pins `Authentication__Mode=Entra` (provider-neutral mode contract — see [ADR-005](./adr/005-provider-neutral-authentication.md)), and disables Easy Auth. |
 
 ## Prerequisites
 

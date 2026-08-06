@@ -130,6 +130,11 @@ Invoke-Az `
         'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17',
         "McpServer__BaseUrl=$mcpServerUrl",
         'Security__RequireAuth=true',
+        # Provider-neutral auth is explicitly pinned to Entra for production (see
+        # Security/ProviderNeutralAuthentication.cs). This is a deploy-time re-assertion of the
+        # committed appsettings.Production.json value; the API fails closed on a missing/unknown
+        # mode and refuses to start under GitHub/Anonymous.
+        'Authentication__Mode=Entra',
         "Security__AllowedOrigins__0=$frontendOrigin",
         "MicrosoftEntra__TenantId=$entraTenantId",
         "MicrosoftEntra__ClientId=$entraClientId",

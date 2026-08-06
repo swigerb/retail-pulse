@@ -64,6 +64,23 @@ All chat interactions are recorded in a tamper-evident audit log (`DurableAuditL
 
 ## Authentication
 
+### Provider selection (mode contract)
+
+The active identity provider is chosen through the `Authentication:Mode`
+configuration key (`Authentication__Mode`). Resolution is deterministic and
+fails closed — it never auto-detects a provider:
+
+- `Entra` (the only implemented mode) routes to the unchanged Entra boundary.
+- `GitHub` and `Anonymous` are declared but not implemented in this sprint;
+  selecting either fails startup and never falls through to another provider.
+- A missing mode defaults to `Entra` **only in Development**. Outside
+  Development a missing, unknown, or malformed mode fails startup.
+
+Production pins `Authentication__Mode=Entra` explicitly in
+`appsettings.Production.json` and the azd postprovision hooks. See
+[ADR-005](adr/005-provider-neutral-authentication.md) and the
+[authentication matrix](authentication-matrix.md).
+
 ### Development
 - `DevelopmentAuthHandler` bypasses all authentication
 - `Security:RequireAuth` defaults to `false`

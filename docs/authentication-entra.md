@@ -77,6 +77,37 @@ There is **no anonymous fallback in Production**: the azd hooks set
 
 ---
 
+## Provider-neutral mode contract
+
+Entra is now selected through an explicit, provider-neutral **mode contract**
+(the Sprint 0 foundation — see
+[ADR-005](adr/005-provider-neutral-authentication.md) and the
+[authentication matrix](authentication-matrix.md)). `Program.cs` calls
+`AddProviderNeutralAuthentication`, which resolves the `Authentication:Mode`
+configuration key and dispatches to a mode-specific wiring path:
+
+- **`Entra`** routes to the existing, unchanged Entra boundary above. Security
+  semantics are identical to before the contract existed.
+- **`GitHub`** and **`Anonymous`** are declared but **not implemented in this
+  sprint**. Selecting either fails startup with a precise error — it never falls
+  through to Entra, Development, or anonymous access.
+
+Resolution is deterministic and never auto-detects a provider:
+
+- an explicit recognized mode (case-insensitive `Entra`, `GitHub`, `Anonymous`)
+  is honored as-is;
+- a missing mode defaults to `Entra` **only in Development** (documented default);
+- a missing mode outside Development, an unknown value, or a bare number **fails
+  startup — the app fails closed**.
+
+Production pins `Authentication__Mode=Entra` explicitly in
+`appsettings.Production.json` and the azd hooks; it never merely defaults to it.
+The normalized principal seam (`IPrincipalNormalizer` / `NormalizedPrincipal`)
+maps Entra claims to a provider-neutral identity for future providers without
+changing the `RetailPulse.User` + `access_as_user` requirement.
+
+---
+
 ## Environment / config contract
 
 | azd env var (operator sets) | Bicep param | Frontend build var | API env var |
@@ -85,6 +116,7 @@ There is **no anonymous fallback in Production**: the azd hooks set
 | `RETAIL_PULSE_ENTRA_CLIENT_ID` | `entraClientId` | `VITE_ENTRA_CLIENT_ID` | `MicrosoftEntra__ClientId` |
 | `RETAIL_PULSE_ENTRA_API_SCOPE` | `entraApiScope` | `VITE_ENTRA_API_SCOPE` | `MicrosoftEntra__ApiScope` |
 | `RETAIL_PULSE_ENTRA_AUDIENCE` | `entraAudience` | `VITE_ENTRA_AUDIENCE` | (derived `api://{clientId}`) |
+| (pinned, not operator-set) | — | — | `Authentication__Mode=Entra` |
 
 - `infra/main.bicepparam` reads the `RETAIL_PULSE_ENTRA_*` env vars; `infra/main.bicep`
   round‑trips them as `VITE_ENTRA_*` outputs, which azd exposes to the Static Web
