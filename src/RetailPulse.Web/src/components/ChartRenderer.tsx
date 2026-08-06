@@ -9,6 +9,7 @@ import {
 import { Card, makeStyles } from '@fluentui/react-components';
 import type { ChartSpec, ChartSeries, ForecastData } from '../types';
 import { ForecastChart } from './forecast';
+import { chartIsRenderable } from './chartBindability';
 
 const BRAND_COLORS = ['#1565C0', '#42A5F5', '#4682B4', '#2E8B57', '#1E88E5', '#64B5F6', '#5F9EA0', '#0D47A1'];
 
@@ -56,6 +57,23 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     padding: '20px',
+  },
+  unavailableCard: {
+    marginTop: '12px',
+    padding: '16px 20px',
+    backgroundColor: 'var(--color-surface-alt)',
+    border: '1px dashed var(--color-border-strong)',
+    borderRadius: '12px',
+  },
+  unavailableTitle: {
+    color: 'var(--color-text)',
+    fontSize: '14px',
+    fontWeight: '600',
+    marginBottom: '4px',
+  },
+  unavailableNote: {
+    color: 'var(--color-text-secondary)',
+    fontSize: '12px',
   },
 });
 
@@ -291,6 +309,22 @@ function SingleChart({ spec }: { spec: ChartSpec }) {
   );
 }
 
+// Non-disruptive diagnostic shown instead of an empty chart card when a spec
+// carries no bindable datapoints. Keeps the assistant's prose answer intact and
+// tells the user the visualization couldn't be built — no blank axes, no CSS
+// hiding, no silent drop.
+function ChartUnavailable({ title }: { title?: string }) {
+  const styles = useStyles();
+  return (
+    <div className={styles.unavailableCard} role="note">
+      {title ? <div className={styles.unavailableTitle}>{title}</div> : null}
+      <div className={styles.unavailableNote}>
+        Chart unavailable — the data returned couldn&apos;t be rendered as a chart.
+      </div>
+    </div>
+  );
+}
+
 // Detect forecast-shaped data embedded in a chart spec's metadata
 function isForecastSpec(spec: ChartSpec): spec is ChartSpec & { forecast: ForecastData } {
   return 'forecast' in spec && !!(spec as ChartSpec & { forecast?: ForecastData }).forecast;
@@ -304,13 +338,17 @@ export default function ChartRenderer({ charts, forecastData }: { charts: ChartS
 
   return (
     <>
-      {charts.map((spec, i) =>
-        isForecastSpec(spec) ? (
-          <ForecastChart key={spec.title || `forecast-${i}`} data={spec.forecast} />
-        ) : (
-          <SingleChart key={spec.title || `chart-${i}`} spec={spec} />
-        ),
-      )}
+      {charts.map((spec, i) => {
+        if (isForecastSpec(spec)) {
+          return <ForecastChart key={spec.title || `forecast-${i}`} data={spec.forecast} />;
+        }
+        // Enforce the renderable invariant at the render boundary: a spec with no
+        // bindable datapoints surfaces a diagnostic instead of an empty chart card.
+        if (!chartIsRenderable(spec)) {
+          return <ChartUnavailable key={spec.title || `chart-${i}`} title={spec.title} />;
+        }
+        return <SingleChart key={spec.title || `chart-${i}`} spec={spec} />;
+      })}
     </>
   );
 }
