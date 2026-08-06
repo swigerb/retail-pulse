@@ -10,6 +10,7 @@ using RetailPulse.Api.Endpoints;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Security;
+using RetailPulse.Api.Security.Anonymous;
 
 namespace RetailPulse.Tests.Security;
 
@@ -28,8 +29,13 @@ namespace RetailPulse.Tests.Security;
 /// </summary>
 public sealed class EndpointAuthorizationCoverageTests
 {
-    /// <summary>The ONLY routes allowed to be reachable anonymously.</summary>
-    private static readonly string[] AnonymousAllowlist = ["/health", "/alive"];
+    /// <summary>
+    /// The ONLY routes allowed to be reachable anonymously: health/liveness, plus the Anonymous
+    /// bootstrap endpoint (the single sanctioned unauthenticated <c>/api</c> route, which mints a
+    /// session credential and is AllowAnonymous by design).
+    /// </summary>
+    private static readonly string[] AnonymousAllowlist =
+        ["/health", "/alive", AnonymousCapabilityPolicy.BootstrapRoute];
 
     private static WebApplication BuildRealEndpointGraph()
     {
@@ -96,6 +102,10 @@ public sealed class EndpointAuthorizationCoverageTests
         app.MapDeadLetterEndpoints();
         app.MapMemoryEndpoints();
         app.MapCacheEndpoints();
+
+        // The Anonymous bootstrap endpoint (unauthenticated, AllowAnonymous by design) — mirrors
+        // Program.cs so the coverage walk sees the exact same route graph the app exposes.
+        app.MapAnonymousAuthEndpoints();
 
         return app;
     }
@@ -186,6 +196,70 @@ public sealed class EndpointAuthorizationCoverageTests
         RouteEndpoint offending = ProtectedRoutes(app).Single();
         HasAuthorization(offending).Should().BeFalse(
             "the fixture endpoint intentionally omits RequireAuthorization, and the detector must catch it");
+    }
+
+    [Fact]
+    public async Task AnonymousCapabilityGraph_AllowsOnlyBootstrapAndChat()
+    {
+        await using WebApplication app = BuildRealEndpointGraph();
+
+        // Walk the REAL compiled route table and, for every mapped (method, route) on the protected
+        // surface, ask the production allowlist whether an anonymous principal may reach it. Only the
+        // bootstrap and POST /api/chat may be reachable; everything else — every broad GET,
+        // observability/admin/export/memory/cards/approvals route, every alternate LLM path
+        // (/api/chat/stream, /api/council/*), AND both SignalR hubs (Sprint 1: no anonymous
+        // real-time telemetry/streaming) — must be denied.
+        var allowed = new List<string>();
+        foreach (RouteEndpoint e in ProtectedRoutes(app))
+        {
+            string path = e.RoutePattern.RawText ?? string.Empty;
+            IReadOnlyList<string> methods =
+                e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? ["GET"];
+            foreach (string method in methods)
+            {
+                if (!AnonymousCapabilityPolicy.IsBlocked(method, path))
+                {
+                    allowed.Add($"{method} {path}");
+                }
+            }
+        }
+
+        allowed.Should().OnlyContain(entry =>
+            entry.Contains(AnonymousCapabilityPolicy.BootstrapRoute, StringComparison.OrdinalIgnoreCase)
+            || entry == $"POST {AnonymousCapabilityPolicy.ChatRoute}",
+            "the anonymous surface is bootstrap + POST /api/chat only (no hubs). Reachable set: "
+            + string.Join(", ", allowed));
+
+        // Prove the positive capabilities really are present (not a vacuous pass).
+        allowed.Should().Contain(entry => entry == $"POST {AnonymousCapabilityPolicy.ChatRoute}",
+            "POST /api/chat must be reachable for anonymous");
+        allowed.Should().Contain(
+            entry => entry.Contains(AnonymousCapabilityPolicy.BootstrapRoute, StringComparison.OrdinalIgnoreCase),
+            "the bootstrap route must be reachable for anonymous");
+
+        // Prove no hub route is reachable — negotiate (POST) and connection (GET), both hubs.
+        allowed.Should().NotContain(entry => entry.Contains("/hubs/", StringComparison.OrdinalIgnoreCase),
+            "no SignalR hub route may be reachable for anonymous in Sprint 1");
+
+        // And prove representative billable / observability / alternate-LLM / hub routes are denied.
+        foreach ((string method, string route) in new[]
+        {
+            ("POST", "/api/chat/stream"),
+            ("POST", "/api/council/convene"),
+            ("GET", "/api/scorecard"),
+            ("GET", "/api/sessions"),
+            ("GET", "/api/memory"),
+            ("GET", "/api/audit"),
+            ("GET", "/api/traces"),
+            ("GET", "/api/dead-letter"),
+            ("GET", "/hubs/telemetry"),
+            ("POST", "/hubs/telemetry/negotiate"),
+            ("GET", "/hubs/streaming"),
+            ("POST", "/hubs/streaming/negotiate"),
+        })
+        {
+            AnonymousCapabilityPolicy.IsBlocked(method, route).Should().BeTrue($"{method} {route} must be denied for anonymous");
+        }
     }
 
     /// <summary>

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using RetailPulse.Api.Agents.Specialists;
+using RetailPulse.Api.Auth;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
@@ -40,7 +41,9 @@ public class RetailPulseAgent
             streamingHubContext,
             streamingFeature,
             configuration,
-            pipelineLogger);
+            pipelineLogger,
+            metrics: null,
+            anonymousChatPolicy: NoOpAnonymousChatPolicy.Instance);
         _generalAgent = new GeneralAgent(_pipeline, agentDef, tools);
     }
 

@@ -244,6 +244,16 @@ All three Container Apps use `minReplicas: 0` / `maxReplicas: 1`. Consequences:
   (proactive alerts) only run while a replica is live. The SQLite stores
   (cost, audit, memory, approvals, alerts) live in the replica's local temp
   directory and reset the same way — there is **no** durable volume (see below).
+- **Anonymous mode (if opted-in) is replica-local too:** Anonymous mode is
+  **not deployed by default** and is permitted hosted only behind the explicit
+  `Anonymous:AllowHosted=true` opt-in. When enabled, its daily request/token/cost
+  **ceilings**, its **rate-limit windows** (including the global bootstrap window),
+  and the **hub session-ownership registry** are all held in replica-local memory
+  and **reset on restart or replica replacement**. This is exactly why hosted
+  Anonymous requires `maxReplicas: 1` (a single writer/counter owner) and ships with
+  conservative limits — it is explicitly not equivalent to authenticated production.
+  See [ADR-005](adr/005-provider-neutral-authentication.md) and the
+  [authentication matrix](authentication-matrix.md).
 - **SignalR:** the Teams Bot holds a persistent SignalR connection to the API telemetry
   hub, and the frontend connects to `/hubs/telemetry` and `/hubs/streaming`. An active
   SignalR/WebSocket connection keeps the API replica warm; once all clients disconnect
@@ -355,6 +365,20 @@ behind it — is **publicly reachable without authentication**, protected only b
 built-in rate limiter. Acceptable for a throwaway demo; do **not** use this posture for
 anything with real data or cost exposure. Set `Security__RequireAuth=true` (and wire an
 identity provider) for non-demo environments.
+
+> **Anonymous mode is a safer alternative to this posture, but is not deployed.**
+> Sprint 1 adds a first-class, fail-closed `Authentication:Mode=Anonymous` provider
+> (server-minted short-lived session tokens, read-only enforcement, per-subject/per-IP
+> rate limits, and a daily request/token/cost circuit breaker) — see
+> [security.md → Anonymous mode](security.md#anonymous-mode-opt-in-never-deployed) and
+> [ADR-005](adr/005-provider-neutral-authentication.md). Unlike `Security__RequireAuth=false`,
+> it does not leave the model surface unauthenticated. It is **not** enabled by any
+> deployment artifact this sprint: `appsettings.Production.json`, the Bicep, and the azd
+> postprovision hooks all remain pinned to `Entra`, and a deployment-contract test asserts
+> the hooks never configure Anonymous guardrails. A hosted Anonymous enable would be a
+> deliberate, separate decision requiring `Anonymous:AllowHosted=true`, a strong signing
+> key, positive daily ceilings, and — because the ceilings are replica-local — a single
+> replica (`maxReplicas=1`). It is not equivalent to authenticated production.
 
 ### Frontend → API routing and SignalR
 
