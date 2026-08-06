@@ -62,16 +62,45 @@ public class ConversationExporter : IConversationExport
             .Select(s =>
             {
                 int count;
-                lock (s.Lock) { count = s.Messages.Count; }
+                int tokens;
+                lock (s.Lock)
+                {
+                    count = s.Messages.Count;
+                    tokens = s.TotalTokens;
+                }
                 return new ExportableSession(
                     s.SessionId,
                     s.StartedAt,
                     count,
-                    [.. s.AgentsUsed]);
+                    [.. s.AgentsUsed],
+                    tokens);
             })
             .ToList();
 
         return Task.FromResult<IReadOnlyList<ExportableSession>>(sessions);
+    }
+
+    /// <summary>
+    /// Returns session metadata plus a bounded slice (oldest-first) of the tracked
+    /// conversation for preview, or <c>null</c> if the session is unknown. Callers
+    /// must treat <c>null</c> as a genuine 404 — there is no silent empty fallback.
+    /// </summary>
+    public Task<SessionPreview?> GetPreviewAsync(string sessionId, int maxMessages = 20, CancellationToken ct = default)
+    {
+        if (!_sessions.TryGetValue(sessionId, out TrackedSession? session))
+            return Task.FromResult<SessionPreview?>(null);
+
+        int limit = Math.Max(1, maxMessages);
+        List<TrackedMessage> snapshot;
+        int total;
+        lock (session.Lock)
+        {
+            total = session.Messages.Count;
+            snapshot = [.. session.Messages.Take(limit)];
+        }
+
+        IReadOnlyList<PreviewMessage> messages = [.. snapshot.Select(m => new PreviewMessage(m.Role, m.Content, m.Timestamp))];
+        return Task.FromResult<SessionPreview?>(new SessionPreview(sessionId, messages, total));
     }
 
     /// <summary>
@@ -93,7 +122,10 @@ public class ConversationExporter : IConversationExport
         lock (session.Lock)
         {
             if (session.Messages.Count < _options.MaxMessagesPerSession)
+            {
                 session.Messages.Add(message);
+                session.TotalTokens += Math.Max(0, message.Tokens ?? 0);
+            }
             // Silently drop messages beyond limit — the session stays usable
         }
 
@@ -200,6 +232,8 @@ public class ConversationExporter : IConversationExport
         public readonly object Lock = new();
         public List<TrackedMessage> Messages { get; } = [];
         public ConcurrentBag<string> AgentsUsed { get; } = [];
+        /// <summary>Running total of model tokens across tracked messages (guarded by <see cref="Lock"/>).</summary>
+        public int TotalTokens { get; set; }
     }
 }
 
@@ -215,4 +249,6 @@ public record TrackedMessage
     public List<string>? ToolCalls { get; init; }
     public string? Reasoning { get; init; }
     public double? DurationMs { get; init; }
+    /// <summary>Model tokens attributable to this message (input+output for the turn), if known.</summary>
+    public int? Tokens { get; init; }
 }

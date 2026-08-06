@@ -433,11 +433,31 @@ The `/api/chat/stream` endpoint pushes tokens via SignalR as they are generated:
 
 | Component | Storage | Endpoint |
 |-----------|---------|----------|
-| **Cost Tracker** | ConcurrentBag (in-memory) | `GET /api/observability/costs`, `/costs/agents`, `/costs/trend` |
-| **Audit Log** | ConcurrentQueue ring buffer (5000 max) | `GET /api/observability/audit`, `/audit/stats` |
-| **Conversation Export** | ConcurrentDictionary (in-memory) | `GET /api/observability/export/sessions`, `POST /api/observability/export/{id}` |
+| **Cost Tracker** | SQLite (`data/costs.db`), bounded by `MaxCostEvents` + TTL pruning | `GET /api/observability/costs`, `/costs/agents`, `/costs/trend` |
+| **Audit Log** | SQLite (`data/audit.db`), hash-chained append-only | `GET /api/observability/audit`, `/audit/stats` |
+| **Conversation Export** | ConcurrentDictionary (in-memory, bounded) | `GET /api/observability/export/sessions`, `GET /api/observability/export/{id}/preview`, `POST /api/observability/export/{id}` |
 
 Model pricing table: gpt-5.4-mini ($0.15/$0.60 per 1M tokens), gpt-4o ($2.50/$10.00), claude-sonnet ($3.00/$15.00).
+
+> **Cost durability & scale-to-zero:** Cost history is written to a SQLite file
+> (`DurableCostTracker`) in the shared writable data directory
+> (`Path.GetTempPath()/retailpulse`), alongside `audit.db`, `memory.db`,
+> `approvals.db`, and `alerts.db`. It therefore inherits the **same durability
+> model as the audit log**: history survives process restarts and in-process
+> lifecycle churn (GC, request bursts) that used to wipe the in-memory
+> `ConcurrentBag` tracker. Cache hits are recorded as real requests but with zero
+> new model tokens and zero cost, so the dashboard reflects true consumption.
+> Each usage event is priced with `specialist.Model` (the actual model that
+> served the turn), not a hardcoded model name. Writes are serialized through a
+> semaphore and bounded on every insert (TTL prune + row cap), matching the
+> in-memory tracker's bounds.
+>
+> **Caveat:** the data directory is container-local ephemeral storage
+> (`Path.GetTempPath()`), not an Azure Files mount, so — like every other SQLite
+> store in this app — history does **not** survive container replacement
+> (redeploy, or a full ACA scale-to-zero cycle that starts a fresh replica). To
+> make cost/audit history durable across replacements, mount a persistent volume
+> and point `dataDirectory` at it; no code change is required beyond the path.
 
 ### Collaborative Adaptive Cards
 

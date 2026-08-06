@@ -519,8 +519,7 @@ export interface AuditLogEntry {
   id: string;
   timestamp: string;
   userId: string;
-  userName: string;
-  agentName: string;
+  agentId: string;
   action: string;
   inputSummary: string;
   outputSummary: string;

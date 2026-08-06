@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Agents.Tools;
@@ -553,8 +554,14 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<InMemoryAdaptiveCardState>());
 
 // Observability Suite — cost tracking, audit log, conversation export
-builder.Services.AddSingleton<InMemoryCostTracker>();
-builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<InMemoryCostTracker>());
+// Cost history is SQLite-backed so it survives process restarts and ACA
+// scale-to-zero (same shared writable data directory as audit.db / memory.db).
+string costDbPath = Path.Combine(dataDirectory, "costs.db");
+builder.Services.AddSingleton(sp => new DurableCostTracker(
+    costDbPath,
+    sp.GetRequiredService<IOptions<ObservabilityOptions>>(),
+    sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<DurableCostTracker>());
 string auditDbPath = Path.Combine(dataDirectory, "audit.db");
 builder.Services.AddSingleton(_ => new DurableAuditLog(auditDbPath));
 builder.Services.AddSingleton<IAuditLog>(sp => sp.GetRequiredService<DurableAuditLog>());
