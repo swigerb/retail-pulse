@@ -43,9 +43,10 @@ The security boundary lives in `src/RetailPulse.Api/Security/`:
 - `UserIdentity.Resolve` derives the caller's immutable subject from the token's
   `oid` claim (claim-first, never a client-supplied header), which is the
   anti-spoofing rule recorded in `.squad/decisions.md`.
-- Health probes (`/health`, `/alive`) stay anonymous by design because the app
-  sets `DefaultPolicy`, not `FallbackPolicy` — a source-scan test guards against
-  a future endpoint group forgetting `RequireAuthorization`.
+- Health probes (`/health`, `/alive`) stay anonymous through explicit
+  `AllowAnonymous` metadata. The app sets both `DefaultPolicy` and
+  `FallbackPolicy`; a runtime endpoint-graph test guards every `/api` and
+  `/hubs` route against missing authorization metadata.
 
 ## Decision
 
@@ -172,6 +173,16 @@ The three explicit pins are belt-and-suspenders:
   policies, token services). Rejected. Dead abstractions age badly; the
   foundation adds only what is testable today (the mode contract, the factory
   seam, and the normalized principal) and lets later sprints grow the seam.
+- **Use a browser-only GitHub token as the API credential.** Rejected. GitHub
+  OAuth requires a server-side confidential exchange and provider validation.
+  Sprint 2 must use a backend-for-frontend flow, keep its client secret in
+  server-managed configuration, and issue a short-lived Retail Pulse session
+  token for REST and SignalR. It must add state, CSRF, rotation, replay, and
+  allowlist tests before the mode can run.
+- **Treat anonymous mode as harmless because it has no identity provider.**
+  Rejected. Anonymous chat still reaches billable models. Sprint 1 must require
+  explicit hosted opt-in and enforce per-client rate limits, daily token/cost
+  budgets, isolated sessions, and disabled write-capable tools.
 
 ## Threat model
 
@@ -184,6 +195,8 @@ The three explicit pins are belt-and-suspenders:
 | Subject / identity spoofing via client-supplied data | `Subject` comes from the token `oid` via `UserIdentity.Resolve` (claim-first), unchanged. The normalizer never trusts headers. |
 | A future provider weakens the role/scope requirement | The authorization policy is untouched and centralized; `RetailPulse.User` + `access_as_user` remain required. Normalization is separate from authorization. |
 | Hub token leakage via query string on REST | `?access_token` remains honored only on `/hubs/*`; unchanged. |
+| Anonymous visitors exhaust the model budget | Hosted Anonymous requires a second explicit opt-in plus rate, token, and cost ceilings; write-capable tools remain disabled. |
+| A GitHub OAuth code or session is replayed or redirected | The GitHub provider uses a backend confidential exchange, validated state and callback URI, short-lived app session tokens, rotation, and allowlists. |
 
 ## No-downgrade and fail-closed rules
 
@@ -203,13 +216,16 @@ The three explicit pins are belt-and-suspenders:
 - **Sprint 0 (this ADR):** provider-neutral foundation — mode contract, factory
   boundary routing Entra unchanged, normalized principal, Production Entra pins,
   fail-closed tests. No live behavior change.
-- **Sprint 1:** GitHub provider (opt-in, non-production) — implement the GitHub
-  case in the factory and a `GitHubPrincipalNormalizer`; keep production Entra.
-- **Sprint 2:** Anonymous provider (opt-in, non-production, health-only-style
-  invariants) with explicit guardrails.
-- **Sprint 3:** normalized-principal consumers and per-provider authorization
-  refinements where justified by tests.
-- **Sprint 4:** hardening, docs, and operational rollout controls.
+- **Sprint 1:** Anonymous provider with explicit local/hosted opt-in, isolated
+  identities and sessions, disabled write-capable tools, and billable-use
+  ceilings. Production stays Entra.
+- **Sprint 2:** GitHub provider through a backend confidential OAuth flow,
+  short-lived Retail Pulse session tokens, and user/organization allowlists.
+  Production stays Entra.
+- **Sprint 3:** provider-neutral frontend sign-in selection and configuration
+  templates. Production exposes only Microsoft sign-in.
+- **Sprint 4:** full provider matrix, security review, docs, and a production
+  verification proving Entra remains the only enabled live mode.
 
 ## Success criteria
 

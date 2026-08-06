@@ -63,14 +63,12 @@ public sealed class NormalizedPrincipalTests
     }
 
     [Fact]
-    public void Normalize_NoIdentityClaims_SubjectFallsBackToAnonymous()
+    public void Normalize_NoImmutableIdentityClaim_FailsClosed()
     {
-        NormalizedPrincipal normalized = Normalizer.Normalize(Principal());
+        Action act = () => Normalizer.Normalize(Principal());
 
-        normalized.Subject.Should().Be(UserIdentity.AnonymousUserId);
-        normalized.DisplayName.Should().BeNull();
-        normalized.Roles.Should().BeEmpty();
-        normalized.Scopes.Should().BeEmpty();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*immutable object identifier*");
     }
 
     [Fact]

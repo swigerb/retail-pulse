@@ -36,6 +36,11 @@ public sealed class EntraPrincipalNormalizer : IPrincipalNormalizer
         ArgumentNullException.ThrowIfNull(principal);
 
         string subject = UserIdentity.Resolve(principal);
+        if (subject == UserIdentity.AnonymousUserId)
+        {
+            throw new InvalidOperationException(
+                "Cannot normalize an Entra principal without an immutable object identifier claim.");
+        }
 
         string? displayName =
             principal.FindFirst("name")?.Value
