@@ -109,8 +109,12 @@ param(
     # Explicit identifier of an EXISTING app to reconcile. Supply one of these to adopt an
     # app in place. When neither is supplied the script is CREATE-ONLY and will never adopt
     # an app located by display name (that would allow a same-name attacker app to be hijacked).
+    # GUID-validated so a malformed value fails fast at binding and can never be interpolated
+    # into the appId OData filter or the object-id URL path below as an injection vector.
+    [ValidatePattern('(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
     [string]$ClientId,
 
+    [ValidatePattern('(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
     [string]$AppObjectId,
 
     # Adopt an existing app that does NOT carry this tool's managed marker tag. Requires that
@@ -463,7 +467,11 @@ else {
 # --- 8. Assign the operator the app role --------------------------------------
 Write-Section "App-role assignment for $AssignUserUpn"
 if ($sp -and $Apply) {
-    $user = Invoke-Graph -Method GET -Url "$graph/users/$AssignUserUpn`?`$select=id,userPrincipalName"
+    # URL-encode the UPN before placing it in the Graph path segment so guest UPNs
+    # (which contain '#', e.g. alice_contoso.com#EXT#@tenant.onmicrosoft.com) and any
+    # other reserved characters resolve correctly instead of being truncated at '#'
+    # or altering the request path.
+    $user = Invoke-Graph -Method GET -Url "$graph/users/$([uri]::EscapeDataString($AssignUserUpn))`?`$select=id,userPrincipalName"
     # Resolve the role id from the SP's published appRoles (post-apply it exists).
     $spRoles = Invoke-Graph -Method GET -Url "$graph/servicePrincipals/$($sp.id)?`$select=appRoles"
     $targetRole = @($spRoles.appRoles) | Where-Object { $_.value -eq $AppRoleValue } | Select-Object -First 1

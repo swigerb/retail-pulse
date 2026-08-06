@@ -464,14 +464,17 @@ builder.Services.AddScoped(sp =>
 
 // Human-in-the-loop approval gate (SQLite-backed, singleton for shared state)
 // The data directory is where every durable SQLite store lives (approvals, memory,
-// alerts, costs, audit). Deployed ACA sets RETAIL_PULSE_DATA_DIRECTORY to the
-// mounted Azure Files share so this history survives replica replacement and
-// scale-to-zero; local development falls back to a temp directory. Resolution
-// fails fast (no silent ephemeral fallback) when a required durable path is missing
-// or unwritable. Durability is required explicitly and environment-agnostically via
-// RETAIL_PULSE_REQUIRE_DURABLE_STORAGE (set true by Bicep alongside the mount), so
-// the deployed API stays safe even though it runs ASPNETCORE_ENVIRONMENT=Development
-// — see DataDirectoryResolver.
+// alerts, costs, audit). The deployed synthetic demo runs
+// ASPNETCORE_ENVIRONMENT=Production under Entra auth with no durable path, because
+// this tenant's governance blocks account-key Azure Files mounts (see
+// docs/deployment-azd.md). It therefore sets RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true
+// to explicitly opt in to a writable per-replica temp directory: there is NO durable
+// Azure volume, and observability history lives only within the current replica and
+// resets on replacement/redeploy. Resolution still fails fast (no silent ephemeral
+// fallback) when durability is EXPLICITLY required — a configured data directory that
+// is unwritable, a truthy RETAIL_PULSE_REQUIRE_DURABLE_STORAGE, or Production WITHOUT
+// the ephemeral opt-out — preserving the guarantee for any future policy-compatible
+// durable backing. See DataDirectoryResolver.
 string dataDirectory = DataDirectoryResolver.Resolve(builder.Configuration, builder.Environment);
 string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>

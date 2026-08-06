@@ -59,8 +59,6 @@ $openAiEndpoint = Get-RequiredEnv 'AZURE_OPENAI_ENDPOINT'
 $apiUrl         = Get-RequiredEnv 'AZURE_API_APP_URL'
 $mcpServerUrl   = Get-RequiredEnv 'AZURE_MCP_SERVER_APP_URL'
 $frontendOrigin = Get-RequiredEnv 'RETAIL_PULSE_FRONTEND_ORIGIN'
-$dataDirectory  = Get-RequiredEnv 'RETAIL_PULSE_DATA_DIRECTORY'
-$requireDurable = Get-RequiredEnv 'RETAIL_PULSE_REQUIRE_DURABLE_STORAGE'
 $staticWebApp   = Get-RequiredEnv 'AZURE_STATIC_WEB_APP_NAME'
 $location       = Get-RequiredEnv 'AZURE_LOCATION'
 # Entra auth configuration. Tenant/client IDs are CONFIGURATION, not secrets; the
@@ -133,13 +131,20 @@ Invoke-Az `
         "McpServer__BaseUrl=$mcpServerUrl",
         'Security__RequireAuth=true',
         "Security__AllowedOrigins__0=$frontendOrigin",
-        "Security__AllowedOrigins__0=$frontendOrigin",
         "MicrosoftEntra__TenantId=$entraTenantId",
         "MicrosoftEntra__ClientId=$entraClientId",
         "MicrosoftEntra__ApiScope=$entraApiScope",
         "MicrosoftEntra__AppRole=$entraAppRole",
-        "RETAIL_PULSE_DATA_DIRECTORY=$dataDirectory",
-        "RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=$requireDurable",
+        # The governance hotfix removed the Azure Files durable mount, so there is no
+        # durable data-directory path to pin. Flipping the API to Production would
+        # otherwise fail closed in DataDirectoryResolver. This is a synthetic demo, so
+        # we explicitly opt in to a writable per-replica ephemeral data directory —
+        # honestly non-durable: observability history resets on replica replacement
+        # (see docs/deployment-azd.md). A future policy-compatible durable backing can
+        # drop this flag and configure a mounted durable path instead. This is NOT the
+        # durable-storage requirement flag; an explicit require-durable=true still
+        # fails closed.
+        'RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true',
         'ASPNETCORE_ENVIRONMENT=Production',
         '--output', 'none'
     ) `

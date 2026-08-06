@@ -439,10 +439,10 @@ The `/api/chat/stream` endpoint pushes tokens via SignalR as they are generated:
 
 Model pricing table: gpt-5.4-mini ($0.15/$0.60 per 1M tokens), gpt-4o ($2.50/$10.00), claude-sonnet ($3.00/$15.00).
 
-> **Cost durability & scale-to-zero:** Cost history is written to a SQLite file
+> **Cost tracking:** Cost history is written to a SQLite file
 > (`DurableCostTracker`) in the shared writable data directory, alongside
 > `audit.db`, `memory.db`, `approvals.db`, and `alerts.db`. It therefore inherits
-> the **same durability model as the audit log**: history survives process
+> the **same persistence model as the audit log**: history survives process
 > restarts and in-process lifecycle churn (GC, request bursts) that used to wipe
 > the in-memory `ConcurrentBag` tracker. Cache hits are recorded as real requests
 > but with zero new model tokens and zero cost, so the dashboard reflects true
@@ -451,51 +451,45 @@ Model pricing table: gpt-5.4-mini ($0.15/$0.60 per 1M tokens), gpt-4o ($2.50/$10
 > through a semaphore and bounded on every insert (TTL prune + row cap), matching
 > the in-memory tracker's bounds.
 >
-> **Durable across replica replacement (deployed):** The data directory is set by
-> `RETAIL_PULSE_DATA_DIRECTORY` (see `DataDirectoryResolver`). In deployed Azure
-> Container Apps it points at an **Azure Files share mounted at
-> `/mnt/retailpulse-data`**, so cost/audit/memory/approval/alert history now
-> survives real replica replacement and full scale-to-zero cycles — the defect
-> that previously lost everything under `Path.GetTempPath()`. Local development
-> leaves the variable unset and falls back to a temp directory. The resolver
-> **fails fast** (it never silently falls back to ephemeral storage) if a
-> configured durable path is missing or unwritable.
+> **Storage lifetime in the deployed demo (no durable volume):** The deployed API
+> writes these SQLite stores to the container's local temp directory. **There is
+> no Azure Files mount** in the deployed stack: this tenant's governance policy
+> forces new storage accounts to `allowSharedKeyAccess=false` and
+> `publicNetworkAccess=Disabled`, and ACA managed-environment Azure Files
+> registration authenticates with an account key, so a key-based CIFS mount fails
+> (`Permission denied`) and takes the API down. The mount was therefore removed
+> (see the incident note in `docs/deployment-azd.md`). Consequently observability
+> history — cost, audit, memory, approvals, alerts — **lives only within the
+> current API replica and resets when that replica is replaced** (new revision,
+> deploy, restart, or scale-to-zero cold start). Export, audit, and cost
+> functionality all still work against the live replica's data; only cross-replica
+> durability is not guaranteed. The data directory is still resolved by
+> `DataDirectoryResolver`; the deployed demo runs `ASPNETCORE_ENVIRONMENT=Production`
+> under Entra auth with **no** durable data directory set, so it **explicitly** sets
+> `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` to use the writable temp fallback rather
+> than being forced to a missing mount path or failing closed.
 >
-> **Environment-agnostic durability requirement:** Fail-fast must not depend on
-> `ASPNETCORE_ENVIRONMENT`, because the deployed API currently runs as
-> `Development`. Deployment therefore sets an explicit
-> `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=true` env var alongside the mount (emitted
-> by `main.bicep`, applied in `container-apps.bicep`, and re-asserted by the
-> postprovision hooks). When that flag is truthy, `DataDirectoryResolver` refuses
-> to start if the configured path is absent, empty, or unwritable — **regardless
-> of environment**. A malformed value (anything other than `true`/`false`/`1`/`0`,
-> case-insensitive) throws rather than silently downgrading to ephemeral storage.
-> Local Development with the flag absent or `false` may still use a temp directory.
+> **Fail-closed behavior is retained for a future durable path:** `DataDirectoryResolver`
+> still **fails fast** (it never silently falls back to ephemeral storage) when a
+> durable path is *explicitly* required — i.e. when `RETAIL_PULSE_DATA_DIRECTORY`
+> is set but unwritable, when `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE` is truthy (which
+> always wins over the ephemeral opt-out), or in `Production` **without** the explicit
+> `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` opt-out. The auth cutover (this PR) flips
+> the API to `Production` and resolves the resulting fail-closed startup by explicitly
+> acknowledging non-durable storage for the synthetic demo, **not** by reintroducing
+> Azure Files. This preserves the guarantee for any future policy-compatible durable
+> backing (see the ranked options in `docs/deployment-azd.md`), which can drop the
+> opt-out and supply a real durable path instead.
 >
-> **Single-replica constraint:** SQLite over SMB (Azure Files) is safe only for a
-> single writer, so the API runs `minReplicas: 0`, `maxReplicas: 1`. Every mounted
-> store opens its connection through the centralized `SqliteMount` helper, which is
-> the single source of the SMB-safe pragma policy — applied in order as
-> `busy_timeout=10000`, then `journal_mode=DELETE`, then `synchronous=FULL`:
-> - `busy_timeout` is set **first** so the `journal_mode` switch (which takes a
->   database lock) waits instead of throwing `SQLITE_BUSY` under contention.
-> - `journal_mode=DELETE` uses a rollback journal rather than WAL, whose `-shm`
->   shared-memory file is unsupported on network filesystems.
-> - `synchronous=FULL` is required for durability with a DELETE journal:
->   `synchronous=NORMAL` only relaxes safely under WAL, so pairing `NORMAL` with
->   `DELETE` (the prior policy) was inconsistent per the SQLite durability matrix.
->   `EXTRA` is not used — it only adds extra directory-sync fsyncs relevant to
->   crash-then-rename scenarios the app does not rely on.
->
-> This is **not** multi-replica-safe; do not raise `maxReplicas` while the stores
-> share one mount.
->
-> **Cost & cleanup:** the durable store is a single Standard_LRS StorageV2 account
-> with a 1 GiB file share (`Standard`/`TransactionOptimized`) — a few cents/month
-> at demo volumes. It is provisioned into the demo resource group and removed by
-> `azd down` with the rest of the stack. No secrets are persisted to it — only the
-> bounded app-data SQLite files. First deployment starts with an **empty** durable
-> store; previously accumulated ephemeral history is not recoverable.
+> **Single-writer & SMB-safe pragmas (retained helper):** The API runs
+> `minReplicas: 0`, `maxReplicas: 1`, so a single SQLite writer owns the files.
+> Every store still opens its connection through the centralized `SqliteMount`
+> helper, which applies, in order, `busy_timeout=10000`, then `journal_mode=DELETE`,
+> then `synchronous=FULL`. These pragmas are safe on both local disk and any future
+> network-filesystem backing (WAL's `-shm` shared-memory file is unsupported over
+> SMB), so the helper is kept even though no SMB share is mounted today. It is
+> **not** multi-replica-safe; do not raise `maxReplicas` while the stores share one
+> directory.
 
 ### Collaborative Adaptive Cards
 
