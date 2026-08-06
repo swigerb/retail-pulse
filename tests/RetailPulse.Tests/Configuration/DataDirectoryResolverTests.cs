@@ -1,4 +1,7 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using RetailPulse.Api.Configuration;
 
 namespace RetailPulse.Tests.Configuration;
@@ -97,5 +100,134 @@ public sealed class DataDirectoryResolverTests : IDisposable
         Action act = () => DataDirectoryResolver.Resolve(configuredDirectory: "   ", isProduction: true);
 
         act.Should().Throw<InvalidOperationException>("whitespace is not a real durable path");
+    }
+
+    // ── RETAIL_PULSE_REQUIRE_DURABLE_STORAGE: environment-agnostic requirement ──
+
+    [Fact]
+    public void Required_Development_WithoutConfiguredDirectory_FailsFast_NoTempFallback()
+    {
+        // The deployed API runs ASPNETCORE_ENVIRONMENT=Development but sets the
+        // require flag. A missing durable path must fail startup, NOT fall back to
+        // temp, independent of the environment.
+        Action act = () => DataDirectoryResolver.Resolve(
+            configuredDirectory: null, isProduction: false, requireDurableStorage: true);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain(DataDirectoryResolver.RequireDurableStorageKey,
+                "the failure must name the flag that made durable storage mandatory")
+            .And.Contain(DataDirectoryResolver.ConfigKey,
+                "and the setting the operator must provide");
+    }
+
+    [Fact]
+    public void Required_Development_UnwritableDirectory_FailsFast()
+    {
+        // A failed Azure Files mount simulated by a path whose parent is a file.
+        string blocker = Track(Path.Combine(Path.GetTempPath(), $"rp-blocker-{Guid.NewGuid():N}"));
+        File.WriteAllText(blocker, "not a directory");
+        string unwritable = Path.Combine(blocker, "cannot", "exist");
+
+        Action act = () => DataDirectoryResolver.Resolve(
+            unwritable, isProduction: false, requireDurableStorage: true);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*not writable*")
+            .Which.Message.Should().Contain(DataDirectoryResolver.ConfigKey);
+    }
+
+    [Fact]
+    public void Required_Development_ConfiguredWritableDirectory_IsUsed()
+    {
+        string target = Track(Path.Combine(Path.GetTempPath(), $"rp-datadir-{Guid.NewGuid():N}", "nested"));
+
+        string resolved = DataDirectoryResolver.Resolve(
+            target, isProduction: false, requireDurableStorage: true);
+
+        resolved.Should().Be(target, "an explicit, writable durable path satisfies the requirement in any environment");
+        Directory.Exists(resolved).Should().BeTrue();
+    }
+
+    [Fact]
+    public void NotRequired_Development_WithoutDirectory_UsesTemp()
+    {
+        // Local development with the flag absent/false is allowed to use temp.
+        string resolved = DataDirectoryResolver.Resolve(
+            configuredDirectory: null, isProduction: false, requireDurableStorage: false);
+
+        resolved.Should().Be(Path.Combine(Path.GetTempPath(), DataDirectoryResolver.LocalFallbackFolderName));
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("True", true)]
+    [InlineData("TRUE", true)]
+    [InlineData(" true ", true)]
+    [InlineData("1", true)]
+    [InlineData("false", false)]
+    [InlineData("False", false)]
+    [InlineData("0", false)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    public void ParseRequireDurableStorage_AcceptsCanonicalBooleans(string? raw, bool expected) => DataDirectoryResolver.ParseRequireDurableStorage(raw).Should().Be(expected);
+
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("no")]
+    [InlineData("tru")]
+    [InlineData("2")]
+    [InlineData("enabled")]
+    [InlineData("on")]
+    public void ParseRequireDurableStorage_RejectsMalformedTruthyValues_NoSilentDowngrade(string raw)
+    {
+        Action act = () => DataDirectoryResolver.ParseRequireDurableStorage(raw);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain(DataDirectoryResolver.RequireDurableStorageKey,
+                "a typo must fail loudly rather than silently disabling the durability requirement");
+    }
+
+    [Fact]
+    public void ConfigurationOverload_RequireFlagTrue_MissingPath_FailsFast_InDevelopment()
+    {
+        // End-to-end via IConfiguration + IHostEnvironment: proves the flag is read
+        // and enforced even when the environment is Development (mirrors the
+        // deployed API's ASPNETCORE_ENVIRONMENT=Development configuration).
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [DataDirectoryResolver.RequireDurableStorageKey] = "true",
+            })
+            .Build();
+
+        Action act = () => DataDirectoryResolver.Resolve(config, new StubHostEnvironment("Development"));
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain(DataDirectoryResolver.RequireDurableStorageKey);
+    }
+
+    [Fact]
+    public void ConfigurationOverload_MalformedRequireFlag_FailsFast()
+    {
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [DataDirectoryResolver.RequireDurableStorageKey] = "yes-please",
+            })
+            .Build();
+
+        Action act = () => DataDirectoryResolver.Resolve(config, new StubHostEnvironment("Development"));
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    private sealed class StubHostEnvironment(string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+        public string ApplicationName { get; set; } = "RetailPulse.Tests";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public IFileProvider ContentRootFileProvider { get; set; } =
+            new PhysicalFileProvider(AppContext.BaseDirectory);
     }
 }

@@ -25,6 +25,12 @@ public partial class DurablePersistenceContractTests
     [GeneratedRegex(@"output\s+RETAIL_PULSE_DATA_DIRECTORY\s+string\s*=", RegexOptions.Multiline)]
     private static partial Regex DataDirectoryOutputRegex();
 
+    [GeneratedRegex(@"output\s+RETAIL_PULSE_REQUIRE_DURABLE_STORAGE\s+string\s*=\s*'true'", RegexOptions.Multiline)]
+    private static partial Regex RequireDurableStorageOutputRegex();
+
+    [GeneratedRegex(@"name:\s*'RETAIL_PULSE_REQUIRE_DURABLE_STORAGE'\s*value:\s*'true'", RegexOptions.Singleline)]
+    private static partial Regex RequireDurableStorageEnvRegex();
+
     [GeneratedRegex(@"output\s+\w*STORAGE\w*KEY\w*\s+string", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex StorageKeyOutputRegex();
 
@@ -127,6 +133,29 @@ public partial class DurablePersistenceContractTests
     }
 
     [Fact]
+    public void ApiContainer_MountPathHasExactValue()
+    {
+        string bicep = ReadInfra("modules/container-apps.bicep");
+
+        // Exact-value contract: the mount path the app reads (RETAIL_PULSE_DATA_DIRECTORY)
+        // must equal the volume mount path, and both come from this default.
+        bicep.Should().MatchRegex(@"param\s+dataMountPath\s+string\s*=\s*'/mnt/retailpulse-data'",
+            "the mounted durable path must be exactly '/mnt/retailpulse-data'");
+    }
+
+    [Fact]
+    public void ApiContainer_RequiresDurableStorage_EnvAgnostically()
+    {
+        string bicep = ReadInfra("modules/container-apps.bicep");
+
+        // The API deploys with ASPNETCORE_ENVIRONMENT=Development, so durability must
+        // be enforced by an explicit, environment-agnostic flag set to exactly 'true'
+        // alongside the mount — not inferred from the environment.
+        RequireDurableStorageEnvRegex().IsMatch(bicep)
+            .Should().BeTrue("the API container must set RETAIL_PULSE_REQUIRE_DURABLE_STORAGE to exactly 'true'");
+    }
+
+    [Fact]
     public void OnlyApiMountsDurableVolume()
     {
         string bicep = ReadInfra("modules/container-apps.bicep");
@@ -161,6 +190,17 @@ public partial class DurablePersistenceContractTests
             $"{hookFile} must re-assert the durable data directory on the API so it cannot regress");
     }
 
+    [Theory]
+    [InlineData("postprovision.ps1")]
+    [InlineData("postprovision.sh")]
+    public void PostprovisionHook_ReassertsRequireDurableStorageFlag(string hookFile)
+    {
+        string script = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile));
+        script.Should().Contain("RETAIL_PULSE_REQUIRE_DURABLE_STORAGE",
+            $"{hookFile} must re-assert the environment-agnostic durability requirement on the API so a " +
+            "re-provision cannot drop it");
+    }
+
     [Fact]
     public void MainBicep_EmitsDataDirectoryContract_WithoutStorageKey()
     {
@@ -170,6 +210,16 @@ public partial class DurablePersistenceContractTests
             .Should().BeTrue("main.bicep must emit the mount path so the hook re-asserts the same durable path");
         StorageKeyOutputRegex().IsMatch(bicep)
             .Should().BeFalse("no storage account key may be emitted as an azd output");
+    }
+
+    [Fact]
+    public void MainBicep_EmitsRequireDurableStorageContract_ExactlyTrue()
+    {
+        string bicep = ReadInfra("main.bicep");
+
+        RequireDurableStorageOutputRegex().IsMatch(bicep)
+            .Should().BeTrue("main.bicep must emit RETAIL_PULSE_REQUIRE_DURABLE_STORAGE = 'true' so the hook " +
+                "re-asserts the exact durability requirement");
     }
 
     private static string FindRepoRoot()

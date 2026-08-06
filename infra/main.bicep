@@ -116,6 +116,10 @@ output AZURE_FILE_SHARE_NAME string = storage.outputs.fileShareName
 // the container-apps module default) so the postprovision hook re-asserts the
 // same durable path.
 output RETAIL_PULSE_DATA_DIRECTORY string = '/mnt/retailpulse-data'
+// Environment-agnostic durability switch re-asserted by the postprovision hook.
+// Kept in sync with the container-apps module env so the deployed API fails fast
+// on a missing/unwritable mount regardless of ASPNETCORE_ENVIRONMENT.
+output RETAIL_PULSE_REQUIRE_DURABLE_STORAGE string = 'true'
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and

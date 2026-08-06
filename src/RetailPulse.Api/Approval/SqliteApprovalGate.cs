@@ -1,15 +1,18 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using RetailPulse.Api.Data;
 using RetailPulse.Contracts.Approval;
 
 namespace RetailPulse.Api.Approval;
 
 /// <summary>
 /// SQLite-backed implementation of <see cref="IApprovalGate"/>.
-/// Thread-safe — each operation opens its own connection over a shared cache.
-/// Uses SMB-safe rollback journaling (see <see cref="Data.SqliteMount"/>)
-/// so it is durable on the Azure Files mount; single-writer only (API runs
-/// maxReplicas: 1). All database I/O uses async APIs with CancellationToken support.
+/// Thread-safe — each operation opens its own connection over a shared cache
+/// through <see cref="SqliteMount.OpenAsync"/>, which applies the centralized
+/// SMB-safe pragmas (busy_timeout, DELETE journaling, synchronous=FULL) to every
+/// connection so it is durable on the Azure Files mount and does not fail fast on a
+/// transient lock; single-writer only (API runs maxReplicas: 1). All database I/O
+/// uses async APIs with CancellationToken support.
 /// WaitForApprovalAsync uses exponential backoff instead of fixed-interval polling.
 /// </summary>
 public sealed class SqliteApprovalGate : IApprovalGate
@@ -46,13 +49,10 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     private async Task InitializeSchemaAsync()
     {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString);
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
-            PRAGMA journal_mode=DELETE;
-
             CREATE TABLE IF NOT EXISTS ApprovalRequests (
                 RequestId   TEXT PRIMARY KEY,
                 AgentId     TEXT NOT NULL,
@@ -83,8 +83,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         DateTimeOffset now = DateTimeOffset.UtcNow;
         DateTimeOffset expiresAt = now.Add(_defaultTimeout);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -111,8 +110,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     public async Task<ApprovalResult> GetResultAsync(string requestId, CancellationToken ct = default)
     {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         ApprovalRequest row = await ReadRowAsync(conn, requestId, ct)
             ?? throw new KeyNotFoundException($"Approval request '{requestId}' not found.");
@@ -136,8 +134,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
         while (!ct.IsCancellationRequested)
         {
-            await using var conn = new SqliteConnection(_connectionString);
-            await conn.OpenAsync(ct);
+            await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
             ApprovalRequest row = await ReadRowAsync(conn, requestId, ct)
                 ?? throw new KeyNotFoundException($"Approval request '{requestId}' not found.");
@@ -165,8 +162,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -194,8 +190,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     public async Task<IReadOnlyList<ApprovalRequest>> GetPendingAsync(string userId, CancellationToken ct = default)
     {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -210,8 +205,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
     public async Task<IReadOnlyList<ApprovalRequest>> GetHistoryAsync(int limit = 50, CancellationToken ct = default)
     {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """

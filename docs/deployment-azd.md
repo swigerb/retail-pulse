@@ -12,7 +12,7 @@ Retail Pulse supports one-command deployment to Azure using the [Azure Developer
 | Container Registry | Azure Container Registry (Basic) | Dedicated registry; Container Apps pull images via managed identity (no admin secrets) |
 | Frontend | Azure Static Web Apps | React/Vite static build (Standard SKU); calls the Container Apps API directly over CORS |
 | Monitoring | Application Insights + Log Analytics | Full OpenTelemetry pipeline |
-| Durable storage | Azure Storage (Standard_LRS StorageV2) + Azure Files share | 1 GiB SMB share mounted into the API at `/mnt/retailpulse-data` for durable SQLite (cost/audit/memory/approvals/alerts) |
+| Durable storage | Azure Storage (Standard_LRS StorageV2) + Azure Files share | 1 GiB SMB share mounted into the API at `/mnt/retailpulse-data` for durable SQLite (cost/audit/memory/approvals/alerts); durability enforced env-agnostically by `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=true` |
 | AI Gateway | Azure API Management | Existing APIM Bicep in `deploy/apim-ai-gateway/` |
 
 ## Prerequisites
@@ -263,6 +263,18 @@ started. `DataDirectoryResolver` **fails fast** if that path is missing or
 unwritable rather than silently reverting to ephemeral temp storage, so a broken
 mount surfaces as a startup error instead of quietly losing data.
 
+Because the deployed API runs with `ASPNETCORE_ENVIRONMENT=Development`, this
+fail-fast must **not** be gated on the environment. Deployment sets an explicit,
+environment-agnostic `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=true` env var alongside
+the mount — emitted by `main.bicep`, applied in `container-apps.bicep`, and
+re-asserted by the postprovision hooks. When the flag is truthy the resolver
+enforces the durable path regardless of environment, and a malformed value
+(anything other than `true`/`false`/`1`/`0`, case-insensitive) throws instead of
+silently downgrading. Local development leaves the flag unset (or `false`) and may
+fall back to a temp directory. PR #23 will later flip the deployed API to
+`Production`, but this durability guarantee is independent of that change and holds
+against the current `Development` deployment and future config drift.
+
 The **MCP server** still writes its seeded retail dataset (`retailpulse.db`) under
 the OS temp directory. That is intentional and safe: it **re-seeds from
 `tenant.yaml` on first run**, so the demo data regenerates automatically and needs
@@ -271,9 +283,13 @@ no durable volume.
 Constraints and cost:
 
 - **Single writer:** SQLite over SMB is safe only for one replica, so the API keeps
-  `maxReplicas: 1`. The mounted stores use SMB-safe rollback journaling
-  (`journal_mode=DELETE`, not WAL). Do **not** raise `maxReplicas` while the stores
-  share one mount.
+  `maxReplicas: 1`. Every mounted store opens through the centralized `SqliteMount`
+  helper, which applies the SMB-safe pragmas in order: `busy_timeout=10000` first
+  (so the journal switch waits rather than throwing `SQLITE_BUSY` under contention),
+  then `journal_mode=DELETE` (rollback journal, not WAL, whose `-shm` file is
+  unsupported over SMB), then `synchronous=FULL` (required for durability with a
+  DELETE journal — `NORMAL` is only safe under WAL). Do **not** raise `maxReplicas`
+  while the stores share one mount.
 - **Cost:** one Standard_LRS StorageV2 account with a 1 GiB `TransactionOptimized`
   file share — a few cents/month at demo volumes.
 - **Cleanup:** the account lives in the demo resource group and is destroyed by

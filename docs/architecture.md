@@ -459,14 +459,36 @@ Model pricing table: gpt-5.4-mini ($0.15/$0.60 per 1M tokens), gpt-4o ($2.50/$10
 > that previously lost everything under `Path.GetTempPath()`. Local development
 > leaves the variable unset and falls back to a temp directory. The resolver
 > **fails fast** (it never silently falls back to ephemeral storage) if a
-> configured durable path is missing or unwritable, and in a genuine Production
-> environment it refuses to start without a durable path.
+> configured durable path is missing or unwritable.
+>
+> **Environment-agnostic durability requirement:** Fail-fast must not depend on
+> `ASPNETCORE_ENVIRONMENT`, because the deployed API currently runs as
+> `Development`. Deployment therefore sets an explicit
+> `RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=true` env var alongside the mount (emitted
+> by `main.bicep`, applied in `container-apps.bicep`, and re-asserted by the
+> postprovision hooks). When that flag is truthy, `DataDirectoryResolver` refuses
+> to start if the configured path is absent, empty, or unwritable — **regardless
+> of environment**. A malformed value (anything other than `true`/`false`/`1`/`0`,
+> case-insensitive) throws rather than silently downgrading to ephemeral storage.
+> Local Development with the flag absent or `false` may still use a temp directory.
 >
 > **Single-replica constraint:** SQLite over SMB (Azure Files) is safe only for a
-> single writer, so the API runs `minReplicas: 0`, `maxReplicas: 1`. The mounted
-> stores use SMB-safe rollback journaling (`journal_mode=DELETE`, not WAL, whose
-> `-shm` shared memory is unsupported on network filesystems). This is **not**
-> multi-replica-safe; do not raise `maxReplicas` while the stores share one mount.
+> single writer, so the API runs `minReplicas: 0`, `maxReplicas: 1`. Every mounted
+> store opens its connection through the centralized `SqliteMount` helper, which is
+> the single source of the SMB-safe pragma policy — applied in order as
+> `busy_timeout=10000`, then `journal_mode=DELETE`, then `synchronous=FULL`:
+> - `busy_timeout` is set **first** so the `journal_mode` switch (which takes a
+>   database lock) waits instead of throwing `SQLITE_BUSY` under contention.
+> - `journal_mode=DELETE` uses a rollback journal rather than WAL, whose `-shm`
+>   shared-memory file is unsupported on network filesystems.
+> - `synchronous=FULL` is required for durability with a DELETE journal:
+>   `synchronous=NORMAL` only relaxes safely under WAL, so pairing `NORMAL` with
+>   `DELETE` (the prior policy) was inconsistent per the SQLite durability matrix.
+>   `EXTRA` is not used — it only adds extra directory-sync fsyncs relevant to
+>   crash-then-rename scenarios the app does not rely on.
+>
+> This is **not** multi-replica-safe; do not raise `maxReplicas` while the stores
+> share one mount.
 >
 > **Cost & cleanup:** the durable store is a single Standard_LRS StorageV2 account
 > with a 1 GiB file share (`Standard`/`TransactionOptimized`) — a few cents/month

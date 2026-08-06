@@ -1,13 +1,14 @@
 namespace RetailPulse.Api.Alerts;
 
 /// <summary>
-/// SQLite DDL for the proactive alerts subsystem.
+/// SQLite DDL for the proactive alerts subsystem. Connection-level pragmas
+/// (journaling, synchronous, busy_timeout) are intentionally NOT declared here —
+/// they are applied centrally to every connection by
+/// <see cref="Data.SqliteMount"/> when the connection is opened.
 /// </summary>
 internal static class AlertDbSchema
 {
     public const string CreateTables = """
-        PRAGMA journal_mode=DELETE;
-
         CREATE TABLE IF NOT EXISTS Alerts (
             Id                TEXT PRIMARY KEY,
             Type              TEXT NOT NULL,

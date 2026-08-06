@@ -49,13 +49,21 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             memory: '1Gi'
           }
           // Point the app's durable SQLite stores at the mounted Azure Files
-          // share. Defined here (not just in the postprovision hook) so a fresh
-          // `azd up` provisions a container that already fails fast if the mount
-          // is missing — it can never silently regress to ephemeral temp storage.
+          // share, and require durable storage explicitly. Defined here (not just
+          // in the postprovision hook) so a fresh `azd up` provisions a container
+          // that already fails fast if the mount is missing — it can never
+          // silently regress to ephemeral temp storage. RETAIL_PULSE_REQUIRE_DURABLE_STORAGE
+          // is environment-agnostic: it makes the durable path a hard startup
+          // requirement even though this app runs ASPNETCORE_ENVIRONMENT=Development,
+          // so future config drift cannot downgrade durability.
           env: [
             {
               name: 'RETAIL_PULSE_DATA_DIRECTORY'
               value: dataMountPath
+            }
+            {
+              name: 'RETAIL_PULSE_REQUIRE_DURABLE_STORAGE'
+              value: 'true'
             }
           ]
           volumeMounts: [

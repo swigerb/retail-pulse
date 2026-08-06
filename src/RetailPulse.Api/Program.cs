@@ -493,8 +493,11 @@ builder.Services.AddScoped(sp =>
 // alerts, costs, audit). Deployed ACA sets RETAIL_PULSE_DATA_DIRECTORY to the
 // mounted Azure Files share so this history survives replica replacement and
 // scale-to-zero; local development falls back to a temp directory. Resolution
-// fails fast (no silent ephemeral fallback) if a required durable path is missing
-// or unwritable — see DataDirectoryResolver.
+// fails fast (no silent ephemeral fallback) when a required durable path is missing
+// or unwritable. Durability is required explicitly and environment-agnostically via
+// RETAIL_PULSE_REQUIRE_DURABLE_STORAGE (set true by Bicep alongside the mount), so
+// the deployed API stays safe even though it runs ASPNETCORE_ENVIRONMENT=Development
+// — see DataDirectoryResolver.
 string dataDirectory = DataDirectoryResolver.Resolve(builder.Configuration, builder.Environment);
 string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
 builder.Services.AddSingleton<IApprovalGate>(sp =>
