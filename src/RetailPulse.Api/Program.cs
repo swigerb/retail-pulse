@@ -126,40 +126,14 @@ builder.Services.AddCors(options =>
 });
 
 // ── Authentication & Authorization ──────────────────────────────────────
-bool requireAuth = builder.Configuration.GetValue("Security:RequireAuth",
-    !builder.Environment.IsDevelopment());
-
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddAuthentication(DevelopmentAuthHandler.SchemeName)
-        .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthHandler>(
-            DevelopmentAuthHandler.SchemeName, _ => { })
-        .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-        {
-            // JWT scheme available but not default in dev — allows testing with real tokens
-            options.Authority = builder.Configuration["Security:JwtAuthority"];
-            options.TokenValidationParameters.ValidateAudience = false;
-        });
-}
-else
-{
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-        {
-            options.Authority = builder.Configuration["Security:JwtAuthority"];
-            options.Audience = builder.Configuration["Security:JwtAudience"];
-        });
-}
-
-builder.Services.AddAuthorization(options =>
-{
-    if (!requireAuth)
-    {
-        options.DefaultPolicy = new AuthorizationPolicyBuilder()
-            .RequireAssertion(_ => true)
-            .Build();
-    }
-});
+// Single, tenant-scoped Entra security boundary (see Security/AuthenticationSetup.cs):
+// Production validates real Entra JWTs pinned to the configured tenant/audience/issuer,
+// honours the access_token query param only for /hubs, and requires the app role + API
+// scope on every protected endpoint and hub. Development uses the synthetic handler. The
+// default policy is never permissive — no RequireAssertion(_ => true) when auth is on.
+EntraAuthOptions entraAuthOptions =
+    builder.Services.AddRetailPulseAuthentication(builder.Configuration, builder.Environment);
+builder.Services.AddRetailPulseAuthorization(entraAuthOptions);
 
 // ── Rate Limiting ───────────────────────────────────────────────────────
 builder.Services.AddRateLimiter(options =>

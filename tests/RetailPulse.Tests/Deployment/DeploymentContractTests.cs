@@ -129,6 +129,8 @@ public partial class DeploymentContractTests
                      "RETAIL_PULSE_FRONTEND_ORIGIN",
                      "AZURE_STATIC_WEB_APP_NAME",
                      "AZURE_LOCATION",
+                     "RETAIL_PULSE_ENTRA_TENANT_ID",
+                     "RETAIL_PULSE_ENTRA_CLIENT_ID",
                  })
         {
             script.Should().Contain(requiredEnv,
@@ -152,6 +154,62 @@ public partial class DeploymentContractTests
             $"{hookFile} must disable platform auth after linking because the link enables the SWA identity provider");
     }
 
+    // ── API deploys as authenticated Production (issue: anonymous prod) ──────
+
+    [Theory]
+    [InlineData("postprovision.ps1")]
+    [InlineData("postprovision.sh")]
+    public void PostprovisionHook_DeploysApiAsAuthenticatedProduction(string hookFile)
+    {
+        string script = Normalize(File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile)));
+
+        // The API must run real auth in Production. These are the exact settings that
+        // were dangerously wrong in the live deployment (anonymous, Development mode).
+        script.Should().Contain("Security__RequireAuth=true",
+            $"{hookFile} must deploy the API with real auth enabled");
+        script.Should().NotContain("Security__RequireAuth=false",
+            $"{hookFile} must never ship the API with auth disabled (anonymous production)");
+        script.Should().Contain("ASPNETCORE_ENVIRONMENT=Production",
+            $"{hookFile} must deploy the API in the Production environment");
+
+        // Tenant-scoped Entra values must be injected so JwtBearer can validate tokens.
+        script.Should().Contain("MicrosoftEntra__TenantId=",
+            $"{hookFile} must inject the Entra tenant id into the API");
+        script.Should().Contain("MicrosoftEntra__ClientId=",
+            $"{hookFile} must inject the Entra client id/audience into the API");
+    }
+
+    [Theory]
+    [InlineData("postprovision.ps1")]
+    [InlineData("postprovision.sh")]
+    public void PostprovisionHook_FailsFastWhenEntraConfigMissing(string hookFile)
+    {
+        // The Entra tenant/client values are read as REQUIRED azd env values so a
+        // misconfigured deploy fails loudly instead of silently shipping anonymous.
+        string raw = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile));
+        string script = Normalize(raw);
+
+        script.Should().Contain("RETAIL_PULSE_ENTRA_TENANT_ID",
+            $"{hookFile} must require the Entra tenant id from the azd environment");
+        script.Should().Contain("RETAIL_PULSE_ENTRA_CLIENT_ID",
+            $"{hookFile} must require the Entra client id from the azd environment");
+
+        if (hookFile.EndsWith(".sh", StringComparison.Ordinal))
+        {
+            script.Should().Contain("require_env RETAIL_PULSE_ENTRA_TENANT_ID",
+                $"{hookFile} must fail fast (require_env) when the Entra tenant id is missing");
+            script.Should().Contain("require_env RETAIL_PULSE_ENTRA_CLIENT_ID",
+                $"{hookFile} must fail fast (require_env) when the Entra client id is missing");
+        }
+        else
+        {
+            script.Should().Contain("Get-RequiredEnv RETAIL_PULSE_ENTRA_TENANT_ID",
+                $"{hookFile} must fail fast (Get-RequiredEnv) when the Entra tenant id is missing");
+            script.Should().Contain("Get-RequiredEnv RETAIL_PULSE_ENTRA_CLIENT_ID",
+                $"{hookFile} must fail fast (Get-RequiredEnv) when the Entra client id is missing");
+        }
+    }
+
     // ── main.bicep: dedicated registry + azd-consumed outputs ───────────────
 
     [Fact]
@@ -172,6 +230,29 @@ public partial class DeploymentContractTests
         var pattern = new Regex($@"output\s+{Regex.Escape(outputName)}\s+string\s*=", RegexOptions.Multiline);
         pattern.IsMatch(bicep).Should().BeTrue(
             $"main.bicep must emit '{outputName}' so azd can push/pull against the dedicated registry");
+    }
+
+    [Theory]
+    [InlineData("VITE_ENTRA_TENANT_ID")]
+    [InlineData("VITE_ENTRA_CLIENT_ID")]
+    [InlineData("VITE_ENTRA_API_SCOPE")]
+    [InlineData("VITE_ENTRA_AUDIENCE")]
+    public void MainBicep_EmitsEntraViteOutput_ForFrontendBuild(string outputName)
+    {
+        string bicep = File.ReadAllText(Path.Combine(RepoRoot, "infra", "main.bicep"));
+        var pattern = new Regex($@"output\s+{Regex.Escape(outputName)}\s+string\s*=", RegexOptions.Multiline);
+        pattern.IsMatch(bicep).Should().BeTrue(
+            $"main.bicep must emit '{outputName}' so the Vite frontend build embeds the Entra config into the SPA");
+    }
+
+    [Theory]
+    [InlineData("RETAIL_PULSE_ENTRA_TENANT_ID")]
+    [InlineData("RETAIL_PULSE_ENTRA_CLIENT_ID")]
+    public void MainBicepParam_ReadsEntraEnv_NonSecret(string envVar)
+    {
+        string bicepparam = File.ReadAllText(Path.Combine(RepoRoot, "infra", "main.bicepparam"));
+        bicepparam.Should().Contain($"readEnvironmentVariable('{envVar}'",
+            $"main.bicepparam must source '{envVar}' from the azd environment so provisioning stays non-secret and idempotent");
     }
 
     // ── container-registry module: Basic SKU, no admin secrets ──────────────

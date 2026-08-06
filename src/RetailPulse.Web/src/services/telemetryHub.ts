@@ -1,6 +1,7 @@
 import * as signalR from '@microsoft/signalr';
 import type { AgentSpan } from '../types';
 import { resolveTelemetryHubUrl } from '../config/telemetryHubUrl';
+import { getHubAccessToken } from '../auth/tokenService';
 
 const HUB_URL = resolveTelemetryHubUrl();
 
@@ -33,7 +34,12 @@ export function connectTelemetryHub(
   }
 
   connection = new signalR.HubConnectionBuilder()
-    .withUrl(HUB_URL)
+    .withUrl(HUB_URL, {
+      // Bearer token for the hub handshake. WebSocket handshakes can't set an
+      // Authorization header, so SignalR appends the returned token as ?access_token=,
+      // which the API honours ONLY for /hubs. Returns '' locally (no token needed).
+      accessTokenFactory: getHubAccessToken,
+    })
     .withAutomaticReconnect()
     .build();
 

@@ -2,6 +2,44 @@
 
 ## Active Decisions
 
+### 2026-08-06: Single-tenant Entra auth boundary for the SPA + API (MSAL PKCE, app-role required)
+
+**By:** Squad (Auth)
+
+**What:** Retail Pulse production access is now gated by **one single-tenant Microsoft
+Entra app registration** covering both the React SPA and the API. Frontend: a new
+`src/RetailPulse.Web/src/auth/` module (MSAL PKCE, no secret) with an `AuthGate` sign-in
+gate, a central `window.fetch` wrapper that attaches the bearer to every `/api`, `/hubs`,
+and `VITE_API_ORIGIN` request, and `accessTokenFactory` on **both** SignalR clients.
+Backend (`Security/AuthenticationSetup.cs` + `EntraAuthOptions.cs`): JwtBearer with
+authority/issuer/audience pinned to the tenant and `api://{clientId}`, a non-permissive
+default policy requiring an authenticated user **+ `RetailPulse.User` app role +
+`access_as_user` scope**, `?access_token` honoured only on `/hubs`, and fail-fast config
+validation in Production. `MemoryEndpoints` was missing `.RequireAuthorization()` (silently
+anonymous because the app sets `DefaultPolicy`, not `FallbackPolicy`) — fixed and guarded by
+a new source-scan test. Non-secret provisioning via `scripts/Setup-EntraAuth.ps1`
+(preview-by-default, explicit `-Apply`) + read-only `scripts/Verify-EntraAuth.ps1`.
+`infra/main.bicep(param)` inject `VITE_ENTRA_*` into the Vite build; the postprovision hooks
+set the API Entra env, `Security__RequireAuth=true`, `ASPNETCORE_ENVIRONMENT=Production`, and
+disable ACA Easy Auth.
+
+**Why:** The app previously shipped no user authentication. A single-tenant SPA/API
+registration with PKCE (no secret) and an assignment-required app role gives a minimal,
+secretless boundary that works identically for direct ACA REST and direct SignalR, without
+Easy Auth redirect interference. Local development stays unauthenticated by design (the
+Development auth handler stamps role+scope) with **no anonymous fallback in Production**.
+
+**Team impact:**
+- Provisioning is manual and non-secret: run `scripts/Setup-EntraAuth.ps1 -Apply` in the
+  target tenant, then `azd env set RETAIL_PULSE_ENTRA_{TENANT_ID,CLIENT_ID,API_SCOPE,AUDIENCE}`
+  before `azd provision`. All values are public identifiers — never commit secrets.
+- Every new API endpoint group **must** call `.RequireAuthorization()` (enforced by
+  `tests/RetailPulse.Tests/Security/EndpointAuthorizationCoverageTests.cs`).
+- Users need the `RetailPulse.User` app role or they get a 403 (surfaced by `AuthGate`).
+  Keep ACA Easy Auth **disabled**; re-enabling it breaks the SPA redirect.
+- Full contract: `docs/authentication-entra.md`; guardrails in
+  `tests/RetailPulse.Tests/{Security,Deployment}`.
+
 ### 2026-08-05: Dedicated Basic ACR + postprovision hook for secretless Container Apps image pull
 
 **By:** Costco (Backend Dev)

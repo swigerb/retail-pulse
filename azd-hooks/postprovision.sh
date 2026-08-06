@@ -34,11 +34,21 @@ require_env AZURE_OPENAI_ENDPOINT
 require_env RETAIL_PULSE_FRONTEND_ORIGIN
 require_env AZURE_STATIC_WEB_APP_NAME
 require_env AZURE_LOCATION
+# Entra auth configuration. Tenant/client IDs are CONFIGURATION, not secrets; the
+# parent captures them via `azd env set` from the Setup-EntraAuth.ps1 output. Read
+# with require_env so a deploy fails fast rather than silently shipping an anonymous,
+# Development-mode API (the exact regression this hook now prevents).
+require_env RETAIL_PULSE_ENTRA_TENANT_ID
+require_env RETAIL_PULSE_ENTRA_CLIENT_ID
 
 resource_group="$AZURE_RESOURCE_GROUP"
 registry_name="$AZURE_CONTAINER_REGISTRY_NAME"
 registry_server="$AZURE_CONTAINER_REGISTRY_ENDPOINT"
 registry_id="$AZURE_CONTAINER_REGISTRY_RESOURCE_ID"
+entra_tenant_id="$RETAIL_PULSE_ENTRA_TENANT_ID"
+entra_client_id="$RETAIL_PULSE_ENTRA_CLIENT_ID"
+entra_api_scope="${RETAIL_PULSE_ENTRA_API_SCOPE:-access_as_user}"
+entra_app_role="${RETAIL_PULSE_ENTRA_APP_ROLE:-RetailPulse.User}"
 
 echo "Configuring ACR pull via system-assigned identity on registry '$registry_name'..."
 
@@ -85,8 +95,12 @@ for app in "$AZURE_API_APP_NAME" "$AZURE_MCP_SERVER_APP_NAME" "$AZURE_TEAMS_BOT_
     echo '   registry auth bound to system identity'
 done
 
-echo 'Configuring synthetic-demo runtime settings...'
+echo 'Configuring production auth + runtime settings for the API...'
 
+# The API is the security boundary. It deploys as Production with real Entra JWT
+# validation enabled (Security__RequireAuth=true). ACA platform (Easy Auth) stays
+# disabled below so the in-process JwtBearer handler is the sole gate; direct ACA
+# REST/SignalR are protected independent of SWA routing.
 az containerapp update \
     --name "$AZURE_API_APP_NAME" \
     --resource-group "$resource_group" \
@@ -96,9 +110,13 @@ az containerapp update \
     'OpenAI__Deployment=gpt-5.4-mini-2026-03-17' \
     'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17' \
     "McpServer__BaseUrl=$AZURE_MCP_SERVER_APP_URL" \
-    'Security__RequireAuth=false' \
+    'Security__RequireAuth=true' \
     "Security__AllowedOrigins__0=$RETAIL_PULSE_FRONTEND_ORIGIN" \
-    'ASPNETCORE_ENVIRONMENT=Development' \
+    "MicrosoftEntra__TenantId=$entra_tenant_id" \
+    "MicrosoftEntra__ClientId=$entra_client_id" \
+    "MicrosoftEntra__ApiScope=$entra_api_scope" \
+    "MicrosoftEntra__AppRole=$entra_app_role" \
+    'ASPNETCORE_ENVIRONMENT=Production' \
     --output none
 
 # SWA proxies relative /api requests to ACA. SignalR intentionally bypasses
@@ -124,8 +142,10 @@ if [ -z "$linked" ]; then
         --output none
 fi
 
-# Linking enables the SWA identity provider. Disable platform auth afterward;
-# the synthetic demo uses its fixed Development identity.
+# Linking enables the SWA identity provider on the /api proxy path, but ACA platform
+# (Easy Auth) is deliberately kept DISABLED: it would issue login redirects that break
+# bearer-token REST/SignalR clients calling ACA directly. The in-process Entra JwtBearer
+# handler (Security__RequireAuth=true above) is the real security boundary.
 az containerapp auth update \
     --name "$AZURE_API_APP_NAME" \
     --resource-group "$resource_group" \
@@ -146,4 +166,4 @@ az containerapp update \
     "TeamsBot__ApiBaseUrl=$AZURE_API_APP_URL" \
     --output none
 
-echo 'Post-provision configuration complete: secretless ACR pull and synthetic-demo runtime settings are ready.'
+echo 'Post-provision configuration complete: secretless ACR pull and production Entra auth runtime settings are ready.'

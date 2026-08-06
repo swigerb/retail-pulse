@@ -13,6 +13,7 @@ Retail Pulse supports one-command deployment to Azure using the [Azure Developer
 | Frontend | Azure Static Web Apps | React/Vite static build (Standard SKU); calls the Container Apps API directly over CORS |
 | Monitoring | Application Insights + Log Analytics | Full OpenTelemetry pipeline |
 | AI Gateway | Azure API Management | Existing APIM Bicep in `deploy/apim-ai-gateway/` |
+| Authentication | Microsoft Entra ID | Single-tenant SPA/API app registration (MSAL PKCE). See [authentication-entra.md](./authentication-entra.md). Set `RETAIL_PULSE_ENTRA_*` before `azd provision`; the postprovision hook flips `RequireAuth` on and disables Easy Auth. |
 
 ## Prerequisites
 
