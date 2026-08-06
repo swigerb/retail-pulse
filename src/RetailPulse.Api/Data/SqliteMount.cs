@@ -4,10 +4,17 @@ namespace RetailPulse.Api.Data;
 
 /// <summary>
 /// Centralized SMB-safe SQLite configuration for <b>every</b> store that lives in
-/// the shared writable data directory and can therefore end up on the mounted
-/// Azure Files share: audit, cost, memory, approvals, and alerts. This is the one
-/// and only place the pragma policy is defined — individual stores must not embed
-/// their own partial pragma strings.
+/// the shared writable data directory (audit, cost, memory, approvals, and alerts).
+/// This is the one and only place the pragma policy is defined — individual stores
+/// must not embed their own partial pragma strings.
+/// <para>
+/// <b>Deployment note:</b> the deployed demo does not currently mount a network
+/// share — its SQLite stores live on the container's local temp disk (an
+/// account-key Azure Files mount is blocked by tenant governance; see
+/// <c>docs/deployment-azd.md</c>). These pragmas are nonetheless correct on local
+/// disk and are retained so any future policy-compatible network-filesystem backing
+/// (where WAL is unsafe) works without change.
+/// </para>
 /// <para>
 /// SQLite's write-ahead log (<c>journal_mode=WAL</c>) relies on a shared-memory
 /// index file (<c>-shm</c>) that is memory-mapped across connections. That
@@ -36,9 +43,9 @@ namespace RetailPulse.Api.Data;
 /// </para>
 /// <para>
 /// This does <b>not</b> make SQLite safe for multiple concurrent writer processes
-/// over SMB. It is correct only because the API Container App runs
-/// <c>maxReplicas: 1</c> (a single writer). Do not raise the replica count while
-/// the durable stores share one Azure Files mount.
+/// over a network filesystem. It is correct only because the API Container App runs
+/// <c>maxReplicas: 1</c> (a single writer). Do not raise the replica count while the
+/// durable stores share one data directory.
 /// </para>
 /// </summary>
 public static class SqliteMount
