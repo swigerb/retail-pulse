@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Alerts;
+using RetailPulse.Api.Auth;
 using RetailPulse.Api.Caching;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
@@ -47,6 +49,14 @@ public static class RoutingServiceExtensions
         // Register the scoped streaming progress feature
         services.AddScoped<StreamingProgressFeature>();
 
+        // Guarantee an IAnonymousChatPolicy is always resolvable wherever the pipeline is composed.
+        // Anonymous mode registers the real AnonymousChatPolicy earlier (see
+        // ProviderNeutralAuthentication.AddAnonymousMode), so this TryAdd is a no-op there and the
+        // constrained policy wins. In Entra/Development the provider-neutral no-op is used. This
+        // makes the pipeline's non-optional policy dependency satisfiable in every composition —
+        // an omitted policy is a startup resolution failure, never a silent null runtime bypass.
+        services.TryAddSingleton<IAnonymousChatPolicy, NoOpAnonymousChatPolicy>();
+
         // Register the shared execution pipeline
         services.AddScoped<IAgentExecutionPipeline>(sp =>
         {
@@ -57,7 +67,8 @@ public static class RoutingServiceExtensions
             IConfiguration configuration = sp.GetRequiredService<IConfiguration>();
             ILogger<AgentExecutionPipeline> logger = sp.GetRequiredService<ILogger<AgentExecutionPipeline>>();
             RetailPulseMetrics? metrics = sp.GetService<RetailPulseMetrics>();
-            return new AgentExecutionPipeline(chatClient, hubContext, streamingHubContext, streamingFeature, configuration, logger, metrics);
+            IAnonymousChatPolicy anonymousChatPolicy = sp.GetRequiredService<IAnonymousChatPolicy>();
+            return new AgentExecutionPipeline(chatClient, hubContext, streamingHubContext, streamingFeature, configuration, logger, metrics, anonymousChatPolicy);
         });
 
         // Register GeneralAgent as ISpecialistAgent

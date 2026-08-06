@@ -49,6 +49,15 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
       // replacement, new revisions, or scale-to-zero. maxReplicas: 1 keeps a single
       // SQLite writer; see docs/deployment-azd.md for the policy-compatible durable
       // options under evaluation.
+      //
+      // maxReplicas: 1 is ALSO a hard requirement for the (non-Production) Anonymous
+      // authentication mode: its billable-use circuit breaker (daily request/token/cost
+      // ceilings), its rate-limit windows (including the global bootstrap limiter), and
+      // its hub session-ownership registry are all replica-local in-memory state, so exact
+      // global enforcement only holds with a single replica (and all of it resets on
+      // restart or replica replacement). This live deployment stays Authentication:Mode=Entra;
+      // the constraint is documented here so a future Anonymous demo deployment cannot
+      // scale out and silently bypass the ceilings. See docs/adr/005 and docs/security.md.
       scale: {
         minReplicas: 0
         maxReplicas: 1

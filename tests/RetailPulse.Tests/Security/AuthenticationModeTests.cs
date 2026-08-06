@@ -15,8 +15,10 @@ namespace RetailPulse.Tests.Security;
 /// These prove the deterministic, fail-closed selection rules:
 /// <list type="bullet">
 ///   <item>Explicit <c>Entra</c> (any casing) resolves and wires the existing Entra boundary.</item>
-///   <item>GitHub/Anonymous resolve as known modes but the factory fails startup
+///   <item>GitHub resolves as a known mode but the factory fails startup
 ///     ("not implemented in this sprint") and never falls through to Entra/dev/anonymous.</item>
+///   <item>Anonymous (Sprint 1) wires its own constrained session stack; hosted use fails
+///     closed without the second opt-in + signing key + daily ceilings.</item>
 ///   <item>Unknown/malformed/numeric modes fail startup.</item>
 ///   <item>Production with a missing mode fails closed; Development defaults to Entra.</item>
 /// </list>
@@ -153,11 +155,11 @@ public sealed class AuthenticationModeTests
     {
         var services = new ServiceCollection();
 
-        EntraAuthOptions options = services.AddProviderNeutralAuthentication(
+        EntraAuthOptions? options = services.AddProviderNeutralAuthentication(
             EntraConfig("Entra"), Env("Production"));
 
         options.Should().NotBeNull();
-        options.RequireAuth.Should().BeTrue("Production must run real Entra auth");
+        options!.RequireAuth.Should().BeTrue("Production must run real Entra auth");
 
         ServiceProvider provider = services.BuildServiceProvider();
         provider.GetService<EntraAuthOptions>().Should().NotBeNull();
@@ -173,18 +175,17 @@ public sealed class AuthenticationModeTests
     {
         var services = new ServiceCollection();
 
-        EntraAuthOptions options = services.AddProviderNeutralAuthentication(
+        EntraAuthOptions? options = services.AddProviderNeutralAuthentication(
             Config(), Env("Development"));
 
         options.Should().NotBeNull();
         services.BuildServiceProvider().GetService<IPrincipalNormalizer>().Should().NotBeNull();
     }
 
-    // ── Factory boundary: unimplemented modes fail closed, no fall-through ─────
+    // ── Factory boundary: GitHub still fails closed, no fall-through ───────────
 
     [Theory]
     [InlineData("GitHub")]
-    [InlineData("Anonymous")]
     public void AddProviderNeutralAuthentication_UnimplementedMode_FailsStartup(string mode)
     {
         var services = new ServiceCollection();
@@ -197,7 +198,6 @@ public sealed class AuthenticationModeTests
 
     [Theory]
     [InlineData("GitHub")]
-    [InlineData("Anonymous")]
     public void AddProviderNeutralAuthentication_UnimplementedMode_DoesNotWireAnyAuth(string mode)
     {
         var services = new ServiceCollection();
@@ -222,6 +222,94 @@ public sealed class AuthenticationModeTests
         services.Should().NotContain(
             d => d.ServiceType.FullName == "Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider",
             "an unimplemented mode must never register an authentication scheme");
+    }
+
+    // ── Factory boundary: Anonymous mode (Sprint 1) ───────────────────────────
+
+    [Fact]
+    public void AddProviderNeutralAuthentication_AnonymousInDevelopment_WiresAnonymousStackAndReturnsNull()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // Development may enable Anonymous with just the explicit mode — no AllowHosted, no key.
+        EntraAuthOptions? options = services.AddProviderNeutralAuthentication(
+            Config(("Authentication:Mode", "Anonymous")), Env("Development"));
+
+        // Anonymous wires its own authorization internally, so it returns null (Program.cs must
+        // NOT layer the Entra policy on top).
+        options.Should().BeNull();
+
+        ServiceProvider provider = services.BuildServiceProvider();
+        provider.GetService<AuthenticationModeOptions>()!.Mode.Should().Be(AuthenticationMode.Anonymous);
+
+        // The anonymous principal normalizer and session token service are registered and usable.
+        IPrincipalNormalizer normalizer = provider.GetRequiredService<IPrincipalNormalizer>();
+        normalizer.Mode.Should().Be(AuthenticationMode.Anonymous);
+
+        provider.GetService<Api.Security.Anonymous.IAnonymousSessionTokenService>()
+            .Should().NotBeNull("Development Anonymous mode generates an ephemeral signing key");
+        provider.GetService<Api.Security.Anonymous.AnonymousUsageBudget>()
+            .Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AddProviderNeutralAuthentication_HostedAnonymousWithoutAllowHosted_FailsClosed()
+    {
+        var services = new ServiceCollection();
+
+        // A hosted (non-Development) Anonymous deployment without the SECOND explicit opt-in
+        // must fail startup — no scheme is wired.
+        Action act = () => services.AddProviderNeutralAuthentication(
+            Config(("Authentication:Mode", "Anonymous")), Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*AllowHosted*");
+    }
+
+    [Fact]
+    public void AddProviderNeutralAuthentication_HostedAnonymousWithoutSigningKey_FailsClosed()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => services.AddProviderNeutralAuthentication(
+            Config(
+                ("Authentication:Mode", "Anonymous"),
+                ("Anonymous:AllowHosted", "true"),
+                ("Anonymous:Limits:DailyMaxRequests", "100"),
+                ("Anonymous:Limits:DailyMaxTokens", "50000"),
+                ("Anonymous:Limits:DailyMaxCostUsd", "2.5")),
+            Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*SigningKey*");
+    }
+
+    [Fact]
+    public void AddProviderNeutralAuthentication_HostedAnonymousFullyConfigured_Wires()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        EntraAuthOptions? options = services.AddProviderNeutralAuthentication(
+            Config(
+                ("Authentication:Mode", "Anonymous"),
+                ("Anonymous:AllowHosted", "true"),
+                ("Anonymous:SigningKey", "this-is-a-32-byte-minimum-signing-key!!"),
+                ("Anonymous:Limits:DailyMaxRequests", "100"),
+                ("Anonymous:Limits:DailyMaxTokens", "50000"),
+                ("Anonymous:Limits:DailyMaxCostUsd", "2.5")),
+            Env("Production"));
+
+        options.Should().BeNull();
+
+        ServiceProvider provider = services.BuildServiceProvider();
+        Api.Security.Anonymous.AnonymousAuthOptions resolved =
+            provider.GetRequiredService<Api.Security.Anonymous.AnonymousAuthOptions>();
+        resolved.HostedGuardrailsEnforced.Should().BeTrue();
+        resolved.HasConfiguredSigningKey.Should().BeTrue();
+
+        Api.Security.Anonymous.AnonymousUsageBudget budget =
+            provider.GetRequiredService<Api.Security.Anonymous.AnonymousUsageBudget>();
+        budget.Enforced.Should().BeTrue("hosted Anonymous must enforce the daily circuit breaker");
     }
 
     [Theory]

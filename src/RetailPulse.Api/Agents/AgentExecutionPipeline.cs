@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
+using RetailPulse.Api.Auth;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Telemetry;
@@ -26,6 +27,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly ILogger<AgentExecutionPipeline> _logger;
     private readonly RetailPulseMetrics? _metrics;
     private readonly StreamingProgressFeature _streamingFeature;
+    private readonly IAnonymousChatPolicy _anonymousChatPolicy;
 
     private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -45,7 +47,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         StreamingProgressFeature? streamingFeature,
         IConfiguration configuration,
         ILogger<AgentExecutionPipeline> logger,
-        RetailPulseMetrics? metrics = null)
+        RetailPulseMetrics? metrics,
+        IAnonymousChatPolicy anonymousChatPolicy)
     {
         _chatClient = chatClient;
         _hubContext = hubContext;
@@ -54,11 +57,15 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         _configuration = configuration;
         _logger = logger;
         _metrics = metrics;
+        _anonymousChatPolicy = anonymousChatPolicy
+            ?? throw new ArgumentNullException(nameof(anonymousChatPolicy));
     }
 
     /// <summary>
     /// Simplified constructor for backward compatibility (tests and legacy code).
-    /// Streaming progress is disabled when using this constructor.
+    /// Streaming progress is disabled when using this constructor, and the provider-neutral
+    /// <see cref="NoOpAnonymousChatPolicy"/> is applied (no Anonymous tool-stripping or output cap).
+    /// Production DI must use the primary constructor and supply the resolved policy explicitly.
     /// </summary>
     public AgentExecutionPipeline(
         IChatClient chatClient,
@@ -66,7 +73,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         IConfiguration configuration,
         ILogger<AgentExecutionPipeline> logger,
         RetailPulseMetrics? metrics = null)
-        : this(chatClient, hubContext, null, null, configuration, logger, metrics)
+        : this(chatClient, hubContext, null, null, configuration, logger, metrics, NoOpAnonymousChatPolicy.Instance)
     {
     }
 
@@ -85,8 +92,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
-            Tools = [.. context.Tools.Select(t => t is AIFunction fn ? new TimedAIFunction(fn) : t)]
+            Tools = [.. _anonymousChatPolicy.ApplyToolFilter(context.Tools).Select(t => t is AIFunction fn ? new TimedAIFunction(fn) : t)]
         };
+        _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
         string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
         List<ChatMessage> messages = BuildMessages(systemPrompt, request);
@@ -256,13 +264,15 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         // Wrap tools with instrumentation for real-time per-tool progress events
         var instrumentedToolMiddleware = new InstrumentedToolMiddleware(_hubContext);
-        IReadOnlyList<AITool> instrumentedTools = instrumentedToolMiddleware.WrapTools(context.Tools, sessionId);
+        IEnumerable<AITool> allowedTools = _anonymousChatPolicy.ApplyToolFilter(context.Tools);
+        IReadOnlyList<AITool> instrumentedTools = instrumentedToolMiddleware.WrapTools(allowedTools, sessionId);
 
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
             Tools = [.. instrumentedTools]
         };
+        _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
         string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
         List<ChatMessage> messages = BuildMessages(systemPrompt, request);

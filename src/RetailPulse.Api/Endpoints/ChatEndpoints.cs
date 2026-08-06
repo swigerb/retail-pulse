@@ -11,6 +11,7 @@ using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.Prefetch;
 using RetailPulse.Api.Rag;
+using RetailPulse.Api.Security.Anonymous;
 using RetailPulse.Api.Tracing;
 using RetailPulse.Api.Validation;
 using RetailPulse.Contracts;
@@ -30,7 +31,7 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IConsensusCouncil? council = null) =>
+        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
             ValidationResult validation = ChatRequestValidator.Validate(request);
@@ -54,6 +55,24 @@ public static class ChatEndpoints
             {
                 string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
                 string userId = UserIdentity.Resolve(httpContext.User, request.User?.ObjectId);
+
+                // Anonymous narrowing (resolved from the validated token, never a client flag):
+                //  • cache is disabled entirely (Finding 7 — the shared key excluded the subject);
+                //  • conversation memory recall + extraction are disabled (Finding 2 — no durable,
+                //    accountable identity, so no stored cross-prompt injection surface).
+                bool anonymous = anonymousChatPolicy?.AppliesToCurrentRequest == true;
+                bool cacheDisabled = anonymousChatPolicy.IsCacheDisabled();
+                bool memoryDisabled = anonymousChatPolicy.IsMemoryDisabled();
+
+                // Bind the session to this anonymous subject BEFORE any telemetry flows to its group.
+                // If the client-supplied id is already owned by a DIFFERENT subject, mint a fresh id
+                // for this turn so this subject's telemetry can never be delivered to another subject's
+                // hub group (the reverse of the JoinSession leak — Finding 6).
+                if (anonymous && sessionOwnership is not null && !sessionOwnership.TryBind(sessionId, userId))
+                {
+                    sessionId = Guid.NewGuid().ToString("N");
+                    sessionOwnership.TryBind(sessionId, userId);
+                }
                 // Normalise request.User so downstream agents resolve the same userId
                 // (MemoryManagementAgent reads request.User?.ObjectId — without this
                 // it would diverge from the /api/memory read path under dev auth).
@@ -77,7 +96,7 @@ public static class ChatEndpoints
                 }
 
                 // ── Cache: check for cached response ─────────────────────────────
-                if (CacheHelpers.IsCacheable(request.Message))
+                if (!cacheDisabled && CacheHelpers.IsCacheable(request.Message))
                 {
                     string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                     CachedResponse? cached = await responseCache.GetAsync(cacheKey, ct);
@@ -173,6 +192,50 @@ public static class ChatEndpoints
                         }));
                 }
 
+                // ── Anonymous intent hard-stops (before specialist selection / execution) ──
+                // These close two chat-internal bypasses that the anonymous write-tool filter and
+                // the cache/memory-disabled narrowing cannot reach, because they do not go through
+                // the tool set at all:
+                //
+                //  1) Memory management — the MemoryManagementAgent calls StoreAsync/ForgetAsync
+                //     DIRECTLY (no AI tools), so tool filtering never sees it. Refuse now so that
+                //     agent never runs: no model call, and zero memory rows are written.
+                //  2) Consensus council (portfolio health) — the council interception below fans out
+                //     multiple model calls via IConsensusCouncil and returns EARLY, bypassing the
+                //     single accounted budget/audit/guardrail path. Refuse now so the council is
+                //     never convened for an anonymous session.
+                //
+                // The council interception is the ONLY in-process alternate orchestrator reachable
+                // from POST /api/chat; the scorecard/escalation orchestrators are not registered as
+                // ISpecialistAgent and are reachable only via their own /api routes (all 403 for
+                // anonymous). Both refusals are deterministic (no model) — they cannot be defeated by
+                // a crafted keyword prompt because they fire on the router's own classification.
+                if (anonymous && AnonymousChatRestrictions.IsMemoryManagementIntent(decision))
+                {
+                    logger.LogInformation(
+                        "Anonymous memory-management request refused (no store/forget, no model) for session {SessionId}",
+                        sessionId);
+                    return Results.Ok(new ChatResponse(
+                        AnonymousChatRestrictions.MemoryRefusalMessage,
+                        sessionId,
+                        [],
+                        null,
+                        0));
+                }
+
+                if (anonymous && AnonymousChatRestrictions.IsCouncilIntent(decision))
+                {
+                    logger.LogInformation(
+                        "Anonymous portfolio-health/council request refused (no council model calls) for session {SessionId}",
+                        sessionId);
+                    return Results.Ok(new ChatResponse(
+                        AnonymousChatRestrictions.CouncilRefusalMessage,
+                        sessionId,
+                        [],
+                        null,
+                        0));
+                }
+
                 // Agent selection with tracing
                 ISpecialistAgent? specialist;
                 {
@@ -225,12 +288,14 @@ public static class ChatEndpoints
 
                 // ── Enrich: now load context relevant to the routed agent ────────
 
-                // Memory recall with tracing
+                // Memory recall with tracing — skipped entirely for Anonymous (memory disabled).
                 string? memoryContext = null;
                 using (Activity? memoryRecallActivity = AgentTelemetry.StartMemoryRecall(userId))
                 {
                     DateTimeOffset memoryStart = DateTimeOffset.UtcNow;
-                    memoryContext = await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
+                    memoryContext = memoryDisabled
+                        ? null
+                        : await memoryMiddleware.BuildMemoryContextAsync(userId, request.Message, ct);
                     DateTimeOffset memoryEnd = DateTimeOffset.UtcNow;
                     double memoryDurationMs = (memoryEnd - memoryStart).TotalMilliseconds;
 
@@ -315,7 +380,10 @@ public static class ChatEndpoints
                             null,
                             (long)verdict.TotalDuration.TotalMilliseconds);
 
-                        await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, councilReply, ct);
+                        if (!memoryDisabled)
+                        {
+                            await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, councilReply, ct);
+                        }
 
                         // Auto-create a Voting card from the council verdict
                         IAdaptiveCardState cardState = app.Services.GetRequiredService<IAdaptiveCardState>();
@@ -427,8 +495,9 @@ public static class ChatEndpoints
                     }
                 }
 
-                // Memory store via bounded channel (background service processes)
-                if (decision.Intent != AgentIntent.MemoryManagement)
+                // Memory store via bounded channel (background service processes) — never for
+                // Anonymous (memory disabled: no accountable identity to key extraction to).
+                if (!memoryDisabled && decision.Intent != AgentIntent.MemoryManagement)
                 {
                     memoryChannel.TryWrite(new MemoryWorkItem(
                         userId,
@@ -502,7 +571,7 @@ public static class ChatEndpoints
                 response = response with { Routing = isErrorResponse ? null : routingInfo };
 
                 // ── Cache: store response for deterministic queries ──────────────
-                if (CacheHelpers.IsCacheable(request.Message))
+                if (!cacheDisabled && CacheHelpers.IsCacheable(request.Message))
                 {
                     string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                     await responseCache.SetAsync(cacheKey,
