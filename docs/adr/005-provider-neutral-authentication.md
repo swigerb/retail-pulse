@@ -180,7 +180,7 @@ and is proven to stay `Entra` by the deployment-contract tests. Anonymous mode i
 ### Server-minted session identity (no trusted client header)
 
 - Identity is never taken from a caller-supplied user id. A single, narrowly
-  scoped, per-IP rate-limited bootstrap endpoint
+  scoped, globally rate-limited bootstrap endpoint
   (`POST /api/auth/anonymous/session`) mints a fresh, cryptographically random
   per-session subject (`anon-<base64url>`) SERVER-SIDE.
 - The credential is a compact, short-lived (default 15 min) **HS256 session JWT**
@@ -206,45 +206,91 @@ and is proven to stay `Entra` by the deployment-contract tests. Anonymous mode i
 - Sessions are isolated by their random subject; no identity state is shared
   across sessions.
 
-### Read-only by policy (single source of truth)
+### Deny-by-default capability allowlist (single source of truth)
 
-- `AnonymousCapabilityPolicy` is data, not UI hiding: a small allowlist of
-  read-only non-GET routes; every other non-GET verb/route is denied by default.
-  A newly added mutation endpoint is therefore denied to anonymous callers unless
-  it is explicitly added to the allowlist.
-- The chat tool set is filtered so write-capable tools (today: `RequestApproval`)
-  are never registered for an anonymous principal — the model cannot invoke a
-  write path.
+- `AnonymousCapabilityPolicy` is data, not UI hiding, and it is **deny-by-default
+  over every (method, route)** — there is no read/GET shortcut. The allowlist is
+  exactly: the unauthenticated bootstrap, authenticated `POST /api/chat`, and the
+  `/hubs/telemetry` + `/hubs/streaming` hubs (plus `OPTIONS` preflight). Everything
+  else — all observability/admin/export/memory/cards/approvals/guardrail-log routes,
+  every broad GET, and every **alternate LLM/orchestrator route**
+  (`/api/chat/stream`, `/api/council/*`, message-extension, scorecard, escalation) —
+  returns `403`. A newly added endpoint is denied to anonymous callers unless it is
+  explicitly allowlisted, and a runtime endpoint-graph test enumerates the compiled
+  route table to prove it.
+- Read-only data (e.g. charts) is reached **through the filtered chat tool path**,
+  not a direct operator endpoint, so subject-scoping and the output/budget controls
+  always apply.
+- Because only the single `AgentExecutionPipeline` behind `POST /api/chat` is
+  reachable, **all model use is accounted through one metered chokepoint** — there is
+  no alternate billable route or orchestrator to escape the output-token cap, the
+  cost/token metering, or the write-capable-tool filter.
+- The chat tool set is filtered so write-capable tools (today: `RequestApproval`,
+  `RememberPreference`, `SaveMemory`) are never registered for an anonymous
+  principal — the model cannot invoke a write path.
+
+### Provider-aware identity, disabled memory and cache
+
+- Identity is resolved per provider by `UserIdentity.Resolve`: **Anonymous → the
+  immutable server-minted `sub`; Entra → the immutable `oid`.** A request-body
+  `objectId` is **never** honoured for any authenticated principal, closing the
+  cross-session spoof/conflation gap (previously the resolver could key an
+  authenticated principal to a spoofable body value).
+- **Memory is disabled for Anonymous** — no recall, write, or extraction — which
+  eliminates stored cross-prompt injection across anonymous sessions in Sprint 1.
+- The **response cache is disabled for Anonymous** (both read and write), so two
+  subjects issuing an identical prompt always execute independently and can never
+  share a reply.
+- **Hub session ownership (Finding 6):** for an anonymous caller `JoinSession` binds
+  and verifies the session id against the caller's immutable subject via a
+  replica-local `ISessionOwnershipRegistry`; an anonymous attacker cannot join
+  another subject's telemetry/stream group even with a known session id, and card
+  groups are refused. Entra/dev hub behaviour is unchanged.
 
 ### Billable-use safeguards
 
-- `AnonymousGuardMiddleware` centrally enforces: read-only (403), request-size
-  bound (413), per-subject and per-IP minute limits (429), a per-request timeout
-  (504), and a global daily request/token/cost **circuit breaker** (503,
-  fail-closed).
+- `AnonymousGuardMiddleware` centrally enforces: the deny-by-default route allowlist
+  (403), request-size bound (413 — set before the body is read **and** via a
+  length-counting pre-read, so a chunked/unknown-length body without
+  `Content-Length` cannot bypass it), per-subject and per-IP minute limits (429), a
+  per-request timeout (504), and a global daily request/token/cost **circuit
+  breaker** (503, fail-closed). History length is bounded per-message and in
+  aggregate by `ChatRequestValidator` (400 before the model).
+- **ACA proxy / X-Forwarded-For:** behind the Container Apps ingress the connection
+  remote IP is the proxy's, not the client's, and `X-Forwarded-For` is **not**
+  trusted (forgeable; no cryptographically verifiable client-IP header). The per-IP
+  limit therefore collapses to a global bucket; bootstrap is deliberately a single
+  **global** conservative window and the **primary** control is the per-subject
+  limit applied after bootstrap.
 - Accounting is truthful: a request slot is charged **at admission — before the
   cache is consulted** — so cache hits cannot bypass the request ceiling; token
   and cost are metered by an `ICostTracker` decorator (`AnonymousBudgetCostTracker`)
   where cache hits cost zero. Output tokens are capped for anonymous chat.
-- **Replica-local limitation (disclosed):** the ceilings are enforced in
-  replica-local memory. Hosted Anonymous is therefore pinned to `maxReplicas=1`
+- **Replica-local limitation (disclosed):** the ceilings, rate-limit windows, and
+  the hub session-ownership registry are enforced in replica-local memory. Hosted
+  Anonymous is therefore pinned to `maxReplicas=1`
   (rationale comment in `infra/modules/container-apps.bicep`) and the ceilings are
-  conservative; counters reset on restart. This is explicitly **NOT** equivalent
-  to authenticated production.
+  conservative; **all of these counters/bindings reset on restart or replica
+  replacement.** This is explicitly **NOT** equivalent to authenticated production.
 
 ### Sprint 1 threat model additions
 
 | Threat | Mitigation |
 |--------|------------|
-| Spoofed subject via a client header/body | Identity is the signed token subject minted server-side; the guard and normalizer never read a client-supplied id. |
+| Spoofed subject via a client header/body | Identity is the signed token subject minted server-side; `UserIdentity.Resolve` is provider-aware and never honours a request-body `objectId` for an authenticated principal. |
 | Token replay after expiry | Strict short TTL + `ValidateLifetime`; no refresh token; the replay window is bounded by the TTL. |
 | Query token smuggled onto a REST path | `?access_token` is honored only on `/hubs/*`; a REST query token yields no `Authorization` header → 401. |
 | Cross-provider (e.g. Entra) token used for anonymous access | The anonymous policy requires `provider=Anonymous` → 403. |
 | Forged/tampered token | HS256 signature validated against the configured key; wrong signature/issuer/audience → 401. |
-| Oversized request exhausts resources | Request-size bound → 413 before work begins. |
+| Oversized request exhausts resources (incl. chunked/unknown-length) | Request-size bound → 413, enforced before the body is read and via a length-counting pre-read. |
+| Unbounded conversation history | Per-message and aggregate history bounds → 400 before the model. |
 | Cache used to bypass the request budget | The request slot is charged at admission, before the cache; the breaker still trips. |
-| Anonymous visitors exhaust the model budget | Per-subject/per-IP limits + daily request/token/cost breaker (fail-closed), conservative and single-replica-pinned when hosted. |
-| Write/mutation via an anonymous session | Read-only allowlist (403) + write-capable tools stripped from the anonymous tool set. |
+| Cross-subject reply leakage via the response cache | The response cache is disabled (read + write) for Anonymous; identical prompts from two subjects execute independently. |
+| Stored cross-prompt injection via memory | Memory (recall/write/extraction) is disabled for Anonymous in Sprint 1. |
+| Cross-subject telemetry/stream subscription on a hub | `JoinSession` binds/verifies the session to the caller's immutable subject (Finding 6); a different subject is rejected. |
+| Model budget escaped via an alternate route/orchestrator | All alternate LLM routes (`/api/chat/stream`, `/api/council/*`, message-extension) are removed from the anonymous surface; only the single metered `POST /api/chat` pipeline is reachable. |
+| Anonymous visitors exhaust the model budget | Per-subject/global limits + daily request/token/cost breaker (fail-closed), conservative and single-replica-pinned when hosted. |
+| Write/mutation via an anonymous session | Deny-by-default allowlist (403) + write-capable tools stripped from the anonymous tool set. |
 
 ### Sprint 1 files
 
@@ -252,15 +298,29 @@ and is proven to stay `Entra` by the deployment-contract tests. Anonymous mode i
   session-token service, capability policy, usage budget + cost tracker, rate
   limiter.
 - `src/RetailPulse.Api/Security/AnonymousAuthenticationSetup.cs` — scheme + policy.
-- `src/RetailPulse.Api/Middleware/AnonymousGuardMiddleware.cs` — central guard.
+- `src/RetailPulse.Api/Middleware/AnonymousGuardMiddleware.cs` — central guard
+  (deny-by-default allowlist, chunked-safe size bound, limits, breaker).
 - `src/RetailPulse.Api/Endpoints/AnonymousAuthEndpoints.cs` — bootstrap endpoint.
+- `src/RetailPulse.Api/Auth/UserIdentity.cs` — provider-aware, spoof-proof identity
+  resolution (Anonymous `sub` / Entra `oid`; body `objectId` never trusted).
+- `src/RetailPulse.Api/Hubs/SessionOwnershipRegistry.cs` — replica-local hub
+  session→subject ownership binding (Finding 6); consulted by `TelemetryHub` /
+  `StreamingHub`.
+- `src/RetailPulse.Api/Validation/ChatRequestValidator.cs` — history count / per-entry
+  / aggregate bounds.
 - `src/RetailPulse.Api/Auth/AnonymousPrincipalNormalizer.cs`,
-  `Auth/IAnonymousChatPolicy.cs` — normalized principal + tool filter/output cap.
+  `Auth/IAnonymousChatPolicy.cs` — normalized principal + tool filter/output cap +
+  cache/memory-disabled flags.
 - `src/RetailPulse.Api/appsettings.Anonymous.example.json` — a non-live template
   (loaded by no environment; contains no secret).
 - Tests: `tests/RetailPulse.Tests/Security/AnonymousAuthenticationTests.cs`
-  (integration + threat), `Security/AnonymousCapabilityTests.cs` (unit), extended
-  `Security/RateLimitingConfigTests.cs` and
+  (integration + threat, incl. deny-by-default route inventory and chunked-oversized),
+  `Security/AnonymousChatEndpointThreatTests.cs` (REAL `POST /api/chat` endpoint:
+  body-spoof ignored, session isolation, cache-disabled, history bounds),
+  `Security/AnonymousHubOwnershipTests.cs` (hub cross-subject join denied),
+  `Security/AnonymousCapabilityTests.cs` (unit), `Security/UserIdentityTests.cs`,
+  `Security/EndpointAuthorizationCoverageTests.cs` (real route-graph deny-by-default
+  incl. bootstrap + hubs), extended `Security/RateLimitingConfigTests.cs` and
   `Deployment/ProviderNeutralDeploymentContractTests.cs`.
 
 ## Alternatives rejected

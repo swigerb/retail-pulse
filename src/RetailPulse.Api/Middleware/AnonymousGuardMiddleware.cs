@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Net;
+using Microsoft.AspNetCore.Http.Features;
 using RetailPulse.Api.Security.Anonymous;
 
 namespace RetailPulse.Api.Middleware;
@@ -9,10 +11,13 @@ namespace RetailPulse.Api.Middleware;
 /// anonymous principal is available. It enforces — server-side, from the token, never from UI or a
 /// client header — that an anonymous session may only:
 /// <list type="bullet">
-///   <item>reach read-only routes (GET/HEAD/OPTIONS or the explicit read-only-POST allowlist);
-///     every other verb/route is a mutation and gets <c>403</c>;</item>
-///   <item>send bodies within the configured size bound (<c>413</c> otherwise);</item>
-///   <item>call model routes within per-subject and per-IP minute limits (<c>429</c>) and within
+///   <item>reach the explicit <see cref="AnonymousCapabilityPolicy"/> allowlist (deny-by-default):
+///     every (method, route) that is not the bootstrap, <c>POST /api/chat</c>, or an allowed hub
+///     gets <c>403</c>. There is NO read/GET shortcut;</item>
+///   <item>send bodies within the configured size bound (<c>413</c> otherwise) — enforced before the
+///     body is read and via a length-counting pre-read, so a chunked/unknown-length body that omits
+///     <c>Content-Length</c> cannot bypass the cap;</item>
+///   <item>call the model route within per-subject and per-IP minute limits (<c>429</c>) and within
 ///     the global daily request/token/cost circuit breaker (<c>503</c> when tripped).</item>
 /// </list>
 /// A request slot is charged at admission — before the cache is consulted downstream — so cache
@@ -50,16 +55,26 @@ public sealed class AnonymousGuardMiddleware : IMiddleware
         string method = context.Request.Method;
         string path = context.Request.Path.Value ?? string.Empty;
 
-        // 1) Read-only enforcement — deny any mutation not on the explicit allowlist.
-        if (AnonymousCapabilityPolicy.IsBlockedMutation(method, path))
+        // 1) Deny-by-default authorization — reject any (method, route) not on the explicit
+        //    anonymous allowlist (bootstrap, POST /api/chat, or an allowed hub). There is no
+        //    read/GET shortcut: observability/admin/export/memory/cards/approvals/etc. are 403.
+        if (AnonymousCapabilityPolicy.IsBlocked(method, path))
         {
             await WriteProblem(context, HttpStatusCode.Forbidden,
-                "anonymous_read_only",
-                "This operation is not available in Anonymous mode. Anonymous sessions are read-only.");
+                "anonymous_forbidden",
+                "This operation is not available in Anonymous mode.");
             return;
         }
 
-        // 2) Request-size bound.
+        // 2) Request-size bound. Set the Kestrel per-request max BEFORE the body is read so a
+        //    chunked / unknown-length body (no Content-Length) is capped during the read, then also
+        //    reject early when a declared Content-Length already exceeds the limit.
+        IHttpMaxRequestBodySizeFeature? sizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (sizeFeature is { IsReadOnly: false })
+        {
+            sizeFeature.MaxRequestBodySize = _options.MaxRequestBytes;
+        }
+
         if (context.Request.ContentLength is long len && len > _options.MaxRequestBytes)
         {
             await WriteProblem(context, HttpStatusCode.RequestEntityTooLarge,
@@ -68,9 +83,20 @@ public sealed class AnonymousGuardMiddleware : IMiddleware
             return;
         }
 
-        bool isModelRoute = IsBudgetedModelRoute(method, path);
+        bool isModelRoute = AnonymousCapabilityPolicy.IsBudgetedModelRoute(method, path);
         if (isModelRoute)
         {
+            // Length-counting pre-read: catches a chunked/unknown-length body that omits
+            // Content-Length (the ContentLength check above cannot see it). Deterministic under the
+            // test server as well as Kestrel. Rejects with 413 before any model work is scheduled.
+            if (await ExceedsBodyLimitAsync(context, _options.MaxRequestBytes))
+            {
+                await WriteProblem(context, HttpStatusCode.RequestEntityTooLarge,
+                    "anonymous_request_too_large",
+                    $"Request body exceeds the anonymous limit of {_options.MaxRequestBytes} bytes.");
+                return;
+            }
+
             string subject = context.User.FindFirst(Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames.Sub)?.Value
                 ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                 ?? "unknown";
@@ -122,19 +148,42 @@ public sealed class AnonymousGuardMiddleware : IMiddleware
         }
     }
 
-    private static bool IsBudgetedModelRoute(string method, string path)
+    /// <summary>
+    /// Reads the request body through a length counter and returns true as soon as it exceeds
+    /// <paramref name="maxBytes"/>. Buffering is enabled first and the stream is rewound afterwards
+    /// so downstream model binding re-reads the same body. This is the deterministic defense against
+    /// a chunked / unknown-length body that omits <c>Content-Length</c>.
+    /// </summary>
+    private static async Task<bool> ExceedsBodyLimitAsync(HttpContext context, long maxBytes)
     {
-        if (HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method))
+        context.Request.EnableBuffering();
+        Stream body = context.Request.Body;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(8192);
+        long total = 0;
+        bool exceeded = false;
+        try
         {
-            return false;
+            int read;
+            while ((read = await body.ReadAsync(buffer.AsMemory(0, buffer.Length), context.RequestAborted)) > 0)
+            {
+                total += read;
+                if (total > maxBytes)
+                {
+                    exceeded = true;
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+            if (body.CanSeek)
+            {
+                body.Position = 0;
+            }
         }
 
-        string normalized = path.Length > 1 ? path.TrimEnd('/') : path;
-
-        // Every anonymous-allowed non-GET route EXCEPT the bootstrap reaches real work/models and
-        // is charged against the budget + chat limits. Bootstrap has its own per-IP limiter.
-        return AnonymousCapabilityPolicy.AnonymousReadableNonGetRoutes.Contains(normalized)
-            && !string.Equals(normalized, AnonymousCapabilityPolicy.BootstrapRoute, StringComparison.OrdinalIgnoreCase);
+        return exceeded;
     }
 
     private static async Task WriteProblem(HttpContext context, HttpStatusCode status, string code, string detail)

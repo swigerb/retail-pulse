@@ -244,6 +244,16 @@ All three Container Apps use `minReplicas: 0` / `maxReplicas: 1`. Consequences:
   (proactive alerts) only run while a replica is live. The SQLite stores
   (cost, audit, memory, approvals, alerts) live in the replica's local temp
   directory and reset the same way — there is **no** durable volume (see below).
+- **Anonymous mode (if opted-in) is replica-local too:** Anonymous mode is
+  **not deployed by default** and is permitted hosted only behind the explicit
+  `Anonymous:AllowHosted=true` opt-in. When enabled, its daily request/token/cost
+  **ceilings**, its **rate-limit windows** (including the global bootstrap window),
+  and the **hub session-ownership registry** are all held in replica-local memory
+  and **reset on restart or replica replacement**. This is exactly why hosted
+  Anonymous requires `maxReplicas: 1` (a single writer/counter owner) and ships with
+  conservative limits — it is explicitly not equivalent to authenticated production.
+  See [ADR-005](adr/005-provider-neutral-authentication.md) and the
+  [authentication matrix](authentication-matrix.md).
 - **SignalR:** the Teams Bot holds a persistent SignalR connection to the API telemetry
   hub, and the frontend connects to `/hubs/telemetry` and `/hubs/streaming`. An active
   SignalR/WebSocket connection keeps the API replica warm; once all clients disconnect

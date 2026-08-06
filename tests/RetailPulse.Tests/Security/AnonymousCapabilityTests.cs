@@ -146,20 +146,60 @@ public sealed class AnonymousCapabilityTests
         act.Should().Throw<InvalidOperationException>().WithMessage("*not 'Anonymous'*");
     }
 
-    // ── Capability policy: read-only enforcement ──────────────────────────────
+    // ── Capability policy: deny-by-default allowlist ──────────────────────────
 
     [Theory]
-    [InlineData("POST", "/api/approvals/7/respond", true)]
-    [InlineData("DELETE", "/api/memory/42", true)]
-    [InlineData("POST", "/api/cards", true)]
-    [InlineData("PUT", "/api/guardrails/config", true)]
-    [InlineData("POST", "/api/admin/cache/invalidate", true)]
-    [InlineData("POST", "/api/chat", false)]
+    // Mutations / admin / observability / memory / cards / approvals / guardrail logs — all denied.
+    [InlineData("POST", "/api/approvals/7/respond")]
+    [InlineData("DELETE", "/api/memory/42")]
+    [InlineData("POST", "/api/cards")]
+    [InlineData("PUT", "/api/guardrails/config")]
+    [InlineData("POST", "/api/admin/cache/invalidate")]
+    // Alternate billable LLM paths + broad GET reads removed from the Anonymous surface — denied.
+    [InlineData("POST", "/api/chat/stream")]
+    [InlineData("POST", "/api/knowledge/search")]
+    [InlineData("POST", "/api/council/convene")]
+    [InlineData("POST", "/api/escalate")]
+    [InlineData("GET", "/api/scorecard")]
+    [InlineData("GET", "/api/margin/anything")]
+    [InlineData("GET", "/api/sessions")]
+    [InlineData("GET", "/api/audit")]
+    [InlineData("GET", "/api/traces")]
+    [InlineData("GET", "/api/dead-letter")]
+    [InlineData("GET", "/api/memory")]
+    [InlineData("GET", "/api/cards")]
+    [InlineData("GET", "/api/approvals")]
+    [InlineData("GET", "/api/info")]
+    [InlineData("GET", "/api/chat")]
+    public void CapabilityPolicy_DeniesEverythingOutsideAllowlist(string method, string path)
+    {
+        AnonymousCapabilityPolicy.IsBlocked(method, path).Should().BeTrue();
+        AnonymousCapabilityPolicy.IsAllowed(method, path).Should().BeFalse();
+    }
+
+    [Theory]
+    // The entire authenticated + bootstrap surface: chat POST, bootstrap POST, the two hubs, preflight.
+    [InlineData("POST", "/api/chat")]
+    [InlineData("POST", "/api/auth/anonymous/session")]
+    [InlineData("OPTIONS", "/api/chat")]
+    [InlineData("GET", "/hubs/telemetry")]
+    [InlineData("POST", "/hubs/telemetry/negotiate")]
+    [InlineData("GET", "/hubs/streaming")]
+    [InlineData("POST", "/hubs/streaming/negotiate")]
+    public void CapabilityPolicy_AllowsOnlyTheMinimalSurface(string method, string path)
+    {
+        AnonymousCapabilityPolicy.IsAllowed(method, path).Should().BeTrue();
+        AnonymousCapabilityPolicy.IsBlocked(method, path).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("POST", "/api/chat", true)]
+    [InlineData("GET", "/hubs/telemetry", false)]
+    [InlineData("POST", "/api/auth/anonymous/session", false)]
+    [InlineData("OPTIONS", "/api/chat", false)]
     [InlineData("POST", "/api/chat/stream", false)]
-    [InlineData("POST", "/api/knowledge/search", false)]
-    [InlineData("GET", "/api/scorecard", false)]
-    [InlineData("GET", "/api/margin/anything", false)]
-    public void CapabilityPolicy_BlocksMutations_AllowsReads(string method, string path, bool blocked) => AnonymousCapabilityPolicy.IsBlockedMutation(method, path).Should().Be(blocked);
+    public void CapabilityPolicy_OnlyChatPostIsBudgeted(string method, string path, bool budgeted)
+        => AnonymousCapabilityPolicy.IsBudgetedModelRoute(method, path).Should().Be(budgeted);
 
     // ── Tool filter: write-capable tools removed for anonymous ─────────────────
 

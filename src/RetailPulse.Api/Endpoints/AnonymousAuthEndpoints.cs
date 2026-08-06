@@ -9,10 +9,11 @@ namespace RetailPulse.Api.Endpoints;
 ///
 /// It creates a cryptographically random per-session subject SERVER-SIDE (never from a client
 /// header or body) and returns a signed, short-TTL Retail Pulse session token usable both as a
-/// REST <c>Authorization: Bearer</c> and as a SignalR <c>?access_token</c>. It is rate-limited
-/// per-IP, exposes no other anonymous API, carries no PII, and issues no refresh token — the
-/// client re-bootstraps when the token expires, which bounds the replay window to the TTL.
-/// Mapped only when <c>Authentication:Mode=Anonymous</c>.
+/// REST <c>Authorization: Bearer</c> and as a SignalR <c>?access_token</c>. Session minting is
+/// rate-limited by a single global conservative window (client IP is not trustworthy behind the
+/// ACA ingress proxy, and X-Forwarded-For is not honoured), exposes no other anonymous API,
+/// carries no PII, and issues no refresh token — the client re-bootstraps when the token expires,
+/// which bounds the replay window to the TTL. Mapped only when <c>Authentication:Mode=Anonymous</c>.
 /// </summary>
 public static class AnonymousAuthEndpoints
 {

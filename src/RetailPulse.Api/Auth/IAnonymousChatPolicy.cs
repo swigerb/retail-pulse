@@ -20,6 +20,21 @@ public interface IAnonymousChatPolicy
     bool AppliesToCurrentRequest { get; }
 
     /// <summary>
+    /// True when the response cache must be bypassed for the current request. Anonymous sessions
+    /// disable the cache entirely (both read and write) so identical prompts from two different
+    /// subjects always execute independently and no reply is ever shared across subjects — the
+    /// shared cache key excluded the subject, so disabling is the fail-safe choice for Sprint 1.
+    /// </summary>
+    bool CacheDisabled { get; }
+
+    /// <summary>
+    /// True when conversation memory (recall + extraction) must be disabled for the current
+    /// request. Anonymous sessions disable memory entirely in Sprint 1 to eliminate any stored
+    /// cross-prompt injection surface; there is no durable, accountable identity to key it to.
+    /// </summary>
+    bool MemoryDisabled { get; }
+
+    /// <summary>
     /// Returns the tool set the current principal may use. For anonymous sessions the
     /// write-capable tools are removed; for everyone else the input set is returned unchanged.
     /// </summary>
@@ -46,6 +61,10 @@ public sealed class AnonymousChatPolicy : IAnonymousChatPolicy
     public bool AppliesToCurrentRequest =>
         AnonymousCapabilityPolicy.IsAnonymousPrincipal(_httpContextAccessor.HttpContext?.User);
 
+    public bool CacheDisabled => AppliesToCurrentRequest;
+
+    public bool MemoryDisabled => AppliesToCurrentRequest;
+
     public IEnumerable<AITool> FilterTools(IEnumerable<AITool> tools) =>
         !AppliesToCurrentRequest
             ? tools
@@ -64,6 +83,12 @@ public static class AnonymousChatPolicyExtensions
 {
     public static IEnumerable<AITool> ApplyToolFilter(this IAnonymousChatPolicy? policy, IEnumerable<AITool> tools) =>
         policy is null ? tools : policy.FilterTools(tools);
+
+    /// <summary>True when the cache must be bypassed for the current request (Anonymous). Null-safe.</summary>
+    public static bool IsCacheDisabled(this IAnonymousChatPolicy? policy) => policy?.CacheDisabled ?? false;
+
+    /// <summary>True when conversation memory must be disabled for the current request (Anonymous). Null-safe.</summary>
+    public static bool IsMemoryDisabled(this IAnonymousChatPolicy? policy) => policy?.MemoryDisabled ?? false;
 
     public static void ApplyOutputCap(this IAnonymousChatPolicy? policy, ChatOptions options)
     {

@@ -15,7 +15,7 @@ resolver is deterministic and never auto-detects a provider.
 |------|-----------------------|------------|
 | `Entra` | Implemented (unchanged) | Supported and pinned |
 | `GitHub` | Declared, not implemented — fails startup | Never enabled |
-| `Anonymous` | Implemented (Sprint 1) — opt-in, fail-closed, never deployed | Never enabled (Entra pinned) |
+| `Anonymous` | Implemented (Sprint 1) — opt-in, fail-closed, not deployed by default (hosted only with `Anonymous:AllowHosted=true`) | Never enabled (Entra pinned) |
 
 ## Mode resolution matrix
 
@@ -46,27 +46,42 @@ Behavior for the `Entra` mode is identical to the pre-foundation implementation.
 
 ## Runtime authorization matrix (Anonymous mode)
 
-Anonymous mode is an **opt-in, fail-closed** capability (never deployed). Identity is a
-server-minted, short-lived session token — never a client-supplied header. The single
-unauthenticated surface besides health is the bootstrap endpoint.
+Anonymous mode is an **opt-in, fail-closed** capability that is **not deployed by
+default** (hosted only behind an explicit `Anonymous:AllowHosted=true` opt-in).
+Identity is a server-minted, short-lived session token — never a client-supplied
+header or body value. The surface is **deny-by-default**: the only reachable routes
+are the unauthenticated bootstrap, authenticated `POST /api/chat`, and the two
+SignalR hubs. There is **no blanket GET allowance** — every other route is `403`.
 
 | Request | Credential | Expected result |
 |---------|-----------|-----------------|
 | `POST /api/auth/anonymous/session` (bootstrap) | none | 200 — mints a short-lived session token (random subject, `provider=Anonymous`, role `RetailPulse.Anonymous`, scope `chat_limited`, no PII, no refresh) |
-| `POST /api/auth/anonymous/session` (bootstrap) | none, over per-IP limit | 429 |
-| Read-only REST (e.g. `GET /api/scorecard`) | valid anonymous session token | 200 |
+| `POST /api/auth/anonymous/session` (bootstrap) | none, over the global bootstrap limit | 429 |
+| `POST /api/chat` (within limits) | valid anonymous session token | 200 — the single allowlisted chat capability, output-token-capped, memory + response-cache disabled |
+| Any broad GET / observability / admin / export / memory / cards / approvals / guardrail-log route (e.g. `GET /api/scorecard`, `GET /api/sessions`, `GET /api/audit`, `GET /api/memory`) | valid anonymous session token | 403 — not on the allowlist (deny-by-default). Read-only data is reached through the filtered chat tool path, not a direct operator endpoint |
+| Alternate LLM / orchestrator routes (`POST /api/chat/stream`, `POST /api/council/convene`) | valid anonymous session token | 403 — removed from the anonymous surface so all model use is accounted through `POST /api/chat` |
 | Protected REST/hub | no token | 401 |
 | Protected REST/hub | malformed / expired / wrong issuer / wrong audience / wrong signature token | 401 |
 | Protected REST/hub | valid-signature token with `provider != Anonymous` (cross-provider) | 403 — the anonymous policy requires `provider=Anonymous` |
-| `/hubs/*` | valid anonymous token via `?access_token` | connects |
+| `/hubs/telemetry`, `/hubs/streaming` | valid anonymous token via `?access_token` | connects |
+| Hub `JoinSession` for a session owned by a **different** subject | valid anonymous token | rejected (`HubException`) — hub groups are namespaced to the caller's immutable subject (Finding 6). Entra behaviour unchanged |
+| Hub `JoinCard` (cards/approvals) | valid anonymous token | rejected — not part of the anonymous surface |
 | REST endpoint | anonymous token via `?access_token` query string only | 401 (query token honored only on `/hubs/*`) |
-| Mutation endpoint / write verb not on the read-only allowlist | valid anonymous token | 403 — Anonymous is read-only, enforced centrally |
+| Chat body carrying a spoofed `user.objectId` | valid anonymous token | ignored — identity is the immutable token `sub`; a body `objectId` is never honoured for an authenticated principal |
 | Chat tool invocation of a write-capable tool (e.g. `RequestApproval`) | valid anonymous token | Tool is not registered for the anonymous principal — never invoked |
-| Read-only chat/query within limits | valid anonymous token | 200, output-token-capped |
-| Read-only chat/query over per-subject or per-IP minute limit | valid anonymous token | 429 |
-| Read-only chat/query after the daily request/token/cost ceiling trips | valid anonymous token | 503 — circuit breaker, fail-closed (cache hits still consume the request slot) |
-| Oversized request body | valid anonymous token | 413 |
+| `POST /api/chat` over per-subject or per-IP minute limit | valid anonymous token | 429 |
+| `POST /api/chat` after the daily request/token/cost ceiling trips | valid anonymous token | 503 — circuit breaker, fail-closed (cache hits still consume the request slot) |
+| Oversized request body (including chunked / unknown-length without `Content-Length`) | valid anonymous token | 413 — enforced before the body is read and via a length-counting pre-read |
+| History over the per-message / aggregate bound | valid anonymous token | 400 — rejected by validation before the model |
 | `/health`, `/alive` | none | 200 |
+
+> **Scope & reset limitation.** The rate-limit windows, daily ceilings, and the hub
+> session-ownership registry are **replica-local, in-memory**. Hosted Anonymous is
+> therefore pinned to `maxReplicas=1`, and all of these counters/bindings **reset on
+> restart or replica replacement**. Behind the ACA ingress the connection IP is the
+> proxy's, not the client's, and `X-Forwarded-For` is not trusted — so the per-IP
+> limit is effectively global and the **primary** control is the per-subject limit
+> applied after bootstrap.
 
 ## Environment behavior
 

@@ -66,14 +66,14 @@ public sealed class AnonymousAuthenticationTests
     }
 
     [Fact]
-    public async Task Bootstrap_IsRateLimitedPerIp()
+    public async Task Bootstrap_IsRateLimitedGlobally()
     {
         using TestFixture fx = CreateServer(bootstrapPerIp: 2);
 
         (await fx.Client.PostAsync("/api/auth/anonymous/session", null)).StatusCode.Should().Be(HttpStatusCode.OK);
         (await fx.Client.PostAsync("/api/auth/anonymous/session", null)).StatusCode.Should().Be(HttpStatusCode.OK);
         (await fx.Client.PostAsync("/api/auth/anonymous/session", null)).StatusCode
-            .Should().Be(HttpStatusCode.TooManyRequests, "the 3rd bootstrap in the window exceeds the per-IP limit");
+            .Should().Be(HttpStatusCode.TooManyRequests, "the 3rd bootstrap in the window exceeds the global limit");
     }
 
     // ── token validation / threat cases ───────────────────────────────────────
@@ -137,16 +137,51 @@ public sealed class AnonymousAuthenticationTests
     // ── valid anonymous access ─────────────────────────────────────────────────
 
     [Fact]
-    public async Task ValidToken_ReachesReadRestAndHub()
+    public async Task ValidToken_ReachesChatAndHub()
     {
         using TestFixture fx = CreateServer();
         string token = Token(subject: "anon-ok");
 
-        (await Get(fx, "/api/scorecard", token)).StatusCode.Should().Be(HttpStatusCode.OK);
+        // POST /api/chat is the single allowlisted authenticated REST capability.
+        (await PostChatRaw(fx, token)).StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Hub: the token is supplied via ?access_token (WebSocket handshakes cannot set headers).
         HttpResponseMessage hub = await fx.Client.GetAsync($"/hubs/telemetry?access_token={token}");
         hub.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    // ── deny-by-default: the broad GET/observability/admin surface is 403 ───────
+
+    [Theory]
+    [InlineData("GET", "/api/scorecard")]
+    [InlineData("GET", "/api/sessions")]
+    [InlineData("GET", "/api/audit")]
+    [InlineData("GET", "/api/traces")]
+    [InlineData("GET", "/api/dead-letter")]
+    [InlineData("GET", "/api/cards")]
+    [InlineData("GET", "/api/approvals")]
+    [InlineData("GET", "/api/memory")]
+    [InlineData("GET", "/api/export/session/abc")]
+    [InlineData("GET", "/api/guardrails/logs")]
+    [InlineData("POST", "/api/chat/stream")]
+    [InlineData("POST", "/api/council/convene")]
+    [InlineData("GET", "/api/council/agents")]
+    [InlineData("POST", "/api/messages")]
+    public async Task NonAllowlistedRoutes_AreForbidden_ForAnonymous(string method, string path)
+    {
+        using TestFixture fx = CreateServer();
+        string token = Token(subject: "anon-deny");
+
+        var req = new HttpRequestMessage(new HttpMethod(method), path);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (method == "POST")
+        {
+            req.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+        }
+
+        HttpResponseMessage resp = await fx.Client.SendAsync(req);
+        resp.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            $"'{method} {path}' is not on the anonymous allowlist — deny-by-default applies before routing");
     }
 
     [Fact]
@@ -241,6 +276,24 @@ public sealed class AnonymousAuthenticationTests
 
         HttpResponseMessage resp = await fx.Client.SendAsync(req);
         resp.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+    }
+
+    [Fact]
+    public async Task ChunkedOversizedRequest_Returns413_WithoutContentLength()
+    {
+        using TestFixture fx = CreateServer(maxRequestBytes: 256);
+        string token = Token(subject: "anon-chunked");
+
+        var req = new HttpRequestMessage(HttpMethod.Post, "/api/chat");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        req.Content = new StringContent(new string('x', 2000), Encoding.UTF8, "application/json");
+        // Force chunked transfer so no Content-Length header is sent — the ContentLength check
+        // cannot see the size; the length-counting pre-read must still reject it.
+        req.Headers.TransferEncodingChunked = true;
+
+        HttpResponseMessage resp = await fx.Client.SendAsync(req);
+        resp.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge,
+            "a chunked/unknown-length oversized body must be capped during the read");
     }
 
     // ── health stays anonymous ─────────────────────────────────────────────────
@@ -343,16 +396,19 @@ public sealed class AnonymousAuthenticationTests
                     // Wire the full anonymous stack (scheme + policy + guardrail services).
                     services.AddProviderNeutralAuthentication(config, context.HostingEnvironment);
 
-                    // Rate limiter with the anonymous-bootstrap per-IP policy (mirrors Program.cs).
+                    // Global conservative bootstrap limiter — mirrors Program.cs. Behind ACA the
+                    // client IP is not trustworthy (proxy IP / forgeable XFF), so bootstrap is a
+                    // single global window; per-subject limits take over after bootstrap.
                     services.AddRateLimiter(rl =>
                     {
                         rl.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-                        rl.AddPolicy("anonymous-bootstrap", httpContext =>
+                        rl.AddPolicy("anonymous-bootstrap", _ =>
                             System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                                partitionKey: "anonymous-bootstrap-global",
                                 factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                                 {
-                                    PermitLimit = config.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 5),
+                                    PermitLimit = config.GetValue("Anonymous:Bootstrap:GlobalPerMinute",
+                                        config.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 30)),
                                     Window = TimeSpan.FromMinutes(1),
                                     QueueLimit = 0,
                                 }));

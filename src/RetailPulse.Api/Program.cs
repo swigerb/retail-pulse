@@ -96,6 +96,12 @@ builder.Services.AddOpenTelemetry()
 builder.Services.AddSignalR()
     .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 
+// Session-ownership registry — binds a chat sessionId to its owning subject so the hubs can refuse
+// a caller that tries to join another subject's session group (Finding 6). Consulted only for
+// Anonymous callers; Entra/dev hub behavior is unchanged. Registered in all modes because the hubs
+// take it via constructor injection.
+builder.Services.AddSingleton<ISessionOwnershipRegistry, SessionOwnershipRegistry>();
+
 // ── CORS — split policies for Development vs Production ─────────────────
 // Development includes known local origins plus explicitly configured deployed
 // origins. This keeps the fixed synthetic demo identity while allowing the SWA
@@ -182,15 +188,27 @@ builder.Services.AddRateLimiter(options =>
         opt.QueueLimit = 0;
     });
 
-    // Per-IP limiter for the unauthenticated Anonymous bootstrap endpoint. Always registered so
-    // the limiter graph is stable and testable; only used when Authentication:Mode=Anonymous maps
-    // the bootstrap route. Partitioning by remote IP throttles session minting per client.
-    options.AddPolicy("anonymous-bootstrap", httpContext =>
+    // Rate limiter for the unauthenticated Anonymous bootstrap endpoint. Always registered so the
+    // limiter graph is stable and testable; only used when Authentication:Mode=Anonymous maps the
+    // bootstrap route.
+    //
+    // IMPORTANT (ACA ingress reality): when hosted behind Azure Container Apps, every request
+    // arrives from the ingress/proxy, so HttpContext.Connection.RemoteIpAddress is the proxy's IP,
+    // NOT the client's — a per-IP partition would therefore collapse to a single global bucket
+    // anyway. We do NOT trust X-Forwarded-For to recover the client IP: ACA does not give us a
+    // cryptographically verifiable client-IP header, and an attacker can forge XFF to shard around a
+    // per-IP limit. So bootstrap is intentionally a single GLOBAL, conservative fixed window — it
+    // caps total anonymous session minting per minute for the whole replica and cannot be bypassed
+    // by header spoofing. Fine-grained abuse control is enforced AFTER bootstrap by the per-subject
+    // (immutable, server-minted sub) limits in AnonymousGuardMiddleware, which is the primary
+    // control. Note: this window is replica-local; hosted Anonymous runs at maxReplicas=1.
+    options.AddPolicy("anonymous-bootstrap", _ =>
         RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            partitionKey: "anonymous-bootstrap-global",
             factory: _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = builder.Configuration.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 5),
+                PermitLimit = builder.Configuration.GetValue("Anonymous:Bootstrap:GlobalPerMinute",
+                    builder.Configuration.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 30)),
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));

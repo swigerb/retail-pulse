@@ -71,9 +71,10 @@ configuration key (`Authentication__Mode`). Resolution is deterministic and
 fails closed — it never auto-detects a provider:
 
 - `Entra` (the production mode) routes to the unchanged Entra boundary.
-- `Anonymous` is implemented (Sprint 1) as an **opt-in, fail-closed, never
-  deployed** capability — see [Anonymous mode](#anonymous-mode-opt-in-never-deployed)
-  below.
+- `Anonymous` is implemented (Sprint 1) as an **opt-in, fail-closed** capability
+  that is **not deployed by default** (hosted only behind an explicit
+  `Anonymous:AllowHosted=true` opt-in) — see
+  [Anonymous mode](#anonymous-mode-opt-in-fail-closed) below.
 - `GitHub` is declared but not implemented in this sprint; selecting it fails
   startup and never falls through to another provider.
 - A missing mode defaults to `Entra` **only in Development**. Outside
@@ -84,38 +85,76 @@ Production pins `Authentication__Mode=Entra` explicitly in
 [ADR-005](adr/005-provider-neutral-authentication.md) and the
 [authentication matrix](authentication-matrix.md).
 
-### Anonymous mode (opt-in, never deployed)
+### Anonymous mode (opt-in, fail-closed)
 
-Anonymous mode lets a future self-serve frontend (Sprint 3) reach the read-only
-chat/query surface without an identity provider. It is additive and fail-closed;
-**live deployment artifacts stay Entra** and are proven so by deployment-contract
-tests. It is not deployed this sprint.
+Anonymous mode lets a future self-serve frontend (Sprint 3) reach a **single
+chat capability** — authenticated `POST /api/chat` plus the two SignalR hubs that
+carry that chat's telemetry/streaming — without an identity provider. It is
+additive and fail-closed. Hosted Anonymous **is permitted only behind an explicit
+opt-in** (`Anonymous:AllowHosted=true`); by default it is never deployed, and the
+**live deployment artifacts stay Entra**, proven so by deployment-contract tests.
+It is not deployed this sprint.
 
+- **Smallest useful surface (deny-by-default).** The anonymous surface is exactly
+  three things: the unauthenticated bootstrap, authenticated `POST /api/chat`, and
+  the `/hubs/telemetry` + `/hubs/streaming` hubs. **Every other (method, route) is
+  `403`** — there is **no blanket GET allowance**. Observability, admin, export,
+  memory, cards, approvals, guardrail logs, `/api/chat/stream`, council, scorecard,
+  escalation and the message-extension endpoints are all forbidden. Read-only data
+  (e.g. charts) is reached **through the filtered chat tool path**, never a direct
+  operator endpoint. A runtime endpoint-graph test enumerates every mapped route and
+  proves deny-by-default.
 - **Two-key hosted activation.** `Authentication:Mode=Anonymous` enables it;
   Development may run with an ephemeral process-local signing key (sessions die on
   restart). Any hosted/non-Development Anonymous deployment additionally requires
   `Anonymous:AllowHosted=true` **and** a strong signing key (≥ 256-bit) **and**
   positive daily request/token/cost ceilings, or startup fails closed.
-- **Server-minted identity.** A per-IP rate-limited bootstrap endpoint
+- **Server-minted identity.** A bootstrap endpoint
   (`POST /api/auth/anonymous/session`) issues a short-lived (default 15 min) HS256
   session token with a cryptographically random subject, `provider=Anonymous`,
   role `RetailPulse.Anonymous`, scope `chat_limited`, strict expiry, no PII, and
   no refresh token. It works as a REST bearer and a SignalR `?access_token`
   (query token honored only on `/hubs/*`). The signing key is a secret, never
-  committed.
+  committed. Bootstrap is throttled by a **single global conservative** rate limit
+  (see the ACA/proxy note below), not per-client-IP.
+- **Provider-aware, spoof-proof identity.** Identity is resolved per provider:
+  Anonymous → the immutable server-minted `sub`; Entra → the immutable `oid`. A
+  request-body `objectId` is **never** honoured for any authenticated principal, so
+  two anonymous sessions cannot be conflated or spoofed. **Memory is disabled for
+  Anonymous** (no read, write, or extraction) to eliminate stored cross-prompt
+  injection, and the **response cache is disabled for Anonymous** so identical
+  prompts from different subjects can never share a reply.
 - **Constrained authorization.** A dedicated policy requires
   `provider=Anonymous` + the anonymous role + scope, so Entra/cross-provider
   tokens can never satisfy it. Only health and the bootstrap endpoint are
   unauthenticated.
-- **Read-only + billable-use safeguards.** `AnonymousGuardMiddleware` centrally
-  enforces read-only (403), request size (413), per-subject/per-IP minute limits
-  (429), a per-request timeout, and a daily request/token/cost circuit breaker
-  (503, fail-closed). Request slots are charged before the cache so cache hits
-  cannot bypass the ceiling; output tokens are capped; write-capable chat tools
-  are stripped from the anonymous tool set.
-- **Limitation.** Ceilings are replica-local, so hosted Anonymous is pinned to
+- **Central enforcement + billable-use safeguards.** `AnonymousGuardMiddleware`
+  centrally enforces the deny-by-default allowlist (403), request size (413 —
+  enforced before the body is read and via a length-counting pre-read, so a
+  chunked/unknown-length body without `Content-Length` cannot bypass it),
+  per-subject/per-IP minute limits (429), a per-request timeout, and a daily
+  request/token/cost circuit breaker (503, fail-closed). Request slots are charged
+  before the cache so cache hits cannot bypass the ceiling. Because only the single
+  `AgentExecutionPipeline` behind `POST /api/chat` is reachable, the output-token
+  cap and the write-capable-tool filter apply to the whole anonymous surface; there
+  is no alternate orchestrator or billable route to escape them. History length is
+  bounded per-message and in aggregate (validation `400` before the model).
+- **Hub session ownership (Finding 6).** For an anonymous caller a hub `JoinSession`
+  binds/verifies the session against the caller's immutable subject, so an anonymous
+  attacker cannot subscribe to another subject's telemetry/stream even with a known
+  session id. Card/approval hub groups are refused for Anonymous. Entra hub
+  behaviour is unchanged.
+- **ACA proxy / per-IP limitation.** Behind the Azure Container Apps ingress the
+  connection remote IP is the **proxy's**, not the client's, and `X-Forwarded-For`
+  is **not** trusted (it is forgeable and ACA gives no cryptographically verifiable
+  client-IP header). Per-IP limits therefore collapse to a global bucket in
+  practice; bootstrap is intentionally a single **global** conservative window and
+  the **primary** abuse control is the **per-subject** limit applied after bootstrap.
+- **Limitation.** Ceilings, rate-limit windows, and the hub session-ownership
+  registry are **replica-local, in-memory**, so hosted Anonymous is pinned to
   `maxReplicas=1` with conservative limits and is **not** equivalent to
-  authenticated production; counters reset on restart.
+  authenticated production; **all of these counters/bindings reset on restart or
+  replica replacement**.
 
 ### Development
 - `DevelopmentAuthHandler` bypasses all authentication
