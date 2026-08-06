@@ -7,17 +7,7 @@ param environmentId string
 @description('Tags for resources')
 param tags object = {}
 
-@description('Managed-environment storage name (Azure Files) for durable API app data')
-param dataStorageName string
-
-@description('Mount path inside the API container for the durable Azure Files volume')
-param dataMountPath string = '/mnt/retailpulse-data'
-
 var placeholderImage = 'mcr.microsoft.com/k8se/quickstart:latest'
-
-// Volume name is local to the container template; it binds to the environment
-// storage entry (dataStorageName) that maps to the Azure Files share.
-var dataVolumeName = 'retailpulse-data'
 
 resource api 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'ca-retailpulse-api'
@@ -48,42 +38,17 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          // Point the app's durable SQLite stores at the mounted Azure Files
-          // share, and require durable storage explicitly. Defined here (not just
-          // in the postprovision hook) so a fresh `azd up` provisions a container
-          // that already fails fast if the mount is missing — it can never
-          // silently regress to ephemeral temp storage. RETAIL_PULSE_REQUIRE_DURABLE_STORAGE
-          // is environment-agnostic: it makes the durable path a hard startup
-          // requirement even though this app runs ASPNETCORE_ENVIRONMENT=Development,
-          // so future config drift cannot downgrade durability.
-          env: [
-            {
-              name: 'RETAIL_PULSE_DATA_DIRECTORY'
-              value: dataMountPath
-            }
-            {
-              name: 'RETAIL_PULSE_REQUIRE_DURABLE_STORAGE'
-              value: 'true'
-            }
-          ]
-          volumeMounts: [
-            {
-              volumeName: dataVolumeName
-              mountPath: dataMountPath
-            }
-          ]
         }
       ]
-      // Durable app data lives on Azure Files, so the API is a single-writer
-      // store: scale-to-zero is fine (history survives on the share) but max=1
-      // avoids two replicas writing the same SQLite files over SMB.
-      volumes: [
-        {
-          name: dataVolumeName
-          storageType: 'AzureFile'
-          storageName: dataStorageName
-        }
-      ]
+      // The API's SQLite stores (cost/audit/memory/approvals/alerts) live in the
+      // container's local temp directory. Under this tenant's governance posture,
+      // account-key-based Azure Files mounts are not permitted (policy forces
+      // allowSharedKeyAccess=false / publicNetworkAccess=Disabled, which breaks the
+      // ACA CIFS mount), so no durable volume is attached. Observability history
+      // therefore lives only within the current replica and resets on replica
+      // replacement, new revisions, or scale-to-zero. maxReplicas: 1 keeps a single
+      // SQLite writer; see docs/deployment-azd.md for the policy-compatible durable
+      // options under evaluation.
       scale: {
         minReplicas: 0
         maxReplicas: 1
