@@ -108,15 +108,19 @@ public static class Extensions
         // protect them with network policies, an ingress filter, or
         // .RequireAuthorization() on a dedicated policy — do NOT remove them.
         // See https://aka.ms/dotnet/aspire/healthchecks for guidance.
+        //
+        // These are the ONLY endpoints allowed to be reachable anonymously. The API sets a
+        // deny-by-default authorization FallbackPolicy (see AuthenticationSetup), so probes
+        // must opt out explicitly with .AllowAnonymous(); everything else stays protected.
 
         // All health checks must pass for app to be considered ready to accept traffic after starting
-        app.MapHealthChecks(_healthEndpointPath);
+        app.MapHealthChecks(_healthEndpointPath).AllowAnonymous();
 
         // Only health checks tagged with the "live" tag must pass for app to be considered alive
         app.MapHealthChecks(_alivenessEndpointPath, new HealthCheckOptions
         {
             Predicate = r => r.Tags.Contains("live")
-        });
+        }).AllowAnonymous();
 
         return app;
     }

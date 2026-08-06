@@ -2,13 +2,16 @@ import { authConfig } from './authConfig';
 import { acquireApiToken } from './tokenService';
 
 /**
- * Global fetch interceptor that attaches the Entra bearer token to every API/hub request.
+ * Global fetch interceptor that attaches the Entra bearer token to our protected `/api`
+ * REST requests only.
  *
  * Rather than editing ~16 service modules (and risking a future call that forgets the
  * header), token attachment is centralized here: {@link installAuthorizedFetch} wraps
  * `window.fetch` once at startup so ALL protected/billable REST goes out authenticated.
- * SignalR handshakes use their own `accessTokenFactory` (see tokenService), so this only
- * needs to cover `fetch`. A no-op when auth is unconfigured (local dev).
+ * The token is scoped to same-origin `/api` paths (see {@link isApiRequest}); SignalR
+ * (`/hubs`) handshakes carry the token via their own `accessTokenFactory` (see
+ * tokenService) and are intentionally excluded, as are assets, third parties, and
+ * App Insights. A no-op when auth is unconfigured (local dev).
  *
  * On a 401 the wrapper transparently forces a fresh token and retries once; if it still
  * fails it emits {@link AUTH_REQUIRED_EVENT} so the sign-in gate can re-authenticate. A 403
@@ -19,23 +22,71 @@ import { acquireApiToken } from './tokenService';
 export const AUTH_REQUIRED_EVENT = 'retailpulse:auth-required';
 export const AUTH_FORBIDDEN_EVENT = 'retailpulse:auth-forbidden';
 
-const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN ?? '').replace(/\/+$/, '');
+/**
+ * Protected REST surface the bearer token may be attached to. This is our own API only —
+ * SignalR (`/hubs`) is deliberately EXCLUDED because it carries the token via its own
+ * `accessTokenFactory` (see tokenService), and anything outside `/api` (static assets,
+ * App Insights, third parties) must never receive the token.
+ */
+const PROTECTED_API_PREFIX = '/api';
 
-/** True when the URL targets our API/hub surface (relative /api, /hubs, or the ACA origin). */
-export function isApiRequest(url: string): boolean {
-  if (url.startsWith('/api') || url.startsWith('/hubs')) {
-    return true;
+function currentOrigin(): string | null {
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    return window.location.origin;
   }
-  if (API_ORIGIN && url.startsWith(API_ORIGIN)) {
-    return true;
-  }
-  return false;
+  return null;
 }
 
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input;
   if (input instanceof URL) return input.toString();
   return input.url;
+}
+
+/** True only for our own `/api` protected paths on the exact current origin. */
+function isProtectedApiPath(pathname: string): boolean {
+  return pathname === PROTECTED_API_PREFIX || pathname.startsWith(`${PROTECTED_API_PREFIX}/`);
+}
+
+/**
+ * Decides whether a request targets our protected API surface and may therefore carry the
+ * Entra bearer token. The check is deliberately strict to avoid ever leaking the token to a
+ * lookalike, a third party, or a same-origin non-API path:
+ *   1. Resolve the URL against the current origin (`new URL(input, location.origin)`), so
+ *      relative and absolute inputs are normalized identically. Unparseable URLs are rejected.
+ *   2. Reject any URL that embeds credentials (userinfo), e.g. `https://trusted@evil.example`.
+ *   3. Require an EXACT origin match (scheme + host + port) — no suffix/prefix lookalikes,
+ *      no scheme or port mismatches, no cross-origin App Insights ingestion endpoints.
+ *   4. Require the path to be on the `/api` allowlist. `/hubs` (SignalR) is handled
+ *      separately by its own accessTokenFactory and is intentionally not matched here.
+ */
+export function isApiRequest(input: RequestInfo | URL): boolean {
+  const origin = currentOrigin();
+  if (!origin) {
+    return false;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(requestUrl(input), origin);
+  } catch {
+    return false;
+  }
+
+  // Never attach the token to a URL that smuggles credentials in the userinfo section.
+  if (parsed.username !== '' || parsed.password !== '') {
+    return false;
+  }
+
+  // Exact same-origin only. This rejects trusted@evil, trusted.evil, suffix hosts,
+  // scheme/port mismatches, and cross-origin telemetry endpoints.
+  if (parsed.origin !== origin) {
+    return false;
+  }
+
+  // Only our own /api protected paths. Encoded traversal (%2e%2e) and normalized `..`
+  // that escape /api resolve to a non-/api pathname and are excluded.
+  return isProtectedApiPath(parsed.pathname);
 }
 
 let installed = false;
@@ -63,7 +114,7 @@ export function installAuthorizedFetch(): void {
   };
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    if (!isApiRequest(requestUrl(input))) {
+    if (!isApiRequest(input)) {
       return originalFetch(input, init);
     }
 

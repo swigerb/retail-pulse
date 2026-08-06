@@ -168,16 +168,41 @@ public sealed class EntraAuthenticationTests
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    // ── never permissive ──────────────────────────────────────────────────────
+    // ── never permissive / deny-by-default fallback ──────────────────────────
 
     [Fact]
-    public async Task RequireAuthFalse_StillRequiresAuthenticatedUser()
+    public async Task UnannotatedApiEndpoint_IsProtectedByFallbackPolicy()
     {
-        // Even with Security:RequireAuth=false the default policy demands a user — the API
-        // never degrades to anonymous production (no RequireAssertion(_ => true)).
-        using TestFixture fx = CreateServer(requireAuth: false);
-        HttpResponseMessage response = await fx.Client.PostAsync("/api/chat", new StringContent(string.Empty));
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        // An /api endpoint that forgot RequireAuthorization must still reject anonymous
+        // callers because of the deny-by-default FallbackPolicy — no billable anonymous path.
+        using TestFixture fx = CreateServer(requireAuth: true);
+        HttpResponseMessage anonymous = await fx.Client.GetAsync("/api/unannotated");
+        anonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task UnannotatedApiEndpoint_AllowsAuthorizedUserViaFallbackPolicy()
+    {
+        // The fallback policy is the SAME strong policy: a fully-assigned user still passes.
+        using TestFixture fx = CreateServer(requireAuth: true);
+        string token = CreateToken(Issuer, ClientId, RoleAndScopeClaims());
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/unannotated");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage response = await fx.Client.SendAsync(request);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task UnannotatedApiEndpoint_MissingRole_IsForbiddenByFallbackPolicy()
+    {
+        // The fallback policy also enforces role+scope, so an authenticated-but-unassigned
+        // user is forbidden rather than served.
+        using TestFixture fx = CreateServer(requireAuth: true);
+        string token = CreateToken(Issuer, ClientId, [new Claim("scp", ApiScope)]);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/unannotated");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage response = await fx.Client.SendAsync(request);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -262,6 +287,11 @@ public sealed class EntraAuthenticationTests
                         endpoints.MapPost("/api/chat", static () => Results.Ok(new { reply = "ok" }))
                             .RequireAuthorization();
 
+                        // Regression fixture: an /api endpoint that FORGOT RequireAuthorization.
+                        // The deny-by-default FallbackPolicy must still protect it so a future
+                        // unannotated route can never expose a billable anonymous path.
+                        endpoints.MapGet("/api/unannotated", static () => Results.Ok(new { data = "secret" }));
+
                         // Protected hub surface (query-token path). A plain endpoint stands in
                         // for the SignalR hub so we can assert the ?access_token mapping.
                         endpoints.MapGet("/hubs/telemetry", static () => Results.Ok(new { hub = "telemetry" }))
@@ -269,9 +299,10 @@ public sealed class EntraAuthenticationTests
                         endpoints.MapPost("/hubs/telemetry/negotiate", static () => Results.Ok(new { negotiated = true }))
                             .RequireAuthorization();
 
-                        // Liveness/readiness must remain anonymous (no RequireAuthorization).
-                        endpoints.MapGet("/health", static () => Results.Ok(new { status = "ok" }));
-                        endpoints.MapGet("/alive", static () => Results.Ok(new { status = "alive" }));
+                        // Liveness/readiness are the ONLY anonymous endpoints. They must opt
+                        // out explicitly because the API sets a deny-by-default FallbackPolicy.
+                        endpoints.MapGet("/health", static () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+                        endpoints.MapGet("/alive", static () => Results.Ok(new { status = "alive" })).AllowAnonymous();
                     });
                 });
             });

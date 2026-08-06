@@ -13,8 +13,18 @@
       * SPA + Web redirect URIs derived from -FrontendOrigin (and -RedirectUri).
       * An app-role assignment for the operator (or -AssignUserUpn) so they can sign in.
 
-    The script is IDEMPOTENT: re-running reconciles the existing app in place and
-    never creates duplicates, extra scopes, extra roles, or secrets.
+    The script is IDEMPOTENT: re-running with the SAME explicit -ClientId / -AppObjectId
+    reconciles that exact app in place and never creates duplicates, extra scopes, extra
+    roles, or secrets.
+
+    SAFE RECONCILIATION (no app hijack): the script NEVER adopts an app located by display
+    name. To modify an existing registration you must pass -ClientId (its appId) or
+    -AppObjectId (its object id); the target is then verified to be owned by the caller, to
+    carry this tool's managed marker tag (or be explicitly overridden with
+    -AllowUnmarkedAdoption), and to have an identifier URI that is unset or already the
+    expected api://{clientId}. With no explicit identifier the script is CREATE-ONLY and
+    hard-fails if any app already uses the requested -DisplayName. Apps created here are
+    stamped with the 'RetailPulseManaged' tag.
 
     It talks to Microsoft Graph exclusively via `az rest` using the CALLER's
     delegated Azure CLI token — it never writes secrets, never prints tokens, and
@@ -30,8 +40,22 @@
     fast if the signed-in `az` context is a different tenant.
 
 .PARAMETER DisplayName
-    Display name of the app registration. Default: 'Retail Pulse'. Used to locate
-    an existing registration for idempotent reconciliation.
+    Display name of the app registration. Default: 'Retail Pulse'. Used ONLY to name a newly
+    created app and to detect same-name collisions in create-only mode. It is NEVER used to
+    adopt an existing app (that requires -ClientId or -AppObjectId).
+
+.PARAMETER ClientId
+    appId (client id GUID) of an EXISTING app to reconcile in place. The app must be owned by
+    the caller and carry the managed marker (or use -AllowUnmarkedAdoption). Mutually usable
+    with -AppObjectId.
+
+.PARAMETER AppObjectId
+    Directory object id (GUID) of an EXISTING app to reconcile in place. Same ownership/marker
+    verification as -ClientId.
+
+.PARAMETER AllowUnmarkedAdoption
+    Permit adoption of an owned app that lacks the 'RetailPulseManaged' marker tag. Ownership
+    and identifier-URI checks still apply. Use only after confirming you targeted the right app.
 
 .PARAMETER FrontendOrigin
     Origin(s) of the deployed SPA (e.g. https://white-sea-123.azurestaticapps.net).
@@ -82,12 +106,32 @@ param(
 
     [string]$AssignUserUpn,
 
+    # Explicit identifier of an EXISTING app to reconcile. Supply one of these to adopt an
+    # app in place. When neither is supplied the script is CREATE-ONLY and will never adopt
+    # an app located by display name (that would allow a same-name attacker app to be hijacked).
+    [string]$ClientId,
+
+    [string]$AppObjectId,
+
+    # Adopt an existing app that does NOT carry this tool's managed marker tag. Requires that
+    # the signed-in user still owns the app and its identifier URI is unset or already correct.
+    [switch]$AllowUnmarkedAdoption,
+
     [switch]$Apply
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $graph = 'https://graph.microsoft.com/v1.0'
+
+# Marker tag stamped on apps this tool creates. Adoption of an existing app requires this
+# marker (or an explicit -AllowUnmarkedAdoption override plus ownership + identifier-URI checks)
+# so the reconciler never mutates an unrelated or attacker-planted application.
+$script:ManagedTag = 'RetailPulseManaged'
+
+# Central write-enable flag. Every Graph mutation (POST/PATCH/DELETE) is hard-gated on this so
+# preview mode (no -Apply) can NEVER make a write, even if a future code path forgets a guard.
+$script:ApplyWrites = [bool]$Apply
 
 function Write-Section([string]$text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
 function Write-Plan([string]$text) { Write-Host "  [plan] $text" -ForegroundColor Yellow }
@@ -101,6 +145,10 @@ function Invoke-Graph {
         [Parameter(Mandatory)][string]$Url,
         [object]$Body
     )
+    # Preview-no-writes choke point: refuse every mutating verb unless -Apply was passed.
+    if ($Method -in @('POST', 'PATCH', 'DELETE') -and -not $script:ApplyWrites) {
+        throw "Refusing $Method $Url in preview mode. Re-run with -Apply to perform writes."
+    }
     $restArgs = @('rest', '--method', $Method.ToLower(), '--url', $Url,
         '--headers', 'Content-Type=application/json')
     if ($null -ne $Body) {
@@ -122,6 +170,100 @@ function Invoke-Graph {
     }
     if ([string]::IsNullOrWhiteSpace($out)) { return $null }
     return ($out | ConvertFrom-Json)
+}
+
+# --- Safe application resolution helpers --------------------------------------
+# Returns the object id of the signed-in caller (used to prove app ownership).
+function Get-CallerObjectId {
+    $me = Invoke-Graph -Method GET -Url "$graph/me?`$select=id"
+    if (-not $me -or -not $me.id) { throw 'Unable to resolve the signed-in caller from Microsoft Graph (/me).' }
+    return $me.id
+}
+
+# True when $callerId is listed among the application's registered owners.
+function Test-AppOwnedByCaller {
+    param([Parameter(Mandatory)][string]$AppObjectId, [Parameter(Mandatory)][string]$CallerId)
+    $owners = Invoke-Graph -Method GET -Url "$graph/applications/$AppObjectId/owners?`$select=id"
+    $ownerIds = @()
+    if ($owners -and $owners.value) { $ownerIds = @($owners.value).id }
+    return $ownerIds -contains $CallerId
+}
+
+# Reads a property off a Graph object safely under StrictMode (missing property -> $default).
+function Get-Prop {
+    param([Parameter(Mandatory)]$Object, [Parameter(Mandatory)][string]$Name, $Default = $null)
+    if ($Object -and ($Object.PSObject.Properties.Name -contains $Name)) { return $Object.$Name }
+    return $Default
+}
+
+# Gate BEFORE any mutation of an EXISTING app that was explicitly targeted for adoption.
+# Refuses unless: (1) the caller owns the app, (2) its identifierUris are unset or already
+# equal the expected api://{clientId} audience (never repoints another app's URI), and
+# (3) it carries the managed marker tag — unless -AllowUnmarkedAdoption was supplied.
+function Assert-SafeToAdopt {
+    param(
+        [Parameter(Mandatory)]$App,
+        [Parameter(Mandatory)][string]$CallerId,
+        [Parameter(Mandatory)][string]$ExpectedAudience
+    )
+    $objectId = Get-Prop $App 'id'
+
+    if (-not (Test-AppOwnedByCaller -AppObjectId $objectId -CallerId $CallerId)) {
+        throw "Refusing to modify application ${objectId}: the signed-in user is not a registered owner. Adopt only apps you own."
+    }
+
+    $uris = @(Get-Prop $App 'identifierUris' @())
+    $uriSafe = ($uris.Count -eq 0) -or ($uris.Count -eq 1 -and $uris[0] -eq $ExpectedAudience)
+    if (-not $uriSafe) {
+        throw "Refusing to modify application ${objectId}: identifierUris [$($uris -join ', ')] do not match expected '$ExpectedAudience'. This app is not the Retail Pulse API."
+    }
+
+    $tags = @(Get-Prop $App 'tags' @())
+    $hasMarker = $tags -contains $script:ManagedTag
+    if (-not $hasMarker) {
+        if (-not $AllowUnmarkedAdoption) {
+            throw "Refusing to adopt application ${objectId}: it lacks the '$($script:ManagedTag)' marker (not provisioned by this tool). Verify you own the correct app, then re-run with -AllowUnmarkedAdoption to override."
+        }
+        Write-Warning "Application $objectId lacks the '$($script:ManagedTag)' marker; adopting anyway because -AllowUnmarkedAdoption was supplied (ownership + identifier URI already verified)."
+    }
+}
+
+# Resolves the app to reconcile. Explicit -AppObjectId / -ClientId adopt a verified, owned
+# app. With NO explicit identifier the script is create-only: a display-name lookup is used
+# ONLY to detect a collision and HARD-FAIL — it never adopts an app located by name, which is
+# what closes the same-name app-hijack hole. Returns $null to signal "create a new app".
+function Resolve-TargetApplication {
+    $callerId = Get-CallerObjectId
+    $selectFields = 'id,appId,displayName,signInAudience,identifierUris,tags'
+
+    if ($AppObjectId) {
+        $app = Invoke-Graph -Method GET -Url "$graph/applications/$AppObjectId`?`$select=$selectFields"
+        if (-not $app) { throw "No application found with object id '$AppObjectId'." }
+        Assert-SafeToAdopt -App $app -CallerId $callerId -ExpectedAudience "api://$(Get-Prop $app 'appId')"
+        return $app
+    }
+
+    if ($ClientId) {
+        $resp = Invoke-Graph -Method GET -Url "$graph/applications?`$filter=appId eq '$ClientId'&`$select=$selectFields"
+        $found = @()
+        if ($resp -and $resp.value) { $found = @($resp.value) }
+        if ($found.Count -eq 0) { throw "No application found with appId (client id) '$ClientId'." }
+        if ($found.Count -gt 1) { throw "Ambiguous: $($found.Count) applications share appId '$ClientId'. Refusing to guess. Use -AppObjectId." }
+        $app = $found[0]
+        Assert-SafeToAdopt -App $app -CallerId $callerId -ExpectedAudience "api://$(Get-Prop $app 'appId')"
+        return $app
+    }
+
+    # No explicit identifier -> CREATE-ONLY. Detect same-name collisions and refuse; never adopt.
+    $escapedName = $DisplayName.Replace("'", "''")
+    $resp = Invoke-Graph -Method GET -Url "$graph/applications?`$filter=displayName eq '$escapedName'&`$select=id,appId,displayName"
+    $sameName = @()
+    if ($resp -and $resp.value) { $sameName = @($resp.value) }
+    if ($sameName.Count -gt 0) {
+        $ids = ($sameName | ForEach-Object { "appId=$($_.appId)" }) -join ', '
+        throw "Found $($sameName.Count) existing application(s) named '$DisplayName' ($ids). This tool will NOT adopt an app by display name (a same-name app may be attacker-controlled). Re-run with -ClientId <appId> or -AppObjectId <objectId> of the app you own to reconcile it, or choose a different -DisplayName to create a new one."
+    }
+    return $null
 }
 
 # --- 1. Validate az context + tenant -----------------------------------------
@@ -151,31 +293,31 @@ if ($redirects.Count -eq 0) {
     Write-Warning 'No -FrontendOrigin / -RedirectUri supplied. SPA redirect URIs will be left unset.'
 }
 
-# --- 2. Find or create the application ----------------------------------------
+# --- 2. Resolve or create the application (SAFE reconciliation) ---------------
+# Never adopts by display name. Explicit -ClientId/-AppObjectId adopt an owned, verified,
+# marked app; otherwise create-only after a hard-fail collision check. See helpers above.
 Write-Section "Application registration '$DisplayName'"
-$escaped = $DisplayName.Replace("'", "''")
-$existing = Invoke-Graph -Method GET -Url "$graph/applications?`$filter=displayName eq '$escaped'&`$select=id,appId,displayName,signInAudience,identifierUris"
-$app = $null
-if ($existing.value.Count -gt 0) { $app = $existing.value[0] }
+$app = Resolve-TargetApplication
 
 if (-not $app) {
-    Write-Plan "Create single-tenant application '$DisplayName' (signInAudience=AzureADMyOrg, SPA public client, no secret)"
+    Write-Plan "Create single-tenant application '$DisplayName' (signInAudience=AzureADMyOrg, SPA public client, no secret, tag=$($script:ManagedTag))"
     if ($Apply) {
         $spaRedirects = @($redirects)
         $body = @{
             displayName    = $DisplayName
             signInAudience = 'AzureADMyOrg'
+            tags           = @($script:ManagedTag)
             spa            = @{ redirectUris = $spaRedirects }
             web            = @{ redirectUris = $spaRedirects }
         }
         $app = Invoke-Graph -Method POST -Url "$graph/applications" -Body $body
-        Write-Done "Created application appId=$($app.appId) objectId=$($app.id)"
+        Write-Done "Created application appId=$($app.appId) objectId=$($app.id) (marked '$($script:ManagedTag)')"
     }
 }
 else {
-    Write-Skip "Application exists: appId=$($app.appId) objectId=$($app.id)"
-    if ($app.signInAudience -ne 'AzureADMyOrg') {
-        Write-Plan "Set signInAudience to AzureADMyOrg (single tenant) — currently '$($app.signInAudience)'"
+    Write-Skip "Adopting owned+verified application: appId=$($app.appId) objectId=$($app.id)"
+    if ((Get-Prop $app 'signInAudience') -ne 'AzureADMyOrg') {
+        Write-Plan "Set signInAudience to AzureADMyOrg (single tenant) — currently '$(Get-Prop $app 'signInAudience')'"
         if ($Apply) {
             Invoke-Graph -Method PATCH -Url "$graph/applications/$($app.id)" -Body @{ signInAudience = 'AzureADMyOrg' } | Out-Null
             Write-Done 'signInAudience set to AzureADMyOrg'

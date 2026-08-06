@@ -73,6 +73,12 @@ public static class AuthenticationSetup
     /// demands an authenticated user, the required app role, and the required API scope.
     /// When auth is disabled (local experiments only) the default policy still requires an
     /// authenticated user — it is never permissive.
+    ///
+    /// A deny-by-default <see cref="AuthorizationOptions.FallbackPolicy"/> is also set to the
+    /// same strong policy so that ANY endpoint without explicit authorization metadata is
+    /// protected. Only endpoints that opt out with <c>.AllowAnonymous()</c> (health/liveness)
+    /// are reachable unauthenticated — a forgotten <c>.RequireAuthorization()</c> on a future
+    /// <c>/api</c> or <c>/hubs</c> route can no longer expose a billable anonymous path.
     /// </summary>
     public static void AddRetailPulseAuthorization(this IServiceCollection services, EntraAuthOptions options)
     {
@@ -81,6 +87,7 @@ public static class AuthenticationSetup
             AuthorizationPolicy policy = BuildUserPolicy(options);
             authz.AddPolicy(UserPolicy, policy);
             authz.DefaultPolicy = policy;
+            authz.FallbackPolicy = policy;
         });
     }
 
@@ -114,9 +121,13 @@ public static class AuthenticationSetup
         jwt.MapInboundClaims = false;
         jwt.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateIssuer = options.ValidIssuers.Length > 0,
+            // Issuer/audience validation is unconditional whenever auth is required (always
+            // the case outside Development). It never silently disables itself because the
+            // configured issuer/audience list happens to be empty — a misconfigured deploy
+            // then rejects every token instead of accepting unvalidated ones.
+            ValidateIssuer = options.RequireAuth || options.ValidIssuers.Length > 0,
             ValidIssuers = options.ValidIssuers,
-            ValidateAudience = options.ValidAudiences.Length > 0,
+            ValidateAudience = options.RequireAuth || options.ValidAudiences.Length > 0,
             ValidAudiences = options.ValidAudiences,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
