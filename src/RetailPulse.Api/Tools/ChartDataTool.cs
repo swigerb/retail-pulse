@@ -21,7 +21,7 @@ public class ChartDataTool
         _logger = logger;
     }
 
-    [Description("Create a chart visualization by providing structured chart data. Provide JSON matching ChartSpec schema. Types: line, bar, groupedBar, pie, donut, horizontalBar, stackedBar, gauge, table.")]
+    [Description("Create a chart visualization by providing structured chart data. Provide JSON matching the ChartSpec schema: {\"type\":\"line|bar|groupedBar|stackedBar|horizontalBar|pie|donut|gauge|table\",\"title\":\"...\",\"xAxisTitle\":\"...\",\"yAxisTitle\":\"...\",\"data\":[{\"legend\":\"Series name\",\"color\":\"#hex\",\"values\":[{\"x\":\"Category\",\"y\":123.4}]}]}. For a multi-series comparison, emit one entry in \"data\" per series, and give every series the same set of \"x\" category labels so they align. Every point needs a finite numeric \"y\". An empty or valueless chart is rejected, not rendered.")]
     public Task<string> CreateChart(
         [Description("JSON string matching the ChartSpec schema")] string chartSpecJson = "")
     {
@@ -39,24 +39,28 @@ public class ChartDataTool
                 return Task.FromResult(JsonSerializer.Serialize(new { error = "Invalid chart specification" }));
             }
 
-            // Strict binding succeeds structurally even when the model used a
-            // non-canonical schema (e.g. top-level series + xAxis), leaving Data empty.
-            // Recover the real series via the normalizer before returning an empty chart.
-            if (spec.Data.Count == 0
-                && ChartSpecNormalizer.TryNormalize(chartSpecJson, out ChartSpec? enriched)
-                && enriched is not null
-                && enriched.Data.Count > 0)
+            // A strictly-valid payload is only usable if it actually has a bindable
+            // datapoint. Prefer it when renderable; otherwise fall back to the normalizer,
+            // which recovers realistic non-canonical schemas (top-level series, Chart.js
+            // labels/series, CanvasJS dataPoints) that bind to empty Data under strict
+            // deserialization. Either way the result must pass the renderable invariant —
+            // an empty/valueless chart is returned as a diagnostic, never as success.
+            if (ChartSpecValidator.IsRenderable(spec))
+            {
+                return Task.FromResult(RenderableSuccessOrError(spec, recovered: false));
+            }
+
+            if (ChartSpecNormalizer.TryNormalize(chartSpecJson, out ChartSpec? enriched)
+                && ChartSpecValidator.IsRenderable(enriched))
             {
                 _logger.LogInformation(
                     "Enriched chart spec from non-canonical schema: {Type} - {Title} with {SeriesCount} series",
-                    enriched.Type, enriched.Title, enriched.Data.Count);
+                    enriched!.Type, enriched.Title, enriched.Data.Count);
 
-                return Task.FromResult(JsonSerializer.Serialize(new { status = "success", chart = enriched, recovered = true }));
+                return Task.FromResult(RenderableSuccessOrError(enriched, recovered: true));
             }
 
-            _logger.LogInformation("Chart created: {Type} - {Title} with {SeriesCount} series", spec.Type, spec.Title, spec.Data.Count);
-
-            return Task.FromResult(JsonSerializer.Serialize(new { status = "success", chart = spec, recovered = false }));
+            return Task.FromResult(NoRenderableDataError());
         }
         catch (JsonException ex)
         {
@@ -80,13 +84,13 @@ public class ChartDataTool
         // The payload may be well-formed but use a non-canonical, model-invented
         // schema (e.g. Chart.js-style data:{labels,series}). Normalize that shape
         // before falling back to truncation repair.
-        if (ChartSpecNormalizer.TryNormalize(cleaned, out ChartSpec? normalized) && normalized is not null)
+        if (ChartSpecNormalizer.TryNormalize(cleaned, out ChartSpec? normalized) && ChartSpecValidator.IsRenderable(normalized))
         {
             _logger.LogInformation(
                 "Normalized non-canonical chart spec: {Type} - {Title} with {SeriesCount} series",
-                normalized.Type, normalized.Title, normalized.Data.Count);
+                normalized!.Type, normalized.Title, normalized.Data.Count);
 
-            return JsonSerializer.Serialize(new { status = "success", chart = normalized, recovered = true });
+            return RenderableSuccessOrError(normalized, recovered: true);
         }
 
         string? repaired = RepairTruncatedJson(cleaned);
@@ -96,13 +100,13 @@ public class ChartDataTool
             {
                 LenientChartSpec? lenient = JsonSerializer.Deserialize<LenientChartSpec>(repaired, _inputOptions);
                 ChartSpec? salvaged = BuildUsableChart(lenient);
-                if (salvaged is not null)
+                if (salvaged is not null && ChartSpecValidator.IsRenderable(salvaged))
                 {
                     _logger.LogInformation(
                         "Recovered truncated chart spec: {Type} - {Title} with {SeriesCount} series",
                         salvaged.Type, salvaged.Title, salvaged.Data.Count);
 
-                    return JsonSerializer.Serialize(new { status = "success", chart = salvaged, recovered = true });
+                    return RenderableSuccessOrError(salvaged, recovered: true);
                 }
             }
             catch (JsonException)
@@ -115,6 +119,42 @@ public class ChartDataTool
         {
             error = "Invalid JSON format",
             message = originalError.Message,
+            recovered = false
+        });
+    }
+
+    /// <summary>
+    /// Serializes a success result only when the chart survives the renderable
+    /// invariant (recognized type + title + at least one finite datapoint), returning
+    /// the cleaned chart. Otherwise returns a structured diagnostic so an empty or
+    /// valueless chart is never emitted as <c>status:"success"</c> and can never
+    /// render as a blank card.
+    /// </summary>
+    private string RenderableSuccessOrError(ChartSpec? chart, bool recovered)
+    {
+        if (ChartSpecValidator.TryGetRenderable(chart, out ChartSpec? renderable) && renderable is not null)
+        {
+            _logger.LogInformation(
+                "Chart created: {Type} - {Title} with {SeriesCount} series (recovered={Recovered})",
+                renderable.Type, renderable.Title, renderable.Data.Count, recovered);
+
+            return JsonSerializer.Serialize(new { status = "success", chart = renderable, recovered });
+        }
+
+        return NoRenderableDataError();
+    }
+
+    private string NoRenderableDataError()
+    {
+        _logger.LogWarning("Chart spec rejected: no renderable data (a recognized type, a title, and at least one finite datapoint are required)");
+
+        return JsonSerializer.Serialize(new
+        {
+            error = "Chart has no renderable data",
+            message = "The chart specification did not contain any bindable series. A renderable chart "
+                + "needs a recognized type, a title, and at least one series with a finite numeric value. "
+                + "Re-issue CreateChart using the canonical schema: data:[{legend, values:[{x, y}]}] with a "
+                + "numeric y per point and a shared x label per category across every series.",
             recovered = false
         });
     }
