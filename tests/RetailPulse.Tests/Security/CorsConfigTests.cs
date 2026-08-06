@@ -24,11 +24,14 @@ public class CorsConfigTests
     {
         // The "Production" CORS policy uses WithOrigins(corsProdOrigins)
         string[] allowedMethods = ["GET", "POST", "PUT", "DELETE"];
-        string[] allowedHeaders = ["Content-Type", "Authorization", "X-Requested-With"];
+        string[] allowedHeaders =
+            ["Content-Type", "Authorization", "X-Requested-With", "X-SignalR-User-Agent"];
 
         allowedMethods.Should().HaveCount(4);
-        allowedHeaders.Should().HaveCount(3);
+        allowedHeaders.Should().HaveCount(4);
         allowedHeaders.Should().Contain("Authorization");
+        allowedHeaders.Should().Contain("X-SignalR-User-Agent",
+            "the browser SignalR client sends this header during direct ACA negotiation");
         await Task.CompletedTask;
     }
 
