@@ -88,15 +88,21 @@ describe('ChartRenderer', () => {
     expect(screen.getByText('Fallback')).toBeInTheDocument();
   });
 
-  it('handles empty data array without crashing', () => {
+  it('shows a diagnostic instead of a blank card for an empty data array', () => {
     const spec: ChartSpec = {
       type: 'bar',
       title: 'Empty',
       data: [],
     };
 
-    expect(() => renderWithProvider(<ChartRenderer charts={[spec]} />)).not.toThrow();
-    expect(screen.getByText('Empty')).toBeInTheDocument();
+    const { container } = renderWithProvider(<ChartRenderer charts={[spec]} />);
+
+    // Non-disruptive diagnostic is shown...
+    expect(screen.getByRole('note')).toBeInTheDocument();
+    expect(screen.getByText(/Chart unavailable/i)).toBeInTheDocument();
+    // ...and NO chart canvas / axes are rendered (no blank card).
+    expect(container.querySelector('.recharts-wrapper')).toBeNull();
+    expect(container.querySelector('svg')).toBeNull();
   });
 
   it('renders multiple charts in order', () => {

@@ -490,8 +490,16 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
                             {
                                 ChartSpec? chart = JsonSerializer.Deserialize<ChartSpec>(
                                     chartElement.GetRawText(), _caseInsensitiveOptions);
-                                if (chart != null)
-                                    charts.Add(chart);
+                                // Enforce the renderable invariant at the extraction
+                                // boundary too: a chart only enters the response when it
+                                // has at least one finite datapoint, so a stale or
+                                // permissively-shaped tool result can never surface as a
+                                // blank card. Non-finite points / empty series are dropped.
+                                if (Charts.ChartSpecValidator.TryGetRenderable(chart, out ChartSpec? renderable)
+                                    && renderable is not null)
+                                {
+                                    charts.Add(renderable);
+                                }
                             }
                         }
                         catch
