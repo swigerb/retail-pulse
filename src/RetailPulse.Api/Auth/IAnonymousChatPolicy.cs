@@ -75,6 +75,31 @@ public sealed class AnonymousChatPolicy : IAnonymousChatPolicy
 }
 
 /// <summary>
+/// Provider-neutral no-op chat policy. Registered as the default <see cref="IAnonymousChatPolicy"/>
+/// in every non-Anonymous composition (Entra/Development) so the execution pipeline can take a
+/// non-optional policy dependency without any mode having to special-case a null. It is a strict
+/// passthrough: it never claims to apply to a request, never disables cache or memory, never strips
+/// a tool, and never caps output tokens. This makes Anonymous constraints opt-in via
+/// <see cref="AnonymousChatPolicy"/> while guaranteeing every DI composition supplies a policy —
+/// omission becomes a compile/resolution failure rather than a silently-null runtime bypass.
+/// </summary>
+public sealed class NoOpAnonymousChatPolicy : IAnonymousChatPolicy
+{
+    /// <summary>Shared stateless instance for convenience constructors and tests.</summary>
+    public static readonly NoOpAnonymousChatPolicy Instance = new();
+
+    public bool AppliesToCurrentRequest => false;
+
+    public bool CacheDisabled => false;
+
+    public bool MemoryDisabled => false;
+
+    public IEnumerable<AITool> FilterTools(IEnumerable<AITool> tools) => tools;
+
+    public int? MaxOutputTokens => null;
+}
+
+/// <summary>
 /// Null-safe helpers so the execution pipeline can apply the anonymous policy uniformly whether or
 /// not one is registered. When the policy is null (non-Anonymous modes) tools pass through
 /// unchanged and no output cap is applied.

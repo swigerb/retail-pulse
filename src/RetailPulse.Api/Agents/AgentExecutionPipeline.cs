@@ -27,7 +27,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly ILogger<AgentExecutionPipeline> _logger;
     private readonly RetailPulseMetrics? _metrics;
     private readonly StreamingProgressFeature _streamingFeature;
-    private readonly IAnonymousChatPolicy? _anonymousChatPolicy;
+    private readonly IAnonymousChatPolicy _anonymousChatPolicy;
 
     private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -47,8 +47,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         StreamingProgressFeature? streamingFeature,
         IConfiguration configuration,
         ILogger<AgentExecutionPipeline> logger,
-        RetailPulseMetrics? metrics = null,
-        IAnonymousChatPolicy? anonymousChatPolicy = null)
+        RetailPulseMetrics? metrics,
+        IAnonymousChatPolicy anonymousChatPolicy)
     {
         _chatClient = chatClient;
         _hubContext = hubContext;
@@ -57,12 +57,15 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         _configuration = configuration;
         _logger = logger;
         _metrics = metrics;
-        _anonymousChatPolicy = anonymousChatPolicy;
+        _anonymousChatPolicy = anonymousChatPolicy
+            ?? throw new ArgumentNullException(nameof(anonymousChatPolicy));
     }
 
     /// <summary>
     /// Simplified constructor for backward compatibility (tests and legacy code).
-    /// Streaming progress is disabled when using this constructor.
+    /// Streaming progress is disabled when using this constructor, and the provider-neutral
+    /// <see cref="NoOpAnonymousChatPolicy"/> is applied (no Anonymous tool-stripping or output cap).
+    /// Production DI must use the primary constructor and supply the resolved policy explicitly.
     /// </summary>
     public AgentExecutionPipeline(
         IChatClient chatClient,
@@ -70,7 +73,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         IConfiguration configuration,
         ILogger<AgentExecutionPipeline> logger,
         RetailPulseMetrics? metrics = null)
-        : this(chatClient, hubContext, null, null, configuration, logger, metrics)
+        : this(chatClient, hubContext, null, null, configuration, logger, metrics, NoOpAnonymousChatPolicy.Instance)
     {
     }
 
