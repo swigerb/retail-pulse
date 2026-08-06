@@ -416,7 +416,7 @@ if ($redirects.Count -gt 0 -and $app) {
     $current = Invoke-Graph -Method GET -Url "$graph/applications/$($app.id)?`$select=spa,web"
     $curSpa = @()
     if ($current.spa -and $current.spa.redirectUris) { $curSpa = @($current.spa.redirectUris) }
-    $missing = $redirects | Where-Object { $curSpa -notcontains $_ }
+    $missing = @($redirects | Where-Object { $curSpa -notcontains $_ })
     if ($missing.Count -eq 0) {
         Write-Skip "SPA redirect URIs already present: $($redirects -join ', ')"
     }
@@ -476,13 +476,19 @@ if ($sp -and $Apply) {
     $spRoles = Invoke-Graph -Method GET -Url "$graph/servicePrincipals/$($sp.id)?`$select=appRoles"
     $targetRole = @($spRoles.appRoles) | Where-Object { $_.value -eq $AppRoleValue } | Select-Object -First 1
     if (-not $targetRole) { throw "App role '$AppRoleValue' not found on service principal yet." }
-    $existingAssignments = Invoke-Graph -Method GET -Url "$graph/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$filter=principalId eq $($user.id)"
-    $already = @($existingAssignments.value) | Where-Object { $_.appRoleId -eq $targetRole.id }
+    # Query from the user's relationship. Some tenants reject filtered reads of
+    # servicePrincipals/{id}/appRoleAssignedTo even though assignment writes are
+    # permitted. The user relationship is broadly supported and we filter the
+    # bounded assignment list locally by resource and role.
+    $existingAssignments = Invoke-Graph -Method GET -Url "$graph/users/$($user.id)/appRoleAssignments?`$select=id,resourceId,appRoleId"
+    $already = @($existingAssignments.value) | Where-Object {
+        $_.resourceId -eq $sp.id -and $_.appRoleId -eq $targetRole.id
+    }
     if ($already) {
         Write-Skip "$AssignUserUpn already assigned to '$AppRoleValue'"
     }
     else {
-        Invoke-Graph -Method POST -Url "$graph/servicePrincipals/$($sp.id)/appRoleAssignedTo" -Body @{
+        Invoke-Graph -Method POST -Url "$graph/users/$($user.id)/appRoleAssignments" -Body @{
             principalId = $user.id
             resourceId  = $sp.id
             appRoleId   = $targetRole.id

@@ -160,6 +160,22 @@ public partial class SetupEntraAuthScriptContractTests
     }
 
     [Fact]
+    public void RoleAssignment_UsesSupportedUserRelationship()
+    {
+        ScriptText.Should().Contain("/appRoleAssignments");
+        ScriptText.Should().Contain("resourceId -eq $sp.id");
+        ScriptText.Should().NotContain("$graph/servicePrincipals/$($sp.id)/appRoleAssignedTo",
+            "filtered appRoleAssignedTo reads are rejected in managed external tenants");
+    }
+
+    [Fact]
+    public void RedirectReconciliation_UsesArrayForEmptyAndSingleResults()
+    {
+        ScriptText.Should().Contain("$missing = @($redirects | Where-Object",
+            "StrictMode does not expose Count on null, so an idempotent rerun with no missing redirects must retain an empty array");
+    }
+
+    [Fact]
     public void PartialFailure_SurfacesAsAThrownError_NotSilentSuccess()
     {
         // Stop-on-error plus an explicit non-zero-exit throw means a failed Graph call aborts
