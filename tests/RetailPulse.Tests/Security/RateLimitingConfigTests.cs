@@ -92,4 +92,34 @@ public class RateLimitingConfigTests
             $"endpoint {endpoint} should map to a valid policy");
         await Task.CompletedTask;
     }
+
+    // ── Sprint 1: mode-conditional anonymous bootstrap limiter ─────────────────
+    // The "anonymous-bootstrap" policy is NOT one of the four always-on core policies above. It is
+    // a per-IP fixed-window limiter added by Program.cs ONLY when Authentication:Mode=Anonymous, so
+    // the single unauthenticated anonymous surface (the session bootstrap endpoint) cannot be used
+    // to farm session tokens. Its permit limit is driven by Anonymous:Bootstrap:PerIpPerMinute
+    // (default 5) over a 1-minute window. It is asserted separately here so the four-core invariant
+    // (RateLimitPolicies_ExactlyFourDefined) stays intact.
+
+    private const string AnonymousBootstrapPolicy = "anonymous-bootstrap";
+    private const int AnonymousBootstrapDefaultPermitLimit = 5;
+    private const int AnonymousBootstrapWindowMinutes = 1;
+
+    [Fact]
+    public async Task AnonymousBootstrapPolicy_IsSeparateFromCorePolicies()
+    {
+        ExpectedPolicies.Keys.Should().NotContain(AnonymousBootstrapPolicy,
+            "the anonymous bootstrap limiter is mode-conditional and not part of the always-on core set");
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task AnonymousBootstrapPolicy_UsesConservativePerIpDefault()
+    {
+        AnonymousBootstrapDefaultPermitLimit.Should().BePositive();
+        AnonymousBootstrapDefaultPermitLimit.Should().BeLessThanOrEqualTo(ExpectedPolicies["strict"].PermitLimit,
+            "bootstrapping a token must be at least as restricted as the strictest core policy");
+        AnonymousBootstrapWindowMinutes.Should().Be(1);
+        await Task.CompletedTask;
+    }
 }

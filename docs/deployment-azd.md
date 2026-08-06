@@ -356,6 +356,20 @@ built-in rate limiter. Acceptable for a throwaway demo; do **not** use this post
 anything with real data or cost exposure. Set `Security__RequireAuth=true` (and wire an
 identity provider) for non-demo environments.
 
+> **Anonymous mode is a safer alternative to this posture, but is not deployed.**
+> Sprint 1 adds a first-class, fail-closed `Authentication:Mode=Anonymous` provider
+> (server-minted short-lived session tokens, read-only enforcement, per-subject/per-IP
+> rate limits, and a daily request/token/cost circuit breaker) — see
+> [security.md → Anonymous mode](security.md#anonymous-mode-opt-in-never-deployed) and
+> [ADR-005](adr/005-provider-neutral-authentication.md). Unlike `Security__RequireAuth=false`,
+> it does not leave the model surface unauthenticated. It is **not** enabled by any
+> deployment artifact this sprint: `appsettings.Production.json`, the Bicep, and the azd
+> postprovision hooks all remain pinned to `Entra`, and a deployment-contract test asserts
+> the hooks never configure Anonymous guardrails. A hosted Anonymous enable would be a
+> deliberate, separate decision requiring `Anonymous:AllowHosted=true`, a strong signing
+> key, positive daily ceilings, and — because the ceilings are replica-local — a single
+> replica (`maxReplicas=1`). It is not equivalent to authenticated production.
+
 ### Frontend → API routing and SignalR
 
 The postprovision hook idempotently links the ACA API as the Static Web App backend,
