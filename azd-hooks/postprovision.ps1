@@ -46,8 +46,6 @@ $openAiEndpoint = Get-RequiredEnv 'AZURE_OPENAI_ENDPOINT'
 $apiUrl         = Get-RequiredEnv 'AZURE_API_APP_URL'
 $mcpServerUrl   = Get-RequiredEnv 'AZURE_MCP_SERVER_APP_URL'
 $frontendOrigin = Get-RequiredEnv 'RETAIL_PULSE_FRONTEND_ORIGIN'
-$dataDirectory  = Get-RequiredEnv 'RETAIL_PULSE_DATA_DIRECTORY'
-$requireDurable = Get-RequiredEnv 'RETAIL_PULSE_REQUIRE_DURABLE_STORAGE'
 $staticWebApp   = Get-RequiredEnv 'AZURE_STATIC_WEB_APP_NAME'
 $location       = Get-RequiredEnv 'AZURE_LOCATION'
 $apps = @(
@@ -108,8 +106,6 @@ Invoke-Az `
         "McpServer__BaseUrl=$mcpServerUrl",
         'Security__RequireAuth=false',
         "Security__AllowedOrigins__0=$frontendOrigin",
-        "RETAIL_PULSE_DATA_DIRECTORY=$dataDirectory",
-        "RETAIL_PULSE_REQUIRE_DURABLE_STORAGE=$requireDurable",
         'ASPNETCORE_ENVIRONMENT=Development',
         '--output', 'none'
     ) `
