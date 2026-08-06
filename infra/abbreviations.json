@@ -5,6 +5,5 @@
   "appManagedEnvironments": "cae-",
   "appContainerApps": "ca-",
   "webSites": "app-",
-  "webServerFarms": "plan-",
-  "storageStorageAccounts": "st"
+  "webServerFarms": "plan-"
 }

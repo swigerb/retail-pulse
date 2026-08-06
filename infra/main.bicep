@@ -42,16 +42,6 @@ module containerRegistry './modules/container-registry.bicep' = {
   }
 }
 
-module storage './modules/storage.bicep' = {
-  name: 'storage'
-  scope: rg
-  params: {
-    location: location
-    resourceToken: resourceToken
-    tags: tags
-  }
-}
-
 module containerAppsEnv './modules/container-apps-env.bicep' = {
   name: 'container-apps-env'
   scope: rg
@@ -60,8 +50,6 @@ module containerAppsEnv './modules/container-apps-env.bicep' = {
     resourceToken: resourceToken
     tags: tags
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
-    storageAccountName: storage.outputs.storageAccountName
-    fileShareName: storage.outputs.fileShareName
   }
 }
 
@@ -71,7 +59,6 @@ module containerApps './modules/container-apps.bicep' = {
   params: {
     location: location
     environmentId: containerAppsEnv.outputs.environmentId
-    dataStorageName: containerAppsEnv.outputs.dataStorageName
     tags: tags
   }
 }
@@ -106,20 +93,6 @@ output AZURE_LOG_ANALYTICS_WORKSPACE_ID string = monitoring.outputs.logAnalytics
 output AZURE_STATIC_WEB_APP_NAME string = staticWebApp.outputs.staticWebAppName
 output AZURE_FRONTEND_APP_NAME string = staticWebApp.outputs.staticWebAppName
 output AZURE_FRONTEND_APP_URL string = staticWebApp.outputs.staticWebAppUrl
-
-// Durable app-data storage (Azure Files). Only non-secret identifiers are
-// emitted — the account key is fetched inside Bicep (see container-apps-env)
-// and never surfaces in the azd environment, logs, or the repo.
-output AZURE_STORAGE_ACCOUNT_NAME string = storage.outputs.storageAccountName
-output AZURE_FILE_SHARE_NAME string = storage.outputs.fileShareName
-// Mount path consumed by the API's RETAIL_PULSE_DATA_DIRECTORY (kept in sync with
-// the container-apps module default) so the postprovision hook re-asserts the
-// same durable path.
-output RETAIL_PULSE_DATA_DIRECTORY string = '/mnt/retailpulse-data'
-// Environment-agnostic durability switch re-asserted by the postprovision hook.
-// Kept in sync with the container-apps module env so the deployed API fails fast
-// on a missing/unwritable mount regardless of ASPNETCORE_ENVIRONMENT.
-output RETAIL_PULSE_REQUIRE_DURABLE_STORAGE string = 'true'
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and

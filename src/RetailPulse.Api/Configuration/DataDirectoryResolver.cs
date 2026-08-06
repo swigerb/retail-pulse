@@ -7,31 +7,35 @@ namespace RetailPulse.Api.Configuration;
 /// Resolves the single writable directory that every durable SQLite store
 /// (audit, cost, memory, approvals, alerts) is opened under.
 /// <para>
-/// Deployed Azure Container Apps mount an Azure Files share and set
-/// <see cref="ConfigKey"/> (<c>RETAIL_PULSE_DATA_DIRECTORY</c>) to the mount path
-/// (e.g. <c>/mnt/retailpulse-data</c>) so history survives replica replacement
-/// and scale-to-zero. Local development leaves it unset and falls back to a
-/// per-machine temp directory.
+/// <b>Deployment note (governance):</b> the deployed synthetic demo does <b>not</b>
+/// mount a durable Azure volume. This tenant's policy forces new storage accounts
+/// to <c>allowSharedKeyAccess=false</c>/<c>publicNetworkAccess=Disabled</c>, which
+/// breaks the account-key Azure Files CIFS mount that was previously used, so the
+/// mount was removed (see <c>docs/deployment-azd.md</c>). The deployed API runs
+/// <c>ASPNETCORE_ENVIRONMENT=Development</c> with <see cref="ConfigKey"/> unset and
+/// therefore uses a per-machine temp directory; observability history lives only
+/// within the current replica and resets on replacement. Local development behaves
+/// the same way.
 /// </para>
 /// <para>
-/// Durability is enforced by an <b>explicit, environment-agnostic</b> switch,
+/// The resolver still supports a durable path for any future policy-compatible
+/// backing. Durability can be required <b>explicitly</b> via
 /// <see cref="RequireDurableStorageKey"/> (<c>RETAIL_PULSE_REQUIRE_DURABLE_STORAGE</c>),
-/// which deployed infrastructure (Bicep/container env) sets to <c>true</c>
-/// alongside the mount. When that flag is truthy the resolver <b>fails startup</b>
-/// if the durable path is absent, empty, or unwritable — regardless of
-/// <c>ASPNETCORE_ENVIRONMENT</c>. This means the deployed API stays safe even
-/// though it currently runs with <c>ASPNETCORE_ENVIRONMENT=Development</c>, and it
-/// does not silently regress if future config drift flips the environment. A
-/// malformed flag value is rejected rather than silently treated as "not
-/// required".
+/// which, when truthy, makes a writable path a hard startup requirement regardless
+/// of <c>ASPNETCORE_ENVIRONMENT</c>. A malformed flag value is rejected rather than
+/// silently treated as "not required". Neither the flag nor <see cref="ConfigKey"/>
+/// is set on the current demo.
 /// </para>
 /// <para>
-/// The resolver never silently degrades to ephemeral storage: it always probes
-/// that the resolved directory is writable and throws if it is not. When the
-/// directory is left unset in a Production environment it also fails fast (belt
-/// and braces with the explicit flag), because a deployed Production API without
-/// a mounted durable path would otherwise lose observability history on every
-/// replica churn. Local development with the flag absent/false may use temp.
+/// The resolver never silently degrades to ephemeral storage when durability is
+/// required: it always probes that the resolved directory is writable and throws if
+/// it is not. When <see cref="ConfigKey"/> is left unset in a Production environment
+/// it also fails fast, because a deployed Production API without a durable path
+/// would otherwise lose observability history on every replica churn. This
+/// Production fail-closed behavior is retained for coordination with the pending
+/// auth PR, which flips the deployed API to Production and must supply a
+/// policy-compatible durable path (or explicitly relax the requirement). Local
+/// development with the flag absent/false and no Production environment may use temp.
 /// </para>
 /// </summary>
 public static class DataDirectoryResolver
@@ -95,8 +99,8 @@ public static class DataDirectoryResolver
             {
                 throw new InvalidOperationException(
                     $"Durable storage is required ('{RequireDurableStorageKey}' is set) but no data directory " +
-                    $"is configured. Set '{ConfigKey}' to a mounted, writable path (for example the Azure Files " +
-                    "mount at /mnt/retailpulse-data). Refusing to fall back to ephemeral temporary storage, which " +
+                    $"is configured. Set '{ConfigKey}' to a mounted, writable, policy-compatible durable path. " +
+                    "Refusing to fall back to ephemeral temporary storage, which " +
                     "would lose audit, cost, memory, approval, and alert history on every replica replacement or " +
                     "scale-to-zero cycle.");
             }
@@ -110,8 +114,8 @@ public static class DataDirectoryResolver
 
         if (configured is not null)
         {
-            // Explicitly configured (deployed ACA points this at the Azure Files
-            // mount). Treat it as a hard requirement.
+            // Explicitly configured durable path (retained for a future
+            // policy-compatible durable backing). Treat it as a hard requirement.
             directory = configured;
             isDurableRequired = true;
         }
@@ -122,7 +126,7 @@ public static class DataDirectoryResolver
             // replica or scale-to-zero cycle would wipe.
             throw new InvalidOperationException(
                 $"A durable data directory is required in Production. Set '{ConfigKey}' to a mounted, " +
-                "writable path (for example the Azure Files mount at /mnt/retailpulse-data). Refusing to " +
+                "writable, policy-compatible durable path. Refusing to " +
                 "fall back to ephemeral temporary storage, which would lose audit, cost, memory, approval, " +
                 "and alert history on every replica replacement or scale-to-zero cycle.");
         }
@@ -176,8 +180,8 @@ public static class DataDirectoryResolver
         {
             string detail = isDurableRequired
                 ? $"The durable data directory '{directory}' (from '{ConfigKey}') is not writable. In a deployed " +
-                  "Container App this usually means the Azure Files volume failed to mount. Refusing to start " +
-                  "with ephemeral storage so observability history is not silently lost."
+                  "Container App this usually means the configured durable volume failed to mount or is not " +
+                  "reachable. Refusing to start with ephemeral storage so observability history is not silently lost."
                 : $"The local data directory '{directory}' is not writable.";
             throw new InvalidOperationException(detail, ex);
         }
