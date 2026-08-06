@@ -96,6 +96,12 @@ builder.Services.AddOpenTelemetry()
 builder.Services.AddSignalR()
     .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 
+// Session-ownership registry — binds a chat sessionId to its owning subject so the hubs can refuse
+// a caller that tries to join another subject's session group (Finding 6). Consulted only for
+// Anonymous callers; Entra/dev hub behavior is unchanged. Registered in all modes because the hubs
+// take it via constructor injection.
+builder.Services.AddSingleton<ISessionOwnershipRegistry, SessionOwnershipRegistry>();
+
 // ── CORS — split policies for Development vs Production ─────────────────
 // Development includes known local origins plus explicitly configured deployed
 // origins. This keeps the fixed synthetic demo identity while allowing the SWA
@@ -134,11 +140,20 @@ builder.Services.AddCors(options =>
 // honours the access_token query param only for /hubs, and requires the app role + API
 // scope on every protected endpoint and hub. Development uses the synthetic handler. The
 // default policy is never permissive — no RequireAssertion(_ => true) when auth is on.
-// GitHub/Anonymous modes are declared but fail startup ("not implemented in this sprint") and
-// never fall through to Entra/Development/anonymous; a missing mode fails closed outside Development.
-EntraAuthOptions entraAuthOptions =
+// GitHub mode is declared but fails startup ("not implemented in this sprint"); a missing mode
+// fails closed outside Development. Anonymous mode (Sprint 1) wires its own constrained session
+// scheme + guardrails internally and returns null (see AddAnonymousMode); it never falls through
+// to Entra/Development and, in a hosted environment, requires a second explicit opt-in.
+AuthenticationMode resolvedAuthMode =
+    AuthenticationModeOptions.Resolve(builder.Configuration, builder.Environment);
+bool anonymousAuthMode = resolvedAuthMode == AuthenticationMode.Anonymous;
+
+EntraAuthOptions? entraAuthOptions =
     builder.Services.AddProviderNeutralAuthentication(builder.Configuration, builder.Environment);
-builder.Services.AddRetailPulseAuthorization(entraAuthOptions);
+if (entraAuthOptions is not null)
+{
+    builder.Services.AddRetailPulseAuthorization(entraAuthOptions);
+}
 
 // ── Rate Limiting ───────────────────────────────────────────────────────
 builder.Services.AddRateLimiter(options =>
@@ -172,6 +187,35 @@ builder.Services.AddRateLimiter(options =>
         opt.Window = TimeSpan.FromMinutes(1);
         opt.QueueLimit = 0;
     });
+
+    // Rate limiter for the unauthenticated Anonymous bootstrap endpoint. Always registered so the
+    // limiter graph is stable and testable; only used when Authentication:Mode=Anonymous maps the
+    // bootstrap route.
+    //
+    // IMPORTANT (ACA ingress reality): when hosted behind Azure Container Apps, every request
+    // arrives from the ingress/proxy, so HttpContext.Connection.RemoteIpAddress is the proxy's IP,
+    // NOT the client's — a per-IP partition would therefore collapse to a single global bucket
+    // anyway. We do NOT trust X-Forwarded-For to recover the client IP: ACA does not give us a
+    // cryptographically verifiable client-IP header, and an attacker can forge XFF to shard around a
+    // per-IP limit. So bootstrap is intentionally a single GLOBAL, conservative fixed window — it
+    // caps total anonymous session minting per minute for the whole replica and cannot be bypassed
+    // by header spoofing. Fine-grained abuse control is enforced AFTER bootstrap by the per-subject
+    // (immutable, server-minted sub) limits in AnonymousGuardMiddleware, which is the primary
+    // control. Note: this window is replica-local; hosted Anonymous runs at maxReplicas=1.
+    //
+    // Config key: Anonymous:Bootstrap:GlobalPerMinute (conservative default 5). The legacy
+    // Anonymous:Bootstrap:PerIpPerMinute key is still honoured as a fallback for backward
+    // compatibility — it was never actually per-IP behind ACA, hence the rename.
+    options.AddPolicy("anonymous-bootstrap", _ =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: "anonymous-bootstrap-global",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = builder.Configuration.GetValue("Anonymous:Bootstrap:GlobalPerMinute",
+                    builder.Configuration.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 5)),
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
 });
 
 // ── API Versioning ──────────────────────────────────────────────────────
@@ -554,6 +598,18 @@ builder.Services.AddSingleton(sp => new DurableCostTracker(
     sp.GetRequiredService<IOptions<ObservabilityOptions>>(),
     sp.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton<ICostTracker>(sp => sp.GetRequiredService<DurableCostTracker>());
+
+// Anonymous mode: decorate the cost tracker so every recorded usage event is also counted
+// against the anonymous daily token/cost circuit breaker. The decorator delegates unchanged to
+// the durable tracker (audit/export/telemetry intact) and feeds the SAME numbers to the budget —
+// cache hits arrive as zero-token events and therefore never advance the token/cost ceilings.
+if (anonymousAuthMode)
+{
+    builder.Services.AddSingleton<ICostTracker>(sp => new RetailPulse.Api.Security.Anonymous.AnonymousBudgetCostTracker(
+        sp.GetRequiredService<DurableCostTracker>(),
+        sp.GetRequiredService<RetailPulse.Api.Security.Anonymous.AnonymousUsageBudget>(),
+        sp.GetRequiredService<IConfiguration>()));
+}
 string auditDbPath = Path.Combine(dataDirectory, "audit.db");
 builder.Services.AddSingleton(_ => new DurableAuditLog(auditDbPath));
 builder.Services.AddSingleton<IAuditLog>(sp => sp.GetRequiredService<DurableAuditLog>());
@@ -933,6 +989,15 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 
+// Anonymous mode central enforcement: read-only restriction (block mutations), request-size
+// bound, per-subject/per-IP chat limits, the daily billable-use circuit breaker, and a per-request
+// timeout. Runs after authorization so the validated anonymous principal is available; no-op for
+// any non-anonymous principal. Registered only when Authentication:Mode=Anonymous.
+if (anonymousAuthMode)
+{
+    app.UseMiddleware<AnonymousGuardMiddleware>();
+}
+
 app.MapDefaultEndpoints();
 
 if (app.Environment.IsDevelopment())
@@ -977,5 +1042,13 @@ app.MapMarginEndpoints();
 app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();
 app.MapCacheEndpoints();
+
+// Anonymous mode: map the single unauthenticated bootstrap endpoint that mints short-lived
+// session tokens for a future frontend (Sprint 3). Mapped only when Authentication:Mode=Anonymous
+// so it exposes no anonymous surface in Entra deployments.
+if (anonymousAuthMode)
+{
+    app.MapAnonymousAuthEndpoints();
+}
 
 app.Run();

@@ -11,6 +11,19 @@ public static partial class ChatRequestValidator
 {
     public const int MaxMessageLength = 4000;
 
+    /// <summary>Maximum number of prior conversation turns accepted with a chat request.</summary>
+    public const int MaxHistoryMessages = 50;
+
+    /// <summary>Maximum characters allowed in any single history entry's content.</summary>
+    public const int MaxHistoryMessageLength = 4000;
+
+    /// <summary>
+    /// Maximum combined characters across all history entries. Bounds the total prompt a caller can
+    /// assemble from the history array (a rough proxy for token count) independent of the per-entry
+    /// and count caps, so an attacker cannot smuggle a huge context past the model.
+    /// </summary>
+    public const int MaxAggregateHistoryChars = 100_000;
+
     // SessionId must be alphanumeric/hyphens, 1-64 chars (GUID-like formats)
     [GeneratedRegex(@"^[a-zA-Z0-9\-]{1,64}$")]
     private static partial Regex SessionIdPattern();
@@ -39,6 +52,33 @@ public static partial class ChatRequestValidator
         if (request.SessionId is not null && !SessionIdPattern().IsMatch(request.SessionId))
         {
             errors["sessionId"] = ["Field 'sessionId' must be 1-64 alphanumeric characters or hyphens."];
+        }
+
+        // History bounds — count, per-entry size, and aggregate size are all bounded BEFORE the
+        // model runs so an oversized or padded history array is rejected with 400, not billed.
+        if (request.History is { Count: > 0 } history)
+        {
+            if (history.Count > MaxHistoryMessages)
+            {
+                errors["history"] = [$"Field 'history' must not exceed {MaxHistoryMessages} messages. Received: {history.Count}."];
+            }
+
+            long aggregate = 0;
+            for (int i = 0; i < history.Count; i++)
+            {
+                int contentLength = history[i]?.Content?.Length ?? 0;
+                aggregate += contentLength;
+
+                if (contentLength > MaxHistoryMessageLength)
+                {
+                    errors[$"history[{i}]"] = [$"History message content must not exceed {MaxHistoryMessageLength} characters. Received: {contentLength}."];
+                }
+            }
+
+            if (aggregate > MaxAggregateHistoryChars)
+            {
+                errors["history.aggregate"] = [$"Combined history content must not exceed {MaxAggregateHistoryChars} characters. Received: {aggregate}."];
+            }
         }
 
         return new ValidationResult(errors.Count == 0, errors);

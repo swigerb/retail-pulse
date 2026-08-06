@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (Sprint 0 — foundation only; no live behavior change)
+Accepted (Sprint 0 — foundation only; no live behavior change).
+Extended by the **Sprint 1 addendum** below (Anonymous mode implemented; still
+opt-in, fail-closed, and never deployed — Production stays Entra).
 
 ## Context
 
@@ -80,14 +82,17 @@ Three pieces, all additive:
    - `Entra` → registers the resolved mode for diagnostics, calls the unchanged
      `AddRetailPulseAuthentication`, registers the `IPrincipalNormalizer`, and
      returns `EntraAuthOptions` for the caller to wire the authorization policy;
-   - `GitHub` / `Anonymous` → throws `NotSupportedException` **before any
-     authentication scheme is registered**, so the app can never fall through to
-     Entra, Development, or anonymous access.
+   - `Anonymous` → wires the anonymous session scheme, the constrained
+     authorization policy, and all billable-use guardrails internally, then
+     returns `null` (implemented in Sprint 1 — see the addendum below);
+   - `GitHub` → throws `NotSupportedException` **before any authentication scheme
+     is registered**, so the app can never fall through to Entra, Development, or
+     anonymous access.
 
 This is a deliberate two-layer split: the resolver classifies *unknown/malformed*
-input as a fail-closed error, while the factory classifies *known-but-
-unimplemented* modes (GitHub, Anonymous) as a distinct fail-closed error. The two
-failure classes carry different, precise messages.
+input as a fail-closed error, while the factory classifies a *known-but-
+unimplemented* mode (GitHub) as a distinct fail-closed error. The two failure
+classes carry different, precise messages.
 
 ### Normalized identity and claims model
 
@@ -152,6 +157,210 @@ The three explicit pins are belt-and-suspenders:
 - REST + hub enforcement, `?access_token` hub-only rule, health-only anonymous
   invariant, and Production fail-closed configuration.
 
+## Sprint 1 addendum: Anonymous mode (implemented)
+
+Sprint 1 implements the `Anonymous` mode dispatched by the factory above. It is
+additive, opt-in, and fail-closed; the live/deployed configuration stays `Entra`
+and is proven to stay `Entra` by the deployment-contract tests. Anonymous mode is
+**not deployed** this sprint. Child issue #30, epic #27.
+
+### Explicit activation and fail-closed hosted opt-in
+
+- `Authentication:Mode=Anonymous` is the only switch; no auto-detection/fallback.
+- **Development** may enable it with an ephemeral, process-local HMAC signing key
+  (generated once per process). Sessions do not survive a restart — this is
+  documented, intentional dev behavior, never a hosted fallback.
+- **Any hosted (non-Development) Anonymous deployment** additionally requires a
+  SECOND explicit opt-in, `Anonymous:AllowHosted=true`, PLUS a complete validated
+  guardrail set: a strong configured signing key (≥ 256-bit) and positive daily
+  request/token/cost ceilings. Missing/malformed/unsafe values throw at startup
+  (`AnonymousAuthOptions.FromConfiguration` / `Validate`), so a misconfigured
+  hosted deploy never serves traffic.
+
+### Server-minted session identity (no trusted client header)
+
+- Identity is never taken from a caller-supplied user id. A single, narrowly
+  scoped, globally rate-limited bootstrap endpoint
+  (`POST /api/auth/anonymous/session`) mints a fresh, cryptographically random
+  per-session subject (`anon-<base64url>`) SERVER-SIDE.
+- The credential is a compact, short-lived (default 15 min) **HS256 session JWT**
+  with issuer, audience, `provider=Anonymous`, subject, role
+  (`RetailPulse.Anonymous`), scope (`chat_limited`), strict expiry, and a random
+  `jti` — **no PII and no refresh token**. The client re-bootstraps when the TTL
+  elapses, which bounds the replay window to the TTL.
+- The same token is usable as a REST `Authorization: Bearer` and as a SignalR
+  `?access_token` (query token honored **only** on `/hubs/*`). Key rotation is a
+  built-in seam (`AnonymousSigningKeyProvider.ValidationKeys`). The signing key is
+  a secret and is never committed.
+
+### Authorization and normalized principal
+
+- A dedicated authorization policy (registered as both default and fallback)
+  requires an authenticated user, the anonymous role, the anonymous scope, and
+  `provider==Anonymous`. An Entra or any cross-provider token can therefore never
+  satisfy the anonymous policy (authenticated-but-unauthorized → 403).
+- `AnonymousPrincipalNormalizer` projects the token to `provider=Anonymous`, the
+  immutable random subject, and the constrained role/scope — the same
+  `IPrincipalNormalizer` seam Entra uses.
+- Only `/health`, `/alive`, and the bootstrap endpoint are unauthenticated.
+- Sessions are isolated by their random subject; no identity state is shared
+  across sessions.
+
+### Deny-by-default capability allowlist (single source of truth)
+
+- `AnonymousCapabilityPolicy` is data, not UI hiding, and it is **deny-by-default
+  over every (method, route)** — there is no read/GET shortcut. For Sprint 1 the
+  allowlist is reduced to exactly **two routes**: the unauthenticated bootstrap and
+  authenticated `POST /api/chat` (plus `OPTIONS` preflight). Everything
+  else — all observability/admin/export/memory/cards/approvals/guardrail-log routes,
+  every broad GET, **both SignalR hubs** (`/hubs/telemetry`, `/hubs/streaming` — at
+  connection and negotiate), and every **alternate LLM/orchestrator route**
+  (`/api/chat/stream`, `/api/council/*`, message-extension, scorecard, escalation) —
+  returns `403`. A newly added endpoint is denied to anonymous callers unless it is
+  explicitly allowlisted, and a runtime endpoint-graph test enumerates the compiled
+  route table to prove it.
+- **The hubs are removed from the anonymous surface (Sprint 1 scope reduction).**
+  Anonymous sessions get **no real-time telemetry or token streaming**; a valid
+  anonymous token is denied `403` on both hubs by the guard, and the Sprint 3
+  frontend does not start the hubs in anonymous mode. This retires the whole class of
+  hub exposures (global `Clients.All` broadcast reach and cross-subject group
+  namespace collisions) without touching the Entra hub telemetry path. Entra hub
+  behaviour is unchanged.
+- Read-only data (e.g. charts) is reached **through the filtered chat tool path**,
+  not a direct operator endpoint, so subject-scoping and the output/budget controls
+  always apply.
+- Because only the single `AgentExecutionPipeline` behind `POST /api/chat` is
+  reachable, **all model use is accounted through one metered chokepoint** — there is
+  no alternate billable route or orchestrator to escape the output-token cap, the
+  cost/token metering, or the write-capable-tool filter.
+- The chat tool set is filtered so write-capable tools (today: `RequestApproval`,
+  `RememberPreference`, `SaveMemory`) are never registered for an anonymous
+  principal — the model cannot invoke a write path.
+- **Chat-internal intent hard-stops (not reachable by tool filtering).** Two in-process
+  paths do not go through the AI tool set, so the write-tool filter alone cannot stop
+  them; the endpoint therefore refuses them by the router's own classification, before
+  specialist selection/execution:
+  - **Memory management** — the `MemoryManagementAgent` calls
+    `IConversationMemory.StoreAsync`/`ForgetAsync` **directly** (no tools). An anonymous
+    turn classified as `AgentIntent.MemoryManagement` (e.g. `remember that ...`,
+    `forget everything`) returns a standard safe refusal — the agent never runs, no
+    model is called, and zero memory rows are written.
+  - **Consensus council / portfolio health** — the council interception convenes
+    `IConsensusCouncil` (a fan-out of model calls) and returns **early**, which would
+    bypass the single accounted budget/audit/guardrail path. An anonymous turn
+    classified as `AgentIntent.PortfolioHealth` is refused before the council is
+    convened, so `ConveneAsync` is never called. The council interception is the only
+    in-process alternate orchestrator reachable from `POST /api/chat`; the scorecard
+    and escalation orchestrators are not registered as specialist agents and are
+    reachable only via their own `/api` routes, which are already `403`.
+
+### Provider-aware identity, disabled memory and cache
+
+- Identity is resolved per provider by `UserIdentity.Resolve`: **Anonymous → the
+  immutable server-minted `sub`; Entra → the immutable `oid`.** A request-body
+  `objectId` is **never** honoured for any authenticated principal, closing the
+  cross-session spoof/conflation gap (previously the resolver could key an
+  authenticated principal to a spoofable body value).
+- **Memory is disabled for Anonymous** — no recall, write, or extraction — which
+  eliminates stored cross-prompt injection across anonymous sessions in Sprint 1.
+- The **response cache is disabled for Anonymous** (both read and write), so two
+  subjects issuing an identical prompt always execute independently and can never
+  share a reply.
+- **Hubs are not part of the anonymous surface (Sprint 1).** The former anonymous hub
+  session-ownership binding is moot because a valid anonymous token is denied `403` on
+  both hubs before any hub method runs. This removes the cross-subject
+  telemetry/stream subscription risk entirely rather than mitigating it inside the hub.
+  Entra/dev hub behaviour is unchanged.
+
+### Billable-use safeguards
+
+- `AnonymousGuardMiddleware` centrally enforces: the deny-by-default route allowlist
+  (403), request-size bound (413 — set before the body is read **and** via a
+  length-counting pre-read, so a chunked/unknown-length body without
+  `Content-Length` cannot bypass it), per-subject and per-IP minute limits (429), a
+  per-request timeout (504), and a global daily request/token/cost **circuit
+  breaker** (503, fail-closed). History length is bounded per-message and in
+  aggregate by `ChatRequestValidator` (400 before the model).
+- **ACA proxy / X-Forwarded-For:** behind the Container Apps ingress the connection
+  remote IP is the proxy's, not the client's, and `X-Forwarded-For` is **not**
+  trusted (forgeable; no cryptographically verifiable client-IP header). The bootstrap
+  limiter is therefore a per-replica **global** fixed window (config key
+  `Anonymous:Bootstrap:GlobalPerMinute`, conservative default `5`; the legacy
+  `Anonymous:Bootstrap:PerIpPerMinute` key is still honoured as a
+  backward-compatible fallback), and the **primary** post-bootstrap control is the
+  per-subject limit.
+- Accounting is truthful: a request slot is charged **at admission — before the
+  cache is consulted** — so cache hits cannot bypass the request ceiling; token
+  and cost are metered by an `ICostTracker` decorator (`AnonymousBudgetCostTracker`)
+  where cache hits cost zero. Output tokens are capped for anonymous chat.
+- **Replica-local limitation (disclosed):** the ceilings and rate-limit windows are
+  enforced in replica-local memory. Hosted
+  Anonymous is therefore pinned to `maxReplicas=1`
+  (rationale comment in `infra/modules/container-apps.bicep`) and the ceilings are
+  conservative; **all of these counters reset on restart or replica
+  replacement.** This is explicitly **NOT** equivalent to authenticated production.
+
+### Sprint 1 threat model additions
+
+| Threat | Mitigation |
+|--------|------------|
+| Spoofed subject via a client header/body | Identity is the signed token subject minted server-side; `UserIdentity.Resolve` is provider-aware and never honours a request-body `objectId` for an authenticated principal. |
+| Token replay after expiry | Strict short TTL + `ValidateLifetime`; no refresh token; the replay window is bounded by the TTL. |
+| Query token smuggled onto a REST path | `?access_token` is honored only on `/hubs/*`; a REST query token yields no `Authorization` header → 401. |
+| Cross-provider (e.g. Entra) token used for anonymous access | The anonymous policy requires `provider=Anonymous` → 403. |
+| Forged/tampered token | HS256 signature validated against the configured key; wrong signature/issuer/audience → 401. |
+| Oversized request exhausts resources (incl. chunked/unknown-length) | Request-size bound → 413, enforced before the body is read and via a length-counting pre-read. |
+| Unbounded conversation history | Per-message and aggregate history bounds → 400 before the model. |
+| Cache used to bypass the request budget | The request slot is charged at admission, before the cache; the breaker still trips. |
+| Cross-subject reply leakage via the response cache | The response cache is disabled (read + write) for Anonymous; identical prompts from two subjects execute independently. |
+| Stored cross-prompt injection via memory | Memory (recall/write/extraction) is disabled for Anonymous in Sprint 1. |
+| Cross-subject telemetry/stream subscription on a hub | The SignalR hubs are removed from the anonymous surface — a valid anonymous token is denied `403` on both hubs (connection + negotiate), so no anonymous caller reaches a hub group at all. Entra hub behaviour is unchanged. |
+| Model budget escaped via an alternate route/orchestrator | All alternate LLM routes (`/api/chat/stream`, `/api/council/*`, message-extension) are removed from the anonymous surface; only the single metered `POST /api/chat` pipeline is reachable. |
+| Direct memory write via the memory-management agent (no tool involved) | An anonymous turn classified as `AgentIntent.MemoryManagement` is refused before the agent runs — no `StoreAsync`/`ForgetAsync`, no model call, zero memory rows. |
+| Council fan-out that skips the metered path | An anonymous turn classified as `AgentIntent.PortfolioHealth` is refused before the council interception — `IConsensusCouncil.ConveneAsync` is never called, so there is no unaccounted model fan-out. |
+| Anonymous visitors exhaust the model budget | Per-subject/global limits + daily request/token/cost breaker (fail-closed), conservative and single-replica-pinned when hosted. |
+| Write/mutation via an anonymous session | Deny-by-default allowlist (403) + write-capable tools stripped from the anonymous tool set. |
+
+### Sprint 1 files
+
+- `src/RetailPulse.Api/Security/Anonymous/*` — options, signing-key provider,
+  session-token service, capability policy, usage budget + cost tracker, rate
+  limiter.
+- `src/RetailPulse.Api/Security/AnonymousAuthenticationSetup.cs` — scheme + policy.
+- `src/RetailPulse.Api/Middleware/AnonymousGuardMiddleware.cs` — central guard
+  (deny-by-default allowlist, chunked-safe size bound, limits, breaker).
+- `src/RetailPulse.Api/Endpoints/AnonymousAuthEndpoints.cs` — bootstrap endpoint.
+- `src/RetailPulse.Api/Auth/UserIdentity.cs` — provider-aware, spoof-proof identity
+  resolution (Anonymous `sub` / Entra `oid`; body `objectId` never trusted).
+- `src/RetailPulse.Api/Security/Anonymous/AnonymousChatRestrictions.cs` — intent-level
+  refusals (memory-management, council) applied in `POST /api/chat` before specialist
+  selection and before the council interception.
+- `src/RetailPulse.Api/Hubs/SessionOwnershipRegistry.cs` — replica-local hub
+  session→subject ownership binding, consulted by `TelemetryHub` / `StreamingHub`
+  (retained for the Entra hub path; anonymous callers never reach the hubs).
+- `src/RetailPulse.Api/Validation/ChatRequestValidator.cs` — history count / per-entry
+  / aggregate bounds.
+- `src/RetailPulse.Api/Auth/AnonymousPrincipalNormalizer.cs`,
+  `Auth/IAnonymousChatPolicy.cs` — normalized principal + tool filter/output cap +
+  cache/memory-disabled flags.
+- `src/RetailPulse.Api/appsettings.Anonymous.example.json` — a non-live template
+  (loaded by no environment; contains no secret).
+- Tests: `tests/RetailPulse.Tests/Security/AnonymousAuthenticationTests.cs`
+  (integration + threat, incl. deny-by-default route inventory, chunked-oversized, and
+  a valid anonymous token → `403` on both hubs at connection + negotiate),
+  `Security/AnonymousChatEndpointThreatTests.cs` (REAL `POST /api/chat` endpoint:
+  body-spoof ignored, session isolation, cache-disabled, history bounds),
+  `Security/AnonymousChatInternalBypassTests.cs` (REAL endpoint: memory-management
+  refusal with zero memory mutation, council refusal with zero `ConveneAsync`, single
+  accounted pipeline with truthful cost/audit),
+  `Security/AnonymousHubOwnershipTests.cs` (Entra hub behaviour unchanged by the
+  anonymous scope reduction),
+  `Security/AnonymousCapabilityTests.cs` (unit — hubs denied), `Security/UserIdentityTests.cs`,
+  `Security/EndpointAuthorizationCoverageTests.cs` (real route-graph deny-by-default —
+  anonymous surface is bootstrap + `POST /api/chat` only, both hubs denied), extended
+  `Security/RateLimitingConfigTests.cs` and
+  `Deployment/ProviderNeutralDeploymentContractTests.cs`.
+
 ## Alternatives rejected
 
 - **SWA-only authentication (Static Web Apps Easy Auth / `.auth`).** Rejected.
@@ -203,8 +412,10 @@ The three explicit pins are belt-and-suspenders:
 1. Authentication never auto-detects a provider. The mode is always explicit
    outside Development.
 2. Outside Development, a missing mode is a startup failure, never a default.
-3. GitHub and Anonymous fail startup until a later sprint implements them; they
-   never fall through to another provider.
+3. GitHub fails startup until a later sprint implements it; it never falls
+   through to another provider. Anonymous is implemented but opt-in and never
+   deployed — a hosted Anonymous deploy fails startup without the second explicit
+   opt-in and complete guardrail configuration.
 4. Production is pinned to `Entra` in base config, Production config, and the azd
    hooks, and a deployment contract test proves those artifacts cannot silently
    select GitHub or Anonymous.
@@ -216,9 +427,9 @@ The three explicit pins are belt-and-suspenders:
 - **Sprint 0 (this ADR):** provider-neutral foundation — mode contract, factory
   boundary routing Entra unchanged, normalized principal, Production Entra pins,
   fail-closed tests. No live behavior change.
-- **Sprint 1:** Anonymous provider with explicit local/hosted opt-in, isolated
-  identities and sessions, disabled write-capable tools, and billable-use
-  ceilings. Production stays Entra.
+- **Sprint 1 (implemented — see addendum above):** Anonymous provider with
+  explicit local/hosted opt-in, isolated identities and sessions, disabled
+  write-capable tools, and billable-use ceilings. Production stays Entra.
 - **Sprint 2:** GitHub provider through a backend confidential OAuth flow,
   short-lived Retail Pulse session tokens, and user/organization allowlists.
   Production stays Entra.
