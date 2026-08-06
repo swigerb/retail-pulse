@@ -1,13 +1,17 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using RetailPulse.Api.Data;
 using RetailPulse.Contracts.Memory;
 
 namespace RetailPulse.Api.Memory;
 
 /// <summary>
 /// SQLite-backed implementation of <see cref="IConversationMemory"/>.
-/// Uses WAL mode and connection pooling for thread-safety across
-/// concurrent users. Expired entries are cleaned up lazily on recall.
+/// Uses a shared cache and opens every connection through
+/// <see cref="SqliteMount"/>, which applies the centralized SMB-safe pragmas
+/// (busy_timeout, DELETE journaling, synchronous=FULL) so it stays durable on the
+/// Azure Files mount; single-writer only (API runs maxReplicas: 1). Expired
+/// entries are cleaned up lazily on recall.
 /// </summary>
 public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
 {
@@ -36,13 +40,10 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
 
     private void InitializeSchema()
     {
-        using var conn = new SqliteConnection(_connectionString);
-        conn.Open();
+        using SqliteConnection conn = SqliteMount.Open(_connectionString);
 
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
-            PRAGMA journal_mode=WAL;
-
             CREATE TABLE IF NOT EXISTS ConversationMemories (
                 Id          TEXT    NOT NULL,
                 UserId      TEXT    NOT NULL COLLATE NOCASE,
@@ -78,8 +79,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         ArgumentNullException.ThrowIfNull(entry);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -112,8 +112,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         // Prune expired entries lazily
         await PruneExpiredAsync(conn, ct);
@@ -184,8 +183,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM ConversationMemories WHERE UserId = @UserId";
@@ -200,8 +198,7 @@ public sealed class SqliteConversationMemory : IConversationMemory, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         ArgumentException.ThrowIfNullOrWhiteSpace(memoryId);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
 
         await using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM ConversationMemories WHERE UserId = @UserId AND Id = @Id";

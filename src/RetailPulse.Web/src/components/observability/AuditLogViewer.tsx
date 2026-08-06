@@ -144,6 +144,7 @@ const useStyles = makeStyles({
 
 function formatTimestamp(ts: string): string {
   const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString(undefined, {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -280,7 +281,7 @@ export default function AuditLogViewer() {
               <TableHeader>
                 <TableRow>
                   <TableHeaderCell>Timestamp</TableHeaderCell>
-                  <TableHeaderCell>User</TableHeaderCell>
+                  <TableHeaderCell>User ID</TableHeaderCell>
                   <TableHeaderCell>Agent</TableHeaderCell>
                   <TableHeaderCell>Action</TableHeaderCell>
                   <TableHeaderCell>Tokens</TableHeaderCell>
@@ -301,9 +302,9 @@ export default function AuditLogViewer() {
                       style={{ cursor: 'pointer' }}
                     >
                       <TableCell className={styles.mutedCell}>{formatTimestamp(entry.timestamp)}</TableCell>
-                      <TableCell>{entry.userName}</TableCell>
+                      <TableCell>{entry.userId}</TableCell>
                       <TableCell>
-                        <span className={styles.agentPill}>{entry.agentName}</span>
+                        <span className={styles.agentPill}>{entry.agentId}</span>
                       </TableCell>
                       <TableCell>{entry.action}</TableCell>
                       <TableCell className={styles.mutedCell}>{(entry.tokens ?? 0).toLocaleString()}</TableCell>

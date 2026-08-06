@@ -90,7 +90,11 @@ public static class ObservabilityEndpoints
             );
 
             IReadOnlyList<AuditEntry> entries = await auditLog.QueryAsync(query, ct);
-            return Results.Ok(entries);
+            IEnumerable<ObservabilityContracts.AuditEntryDto> dto = entries.Select(e =>
+                new ObservabilityContracts.AuditEntryDto(
+                    e.Id, e.Timestamp, e.UserId, e.AgentId, e.Action,
+                    e.InputSummary, e.OutputSummary, e.TokensUsed, e.Duration.TotalMilliseconds));
+            return Results.Ok(dto);
         })
         .WithName("GetAuditLog").RequireAuthorization().RequireRateLimiting("relaxed");
 
@@ -104,13 +108,32 @@ public static class ObservabilityEndpoints
         app.MapGet("/api/observability/export/sessions", async (IConversationExport exporter, CancellationToken ct) =>
         {
             IReadOnlyList<ExportableSession> sessions = await exporter.ListSessionsAsync(ct);
-            return Results.Ok(sessions);
+            IEnumerable<ObservabilityContracts.ExportSessionDto> dto = sessions.Select(s =>
+                new ObservabilityContracts.ExportSessionDto(
+                    s.SessionId, s.StartedAt, s.MessageCount, s.AgentsUsed, s.TotalTokens));
+            return Results.Ok(dto);
         })
         .WithName("ListExportSessions").RequireAuthorization().RequireRateLimiting("relaxed");
 
-        app.MapPost("/api/observability/export/{sessionId}", async (string sessionId, HttpContext http, IConversationExport exporter, CancellationToken ct) =>
+        app.MapGet("/api/observability/export/{sessionId}/preview", async (string sessionId, HttpContext http, IConversationExport exporter, CancellationToken ct) =>
         {
-            string formatStr = http.Request.Query["format"].FirstOrDefault() ?? "markdown";
+            int maxMessages = int.TryParse(http.Request.Query["max"].FirstOrDefault(), out int m) && m > 0 ? m : 20;
+            SessionPreview? preview = await exporter.GetPreviewAsync(sessionId, maxMessages, ct);
+            if (preview is null)
+                return Results.NotFound(new { error = $"Session '{sessionId}' not found." });
+
+            var dto = new ObservabilityContracts.ExportPreviewDto(
+                preview.SessionId,
+                [.. preview.Messages.Select(msg => new ObservabilityContracts.PreviewMessageDto(msg.Role, msg.Content, msg.Timestamp))],
+                preview.TotalMessages);
+            return Results.Ok(dto);
+        })
+        .WithName("PreviewExportSession").RequireAuthorization().RequireRateLimiting("relaxed");
+
+        app.MapPost("/api/observability/export/{sessionId}", async (string sessionId, HttpContext http, ObservabilityContracts.ExportRequest? body, IConversationExport exporter, CancellationToken ct) =>
+        {
+            // Format may arrive in the JSON body ({ "format": "json" }) or the query string.
+            string? formatStr = body?.Format ?? http.Request.Query["format"].FirstOrDefault();
             ExportFormat format = string.Equals(formatStr, "json", StringComparison.OrdinalIgnoreCase)
                 ? ExportFormat.Json
                 : ExportFormat.Markdown;
@@ -118,7 +141,12 @@ public static class ObservabilityEndpoints
             try
             {
                 ExportResult result = await exporter.ExportAsync(sessionId, format, ct);
-                return Results.Ok(result);
+                string contentType = format == ExportFormat.Json
+                    ? "application/json"
+                    : "text/markdown";
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(result.Content);
+                // Results.File sets Content-Type and Content-Disposition: attachment; filename=...
+                return Results.File(bytes, $"{contentType}; charset=utf-8", result.FileName);
             }
             catch (KeyNotFoundException)
             {

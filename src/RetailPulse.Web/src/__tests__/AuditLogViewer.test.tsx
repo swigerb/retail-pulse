@@ -10,8 +10,7 @@ const mockPage: AuditLogPage = {
       id: 'log-1',
       timestamp: '2026-05-13T10:00:00Z',
       userId: 'user-1',
-      userName: 'Alice',
-      agentName: 'Demand Agent',
+      agentId: 'demand-agent',
       action: 'chat',
       inputSummary: 'What are the demand trends for Apex Grill?',
       outputSummary: 'Demand is up 8.2% YoY across all regions...',
@@ -22,8 +21,7 @@ const mockPage: AuditLogPage = {
       id: 'log-2',
       timestamp: '2026-05-13T10:05:00Z',
       userId: 'user-2',
-      userName: 'Bob',
-      agentName: 'Supply Agent',
+      agentId: 'supply-agent',
       action: 'tool_call',
       inputSummary: 'Check inventory levels for Southeast',
       outputSummary: 'Inventory at 3.2 weeks, fill rate 96%...',
@@ -59,16 +57,16 @@ describe('AuditLogViewer', () => {
   it('shows log entries after loading', async () => {
     render(wrap(<AuditLogViewer />));
     await waitFor(() => {
-      expect(screen.getByText('Alice')).toBeInTheDocument();
-      expect(screen.getByText('Bob')).toBeInTheDocument();
+      expect(screen.getByText('user-1')).toBeInTheDocument();
+      expect(screen.getByText('user-2')).toBeInTheDocument();
     });
   });
 
-  it('shows agent names in log entries', async () => {
+  it('shows agent ids in log entries', async () => {
     render(wrap(<AuditLogViewer />));
     await waitFor(() => {
-      expect(screen.getByText('Demand Agent')).toBeInTheDocument();
-      expect(screen.getByText('Supply Agent')).toBeInTheDocument();
+      expect(screen.getByText('demand-agent')).toBeInTheDocument();
+      expect(screen.getByText('supply-agent')).toBeInTheDocument();
     });
   });
 
@@ -83,7 +81,7 @@ describe('AuditLogViewer', () => {
   it('expands a row to show detail on click', async () => {
     render(wrap(<AuditLogViewer />));
     await waitFor(() => {
-      expect(screen.getByText('Alice')).toBeInTheDocument();
+      expect(screen.getByText('user-1')).toBeInTheDocument();
     });
     // Click the first row to expand
     const rows = screen.getAllByTestId(/^audit-row-/);
