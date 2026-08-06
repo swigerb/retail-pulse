@@ -127,13 +127,17 @@ builder.Services.AddCors(options =>
 });
 
 // ── Authentication & Authorization ──────────────────────────────────────
-// Single, tenant-scoped Entra security boundary (see Security/AuthenticationSetup.cs):
+// Provider-neutral authentication boundary (see Security/ProviderNeutralAuthentication.cs).
+// The configured Authentication:Mode selects the provider; only "Entra" is implemented today
+// and routes to the single, tenant-scoped Entra security boundary (Security/AuthenticationSetup.cs):
 // Production validates real Entra JWTs pinned to the configured tenant/audience/issuer,
 // honours the access_token query param only for /hubs, and requires the app role + API
 // scope on every protected endpoint and hub. Development uses the synthetic handler. The
 // default policy is never permissive — no RequireAssertion(_ => true) when auth is on.
+// GitHub/Anonymous modes are declared but fail startup ("not implemented in this sprint") and
+// never fall through to Entra/Development/anonymous; a missing mode fails closed outside Development.
 EntraAuthOptions entraAuthOptions =
-    builder.Services.AddRetailPulseAuthentication(builder.Configuration, builder.Environment);
+    builder.Services.AddProviderNeutralAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddRetailPulseAuthorization(entraAuthOptions);
 
 // ── Rate Limiting ───────────────────────────────────────────────────────
