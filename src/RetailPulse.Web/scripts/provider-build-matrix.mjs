@@ -15,10 +15,13 @@
  *     • Unknown mode (e.g. "Okta")                    → FAIL  (an unknown selector never picks a provider)
  *     • Unset mode (local dev / CI type-check build)  → PASS
  *
- *   Full build (real `tsc -b` + `vite build` with synthetic env, no secrets):
- *     • Default:  builds the Entra (production) mode only — concise; avoids duplicate full builds.
- *     • --full:   additionally builds GitHub and Anonymous modes.
+ *   Full build + auth-mode meta behavioral test (real `tsc -b` + `vite build`, synthetic env):
+ *     • Builds Entra, GitHub, and Anonymous (all statically bundled — no secrets).
+ *     • Inspects each EMITTED index.html with the production verifier's exact parser + predicate
+ *       (auth-mode-meta.mjs): Entra carries meta `Entra` and PASSES isProductionEntra; GitHub and
+ *       Anonymous carry their own normalized name and FAIL the production-Entra predicate.
  *     • --gate-only: skips the full builds entirely (fastest; gate matrix only).
+ *     • --full: accepted for back-compat; all three modes always build for the meta proof.
  *
  * All identifiers are synthetic and public. No .env* file is read or written; every scenario's
  * environment is passed in-process. Output goes to ./dist-matrix/<mode> and is cleaned up.
@@ -26,9 +29,10 @@
  * Exit code is non-zero if ANY scenario deviates from its expectation, so CI can gate on it.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, rmSync, readdirSync } from 'node:fs';
+import { existsSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { parseAuthModeMeta, isProductionEntra, normalizeAuthMode } from './auth-mode-meta.mjs';
 
 const webRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MATRIX_OUT = join(webRoot, 'dist-matrix');
@@ -101,19 +105,24 @@ for (const s of gateScenarios) {
     passed === s.expectPass ? '' : `gate exit=${res.status} (${(res.stderr || res.stdout || '').trim().split('\n').pop()})`);
 }
 
-// ── Full build matrix ─────────────────────────────────────────────────────────
+// ── Full build matrix + immutable auth-mode meta behavioral test ───────────────
+// All three providers are STATICALLY BUNDLED, so a JS "string absence" scan can never prove
+// which mode is active. Instead every mode's real vite build bakes an immutable, normalized
+// `<meta name="retail-pulse-auth-mode" content="...">` into index.html. We build Entra, GitHub,
+// and Anonymous and inspect the EMITTED index.html with the exact same parser + predicate the
+// production verifier uses (scripts/auth-mode-meta.mjs, mirrored in Verify-ProductionAuth.ps1):
+//   • Entra      → meta content 'Entra'      and isProductionEntra === true  (verifier PASSES)
+//   • GitHub     → meta content 'GitHub'     and isProductionEntra === false (verifier FAILS)
+//   • Anonymous  → meta content 'Anonymous'  and isProductionEntra === false (verifier FAILS)
 if (!gateOnly) {
   const buildModes = [
-    { mode: 'entra', env: { VITE_AUTH_MODE: 'Entra', VITE_ENTRA_TENANT_ID: SYN.tenant, VITE_ENTRA_CLIENT_ID: SYN.client, VITE_API_ORIGIN: SYN.apiOrigin } },
+    { mode: 'entra', rawMode: 'Entra', env: { VITE_AUTH_MODE: 'Entra', VITE_ENTRA_TENANT_ID: SYN.tenant, VITE_ENTRA_CLIENT_ID: SYN.client, VITE_API_ORIGIN: SYN.apiOrigin } },
+    { mode: 'github', rawMode: 'GitHub', env: { VITE_AUTH_MODE: 'GitHub', VITE_API_ORIGIN: SYN.apiOrigin } },
+    { mode: 'anonymous', rawMode: 'Anonymous', env: { VITE_AUTH_MODE: 'Anonymous', VITE_API_ORIGIN: SYN.apiOrigin } },
   ];
-  if (full) {
-    buildModes.push(
-      { mode: 'github', env: { VITE_AUTH_MODE: 'GitHub', VITE_API_ORIGIN: SYN.apiOrigin } },
-      { mode: 'anonymous', env: { VITE_AUTH_MODE: 'Anonymous', VITE_API_ORIGIN: SYN.apiOrigin } },
-    );
-  }
+  void full; // retained for CLI back-compat; all three modes always build for the meta proof.
 
-  console.log(`\n=== Frontend full build matrix (${buildModes.map((b) => b.mode).join(', ')}) ===`);
+  console.log(`\n=== Frontend full build matrix + auth-mode meta behavioral test (${buildModes.map((b) => b.mode).join(', ')}) ===`);
 
   // Type-check once — vite build does not type-check, so mirror `npm run build`'s `tsc -b`.
   const tsc = run('npx', ['tsc', '-b'], buildModes[0].env, true);
@@ -134,6 +143,26 @@ if (!gateOnly) {
         readdirSync(join(MATRIX_OUT, b.mode)).length > 0;
       report(emitted, `${b.mode} build succeeds and emits a bundle`,
         emitted ? '' : (built.stderr || built.stdout || '').trim().split('\n').slice(-3).join(' | '));
+      if (!emitted) continue;
+
+      // Behavioral proof: inspect the EMITTED index.html with the verifier's parser + predicate.
+      const htmlPath = join(MATRIX_OUT, b.mode, 'index.html');
+      const html = existsSync(htmlPath) ? readFileSync(htmlPath, 'utf8') : '';
+      const content = parseAuthModeMeta(html);
+      const expected = normalizeAuthMode(b.rawMode);
+      const metaPresent = content !== null;
+      report(metaPresent && content === expected,
+        `${b.mode}: emitted index.html carries immutable auth-mode meta = '${expected}'`,
+        metaPresent ? `got '${content}'` : 'meta tag missing');
+
+      const prodEntra = isProductionEntra(content);
+      if (b.mode === 'entra') {
+        report(prodEntra, `${b.mode}: satisfies the production-Entra verifier predicate`,
+          prodEntra ? '' : `isProductionEntra('${content}') was false`);
+      } else {
+        report(!prodEntra, `${b.mode}: FAILS the production-Entra verifier predicate (as required)`,
+          prodEntra ? `isProductionEntra('${content}') unexpectedly true` : '');
+      }
     }
   }
 }

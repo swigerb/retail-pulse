@@ -101,14 +101,10 @@ function Invoke-Leg {
 
 if (-not $FrontendOnly) {
     Invoke-Leg -Name 'Backend provider matrix (dotnet test: Security + Deployment)' -Action {
-        Push-Location $repoRoot
-        try {
-            dotnet test 'RetailPulse.slnx' `
-                --configuration $Configuration `
-                --filter 'FullyQualifiedName~RetailPulse.Tests.Security|FullyQualifiedName~RetailPulse.Tests.Deployment' `
-                --nologo
-        }
-        finally { Pop-Location }
+        # Delegate to the reusable backend matrix gate: it emits a machine-readable TRX and
+        # enforces a conservative minimum count (>=400) with zero failures; a zero-match run
+        # is a hard failure, not a vacuous pass.
+        & (Join-Path $PSScriptRoot 'Test-BackendAuthMatrix.ps1') -Configuration $Configuration
     }
 }
 

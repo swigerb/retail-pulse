@@ -99,8 +99,8 @@ dotnet user-secrets set "OpenAI:ApiKey" "<your-api-key>" --project src/RetailPul
 ### 4. Run with Aspire
 
 ```bash
-# Install frontend dependencies (first time only)
-cd src/RetailPulse.Web && npm install && cd ../..
+# Install frontend dependencies (first time only; reproducible, via the internal proxy)
+cd src/RetailPulse.Web && npm ci && cd ../..
 
 # Start the full stack
 dotnet run --project src/RetailPulse.AppHost
@@ -387,8 +387,9 @@ The CI pipeline runs on every push and PR to `main`:
 | Job | What it does |
 |-----|-------------|
 | **build** | Restore, build, test (.NET 10) with coverage |
-| **frontend** | npm ci, build, vitest |
+| **frontend** | `npm ci` (from the committed lockfile, via the internal package feed proxy), build, vitest |
 | **security** | Check for vulnerable NuGet packages |
+| **provider-matrix** | Auth provider matrix: `npm ci` + frontend build/meta gate, and the backend Security + Deployment suites emitted to TRX with a conservative count gate (`scripts/Test-BackendAuthMatrix.ps1`) |
 | **lint** | Verify code style (`dotnet format --verify-no-changes`) |
 
 ### Run locally
@@ -475,18 +476,23 @@ missing/placeholder ids**, passes GitHub/Anonymous with just the mode, and rejec
 ### Provider build/test matrix
 
 A repeatable, secret-free matrix builds all three modes with **synthetic public identifiers** and
-asserts the fail-closed cases. It also runs in CI (`provider-matrix` job — no secrets, and the
-install never mutates the committed lockfile):
+asserts the fail-closed cases plus the immutable auth-mode meta marker (only Entra satisfies the
+production predicate). It also runs in CI (`provider-matrix` job — no secrets; installs run
+`npm ci` through the internal proxy and never mutate the committed lockfile):
 
 ```bash
-# Frontend: config gate for every mode + a real Entra build (concise):
+# Frontend: config gate for every mode + real Entra/GitHub/Anonymous builds with the
+# emitted-index.html auth-mode meta behavioral assertion:
 npm --prefix src/RetailPulse.Web run test:provider-matrix
-# ...or build all three modes fully:
-npm --prefix src/RetailPulse.Web run test:provider-matrix:full
+# ...or run only the fast config gate (skip the full builds):
+npm --prefix src/RetailPulse.Web run test:provider-matrix:gate
 
 # Full backend + frontend matrix orchestrator:
-pwsh scripts/Test-ProviderMatrix.ps1            # backend suites + frontend gate + Entra build
-pwsh scripts/Test-ProviderMatrix.ps1 -Full      # also full GitHub/Anonymous frontend builds
+pwsh scripts/Test-ProviderMatrix.ps1            # backend TRX count gate + frontend gate + builds
+pwsh scripts/Test-ProviderMatrix.ps1 -Full      # frontend legacy flag (all three modes build regardless)
+
+# Backend matrix alone, with the machine-readable TRX + conservative count gate (>=400, zero failures):
+pwsh scripts/Test-BackendAuthMatrix.ps1
 ```
 
 ### Verify the live production posture (read-only)
@@ -502,6 +508,11 @@ pwsh scripts/Verify-ProductionAuth.ps1 -TenantId <guid> -ClientId <guid> -Resour
 # Run against the live environment (requires an existing `az login` with reader access):
 pwsh scripts/Verify-ProductionAuth.ps1 -TenantId <guid> -ClientId <guid> -ResourceGroup <rg>
 ```
+
+It asserts the live SWA root carries the immutable `retail-pulse-auth-mode` meta marker set to
+exactly `Entra` (empty/non-200/missing/malformed fails), and that ACA Easy Auth is observed
+disabled (an undetermined state fails closed). Use `-SkipHttpProbes` to skip only the live API
+status probes, or `-SkipSpaInspection` to skip only the SWA marker check — they are independent.
 
 It verifies the target tenant/subscription/RG, the API revision health and Entra env pins
 (`ASPNETCORE_ENVIRONMENT=Production`, `Authentication__Mode=Entra`, `Security__RequireAuth=true`,

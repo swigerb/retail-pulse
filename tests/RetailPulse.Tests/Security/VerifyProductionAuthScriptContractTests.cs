@@ -18,7 +18,8 @@ namespace RetailPulse.Tests.Security;
 ///   <item>it verifies the Entra-only production pins (Mode/RequireAuth/env/tenant/client)</item>
 ///   <item>it rejects any Anonymous__*/GitHub__* env and confirms Easy Auth is disabled</item>
 ///   <item>it proves the anonymous 401 surface + health 200s via live probes</item>
-///   <item>it proves the SWA serves Entra and hides GitHub/Anonymous sign-in</item>
+///   <item>it proves the SWA serves the Entra build via the immutable auth-mode meta tag</item>
+///   <item>it separates -SkipSpaInspection from -SkipHttpProbes and fails closed on undetermined Easy Auth</item>
 ///   <item>it supports -WhatIf (describe-only, no calls) and exits non-zero on any mismatch</item>
 /// </list>
 /// </summary>
@@ -142,13 +143,48 @@ public partial class VerifyProductionAuthScriptContractTests
     }
 
     [Fact]
-    public void Script_ProvesSwaServesEntraAndHidesOtherModes()
+    public void Script_ProvesSwaServesEntraViaImmutableAuthModeMeta()
     {
-        ScriptText.Should().Contain("serves an Entra");
-        ScriptText.Should().Contain("Continue with GitHub");
-        ScriptText.Should().Contain("Continue in limited demo");
-        ScriptText.Should().Contain("-not $exposesGitHub");
-        ScriptText.Should().Contain("-not $exposesAnon");
+        // The SWA posture is proven by the IMMUTABLE build-time auth-mode meta tag, parsed with the
+        // same predicate as the shared module (scripts/auth-mode-meta.mjs) — NOT by an impossible
+        // "string absence" scan of a statically-bundled SPA.
+        ScriptText.Should().Contain("retail-pulse-auth-mode");
+        ScriptText.Should().Contain("Get-AuthModeMeta");
+        ScriptText.Should().Contain("Test-IsProductionEntra");
+
+        // The predicate passes for EXACTLY Entra (case-insensitive); GitHub/Anonymous/empty/missing fail.
+        string predicate = FunctionBody("Test-IsProductionEntra");
+        predicate.Should().Contain("'entra'");
+        ScriptText.Should().Contain("exactly Entra");
+
+        // An empty/non-200 root response and a missing/malformed meta are explicit failures.
+        ScriptText.Should().Contain("SWA root reachable (HTTP 200, non-empty)");
+        ScriptText.Should().Contain("immutable auth-mode meta tag");
+
+        // The old bundle string-absence heuristic must be gone.
+        ScriptText.Should().NotContain("exposesGitHub");
+        ScriptText.Should().NotContain("exposesAnon");
+    }
+
+    [Fact]
+    public void Script_SeparatesSpaInspectionFromLiveHttpProbes()
+    {
+        // -SkipSpaInspection (SWA meta) and -SkipHttpProbes (live ACA status probes) are independent.
+        ScriptText.Should().Contain("$SkipSpaInspection");
+        ScriptText.Should().Contain("$SkipHttpProbes");
+        ScriptText.Should().Contain("if (-not $SkipSpaInspection)");
+        // The live anonymous probes remain guarded by their own switch.
+        ScriptText.Should().Contain("if (-not $SkipHttpProbes)");
+    }
+
+    [Fact]
+    public void Script_EasyAuthFailsClosedWhenStateUndetermined()
+    {
+        // ONLY an observed platform.enabled == false passes; any az/RBAC/CLI/transport error,
+        // missing property, or null/unknown shape is an explicit state-undetermined FAILURE.
+        ScriptText.Should().Contain("state undetermined");
+        ScriptText.Should().Contain("$easyAuthDisabled");
+        ScriptText.Should().Contain("platform.enabled");
     }
 
     [Fact]

@@ -31,7 +31,9 @@
         * RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE = true (the acknowledged ephemeral-storage pin).
         * NO Anonymous__* or GitHub__* environment variable is present on the app.
         * ACA platform auth (Easy Auth) is DISABLED — the in-process JwtBearer handler is the
-          sole gate.
+          sole gate. ONLY an observed `platform.enabled == false` passes; any az error, RBAC or
+          CLI/transport failure, missing property, or null/unknown shape is an explicit
+          state-undetermined FAILURE (never assumed-disabled).
 
       Live anonymous HTTP probes against the API origin (no credential)
         * POST /api/chat                       -> 401
@@ -42,9 +44,14 @@
         * GET  /alive                          -> 200
 
       Static Web App (the SPA)
-        * The root serves an Entra (Microsoft sign-in) build.
-        * The compiled, PUBLIC bundle does NOT expose the GitHub or Anonymous sign-in mode
-          (inspected via public markers only — never any secret).
+        * The served root carries the immutable, build-time auth-mode marker
+          `<meta name="retail-pulse-auth-mode" content="Entra">` baked in by the Vite build from
+          VITE_AUTH_MODE (see src/RetailPulse.Web/vite.config.ts + scripts/auth-mode-meta.mjs).
+          Because all three providers are statically bundled, a JS "string absence" scan can never
+          prove which mode is active; the meta tag is the authoritative, verifiable signal. The
+          verifier fetches the root and asserts the content is EXACTLY `Entra` (case-insensitive)
+          using the same parser + predicate as the shared module. An empty/non-200/missing/
+          malformed marker is a FAILURE (GitHub, Anonymous, and unset all fail this predicate).
 
       Entra app registration (delegates to Verify-EntraAuth.ps1 when present)
         * Single tenant (signInAudience = AzureADMyOrg).
@@ -52,8 +59,9 @@
         * Delegated scope + app role present and enabled.
         * Service principal exists with appRoleAssignmentRequired = true.
 
-    Output is redacted: GUIDs are masked to `****last4`; no user assignments, tokens, or secrets
-    are printed.
+    Output is redacted: identifiers (GUIDs such as tenant/client/subscription) are shown only as
+    their last 4 characters (`****abcd`); values of 4 characters or fewer are fully masked
+    (`****`). No user assignments, tokens, or secrets are printed.
 
 .PARAMETER TenantId
     Expected Entra tenant (directory) GUID. REQUIRED. The signed-in az context must match it.
@@ -90,7 +98,15 @@
     of the posture is still verified.
 
 .PARAMETER SkipHttpProbes
-    Skip the live anonymous HTTP probes (e.g. air-gapped review of configuration only).
+    Skip ONLY the live anonymous HTTP status probes against the API origin (POST /api/chat,
+    the hub negotiates, the query-token REST check, and GET /health + /alive) — e.g. an
+    air-gapped review of configuration only. This does NOT affect the Static Web App marker
+    inspection, which is controlled independently by -SkipSpaInspection.
+
+.PARAMETER SkipSpaInspection
+    Skip ONLY the Static Web App root fetch + auth-mode meta assertion (e.g. when the SWA is not
+    yet deployed, or is reviewed separately). The live API probes still run unless -SkipHttpProbes
+    is also passed.
 
 .EXAMPLE
     ./scripts/Verify-ProductionAuth.ps1 -TenantId <guid> -ClientId <guid> -ResourceGroup rg-prod
@@ -116,7 +132,8 @@ param(
     [string]$ApiScopeName = 'access_as_user',
     [string]$AppRoleValue = 'RetailPulse.User',
     [switch]$SkipEntraAppRegistration,
-    [switch]$SkipHttpProbes
+    [switch]$SkipHttpProbes,
+    [switch]$SkipSpaInspection
 )
 
 Set-StrictMode -Version Latest
@@ -126,6 +143,8 @@ $script:failures = 0
 $script:checksPlanned = [System.Collections.Generic.List[string]]::new()
 
 # ── redaction / reporting ──────────────────────────────────────────────────
+# Redact an identifier to its last 4 characters (`****abcd`). Values of 4 characters or fewer
+# are fully masked (`****`). Used for every GUID (tenant/client/subscription) that is printed.
 function Format-Redacted([string]$value) {
     if ([string]::IsNullOrWhiteSpace($value)) { return '(empty)' }
     $v = $value.Trim()
@@ -191,6 +210,38 @@ function Test-AnyEnvWithPrefix($template, [string]$prefix) {
     return $false
 }
 
+# ── shared auth-mode meta parser + predicate (mirrors scripts/auth-mode-meta.mjs) ──
+# The deployed SPA carries an immutable, build-time record of its single auth mode as
+# `<meta name="retail-pulse-auth-mode" content="Entra|GitHub|Anonymous">`. These two functions
+# are the PowerShell mirror of parseAuthModeMeta()/isProductionEntra() in the shared JS module,
+# so the live verifier and the build-time provider matrix apply the SAME parser + predicate.
+
+$script:AuthModeMetaName = 'retail-pulse-auth-mode'
+
+# Extract the auth-mode meta content from an HTML document. Tolerant of attribute order and of
+# single/double quotes. Returns the content string (possibly empty) when the tag is present, or
+# $null when there is no such tag. Mirrors parseAuthModeMeta() in auth-mode-meta.mjs.
+function Get-AuthModeMeta([string]$html) {
+    if ([string]::IsNullOrEmpty($html)) { return $null }
+    foreach ($m in [regex]::Matches($html, '<meta\b[^>]*>', 'IgnoreCase')) {
+        $tag = $m.Value
+        $name = [regex]::Match($tag, '\bname\s*=\s*["'']([^"'']*)["'']', 'IgnoreCase')
+        if ($name.Success -and $name.Groups[1].Value.Trim().ToLowerInvariant() -eq $script:AuthModeMetaName) {
+            $content = [regex]::Match($tag, '\bcontent\s*=\s*["'']([^"'']*)["'']', 'IgnoreCase')
+            if ($content.Success) { return $content.Groups[1].Value }
+            return ''
+        }
+    }
+    return $null
+}
+
+# The production predicate: the served SPA is the Entra (production) build IFF the meta content is
+# exactly `Entra`, case-insensitively. `GitHub`, `Anonymous`, empty, and $null (missing/malformed)
+# all fail. Mirrors isProductionEntra() in auth-mode-meta.mjs.
+function Test-IsProductionEntra($content) {
+    return ($content -is [string]) -and ($content.Trim().ToLowerInvariant() -eq 'entra')
+}
+
 # ── plan the checks (used by -WhatIf and as the running order) ──────────────
 Add-PlannedCheck 'Signed-in az context targets the expected tenant (and subscription, if given)'
 Add-PlannedCheck "Resource group '$ResourceGroup' exists"
@@ -212,7 +263,9 @@ if (-not $SkipHttpProbes) {
     Add-PlannedCheck 'Anonymous GET /api/chat?access_token=<synthetic> -> 401 (query token hub-only)'
     Add-PlannedCheck 'GET /health -> 200'
     Add-PlannedCheck 'GET /alive -> 200'
-    Add-PlannedCheck 'SWA root serves an Entra build and hides GitHub/Anonymous mode'
+}
+if (-not $SkipSpaInspection) {
+    Add-PlannedCheck 'SWA root serves an Entra build (immutable auth-mode meta content == Entra)'
 }
 if (-not $SkipEntraAppRegistration) {
     Add-PlannedCheck 'Entra app registration posture (single-tenant, no secret, scope+role, SP assignmentRequired)'
@@ -301,23 +354,37 @@ Test-Check 'No Anonymous__* environment variable present' (-not (Test-AnyEnvWith
 Test-Check 'No GitHub__* environment variable present' (-not (Test-AnyEnvWithPrefix $template 'GitHub__'))
 
 # 3) Easy Auth disabled ───────────────────────────────────────────────────────
+# State-undetermined is a FAILURE, not a pass: ONLY an observed `platform.enabled == false`
+# proves Easy Auth is off. Any az/RBAC/CLI/transport error, a missing `platform` property, or a
+# null/unknown shape leaves the platform-auth state undetermined and MUST fail closed — we never
+# assume "no config == disabled".
 Write-Host "`n[ACA platform auth]" -ForegroundColor Cyan
-$authEnabled = $null
+$easyAuthDisabled = $false
+$easyAuthDetail = ''
 try {
     $authCfg = Invoke-AzJson @('containerapp', 'auth', 'show', '--name', $ApiAppName, '--resource-group', $ResourceGroup, '--output', 'json') `
         'Failed to read container app auth config'
-    if ($authCfg -and $authCfg.PSObject.Properties.Name -contains 'platform' -and $authCfg.platform) {
-        $authEnabled = [bool]$authCfg.platform.enabled
+    if ($null -eq $authCfg) {
+        $easyAuthDetail = '(auth config returned null — state undetermined)'
+    }
+    elseif (-not ($authCfg.PSObject.Properties.Name -contains 'platform') -or $null -eq $authCfg.platform) {
+        $easyAuthDetail = '(no platform property — state undetermined)'
+    }
+    elseif (-not ($authCfg.platform.PSObject.Properties.Name -contains 'enabled') -or $null -eq $authCfg.platform.enabled) {
+        $easyAuthDetail = '(platform.enabled missing/null — state undetermined)'
     }
     else {
-        $authEnabled = $false
+        $enabled = [bool]$authCfg.platform.enabled
+        $easyAuthDisabled = (-not $enabled)
+        if (-not $easyAuthDisabled) { $easyAuthDetail = '(platform.enabled == true)' }
     }
 }
 catch {
-    # A missing auth config resource means Easy Auth was never enabled — which is the desired state.
-    $authEnabled = $false
+    # An az error, RBAC denial, or transport failure means we could NOT observe the state.
+    $easyAuthDisabled = $false
+    $easyAuthDetail = "(could not read auth config: $($_.Exception.Message.Trim()))"
 }
-Test-Check 'ACA platform auth (Easy Auth) disabled — in-process JWT boundary' (-not $authEnabled)
+Test-Check 'ACA platform auth (Easy Auth) observed disabled — in-process JWT boundary' $easyAuthDisabled $easyAuthDetail
 
 # 4) Live anonymous HTTP probes ───────────────────────────────────────────────
 if (-not $SkipHttpProbes) {
@@ -342,8 +409,15 @@ if (-not $SkipHttpProbes) {
         Test-Check 'GET /health -> 200' ((Get-HttpStatus 'GET' "$ApiOrigin/health") -eq 200)
         Test-Check 'GET /alive -> 200' ((Get-HttpStatus 'GET' "$ApiOrigin/alive") -eq 200)
     }
+}
 
-    # 5) Static Web App: Entra build only, GitHub/Anonymous mode not exposed ───
+# 5) Static Web App: immutable auth-mode meta must be exactly Entra ─────────────
+# The authoritative signal is the build-time `<meta name="retail-pulse-auth-mode" content="...">`
+# baked into index.html (all providers are statically bundled, so a JS string-absence scan can
+# never prove the active mode). We fetch the SWA root and assert, with the SAME parser + predicate
+# as the shared module, that the content is EXACTLY `Entra`. A non-200 or empty response, and a
+# missing/empty/malformed/non-Entra marker, are all FAILURES.
+if (-not $SkipSpaInspection) {
     Write-Host "`n[Static Web App]" -ForegroundColor Cyan
     if (-not $StaticWebAppName) {
         $swas = Invoke-AzJson @('staticwebapp', 'list', '--resource-group', $ResourceGroup,
@@ -360,28 +434,28 @@ if (-not $SkipHttpProbes) {
         $swaHost = $swa.defaultHostname
         Test-Check 'SWA default hostname resolved' ([bool]$swaHost)
         if ($swaHost) {
-            # Public, secret-free inspection of the served SPA. The Entra build embeds the
-            # Microsoft identity authority + the Microsoft sign-in gate; the GitHub/Anonymous
-            # builds embed their own gate routes/labels. We assert the Entra markers ARE present
-            # and the GitHub/Anonymous markers are ABSENT. Nothing sensitive is printed.
-            $spa = ''
+            # Public, secret-free fetch of the served root document. An empty or non-200 response
+            # records a failure; nothing sensitive is ever printed.
+            $status = -1
+            $body = ''
             try {
-                $spa = (Invoke-WebRequest -Uri "https://$swaHost/" -TimeoutSec 30 -SkipHttpErrorCheck).Content
-                # The SPA is a shell that lazily loads JS; also pull the referenced bundles.
-                foreach ($m in [regex]::Matches($spa, 'src="(/assets/[^"]+\.js)"')) {
-                    try { $spa += (Invoke-WebRequest -Uri "https://$swaHost$($m.Groups[1].Value)" -TimeoutSec 30 -SkipHttpErrorCheck).Content } catch { }
-                }
+                $resp = Invoke-WebRequest -Uri "https://$swaHost/" -TimeoutSec 30 -SkipHttpErrorCheck -ErrorAction Stop
+                $status = [int]$resp.StatusCode
+                $body = [string]$resp.Content
             }
             catch {
-                Test-Check 'SWA root reachable' $false "($($_.Exception.Message))"
+                Test-Check 'SWA root reachable (HTTP 200)' $false "($($_.Exception.Message.Trim()))"
             }
-            if ($spa) {
-                $hasEntra = ($spa -match 'login\.microsoftonline\.com') -or ($spa -match 'Sign in with Microsoft')
-                $exposesGitHub = ($spa -match '/api/auth/github/start') -or ($spa -match 'Continue with GitHub')
-                $exposesAnon = ($spa -match '/api/auth/anonymous/session') -or ($spa -match 'Continue in limited demo')
-                Test-Check 'SWA serves an Entra (Microsoft sign-in) build' $hasEntra
-                Test-Check 'SWA does NOT expose GitHub sign-in mode' (-not $exposesGitHub)
-                Test-Check 'SWA does NOT expose Anonymous sign-in mode' (-not $exposesAnon)
+            $rootOk = ($status -eq 200) -and (-not [string]::IsNullOrWhiteSpace($body))
+            Test-Check 'SWA root reachable (HTTP 200, non-empty)' $rootOk "(status=$status, bytes=$($body.Length))"
+            if ($rootOk) {
+                $metaContent = Get-AuthModeMeta $body
+                $present = ($null -ne $metaContent)
+                Test-Check 'SWA root carries the immutable auth-mode meta tag' $present `
+                    ($present ? "(content='$metaContent')" : '(meta tag missing or malformed)')
+                Test-Check 'SWA auth-mode meta content is exactly Entra (production build)' `
+                (Test-IsProductionEntra $metaContent) `
+                    ($present ? "(got '$metaContent'; GitHub/Anonymous/empty fail this predicate)" : '(no meta content to evaluate)')
             }
         }
     }

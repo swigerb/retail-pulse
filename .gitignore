@@ -14,6 +14,11 @@ node_modules/
 dist/
 .vite/
 
+# Test result artifacts (TRX / coverage) — machine-generated, never committed
+test-results/
+test-results-matrix/
+*.trx
+
 # IDE
 .idea/
 *.swp
