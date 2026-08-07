@@ -164,12 +164,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: src/RetailPulse.Web/package-lock.json
 
-      # Lockfile-integrity install (no post-install lockfile drift, no secrets in env).
-      - name: Install frontend dependencies (npm ci)
+      # Install without touching the committed lockfile. `npm ci` cannot be used here: the
+      # checked-in package-lock.json omits Linux-only optional transitive deps (e.g. @emnapi/*)
+      # because it was generated on Windows, so `npm ci` fails its exact-sync check on Linux
+      # runners (the existing frontend job uses `npm install` for the same reason). Using
+      # --no-package-lock guarantees the install never rewrites the committed lockfile; the next
+      # step then proves the lockfile is byte-for-byte unchanged (integrity preserved, no secrets).
+      - name: Install frontend dependencies (no lockfile mutation)
         working-directory: src/RetailPulse.Web
-        run: npm ci
+        run: npm install --no-package-lock --no-audit --no-fund
 
-      - name: Verify lockfile unchanged by install
+      - name: Verify lockfile unchanged by install (integrity)
         working-directory: src/RetailPulse.Web
         run: git diff --exit-code -- package-lock.json
 

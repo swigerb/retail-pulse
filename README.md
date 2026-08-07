@@ -475,8 +475,8 @@ missing/placeholder ids**, passes GitHub/Anonymous with just the mode, and rejec
 ### Provider build/test matrix
 
 A repeatable, secret-free matrix builds all three modes with **synthetic public identifiers** and
-asserts the fail-closed cases. It also runs in CI (`provider-matrix` job, `npm ci` for lockfile
-integrity, no secrets):
+asserts the fail-closed cases. It also runs in CI (`provider-matrix` job — no secrets, and the
+install never mutates the committed lockfile):
 
 ```bash
 # Frontend: config gate for every mode + a real Entra build (concise):
