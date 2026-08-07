@@ -69,6 +69,24 @@ public partial class VerifyProductionAuthScriptContractTests
     }
 
     [Fact]
+    public void AzureJsonParsing_SeparatesWarningsFromStdout()
+    {
+        ScriptText.Should().Contain("--only-show-errors");
+        ScriptText.Should().Contain("2>$errorFile");
+        ScriptText.Should().NotContain("& az @Arguments 2>&1",
+            "successful Azure CLI warnings on stderr must not corrupt the JSON stdout payload");
+    }
+
+    [Fact]
+    public void ResourceDiscovery_FiltersHyphenatedTagsInPowerShell()
+    {
+        ScriptText.Should().Contain("$_.tags.'azd-service-name' -eq 'api'");
+        ScriptText.Should().Contain("$_.tags.'azd-service-name' -eq 'frontend'");
+        ScriptText.Should().NotContain("[?tags.",
+            "quoted JMESPath tag keys are mangled by Azure CLI argument parsing on Windows");
+    }
+
+    [Fact]
     public void Script_NeverObtainsOrPrintsTokensOrSecrets()
     {
         // No token acquisition of any kind.
