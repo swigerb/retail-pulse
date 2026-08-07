@@ -91,6 +91,8 @@ a broadly-readable cookie, never cross-tab. Cleared on logout, expiry, and 401/4
 
 The header bar contains toggle buttons that switch the main content area between the chat and specialized dashboards. Click a tab to open it; click again (or "Back to Chat") to return.
 
+**Chat persistence across navigation.** Switching to any tab (Observability, Competitive, etc.) or opening the Approvals overlay does **not** discard the conversation. A single `ChatPanel` instance stays mounted for the lifetime of the Dashboard; when a tab is active the chat host is hidden with `display:none` + `inert` + `aria-hidden` (removed from the tab order and the screen-reader tree) but its React state — messages, charts, session id/history, scroll position, and any in-flight request — is preserved. Returning to Chat restores the exact conversation with no refetch or replay, and a response that resolves while you are on another tab is waiting for you when you come back. **"New Chat" is the only intentional reset** — it remounts the panel (via a `chatKey` bump), clearing all messages/charts and starting a fresh session with the welcome prompts.
+
 | Tab | Icon | What It Shows |
 |-----|------|---------------|
 | Approvals | Badge | Pending human-in-the-loop approvals for promotions and campaigns |
@@ -196,6 +198,7 @@ The top-level app shell. Manages the `activeView` state (`'chat' | 'promo' | 'co
 - **State:** `telemetryOpen`, `activeView`, `connected`, `liveSpans`, `totalDurationMs`, `totalTokenUsage`, `routingHistory`, `pendingApprovals`, `approvalHistory`, `alerts`, `traces`, `selectedBrand`, `explanationOpen`, `explanationData`
 - **Services:** `connectTelemetryHub()` from `telemetryHub.ts`
 - **Renders:** `ChatPanel`, `TelemetryPanel`, `AgentRoutingPanel`, `MemoryPanel`, `ApprovalHistory`, `PendingApprovals`, plus all feature views
+- **Persistent chat host:** `ChatPanel` is rendered once inside a wrapper (`data-testid="chat-host"`) that is hidden with `display:none` + `inert` + `aria-hidden` whenever `activeView !== 'chat'` (or an alternate view is otherwise active), instead of being unmounted. This keeps the conversation, session id, charts, and pending requests alive across navigation. Only `handleNewChat` (the "New Chat" button) resets it, by incrementing `chatKey` to force a remount.
 
 #### `ErrorBoundary`
 React error boundary that catches render errors and shows a fallback UI with a retry button.
