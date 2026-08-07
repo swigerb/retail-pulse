@@ -103,8 +103,20 @@ so azd's `${...}` substitution and Vite's `import.meta.env` resolve them:
 | Output (Bicep) | Source | Consumed by |
 |----------------|--------|-------------|
 | `VITE_API_ORIGIN` | API container app origin | Frontend Vite build → `import.meta.env.VITE_API_ORIGIN` → absolute `/hubs/telemetry` |
+| `VITE_AUTH_MODE` | literal `'Entra'` (live) | Frontend Vite build → `import.meta.env.VITE_AUTH_MODE` → selects the sign-in UX (must equal the API's `Authentication__Mode`) |
 | `RETAIL_PULSE_FRONTEND_ORIGIN` | Static Web App origin | `api` `Security__AllowedOrigins__0` (CORS) |
 | `MCP_SERVER_BASE_URL` | MCP server container app origin | `api` `McpServer__BaseUrl` |
+
+**Frontend/API mode parity.** `VITE_AUTH_MODE` (frontend) **must equal**
+`Authentication__Mode` (API) so the rendered sign-in UX matches the boundary the API
+enforces. The live Bicep emits `output VITE_AUTH_MODE = 'Entra'` and the postprovision
+hook pins `Authentication__Mode=Entra`, so the deployed pair is always `Entra`. A
+deployment contract test
+(`tests/RetailPulse.Tests/Deployment/ProviderNeutralDeploymentContractTests.cs`)
+asserts this parity and that the Bicep/hooks never emit `GitHub`/`Anonymous`. Non-live
+web builds can be produced from the secret-free templates
+`src/RetailPulse.Web/.env.github.example` and `.env.anonymous.example` (see below); they
+are documentation-only and are **not** auto-loaded by any deployment.
 
 The pre-existing `AZURE_*` outputs (`AZURE_API_APP_URL`, `AZURE_MCP_SERVER_APP_URL`,
 `AZURE_FRONTEND_APP_URL`, …) are retained as-is for tooling compatibility; the
@@ -391,6 +403,21 @@ identity provider) for non-demo environments.
 > deliberate, separate decision requiring `Anonymous:AllowHosted=true`, a strong signing
 > key, positive daily ceilings, and — because the ceilings are replica-local — a single
 > replica (`maxReplicas=1`). It is not equivalent to authenticated production.
+
+#### Safe web-build mode templates (`.env.*.example`)
+
+The frontend ships two **secret-free** example env files for producing a non-live web
+build in `GitHub` or `Anonymous` mode:
+
+- `src/RetailPulse.Web/.env.github.example` → `VITE_AUTH_MODE=GitHub`
+- `src/RetailPulse.Web/.env.anonymous.example` → `VITE_AUTH_MODE=Anonymous`
+
+Both are documentation/templates only — copy to `.env.local` and set `VITE_API_ORIGIN`
+to an API deployed in the **matching** backend mode. They contain no secrets and are
+**not** auto-loaded by azd, the Bicep, or any hook; the live deployment stays `Entra`.
+Because the SPA renders exactly the mode it was built with, a mismatched
+`VITE_AUTH_MODE`/`Authentication__Mode` pair is a build-time configuration error, not a
+runtime provider switch.
 
 ### Frontend → API routing and SignalR
 

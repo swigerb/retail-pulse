@@ -37,6 +37,56 @@ App.tsx
 - **Centralized constants** — `constants/agentRouting.ts` holds all agent colors, emojis, labels, and domain configs
 - **Type-safe contracts** — `types/index.ts` defines all shared interfaces aligned with backend API responses
 
+## Authentication & sign-in (provider-neutral)
+
+The SPA is **provider-neutral**: it renders exactly one sign-in UX chosen at build
+time, with all provider logic centralized behind a single interface. See
+[ADR-005](adr/005-provider-neutral-authentication.md) and the
+[authentication matrix](authentication-matrix.md).
+
+```
+VITE_AUTH_MODE (build-time, mirrors backend Authentication__Mode)
+   └─ auth/authMode.ts        resolveAuthMode() — pure, fail-closed
+        └─ auth/activeProvider.ts   selects ONE SessionProvider + capabilities
+             ├─ providers/entraProvider.ts      (MSAL — live, unchanged)
+             ├─ providers/githubProvider.ts     (confidential BFF; no provider token in browser)
+             └─ providers/anonymousProvider.ts  (limited demo)
+                  ├─ AuthGate.tsx → gates/{Entra,GitHub,Anonymous}AuthGate.tsx  (mode UX)
+                  ├─ auth/tokenService.ts + auth/authorizedFetch.ts  (all REST + SignalR)
+                  └─ session/sessionCredentialStore.ts  (session-only token store)
+```
+
+**Build-time mode selection.** `VITE_AUTH_MODE` (`Entra` / `GitHub` / `Anonymous`) is
+injected by the deployment (Bicep output → azd env → Vite). `resolveAuthMode()` is
+fail-closed: a missing mode resolves to `Entra` only when safe (existing Entra config,
+or explicit local-dev pass-through); a missing mode in a production build, or any
+unknown/numeric value, **throws at load** — never a silent anonymous default. Only the
+configured mode is rendered (no provider chooser).
+
+**One credential path.** A single `SessionProvider` (selected by `activeProvider.ts`)
+feeds both `authorizedFetch` (global REST) and the SignalR `accessTokenFactory`;
+components never touch provider logic. `authorizedFetch` attaches the token only to our
+`/api` paths on an exact-origin match.
+
+**Mode UX (`AuthGate` dispatches to one gate):**
+
+| Mode | Gate label | Flow | Token in browser |
+|------|-----------|------|------------------|
+| Entra | "Sign in with Microsoft" | MSAL redirect (unchanged) | MSAL token (`sessionStorage`, MSAL-owned) |
+| GitHub | "Continue with GitHub" | Top-level nav to `GET /api/auth/github/start` → callback returns one-time code → stripped via `history.replaceState` → `POST /api/auth/github/exchange` | Retail Pulse session token only (**GitHub provider token never in browser**) |
+| Anonymous | "Continue in limited demo" | Explicit consent click → `POST /api/auth/anonymous/session` | Short-lived session token only |
+
+**Capabilities.** A build-time capability object per mode centrally hides/disables
+surfaces. Anonymous disables the SignalR hubs (`realtimeHub=false` — Dashboard never
+starts SignalR, hub token factory returns `''`), Observability, Approvals, Memory,
+telemetry, exports, write actions, and alternate views; a consent banner shows the
+limitations and a "New anonymous session" action. Entra/GitHub get full capabilities.
+This is a **usability layer only** — the backend remains authoritative.
+
+**Session-token storage.** GitHub/Anonymous session tokens live in memory (source of
+truth) mirrored to `sessionStorage` for same-tab reload — never `localStorage`, never
+a broadly-readable cookie, never cross-tab. Cleared on logout, expiry, and 401/403.
+
 ## Dashboard Tabs
 
 The header bar contains toggle buttons that switch the main content area between the chat and specialized dashboards. Click a tab to open it; click again (or "Back to Chat") to return.

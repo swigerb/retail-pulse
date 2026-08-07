@@ -5,10 +5,28 @@ import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import { InteractionStatus } from '@azure/msal-browser';
 import { AUTH_FORBIDDEN_EVENT } from '../auth/authorizedFetch';
 
-// Mutable so individual tests can flip configured/unconfigured; AuthGate reads it per render.
-const { mockAuthConfig } = vi.hoisted(() => ({ mockAuthConfig: { isConfigured: true } }));
+// The dispatcher reads the active provider selection. A mutable mock lets each test pick the mode
+// and whether a gate is required, exercising the build-time dispatch without a real provider.
+const { mockActive } = vi.hoisted(() => ({
+  mockActive: {
+    requiresGate: true,
+    activeAuthMode: 'entra' as 'entra' | 'github' | 'anonymous',
+    provider: {} as unknown,
+  },
+}));
+vi.mock('../auth/activeProvider', () => ({
+  get requiresGate() {
+    return mockActive.requiresGate;
+  },
+  get activeAuthMode() {
+    return mockActive.activeAuthMode;
+  },
+  getActiveProvider: () => mockActive.provider,
+}));
+
+// authConfig/msal are only consumed by the Entra gate.
 vi.mock('../auth/authConfig', () => ({
-  authConfig: mockAuthConfig,
+  authConfig: { isConfigured: true },
   loginRequest: { scopes: ['api://client/access_as_user'] },
 }));
 
@@ -30,8 +48,27 @@ function wrap(ui: React.ReactNode) {
 
 const child = <div data-testid="protected-child">dashboard</div>;
 
+/** Minimal observable-provider stub for GitHub/Anonymous dispatch checks. */
+function stubProvider(status: string) {
+  const state = { status };
+  return {
+    subscribe: () => () => {},
+    getState: () => state,
+    startLogin: vi.fn(),
+    bootstrap: vi.fn(),
+    retry: vi.fn(),
+    handleAuthRequired: vi.fn(),
+    handleForbidden: vi.fn(),
+    msUntilExpiry: () => null,
+    endSession: vi.fn(),
+    newSession: vi.fn(),
+  };
+}
+
 beforeEach(() => {
-  mockAuthConfig.isConfigured = true;
+  mockActive.requiresGate = true;
+  mockActive.activeAuthMode = 'entra';
+  mockActive.provider = {};
   useIsAuthenticated.mockReset();
   useMsal.mockReset();
   loginRedirect.mockReset();
@@ -43,14 +80,34 @@ beforeEach(() => {
   });
 });
 
-describe('AuthGate', () => {
-  it('is a transparent pass-through when auth is not configured (local dev)', () => {
-    mockAuthConfig.isConfigured = false;
+describe('AuthGate dispatcher', () => {
+  it('is a transparent pass-through when no gate is required (local dev)', () => {
+    mockActive.requiresGate = false;
     render(wrap(<AuthGate>{child}</AuthGate>));
     expect(screen.getByTestId('protected-child')).toBeInTheDocument();
     expect(screen.queryByTestId('auth-gate')).not.toBeInTheDocument();
   });
 
+  it('dispatches to the GitHub gate in github mode', () => {
+    mockActive.activeAuthMode = 'github';
+    mockActive.provider = stubProvider('unauthenticated');
+    render(wrap(<AuthGate>{child}</AuthGate>));
+    expect(screen.getByTestId('auth-github-button')).toHaveTextContent(/Continue with GitHub/i);
+    expect(screen.queryByTestId('protected-child')).not.toBeInTheDocument();
+  });
+
+  it('dispatches to the Anonymous gate in anonymous mode', () => {
+    mockActive.activeAuthMode = 'anonymous';
+    mockActive.provider = stubProvider('unauthenticated');
+    render(wrap(<AuthGate>{child}</AuthGate>));
+    expect(screen.getByTestId('anon-continue-button')).toHaveTextContent(
+      /Continue in limited demo/i,
+    );
+    expect(screen.queryByTestId('protected-child')).not.toBeInTheDocument();
+  });
+});
+
+describe('AuthGate → Entra gate (live UX, unchanged)', () => {
   it('renders the protected app when the user is authenticated', () => {
     useIsAuthenticated.mockReturnValue(true);
     render(wrap(<AuthGate>{child}</AuthGate>));
@@ -58,13 +115,13 @@ describe('AuthGate', () => {
     expect(screen.queryByTestId('auth-gate')).not.toBeInTheDocument();
   });
 
-  it('shows the sign-in gate (and hides the app) when unauthenticated', async () => {
+  it('shows the Microsoft sign-in gate (and hides the app) when unauthenticated', async () => {
     useIsAuthenticated.mockReturnValue(false);
     render(wrap(<AuthGate>{child}</AuthGate>));
 
     expect(screen.queryByTestId('protected-child')).not.toBeInTheDocument();
     const button = screen.getByTestId('auth-signin-button');
-    expect(button).toBeInTheDocument();
+    expect(button).toHaveTextContent(/Sign in with Microsoft/i);
 
     await userEvent.click(button);
     expect(loginRedirect).toHaveBeenCalledTimes(1);
@@ -85,10 +142,8 @@ describe('AuthGate', () => {
   it('surfaces a role/scope access-denied message on a 403 event', async () => {
     useIsAuthenticated.mockReturnValue(true);
     render(wrap(<AuthGate>{child}</AuthGate>));
-    // Authenticated user with the app rendered...
     expect(screen.getByTestId('protected-child')).toBeInTheDocument();
 
-    // ...then the API returns 403 (authenticated but unassigned): the gate takes over.
     act(() => {
       window.dispatchEvent(new CustomEvent(AUTH_FORBIDDEN_EVENT));
     });

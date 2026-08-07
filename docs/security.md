@@ -251,6 +251,44 @@ deployment-contract tests). It is **not deployed** this sprint.
   inspect ACA topology, hosted GitHub requires an explicit
   `AcknowledgeSingleReplica=true` fail-closed acknowledgement of that pin.
 
+### Frontend build mode & session-token lifecycle (Sprint 3)
+
+The SPA renders exactly **one** provider's sign-in UX, selected at build time by
+`VITE_AUTH_MODE` (`Entra` / `GitHub` / `Anonymous`), which mirrors the backend
+`Authentication__Mode`; a deployment contract test proves the parity. Resolution is a
+pure, **fail-closed** function (`src/RetailPulse.Web/src/auth/authMode.ts`): a missing
+mode resolves to `Entra` only when safe (the SPA already carries Entra config, or an
+explicit local-dev pass-through); a missing mode in a production build, or any unknown/
+numeric value, **throws at load** — never a silent, insecure default. A single-mode
+deployment renders only its configured provider (no provider chooser), minimizing
+attack surface. The live build stays `Entra`.
+
+- **One centralized credential path.** A single `SessionProvider` interface, active
+  selector (`activeProvider.ts`), and token service feed both the global REST
+  `authorizedFetch` and the SignalR `accessTokenFactory`; provider logic is never
+  duplicated in components. `authorizedFetch` attaches the token **only** to our own
+  `/api` paths on an **exact-origin** match (same-origin or the exact configured
+  `VITE_API_ORIGIN`), rejecting userinfo-smuggling, lookalike hosts, scheme/port
+  mismatches, `/hubs`, assets, and third parties — so a token is never sent to a
+  lookalike or redirect target.
+- **Narrow session-token storage.** The Retail Pulse session tokens minted for GitHub
+  and Anonymous live in memory (source of truth) mirrored to `sessionStorage` for
+  same-tab reload only — **never `localStorage`, never a broadly-readable cookie,
+  never cross-tab**. They are cleared on logout / clear-session, on expiry, and on a
+  401/403 from the API. The **GitHub provider token never reaches the browser** (the
+  confidential BFF holds it server-side); the SPA only ever handles the one-time
+  redemption code (stripped from the URL immediately via `history.replaceState`) and
+  the resulting Retail Pulse session token.
+- **SignalR gated by capability.** A build-time capability object disables the real-time
+  hubs for Anonymous (`realtimeHub=false`): the Dashboard never starts SignalR and the
+  hub token factory returns `''`. Entra and GitHub retain full hub access. This is a
+  defense-in-depth usability layer — the backend remains authoritative and still `403`s
+  any disallowed route regardless of what the UI renders.
+- **Login start cannot be redirected.** GitHub login is a top-level navigation to the
+  fixed same-origin `GET /api/auth/github/start`; no return/redirect URL is ever read
+  from the query string or user input. Logout clears only our session token (no
+  github.com provider-logout assumption).
+
 ### Development
 - `Security:RequireAuth` defaults to `false`
 - `Authentication:Mode` defaults to `Entra`, whose `DevelopmentAuthHandler`

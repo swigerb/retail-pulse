@@ -1,18 +1,19 @@
-import { authConfig } from './authConfig';
+import { requiresGate } from './activeProvider';
 import { acquireApiToken } from './tokenService';
 import { resolveApiOrigin } from '../config/apiOrigin';
 
 /**
- * Global fetch interceptor that attaches the Entra bearer token to our protected `/api`
- * REST requests only.
+ * Global fetch interceptor that attaches the ACTIVE provider's session bearer token to our
+ * protected `/api` REST requests only.
  *
  * Rather than editing ~16 service modules (and risking a future call that forgets the
  * header), token attachment is centralized here: {@link installAuthorizedFetch} wraps
- * `window.fetch` once at startup so ALL protected/billable REST goes out authenticated.
+ * `window.fetch` once at startup so ALL protected/billable REST goes out authenticated with
+ * whatever provider is configured (Entra MSAL, GitHub BFF session, or Anonymous session).
  * The token is scoped to same-origin `/api` paths (see {@link isApiRequest}); SignalR
  * (`/hubs`) handshakes carry the token via their own `accessTokenFactory` (see
  * tokenService) and are intentionally excluded, as are assets, third parties, and
- * App Insights. A no-op when auth is unconfigured (local dev).
+ * App Insights. A no-op when no provider gate is active (local dev pass-through).
  *
  * On a 401 the wrapper transparently forces a fresh token and retries once; if it still
  * fails it emits {@link AUTH_REQUIRED_EVENT} so the sign-in gate can re-authenticate. A 403
@@ -95,7 +96,7 @@ export function isApiRequest(input: RequestInfo | URL): boolean {
 let installed = false;
 
 export function installAuthorizedFetch(): void {
-  if (installed || !authConfig.isConfigured || typeof window === 'undefined') {
+  if (installed || !requiresGate || typeof window === 'undefined') {
     return;
   }
   installed = true;
@@ -121,7 +122,7 @@ export function installAuthorizedFetch(): void {
       return originalFetch(input, init);
     }
 
-    let token: string | null = null;
+    let token: string | null;
     try {
       token = await acquireApiToken();
     } catch {
@@ -131,7 +132,7 @@ export function installAuthorizedFetch(): void {
     let response = await send(input, init, token);
 
     if (response.status === 401) {
-      let fresh: string | null = null;
+      let fresh: string | null;
       try {
         fresh = await acquireApiToken({ forceRefresh: true });
       } catch {

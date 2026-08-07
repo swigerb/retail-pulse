@@ -184,6 +184,81 @@ public sealed class ProviderNeutralDeploymentContractTests
             "the example must document signing-key rotation via additional validation keys");
     }
 
+    [Fact]
+    public void InfraBicep_PinsFrontendAuthModeToEntra()
+    {
+        // The SPA build reads VITE_AUTH_MODE from the azd env (an infra output). The live
+        // deployment must emit it pinned to Entra so the frontend renders ONLY the Microsoft
+        // sign-in UX — matching the API's Entra Authentication__Mode (proven above/below).
+        string bicep = File.ReadAllText(Path.Combine(RepoRoot, "infra", "main.bicep"));
+
+        bicep.Should().MatchRegex(
+            "output\\s+VITE_AUTH_MODE\\s+string\\s*=\\s*'Entra'",
+            "infra/main.bicep must emit VITE_AUTH_MODE pinned to Entra for the live SPA build");
+        bicep.Should().NotMatchRegex(
+            "output\\s+VITE_AUTH_MODE\\s+string\\s*=\\s*'(GitHub|Anonymous)'",
+            "the live SPA build must never be pinned to GitHub or Anonymous");
+    }
+
+    [Fact]
+    public void DeploymentContract_FrontendAndApiAuthModesAreInParity()
+    {
+        // End-to-end parity for the LIVE path: the frontend VITE_AUTH_MODE (infra output) and the
+        // API Authentication__Mode (both postprovision hooks + committed Production settings) must
+        // all resolve to the SAME provider — Entra. This is the single guardrail that proves the
+        // two halves of a deployment can never diverge into a mixed/misconfigured provider state.
+        string bicep = File.ReadAllText(Path.Combine(RepoRoot, "infra", "main.bicep"));
+        string ps1 = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", "postprovision.ps1"));
+        string sh = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", "postprovision.sh"));
+        string prod = File.ReadAllText(Path.Combine(
+            RepoRoot, "src", "RetailPulse.Api", "appsettings.Production.json"));
+
+        const string frontendMode = "Entra";
+
+        bicep.Should().MatchRegex(
+            "output\\s+VITE_AUTH_MODE\\s+string\\s*=\\s*'" + frontendMode + "'",
+            "frontend VITE_AUTH_MODE must be " + frontendMode);
+        ps1.Should().Contain($"Authentication__Mode={frontendMode}",
+            "the pwsh hook API mode must match the frontend mode");
+        sh.Should().Contain($"Authentication__Mode={frontendMode}",
+            "the sh hook API mode must match the frontend mode");
+        prod.Should().MatchRegex(
+            "\"Authentication\"\\s*:\\s*\\{[^}]*\"Mode\"\\s*:\\s*\"" + frontendMode + "\"",
+            "the committed Production API mode must match the frontend mode");
+    }
+
+    [Theory]
+    [InlineData(".env.example")]
+    [InlineData(".env.github.example")]
+    [InlineData(".env.anonymous.example")]
+    public void WebEnvTemplates_DocumentAuthMode(string envFile)
+    {
+        // Every committed web env template must document VITE_AUTH_MODE so an operator building a
+        // non-default (GitHub/Anonymous) deployment has a safe, secret-free starting point and the
+        // fail-closed contract is discoverable. These are templates only — never auto-loaded.
+        string path = Path.Combine(RepoRoot, "src", "RetailPulse.Web", envFile);
+
+        File.Exists(path).Should().BeTrue($"{envFile} template should be committed");
+        File.ReadAllText(path).Should().Contain("VITE_AUTH_MODE",
+            $"{envFile} must document the VITE_AUTH_MODE build-time selector");
+    }
+
+    [Theory]
+    [InlineData(".env.github.example")]
+    [InlineData(".env.anonymous.example")]
+    public void WebModeTemplates_CarryNoSecrets(string envFile)
+    {
+        // The non-production SPA templates are build-time CONFIG only. They must never carry a
+        // provider secret or signing key — those live on the backend, never in the browser bundle.
+        string content = File.ReadAllText(Path.Combine(
+            RepoRoot, "src", "RetailPulse.Web", envFile));
+
+        content.Should().NotContain("ClientSecret",
+            $"{envFile} must never carry a client secret");
+        content.Should().NotContain("SigningKey",
+            $"{envFile} must never carry a signing key");
+    }
+
     private static string FindRepoRoot()
     {
         DirectoryInfo? dir = new(AppContext.BaseDirectory);

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// The wrapper only installs when auth is configured; force that in tests.
+// The wrapper only installs when a provider gate is active; force that in tests.
+vi.mock('../auth/activeProvider', () => ({ requiresGate: true }));
 vi.mock('../auth/authConfig', () => ({ authConfig: { isConfigured: true } }));
 
 // Central token acquisition is mocked so we can drive silent-refresh / retry behavior.
