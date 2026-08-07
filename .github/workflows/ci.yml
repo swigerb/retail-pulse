@@ -146,6 +146,54 @@ jobs:
           name: vulnerability-report
           path: vulnerability-report.txt
 
+  provider-matrix:
+    name: Auth Provider Matrix (Entra/GitHub/Anonymous)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/RetailPulse.Web/package-lock.json
+
+      # Lockfile-integrity install (no post-install lockfile drift, no secrets in env).
+      - name: Install frontend dependencies (npm ci)
+        working-directory: src/RetailPulse.Web
+        run: npm ci
+
+      - name: Verify lockfile unchanged by install
+        working-directory: src/RetailPulse.Web
+        run: git diff --exit-code -- package-lock.json
+
+      # Frontend provider matrix: fail-closed config gate for every mode + a real Entra
+      # (production) build with SAFE SYNTHETIC PUBLIC ids. No live secrets, no .env files.
+      # Kept concise (single full build) to avoid duplicate full builds in CI.
+      - name: Frontend provider build matrix
+        working-directory: src/RetailPulse.Web
+        run: npm run test:provider-matrix
+
+      # Backend provider matrix: the Development + non-Development startup/authorization suites
+      # (Entra 200/401/403, Anonymous 2-route surface + 403, GitHub BFF/session/REST/hubs,
+      # unknown/missing/cross-provider fail-closed) and the deployment Entra pins/parity.
+      - name: Restore
+        run: dotnet restore RetailPulse.slnx
+
+      - name: Backend provider matrix (Security + Deployment)
+        run: |
+          dotnet test RetailPulse.slnx \
+            --no-restore \
+            --configuration Release \
+            --filter 'FullyQualifiedName~RetailPulse.Tests.Security|FullyQualifiedName~RetailPulse.Tests.Deployment' \
+            --nologo
+
   lint:
     name: Lint (dotnet format)
     runs-on: ubuntu-latest

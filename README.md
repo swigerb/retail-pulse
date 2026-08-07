@@ -426,6 +426,103 @@ dotnet run -c Release --project tests/RetailPulse.Benchmarks
 
 ---
 
+## Authentication Modes
+
+Retail Pulse is **provider-neutral**: a single build-time selector picks exactly one sign-in
+provider for both the API (`Authentication__Mode`) and the SPA (`VITE_AUTH_MODE`), which **must
+match** for a deployment (a deployment contract test enforces the parity). Resolution is
+**fail-closed** — an unknown, missing, or cross-provider configuration refuses to start rather
+than silently downgrading. See [ADR-005](docs/adr/005-provider-neutral-authentication.md) and the
+[authentication matrix](docs/authentication-matrix.md) for the authoritative behavior.
+
+| Mode | Live/prod? | Sign-in UX | Identity & token | Surface |
+|------|-----------|-----------|------------------|---------|
+| **Entra** | ✅ **Production default (pinned)** | Microsoft Entra single-tenant (MSAL, PKCE, no secret) | In-process JWT bearer validation; normalized principal | Full app (chat, telemetry, charts, SignalR, observability) |
+| **GitHub** | ⛔ Opt-in, **non-production** | "Continue with GitHub" confidential OAuth **BFF** | GitHub token stays server-side; SPA holds a short-lived Retail Pulse **session** token only | Full app for allow-listed users; REST + hubs |
+| **Anonymous** | ⛔ Opt-in, **non-production** | "Continue in limited demo" | Server-minted anonymous session; no external IdP | **Read-only chat only** — two-route surface (`POST /api/chat` + anonymous session bootstrap); everything else 403; no SignalR |
+
+### Production status
+
+The live environment is **always Entra**, and this is enforced across every layer:
+`appsettings`, `infra/main.bicep` (`output VITE_AUTH_MODE = 'Entra'`), the `azd` env/params/hooks,
+and the Static Web App frontend build are all explicitly `Entra`. GitHub and Anonymous are
+**never deployed** by the standard pipeline — they require a **separate, explicit, non-production
+build** with their own complete configuration. `azd up` never provisions them.
+
+### Build each mode (safe, synthetic, no secrets)
+
+Auth mode is injected at build time. Locally, leave the variables **unset** for the Development
+synthetic auth handler. To exercise a specific mode, provide the public build-time values
+(never secrets — the GitHub client secret and session key live only on the backend):
+
+```bash
+# Entra (production mode) — requires valid tenant/client ids or the build fails fast:
+VITE_AUTH_MODE=Entra VITE_ENTRA_TENANT_ID=<tenant-guid> VITE_ENTRA_CLIENT_ID=<client-guid> \
+  npm --prefix src/RetailPulse.Web run build
+
+# GitHub (opt-in, non-production) — mode + API origin, no Entra ids:
+VITE_AUTH_MODE=GitHub VITE_API_ORIGIN=https://<api-host> \
+  npm --prefix src/RetailPulse.Web run build
+
+# Anonymous (opt-in, non-production) — mode + API origin, no Entra ids:
+VITE_AUTH_MODE=Anonymous VITE_API_ORIGIN=https://<api-host> \
+  npm --prefix src/RetailPulse.Web run build
+```
+
+The `prebuild` gate (`scripts/validate-auth-config.mjs`) **fails an Entra build with
+missing/placeholder ids**, passes GitHub/Anonymous with just the mode, and rejects unknown modes.
+
+### Provider build/test matrix
+
+A repeatable, secret-free matrix builds all three modes with **synthetic public identifiers** and
+asserts the fail-closed cases. It also runs in CI (`provider-matrix` job, `npm ci` for lockfile
+integrity, no secrets):
+
+```bash
+# Frontend: config gate for every mode + a real Entra build (concise):
+npm --prefix src/RetailPulse.Web run test:provider-matrix
+# ...or build all three modes fully:
+npm --prefix src/RetailPulse.Web run test:provider-matrix:full
+
+# Full backend + frontend matrix orchestrator:
+pwsh scripts/Test-ProviderMatrix.ps1            # backend suites + frontend gate + Entra build
+pwsh scripts/Test-ProviderMatrix.ps1 -Full      # also full GitHub/Anonymous frontend builds
+```
+
+### Verify the live production posture (read-only)
+
+After a deployment, confirm the live environment is Entra-only and fail-closed. This script is
+**strictly read-only** — it never obtains, prints, or logs a token/secret, never signs you in,
+and never mutates a resource; it exits non-zero on any mismatch:
+
+```pwsh
+# Preview exactly what it checks, contacting nothing:
+pwsh scripts/Verify-ProductionAuth.ps1 -TenantId <guid> -ClientId <guid> -ResourceGroup <rg> -WhatIf
+
+# Run against the live environment (requires an existing `az login` with reader access):
+pwsh scripts/Verify-ProductionAuth.ps1 -TenantId <guid> -ClientId <guid> -ResourceGroup <rg>
+```
+
+It verifies the target tenant/subscription/RG, the API revision health and Entra env pins
+(`ASPNETCORE_ENVIRONMENT=Production`, `Authentication__Mode=Entra`, `Security__RequireAuth=true`,
+matching tenant/client ids, ephemeral-storage acknowledgement, **no** `Anonymous__*`/`GitHub__*`
+vars), ACA Easy Auth disabled, the anonymous `401` surface + `health/alive` `200`s, the SWA serving
+an Entra build (GitHub/Anonymous **not** exposed), and the Entra app registration posture
+(single-tenant, no password credential, scope+role, SP `assignmentRequired`).
+
+### Limitations (GitHub & Anonymous)
+
+- **Non-production only** — neither is ever deployed live; there is **no live deployment** for them.
+- **Single replica / replica-local** — session and one-time stores are in-memory, so these modes are
+  pinned to **max 1 replica** (state does not survive scale-out or restart).
+- **Anonymous is read-only** — chat only, rate-limited and billable; telemetry, observability,
+  streaming, exports, approvals, memory, and all operator views are hidden client-side and gated
+  server-side. No SignalR hub runs.
+- **GitHub** requires a confidential OAuth app and an allow-list; the provider token never reaches
+  the browser.
+
+---
+
 ## Real-Time Telemetry
 
 The SignalR `TelemetryHub` streams agent execution spans to connected clients in real time. Clients join **session-scoped groups** so telemetry is isolated per conversation.
