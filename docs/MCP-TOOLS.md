@@ -4,6 +4,13 @@ The Retail Pulse MCP (Model Context Protocol) Server exposes domain-specific too
 
 All tools are registered as `[McpServerTool]` classes and are accessible both through the MCP protocol and via proxy REST endpoints on the API server.
 
+> **Tool-context budget.** Before any tool result enters model context it passes through
+> a centralized compaction boundary (dedup + per-result/per-request budgets + tool-specific
+> summarizers). Large payloads such as `GetHistoricalDemand` are rolled up (totals + aligned
+> per-region points preserved) with an explicit opt-in hint for full detail, and
+> `CreateChart`'s canonical `ChartSpec` is exempt and never compacted. See
+> [`tool-context-budget.md`](./tool-context-budget.md) and ADR-006.
+
 ---
 
 ## Demand Tools
