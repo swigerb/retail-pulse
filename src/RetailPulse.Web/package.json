@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "start": "vite",
+    "validate:auth-config": "node scripts/validate-auth-config.mjs",
+    "prebuild": "node scripts/validate-auth-config.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

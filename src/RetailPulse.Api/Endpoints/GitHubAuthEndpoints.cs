@@ -23,8 +23,11 @@ namespace RetailPulse.Api.Endpoints;
 ///     exchanges the code server-side, validates the token via <c>/user</c>, verifies the server-side
 ///     allowlist, and redirects to the ONE configured SPA URL carrying only a one-time redemption
 ///     code (never a provider/app token). Denials and errors are handled without leaking anything.</item>
-///   <item><b>exchange</b> (POST) — atomically redeems the one-time code and returns a short-lived
-///     Retail Pulse GitHub session token (no refresh token). Replay/races are impossible (one-use).</item>
+///   <item><b>exchange</b> (POST) — requires the exact per-code browser-bound <c>__Host-</c> redemption
+///     cookie set at callback (constant-time hash compare), atomically redeems the one-time code, and
+///     returns a short-lived Retail Pulse GitHub session token (no refresh token). A stolen unused code
+///     replayed from another browser fails (no cookie); replay/races are impossible (one-use); the exact
+///     cookie is deleted on success and failure.</item>
 /// </list>
 /// </summary>
 public static class GitHubAuthEndpoints
@@ -196,11 +199,16 @@ public static class GitHubAuthEndpoints
             return RedirectToFrontend(options, "error", "not_authorized");
         }
 
-        // 8) Mint a one-time redemption code bound to the verified identity (NOT a token). The app
-        //    session JWT is minted fresh at exchange so its short TTL starts when the SPA receives it.
+        // 8) Mint a one-time redemption code bound to the verified identity (NOT a token) AND to THIS
+        //    browser. A separate random secret is placed in a per-code __Host- redemption cookie; only
+        //    its hash is stored server-side. The exchange must present both the code and the matching
+        //    cookie (constant-time compared), so a stolen unused code replayed from another browser —
+        //    which never received the cookie — can never be redeemed. The app session JWT is minted
+        //    fresh at exchange so its short TTL starts when the SPA receives it.
         string redemptionCode = GitHubRandom.NewToken();
+        string redemptionCookieSecret = GitHubRandom.NewToken();
         long redeemBy = clock.GetUtcNow().UtcDateTime.AddSeconds(options.RedemptionTtlSeconds).Ticks;
-        if (!redemptionStore.TryStore(redemptionCode, new GitHubRedemptionEntry(verified, redeemBy)))
+        if (!redemptionStore.TryStore(redemptionCode, new GitHubRedemptionEntry(verified, Sha256(redemptionCookieSecret), redeemBy)))
         {
             return Results.Problem(
                 title: "github_callback_unavailable",
@@ -208,25 +216,54 @@ public static class GitHubAuthEndpoints
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
 
+        // Bind the redemption to this browser: set the per-code __Host- cookie carrying the secret.
+        AppendRedemptionCookie(context, options, redemptionCode, redemptionCookieSecret);
+
         // 9) Redirect to the ONE configured SPA URL carrying only the one-time redemption code.
         return RedirectToFrontend(options, "code", redemptionCode);
     }
 
     // ── exchange ─────────────────────────────────────────────────────────────────
     private static IResult ExchangeAsync(
+        HttpContext context,
         [FromBody] GitHubExchangeRequest request,
+        GitHubAuthOptions options,
         GitHubRedemptionStore redemptionStore,
         IGitHubSessionTokenService tokenService)
     {
-        if (request is null || string.IsNullOrWhiteSpace(request.Code))
+        // The code must be present AND exactly the fixed base64url shape our callback emits — this bounds
+        // the per-code cookie-name derivation and rejects any malformed/oversized code up front.
+        if (request is null || string.IsNullOrWhiteSpace(request.Code) || !GitHubStateCookie.IsValidStateFormat(request.Code))
         {
             return Results.BadRequest(Problem("invalid_request", "A redemption code is required."));
         }
 
-        // Atomic one-time redemption — a second attempt (replay) or a race can never both succeed.
-        if (!redemptionStore.TryConsume(request.Code, out GitHubRedemptionEntry entry))
+        string code = request.Code;
+
+        // The redemption is bound to the browser that completed the callback: read the per-code cookie
+        // and ALWAYS delete it, whatever the outcome (success or failure).
+        string cookieName = GitHubStateCookie.RedemptionNameFor(code, options.RequireSecureCookies);
+        string? cookieSecret = context.Request.Cookies[cookieName];
+        DeleteRedemptionCookie(context, options, code);
+
+        // 1) The per-code cookie must be present. A stolen unused code replayed from another browser has
+        //    no such cookie, so it fails HERE — and, crucially, without consuming the victim's code.
+        if (string.IsNullOrEmpty(cookieSecret))
         {
             return Results.BadRequest(Problem("invalid_code", "The redemption code is unknown, already used, or expired."));
+        }
+
+        // 2) Atomic one-time redemption — a second attempt (replay) or a race can never both succeed.
+        if (!redemptionStore.TryConsume(code, out GitHubRedemptionEntry entry))
+        {
+            return Results.BadRequest(Problem("invalid_code", "The redemption code is unknown, already used, or expired."));
+        }
+
+        // 3) Bind to THIS browser: the presented cookie secret must hash to the stored value
+        //    (constant-time). A wrong cookie fails even though the code existed (it is now consumed).
+        if (!CryptographicOperations.FixedTimeEquals(Sha256(cookieSecret), entry.CookieSecretHash))
+        {
+            return Results.BadRequest(Problem("invalid_code", "The redemption code does not match this browser."));
         }
 
         GitHubSession session = tokenService.CreateSession(entry.User);
@@ -270,6 +307,35 @@ public static class GitHubAuthEndpoints
     private static void DeleteStateCookie(HttpContext context, GitHubAuthOptions options, string state)
     {
         context.Response.Cookies.Delete(CookieName(options, state), new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = options.RequireSecureCookies,
+            SameSite = SameSiteMode.Lax,
+            Path = "/",
+        });
+    }
+
+    private static string RedemptionCookieName(GitHubAuthOptions options, string code) =>
+        // Per-code name so parallel logins never clash. Secure/__Host semantics come from validated
+        // configuration (RequireSecureCookies), NEVER from Request.IsHttps — identical to the state cookie.
+        GitHubStateCookie.RedemptionNameFor(code, options.RequireSecureCookies);
+
+    private static void AppendRedemptionCookie(HttpContext context, GitHubAuthOptions options, string code, string secret)
+    {
+        context.Response.Cookies.Append(RedemptionCookieName(options, code), secret, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = options.RequireSecureCookies, // fixed by config, not the observed scheme
+            SameSite = SameSiteMode.Lax, // the SPA's same-site exchange POST carries it
+            Path = "/", // __Host- requires Path=/ and no Domain
+            IsEssential = true,
+            MaxAge = TimeSpan.FromSeconds(options.RedemptionTtlSeconds),
+        });
+    }
+
+    private static void DeleteRedemptionCookie(HttpContext context, GitHubAuthOptions options, string code)
+    {
+        context.Response.Cookies.Delete(RedemptionCookieName(options, code), new CookieOptions
         {
             HttpOnly = true,
             Secure = options.RequireSecureCookies,
