@@ -68,7 +68,9 @@ public static class RoutingServiceExtensions
             ILogger<AgentExecutionPipeline> logger = sp.GetRequiredService<ILogger<AgentExecutionPipeline>>();
             RetailPulseMetrics? metrics = sp.GetService<RetailPulseMetrics>();
             IAnonymousChatPolicy anonymousChatPolicy = sp.GetRequiredService<IAnonymousChatPolicy>();
-            return new AgentExecutionPipeline(chatClient, hubContext, streamingHubContext, streamingFeature, configuration, logger, metrics, anonymousChatPolicy);
+            Budget.ToolResultBudget? toolBudget = sp.GetService<Budget.ToolResultBudget>();
+            Budget.ToolResultBudgetOptions? budgetOptions = sp.GetService<Budget.ToolResultBudgetOptions>();
+            return new AgentExecutionPipeline(chatClient, hubContext, streamingHubContext, streamingFeature, configuration, logger, metrics, anonymousChatPolicy, toolBudget, budgetOptions);
         });
 
         // Register GeneralAgent as ISpecialistAgent
