@@ -45,11 +45,12 @@ Consequences and rules:
   integrity** for every package (never sha1, never unpinned). `npm ci` verifies the tree against
   it and **never rewrites it**; CI additionally runs `git diff --exit-code -- package-lock.json`
   right after the install as an integrity guard proving the install did not mutate the lockfile.
-- The lockfile is deliberately kept **cross-platform complete**: it includes the Linux-only
-  optional peer dependencies (`@emnapi/core`, `@emnapi/runtime`, pulled in by the wasm fallback
+- The lockfile is deliberately kept **cross-platform complete**: it includes the optional peer
+  dependencies (`@emnapi/core`, `@emnapi/runtime`, pulled in by the wasm fallback
   `@napi-rs/wasm-runtime`) so `npm ci` reconstructs the exact tree on Linux CI runners as well as
   on Windows. These entries carry canonical `resolved` URLs and `sha512` integrity computed from
-  the published tarball bytes (their `sha1` matches the feed's, proving authenticity).
+  the tarball bytes served by the sanctioned internal feed, pinning that reviewed tree for
+  reproducible future installs.
 - `src/__tests__/lockfileIntegrity.test.ts` fails the build if any package regresses to
   non-`sha512` integrity or a non-canonical `resolved` URL — no supply-chain weakening can land.
 
