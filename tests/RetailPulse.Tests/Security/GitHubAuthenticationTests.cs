@@ -88,6 +88,87 @@ public sealed class GitHubAuthenticationTests
         q["scope"].Should().NotContain("repo");
     }
 
+    // ── cookie topology (Blocker 1) ──────────────────────────────────────────
+
+    [Fact]
+    public async Task Start_HostedHttp_StateCookieHasHostPrefixAndFullSecureAttributes()
+    {
+        // In-container HTTP (TestServer is plain HTTP) but hosted (Production) config: cookie security
+        // MUST come from RequireSecureCookies, not the observed request scheme. Set-Cookie must be a
+        // __Host- cookie: Secure, HttpOnly, SameSite=Lax, Path=/, and NO Domain.
+        using TestFixture fx = CreateServer();
+
+        HttpResponseMessage resp = await fx.Client.GetAsync(GitHubAuthConstants.StartRoute);
+
+        string setCookie = resp.Headers.GetValues("Set-Cookie").First(c => c.Contains("rp_gh_state"));
+        string cookieName = setCookie.Split('=')[0];
+
+        cookieName.Should().StartWith("__Host-rp_gh_state_", "hosted cookies use fixed __Host- semantics");
+        setCookie.ToLowerInvariant().Should().Contain("secure", "TLS terminates at the edge; Secure comes from config");
+        setCookie.ToLowerInvariant().Should().Contain("httponly");
+        setCookie.ToLowerInvariant().Should().Contain("samesite=lax");
+        setCookie.ToLowerInvariant().Should().Contain("path=/");
+        setCookie.ToLowerInvariant().Should().NotContain("domain=", "__Host- cookies must not set Domain");
+    }
+
+    [Fact]
+    public void Start_HostedWithoutSecureCookies_FailsStartup()
+    {
+        // A hosted GitHub deployment that opts out of secure cookies must never boot.
+        Action act = () => CreateServer(requireSecureCookies: false);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*RequireSecureCookies*");
+    }
+
+    [Fact]
+    public void Start_HostedWithoutSingleReplicaAck_FailsStartup()
+    {
+        Action act = () => CreateServer(acknowledgeSingleReplica: false);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*AcknowledgeSingleReplica*");
+    }
+
+    [Fact]
+    public async Task Start_DevelopmentInsecure_UsesNonHostDevCookie()
+    {
+        // Development may explicitly opt into an insecure, non-__Host dev cookie over plain HTTP.
+        using TestFixture fx = CreateServer(
+            requireSecureCookies: false, acknowledgeSingleReplica: false, environment: "Development");
+
+        HttpResponseMessage resp = await fx.Client.GetAsync(GitHubAuthConstants.StartRoute);
+
+        string setCookie = resp.Headers.GetValues("Set-Cookie").First(c => c.Contains("rp_gh_state"));
+        string cookieName = setCookie.Split('=')[0];
+
+        cookieName.Should().NotStartWith("__Host-", "the dev cookie is deliberately non-__Host");
+        cookieName.Should().StartWith("rp_gh_state_");
+        setCookie.ToLowerInvariant().Should().Contain("httponly", "even the dev cookie stays HttpOnly");
+        setCookie.ToLowerInvariant().Should().NotContain("secure", "the dev cookie is served over plain HTTP");
+    }
+
+    // ── parallel tabs (related hardening) ────────────────────────────────────
+
+    [Fact]
+    public async Task Callback_ParallelTabs_BothLoginsCompleteIndependently()
+    {
+        using TestFixture fx = CreateServer();
+
+        // Two concurrent starts (two browser tabs) each get their own per-state cookie.
+        (string state1, string cookie1) = await BeginLogin(fx);
+        (string state2, string cookie2) = await BeginLogin(fx);
+
+        cookie1.Split('=')[0].Should().NotBe(cookie2.Split('=')[0], "each tab derives a distinct cookie name");
+
+        // Each callback consumes only its own cookie; both complete successfully and independently.
+        HttpResponseMessage first = await Callback(fx, state1, cookie1, code: "c1");
+        HttpResponseMessage second = await Callback(fx, state2, cookie2, code: "c2");
+
+        first.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        second.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        System.Web.HttpUtility.ParseQueryString(first.Headers.Location!.Query)["code"].Should().NotBeNullOrWhiteSpace();
+        System.Web.HttpUtility.ParseQueryString(second.Headers.Location!.Query)["code"].Should().NotBeNullOrWhiteSpace();
+    }
+
     // ── callback happy path ──────────────────────────────────────────────────
 
     [Fact]
@@ -583,7 +664,10 @@ public sealed class GitHubAuthenticationTests
         int stateTtlSeconds = 300,
         int redemptionTtlSeconds = 120,
         int startPerMinute = 100,
-        int exchangePerMinute = 100)
+        int exchangePerMinute = 100,
+        bool requireSecureCookies = true,
+        bool acknowledgeSingleReplica = true,
+        string environment = "Production")
     {
         var settings = new Dictionary<string, string?>
         {
@@ -597,6 +681,8 @@ public sealed class GitHubAuthenticationTests
             ["GitHub:FrontendReturnUrl"] = FrontendUrl,
             ["GitHub:StateTtlSeconds"] = stateTtlSeconds.ToString(),
             ["GitHub:RedemptionTtlSeconds"] = redemptionTtlSeconds.ToString(),
+            ["GitHub:RequireSecureCookies"] = requireSecureCookies ? "true" : "false",
+            ["GitHub:AcknowledgeSingleReplica"] = acknowledgeSingleReplica ? "true" : "false",
             ["GitHub:RateLimits:StartPerMinute"] = startPerMinute.ToString(),
             ["GitHub:RateLimits:ExchangePerMinute"] = exchangePerMinute.ToString(),
         };
@@ -604,7 +690,6 @@ public sealed class GitHubAuthenticationTests
         if (useUserIdAllowlist)
         {
             settings["GitHub:AllowedUserIds:0"] = AllowedId.ToString();
-            settings["GitHub:AllowedLogins:0"] = AllowedLogin;
         }
 
         if (allowedOrgs is not null)
@@ -626,7 +711,7 @@ public sealed class GitHubAuthenticationTests
         var logSink = new ListLoggerProvider();
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        builder.Environment.EnvironmentName = Environments.Production;
+        builder.Environment.EnvironmentName = environment;
         builder.WebHost.UseTestServer();
 
         builder.Services.AddRouting();

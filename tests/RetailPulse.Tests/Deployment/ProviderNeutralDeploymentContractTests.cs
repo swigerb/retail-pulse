@@ -96,15 +96,28 @@ public sealed class ProviderNeutralDeploymentContractTests
     [Fact]
     public void ContainerAppsBicep_PinsApiToSingleReplica()
     {
-        // maxReplicas: 1 is required for the single SQLite writer AND for the (non-Production)
-        // Anonymous mode's replica-local billable-use circuit breaker. This proves the live
-        // artifact cannot scale the API out.
+        // maxReplicas: 1 is required for the single SQLite writer, the (non-Production)
+        // Anonymous mode's replica-local billable-use circuit breaker, AND the Sprint 2
+        // GitHub BFF mode's replica-local OAuth state/redemption stores + login limiters.
+        // This proves the live API artifact cannot scale out.
         string bicep = File.ReadAllText(Path.Combine(
             RepoRoot, "infra", "modules", "container-apps.bicep"));
 
-        bicep.Should().MatchRegex(
+        // Scope the assertion to the API container app's own scale block, so a maxReplicas on
+        // some OTHER container app (mcp/teamsbot) can never satisfy this contract by accident.
+        int apiIndex = bicep.IndexOf("'ca-retailpulse-api'", StringComparison.Ordinal);
+        apiIndex.Should().BeGreaterThan(-1, "the API container app must exist");
+        int nextResourceIndex = bicep.IndexOf("resource ", apiIndex, StringComparison.Ordinal);
+        string apiBlock = nextResourceIndex > apiIndex
+            ? bicep[apiIndex..nextResourceIndex]
+            : bicep[apiIndex..];
+
+        apiBlock.Should().MatchRegex(
             "maxReplicas\\s*:\\s*1",
             "the API container app must pin maxReplicas to 1");
+        apiBlock.Should().NotMatchRegex(
+            "maxReplicas\\s*:\\s*([2-9]|\\d{2,})",
+            "the API container app must never allow more than one replica");
     }
 
     [Fact]
@@ -149,6 +162,26 @@ public sealed class ProviderNeutralDeploymentContractTests
             "the GitHub example client secret must be an angle-bracket placeholder");
         json.Should().MatchRegex("\"SigningKey\"\\s*:\\s*\"<[^\"]*>\"",
             "the GitHub example signing key must be an angle-bracket placeholder");
+    }
+
+    [Fact]
+    public void ExampleGitHubConfig_HasImmutableAllowlistContract_NoLoginAllowlist()
+    {
+        // The example must teach the hardened contract: immutable allowlist + secure cookies +
+        // single-replica acknowledgement, and must NOT reintroduce a mutable login allowlist.
+        string json = File.ReadAllText(Path.Combine(
+            RepoRoot, "src", "RetailPulse.Api", "appsettings.GitHub.example.json"));
+
+        json.Should().NotContain("\"AllowedLogins\"",
+            "the mutable login allowlist was removed and must never return to the example");
+        json.Should().Contain("\"AllowedUserIds\"",
+            "the example must show the immutable numeric-id allowlist");
+        json.Should().Contain("\"RequireSecureCookies\"",
+            "the example must document the secure-cookie enforcement flag");
+        json.Should().Contain("\"AcknowledgeSingleReplica\"",
+            "the example must document the single-replica acknowledgement flag");
+        json.Should().Contain("\"AdditionalValidationKeys\"",
+            "the example must document signing-key rotation via additional validation keys");
     }
 
     private static string FindRepoRoot()

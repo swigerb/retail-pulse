@@ -42,6 +42,9 @@ public static class GitHubAuthEndpoints
 
         app.MapGet(GitHubAuthConstants.CallbackRoute, CallbackAsync)
             .AllowAnonymous()
+            // The callback INTENTIONALLY shares the "github-start" fixed window: start + callback are the
+            // two halves of one login attempt, so they are budgeted together against the same per-replica
+            // window. Exchange has its own, separate window.
             .RequireRateLimiting(StartRateLimitPolicy)
             .WithName("GitHubAuthCallback")
             .WithTags("Authentication");
@@ -79,7 +82,7 @@ public static class GitHubAuthEndpoints
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
 
-        AppendStateCookie(context, options, cookieSecret);
+        AppendStateCookie(context, options, state, cookieSecret);
 
         // Redirect ONLY to the fixed GitHub authorize URL with minimal scopes. redirect_uri is the
         // exact registered callback; allow_signup=false avoids account-creation flows in a demo.
@@ -111,20 +114,32 @@ public static class GitHubAuthEndpoints
         CancellationToken ct = context.RequestAborted;
 
         string? state = context.Request.Query["state"];
-        string? cookieSecret = context.Request.Cookies[CookieName(context)];
+
+        // Validate the state FORMAT before anything else: it must be exactly the fixed-length base64url
+        // shape our start emits. This bounds the cookie-name derivation below and rejects a malformed or
+        // oversized callback up front. (Format-valid ≠ known; the one-time store still gates authenticity.)
+        if (string.IsNullOrEmpty(state) || !GitHubStateCookie.IsValidStateFormat(state))
+        {
+            return Results.BadRequest(Problem("invalid_state", "Missing or invalid login state."));
+        }
+
+        // The cookie name is DERIVED from this specific state, so parallel login tabs never collide and
+        // this callback reads/deletes ONLY its own cookie.
+        string cookieName = GitHubStateCookie.NameFor(state, options.RequireSecureCookies);
+        string? cookieSecret = context.Request.Cookies[cookieName];
 
         // The state cookie is one-use: always delete it, whatever the outcome.
         // 1) State + cookie must both be present, or this is not a genuine callback from our start.
-        if (string.IsNullOrEmpty(state) || string.IsNullOrEmpty(cookieSecret))
+        if (string.IsNullOrEmpty(cookieSecret))
         {
-            DeleteStateCookie(context, options);
+            DeleteStateCookie(context, options, state);
             return Results.BadRequest(Problem("invalid_state", "Missing or invalid login state."));
         }
 
         // 2) Consume the state entry atomically (one-time). Missing/expired ⇒ CSRF / replay / timeout.
         if (!stateStore.TryConsume(state, out GitHubStateEntry entry))
         {
-            DeleteStateCookie(context, options);
+            DeleteStateCookie(context, options, state);
             return Results.BadRequest(Problem("invalid_state", "The login state is unknown, already used, or expired."));
         }
 
@@ -132,12 +147,12 @@ public static class GitHubAuthEndpoints
         //    (constant-time). This defeats state fixation and a stolen/guessed state without the cookie.
         if (!CryptographicOperations.FixedTimeEquals(Sha256(cookieSecret), entry.CookieSecretHash))
         {
-            DeleteStateCookie(context, options);
+            DeleteStateCookie(context, options, state);
             return Results.BadRequest(Problem("invalid_state", "The login state does not match this browser."));
         }
 
         // The flow is now proven to originate from our start in this browser. Retire the cookie.
-        DeleteStateCookie(context, options);
+        DeleteStateCookie(context, options, state);
 
         // 4) The user may have denied consent — handle safely, no token, redirect to the fixed frontend.
         string? oauthError = context.Request.Query["error"];
@@ -233,33 +248,31 @@ public static class GitHubAuthEndpoints
         return Results.Redirect(url);
     }
 
-    private static string CookieName(HttpContext context) =>
-        // The __Host- prefix (Secure + Path=/ + no Domain) is the strongest anti-fixation binding, but
-        // it requires HTTPS. Fall back to a plain name only over plain HTTP (local dev / test host).
-        context.Request.IsHttps ? GitHubAuthConstants.StateCookieName : "rp_gh_state";
+    private static string CookieName(GitHubAuthOptions options, string state) =>
+        // Per-state name so parallel login tabs never clash. Secure/__Host semantics come from validated
+        // configuration (RequireSecureCookies), NEVER from Request.IsHttps — behind a TLS-terminating
+        // proxy (ACA) the container request is plain HTTP even though the browser↔edge hop is HTTPS.
+        GitHubStateCookie.NameFor(state, options.RequireSecureCookies);
 
-    private static void AppendStateCookie(HttpContext context, GitHubAuthOptions options, string secret)
+    private static void AppendStateCookie(HttpContext context, GitHubAuthOptions options, string state, string secret)
     {
-        bool secure = context.Request.IsHttps;
-        context.Response.Cookies.Append(CookieName(context), secret, new CookieOptions
+        context.Response.Cookies.Append(CookieName(options, state), secret, new CookieOptions
         {
             HttpOnly = true,
-            Secure = secure,
+            Secure = options.RequireSecureCookies, // fixed by config, not the observed scheme
             SameSite = SameSiteMode.Lax, // top-level GET navigation back from github.com carries it
-            Path = "/",
+            Path = "/", // __Host- requires Path=/ and no Domain
             IsEssential = true,
             MaxAge = TimeSpan.FromSeconds(options.StateTtlSeconds),
         });
     }
 
-    private static void DeleteStateCookie(HttpContext context, GitHubAuthOptions options)
+    private static void DeleteStateCookie(HttpContext context, GitHubAuthOptions options, string state)
     {
-        _ = options;
-        bool secure = context.Request.IsHttps;
-        context.Response.Cookies.Delete(CookieName(context), new CookieOptions
+        context.Response.Cookies.Delete(CookieName(options, state), new CookieOptions
         {
             HttpOnly = true,
-            Secure = secure,
+            Secure = options.RequireSecureCookies,
             SameSite = SameSiteMode.Lax,
             Path = "/",
         });

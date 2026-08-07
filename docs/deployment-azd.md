@@ -261,7 +261,10 @@ All three Container Apps use `minReplicas: 0` / `maxReplicas: 1`. Consequences:
   in replica-local memory. A login `callback` served by one replica and the
   `POST /api/auth/github/exchange` served by another would not share state, so
   hosted GitHub requires `maxReplicas: 1` until the stores are moved to distributed
-  storage. See [ADR-005](adr/005-provider-neutral-authentication.md) and the
+  storage. Because the runtime cannot inspect ACA topology, hosted GitHub also
+  requires an explicit `AcknowledgeSingleReplica=true` fail-closed acknowledgement
+  of that pin (startup fails without it). See
+  [ADR-005](adr/005-provider-neutral-authentication.md) and the
   [authentication matrix](authentication-matrix.md).
 - **SignalR:** the Teams Bot holds a persistent SignalR connection to the API telemetry
   hub, and the frontend connects to `/hubs/telemetry` and `/hubs/streaming`. An active

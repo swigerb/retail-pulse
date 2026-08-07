@@ -14,15 +14,14 @@ public readonly record struct GitHubAllowlistDecision(bool Allowed, string Reaso
 /// A user is admitted when ANY configured rule matches, evaluated cheapest-first:
 /// <list type="number">
 ///   <item>the numeric id is in <see cref="GitHubAuthOptions.AllowedUserIds"/>;</item>
-///   <item>the login is in <see cref="GitHubAuthOptions.AllowedLogins"/> (case-insensitive — but the
-///     resulting session is still keyed to the immutable id);</item>
 ///   <item>the user is an ACTIVE member of any org in <see cref="GitHubAuthOptions.AllowedOrgs"/>,
 ///     confirmed via <c>/user/memberships/orgs/{org}</c> (requires the <c>read:org</c> scope).</item>
 /// </list>
-/// Every failure mode fails CLOSED: an empty allowlist (rejected at startup), an org API error, a
-/// rate-limit response, or an inactive/pending membership all deny access. Org membership can be
-/// private; reading it requires <c>read:org</c>, which is why that scope is requested only when an
-/// org allowlist is configured.
+/// The mutable login handle is NEVER an access mechanism — a renamed or re-created account that lands on
+/// a previously-allowed handle can never inherit access. Every failure mode fails CLOSED: an empty
+/// allowlist (rejected at startup), an org API error, a rate-limit response, or an inactive/pending
+/// membership all deny access. Org membership can be private; reading it requires <c>read:org</c>, which
+/// is why that scope is requested only when an org allowlist is configured.
 /// </summary>
 public sealed class GitHubUserAllowlist
 {
@@ -58,14 +57,7 @@ public sealed class GitHubUserAllowlist
             return new GitHubAllowlistDecision(true, "user_id");
         }
 
-        // 2) Login allowlist (case-insensitive). The session is still keyed to the immutable id.
-        if (!string.IsNullOrWhiteSpace(user.Login)
-            && _options.AllowedLogins.Any(l => string.Equals(l, user.Login, StringComparison.OrdinalIgnoreCase)))
-        {
-            return new GitHubAllowlistDecision(true, "login");
-        }
-
-        // 3) Active org membership — fail closed on any API/rate/error and on non-active states.
+        // 2) Active org membership — fail closed on any API/rate/error and on non-active states.
         foreach (string org in _options.AllowedOrgs)
         {
             GitHubOrgMembershipResult membership =

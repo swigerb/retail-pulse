@@ -32,8 +32,30 @@ public sealed class GitHubSessionTokenTests
             ["GitHub:CallbackUrl"] = "https://api.example.com/api/auth/github/callback",
             ["GitHub:FrontendReturnUrl"] = "https://app.example.com/auth/github/callback",
             ["GitHub:AllowedUserIds:0"] = "12345",
+            ["GitHub:AcknowledgeSingleReplica"] = "true",
         }).Build(),
         new TestEnv());
+
+    private static GitHubAuthOptions OptionsWithRotation(string signingKey, params string[] additional)
+    {
+        var cfg = new Dictionary<string, string?>
+        {
+            ["GitHub:ClientId"] = "Iv1.abc",
+            ["GitHub:ClientSecret"] = "secret",
+            ["GitHub:SigningKey"] = signingKey,
+            ["GitHub:CallbackUrl"] = "https://api.example.com/api/auth/github/callback",
+            ["GitHub:FrontendReturnUrl"] = "https://app.example.com/auth/github/callback",
+            ["GitHub:AllowedUserIds:0"] = "12345",
+            ["GitHub:AcknowledgeSingleReplica"] = "true",
+        };
+        for (int i = 0; i < additional.Length; i++)
+        {
+            cfg[$"GitHub:AdditionalValidationKeys:{i}"] = additional[i];
+        }
+
+        return GitHubAuthOptions.FromConfiguration(
+            new ConfigurationBuilder().AddInMemoryCollection(cfg).Build(), new TestEnv());
+    }
 
     private sealed class TestEnv : IHostEnvironment
     {
@@ -123,6 +145,58 @@ public sealed class GitHubSessionTokenTests
 
         kp.IsEphemeral.Should().BeFalse();
         kp.Key.KeySize.Should().BeGreaterThanOrEqualTo(256);
+    }
+
+    // ── Signing-key rotation ────────────────────────────────────────────────────
+
+    private const string OldKey = "github-OLD-signing-key-0123456789abcdefZZZZ";
+    private const string NewKey = "github-NEW-signing-key-0123456789abcdefYYYY";
+
+    [Fact]
+    public void Rotation_TokenSignedWithPreviousKey_StillValidatesAfterRotation()
+    {
+        // Before rotation: the OLD key is the sole signing key; mint a session token with it.
+        GitHubAuthOptions before = OptionsWithRotation(OldKey);
+        var beforeKp = new GitHubSigningKeyProvider(before);
+        GitHubSession oldSession = new GitHubSessionTokenService(before, beforeKp)
+            .CreateSession(new GitHubVerifiedUser(12345, "octocat"));
+
+        // After rotation: NEW key signs, OLD key demoted to validation-only. The in-flight OLD token
+        // must keep validating against the rotated key set.
+        GitHubAuthOptions after = OptionsWithRotation(NewKey, OldKey);
+        var afterKp = new GitHubSigningKeyProvider(after);
+
+        ClaimsPrincipal principal = Validate(oldSession.Token, after, afterKp);
+
+        principal.FindFirst(JwtRegisteredClaimNames.Sub)!.Value.Should().Be("github:12345");
+    }
+
+    [Fact]
+    public void Rotation_NewTokensAreSignedWithCurrentKey_NotThePreviousKey()
+    {
+        GitHubAuthOptions after = OptionsWithRotation(NewKey, OldKey);
+        var afterKp = new GitHubSigningKeyProvider(after);
+        GitHubSession newSession = new GitHubSessionTokenService(after, afterKp)
+            .CreateSession(new GitHubVerifiedUser(12345, "octocat"));
+
+        // Freshly-minted tokens must be signed by the CURRENT key (listed first), never a rotation key.
+        var jwt = new JsonWebToken(newSession.Token);
+        jwt.Kid.Should().Be(afterKp.Key.KeyId);
+        jwt.Kid.Should().NotBe(new GitHubSigningKeyProvider(OptionsWithRotation(OldKey)).Key.KeyId,
+            "the new token's kid identifies the current key, not the demoted one");
+
+        // And a validator that ONLY trusts the OLD key must reject the new token.
+        GitHubAuthOptions oldOnly = OptionsWithRotation(OldKey);
+        var handler = new JsonWebTokenHandler { MapInboundClaims = false };
+        TokenValidationResult result = handler.ValidateTokenAsync(newSession.Token, new TokenValidationParameters
+        {
+            ValidIssuers = [after.Issuer],
+            ValidAudiences = [after.Audience],
+            IssuerSigningKeys = new GitHubSigningKeyProvider(oldOnly).ValidationKeys,
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+        }).GetAwaiter().GetResult();
+
+        result.IsValid.Should().BeFalse("the new token is signed by the current key, not the old one");
     }
 
     // ── Normalizer ────────────────────────────────────────────────────────────

@@ -192,9 +192,11 @@ and is proven to stay `Entra` by the deployment-contract tests. Anonymous mode i
   `jti` — **no PII and no refresh token**. The client re-bootstraps when the TTL
   elapses, which bounds the replay window to the TTL.
 - The same token is usable as a REST `Authorization: Bearer` and as a SignalR
-  `?access_token` (query token honored **only** on `/hubs/*`). Key rotation is a
-  built-in seam (`AnonymousSigningKeyProvider.ValidationKeys`). The signing key is
-  a secret and is never committed.
+  `?access_token` (query token honored **only** on `/hubs/*`). Genuine signing-key
+  rotation is supported (`AnonymousSigningKeyProvider.ValidationKeys` /
+  `Anonymous:AdditionalValidationKeys`): validation-only keys keep pre-rotation
+  tokens valid while the current key signs, parity with GitHub mode. The signing
+  key is a secret and is never committed.
 
 ### Authorization and normalized principal
 
@@ -408,31 +410,49 @@ All three are mapped **only** in GitHub mode, are the only anonymous
 (`AllowAnonymous`) surface besides `/health` + `/alive`, and are rate limited.
 
 1. `GET /api/auth/github/start` — mints a random `state` (server-side one-time
-   store, short TTL) and a separate random cookie secret (HttpOnly/Secure/
-   SameSite=Lax, `__Host-` prefixed over HTTPS), then **redirects only** to the
-   fixed `https://github.com/login/oauth/authorize` with the exact registered
+   store, short TTL) and a separate random cookie secret. The cookie's security
+   attributes come from the validated `RequireSecureCookies` option, **never** from
+   the in-container `Request.IsHttps`: behind a TLS-terminating proxy (Azure
+   Container Apps) the browser↔edge hop is HTTPS while the edge↔container hop the
+   app observes is plain HTTP, so deriving `Secure`/`__Host-` from the request
+   scheme would silently emit an insecure cookie in production. In hosted/secure
+   mode the cookie is always `__Host-` prefixed (Secure, HttpOnly, SameSite=Lax,
+   Path=/, no Domain). Development may explicitly opt into an insecure, non-`__Host`
+   dev cookie over plain HTTP (`RequireSecureCookies=false`, rejected at startup
+   outside Development). The cookie **name is per-state** — a `__Host-rp_gh_state_`
+   base plus a bounded URL-safe suffix derived from the state (truncated SHA-256) —
+   so **parallel login tabs never collide**: two concurrent starts write two
+   differently-named cookies. It then **redirects only** to the fixed
+   `https://github.com/login/oauth/authorize` with the exact registered
    `redirect_uri`, minimal scopes (empty by default; `read:org` **only** when an
    org allowlist is configured — never `repo`), and `allow_signup=false`. No
    user-supplied redirect target is ever honored (open-redirect closed).
-2. `GET /api/auth/github/callback` — validates `state` + cookie presence, consumes
-   the state entry atomically (one-use), and constant-time compares the cookie
-   secret hash **before any code exchange**; deletes the state cookie on every
-   path. Handles user denial safely (no token). Exchanges the code server-side at
-   the fixed token endpoint, validates the token by calling `/user`, then runs the
-   server-side allowlist. On success it mints a random one-time **redemption code**
-   (bounded, atomic, TTL store) and **redirects to the one configured SPA URL**
-   carrying only that code — never a provider or app token. All failures redirect
-   with a generic error code or return a sanitized `400`.
+2. `GET /api/auth/github/callback` — validates the `state` **format** first (exactly
+   the fixed-length base64url shape our start emits), derives the exact per-state
+   cookie name from the validated state, and reads/deletes **only** that cookie.
+   It consumes the state entry atomically (one-use) and constant-time compares the
+   cookie secret hash **before any code exchange**; deletes the state cookie on
+   every path. Handles user denial safely (no token). Exchanges the code
+   server-side at the fixed token endpoint, validates the token by calling `/user`,
+   then runs the server-side allowlist. On success it mints a random one-time
+   **redemption code** (bounded, atomic, TTL store) and **redirects to the one
+   configured SPA URL** carrying only that code — never a provider or app token.
+   All failures redirect with a generic error code or return a sanitized `400`.
 3. `POST /api/auth/github/exchange` — atomically redeems the one-time code
    (replay/race impossible) and returns a freshly minted short-lived Retail Pulse
    GitHub session token. No refresh token. CORS is the exact configured origin.
 
 ### Server-side allowlist and minimal scopes
 
-- Authorization is decided **server-side** on the immutable numeric GitHub user id
-  first (`AllowedUserIds`), then a configurable login allowlist (`AllowedLogins`,
-  case-insensitive, informational identity only), and/or **active** organization
-  membership via `GET /user/memberships/orgs/{org}` requiring `state == "active"`.
+- Authorization is decided **server-side** on **immutable** signals only: the
+  numeric GitHub user id (`AllowedUserIds`, positive integers, deduped) and/or
+  **active** organization membership via `GET /user/memberships/orgs/{org}`
+  requiring `state == "active"`. The mutable login handle is **never** an access
+  mechanism — a renamed or re-created handle can never inherit access (handle-reuse
+  is denied). If a display login is ever surfaced it is informational only. Startup
+  **fails closed** unless at least one immutable mechanism (`AllowedUserIds` or
+  `AllowedOrgs`) is configured, so an empty allowlist can never admit every GitHub
+  account.
 - Scopes are minimized: **no `repo` scope, ever**. With no org allowlist the
   requested scope is empty (public profile only). Org membership checks require
   `read:org`; private membership is only visible with that scope, so the org path
@@ -449,8 +469,15 @@ All three are mapped **only** in GitHub mode, are the only anonymous
   and **no refresh token** — no PII beyond the public login. The client re-runs the
   flow when the TTL elapses, bounding replay to the TTL.
 - HS256 is pinned (algorithm confusion closed); the signing key is ≥ 256-bit and a
-  secret. Key rotation is a built-in seam
-  (`GitHubSigningKeyProvider.ValidationKeys`).
+  secret. **Genuine signing-key rotation** is supported via
+  `GitHub:AdditionalValidationKeys`: additional strong (≥ 256-bit, placeholders
+  rejected) keys are accepted for **validation only** while the current
+  `SigningKey` is always used to **sign** (and is tried first). Each key carries a
+  stable id derived from its own material, so a token signed before a rotation keeps
+  the same `kid` after its key is demoted to the validation-only list and therefore
+  keeps validating until it expires — a rotation never invalidates in-flight
+  sessions. Anonymous mode has the same rotation seam
+  (`AnonymousSigningKeyProvider` / `Anonymous:AdditionalValidationKeys`) for parity.
 - The same token is usable as a REST `Authorization: Bearer` and a SignalR
   `?access_token` (query token honored **only** on `/hubs/*`, exactly like Entra).
   A dedicated policy (default + fallback) requires the authenticated user, the
@@ -464,9 +491,14 @@ All three are mapped **only** in GitHub mode, are the only anonymous
 - The state and redemption stores are **bounded, concurrent, one-use, TTL** stores
   with background/opportunistic cleanup. They are **replica-local** (in-memory):
   a callback served by one replica and an exchange served by another would not
-  share state. Until moved to distributed storage, GitHub mode requires
-  **`maxReplicas=1`**; this is documented in the deployment doc and the example
-  config, and is a fail-closed operational constraint (never silently multi-replica).
+  share state. The state store is also **capacity/TTL bounded**, so a flood of
+  `start` requests (parallel-tab cookie-count abuse) is rejected with a `503`
+  rather than growing unboundedly. Until moved to distributed storage, GitHub mode
+  requires **`maxReplicas=1`**. Because the runtime cannot inspect ACA topology,
+  hosted GitHub additionally requires an explicit
+  `GitHub:AcknowledgeSingleReplica=true` — a fail-closed acknowledgement of the
+  single-replica pin; startup fails without it. This is documented in the
+  deployment doc and the example config, and is never silently multi-replica.
 
 ### Files (Sprint 2)
 
@@ -541,7 +573,10 @@ All three are mapped **only** in GitHub mode, are the only anonymous
 | A future provider weakens the role/scope requirement | The authorization policy is untouched and centralized; `RetailPulse.User` + `access_as_user` remain required. Normalization is separate from authorization. |
 | Hub token leakage via query string on REST | `?access_token` remains honored only on `/hubs/*`; unchanged. |
 | Anonymous visitors exhaust the model budget | Hosted Anonymous requires a second explicit opt-in plus rate, token, and cost ceilings; write-capable tools remain disabled. |
-| A GitHub OAuth code or session is replayed or redirected | The GitHub provider uses a backend confidential exchange, a random `state` in a server-side one-time store bound to an HttpOnly/Secure/SameSite=Lax cookie (constant-time hash compare) validated before any exchange, the exact fixed authorize/callback/token endpoints (SSRF-safe), a one-time bounded redemption code (never a provider/app token) redeemed atomically, short-lived HS256 session tokens with a separate issuer/audience/provider and rotation, and a fail-closed server-side id/login/active-org allowlist with no `repo` scope. |
+| A GitHub OAuth code or session is replayed or redirected | The GitHub provider uses a backend confidential exchange, a random `state` in a server-side one-time store bound to a per-state HttpOnly cookie whose Secure/`__Host-` attributes come from validated config (not the proxy-observed request scheme), constant-time hash compare validated before any exchange, the exact fixed authorize/callback/token endpoints (SSRF-safe), a one-time bounded redemption code (never a provider/app token) redeemed atomically, short-lived HS256 session tokens with a separate issuer/audience/provider and genuine key rotation, and a fail-closed server-side **immutable** id / active-org allowlist (mutable login never grants) with no `repo` scope. |
+| A renamed or re-created GitHub handle inherits another user's access | Authorization keys only on the immutable numeric id and/or active org membership; the mutable login is never an access mechanism, so a reused handle with a different id is denied. A login-only allowlist fails startup. |
+| Cookie hardening is bypassed behind TLS termination | Behind Azure Container Apps the in-container request is plain HTTP; deriving `Secure`/`__Host-` from `Request.IsHttps` would emit an insecure cookie. Cookie attributes come from the validated `RequireSecureCookies` option instead, which must be `true` in any hosted deployment (startup fails otherwise). |
+| Parallel login tabs clash or a state flood abuses cookies | Each `start` writes a distinct per-state cookie name (`__Host-rp_gh_state_` + bounded suffix derived from the state) and the callback consumes/deletes only its own, so concurrent tabs complete independently; the state store is capacity/TTL bounded and returns `503` under flood. |
 | A GitHub provider token leaks to the SPA or logs | The provider token never leaves the server: it is used transiently to call `/user` and org membership, then discarded. Redirects and the exchange body carry only a one-time redemption code / the Retail Pulse session token; integration tests assert the provider token never appears in any redirect, body, or log. |
 
 ## No-downgrade and fail-closed rules

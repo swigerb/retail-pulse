@@ -2,54 +2,6 @@
 
 ## Active Decisions
 
-### 2026-05-08: Sprint 2 — GitHub confidential OAuth BFF authentication mode (epic #27, issue #36)
-
-**By:** Costco (Backend Dev)
-
-**What:** Implemented `Authentication:Mode=GitHub` as an additive, opt-in,
-fail-closed provider behind the existing provider-neutral factory. It is a
-**confidential Backend-for-Frontend (BFF)** OAuth flow with three
-narrowly-anonymous, rate-limited endpoints — `GET /api/auth/github/start`,
-`GET /api/auth/github/callback`, `POST /api/auth/github/exchange` — mapped only in
-GitHub mode. The browser only ever talks to our API; the GitHub client secret and
-**provider token stay server-side** (used transiently to call `/user` and org
-membership, then discarded). The SPA receives only a one-time redemption code,
-exchanged for a short-lived HS256 Retail Pulse session token (`provider=GitHub`,
-`sub=github:<immutable numeric id>`, `RetailPulse.User` + `access_as_user`, `jti`,
-strict expiry, no refresh). **Live/production stays Entra** — no hook/config/IaC
-pin changed; deployment-contract tests still prove Entra-only artifacts.
-
-**Why:** GitHub OAuth Apps do **not** support PKCE, so a browser-only exchange
-would leak the client secret or the provider token. The BFF confidential exchange
-plus a server-side one-time `state` store bound to an HttpOnly/Secure/SameSite=Lax
-cookie (SHA-256 hash, constant-time compare, validated before any code exchange)
-closes login-CSRF, state fixation/replay, code/callback replay, and token
-substitution without PKCE. Fixed GitHub endpoints close SSRF/open-redirect; the
-server-side allowlist (immutable numeric id / login / **active** org membership,
-`read:org` only when an org allowlist is set, **never `repo`**) fails closed on any
-API/rate/error.
-
-**Team impact:**
-- **Chick (Frontend):** Sprint 3 owns the provider-neutral sign-in selector. The
-  GitHub SPA contract is: navigate to `/api/auth/github/start`; on return read the
-  one-time `code` query param from the single configured frontend callback URL and
-  `POST` it to `/api/auth/github/exchange`; store the returned session token
-  **session-only**; use it as a REST `Authorization: Bearer` and a `/hubs`
-  `?access_token`. The provider token is never exposed.
-- **Publix (QA):** New suites — `GitHubAuthenticationTests` (TestServer
-  integration + threat: start/callback/exchange happy path and every failure,
-  provider-token-never-leaked, exact scopes/no repo, rate limits,
-  anonymous-exception coverage) plus `GitHubAuthOptionsTests`,
-  `GitHubOneTimeStoreTests`, `GitHubSessionTokenTests`, `GitHubUserAllowlistTests`.
-- **Kroger (Lead):** **Operational limitation** — the state and redemption stores
-  are replica-local in-memory, so hosted GitHub requires `maxReplicas=1` until moved
-  to distributed storage. Documented in ADR-005, the authentication matrix,
-  security.md, and deployment-azd.md. Not deployed this sprint.
-
-**Validation:** backend `dotnet test` 2421 pass; Release build 0/0; `dotnet format
---verify-no-changes` clean; `az bicep build` clean; frontend `npm ci` + build +
-371 vitest pass. No GitHub/Azure writes, no deploy, no merge.
-
 ### 2026-08-05: Dedicated Basic ACR + postprovision hook for secretless Container Apps image pull
 
 **By:** Costco (Backend Dev)

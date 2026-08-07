@@ -20,6 +20,8 @@ namespace RetailPulse.Api.Security.Anonymous;
 /// </summary>
 public sealed class AnonymousSigningKeyProvider
 {
+    private readonly IReadOnlyList<SecurityKey> _validationKeys;
+
     /// <summary>True when the key was generated ephemerally (Development, no configured secret).</summary>
     public bool IsEphemeral { get; }
 
@@ -29,10 +31,8 @@ public sealed class AnonymousSigningKeyProvider
 
         if (options.HasConfiguredSigningKey)
         {
-            Key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(options.SigningKey!))
-            {
-                KeyId = "anon-configured",
-            };
+            byte[] material = Encoding.UTF8.GetBytes(options.SigningKey!);
+            Key = new SymmetricSecurityKey(material) { KeyId = KeyIdFor(material) };
             IsEphemeral = false;
         }
         else
@@ -42,11 +42,33 @@ public sealed class AnonymousSigningKeyProvider
             Key = new SymmetricSecurityKey(material) { KeyId = "anon-ephemeral" };
             IsEphemeral = true;
         }
+
+        // Genuine rotation (parity with GitHub): current signing key first, then each configured
+        // validation-only key. Each key gets a STABLE, key-material-derived id so a token keeps the
+        // same kid after its key is demoted to validation-only — that is what lets an in-flight token
+        // resolve to its original key across a rotation. Options validation already rejected
+        // weak/placeholder rotation keys.
+        var keys = new List<SecurityKey> { Key };
+        for (int i = 0; i < options.AdditionalValidationKeys.Count; i++)
+        {
+            byte[] extra = Encoding.UTF8.GetBytes(options.AdditionalValidationKeys[i]);
+            keys.Add(new SymmetricSecurityKey(extra) { KeyId = KeyIdFor(extra) });
+        }
+
+        _validationKeys = keys;
     }
+
+    // A deterministic, non-reversible id for a key: the first bytes of SHA-256(key material). Stable
+    // across process restarts and rotation "slots", so a demoted signing key keeps the same kid.
+    private static string KeyIdFor(byte[] material) =>
+        "anon-" + Convert.ToHexString(SHA256.HashData(material))[..12].ToLowerInvariant();
 
     /// <summary>The active signing key for token creation and validation.</summary>
     public SymmetricSecurityKey Key { get; }
 
-    /// <summary>All keys accepted for validation. Kept as a seam for future key rotation.</summary>
-    public IEnumerable<SecurityKey> ValidationKeys => [Key];
+    /// <summary>
+    /// All keys accepted for validation: the active signing key first, then every configured rotation
+    /// (validation-only) key, so tokens issued before a rotation stay valid until they expire.
+    /// </summary>
+    public IEnumerable<SecurityKey> ValidationKeys => _validationKeys;
 }

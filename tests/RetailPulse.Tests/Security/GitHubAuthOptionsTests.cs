@@ -44,6 +44,8 @@ public sealed class GitHubAuthOptionsTests
         ["GitHub:CallbackUrl"] = "https://api.example.com/api/auth/github/callback",
         ["GitHub:FrontendReturnUrl"] = "https://app.example.com/auth/github/callback",
         ["GitHub:AllowedUserIds:0"] = "12345",
+        ["GitHub:RequireSecureCookies"] = "true",
+        ["GitHub:AcknowledgeSingleReplica"] = "true",
     };
 
     [Fact]
@@ -194,14 +196,99 @@ public sealed class GitHubAuthOptionsTests
     }
 
     [Fact]
-    public void FromConfiguration_LoginOnlyAllowlist_Resolves()
+    public void FromConfiguration_LoginConfig_NeverExposesAccessGrantSurface()
     {
+        // A login-only allowlist must fail closed: the mutable handle can never be the sole gate.
         Dictionary<string, string?> cfg = Complete();
         cfg.Remove("GitHub:AllowedUserIds:0");
         cfg["GitHub:AllowedLogins:0"] = "octocat";
 
+        Action act = () => GitHubAuthOptions.FromConfiguration(Config(cfg), Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*allowlist*");
+    }
+
+    [Fact]
+    public void FromConfiguration_HostedWithoutSecureCookies_FailsClosed()
+    {
+        Dictionary<string, string?> cfg = Complete();
+        cfg["GitHub:RequireSecureCookies"] = "false";
+
+        Action act = () => GitHubAuthOptions.FromConfiguration(Config(cfg), Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*RequireSecureCookies*");
+    }
+
+    [Fact]
+    public void FromConfiguration_DevelopmentInsecureCookies_Resolves()
+    {
+        // Development may opt into an insecure, non-__Host dev cookie over plain http://localhost.
+        Dictionary<string, string?> cfg = Complete();
+        cfg.Remove("GitHub:SigningKey");
+        cfg["GitHub:RequireSecureCookies"] = "false";
+        cfg["GitHub:AcknowledgeSingleReplica"] = "false";
+
+        var options = GitHubAuthOptions.FromConfiguration(Config(cfg), Env("Development"));
+
+        options.RequireSecureCookies.Should().BeFalse();
+    }
+
+    [Fact]
+    public void FromConfiguration_HostedWithoutSingleReplicaAck_FailsClosed()
+    {
+        Dictionary<string, string?> cfg = Complete();
+        cfg.Remove("GitHub:AcknowledgeSingleReplica");
+
+        Action act = () => GitHubAuthOptions.FromConfiguration(Config(cfg), Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*AcknowledgeSingleReplica*");
+    }
+
+    [Fact]
+    public void FromConfiguration_WeakAdditionalValidationKey_FailsClosed()
+    {
+        Dictionary<string, string?> cfg = Complete();
+        cfg["GitHub:AdditionalValidationKeys:0"] = "too-short";
+
+        Action act = () => GitHubAuthOptions.FromConfiguration(Config(cfg), Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*256-bit*");
+    }
+
+    [Fact]
+    public void FromConfiguration_StrongAdditionalValidationKeys_ResolveDedupedAndPlaceholderStripped()
+    {
+        Dictionary<string, string?> cfg = Complete();
+        cfg["GitHub:AdditionalValidationKeys:0"] = "github-rotated-previous-key-0123456789abcdef";
+        cfg["GitHub:AdditionalValidationKeys:1"] = "github-rotated-previous-key-0123456789abcdef"; // dupe
+        cfg["GitHub:AdditionalValidationKeys:2"] = "<optional-previous-or-next-signing-key-min-32-bytes>"; // placeholder
+
         var options = GitHubAuthOptions.FromConfiguration(Config(cfg), Env("Production"));
 
-        options.AllowedLogins.Should().ContainSingle().Which.Should().Be("octocat");
+        options.AdditionalValidationKeys.Should().ContainSingle()
+            .Which.Should().Be("github-rotated-previous-key-0123456789abcdef");
+    }
+
+    [Fact]
+    public void FromConfiguration_AllowedUserIds_ParsedPositiveAndDeduped()
+    {
+        Dictionary<string, string?> cfg = Complete();
+        cfg["GitHub:AllowedUserIds:1"] = "12345"; // dupe
+        cfg["GitHub:AllowedUserIds:2"] = "67890";
+
+        var options = GitHubAuthOptions.FromConfiguration(Config(cfg), Env("Production"));
+
+        options.AllowedUserIds.Should().BeEquivalentTo([12345L, 67890L]);
+    }
+
+    [Fact]
+    public void FromConfiguration_NonPositiveAllowedUserId_FailsClosed()
+    {
+        Dictionary<string, string?> cfg = Complete();
+        cfg["GitHub:AllowedUserIds:0"] = "0";
+
+        Action act = () => GitHubAuthOptions.FromConfiguration(Config(cfg), Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>();
     }
 }

@@ -116,7 +116,7 @@ rate limited.
 | `GET /api/auth/github/callback` | missing/mismatched/expired/replayed `state`, or absent state cookie, or cookie hash mismatch | 400 `invalid_state`, no code exchange performed; state cookie deleted |
 | `GET /api/auth/github/callback` | `error=access_denied` (user denied) | 302 to the SPA URL with a generic error code; no token |
 | `GET /api/auth/github/callback` | GitHub code exchange or `/user` validation fails | 302 to the SPA URL with a generic `login_failed`; provider errors never leaked |
-| `GET /api/auth/github/callback` | user not on the id/login allowlist, or org membership absent/inactive, or the allowlist GitHub API errors/rate-limits | 302 to the SPA URL with `not_authorized` — **fail closed** (deny on error) |
+| `GET /api/auth/github/callback` | user not on the immutable id / active-org allowlist, or org membership absent/inactive, or the allowlist GitHub API errors/rate-limits | 302 to the SPA URL with `not_authorized` — **fail closed** (deny on error) |
 | `POST /api/auth/github/exchange` (valid one-time code) | one-time redemption code | 200 — mints a short-lived HS256 session token (`provider=GitHub`, `sub=github:<id>`, role `RetailPulse.User`, scope `access_as_user`, random `jti`, no refresh) |
 | `POST /api/auth/github/exchange` | replayed / unknown / expired code | 400 `invalid_code` — the code is one-use and redeemed atomically (replay/race impossible) |
 | `POST /api/auth/github/exchange` | over the exchange limit | 429 |
@@ -156,11 +156,16 @@ running without configuration. It never applies outside Development.
 - GitHub is implemented but **opt-in and never deployed**: a hosted
   (non-Development) GitHub deployment fails startup unless a complete, validated
   secret-bearing configuration is present (client id/secret, ≥ 256-bit signing
-  key, issuer, audience, exact callback + frontend URLs, non-empty allowlist);
-  placeholder secrets are rejected. The provider token never reaches the SPA, the
-  allowlist fails closed on any error, no `repo` scope is requested, and hosted
-  GitHub is pinned to a single replica (`maxReplicas=1`) because the state /
-  redemption stores are replica-local.
+  key, issuer, audience, exact callback + frontend URLs, an **immutable** allowlist
+  — numeric `AllowedUserIds` and/or active-org `AllowedOrgs`, `RequireSecureCookies=true`,
+  and `AcknowledgeSingleReplica=true`); placeholder secrets are rejected. The
+  mutable login handle never grants access (a login-only allowlist fails startup).
+  Cookie `Secure`/`__Host-` semantics come from validated config, not the
+  proxy-observed request scheme. The provider token never reaches the SPA, the
+  allowlist fails closed on any error, no `repo` scope is requested, genuine
+  signing-key rotation is supported, and hosted GitHub is pinned to a single
+  replica (`maxReplicas=1`, acknowledged via `AcknowledgeSingleReplica`) because
+  the state / redemption stores and login limiters are replica-local.
 - Anonymous is implemented but **opt-in and never deployed**: any hosted
   (non-Development) Anonymous deployment fails startup unless a second explicit
   opt-in (`Anonymous:AllowHosted=true`) and a complete, validated guardrail set

@@ -202,6 +202,8 @@ public sealed class AuthenticationModeTests
         if (!environment.Equals("Development", StringComparison.OrdinalIgnoreCase))
         {
             entries.Add(("GitHub:SigningKey", GitHubSigningKey));
+            entries.Add(("GitHub:RequireSecureCookies", "true"));
+            entries.Add(("GitHub:AcknowledgeSingleReplica", "true"));
         }
 
         entries.AddRange(extra);

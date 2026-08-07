@@ -53,9 +53,17 @@ public static class GitHubAuthConstants
     public const string UserApiUrl = "https://api.github.com/user";
     public const string OrgMembershipUrlFormat = "https://api.github.com/user/memberships/orgs/{0}";
 
-    /// <summary>Name of the HttpOnly cookie that binds the browser to its OAuth state entry.</summary>
-    public const string StateCookieName = "__Host-rp_gh_state";
+    /// <summary>
+    /// Cookie-name base for the browser-bound OAuth state cookie in HOSTED / secure mode. The final
+    /// name is per-state (<see cref="GitHubStateCookie.NameFor"/>) so parallel login tabs never clash;
+    /// the <c>__Host-</c> prefix pins Secure + Path=/ + no Domain, the strongest anti-fixation binding.
+    /// </summary>
+    public const string SecureStateCookieBase = "__Host-rp_gh_state_";
 
-    /// <summary>Path the state cookie is scoped to — the GitHub auth surface only.</summary>
-    public const string StateCookiePath = "/api/auth/github";
+    /// <summary>
+    /// Cookie-name base for the DEVELOPMENT-only insecure state cookie (plain HTTP, no <c>__Host-</c>
+    /// prefix). Only used when <see cref="GitHubAuthOptions.RequireSecureCookies"/> is explicitly false,
+    /// which is rejected at startup outside Development.
+    /// </summary>
+    public const string DevStateCookieBase = "rp_gh_state_";
 }

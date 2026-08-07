@@ -16,8 +16,10 @@ namespace RetailPulse.Api.Security.GitHub;
 ///     <c>GitHub__SigningKey</c> or a secret store) and are never committed, logged, or emitted.</item>
 ///   <item>Any hosted (non-Development) deployment requires a COMPLETE, validated configuration —
 ///     client id + client secret + a ≥ 256-bit signing key + the exact API callback URL + the exact
-///     frontend return URL + at least one allowlist mechanism. A missing, malformed, or placeholder
-///     value throws at startup so a misconfigured hosted deploy never serves traffic.</item>
+///     frontend return URL + at least one IMMUTABLE allowlist mechanism (numeric user ids and/or active
+///     org membership) + secure-cookie enforcement + a single-replica acknowledgement. A missing,
+///     malformed, or placeholder value throws at startup so a misconfigured hosted deploy never serves
+///     traffic.</item>
 ///   <item>Development may run the same real OAuth flow with an ephemeral process-local signing key
 ///     (sessions die on restart) but STILL requires the real OAuth app credentials, exact URLs, and
 ///     an allowlist — there is no "allow everyone" shortcut.</item>
@@ -60,6 +62,34 @@ public sealed class GitHubAuthOptions
     /// <summary>HMAC signing key (secret). Required in hosted mode; ephemeral in Development.</summary>
     public string? SigningKey { get; init; }
 
+    /// <summary>
+    /// Additional strong HMAC keys accepted for VALIDATION only (never used to sign). This is genuine
+    /// signing-key rotation: publish the next key here alongside the current <see cref="SigningKey"/>,
+    /// deploy, then promote it to <see cref="SigningKey"/> on the next rotation — tokens signed with the
+    /// previous key keep validating until they expire. Each entry must be a strong (≥256-bit) secret;
+    /// angle-bracket placeholders are rejected. The current signing key is always tried first.
+    /// </summary>
+    public IReadOnlyList<string> AdditionalValidationKeys { get; init; } = [];
+
+    /// <summary>
+    /// When true (the ONLY value permitted outside Development), the browser-bound OAuth state cookie is
+    /// ALWAYS emitted with fixed <c>__Host-</c> semantics — Secure=true, HttpOnly=true, SameSite=Lax,
+    /// Path=/, no Domain — regardless of the in-container <c>Request.IsHttps</c>. This is required behind
+    /// a TLS-terminating proxy (Azure Container Apps): the browser↔edge hop is HTTPS even though the
+    /// edge↔container hop the app sees is plain HTTP, so cookie security MUST come from validated
+    /// configuration, never from the observed request scheme. Development MAY set this false to opt into
+    /// an insecure, non-<c>__Host</c> dev cookie over plain HTTP; that is rejected at startup elsewhere.
+    /// </summary>
+    public bool RequireSecureCookies { get; init; } = true;
+
+    /// <summary>
+    /// Explicit operator acknowledgement that the hosted GitHub deployment runs at <c>maxReplicas=1</c>.
+    /// The OAuth state and redemption stores (and the login rate limiters) are replica-local in-memory,
+    /// so a callback handled by replica A cannot redeem a code on replica B. The app cannot inspect ACA
+    /// topology at runtime, so a hosted GitHub deployment fails closed unless this flag is set true.
+    /// </summary>
+    public bool AcknowledgeSingleReplica { get; init; }
+
     public string Role { get; init; } = GitHubAuthConstants.DefaultRole;
     public string Scope { get; init; } = GitHubAuthConstants.DefaultScope;
 
@@ -70,13 +100,9 @@ public sealed class GitHubAuthOptions
     /// <summary>How long the one-time redemption code is valid before the SPA must exchange it.</summary>
     public int RedemptionTtlSeconds { get; init; } = 120;
 
-    // ── Allowlist (server-side, immutable numeric id / login / org membership) ─
-    /// <summary>Immutable numeric GitHub user ids explicitly allowed.</summary>
+    // ── Allowlist (server-side, immutable numeric id / active org membership) ─
+    /// <summary>Immutable numeric GitHub user ids explicitly allowed. The sole per-user identity gate.</summary>
     public IReadOnlyList<long> AllowedUserIds { get; init; } = [];
-
-    /// <summary>Configurable login-handle allowlist (case-insensitive). Convenience only — the numeric
-    /// id remains the identity; a matched login is still keyed to its immutable id.</summary>
-    public IReadOnlyList<string> AllowedLogins { get; init; } = [];
 
     /// <summary>Organizations whose ACTIVE members are allowed (verified via
     /// <c>/user/memberships/orgs/{org}</c>; requires the <c>read:org</c> scope).</summary>
@@ -119,12 +145,14 @@ public sealed class GitHubAuthOptions
             Audience = Clean(section["Audience"]) ?? "retail-pulse-api",
             SessionTokenTtlSeconds = section.GetValue("SessionTokenTtlSeconds", 900),
             SigningKey = Clean(section["SigningKey"]),
+            AdditionalValidationKeys = CleanList(section.GetSection("AdditionalValidationKeys").Get<string[]>()),
+            RequireSecureCookies = section.GetValue("RequireSecureCookies", true),
+            AcknowledgeSingleReplica = section.GetValue("AcknowledgeSingleReplica", false),
             Role = Clean(section["Role"]) ?? GitHubAuthConstants.DefaultRole,
             Scope = Clean(section["Scope"]) ?? GitHubAuthConstants.DefaultScope,
             StateTtlSeconds = section.GetValue("StateTtlSeconds", 300),
             RedemptionTtlSeconds = section.GetValue("RedemptionTtlSeconds", 120),
             AllowedUserIds = ParseUserIds(section.GetSection("AllowedUserIds").Get<string[]>()),
-            AllowedLogins = CleanList(section.GetSection("AllowedLogins").Get<string[]>()),
             AllowedOrgs = CleanList(section.GetSection("AllowedOrgs").Get<string[]>()),
             StartPerMinute = section.GetValue("RateLimits:StartPerMinute", 10),
             ExchangePerMinute = section.GetValue("RateLimits:ExchangePerMinute", 20),
@@ -168,13 +196,15 @@ public sealed class GitHubAuthOptions
         }
 
         // Fail closed on an empty allowlist: GitHub mode must NEVER admit every GitHub account. At
-        // least one of numeric id / login / org membership must be configured.
-        if (AllowedUserIds.Count == 0 && AllowedLogins.Count == 0 && AllowedOrgs.Count == 0)
+        // least one IMMUTABLE mechanism must be configured — numeric user ids and/or active org
+        // membership. A mutable login handle is deliberately NOT an access mechanism.
+        if (AllowedUserIds.Count == 0 && AllowedOrgs.Count == 0)
         {
             throw new InvalidOperationException(
-                "GitHub mode requires an explicit allowlist — configure at least one of " +
-                "GitHub:AllowedUserIds, GitHub:AllowedLogins, or GitHub:AllowedOrgs. An empty allowlist " +
-                "would admit every GitHub user and fails closed.");
+                "GitHub mode requires an explicit immutable allowlist — configure at least one of " +
+                "GitHub:AllowedUserIds (numeric ids) or GitHub:AllowedOrgs (active org membership). An " +
+                "empty allowlist would admit every GitHub user and fails closed. Login handles are " +
+                "mutable and never grant access.");
         }
 
         // The client secret and signing key are secrets. Required in any hosted environment; in
@@ -210,6 +240,43 @@ public sealed class GitHubAuthOptions
             throw new InvalidOperationException(
                 "GitHub:SigningKey must be at least 32 bytes (256-bit) when configured.");
         }
+
+        // Every additional VALIDATION key (rotation) must be strong wherever it is configured — a weak
+        // rotation key would validate forged tokens. Placeholders were already dropped by CleanList.
+        foreach (string extra in AdditionalValidationKeys)
+        {
+            if (Encoding.UTF8.GetByteCount(extra) < 32)
+            {
+                throw new InvalidOperationException(
+                    "GitHub:AdditionalValidationKeys entries must each be at least 32 bytes (256-bit). " +
+                    "A weak rotation key would validate forged tokens and fails closed.");
+            }
+        }
+
+        if (enforceSecret)
+        {
+            // Behind a TLS-terminating proxy the container request is plain HTTP; cookie security must
+            // therefore come from validated config, never the observed scheme. Refuse to run a hosted
+            // GitHub deployment that has opted out of secure cookies.
+            if (!RequireSecureCookies)
+            {
+                throw new InvalidOperationException(
+                    $"GitHub:RequireSecureCookies must be true for a hosted GitHub deployment " +
+                    $"('{environmentName}'). The insecure dev cookie (no __Host- prefix / no Secure) is " +
+                    "only permitted in Development over plain HTTP.");
+            }
+
+            // The stores/limiters are replica-local and the app cannot inspect ACA topology, so require
+            // an explicit single-replica acknowledgement rather than silently assuming it.
+            if (!AcknowledgeSingleReplica)
+            {
+                throw new InvalidOperationException(
+                    $"GitHub:AcknowledgeSingleReplica must be true for a hosted GitHub deployment " +
+                    $"('{environmentName}'). The OAuth state/redemption stores and login rate limiters " +
+                    "are replica-local in-memory, so hosted GitHub must run at maxReplicas=1; the runtime " +
+                    "cannot verify topology, so this acknowledgement is required and fails closed.");
+            }
+        }
     }
 
     private static IReadOnlyList<long> ParseUserIds(string[]? raw)
@@ -235,7 +302,10 @@ public sealed class GitHubAuthOptions
                     "GitHub user ids are positive integers.");
             }
 
-            ids.Add(id);
+            if (!ids.Contains(id))
+            {
+                ids.Add(id);
+            }
         }
 
         return ids;

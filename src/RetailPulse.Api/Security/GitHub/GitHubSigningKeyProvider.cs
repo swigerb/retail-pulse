@@ -16,12 +16,17 @@ namespace RetailPulse.Api.Security.GitHub;
 ///     sessions are invalidated when the process restarts. This is documented, intentional dev
 ///     behavior, not a fallback that can leak into a hosted deployment.</item>
 /// </list>
-/// <see cref="ValidationKeys"/> is the rotation seam: additional retired keys can be accepted for
-/// validation while a new key signs, so tokens issued before a rotation stay valid until they expire.
-/// A single instance is registered as a singleton so the ephemeral key is stable within a process.
+/// Signing-key ROTATION is genuine, not merely a seam: <see cref="ValidationKeys"/> is the CURRENT
+/// signing key first, followed by every strong key configured in
+/// <see cref="GitHubAuthOptions.AdditionalValidationKeys"/>. New tokens are always signed with
+/// <see cref="Key"/>, but tokens signed by a key that has just been demoted to the additional list keep
+/// validating until they expire — so a rotation never invalidates in-flight sessions. A single instance
+/// is registered as a singleton so the ephemeral key is stable within a process.
 /// </summary>
 public sealed class GitHubSigningKeyProvider
 {
+    private readonly IReadOnlyList<SecurityKey> _validationKeys;
+
     /// <summary>True when the key was generated ephemerally (Development, no configured secret).</summary>
     public bool IsEphemeral { get; }
 
@@ -31,10 +36,8 @@ public sealed class GitHubSigningKeyProvider
 
         if (options.HasConfiguredSigningKey)
         {
-            Key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(options.SigningKey!))
-            {
-                KeyId = "github-configured",
-            };
+            byte[] material = Encoding.UTF8.GetBytes(options.SigningKey!);
+            Key = new SymmetricSecurityKey(material) { KeyId = KeyIdFor(material) };
             IsEphemeral = false;
         }
         else
@@ -44,14 +47,32 @@ public sealed class GitHubSigningKeyProvider
             Key = new SymmetricSecurityKey(material) { KeyId = "github-ephemeral" };
             IsEphemeral = true;
         }
+
+        // Current signing key FIRST, then each configured rotation (validation-only) key. Each key gets
+        // a STABLE, key-material-derived id so a token keeps the same kid after its key is demoted to
+        // validation-only — that is what lets an in-flight token resolve to its original key across a
+        // rotation. Options validation already rejected weak/placeholder rotation keys.
+        var keys = new List<SecurityKey> { Key };
+        for (int i = 0; i < options.AdditionalValidationKeys.Count; i++)
+        {
+            byte[] extra = Encoding.UTF8.GetBytes(options.AdditionalValidationKeys[i]);
+            keys.Add(new SymmetricSecurityKey(extra) { KeyId = KeyIdFor(extra) });
+        }
+
+        _validationKeys = keys;
     }
+
+    // A deterministic, non-reversible id for a key: the first bytes of SHA-256(key material). Stable
+    // across process restarts and rotation "slots", so a demoted signing key keeps the same kid.
+    private static string KeyIdFor(byte[] material) =>
+        "github-" + Convert.ToHexString(SHA256.HashData(material))[..12].ToLowerInvariant();
 
     /// <summary>The active signing key for token creation and validation.</summary>
     public SymmetricSecurityKey Key { get; }
 
     /// <summary>
-    /// All keys accepted for validation. The active key first; retired keys can be appended here
-    /// during a rotation so in-flight tokens validate until they expire.
+    /// All keys accepted for validation: the active signing key first, then every configured rotation
+    /// (validation-only) key, so tokens issued before a rotation stay valid until they expire.
     /// </summary>
-    public IEnumerable<SecurityKey> ValidationKeys => [Key];
+    public IEnumerable<SecurityKey> ValidationKeys => _validationKeys;
 }

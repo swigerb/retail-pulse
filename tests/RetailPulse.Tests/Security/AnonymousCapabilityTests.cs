@@ -116,6 +116,39 @@ public sealed class AnonymousCapabilityTests
             "anonymous tokens must carry no PII");
     }
 
+    [Fact]
+    public void TokenService_KeyRotation_OldTokenStillValidatesAndNewTokenUsesCurrentKey()
+    {
+        const string oldKey = "anon-OLD-signing-key-0123456789ABCDEF-32byte";
+        const string newKey = "anon-NEW-signing-key-0123456789ABCDEF-32byte";
+
+        // Before rotation: OLD key signs.
+        AnonymousAuthOptions before = HostedOptionsWithRotation(oldKey);
+        var beforeKp = new AnonymousSigningKeyProvider(before);
+        AnonymousSession oldSession = new AnonymousSessionTokenService(before, beforeKp).CreateSession();
+
+        // After rotation: NEW key signs, OLD demoted to validation-only.
+        AnonymousAuthOptions after = HostedOptionsWithRotation(newKey, oldKey);
+        var afterKp = new AnonymousSigningKeyProvider(after);
+        AnonymousSession newSession = new AnonymousSessionTokenService(after, afterKp).CreateSession();
+
+        var handler = new JsonWebTokenHandler { MapInboundClaims = false };
+
+        // The in-flight OLD token still validates against the rotated key set.
+        TokenValidationResult oldResult = handler.ValidateTokenAsync(oldSession.Token, new TokenValidationParameters
+        {
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            IssuerSigningKeys = afterKp.ValidationKeys,
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+        }).GetAwaiter().GetResult();
+        oldResult.IsValid.Should().BeTrue("a token signed by the previous key must validate after rotation");
+
+        // New tokens are signed by the CURRENT key (its kid), never the demoted one.
+        new JsonWebToken(newSession.Token).Kid.Should().Be(afterKp.Key.KeyId);
+        afterKp.Key.KeyId.Should().NotBe(beforeKp.Key.KeyId, "rotation changes the active signing key");
+    }
+
     // ── Principal normalizer: subject from token, provider pinned ──────────────
 
     [Fact]
@@ -305,6 +338,25 @@ public sealed class AnonymousCapabilityTests
                 ("Anonymous:Limits:DailyMaxTokens", dailyTokens.ToString()),
                 ("Anonymous:Limits:DailyMaxCostUsd", dailyCost.ToString(System.Globalization.CultureInfo.InvariantCulture))),
             Env("Production"));
+
+    private static AnonymousAuthOptions HostedOptionsWithRotation(string signingKey, params string[] additional)
+    {
+        var entries = new List<(string, string?)>
+        {
+            ("Authentication:Mode", "Anonymous"),
+            ("Anonymous:AllowHosted", "true"),
+            ("Anonymous:SigningKey", signingKey),
+            ("Anonymous:Limits:DailyMaxRequests", "500"),
+            ("Anonymous:Limits:DailyMaxTokens", "200000"),
+            ("Anonymous:Limits:DailyMaxCostUsd", "5"),
+        };
+        for (int i = 0; i < additional.Length; i++)
+        {
+            entries.Add(($"Anonymous:AdditionalValidationKeys:{i}", additional[i]));
+        }
+
+        return AnonymousAuthOptions.FromConfiguration(Config([.. entries]), Env("Production"));
+    }
 
     private static ClaimsPrincipal AnonymousPrincipal(
         string subject, string role = "RetailPulse.Anonymous", string scope = "chat_limited")

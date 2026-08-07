@@ -9,8 +9,8 @@ namespace RetailPulse.Tests.Security;
 /// <summary>
 /// Server-side allowlist contract for GitHub mode. The allowlist is the gate that makes full
 /// authenticated capabilities acceptable, so it is proven to key on the IMMUTABLE numeric id, to
-/// admit via login or ACTIVE org membership, and to FAIL CLOSED on every error, inactive membership,
-/// or non-member response.
+/// admit via numeric id or ACTIVE org membership (never via the mutable login handle), and to FAIL
+/// CLOSED on every error, inactive membership, or non-member response.
 /// </summary>
 public sealed class GitHubUserAllowlistTests
 {
@@ -32,6 +32,7 @@ public sealed class GitHubUserAllowlistTests
             ["GitHub:SigningKey"] = "github-mode-test-signing-key-0123456789abcdef",
             ["GitHub:CallbackUrl"] = "https://api.example.com/api/auth/github/callback",
             ["GitHub:FrontendReturnUrl"] = "https://app.example.com/auth/github/callback",
+            ["GitHub:AcknowledgeSingleReplica"] = "true",
         };
         foreach ((string k, string? v) in extra)
         {
@@ -61,16 +62,28 @@ public sealed class GitHubUserAllowlistTests
     }
 
     [Fact]
-    public async Task LoginMatch_IsCaseInsensitive_Allows()
+    public async Task LoginNeverGrantsAccess_HandleReuseIsDenied()
     {
-        GitHubAuthOptions options = Options(new() { ["GitHub:AllowedLogins:0"] = "OctoCat" });
+        // Handle-reuse threat: an attacker recreates/renames to a previously-trusted login but has a
+        // DIFFERENT immutable id. Login must never be an access mechanism, so this is denied.
+        GitHubAuthOptions options = Options(new() { ["GitHub:AllowedUserIds:0"] = "12345" });
         GitHubUserAllowlist allowlist = Allowlist(options, new FakeGitHubOAuthClient());
 
+        // The trusted user 12345 uses login "octocat"; the attacker below reuses "octocat" with id 999.
         GitHubAllowlistDecision decision =
             await allowlist.EvaluateAsync(new GitHubVerifiedUser(999, "octocat"), "tok", CancellationToken.None);
 
-        decision.Allowed.Should().BeTrue();
-        decision.Reason.Should().Be("login");
+        decision.Allowed.Should().BeFalse("a matching login with a different id must never inherit access");
+        decision.Reason.Should().Be("not_allowlisted");
+    }
+
+    [Fact]
+    public void LoginOnlyConfig_FailsClosedAtStartup()
+    {
+        // A config that tries to gate solely on the mutable login handle must not resolve at all.
+        Action act = () => Options(new() { ["GitHub:AllowedLogins:0"] = "octocat" });
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*allowlist*");
     }
 
     [Fact]
