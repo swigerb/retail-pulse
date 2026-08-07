@@ -419,6 +419,30 @@ Because the SPA renders exactly the mode it was built with, a mismatched
 `VITE_AUTH_MODE`/`Authentication__Mode` pair is a build-time configuration error, not a
 runtime provider switch.
 
+#### Verify the live production posture (read-only)
+
+After `azd up` completes (and any post-outputs frontend rebuild), confirm the deployed
+environment is the expected **Entra-only, fail-closed** posture with the read-only verifier.
+It never obtains, prints, or logs a token/secret, never signs you in, and never mutates a
+resource — it exits non-zero on any mismatch:
+
+```pwsh
+# Preview the checks without contacting anything:
+pwsh scripts/Verify-ProductionAuth.ps1 -TenantId <tenant-guid> -ClientId <client-guid> -ResourceGroup <rg> -WhatIf
+
+# Verify the live environment (needs an existing `az login` with reader access to the RG):
+pwsh scripts/Verify-ProductionAuth.ps1 -TenantId <tenant-guid> -ClientId <client-guid> -ResourceGroup <rg>
+```
+
+It checks the signed-in tenant/subscription, the API revision health and Entra env pins
+(`ASPNETCORE_ENVIRONMENT=Production`, `Authentication__Mode=Entra`, `Security__RequireAuth=true`,
+matching tenant/client ids, the ephemeral-storage acknowledgement, and the **absence** of any
+`Anonymous__*`/`GitHub__*` var), that ACA Easy Auth is disabled, the anonymous `401` surface plus
+`health`/`alive` `200`s, that the Static Web App serves an Entra build (GitHub/Anonymous **not**
+exposed), and the Entra app-registration posture (delegating to `Verify-EntraAuth.ps1`). Pair it
+with `pwsh scripts/Test-ProviderMatrix.ps1` before a release to exercise the full secret-free
+provider build/test matrix.
+
 ### Frontend → API routing and SignalR
 
 The postprovision hook idempotently links the ACA API as the Static Web App backend,
