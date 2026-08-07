@@ -259,6 +259,74 @@ public sealed class ProviderNeutralDeploymentContractTests
             $"{envFile} must never carry a signing key");
     }
 
+    [Theory]
+    [InlineData("preprovision.ps1")]
+    [InlineData("preprovision.sh")]
+    public void PreprovisionHook_FailsClosedWhenEntraIdsMissing(string hookFile)
+    {
+        // The live default auth mode is Entra. The preprovision hook must fail the whole provision
+        // BEFORE any resource is created when the Entra tenant/client IDs are empty/placeholders, so a
+        // deployment can never silently ship an unauthenticated shell.
+        string script = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile));
+
+        script.Should().Contain("RETAIL_PULSE_ENTRA_TENANT_ID",
+            $"{hookFile} must validate the Entra tenant id before provisioning");
+        script.Should().Contain("RETAIL_PULSE_ENTRA_CLIENT_ID",
+            $"{hookFile} must validate the Entra client id before provisioning");
+        script.Should().Contain("RETAIL_PULSE_AUTH_MODE",
+            $"{hookFile} must read the auth mode so non-Entra deployments can skip the Entra-specific check");
+        // The hook must actually abort (throw/exit) on the misconfiguration, not merely warn.
+        script.Should().MatchRegex(hookFile.EndsWith(".ps1") ? "throw " : "exit 1",
+            $"{hookFile} must abort provisioning when Entra IDs are missing");
+    }
+
+    [Theory]
+    [InlineData("preprovision.ps1")]
+    [InlineData("preprovision.sh")]
+    public void PreprovisionHook_DefaultsAuthModeToEntra(string hookFile)
+    {
+        // When RETAIL_PULSE_AUTH_MODE is unset the hook must treat the deployment as Entra (the live
+        // default), so an operator cannot bypass the Entra ID check simply by not setting the mode.
+        string script = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile));
+
+        script.Should().Contain("Entra",
+            $"{hookFile} must default the auth mode to Entra when RETAIL_PULSE_AUTH_MODE is unset");
+    }
+
+    [Fact]
+    public void WebPackage_WiresPrebuildAuthConfigValidator()
+    {
+        // A frontend-only deploy (e.g. Static Web Apps) builds without azd outputs. The npm `prebuild`
+        // guard must run the validator so `npm run build` fails fast on an Entra build with empty config.
+        string pkg = File.ReadAllText(Path.Combine(
+            RepoRoot, "src", "RetailPulse.Web", "package.json"));
+
+        pkg.Should().MatchRegex(
+            "\"prebuild\"\\s*:\\s*\"[^\"]*validate-auth-config\\.mjs[^\"]*\"",
+            "package.json must wire a prebuild step that runs the auth-config validator");
+
+        File.Exists(Path.Combine(RepoRoot, "src", "RetailPulse.Web", "scripts", "validate-auth-config.mjs"))
+            .Should().BeTrue("the auth-config validator script must be committed");
+    }
+
+    [Fact]
+    public void WebAuthConfigValidator_FailsClosedForEntra_ButPassesWhenModeUnset()
+    {
+        // Static guardrails on the validator's contract so it stays green for CI's plain `npm run build`
+        // (no VITE_AUTH_MODE) yet fails an explicit Entra build with empty ids.
+        string script = File.ReadAllText(Path.Combine(
+            RepoRoot, "src", "RetailPulse.Web", "scripts", "validate-auth-config.mjs"));
+
+        script.Should().Contain("VITE_AUTH_MODE",
+            "the validator must key off the build-time auth-mode selector");
+        script.Should().Contain("VITE_ENTRA_TENANT_ID",
+            "the validator must require the Entra tenant id for an Entra build");
+        script.Should().Contain("VITE_ENTRA_CLIENT_ID",
+            "the validator must require the Entra client id for an Entra build");
+        script.Should().Contain("process.exit(1)",
+            "the validator CLI must fail the build (non-zero exit) on invalid config");
+    }
+
     private static string FindRepoRoot()
     {
         DirectoryInfo? dir = new(AppContext.BaseDirectory);

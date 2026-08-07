@@ -18,10 +18,17 @@ public readonly record struct GitHubStateEntry(byte[] CookieSecretHash, long Exp
 /// The server-side record redeemed by the SPA at the exchange endpoint. It holds the VERIFIED GitHub
 /// identity (immutable numeric id + login) — NOT a provider token and NOT an app token. The app
 /// session JWT is minted fresh at redemption so its short TTL starts when the SPA receives it.
+///
+/// Like the OAuth state, the redemption code is bound to the SAME browser that completed the callback:
+/// the record stores only the HASH of a per-code random secret placed in a browser-bound
+/// <c>__Host-</c> cookie at callback time. The exchange must present BOTH the code (query/body) and the
+/// matching per-code cookie secret (constant-time compared), so a stolen but unused code replayed from
+/// another browser — which never received the cookie — can never be redeemed.
 /// </summary>
 /// <param name="User">The verified GitHub identity established during the callback.</param>
+/// <param name="CookieSecretHash">SHA-256 of the random secret placed in the per-code redemption cookie.</param>
 /// <param name="ExpiresAtTicks">Absolute UTC expiry (ticks). Past this the code is invalid.</param>
-public readonly record struct GitHubRedemptionEntry(GitHubVerifiedUser User, long ExpiresAtTicks);
+public readonly record struct GitHubRedemptionEntry(GitHubVerifiedUser User, byte[] CookieSecretHash, long ExpiresAtTicks);
 
 /// <summary>
 /// A bounded, thread-safe, in-memory store with atomic one-time consumption and TTL, used for both

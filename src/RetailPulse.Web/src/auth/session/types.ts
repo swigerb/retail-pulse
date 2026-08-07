@@ -17,12 +17,6 @@ export interface ProviderCapabilities {
   readonly approvals: boolean;
   /** Memory panel + memory-management actions. */
   readonly memory: boolean;
-  /** Token-streaming chat responses. */
-  readonly streaming: boolean;
-  /** Conversation/data export. */
-  readonly export: boolean;
-  /** Any write-capable action (approve, configure, etc.). */
-  readonly writeActions: boolean;
   /** Non-chat alternate views/tabs (promo, competitive, stores, financials, portfolio, …). */
   readonly alternateViews: boolean;
 }
@@ -79,15 +73,12 @@ export const FULL_CAPABILITIES: ProviderCapabilities = {
   observability: true,
   approvals: true,
   memory: true,
-  streaming: true,
-  export: true,
-  writeActions: true,
   alternateViews: true,
 };
 
 /**
  * Anonymous demo capability profile: read-only chat only. Everything that implies real-time
- * telemetry, memory, write actions, observability, export, or alternate operator views is off —
+ * telemetry, memory, observability, or alternate operator views is off —
  * matching the backend's deny-by-default anonymous surface (bootstrap + `POST /api/chat` only).
  */
 export const ANONYMOUS_CAPABILITIES: ProviderCapabilities = {
@@ -96,8 +87,5 @@ export const ANONYMOUS_CAPABILITIES: ProviderCapabilities = {
   observability: false,
   approvals: false,
   memory: false,
-  streaming: false,
-  export: false,
-  writeActions: false,
   alternateViews: false,
 };

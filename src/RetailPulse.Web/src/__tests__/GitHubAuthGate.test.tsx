@@ -15,8 +15,14 @@ function wrap(ui: React.ReactNode) {
 const child = <div data-testid="protected-child">app</div>;
 
 const STORAGE_KEY = 'retailpulse:session:github';
+const MARKER_KEY = 'retailpulse:login-started:github';
 const START_PATH = '/api/auth/github/start';
 const EXCHANGE_PATH = '/api/auth/github/exchange';
+
+/** Simulate a login that THIS tab started: startLogin() sets this marker before navigating away. */
+function markLoginStarted() {
+  window.sessionStorage.setItem(MARKER_KEY, '1');
+}
 
 function tokenResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -106,12 +112,15 @@ describe('GitHubAuthGate — start', () => {
     // The provider never appends a return/redirect query parameter.
     expect(String(assignMock.mock.calls[0][0])).not.toMatch(/return|redirect|url=/i);
     expect(fetchMock).not.toHaveBeenCalled();
+    // startLogin set the single-use marker so the returning callback is trusted.
+    expect(window.sessionStorage.getItem(MARKER_KEY)).toBe('1');
   });
 });
 
 describe('GitHubAuthGate — callback exchange', () => {
   it('redeems a one-time code, strips it from the URL, and renders the app', async () => {
     navigate('/?code=abc123&extra=keep');
+    markLoginStarted();
     fetchMock.mockResolvedValueOnce(
       tokenResponse({ token: 'rp-session', tokenType: 'Bearer', expiresInSeconds: 900, subject: 's' }),
     );
@@ -120,11 +129,13 @@ describe('GitHubAuthGate — callback exchange', () => {
 
     expect(await screen.findByTestId('protected-child')).toBeInTheDocument();
 
-    // Exchange POSTed to the exact same-origin exchange route with the code.
+    // Exchange POSTed to the exact same-origin exchange route with the code, carrying credentials so the
+    // per-code __Host- redemption cookie is sent.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(EXCHANGE_PATH);
     expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
     expect(JSON.parse(init.body as string)).toEqual({ code: 'abc123' });
 
     // Code was stripped immediately via history.replaceState; unrelated params preserved.
@@ -132,13 +143,67 @@ describe('GitHubAuthGate — callback exchange', () => {
     expect(window.location.search).not.toContain('code=');
     expect(window.location.search).toContain('extra=keep');
 
+    // The single-use login marker was consumed.
+    expect(window.sessionStorage.getItem(MARKER_KEY)).toBeNull();
+
     // Token stored session-only.
     expect(window.sessionStorage.getItem(STORAGE_KEY)).toContain('rp-session');
     expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
+  it('ignores an injected code with no login marker: never calls exchange but still strips the URL', async () => {
+    // An attacker seeds ?code= into the victim's address bar WITHOUT the victim clicking "Sign in", so no
+    // login-started marker exists. The SPA must strip the param and never attempt an exchange. (The
+    // backend per-code cookie is the primary control; this is defense-in-depth.)
+    navigate('/?code=injected&extra=keep');
+    const provider = new GitHubSessionProvider();
+    await mountInitialized(provider);
+
+    // No exchange attempted, and the sign-in button is shown (unauthenticated).
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await screen.findByTestId('auth-github-button')).toBeInTheDocument();
+
+    // The injected code was still stripped from the address bar immediately.
+    expect(replaceStateSpy).toHaveBeenCalled();
+    expect(window.location.search).not.toContain('code=');
+    expect(window.location.search).toContain('extra=keep');
+  });
+
+  it('ignores an injected error with no login marker: shows no error, strips the URL', async () => {
+    navigate('/?error=not_authorized');
+    const provider = new GitHubSessionProvider();
+    await mountInitialized(provider);
+
+    expect(screen.queryByTestId('auth-error')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('auth-github-button')).toBeInTheDocument();
+    expect(window.location.search).not.toContain('error=');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('consumes the login marker exactly once: a genuine callback exchanges, an injected reload does not', async () => {
+    navigate('/?code=genuine');
+    markLoginStarted();
+    fetchMock.mockResolvedValueOnce(
+      tokenResponse({ token: 't', tokenType: 'Bearer', expiresInSeconds: 900, subject: 's' }),
+    );
+    const provider = new GitHubSessionProvider();
+    await act(async () => {
+      await provider.initialize();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The marker is single-use: a fresh injected code with no new marker does not exchange again.
+    navigate('/?code=injected-again');
+    const attacker = new GitHubSessionProvider();
+    await act(async () => {
+      await attacker.initialize();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('shows a safe access-denied message for a callback error and offers retry', async () => {
     navigate('/?error=access_denied');
+    markLoginStarted();
     const provider = new GitHubSessionProvider();
     await mountInitialized(provider);
 
@@ -153,6 +218,7 @@ describe('GitHubAuthGate — callback exchange', () => {
 
   it('maps a replayed/expired code (HTTP 400) to an invalid_code message', async () => {
     navigate('/?code=used');
+    markLoginStarted();
     fetchMock.mockResolvedValueOnce(tokenResponse({ error: 'invalid_code' }, 400));
     const provider = new GitHubSessionProvider();
     await mountInitialized(provider);
@@ -163,6 +229,7 @@ describe('GitHubAuthGate — callback exchange', () => {
 
   it('does not replay the code on a reload (it was already stripped from the URL)', async () => {
     navigate('/?code=abc123');
+    markLoginStarted();
     fetchMock.mockResolvedValueOnce(
       tokenResponse({ token: 't', tokenType: 'Bearer', expiresInSeconds: 900, subject: 's' }),
     );

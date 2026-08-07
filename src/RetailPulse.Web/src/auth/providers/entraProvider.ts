@@ -25,7 +25,11 @@ export class EntraSessionProvider implements SessionProvider {
   }
 
   get requiresGate(): boolean {
-    return authConfig.isConfigured && !this.isLocalDevPassthrough;
+    // Outside the explicit local-dev pass-through, an Entra build ALWAYS requires the sign-in gate.
+    // We deliberately do NOT let authConfig.isConfigured turn the gate off: a missing/placeholder
+    // configuration must fail closed (assertEntraConfigured throws in main.tsx before render), never
+    // silently drop the gate and expose an unauthenticated shell.
+    return !this.isLocalDevPassthrough;
   }
 
   async initialize(): Promise<void> {

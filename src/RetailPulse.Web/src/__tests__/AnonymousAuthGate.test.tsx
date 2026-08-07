@@ -187,9 +187,6 @@ describe('AnonymousSessionProvider — capabilities', () => {
     expect(caps.observability).toBe(false);
     expect(caps.approvals).toBe(false);
     expect(caps.memory).toBe(false);
-    expect(caps.streaming).toBe(false);
-    expect(caps.export).toBe(false);
-    expect(caps.writeActions).toBe(false);
     expect(caps.alternateViews).toBe(false);
   });
 });

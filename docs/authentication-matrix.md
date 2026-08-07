@@ -61,7 +61,7 @@ fail-closed function (`src/RetailPulse.Web/src/auth/authMode.ts`).
 | Login start | MSAL redirect | Top-level nav to fixed `GET /api/auth/github/start` (no return URL) | Explicit consent click → `POST /api/auth/anonymous/session` |
 | Callback handling | MSAL | One-time `code` stripped via `history.replaceState`, exchanged at `POST /api/auth/github/exchange` | n/a |
 | SignalR hubs | yes | yes | **no** (`realtimeHub=false`; hub never started, token factory returns `''`) |
-| Telemetry / Observability / Approvals / Memory / Export / write actions / alternate views | shown | shown | **hidden** (all capabilities false) |
+| Telemetry / Observability / Approvals / Memory / alternate views | shown | shown | **hidden** (all capabilities false) |
 | Token cleared on | logout / expiry / 401 / 403 | logout / expiry / 401 / 403 | clear-session / expiry / 401 / 403 |
 
 Capability gating in the UI is a **usability layer only** — the backend remains the

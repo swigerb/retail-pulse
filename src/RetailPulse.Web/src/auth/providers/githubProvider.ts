@@ -28,6 +28,17 @@ import {
 const START_ROUTE = '/api/auth/github/start';
 const EXCHANGE_ROUTE = '/api/auth/github/exchange';
 
+/**
+ * Provider-namespaced sessionStorage marker set by {@link GitHubSessionProvider.startLogin} immediately
+ * before the top-level navigation to the backend start route. It is defense-in-depth ONLY — the backend
+ * per-code `__Host-` redemption cookie is the primary CSRF/login-forgery control. The marker ensures the
+ * SPA only attempts an exchange for a callback IT initiated in this tab: an attacker who injects a `?code=`
+ * into a victim's address bar (without the victim having clicked "Sign in") produces no marker, so the SPA
+ * strips the param and never calls exchange. It is single-use: cleared on read (success OR error) and on
+ * logout, so a stale marker can never authorize a second, unrelated callback.
+ */
+const LOGIN_STARTED_KEY = 'retailpulse:login-started:github';
+
 /** Safe, user-facing error codes surfaced by the callback or exchange. */
 export type GitHubErrorCode =
   | 'access_denied'
@@ -59,7 +70,21 @@ export class GitHubSessionProvider implements SessionProvider {
     if (this.initialized) return;
     this.initialized = true;
 
+    // ALWAYS strip code/error from the address bar first, whatever we decide to do with them, so a
+    // reload/bookmark/back can never replay them.
     const { code, error } = this.consumeCallbackParams();
+
+    // Defense-in-depth: only act on callback params for a login THIS tab actually started. The marker is
+    // single-use — reading it here clears it — so an injected `?code=`/`?error=` without a preceding
+    // startLogin() is ignored (params already stripped) and we fall through to the stored-token path.
+    const loginStarted = this.consumeLoginMarker();
+
+    if ((code || error) && !loginStarted) {
+      this.setState(
+        this.store.getToken() ? { status: 'authenticated' } : { status: 'unauthenticated' },
+      );
+      return;
+    }
 
     if (error) {
       this.setState({ status: 'error', errorCode: error });
@@ -80,6 +105,9 @@ export class GitHubSessionProvider implements SessionProvider {
   /** Begin login with a top-level navigation to the fixed start route. No return URL is accepted. */
   startLogin(): void {
     this.setState({ status: 'authenticating' });
+    // Mark that THIS tab initiated the login before leaving the page, so the returning callback's params
+    // are trusted by initialize(). Non-fatal if storage is unavailable — the backend cookie still gates.
+    this.setLoginMarker();
     if (typeof window !== 'undefined') {
       window.location.assign(resolveApiUrl(START_ROUTE));
     }
@@ -99,6 +127,7 @@ export class GitHubSessionProvider implements SessionProvider {
     // Clear only OUR session token. There is no GitHub provider-logout assumption — we never held a
     // provider session in the browser, so we do not attempt to sign the user out of github.com.
     this.store.clear();
+    this.clearLoginMarker();
     this.setState({ status: 'unauthenticated' });
   }
 
@@ -167,12 +196,44 @@ export class GitHubSessionProvider implements SessionProvider {
     }
   }
 
+  /** Set the single-use, provider-namespaced "this tab started a login" marker. */
+  private setLoginMarker(): void {
+    try {
+      window.sessionStorage?.setItem(LOGIN_STARTED_KEY, '1');
+    } catch {
+      // Non-fatal: the backend per-code cookie remains the primary control.
+    }
+  }
+
+  /** Read AND clear the marker (single-use). Returns true only if a login was started in this tab. */
+  private consumeLoginMarker(): boolean {
+    try {
+      const present = window.sessionStorage?.getItem(LOGIN_STARTED_KEY) === '1';
+      window.sessionStorage?.removeItem(LOGIN_STARTED_KEY);
+      return present;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Clear the marker without reading it (logout). */
+  private clearLoginMarker(): void {
+    try {
+      window.sessionStorage?.removeItem(LOGIN_STARTED_KEY);
+    } catch {
+      // Non-fatal.
+    }
+  }
+
   private async exchange(code: string): Promise<void> {
     this.setState({ status: 'authenticating' });
     try {
       const response = await fetch(resolveApiUrl(EXCHANGE_ROUTE), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // The per-code `__Host-` redemption cookie set by the callback must accompany the exchange so the
+        // backend can bind this redemption to the browser that completed the callback.
+        credentials: 'include',
         body: JSON.stringify({ code }),
       });
 
