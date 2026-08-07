@@ -66,4 +66,20 @@ public static class GitHubAuthConstants
     /// which is rejected at startup outside Development.
     /// </summary>
     public const string DevStateCookieBase = "rp_gh_state_";
+
+    /// <summary>
+    /// Cookie-name base for the per-code browser-bound REDEMPTION cookie in HOSTED / secure mode. The
+    /// final name is per-code (<see cref="GitHubStateCookie.RedemptionNameFor"/>) so parallel logins
+    /// never clash; the <c>__Host-</c> prefix pins Secure + Path=/ + no Domain. This cookie binds the
+    /// one-time redemption code to the browser that completed the callback: the exchange requires the
+    /// exact code-derived cookie, so a stolen unused code replayed from another browser fails.
+    /// </summary>
+    public const string SecureRedemptionCookieBase = "__Host-rp_gh_redeem_";
+
+    /// <summary>
+    /// Cookie-name base for the DEVELOPMENT-only insecure per-code redemption cookie (plain HTTP, no
+    /// <c>__Host-</c> prefix). Only used when <see cref="GitHubAuthOptions.RequireSecureCookies"/> is
+    /// explicitly false, which is rejected at startup outside Development.
+    /// </summary>
+    public const string DevRedemptionCookieBase = "rp_gh_redeem_";
 }

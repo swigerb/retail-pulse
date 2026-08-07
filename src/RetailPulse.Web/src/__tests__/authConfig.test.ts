@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildAuthConfig, type RawAuthEnv } from '../auth/authConfig';
+import {
+  buildAuthConfig,
+  validateEntraConfig,
+  assertEntraConfigured,
+  type RawAuthEnv,
+} from '../auth/authConfig';
 
 const ORIGIN = 'https://retail-pulse.example.net';
 
@@ -67,5 +72,61 @@ describe('buildAuthConfig', () => {
       ORIGIN,
     );
     expect(cfg.msalConfig.auth.authority).toBe('https://login.microsoftonline.us/tenant');
+  });
+});
+
+const VALID_TENANT = '11111111-1111-1111-1111-111111111111';
+const VALID_CLIENT = '33333333-3333-3333-3333-333333333333';
+
+describe('validateEntraConfig', () => {
+  it('accepts a valid GUID tenant + GUID client', () => {
+    expect(validateEntraConfig(VALID_TENANT, VALID_CLIENT)).toEqual({ ok: true });
+  });
+
+  it('accepts a verified directory domain as the tenant', () => {
+    expect(validateEntraConfig('contoso.onmicrosoft.com', VALID_CLIENT).ok).toBe(true);
+  });
+
+  it.each([
+    ['', VALID_CLIENT, 'empty tenant'],
+    [VALID_TENANT, '', 'empty client'],
+    ['   ', VALID_CLIENT, 'whitespace tenant'],
+    ['<your-tenant-id>', VALID_CLIENT, 'angle-bracket placeholder tenant'],
+    [VALID_TENANT, '<your-client-id>', 'angle-bracket placeholder client'],
+    ['00000000-0000-0000-0000-000000000000', VALID_CLIENT, 'all-zero GUID tenant'],
+    [VALID_TENANT, '00000000-0000-0000-0000-000000000000', 'all-zero GUID client'],
+    ['your-tenant-id', VALID_CLIENT, 'scaffold token tenant'],
+    ['not-a-guid-or-domain', VALID_CLIENT, 'malformed tenant'],
+    [VALID_TENANT, 'not-a-guid', 'non-GUID client'],
+    ['tenant', VALID_CLIENT, 'non-GUID non-domain tenant'],
+  ])('rejects %s / %s (%s)', (tenant, client) => {
+    const result = validateEntraConfig(tenant, client);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+});
+
+describe('assertEntraConfigured', () => {
+  it('does not throw for a valid configuration', () => {
+    const cfg = buildAuthConfig(
+      { VITE_ENTRA_TENANT_ID: VALID_TENANT, VITE_ENTRA_CLIENT_ID: VALID_CLIENT },
+      ORIGIN,
+    );
+    expect(() => assertEntraConfigured(cfg)).not.toThrow();
+  });
+
+  it('throws a deterministic configuration error when ids are missing', () => {
+    const cfg = buildAuthConfig({}, ORIGIN);
+    expect(() => assertEntraConfigured(cfg)).toThrowError(/configuration is invalid/i);
+  });
+
+  it('throws when ids are placeholders even though buildAuthConfig marks it "configured"', () => {
+    const cfg = buildAuthConfig(
+      { VITE_ENTRA_TENANT_ID: '<tenant>', VITE_ENTRA_CLIENT_ID: '<client>' },
+      ORIGIN,
+    );
+    // isConfigured is true (both non-empty) but the values are placeholders — must still fail closed.
+    expect(cfg.isConfigured).toBe(true);
+    expect(() => assertEntraConfigured(cfg)).toThrow();
   });
 });

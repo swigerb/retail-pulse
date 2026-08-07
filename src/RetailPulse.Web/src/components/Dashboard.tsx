@@ -25,6 +25,9 @@ import { PortfolioScorecard, BrandScoreCard, ExplanationPanel } from './scorecar
 import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData } from '../types';
 import { connectTelemetryHub } from '../services/telemetryHub';
 import { featureFlags } from '../config/featureFlags';
+import { capabilities, activeAuthMode, getActiveProvider } from '../auth/activeProvider';
+import { AnonymousSessionBanner } from '../auth/gates/AnonymousAuthGate';
+import type { AnonymousSessionProvider } from '../auth/providers/anonymousProvider';
 
 const DRAWER_WIDTH_PX = 560;
 const DRAWER_BREAKPOINT_PX = 768;
@@ -195,7 +198,14 @@ export function Dashboard() {
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close.
   // We intentionally do NOT disconnect on unmount — the connection is a module-level
   // singleton that survives React StrictMode double-mount and persists for the app lifetime.
+  //
+  // Gated by the active provider's capabilities: providers that forbid the real-time hubs
+  // (Anonymous) never start SignalR. The hub access-token factory also returns '' for those
+  // providers, so this is defense-in-depth on top of the backend's authoritative gate.
   useEffect(() => {
+    if (!capabilities.realtimeHub) {
+      return;
+    }
     const conn = connectTelemetryHub(
       (span) => setLiveSpans(prev => {
         const next = [...prev, span];
@@ -419,17 +429,24 @@ export function Dashboard() {
 
   return (
     <div className={styles.dashboard}>
+      {activeAuthMode === 'anonymous' && (
+        <AnonymousSessionBanner
+          provider={getActiveProvider() as unknown as AnonymousSessionProvider}
+        />
+      )}
       <header className={styles.header}>
         <div className={styles.headerBrand}>
           <BrandLogo size={36} />
           <span className={styles.headerTagline}>Brand Intelligence Platform</span>
         </div>
         <div className={`${styles.headerActions} ${telemetryOpen ? styles.headerActionsOpen : ''}`}>
-          <PendingApprovals
-            pendingApprovals={pendingApprovals}
-            onClick={() => setTelemetryOpen(true)}
-          />
-          {featureFlags.campaignPlanner && (
+          {capabilities.approvals && (
+            <PendingApprovals
+              pendingApprovals={pendingApprovals}
+              onClick={() => setTelemetryOpen(true)}
+            />
+          )}
+          {capabilities.alternateViews && featureFlags.campaignPlanner && (
             <Button
               appearance={activeView === 'promo' ? 'primary' : 'subtle'}
               icon={<TargetArrow24Regular />}
@@ -439,7 +456,7 @@ export function Dashboard() {
               {activeView === 'promo' ? 'Back to Chat' : 'Campaign Planner'}
             </Button>
           )}
-          {featureFlags.competitive && (
+          {capabilities.alternateViews && featureFlags.competitive && (
             <Button
               appearance={activeView === 'competitive' ? 'primary' : 'subtle'}
               icon={<Shield24Regular />}
@@ -449,7 +466,7 @@ export function Dashboard() {
               {activeView === 'competitive' ? 'Back to Chat' : 'Competitive'}
             </Button>
           )}
-          {featureFlags.knowledgeBase && (
+          {capabilities.alternateViews && featureFlags.knowledgeBase && (
             <Button
               appearance={activeView === 'knowledge' ? 'primary' : 'subtle'}
               icon={<Library24Regular />}
@@ -459,7 +476,7 @@ export function Dashboard() {
               {activeView === 'knowledge' ? 'Back to Chat' : 'Knowledge Base'}
             </Button>
           )}
-          {featureFlags.healthCouncil && (
+          {capabilities.alternateViews && featureFlags.healthCouncil && (
             <Button
               appearance={activeView === 'council' ? 'primary' : 'subtle'}
               icon={<HeartPulse24Regular />}
@@ -469,7 +486,7 @@ export function Dashboard() {
               {activeView === 'council' ? 'Back to Chat' : 'Health Council'}
             </Button>
           )}
-          {featureFlags.security && (
+          {capabilities.alternateViews && featureFlags.security && (
             <Button
               appearance={activeView === 'security' ? 'primary' : 'subtle'}
               icon={<ShieldCheckmark24Regular />}
@@ -479,7 +496,7 @@ export function Dashboard() {
               {activeView === 'security' ? 'Back to Chat' : 'Security'}
             </Button>
           )}
-          {featureFlags.cards && (
+          {capabilities.alternateViews && featureFlags.cards && (
             <Button
               appearance={activeView === 'cards' ? 'primary' : 'subtle'}
               icon={<CardUi24Regular />}
@@ -489,7 +506,7 @@ export function Dashboard() {
               {activeView === 'cards' ? 'Back to Chat' : 'Cards'}
             </Button>
           )}
-          {featureFlags.observability && (
+          {capabilities.observability && featureFlags.observability && (
             <Button
               appearance={activeView === 'observability' ? 'primary' : 'subtle'}
               icon={<Eye24Regular />}
@@ -499,7 +516,7 @@ export function Dashboard() {
               {activeView === 'observability' ? 'Back to Chat' : 'Observability'}
             </Button>
           )}
-          {featureFlags.stores && (
+          {capabilities.alternateViews && featureFlags.stores && (
             <Button
               appearance={activeView === 'stores' ? 'primary' : 'subtle'}
               icon={<Building24Regular />}
@@ -509,7 +526,7 @@ export function Dashboard() {
               {activeView === 'stores' ? 'Back to Chat' : 'Stores'}
             </Button>
           )}
-          {featureFlags.financials && (
+          {capabilities.alternateViews && featureFlags.financials && (
             <Button
               appearance={activeView === 'financials' ? 'primary' : 'subtle'}
               icon={<Money24Regular />}
@@ -519,7 +536,7 @@ export function Dashboard() {
               {activeView === 'financials' ? 'Back to Chat' : 'Financials'}
             </Button>
           )}
-          {featureFlags.portfolio && (
+          {capabilities.alternateViews && featureFlags.portfolio && (
             <Button
               appearance={activeView === 'portfolio' ? 'primary' : 'subtle'}
               icon={<Star24Regular />}
@@ -536,21 +553,23 @@ export function Dashboard() {
           >
             New Chat
           </Button>
-          <Button
-            appearance={telemetryOpen ? 'primary' : 'subtle'}
-            icon={telemetryOpen ? <Dismiss24Regular /> : <DataUsage24Regular />}
-            onClick={() => setTelemetryOpen(prev => !prev)}
-            aria-expanded={telemetryOpen}
-            aria-controls="telemetry-drawer"
-          >
-            {telemetryOpen ? 'Close' : 'Real-Time Telemetry'}
-          </Button>
+          {capabilities.telemetryPanel && (
+            <Button
+              appearance={telemetryOpen ? 'primary' : 'subtle'}
+              icon={telemetryOpen ? <Dismiss24Regular /> : <DataUsage24Regular />}
+              onClick={() => setTelemetryOpen(prev => !prev)}
+              aria-expanded={telemetryOpen}
+              aria-controls="telemetry-drawer"
+            >
+              {telemetryOpen ? 'Close' : 'Real-Time Telemetry'}
+            </Button>
+          )}
         </div>
       </header>
 
       <main className={styles.main}>
         <div className={`${styles.chatContainer} ${telemetryOpen ? styles.chatContainerOpen : ''}`}>
-          {activeView === 'promo' && featureFlags.campaignPlanner ? (
+          {capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner ? (
             <div style={{ overflow: 'auto', height: '100%' }}>
               <PromoTaskModule />
             </div>
@@ -569,7 +588,7 @@ export function Dashboard() {
             <div style={{ overflow: 'auto', height: '100%' }}>
               <AdaptiveCardPanel />
             </div>
-          ) : activeView === 'observability' && featureFlags.observability ? (
+          ) : capabilities.observability && activeView === 'observability' && featureFlags.observability ? (
             <div style={{ overflow: 'auto', height: '100%' }}>
               <ObservabilityPanel />
             </div>
@@ -626,6 +645,7 @@ export function Dashboard() {
           )}
         </div>
 
+        {capabilities.telemetryPanel && (
         <Drawer
           id="telemetry-drawer"
           type="overlay"
@@ -680,9 +700,11 @@ export function Dashboard() {
                 <ApprovalHistory approvals={approvalHistory} />
               </CollapsibleSection>
             )}
-            <CollapsibleSection title="Memory">
-              <MemoryPanel refreshKey={memoryRefreshKey} />
-            </CollapsibleSection>
+            {capabilities.memory && (
+              <CollapsibleSection title="Memory">
+                <MemoryPanel refreshKey={memoryRefreshKey} />
+              </CollapsibleSection>
+            )}
             {traces.length > 0 && (
               <CollapsibleSection title="Trace Dashboard">
                 <TraceDashboard traces={traces} />
@@ -699,6 +721,7 @@ export function Dashboard() {
             </CollapsibleSection>
           </DrawerBody>
         </Drawer>
+        )}
       </main>
     </div>
   );

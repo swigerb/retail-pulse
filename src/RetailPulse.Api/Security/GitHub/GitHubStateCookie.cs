@@ -66,6 +66,20 @@ public static class GitHubStateCookie
         return @base + Suffix(state);
     }
 
+    /// <summary>
+    /// The exact per-code redemption cookie name for <paramref name="code"/>. This binds the one-time
+    /// redemption code to the browser that completed the callback: the callback sets this cookie and the
+    /// exchange requires it. In <paramref name="secure"/> mode the name keeps the <c>__Host-</c> prefix;
+    /// otherwise it uses the Development-only insecure base. The code MUST already be validated with
+    /// <see cref="IsValidStateFormat"/> (state and redemption codes share the same fixed base64url shape),
+    /// so a crafted code can never inject cookie attributes or an oversized name.
+    /// </summary>
+    public static string RedemptionNameFor(string code, bool secure)
+    {
+        string @base = secure ? GitHubAuthConstants.SecureRedemptionCookieBase : GitHubAuthConstants.DevRedemptionCookieBase;
+        return @base + Suffix(code);
+    }
+
     private static string Suffix(string state)
     {
         byte[] hash = SHA256.HashData(Encoding.ASCII.GetBytes(state));

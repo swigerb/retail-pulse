@@ -132,6 +132,16 @@ output MCP_SERVER_BASE_URL string = containerApps.outputs.mcpServerUrl
 output RETAIL_PULSE_FRONTEND_ORIGIN string = staticWebApp.outputs.staticWebAppUrl
 output VITE_API_ORIGIN string = containerApps.outputs.apiUrl
 
+// - VITE_AUTH_MODE: the provider-neutral sign-in mode read by the Vite frontend
+//   build (import.meta.env) so the deployed SPA renders exactly one provider's
+//   sign-in UX. The LIVE environment is pinned to Entra — matching the API's
+//   Authentication__Mode (set to Entra by the postprovision hook and committed in
+//   appsettings.Production.json). ProviderNeutralDeploymentContractTests asserts
+//   this parity. Other (non-production) deployments use a separate template that
+//   overrides both halves together (see docs/deployment-azd.md and the
+//   appsettings.{GitHub,Anonymous}.example.json / .env.*.example templates).
+output VITE_AUTH_MODE string = 'Entra'
+
 // - VITE_ENTRA_*: non-secret Entra identifiers read by the Vite frontend build
 //   (import.meta.env) so the deployed SPA can run MSAL PKCE sign-in against the
 //   single-tenant app registration. Round-tripped from the entra* params above.
@@ -140,4 +150,6 @@ output VITE_API_ORIGIN string = containerApps.outputs.apiUrl
 output VITE_ENTRA_TENANT_ID string = entraTenantId
 output VITE_ENTRA_CLIENT_ID string = entraClientId
 output VITE_ENTRA_API_SCOPE string = entraApiScope
-output VITE_ENTRA_AUDIENCE string = empty(entraAudience) && !empty(entraClientId) ? 'api://${entraClientId}' : entraAudience
+output VITE_ENTRA_AUDIENCE string = empty(entraAudience) && !empty(entraClientId)
+  ? 'api://${entraClientId}'
+  : entraAudience

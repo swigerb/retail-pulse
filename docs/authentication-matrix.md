@@ -1,9 +1,10 @@
 # Authentication matrix
 
 > The authoritative behavior matrix for Retail Pulse authentication after the
-> provider-neutral foundation (Sprint 0). It enumerates every mode and
-> environment combination and the exact expected outcome. Each row is backed by
-> an automated test — see [Coverage](#coverage).
+> provider-neutral foundation (Sprint 0), extended with the Sprint 3
+> provider-neutral **frontend** build modes (`VITE_AUTH_MODE`). It enumerates every
+> mode and environment combination and the exact expected outcome. Each row is
+> backed by an automated test — see [Coverage](#coverage).
 
 ## Modes
 
@@ -30,6 +31,42 @@ resolver is deterministic and never auto-detects a provider.
 | missing / blank | Production (or any non-Development) | Startup fails — mode must be pinned explicitly, fails closed |
 | unknown string (for example `Okta`) | any | Startup fails — not a recognized mode |
 | bare number (for example `1`) | any | Startup fails — numeric selection is rejected |
+
+## Frontend build-mode matrix (`VITE_AUTH_MODE`)
+
+The SPA renders exactly **one** provider's sign-in UX, chosen at build time by
+`VITE_AUTH_MODE` (injected by the deployment: `infra/main.bicep` output → azd env →
+Vite build). This mirrors the backend `Authentication:Mode` so both halves of a
+deployment agree — a deployment contract test proves the parity. Resolution is a pure,
+fail-closed function (`src/RetailPulse.Web/src/auth/authMode.ts`).
+
+| `VITE_AUTH_MODE` value | Build | Outcome |
+|------------------------|-------|---------|
+| `Entra` (any case) | any | Renders the Microsoft sign-in gate (MSAL). Live production build. |
+| `GitHub` (any case) | any | Renders the "Continue with GitHub" gate (confidential BFF; provider token never in the browser). |
+| `Anonymous` (any case) | any | Renders the "Continue in limited demo" consent gate; all privileged surfaces hidden. |
+| missing / blank | SPA already carries Entra config | Resolves to `Entra` (back-compat); mounts the Entra gate. |
+| missing / blank | local dev (`import.meta.env.DEV`), no Entra config | Transparent pass-through (no gate) against the API's Development synthetic auth. |
+| missing / blank | production build, no Entra config | **Throws at load** — never a silent, insecure default. |
+| unknown string (e.g. `Okta`) | any | **Throws** — not a recognized mode. |
+| bare number (e.g. `1`) | any | **Throws** — numeric selection rejected. |
+
+### Frontend UX & capability behavior per mode
+
+| Concern | Entra | GitHub | Anonymous |
+|---------|-------|--------|-----------|
+| Gate label | "Sign in with Microsoft" | "Continue with GitHub" | "Continue in limited demo" |
+| Credential in browser | MSAL token (`sessionStorage`, MSAL-owned) | Retail Pulse session token only (memory + `sessionStorage`) | Retail Pulse session token only (memory + `sessionStorage`) |
+| Provider token in browser | n/a | **Never** (server-side BFF) | n/a |
+| Login start | MSAL redirect | Top-level nav to fixed `GET /api/auth/github/start` (no return URL) | Explicit consent click → `POST /api/auth/anonymous/session` |
+| Callback handling | MSAL | One-time `code` stripped via `history.replaceState`, exchanged at `POST /api/auth/github/exchange` | n/a |
+| SignalR hubs | yes | yes | **no** (`realtimeHub=false`; hub never started, token factory returns `''`) |
+| Telemetry / Observability / Approvals / Memory / alternate views | shown | shown | **hidden** (all capabilities false) |
+| Token cleared on | logout / expiry / 401 / 403 | logout / expiry / 401 / 403 | clear-session / expiry / 401 / 403 |
+
+Capability gating in the UI is a **usability layer only** — the backend remains the
+authoritative gate (an anonymous token is still `403`'d on any disallowed route
+regardless of what the UI renders).
 
 ## Runtime authorization matrix (Entra mode)
 
@@ -189,7 +226,9 @@ running without configuration. It never applies outside Development.
 | Endpoint graph policy: anonymous surface is bootstrap + `POST /api/chat` only; both hubs denied; REST + hubs carry authorization metadata | `tests/RetailPulse.Tests/Security/EndpointAuthorizationCoverageTests.cs` |
 | Entra hub behaviour unchanged by the anonymous scope reduction | `tests/RetailPulse.Tests/Security/AnonymousHubOwnershipTests.cs` |
 | Normalized principal mapping | `tests/RetailPulse.Tests/Security/NormalizedPrincipalTests.cs` |
-| Production / hooks pinned to Entra, never GitHub/Anonymous; single-replica pin; GitHub example config not auto-loaded and secret-free | `tests/RetailPulse.Tests/Deployment/ProviderNeutralDeploymentContractTests.cs` |
+| Production / hooks pinned to Entra, never GitHub/Anonymous; single-replica pin; GitHub example config not auto-loaded and secret-free; **frontend `VITE_AUTH_MODE` ↔ API `Authentication__Mode` parity; web mode templates documented & secret-free** | `tests/RetailPulse.Tests/Deployment/ProviderNeutralDeploymentContractTests.cs` |
+| Frontend mode resolver (all `VITE_AUTH_MODE` rows: explicit modes, back-compat, local-dev pass-through, prod-missing throw, unknown/numeric throw) | `src/RetailPulse.Web/src/__tests__/authMode.test.ts` |
+| Provider-neutral gate dispatch + Entra gate unchanged; GitHub start/callback/exchange/history-strip/replay/error/logout/401/403; Anonymous consent/bootstrap/limited-nav/no-hub/expiry/banner; token storage (session-only, cleared on expiry/logout/401/403); exact-origin `authorizedFetch`; hub token gated by capabilities; Dashboard hides privileged surfaces & never starts SignalR for anonymous | `src/RetailPulse.Web/src/__tests__/{AuthGate,GitHubAuthGate,AnonymousAuthGate,sessionCredentialStore,tokenService,authorizedFetch,Dashboard.capabilities}.test.ts(x)` |
 
 See [ADR-005](adr/005-provider-neutral-authentication.md) for the design and
 threat model, and [Entra authentication](authentication-entra.md) for the
