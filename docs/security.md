@@ -75,8 +75,9 @@ fails closed — it never auto-detects a provider:
   that is **not deployed by default** (hosted only behind an explicit
   `Anonymous:AllowHosted=true` opt-in) — see
   [Anonymous mode](#anonymous-mode-opt-in-fail-closed) below.
-- `GitHub` is declared but not implemented in this sprint; selecting it fails
-  startup and never falls through to another provider.
+- `GitHub` is implemented (Sprint 2) as an **opt-in, fail-closed** confidential
+  OAuth backend-for-frontend capability that is **not deployed** — see
+  [GitHub mode](#github-mode-confidential-oauth-bff-opt-in-fail-closed) below.
 - A missing mode defaults to `Entra` **only in Development**. Outside
   Development a missing, unknown, or malformed mode fails startup.
 
@@ -169,10 +170,92 @@ It is not deployed this sprint.
   authenticated production; **all of these counters reset on restart or
   replica replacement**.
 
+### GitHub mode (confidential OAuth BFF, opt-in, fail-closed)
+
+GitHub mode lets a future self-serve frontend (Sprint 3) sign in with GitHub
+without exposing a GitHub provider token to the browser. It is additive and
+fail-closed, and the **live deployment artifacts stay Entra** (proven by
+deployment-contract tests). It is **not deployed** this sprint.
+
+- **Confidential backend-for-frontend (BFF).** GitHub OAuth Apps **do not support
+  PKCE**, so a browser-only exchange is impossible without leaking the client
+  secret or the provider token. The browser therefore talks only to our API: the
+  API holds the client secret, performs the authorization-code→token exchange
+  **server-side**, validates the user by calling `/user`, and the GitHub
+  **provider token never reaches the SPA** (it is used transiently server-side,
+  then discarded). Integration tests assert it never appears in any redirect,
+  response body, or log.
+- **Three narrowly-anonymous, rate-limited endpoints** (the only anonymous surface
+  besides health): `GET /api/auth/github/start`, `GET /api/auth/github/callback`,
+  `POST /api/auth/github/exchange`.
+- **Login-CSRF / fixation closed without PKCE.** `start` mints a random `state`
+  in a server-side **one-time** store **and** a separate random secret in an
+  HttpOnly cookie whose **Secure / `__Host-` attributes come from the validated
+  `RequireSecureCookies` option, never from `Request.IsHttps`** — behind a
+  TLS-terminating proxy (Azure Container Apps) the in-container request is plain
+  HTTP even though the browser↔edge hop is HTTPS, so deriving cookie security from
+  the observed scheme would silently emit an insecure cookie in production. In
+  hosted/secure mode the cookie is `__Host-` prefixed (Secure, HttpOnly,
+  SameSite=Lax, Path=/, no Domain); Development may explicitly opt into an insecure,
+  non-`__Host` dev cookie over plain HTTP (rejected at startup outside Development).
+  Only the cookie secret's SHA-256 hash is stored server-side. The cookie **name is
+  per-state** (`__Host-rp_gh_state_` + a bounded URL-safe suffix derived from the
+  state), so **parallel login tabs never clash** — each `callback` reads/deletes
+  only its own cookie. `callback` validates the state **format** first, requires
+  both signals, consumes the state atomically (one-use), and **constant-time**
+  compares the cookie hash **before any code exchange**, then deletes the state
+  cookie on every path (success or failure).
+- **Open-redirect / SSRF closed.** `start` redirects **only** to the fixed
+  `https://github.com/login/oauth/authorize`; the token, `/user`, and org-membership
+  calls use fixed GitHub endpoints; the SPA return is the **one** configured,
+  validated absolute-HTTPS frontend URL — no user-supplied redirect target is ever
+  honored.
+- **One-time redemption, no token in the redirect.** On success `callback`
+  redirects to the SPA carrying only a random, short-lived, single-use **redemption
+  code** (never a provider/app token). `exchange` atomically redeems it (replay/race
+  impossible) and returns the session token. There is no refresh token.
+- **Server-side immutable allowlist, minimal scopes.** Authorization is decided
+  server-side on **immutable** signals only: the **numeric GitHub user id**
+  (`AllowedUserIds`, positive, deduped) and/or **active** org membership
+  (`/user/memberships/orgs/{org}`, `state==active`). The **mutable login handle
+  never grants access** — a renamed/re-created handle cannot inherit access
+  (handle-reuse denied), and a login-only allowlist fails startup. Startup **fails
+  closed** unless at least one immutable mechanism is configured. **No `repo` scope
+  is ever requested**; scope is empty by default and `read:org` only when an org
+  allowlist is configured (private membership requires the user's `read:org`
+  consent). The allowlist **fails closed** on any GitHub API/rate/transport error.
+- **Retail Pulse session token.** A compact short-lived HS256 JWT (algorithm
+  pinned) with a **separate issuer/audience**, `provider=GitHub`, subject
+  `github:<immutable id>`, the required `RetailPulse.User` role + `access_as_user`
+  scope, a random `jti`, strict expiry, no PII beyond the public login, and no
+  refresh token. The ≥ 256-bit signing key is a secret; **genuine key rotation** is
+  supported via `AdditionalValidationKeys` (validation-only strong keys keep
+  pre-rotation tokens valid while the current key signs; each key has a stable
+  material-derived `kid`). It works as a REST bearer and a SignalR `?access_token`
+  (query token honored only on `/hubs/*`), exactly like Entra. A dedicated policy
+  requires `provider=GitHub`, so Entra/Anonymous/cross-provider tokens can never
+  satisfy it. `GitHubPrincipalNormalizer` trusts only the numeric subject, never the
+  mutable login.
+- **Fail-closed hosted config.** `Authentication:Mode=GitHub` enables it;
+  Development may run with an ephemeral process-local signing key (sessions die on
+  restart) but still needs a client id/secret and an immutable allowlist. Any hosted
+  deploy requires a complete validated set (client id/secret, ≥ 256-bit signing key,
+  issuer, audience, exact callback + frontend URLs, immutable allowlist,
+  `RequireSecureCookies=true`, and `AcknowledgeSingleReplica=true`) — missing,
+  malformed, or angle-bracket **placeholder** secrets fail startup. The client id is
+  public; the client secret and signing key are secrets, never committed/logged.
+- **Limitation.** The state and redemption stores are **replica-local, in-memory**
+  (bounded, one-use, TTL with opportunistic cleanup), so hosted GitHub is pinned to
+  `maxReplicas=1` until they move to distributed storage; a callback and exchange
+  served by different replicas would not share state. Because the runtime cannot
+  inspect ACA topology, hosted GitHub requires an explicit
+  `AcknowledgeSingleReplica=true` fail-closed acknowledgement of that pin.
+
 ### Development
-- `DevelopmentAuthHandler` bypasses all authentication
 - `Security:RequireAuth` defaults to `false`
-- No API key required
+- `Authentication:Mode` defaults to `Entra`, whose `DevelopmentAuthHandler`
+  stamps a synthetic local identity. This bypass exists only in Development.
+- No API key required.
 
 ### Production
 - **API Key:** Required via `x-api-key` header (configured in `ApiKey:Value`)
