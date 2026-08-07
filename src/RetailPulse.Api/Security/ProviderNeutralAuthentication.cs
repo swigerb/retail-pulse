@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using RetailPulse.Api.Auth;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Security.Anonymous;
+using RetailPulse.Api.Security.GitHub;
 
 namespace RetailPulse.Api.Security;
 
@@ -23,10 +24,14 @@ namespace RetailPulse.Api.Security;
 ///     guardrails INTERNALLY, then returns <c>null</c> (the caller must not layer the Entra policy
 ///     on top). A hosted deployment must additionally pass the second explicit opt-in and complete
 ///     guardrail configuration, or startup fails closed (see <see cref="AnonymousAuthOptions"/>).</item>
-///   <item><see cref="AuthenticationMode.GitHub"/> → a deliberate fail-closed startup error. This
-///     mode is declared but NOT implemented in this sprint; selecting it throws before any
-///     authentication scheme is registered, so the app can never fall through to Entra,
-///     Development, or anonymous access.</item>
+///   <item><see cref="AuthenticationMode.GitHub"/> → the Sprint 2 GitHub confidential OAuth
+///     Backend-for-Frontend (BFF) boundary. It wires the app's own GitHub session scheme, the
+///     constrained authorization policy (provider==GitHub + role + scope), the one-time state and
+///     redemption stores, the SSRF-safe OAuth transport, and the server-side allowlist INTERNALLY,
+///     then returns <c>null</c> (the caller must not layer the Entra policy on top). Outside
+///     Development it fails startup unless a complete, validated configuration (client id + secret +
+///     ≥256-bit signing key + exact callback/frontend URLs + a non-empty allowlist) is present. It is
+///     never enabled in production.</item>
 /// </list>
 /// The boundary is intentionally thin: later sprints add a case per provider here without
 /// reworking the Entra path or the authorization policy.
@@ -68,11 +73,9 @@ public static class ProviderNeutralAuthentication
                 AddAnonymousMode(services, configuration, environment);
                 return null;
             case AuthenticationMode.GitHub:
-                throw new NotSupportedException(
-                    $"Authentication mode '{mode}' is not implemented in this sprint. Only 'Entra' and " +
-                    "'Anonymous' are currently supported. GitHub is an opt-in capability delivered in a later " +
-                    "sprint and is never enabled in production. This is a deliberate fail-closed startup error — " +
-                    "authentication does not fall through to Entra, Development, or Anonymous.");
+                services.AddSingleton(new AuthenticationModeOptions { Mode = mode });
+                AddGitHubMode(services, configuration, environment);
+                return null;
 
             default:
                 // Unreachable: AuthenticationModeOptions.Resolve only returns defined members.
@@ -106,5 +109,25 @@ public static class ProviderNeutralAuthentication
         services.AddSingleton<AnonymousRateLimiter>();
         services.AddSingleton<AnonymousUsageBudget>();
         services.AddSingleton<AnonymousGuardMiddleware>();
+    }
+
+    /// <summary>
+    /// Wires the GitHub confidential OAuth Backend-for-Frontend boundary: the app's own GitHub session
+    /// scheme, the constrained authorization policy, the one-time state/redemption stores, the
+    /// SSRF-safe OAuth transport, and the server-side allowlist. Resolution is fail-closed: outside
+    /// Development it throws here unless a complete, validated configuration is supplied (client id +
+    /// secret + strong signing key + exact callback/frontend URLs + a non-empty allowlist). The GitHub
+    /// provider token never leaves the server, and the live/deployed config stays Entra.
+    /// </summary>
+    private static void AddGitHubMode(
+        IServiceCollection services,
+        IConfiguration configuration,
+        IHostEnvironment environment)
+    {
+        var options = GitHubAuthOptions.FromConfiguration(configuration, environment);
+
+        // Session scheme + constrained authz policy (default + fallback) + token service + signing key
+        // provider + one-time stores + OAuth client + allowlist + GitHub principal normalizer.
+        services.AddGitHubAuthentication(options);
     }
 }

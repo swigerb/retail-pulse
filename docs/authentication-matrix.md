@@ -14,7 +14,7 @@ resolver is deterministic and never auto-detects a provider.
 | Mode | Status in this sprint | Production |
 |------|-----------------------|------------|
 | `Entra` | Implemented (unchanged) | Supported and pinned |
-| `GitHub` | Declared, not implemented — fails startup | Never enabled |
+| `GitHub` | Implemented (Sprint 2) — opt-in, fail-closed, not deployed (hosted requires complete validated secret-bearing config); confidential OAuth BFF | Never enabled (Entra pinned) |
 | `Anonymous` | Implemented (Sprint 1) — opt-in, fail-closed, not deployed by default (hosted only with `Anonymous:AllowHosted=true`) | Never enabled (Entra pinned) |
 
 ## Mode resolution matrix
@@ -22,7 +22,8 @@ resolver is deterministic and never auto-detects a provider.
 | `Authentication:Mode` value | Environment | Outcome |
 |-----------------------------|-------------|---------|
 | `Entra` (any case) | any | Resolves to `Entra`; wires the existing Entra boundary |
-| `GitHub` (any case) | any | Resolves, then the factory throws `NotSupportedException` — not implemented this sprint |
+| `GitHub` (any case) | Development | Resolves; wires the GitHub confidential OAuth BFF boundary. May use an ephemeral process-local signing key (sessions die on restart), but still requires a client id/secret and an allowlist. |
+| `GitHub` (any case) | Production (or any non-Development) | Resolves; requires a complete validated set — client id/secret, ≥ 256-bit signing key, issuer, audience, exact callback + frontend URLs, and a non-empty immutable user-id and/or active-organization allowlist — or startup fails closed. Placeholder (`<...>`) secrets are rejected. |
 | `Anonymous` (any case) | Development | Resolves; wires the Anonymous boundary with an ephemeral process-local signing key (sessions die on restart). No hosted guardrails required. |
 | `Anonymous` (any case) | Production (or any non-Development) | Resolves; requires `Anonymous:AllowHosted=true` **plus** a strong signing key (≥ 256-bit) **plus** positive daily request/token/cost ceilings, or startup fails closed |
 | missing / blank | Development | Defaults to `Entra` (documented Development-only default) |
@@ -92,7 +93,49 @@ hubs in anonymous mode. There is **no blanket GET allowance** — every other ro
 > still honoured as a backward-compatible fallback), and the **primary** post-bootstrap
 > control is the per-subject chat limit.
 
-## Environment behavior
+## Runtime authorization matrix (GitHub mode)
+
+GitHub mode is an **opt-in, fail-closed** capability that is **not deployed**.
+Authentication is a **confidential backend-for-frontend (BFF) OAuth flow**: the
+browser talks only to our API; the GitHub client secret stays on the server; the
+GitHub **provider token never reaches the SPA** (used transiently server-side to
+validate the user and org membership, then discarded). GitHub OAuth Apps do not
+support PKCE, so CSRF/fixation is closed by a random `state` in a server-side
+one-time store **plus** a separate random secret in an HttpOnly/Secure/
+SameSite=Lax cookie (SHA-256 hash stored server-side, constant-time compared).
+The SPA receives only a short-lived one-time **redemption code**, which it
+exchanges for a short-lived Retail Pulse **session token**. The three BFF
+endpoints are the only anonymous surface beyond `/health` + `/alive`, and all are
+rate limited.
+
+| Request | Credential | Expected result |
+|---------|-----------|-----------------|
+| `GET /api/auth/github/start` | none | 302 to `https://github.com/login/oauth/authorize` with the exact registered `redirect_uri`, a random `state`, minimal scope (empty by default; `read:org` only when an org allowlist is configured; **never `repo`**), `allow_signup=false`; sets the HttpOnly/Secure/SameSite=Lax state cookie |
+| `GET /api/auth/github/start` | none, over the start limit | 429 |
+| `GET /api/auth/github/callback` (valid state + cookie, allowlisted user) | GitHub redirect back | 302 to the **one** configured SPA URL carrying only a one-time redemption `code` (never a provider/app token); state cookie deleted |
+| `GET /api/auth/github/callback` | missing/mismatched/expired/replayed `state`, or absent state cookie, or cookie hash mismatch | 400 `invalid_state`, no code exchange performed; state cookie deleted |
+| `GET /api/auth/github/callback` | `error=access_denied` (user denied) | 302 to the SPA URL with a generic error code; no token |
+| `GET /api/auth/github/callback` | GitHub code exchange or `/user` validation fails | 302 to the SPA URL with a generic `login_failed`; provider errors never leaked |
+| `GET /api/auth/github/callback` | user not on the immutable id / active-org allowlist, or org membership absent/inactive, or the allowlist GitHub API errors/rate-limits | 302 to the SPA URL with `not_authorized` — **fail closed** (deny on error) |
+| `POST /api/auth/github/exchange` (valid one-time code) | one-time redemption code | 200 — mints a short-lived HS256 session token (`provider=GitHub`, `sub=github:<id>`, role `RetailPulse.User`, scope `access_as_user`, random `jti`, no refresh) |
+| `POST /api/auth/github/exchange` | replayed / unknown / expired code | 400 `invalid_code` — the code is one-use and redeemed atomically (replay/race impossible) |
+| `POST /api/auth/github/exchange` | over the exchange limit | 429 |
+| Protected REST endpoint | valid GitHub session token | 200 — full authenticated capability, acceptable only because it was reached after server-side allowlist verification |
+| `/hubs/*` (connection + negotiate) | valid GitHub session token via `?access_token=` | connects — query token honored on `/hubs/*` exactly like Entra |
+| REST endpoint | GitHub session token via `?access_token` query string only | 401 (query token honored only on `/hubs/*`) |
+| Protected REST/hub | no token | 401 |
+| Protected REST/hub | malformed / expired / wrong issuer / wrong audience / wrong signature (algorithm pinned HS256) | 401 |
+| Protected REST/hub | valid-signature token with `provider != GitHub` (Entra/Anonymous/cross-provider) | 403 — the GitHub policy requires `provider=GitHub` |
+| Any redirect, response body, or log line | — | never contains the GitHub provider token (asserted by integration tests) |
+| `/health`, `/alive` | none | 200 |
+
+> **Replica-local limitation.** The state and redemption stores are
+> **replica-local, in-memory**, so a callback served by one replica and an
+> exchange served by another would not share state. Hosted GitHub is therefore
+> pinned to `maxReplicas=1` until the stores are moved to distributed storage; the
+> stores are bounded, one-use, and TTL-expiring with opportunistic cleanup.
+
+
 
 | Environment | Mode source | Auth handler |
 |-------------|-------------|--------------|
@@ -110,8 +153,19 @@ running without configuration. It never applies outside Development.
 - Production is pinned to `Entra` in three independent artifacts (base config,
   Production config, azd hooks). A deployment contract test proves those
   artifacts never emit `GitHub` or `Anonymous`.
-- GitHub is an opt-in capability for a later sprint and is never enabled in
-  production.
+- GitHub is implemented but **opt-in and never deployed**: a hosted
+  (non-Development) GitHub deployment fails startup unless a complete, validated
+  secret-bearing configuration is present (client id/secret, ≥ 256-bit signing
+  key, issuer, audience, exact callback + frontend URLs, an **immutable** allowlist
+  — numeric `AllowedUserIds` and/or active-org `AllowedOrgs`, `RequireSecureCookies=true`,
+  and `AcknowledgeSingleReplica=true`); placeholder secrets are rejected. The
+  mutable login handle never grants access (a login-only allowlist fails startup).
+  Cookie `Secure`/`__Host-` semantics come from validated config, not the
+  proxy-observed request scheme. The provider token never reaches the SPA, the
+  allowlist fails closed on any error, no `repo` scope is requested, genuine
+  signing-key rotation is supported, and hosted GitHub is pinned to a single
+  replica (`maxReplicas=1`, acknowledged via `AcknowledgeSingleReplica`) because
+  the state / redemption stores and login limiters are replica-local.
 - Anonymous is implemented but **opt-in and never deployed**: any hosted
   (non-Development) Anonymous deployment fails startup unless a second explicit
   opt-in (`Anonymous:AllowHosted=true`) and a complete, validated guardrail set
@@ -125,15 +179,17 @@ running without configuration. It never applies outside Development.
 | Matrix area | Test |
 |-------------|------|
 | Mode resolution (all rows above) | `tests/RetailPulse.Tests/Security/AuthenticationModeTests.cs` |
-| Entra wiring + GitHub fail closed at the factory; Anonymous factory wiring | `tests/RetailPulse.Tests/Security/AuthenticationModeTests.cs` |
+| Entra wiring + GitHub/Anonymous factory wiring and hosted fail-closed validation | `tests/RetailPulse.Tests/Security/AuthenticationModeTests.cs` |
 | Entra success / 401 / 403 / hubs | `tests/RetailPulse.Tests/Security/EntraAuthenticationTests.cs` |
+| GitHub BFF start/callback/exchange happy path + every failure (state/cookie/TTL/replay, denial, exchange/`/user`/org errors, unallowlisted/inactive, code replay/race, wrong redirect, token validation incl. cross-provider, REST + both hubs after session token, query-token-on-REST denied, provider token never in redirect/body/logs, exact scopes/no repo, rate limits, anonymous-exception coverage) | `tests/RetailPulse.Tests/Security/GitHubAuthenticationTests.cs` |
+| GitHub options fail-closed validation, one-time stores (TTL/one-use/bounded), session token claims + validation, id/login/active-org allowlist (fail-closed) | `tests/RetailPulse.Tests/Security/GitHubAuthOptionsTests.cs`, `GitHubOneTimeStoreTests.cs`, `GitHubSessionTokenTests.cs`, `GitHubUserAllowlistTests.cs` |
 | Anonymous bootstrap, token validation, read-only 403, **both hubs 403 (connect + negotiate)**, budget/rate breakers, isolation, threat cases | `tests/RetailPulse.Tests/Security/AnonymousAuthenticationTests.cs` |
 | Anonymous options fail-closed validation, token claims (no PII), capability policy (hubs denied), normalizer | `tests/RetailPulse.Tests/Security/AnonymousCapabilityTests.cs` |
 | Chat-internal bypasses closed: memory-management refusal (zero memory mutation), council refusal (zero `ConveneAsync`), single accounted pipeline with truthful cost/audit | `tests/RetailPulse.Tests/Security/AnonymousChatInternalBypassTests.cs` |
 | Endpoint graph policy: anonymous surface is bootstrap + `POST /api/chat` only; both hubs denied; REST + hubs carry authorization metadata | `tests/RetailPulse.Tests/Security/EndpointAuthorizationCoverageTests.cs` |
 | Entra hub behaviour unchanged by the anonymous scope reduction | `tests/RetailPulse.Tests/Security/AnonymousHubOwnershipTests.cs` |
 | Normalized principal mapping | `tests/RetailPulse.Tests/Security/NormalizedPrincipalTests.cs` |
-| Production / hooks pinned to Entra, never GitHub/Anonymous; single-replica pin | `tests/RetailPulse.Tests/Deployment/ProviderNeutralDeploymentContractTests.cs` |
+| Production / hooks pinned to Entra, never GitHub/Anonymous; single-replica pin; GitHub example config not auto-loaded and secret-free | `tests/RetailPulse.Tests/Deployment/ProviderNeutralDeploymentContractTests.cs` |
 
 See [ADR-005](adr/005-provider-neutral-authentication.md) for the design and
 threat model, and [Entra authentication](authentication-entra.md) for the

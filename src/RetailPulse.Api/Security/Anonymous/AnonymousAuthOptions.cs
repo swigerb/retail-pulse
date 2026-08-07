@@ -34,6 +34,15 @@ public sealed class AnonymousAuthOptions
     /// <summary>HMAC signing key (secret). Required in hosted mode; ephemeral in Development.</summary>
     public string? SigningKey { get; init; }
 
+    /// <summary>
+    /// Additional strong HMAC keys accepted for VALIDATION only (never used to sign) — genuine
+    /// signing-key rotation, mirroring the GitHub provider. Publish the next key here alongside the
+    /// current <see cref="SigningKey"/>, deploy, then promote it on the next rotation; tokens signed with
+    /// the previous key keep validating until they expire. Each entry must be ≥256-bit; placeholders are
+    /// rejected. The current signing key is always tried first.
+    /// </summary>
+    public IReadOnlyList<string> AdditionalValidationKeys { get; init; } = [];
+
     public string Role { get; init; } = AnonymousCapabilityPolicy.DefaultRole;
     public string Scope { get; init; } = AnonymousCapabilityPolicy.DefaultScope;
 
@@ -105,6 +114,7 @@ public sealed class AnonymousAuthOptions
             Audience = Clean(section["Audience"]) ?? "retail-pulse-api",
             SessionTokenTtlSeconds = section.GetValue("SessionTokenTtlSeconds", 900),
             SigningKey = Clean(section["SigningKey"]),
+            AdditionalValidationKeys = CleanList(section.GetSection("AdditionalValidationKeys").Get<string[]>()),
             Role = Clean(section["Role"]) ?? AnonymousCapabilityPolicy.DefaultRole,
             Scope = Clean(section["Scope"]) ?? AnonymousCapabilityPolicy.DefaultScope,
             MaxOutputTokens = section.GetValue("MaxOutputTokens", 512),
@@ -139,6 +149,18 @@ public sealed class AnonymousAuthOptions
         {
             throw new InvalidOperationException(
                 "Anonymous:Issuer and Anonymous:Audience are required so session tokens can be validated.");
+        }
+
+        // Rotation keys must be strong wherever configured — a weak validation key would accept forged
+        // tokens in any environment.
+        foreach (string extra in AdditionalValidationKeys)
+        {
+            if (Encoding.UTF8.GetByteCount(extra) < 32)
+            {
+                throw new InvalidOperationException(
+                    "Anonymous:AdditionalValidationKeys entries must each be at least 32 bytes (256-bit). " +
+                    "A weak rotation key would validate forged tokens and fails closed.");
+            }
         }
 
         if (!enforce)
@@ -189,6 +211,9 @@ public sealed class AnonymousAuthOptions
 
     private static bool IsPlaceholder(string? value) =>
         !string.IsNullOrWhiteSpace(value) && (value.Contains('<') || value.Contains('>'));
+
+    private static IReadOnlyList<string> CleanList(string[]? raw) =>
+        raw is null ? [] : [.. raw.Select(Clean).Where(v => v is not null).Select(v => v!)];
 
     private static string? Clean(string? value)
     {
