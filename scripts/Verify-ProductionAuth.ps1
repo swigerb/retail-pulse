@@ -166,8 +166,17 @@ function Add-PlannedCheck([string]$name) { $script:checksPlanned.Add($name) | Ou
 
 # ── read-only az / http helpers ────────────────────────────────────────────
 function Invoke-AzJson([string[]]$Arguments, [string]$FailureMessage) {
-    $out = & az @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "$FailureMessage (az exited $LASTEXITCODE): $out" }
+    $errorFile = [IO.Path]::GetTempFileName()
+    try {
+        $out = & az @Arguments --only-show-errors 2>$errorFile
+        if ($LASTEXITCODE -ne 0) {
+            $errorText = Get-Content $errorFile -Raw -ErrorAction SilentlyContinue
+            throw "$FailureMessage (az exited $LASTEXITCODE): $errorText"
+        }
+    }
+    finally {
+        Remove-Item $errorFile -Force -ErrorAction SilentlyContinue
+    }
     $text = ($out | Out-String).Trim()
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
     return ($text | ConvertFrom-Json)
@@ -307,8 +316,9 @@ Test-Check "Resource group '$ResourceGroup' exists" ($null -ne $rg)
 Write-Host "`n[API container app]" -ForegroundColor Cyan
 if (-not $ApiAppName) {
     $apps = Invoke-AzJson @('containerapp', 'list', '--resource-group', $ResourceGroup,
-        '--query', '[?tags."azd-service-name"==''api''].name', '--output', 'json') 'Failed to list container apps'
-    $ApiAppName = if ($apps -and @($apps).Count -gt 0) { @($apps)[0] } else { $null }
+        '--output', 'json') 'Failed to list container apps'
+    $matches = @($apps | Where-Object { $_.tags.'azd-service-name' -eq 'api' })
+    $ApiAppName = if ($matches.Count -eq 1) { $matches[0].name } else { $null }
 }
 Test-Check 'API container app resolved' ([bool]$ApiAppName) '(pass -ApiAppName if discovery by tag azd-service-name=api fails)'
 if (-not $ApiAppName) {
@@ -421,8 +431,9 @@ if (-not $SkipSpaInspection) {
     Write-Host "`n[Static Web App]" -ForegroundColor Cyan
     if (-not $StaticWebAppName) {
         $swas = Invoke-AzJson @('staticwebapp', 'list', '--resource-group', $ResourceGroup,
-            '--query', '[?tags."azd-service-name"==''frontend''].name', '--output', 'json') 'Failed to list static web apps'
-        $StaticWebAppName = if ($swas -and @($swas).Count -gt 0) { @($swas)[0] } else { $null }
+            '--output', 'json') 'Failed to list static web apps'
+        $matches = @($swas | Where-Object { $_.tags.'azd-service-name' -eq 'frontend' })
+        $StaticWebAppName = if ($matches.Count -eq 1) { $matches[0].name } else { $null }
     }
     if (-not $StaticWebAppName) {
         Test-Check 'Static Web App resolved' $false '(pass -StaticWebAppName if discovery fails)'
