@@ -38,6 +38,14 @@ const drawerStyle: React.CSSProperties = {
   borderLeft: '1px solid var(--brand-accent-border-faint)',
 };
 
+// Applied to the persistent ChatPanel host while an alternate dashboard view
+// (Observability, Approvals overlay, etc.) is active. `display: none` keeps the
+// single ChatPanel instance mounted — preserving its messages, charts, session
+// id/history, scroll, and any pending request — while fully removing it from the
+// tab order and the screen-reader accessibility tree. Navigation no longer
+// unmounts chat, so returning restores the exact conversation with no refetch.
+const HIDDEN_CHAT_STYLE: React.CSSProperties = { display: 'none' };
+
 const useStyles = makeStyles({
   dashboard: {
     display: 'flex',
@@ -101,6 +109,9 @@ const useStyles = makeStyles({
     [`@media (max-width: ${DRAWER_BREAKPOINT_PX}px)`]: {
       marginRight: '0',
     },
+  },
+  chatHost: {
+    height: '100%',
   },
 });
 
@@ -427,6 +438,24 @@ export function Dashboard() {
     setAlerts(prev => prev.map(a => a.status === 'active' ? { ...a, status: 'dismissed' as const } : a));
   }, []);
 
+  // The chat surface is a SINGLE persistently-mounted ChatPanel. It is visible only
+  // when no alternate dashboard view is active; otherwise it is hidden (but kept
+  // mounted) so its conversation state survives navigation. This boolean mirrors —
+  // exactly — the alternate-view conditions rendered below, so chat shows whenever
+  // none of them match (including the "feature flag off" fall-through cases).
+  const chatVisible = !(
+    (capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner) ||
+    (activeView === 'competitive' && featureFlags.competitive) ||
+    (activeView === 'knowledge' && featureFlags.knowledgeBase) ||
+    (activeView === 'council' && featureFlags.healthCouncil) ||
+    (activeView === 'security' && featureFlags.security) ||
+    (activeView === 'cards' && featureFlags.cards) ||
+    (capabilities.observability && activeView === 'observability' && featureFlags.observability) ||
+    (activeView === 'stores' && featureFlags.stores) ||
+    (activeView === 'financials' && featureFlags.financials) ||
+    (activeView === 'portfolio' && featureFlags.portfolio)
+  );
+
   return (
     <div className={styles.dashboard}>
       {activeAuthMode === 'anonymous' && (
@@ -569,6 +598,29 @@ export function Dashboard() {
 
       <main className={styles.main}>
         <div className={`${styles.chatContainer} ${telemetryOpen ? styles.chatContainerOpen : ''}`}>
+          {/*
+            Persistent chat surface. A single ChatPanel instance stays mounted for the
+            lifetime of the Dashboard (or until New Chat remounts it via `chatKey`), so
+            switching to Observability/Approvals/any alternate view no longer discards
+            the conversation, session id, charts, scroll, or an in-flight request. When
+            an alternate view is active the host is `display:none` + `inert` +
+            `aria-hidden`, which removes it from the tab order and the screen-reader
+            tree while keeping its React state alive.
+          */}
+          <div
+            className={styles.chatHost}
+            data-testid="chat-host"
+            style={chatVisible ? undefined : HIDDEN_CHAT_STYLE}
+            inert={!chatVisible}
+            aria-hidden={chatVisible ? undefined : true}
+          >
+            <ChatPanel
+              key={chatKey}
+              onResponseReceived={handleResponseReceived}
+              approvals={pendingApprovals}
+              onApprovalResolved={handleApprovalResolved}
+            />
+          </div>
           {capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner ? (
             <div style={{ overflow: 'auto', height: '100%' }}>
               <PromoTaskModule />
@@ -635,14 +687,7 @@ export function Dashboard() {
               )}
               <ExplanationPanel explanation={explanationData} open={explanationOpen} onClose={() => setExplanationOpen(false)} />
             </div>
-          ) : (
-            <ChatPanel
-              key={chatKey}
-              onResponseReceived={handleResponseReceived}
-              approvals={pendingApprovals}
-              onApprovalResolved={handleApprovalResolved}
-            />
-          )}
+          ) : null}
         </div>
 
         {capabilities.telemetryPanel && (
