@@ -368,7 +368,7 @@ public class ToolPrefetchServiceTests
             new Dictionary<string, string> { ["GetHistoricalDemand"] = raw });
 
         Assert.NotNull(entries);
-        PrefetchEntry entry = Assert.Single(entries!);
+        PrefetchEntry entry = Assert.Single(entries);
         Assert.Equal("GetHistoricalDemand", entry.ToolName);
         Assert.True(entry.IsSummary, "an over-budget rollup is a SUMMARY, not a COMPLETE result");
         Assert.True(entry.Json.Length < raw.Length, "the compacted payload must be smaller than raw");
@@ -416,7 +416,7 @@ public class ToolPrefetchServiceTests
             new Dictionary<string, string> { ["GetSeasonalityFactors"] = SmallSeasonalityPayload });
 
         Assert.NotNull(entries);
-        Assert.False(entries!.Single().IsSummary, "an under-budget payload is COMPLETE");
+        Assert.False(entries.Single().IsSummary, "an under-budget payload is COMPLETE");
 
         string prompt = AgentExecutionPipeline.BuildSystemPromptWithPrefetch(
             "You are a demand forecasting agent.", entries);
@@ -434,7 +434,7 @@ public class ToolPrefetchServiceTests
         AgentExecutionPipeline pipeline = CreatePipelineWithBudget();
         string bigDemand = BuildOversizedHistoricalDemand(["West", "Central", "East"], weeksPerRegion: 52);
 
-        // Ordered dictionary preserves insertion order for deterministic section slicing.
+        // Section slicing is keyed by tool name, so it is independent of enumeration order.
         IReadOnlyList<PrefetchEntry>? entries = pipeline.CompactPrefetch(
             new Dictionary<string, string>
             {
@@ -443,7 +443,7 @@ public class ToolPrefetchServiceTests
             });
 
         Assert.NotNull(entries);
-        Assert.Equal(2, entries!.Count);
+        Assert.Equal(2, entries.Count);
 
         string prompt = AgentExecutionPipeline.BuildSystemPromptWithPrefetch(
             "You are a demand forecasting agent.", entries);
