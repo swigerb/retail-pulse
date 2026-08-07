@@ -106,8 +106,15 @@ jobs:
           cache: 'npm'
           cache-dependency-path: src/RetailPulse.Web/package-lock.json
 
-      - name: Install dependencies
-        run: npm install
+      # Reproducible install from the committed lockfile, routed through the internal
+      # package feed proxy by src/RetailPulse.Web/.npmrc (registry + replace-registry-host=always).
+      # `npm ci` enforces the locked tree and its sha512 integrity; the official npm registry is
+      # never contacted. It also never rewrites package-lock.json — the next step proves that.
+      - name: Install dependencies (npm ci via internal proxy)
+        run: npm ci
+
+      - name: Verify lockfile unchanged by install (integrity)
+        run: git diff --exit-code -- package-lock.json
 
       - name: Build
         run: npm run build
@@ -145,6 +152,65 @@ jobs:
         with:
           name: vulnerability-report
           path: vulnerability-report.txt
+
+  provider-matrix:
+    name: Auth Provider Matrix (Entra/GitHub/Anonymous)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/RetailPulse.Web/package-lock.json
+
+      # Reproducible install from the committed lockfile, routed through the internal package
+      # feed proxy by src/RetailPulse.Web/.npmrc (registry + replace-registry-host=always). The
+      # lockfile carries full cross-platform optional binaries (rolldown/lightningcss/emnapi for
+      # linux/darwin/win32), so `npm ci` reconstructs the exact tree on Linux and enforces its
+      # sha512 integrity. The official npm registry is never contacted, and `npm ci` never mutates
+      # the lockfile — the next step proves it is byte-for-byte unchanged.
+      - name: Install frontend dependencies (npm ci via internal proxy)
+        working-directory: src/RetailPulse.Web
+        run: npm ci
+
+      - name: Verify lockfile unchanged by install (integrity)
+        working-directory: src/RetailPulse.Web
+        run: git diff --exit-code -- package-lock.json
+
+      # Frontend provider matrix: fail-closed config gate for every mode, plus a real build of
+      # each mode (Entra/GitHub/Anonymous) with SAFE SYNTHETIC PUBLIC ids, asserting the immutable
+      # auth-mode meta marker baked into the emitted index.html (only Entra satisfies the production
+      # predicate). No live secrets, no .env files.
+      - name: Frontend provider build matrix
+        working-directory: src/RetailPulse.Web
+        run: npm run test:provider-matrix
+
+      # Backend provider matrix: the Development + non-Development startup/authorization suites
+      # (Entra 200/401/403, Anonymous 2-route surface + 403, GitHub BFF/session/REST/hubs,
+      # unknown/missing/cross-provider fail-closed) and the deployment Entra pins/parity.
+      # The reusable gate emits a machine-readable TRX and enforces a conservative minimum count
+      # (>=400) with zero failures; a zero-match run fails hard rather than passing vacuously.
+      - name: Restore
+        run: dotnet restore RetailPulse.slnx
+
+      - name: Backend provider matrix (Security + Deployment, TRX + count gate)
+        shell: pwsh
+        run: ./scripts/Test-BackendAuthMatrix.ps1 -Configuration Release -NoRestore
+
+      - name: Upload backend matrix TRX
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-auth-matrix-trx
+          path: test-results-matrix/*.trx
 
   lint:
     name: Lint (dotnet format)

@@ -87,10 +87,15 @@ Entra is now selected through an explicit, provider-neutral **mode contract**
 configuration key and dispatches to a mode-specific wiring path:
 
 - **`Entra`** routes to the existing, unchanged Entra boundary above. Security
-  semantics are identical to before the contract existed.
-- **`GitHub`** and **`Anonymous`** are declared but **not implemented in this
-  sprint**. Selecting either fails startup with a precise error — it never falls
-  through to Entra, Development, or anonymous access.
+  semantics are identical to before the contract existed. This is the only
+  live/production mode.
+- **`GitHub`** (confidential OAuth BFF, Sprint 2) and **`Anonymous`**
+  (server-minted session, Sprint 1) are fully implemented but remain **opt-in,
+  fail-closed capabilities for non-production environments only — never
+  deployed**. A hosted GitHub/Anonymous deployment additionally fails startup
+  unless its complete validated configuration is present. Selecting any missing,
+  unknown, or malformed mode fails startup — it never falls through to Entra,
+  Development, or anonymous access.
 
 Resolution is deterministic and never auto-detects a provider:
 
