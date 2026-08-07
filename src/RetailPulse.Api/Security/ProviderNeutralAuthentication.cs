@@ -41,12 +41,14 @@ public static class ProviderNeutralAuthentication
     /// <summary>
     /// Resolves the configured authentication mode and registers the matching authentication
     /// stack. Returns the resolved <see cref="EntraAuthOptions"/> for the Entra path so the
-    /// caller can wire the authorization policy; returns <c>null</c> for the Anonymous path,
-    /// which wires its own authorization internally. GitHub throws.
+    /// caller can wire the authorization policy; returns <c>null</c> for the Anonymous and
+    /// GitHub paths, which wire their own constrained authorization internally.
     /// </summary>
-    /// <exception cref="NotSupportedException">
-    /// Thrown when the configured mode is recognized but not implemented in this sprint (GitHub).
-    /// This is a fail-closed startup error by design.
+    /// <exception cref="InvalidOperationException">
+    /// Thrown (fail-closed, at startup) when the mode is missing/blank outside Development,
+    /// unknown, or a bare number — see <see cref="AuthenticationModeOptions.Resolve"/> — or
+    /// when a hosted GitHub/Anonymous deployment is missing its complete validated
+    /// configuration. Authentication never falls through to a weaker provider.
     /// </exception>
     public static EntraAuthOptions? AddProviderNeutralAuthentication(
         this IServiceCollection services,
