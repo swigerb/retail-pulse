@@ -140,8 +140,8 @@ builder.Services.AddCors(options =>
 // honours the access_token query param only for /hubs, and requires the app role + API
 // scope on every protected endpoint and hub. Development uses the synthetic handler. The
 // default policy is never permissive — no RequireAssertion(_ => true) when auth is on.
-// GitHub mode is declared but fails startup ("not implemented in this sprint"); a missing mode
-// fails closed outside Development. Anonymous mode (Sprint 1) wires its own constrained session
+// GitHub mode wires a confidential OAuth BFF and short-lived Retail Pulse session tokens.
+// A missing mode fails closed outside Development. Anonymous mode (Sprint 1) wires its own constrained session
 // scheme + guardrails internally and returns null (see AddAnonymousMode); it never falls through
 // to Entra/Development and, in a hosted environment, requires a second explicit opt-in.
 AuthenticationMode resolvedAuthMode =

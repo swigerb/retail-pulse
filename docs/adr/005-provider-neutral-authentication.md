@@ -399,7 +399,8 @@ compared in constant time at callback). Both are required at callback.
 - **Outside Development**, `GitHubAuthOptions.FromConfiguration` requires a
   complete validated set: client id/secret, a ≥ 256-bit signing key, issuer,
   audience, exact callback URL, exact frontend return URL, and a non-empty
-  allowlist (user ids and/or logins and/or orgs). Missing/malformed/unsafe values
+  allowlist (immutable numeric user ids and/or active organization memberships).
+  Missing/malformed/unsafe values
   throw at startup, so a misconfigured hosted deploy never serves traffic.
 - Development may run with an ephemeral, process-local signing key (sessions do
   not survive a restart — intentional dev behavior, never a hosted fallback).

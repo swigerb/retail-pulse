@@ -23,7 +23,7 @@ resolver is deterministic and never auto-detects a provider.
 |-----------------------------|-------------|---------|
 | `Entra` (any case) | any | Resolves to `Entra`; wires the existing Entra boundary |
 | `GitHub` (any case) | Development | Resolves; wires the GitHub confidential OAuth BFF boundary. May use an ephemeral process-local signing key (sessions die on restart), but still requires a client id/secret and an allowlist. |
-| `GitHub` (any case) | Production (or any non-Development) | Resolves; requires a complete validated set — client id/secret, ≥ 256-bit signing key, issuer, audience, exact callback + frontend URLs, and a non-empty id/login/org allowlist — or startup fails closed. Placeholder (`<...>`) secrets are rejected. |
+| `GitHub` (any case) | Production (or any non-Development) | Resolves; requires a complete validated set — client id/secret, ≥ 256-bit signing key, issuer, audience, exact callback + frontend URLs, and a non-empty immutable user-id and/or active-organization allowlist — or startup fails closed. Placeholder (`<...>`) secrets are rejected. |
 | `Anonymous` (any case) | Development | Resolves; wires the Anonymous boundary with an ephemeral process-local signing key (sessions die on restart). No hosted guardrails required. |
 | `Anonymous` (any case) | Production (or any non-Development) | Resolves; requires `Anonymous:AllowHosted=true` **plus** a strong signing key (≥ 256-bit) **plus** positive daily request/token/cost ceilings, or startup fails closed |
 | missing / blank | Development | Defaults to `Entra` (documented Development-only default) |

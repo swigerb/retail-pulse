@@ -253,7 +253,9 @@ deployment-contract tests). It is **not deployed** this sprint.
 
 ### Development
 - `Security:RequireAuth` defaults to `false`
-- No API key required
+- `Authentication:Mode` defaults to `Entra`, whose `DevelopmentAuthHandler`
+  stamps a synthetic local identity. This bypass exists only in Development.
+- No API key required.
 
 ### Production
 - **API Key:** Required via `x-api-key` header (configured in `ApiKey:Value`)
