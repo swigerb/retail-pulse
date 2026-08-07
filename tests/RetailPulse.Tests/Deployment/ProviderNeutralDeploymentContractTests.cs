@@ -122,6 +122,35 @@ public sealed class ProviderNeutralDeploymentContractTests
             .Should().BeTrue("the non-live Anonymous template should be committed for documentation");
     }
 
+    [Fact]
+    public void ExampleGitHubConfig_IsNotLoadedByAnyEnvironment()
+    {
+        // The GitHub example/template MUST NOT be a real environment overlay. Only
+        // appsettings.json and appsettings.{Environment}.json are auto-loaded; the example
+        // is deliberately named appsettings.GitHub.example.json (note ".example.") so it
+        // can never be picked up by ASPNETCORE_ENVIRONMENT=GitHub.
+        string apiDir = Path.Combine(RepoRoot, "src", "RetailPulse.Api");
+
+        File.Exists(Path.Combine(apiDir, "appsettings.GitHub.json"))
+            .Should().BeFalse("a live appsettings.GitHub.json overlay must not exist");
+        File.Exists(Path.Combine(apiDir, "appsettings.GitHub.example.json"))
+            .Should().BeTrue("the non-live GitHub template should be committed for documentation");
+    }
+
+    [Fact]
+    public void ExampleGitHubConfig_ContainsNoRealSecrets()
+    {
+        // The committed GitHub example must only ever carry angle-bracket placeholders for the
+        // secret values — never a real client secret or signing key.
+        string json = File.ReadAllText(Path.Combine(
+            RepoRoot, "src", "RetailPulse.Api", "appsettings.GitHub.example.json"));
+
+        json.Should().MatchRegex("\"ClientSecret\"\\s*:\\s*\"<[^\"]*>\"",
+            "the GitHub example client secret must be an angle-bracket placeholder");
+        json.Should().MatchRegex("\"SigningKey\"\\s*:\\s*\"<[^\"]*>\"",
+            "the GitHub example signing key must be an angle-bracket placeholder");
+    }
+
     private static string FindRepoRoot()
     {
         DirectoryInfo? dir = new(AppContext.BaseDirectory);

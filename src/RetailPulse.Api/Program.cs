@@ -147,6 +147,7 @@ builder.Services.AddCors(options =>
 AuthenticationMode resolvedAuthMode =
     AuthenticationModeOptions.Resolve(builder.Configuration, builder.Environment);
 bool anonymousAuthMode = resolvedAuthMode == AuthenticationMode.Anonymous;
+bool gitHubAuthMode = resolvedAuthMode == AuthenticationMode.GitHub;
 
 EntraAuthOptions? entraAuthOptions =
     builder.Services.AddProviderNeutralAuthentication(builder.Configuration, builder.Environment);
@@ -213,6 +214,32 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = builder.Configuration.GetValue("Anonymous:Bootstrap:GlobalPerMinute",
                     builder.Configuration.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 5)),
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+
+    // Rate limiters for the GitHub confidential OAuth BFF endpoints. Always registered so the limiter
+    // graph is stable and testable; only used when Authentication:Mode=GitHub maps the endpoints.
+    // Behind ACA the client IP is the proxy's and X-Forwarded-For is forgeable, so these are single
+    // GLOBAL per-replica fixed windows (not per-IP) that cap login-flow abuse (state minting and code
+    // redemption) without being bypassable by header spoofing. Replica-local; hosted GitHub runs at
+    // maxReplicas=1. Config keys: GitHub:RateLimits:StartPerMinute / ExchangePerMinute.
+    options.AddPolicy("github-start", _ =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: "github-start-global",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = builder.Configuration.GetValue("GitHub:RateLimits:StartPerMinute", 10),
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+
+    options.AddPolicy("github-exchange", _ =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: "github-exchange-global",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = builder.Configuration.GetValue("GitHub:RateLimits:ExchangePerMinute", 20),
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));
@@ -1049,6 +1076,15 @@ app.MapCacheEndpoints();
 if (anonymousAuthMode)
 {
     app.MapAnonymousAuthEndpoints();
+}
+
+// GitHub mode: map the three narrowly-anonymous confidential OAuth BFF endpoints (start / callback /
+// exchange). Mapped only when Authentication:Mode=GitHub so no GitHub surface exists in Entra
+// deployments. The GitHub provider token never reaches the browser; the SPA receives only a one-time
+// redemption code and, after exchange, a short-lived Retail Pulse session token.
+if (gitHubAuthMode)
+{
+    app.MapGitHubAuthEndpoints();
 }
 
 app.Run();
