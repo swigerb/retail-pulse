@@ -344,6 +344,22 @@ builder.Services.AddScoped(sp =>
 // Chart data tool (always available)
 builder.Services.AddScoped<ChartDataTool>();
 
+// ── Tool-result budget boundary ─────────────────────────────────────────────
+// Centralized compaction + dedup + per-request budget applied to every tool result
+// before it enters model context (wired at the AgentExecutionPipeline tool-wrap
+// choke point, so it covers all specialist agents). See docs/tool-context-budget.md.
+builder.Services.AddSingleton(sp =>
+{
+    var options = new RetailPulse.Api.Budget.ToolResultBudgetOptions();
+    builder.Configuration.GetSection(RetailPulse.Api.Budget.ToolResultBudgetOptions.SectionName).Bind(options);
+    return options;
+});
+builder.Services.AddSingleton<RetailPulse.Api.Budget.IToolResultCompactor, RetailPulse.Api.Budget.HistoricalDemandCompactor>();
+builder.Services.AddSingleton<RetailPulse.Api.Budget.IToolResultCompactor, RetailPulse.Api.Budget.PortfolioDepletionCompactor>();
+builder.Services.AddSingleton(sp =>
+    new RetailPulse.Api.Budget.ToolResultBudget(
+        sp.GetServices<RetailPulse.Api.Budget.IToolResultCompactor>()));
+
 builder.Services.AddScoped(sp =>
 {
     IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();

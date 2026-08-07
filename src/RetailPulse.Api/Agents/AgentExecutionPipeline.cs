@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Auth;
+using RetailPulse.Api.Budget;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Telemetry;
@@ -28,6 +29,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly RetailPulseMetrics? _metrics;
     private readonly StreamingProgressFeature _streamingFeature;
     private readonly IAnonymousChatPolicy _anonymousChatPolicy;
+    private readonly ToolResultBudget? _toolBudget;
+    private readonly ToolResultBudgetOptions _budgetOptions;
 
     private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -48,7 +51,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         IConfiguration configuration,
         ILogger<AgentExecutionPipeline> logger,
         RetailPulseMetrics? metrics,
-        IAnonymousChatPolicy anonymousChatPolicy)
+        IAnonymousChatPolicy anonymousChatPolicy,
+        ToolResultBudget? toolBudget = null,
+        ToolResultBudgetOptions? budgetOptions = null)
     {
         _chatClient = chatClient;
         _hubContext = hubContext;
@@ -59,6 +64,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         _metrics = metrics;
         _anonymousChatPolicy = anonymousChatPolicy
             ?? throw new ArgumentNullException(nameof(anonymousChatPolicy));
+        _toolBudget = toolBudget;
+        _budgetOptions = budgetOptions ?? new ToolResultBudgetOptions();
     }
 
     /// <summary>
@@ -92,15 +99,16 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
-            Tools = [.. _anonymousChatPolicy.ApplyToolFilter(context.Tools).Select(t => t is AIFunction fn ? new TimedAIFunction(fn) : t)]
+            Tools = [.. _anonymousChatPolicy.ApplyToolFilter(context.Tools).Select(t => WrapWithBudget(t is AIFunction fn ? new TimedAIFunction(fn) : t))]
         };
         _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
-        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
+        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, CompactPrefetch(context.PrefetchedData));
         List<ChatMessage> messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
         using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
+        using IDisposable budgetScope = RequestToolContext.Begin(sessionId);
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
@@ -229,6 +237,34 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Wraps an <see cref="AIFunction"/> tool with the tool-context budget boundary so its
+    /// result is deduplicated, compacted, and budget-capped before entering model context.
+    /// Non-function tools and (when the budget is not configured) all tools pass through.
+    /// </summary>
+    private AITool WrapWithBudget(AITool tool) =>
+        _toolBudget is not null && tool is AIFunction fn
+            ? new BudgetedAIFunction(fn, _toolBudget, _budgetOptions, _logger)
+            : tool;
+
+    /// <summary>
+    /// Runs pre-fetched tool results through the same compaction boundary before they are
+    /// injected into the system prompt, so prefetch cannot smuggle an un-budgeted raw
+    /// payload into context (and re-send it on every function-invocation iteration).
+    /// </summary>
+    internal IReadOnlyDictionary<string, string>? CompactPrefetch(IReadOnlyDictionary<string, string>? prefetchedData)
+    {
+        if (_toolBudget is null || prefetchedData is null or { Count: 0 })
+            return prefetchedData;
+
+        var compacted = new Dictionary<string, string>(prefetchedData.Count);
+        foreach ((string toolName, string result) in prefetchedData)
+        {
+            compacted[toolName] = _toolBudget.Apply(toolName, result, _budgetOptions).Json;
+        }
+        return compacted;
+    }
+
     internal static List<ChatMessage> BuildMessages(string systemPrompt, ChatRequest request)
     {
         var messages = new List<ChatMessage>
@@ -270,15 +306,16 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
-            Tools = [.. instrumentedTools]
+            Tools = [.. instrumentedTools.Select(WrapWithBudget)]
         };
         _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
-        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, context.PrefetchedData);
+        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, CompactPrefetch(context.PrefetchedData));
         List<ChatMessage> messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
         using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
+        using IDisposable budgetScope = RequestToolContext.Begin(sessionId);
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase

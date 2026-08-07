@@ -621,6 +621,36 @@ The `ConsensusOrchestrator` uses direct LLM calls (not full agent execution) for
 
 ---
 
+## Tool-Context Budget (compaction boundary)
+
+Caching reduces network latency but not the number of tokens entering model context — a
+cache hit still injects the same full payload, which `FunctionInvokingChatClient`
+re-sends on every iteration (`MaximumIterationsPerRequest = 3`). A centralized,
+typed **tool-context budget** addresses the token dimension.
+
+Every tool is wrapped with `BudgetedAIFunction` at the single `AgentExecutionPipeline`
+tool-wrap choke point (outermost, after `TimedAIFunction`/`InstrumentedAIFunction`), so
+the boundary covers the entire tool catalog automatically. Per result, in order:
+
+1. **Request-scoped dedup** — `RequestToolContext` (`AsyncLocal`, per-request,
+   principal-keyed) short-circuits identical `principal + tool + normalized-args` calls.
+2. **Distinct-call cap** (`MaxToolCalls`).
+3. **Per-result compaction** (`ToolResultBudget`) — tool-specific summarizers
+   (`IToolResultCompactor`) → generic array truncation with explicit metadata →
+   guaranteed-valid hard clip.
+4. **Cumulative per-request budget** (`MaxCumulativeChars`).
+
+`CreateChart` is exempt (its canonical `ChartSpec` is what the frontend renders) and
+never counts toward the budget. Prefetched results pass through the same boundary before
+injection. Telemetry records sizes/flags only (no payload/PII).
+
+Impact on the depletion-comparison baseline: **74,868 → 1,412 est. tokens** per
+occurrence (≈98%), with correctness preserved (summary totals + `by_region` points kept;
+grouped-bar chart still renders two series / six bars). See
+[`tool-context-budget.md`](./tool-context-budget.md) and ADR-006.
+
+---
+
 ## Prompt Management (Sprint 5)
 
 `PromptTemplateEngine` centralizes all tenant placeholder substitution:
