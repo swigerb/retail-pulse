@@ -350,3 +350,4 @@ The dashboard now refreshes every 10 seconds while mounted and shows empty state
 - **Backend / Costco:** Tool usage statistics belong in tracing, not cost usage events, whenever duration is required.
 - **Frontend / Chick:** Observability summary endpoints must not be assumed to contain nested dashboard collections; call the dedicated endpoints and map fields explicitly.
 - **QA / Publix:** Contract validation for observability dashboards should include idle/empty states and cross-endpoint field names.
+
