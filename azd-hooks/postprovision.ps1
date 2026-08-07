@@ -133,7 +133,9 @@ Invoke-Az `
         # Provider-neutral auth is explicitly pinned to Entra for production (see
         # Security/ProviderNeutralAuthentication.cs). This is a deploy-time re-assertion of the
         # committed appsettings.Production.json value; the API fails closed on a missing/unknown
-        # mode and refuses to start under GitHub/Anonymous.
+        # mode and refuses to start under GitHub/Anonymous. It matches the SPA's VITE_AUTH_MODE
+        # (also pinned to Entra by infra/main.bicep) — ProviderNeutralDeploymentContractTests
+        # asserts the parity.
         'Authentication__Mode=Entra',
         "Security__AllowedOrigins__0=$frontendOrigin",
         "MicrosoftEntra__TenantId=$entraTenantId",

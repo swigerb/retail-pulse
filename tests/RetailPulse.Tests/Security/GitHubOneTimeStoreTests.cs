@@ -28,7 +28,7 @@ public sealed class GitHubOneTimeStoreTests
     {
         var clock = new TestClock();
         var store = new OneTimeTtlStore<GitHubRedemptionEntry>(static e => e.ExpiresAtTicks, timeProvider: clock);
-        var entry = new GitHubRedemptionEntry(new GitHubVerifiedUser(1, "octocat"), Ttl(clock, 120));
+        var entry = new GitHubRedemptionEntry(new GitHubVerifiedUser(1, "octocat"), [0x01], Ttl(clock, 120));
 
         store.TryStore("code-1", entry).Should().BeTrue();
 
@@ -65,7 +65,7 @@ public sealed class GitHubOneTimeStoreTests
     {
         var clock = new TestClock();
         var store = new OneTimeTtlStore<GitHubRedemptionEntry>(static e => e.ExpiresAtTicks, timeProvider: clock);
-        store.TryStore("race", new GitHubRedemptionEntry(new GitHubVerifiedUser(7, "u"), Ttl(clock, 300)));
+        store.TryStore("race", new GitHubRedemptionEntry(new GitHubVerifiedUser(7, "u"), [0x01], Ttl(clock, 300)));
 
         var winners = new ConcurrentBag<bool>();
         using var start = new Barrier(32);

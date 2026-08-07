@@ -199,9 +199,9 @@ public sealed class GitHubAuthenticationTests
     public async Task Callback_ThenExchange_ReturnsUsableSessionToken_NotProviderToken()
     {
         using TestFixture fx = CreateServer();
-        string redemption = await LoginToRedemption(fx);
+        (string redemption, string cookie) = await LoginToRedemption(fx);
 
-        HttpResponseMessage resp = await Exchange(fx, redemption);
+        HttpResponseMessage resp = await Exchange(fx, redemption, cookie);
 
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
         string raw = await resp.Content.ReadAsStringAsync();
@@ -377,10 +377,10 @@ public sealed class GitHubAuthenticationTests
     public async Task Exchange_ReplayedCode_IsRejectedSecondTime()
     {
         using TestFixture fx = CreateServer();
-        string redemption = await LoginToRedemption(fx);
+        (string redemption, string cookie) = await LoginToRedemption(fx);
 
-        (await Exchange(fx, redemption)).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await Exchange(fx, redemption)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Exchange(fx, redemption, cookie)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await Exchange(fx, redemption, cookie)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -397,25 +397,157 @@ public sealed class GitHubAuthenticationTests
     public async Task Exchange_ExpiredCode_IsRejected()
     {
         using TestFixture fx = CreateServer(redemptionTtlSeconds: 30);
-        string redemption = await LoginToRedemption(fx);
+        (string redemption, string cookie) = await LoginToRedemption(fx);
 
         fx.Clock.Advance(TimeSpan.FromSeconds(31));
 
-        (await Exchange(fx, redemption)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Exchange(fx, redemption, cookie)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
     public async Task Exchange_ConcurrentRace_YieldsExactlyOneSuccess()
     {
         using TestFixture fx = CreateServer();
-        string redemption = await LoginToRedemption(fx);
+        (string redemption, string cookie) = await LoginToRedemption(fx);
 
         Task<HttpResponseMessage>[] attempts =
-            [.. Enumerable.Range(0, 8).Select(_ => Exchange(fx, redemption))];
+            [.. Enumerable.Range(0, 8).Select(_ => Exchange(fx, redemption, cookie))];
         HttpResponseMessage[] results = await Task.WhenAll(attempts);
 
         results.Count(r => r.StatusCode == HttpStatusCode.OK).Should().Be(1,
             "atomic one-time redemption admits exactly one exchange");
+    }
+
+    // ── redemption code ↔ browser binding threats (Blocker 1) ────────────────
+    //
+    // The one-time redemption code returned in the callback redirect is bound to the SAME browser that
+    // completed the callback via a per-code __Host- cookie carrying a random secret (only its hash is
+    // stored server-side). A stolen but unused code replayed from another browser — which never received
+    // that cookie — can never be redeemed.
+
+    [Fact]
+    public async Task Exchange_CorrectBrowserCookie_Succeeds()
+    {
+        using TestFixture fx = CreateServer();
+        (string redemption, string cookie) = await LoginToRedemption(fx);
+
+        HttpResponseMessage resp = await Exchange(fx, redemption, cookie);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK, "the code is redeemed from the browser that owns its cookie");
+    }
+
+    [Fact]
+    public async Task Exchange_StolenCodeFromDifferentBrowser_Fails_AndDoesNotBurnVictimCode()
+    {
+        using TestFixture fx = CreateServer();
+
+        // The victim completes login in their browser: they receive the code AND its redemption cookie.
+        (string redemption, string victimCookie) = await LoginToRedemption(fx);
+
+        // The attacker exfiltrates ONLY the code (e.g. from a leaked redirect URL / logs) and replays it
+        // from a DIFFERENT browser that has no redemption cookie. It must be rejected...
+        HttpResponseMessage stolen = await Exchange(fx, redemption, cookie: null);
+        stolen.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "a code replayed from a browser without the per-code cookie must fail");
+
+        // ...and critically the victim's code must NOT have been consumed by the attacker's attempt, so
+        // the legitimate browser can still complete its own exchange.
+        HttpResponseMessage victim = await Exchange(fx, redemption, victimCookie);
+        victim.StatusCode.Should().Be(HttpStatusCode.OK,
+            "an attacker without the cookie cannot burn the victim's still-valid code");
+    }
+
+    [Fact]
+    public async Task Exchange_MissingRedemptionCookie_IsRejected()
+    {
+        using TestFixture fx = CreateServer();
+        (string redemption, _) = await LoginToRedemption(fx);
+
+        HttpResponseMessage resp = await Exchange(fx, redemption, cookie: null);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest, "the per-code redemption cookie is required");
+    }
+
+    [Fact]
+    public async Task Exchange_WrongRedemptionCookieValue_IsRejected()
+    {
+        using TestFixture fx = CreateServer();
+        (string redemption, string cookie) = await LoginToRedemption(fx);
+
+        // Same cookie NAME (derivable from the known code) but a forged secret VALUE.
+        string cookieName = cookie.Split('=')[0];
+        string forged = cookieName + "=forged-cookie-secret-value-that-will-not-match-hash";
+
+        HttpResponseMessage resp = await Exchange(fx, redemption, forged);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "a forged cookie secret fails the constant-time hash comparison");
+    }
+
+    [Fact]
+    public async Task Exchange_ReplayedCookieAfterSuccess_IsRejected()
+    {
+        using TestFixture fx = CreateServer();
+        (string redemption, string cookie) = await LoginToRedemption(fx);
+
+        (await Exchange(fx, redemption, cookie)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Replaying the exact same code + cookie a second time must fail: the code is consumed atomically.
+        (await Exchange(fx, redemption, cookie)).StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "a replayed code+cookie pair cannot be redeemed twice");
+    }
+
+    [Fact]
+    public async Task Callback_SetsHostPrefixedSecureRedemptionCookie()
+    {
+        using TestFixture fx = CreateServer();
+        (string state, string cookie) = await BeginLogin(fx);
+
+        HttpResponseMessage resp = await Callback(fx, state, cookie, code: "gh-auth-code");
+
+        resp.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? cookies).Should().BeTrue();
+        string redeem = cookies!.Single(c => c.Contains("rp_gh_redeem"));
+        redeem.Should().StartWith("__Host-", "the redemption cookie must carry the __Host- prefix in hosted mode");
+        redeem.Should().Contain("secure", "the redemption cookie must be Secure");
+        redeem.Should().Contain("httponly", "the redemption cookie must be HttpOnly");
+        redeem.Should().Contain("path=/", "the __Host- prefix requires Path=/");
+        redeem.Should().NotContain("domain=", "the __Host- prefix forbids a Domain attribute");
+        redeem.Should().Match(c => c.Contains("samesite=lax", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ParallelLogins_EachRedeemsWithOwnCookie()
+    {
+        using TestFixture fx = CreateServer();
+
+        (string codeA, string cookieA) = await LoginToRedemption(fx);
+        (string codeB, string cookieB) = await LoginToRedemption(fx);
+
+        codeA.Should().NotBe(codeB);
+        cookieA.Split('=')[0].Should().NotBe(cookieB.Split('=')[0], "each login gets its own per-code cookie name");
+
+        // Crossing the cookies fails: the exchange derives the cookie NAME from the code, so codeA never
+        // sees cookieB (different name) and is rejected without being consumed.
+        (await Exchange(fx, codeA, cookieB)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Exchange(fx, codeB, cookieA)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        // Both codes are still valid and each redeems cleanly with ITS OWN cookie — parallel logins are
+        // fully independent.
+        (await Exchange(fx, codeA, cookieA)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await Exchange(fx, codeB, cookieB)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Exchange_CodeNeverAppearsAsTokenOrInLogs()
+    {
+        using TestFixture fx = CreateServer();
+        (string redemption, string cookie) = await LoginToRedemption(fx);
+
+        HttpResponseMessage resp = await Exchange(fx, redemption, cookie);
+        string body = await resp.Content.ReadAsStringAsync();
+
+        body.Should().NotContain(redemption, "the redemption code must never be echoed back as/with the session token");
+        fx.LogSink.Messages.Should().NotContain(m => m.Contains(redemption), "the redemption code must never be logged");
     }
 
     // ── session token validation threats ─────────────────────────────────────
@@ -582,20 +714,36 @@ public sealed class GitHubAuthenticationTests
         return await fx.Client.SendAsync(req);
     }
 
-    private async Task<string> LoginToRedemption(TestFixture fx)
+    private async Task<(string Code, string Cookie)> LoginToRedemption(TestFixture fx)
     {
         (string state, string cookie) = await BeginLogin(fx);
         HttpResponseMessage resp = await Callback(fx, state, cookie, code: "gh-auth-code");
         resp.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        return System.Web.HttpUtility.ParseQueryString(resp.Headers.Location!.Query)["code"]!;
+        string code = System.Web.HttpUtility.ParseQueryString(resp.Headers.Location!.Query)["code"]!;
+        string redemptionCookie = RedemptionCookieFrom(resp);
+        return (code, redemptionCookie);
     }
 
-    private static async Task<HttpResponseMessage> Exchange(TestFixture fx, string code)
+    // The per-code browser-bound redemption cookie set by the callback (name=value), used by the exchange.
+    private static string RedemptionCookieFrom(HttpResponseMessage resp)
+    {
+        resp.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? cookies).Should().BeTrue(
+            "the callback must set the per-code redemption cookie");
+        string setCookie = cookies!.First(c => c.Contains("rp_gh_redeem"));
+        return setCookie.Split(';')[0]; // name=value
+    }
+
+    private static async Task<HttpResponseMessage> Exchange(TestFixture fx, string code, string? cookie = null)
     {
         var req = new HttpRequestMessage(HttpMethod.Post, GitHubAuthConstants.ExchangeRoute)
         {
             Content = new StringContent(JsonSerializer.Serialize(new { code }), Encoding.UTF8, "application/json"),
         };
+        if (cookie is not null)
+        {
+            req.Headers.Add("Cookie", cookie);
+        }
+
         return await fx.Client.SendAsync(req);
     }
 

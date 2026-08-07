@@ -529,6 +529,95 @@ All three are mapped **only** in GitHub mode, are the only anonymous
   `GitHubUserAllowlistTests`, and extended `AuthenticationModeTests` /
   `Deployment/ProviderNeutralDeploymentContractTests`.
 
+## Sprint 3 addendum: Provider-neutral frontend sign-in UX (implemented)
+
+Sprints 1–2 implemented the **backend** for Anonymous and GitHub modes. Sprint 3
+generalizes the **SPA** from Entra-only (MSAL) into a build-time-selected,
+provider-neutral frontend that renders exactly one mode's sign-in UX, without
+regressing the live Entra path. Production stays Entra; nothing is deployed and no
+GitHub OAuth app/secret is created this sprint.
+
+### Build-time deterministic mode (`VITE_AUTH_MODE`)
+
+- A new `VITE_AUTH_MODE` variable (`Entra` / `GitHub` / `Anonymous`, case-insensitive)
+  selects the provider at build time, mirroring the backend's `Authentication:Mode`.
+  A deployment contract test proves `VITE_AUTH_MODE` ↔ `Authentication__Mode` parity.
+- Resolution is **fail-closed** (`src/auth/authMode.ts`, pure `resolveAuthMode(env)`):
+  an explicit known mode always wins; a missing mode resolves to Entra **only** when
+  it is safe (the SPA already carries Entra config — back-compat — or an explicit
+  local-dev build, which becomes a transparent pass-through against the API's
+  Development synthetic auth); a missing mode in a production build with no Entra
+  config **throws**; an unknown/numeric value always **throws**. It is never silently
+  anonymous.
+- Live `infra/main.bicep` emits a literal `output VITE_AUTH_MODE string = 'Entra'` and
+  the azd post-provision hooks stay hardcoded to `Authentication__Mode=Entra`. Other
+  deployments use the separate, secret-free templates
+  (`src/RetailPulse.Web/.env.github.example`, `.env.anonymous.example`, and the
+  backend `appsettings.{GitHub,Anonymous}.example.json`).
+
+### Provider-neutral session/token architecture
+
+- A single `SessionProvider` interface (`src/auth/session/types.ts`) is implemented by
+  three adapters (`providers/{entra,github,anonymous}Provider.ts`). Entra preserves the
+  exact MSAL behavior (MSAL still owns its `sessionStorage` cache). A central selector
+  (`src/auth/activeProvider.ts`) exposes the one active provider, its `capabilities`,
+  `requiresGate`, and `acquireActiveToken()`.
+- **One** credential-acquisition path feeds both the global REST `authorizedFetch` and
+  the SignalR `accessTokenFactory` (`tokenService.ts`) — provider logic is never
+  duplicated in components.
+- GitHub/Anonymous Retail Pulse **session** tokens live in a narrow store
+  (`session/sessionCredentialStore.ts`): in-memory source of truth, mirrored to
+  `sessionStorage` for same-tab reload only — never `localStorage`, never a
+  broadly-readable cookie, never cross-tab. Cleared on logout, expiry, and 401/403. The
+  GitHub **provider** token never reaches the browser at all (confidential BFF).
+
+### Mode-specific UX (single gate, no chooser)
+
+- `AuthGate.tsx` is a dispatcher: pass-through when `!requiresGate`, else it renders the
+  one configured gate (`gates/{Entra,GitHub,Anonymous}AuthGate.tsx`). A single-mode
+  deployment renders only its own provider — no provider chooser — minimizing attack
+  surface and confusion.
+- **Entra** (live): unchanged Microsoft button / redirect / role-denied states.
+- **GitHub**: branded "Continue with GitHub"; a top-level navigation to the fixed
+  same-origin `GET /api/auth/github/start` (no user-supplied return URL); the callback
+  code is consumed and stripped from the URL immediately via `history.replaceState`
+  (no replay on reload/bookmark/back), exchanged at `POST /api/auth/github/exchange`,
+  and a session-only token is stored. Denial/expired/replayed/unallowlisted/provider
+  errors map to safe messages with retry. Logout clears only our token (no github.com
+  logout assumption).
+- **Anonymous**: an explicit "Continue in limited demo" consent gate listing the
+  limitations (billable, rate-limited, read-only chat, no telemetry/streaming/memory/
+  observability/admin/export, short-lived). Only an explicit click bootstraps a
+  session-only token. An in-app banner shows remaining time and offers "New anonymous
+  session" / "Clear session".
+
+### Central capability gating (usability layer; backend remains authoritative)
+
+- A build-time `ProviderCapabilities` object (`FULL_CAPABILITIES` for Entra/GitHub,
+  all-false `ANONYMOUS_CAPABILITIES`) centrally hides/disables Observability, Approvals,
+  Memory, telemetry, streaming, write actions, and alternate operator views. The
+  Dashboard's SignalR effect early-returns when `capabilities.realtimeHub` is false, and
+  `getHubAccessToken()` returns `''` for those providers — so an anonymous build never
+  starts a hub. This is defense-in-depth: the backend still 403s any disallowed route.
+
+### Files (Sprint 3, all frontend + templates/tests/docs)
+
+- `src/RetailPulse.Web/src/auth/authMode.ts`, `activeProvider.ts`,
+  `session/{types.ts,sessionCredentialStore.ts}`,
+  `providers/{entra,github,anonymous}Provider.ts`, `tokenService.ts` (refactor),
+  `authorizedFetch.ts` (install guard now keys off `requiresGate`).
+- `src/auth/AuthGate.tsx` (dispatcher), `src/auth/gates/*` (three gates + shared
+  `gateStyles.ts`), `src/main.tsx` (provider-neutral bootstrap),
+  `src/components/Dashboard.tsx` (capability + SignalR gating + anonymous banner),
+  `src/vite-env.d.ts` (+`VITE_AUTH_MODE`).
+- Templates: `infra/main.bicep` (`output VITE_AUTH_MODE = 'Entra'`),
+  `src/RetailPulse.Web/.env.example` (documented), `.env.github.example`,
+  `.env.anonymous.example`.
+- Tests: `src/__tests__/{authMode,AuthGate,GitHubAuthGate,AnonymousAuthGate,
+  sessionCredentialStore,tokenService,Dashboard.capabilities}.test.ts(x)` and
+  `authorizedFetch.test.ts` (updated), plus the 5 new
+  `Deployment/ProviderNeutralDeploymentContractTests` parity/template cases.
+
 ## Alternatives rejected
 
 

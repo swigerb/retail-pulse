@@ -414,7 +414,8 @@ dotnet run -c Release --project tests/RetailPulse.Benchmarks
 
 | Area | Implementation |
 |------|---------------|
-| **API Authentication** | Auth middleware on all API endpoints |
+| **API Authentication** | Auth middleware on all API endpoints; provider-neutral mode contract (`Authentication__Mode` = `Entra`/`GitHub`/`Anonymous`, fail-closed) — see [ADR-005](docs/adr/005-provider-neutral-authentication.md) |
+| **Frontend sign-in** | Provider-neutral SPA: build-time `VITE_AUTH_MODE` (mirrors the API mode) renders exactly one sign-in UX; fail-closed resolver; session tokens are `sessionStorage`-only and cleared on logout/expiry/401/403. See [FRONTEND.md](docs/FRONTEND.md#authentication--sign-in-provider-neutral) and the [authentication matrix](docs/authentication-matrix.md). |
 | **Teams Bot** | JWT token validation on incoming activities |
 | **MCP Server** | Parameterized SQL queries (no string interpolation) |
 | **SignalR** | Telemetry scoped to session groups (no cross-session leakage) |
