@@ -67,8 +67,21 @@ public sealed class PortfolioDepletionCompactor : IToolResultCompactor
             ["compaction"] = new JsonObject
             {
                 ["compacted"] = true,
-                ["note"] = "Per-brand sentiment narrative was removed to fit the tool-context budget. "
-                    + "Call GetDepletionStats for a single brand to retrieve its full sentiment summary."
+                // The per-brand comparison metrics (YoY depletions/sell-through, inventory
+                // weeks, status) are COMPLETE; only the free-text sentiment narrative was
+                // dropped. Callers ranking/comparing brands or building a chart have
+                // everything they need — this is not a truncated/unusable result.
+                ["aggregate_complete"] = true,
+                ["sufficient_for"] = new JsonArray
+                {
+                    "cross-brand comparison",
+                    "brand ranking",
+                    "chart of depletion / sell-through / inventory by brand"
+                },
+                ["narrowed_detail"] = new JsonArray { "per-brand sentiment narrative" },
+                ["note"] = "Per-brand sentiment narrative was rolled off; the per-brand metrics "
+                    + "are complete and sufficient for comparison, ranking, and charts — proceed. "
+                    + "Call GetDepletionStats for a single brand only if you need its full sentiment summary."
             }
         };
 

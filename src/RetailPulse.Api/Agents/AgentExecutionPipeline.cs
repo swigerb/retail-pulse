@@ -187,6 +187,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         reply = inlineCharts.Reply;
         charts = MergeInlineCharts(charts, inlineCharts.Charts);
 
+        // Chart-fulfillment invariant: an explicit chart request must yield a renderable
+        // chart (reconstructed deterministically from tool results if the model emitted
+        // none) or a structured chart-unavailable diagnostic — never silent prose-only.
+        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply);
+        charts = fulfillment.Charts;
+        reply = fulfillment.Reply;
+
         using Activity? responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
         long responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
         await collector.RecordSpanAsync(
@@ -455,6 +462,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         InlineChartExtraction inlineCharts = ExtractInlineCharts(reply);
         reply = inlineCharts.Reply;
         charts = MergeInlineCharts(charts, inlineCharts.Charts);
+
+        // Chart-fulfillment invariant (streaming): reconstruct deterministically or append
+        // a structured chart-unavailable diagnostic before streaming, so the streamed reply
+        // matches the final response and never silently omits an explicitly requested chart.
+        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply);
+        charts = fulfillment.Charts;
+        reply = fulfillment.Reply;
 
         // Stream the reply token-by-token via StreamingHub for progressive rendering
         await StreamReplyAsync(sessionId, context.AgentName, reply, ct);
