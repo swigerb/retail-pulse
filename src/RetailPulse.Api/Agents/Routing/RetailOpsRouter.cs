@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Caching;
+using RetailPulse.Api.Charts;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Telemetry;
@@ -265,6 +266,19 @@ public partial class RetailOpsRouter : IAgentRouter
         {
             return new IntentClassification(
                 AgentIntent.MemoryManagement, _keywordMatchConfidence, [AgentIntent.MemoryManagement]);
+        }
+
+        // Explicit visualization requests take priority over broad keyword/LLM routing.
+        // A prompt like "Show a gauge chart for <brand> inventory health in the Midwest"
+        // must reach a data + CreateChart specialist (here: supply/shipments via the
+        // "inventory" cue) rather than being classified as council/health on the bare
+        // keyword "health". The detector is generic (chart-type word + domain cue) and
+        // never yields the portfolio-health council, which produces prose/votes, no chart.
+        ChartIntent chartIntent = ChartRequestDetector.Detect(message);
+        if (chartIntent.IsExplicitChartRequest)
+        {
+            return new IntentClassification(
+                chartIntent.RoutedIntent, _keywordMatchConfidence, [chartIntent.RoutedIntent]);
         }
 
         // Portfolio-level "performing" queries → council (multi-agent synthesis)
