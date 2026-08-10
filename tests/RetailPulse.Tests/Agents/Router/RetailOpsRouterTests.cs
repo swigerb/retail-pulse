@@ -631,6 +631,86 @@ public class RetailOpsRouterTests
 
     #endregion
 
+    #region Explicit Chart-Intent Fast-Path
+
+    [Theory]
+    // Exact P0 gauge prompt: must reach the supply/inventory specialist (via the
+    // "inventory" cue) and NOT the health council, despite the word "health".
+    [InlineData("Show a gauge chart for Pinnacle Hardware inventory health in the Midwest", AgentIntent.SupplyShipments)]
+    // Exact P0 bar prompt: depletion velocity → demand specialist.
+    [InlineData("Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast", AgentIntent.DemandForecasting)]
+    // Generic, not brand-overfit: chart-type word + domain cue.
+    [InlineData("Give me a line chart of gross margin by brand", AgentIntent.MarginAnalysis)]
+    [InlineData("bar chart of planogram compliance by store", AgentIntent.Planogram)]
+    [InlineData("Plot a gauge for stockout risk in the West", AgentIntent.SupplyShipments)]
+    public async Task RouteAsync_ExplicitChartRequest_RoutesToChartCapableSpecialist(
+        string message, string expectedIntent)
+    {
+        // Mock returns General/0.5 — if the chart fast-path did NOT fire, the result
+        // would be General (below threshold), so a correct specialist intent proves
+        // the deterministic detector intercepted before the LLM.
+        IChatClient chatClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.5}}");
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
+
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
+
+        result.Intent.Should().Be(expectedIntent);
+        result.Confidence.Should().Be(0.95, "chart-intent fast-path assigns keyword confidence");
+        result.DetectedIntents.Should().NotContain(AgentIntent.PortfolioHealth,
+            "an explicit chart request must never route to the health council");
+    }
+
+    [Fact]
+    public async Task RouteAsync_ExplicitGaugeChart_DoesNotInvokeLlmOrCouncil()
+    {
+        // The exact gauge prompt must be intercepted deterministically (no LLM call)
+        // and must not be classified as council/health.
+        var mockClient = new Mock<IChatClient>();
+        mockClient
+            .Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant,
+                    $"{{\"intent\":\"{AgentIntent.PortfolioHealth}\",\"confidence\":0.99}}")));
+
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(mockClient.Object, specialists);
+
+        RoutingDecision result = await router.RouteAsync(
+            "Show a gauge chart for Pinnacle Hardware inventory health in the Midwest", null, null, null);
+
+        result.Intent.Should().Be(AgentIntent.SupplyShipments);
+        result.DetectedIntents.Should().NotContain(AgentIntent.PortfolioHealth);
+        mockClient.Verify(x => x.GetResponseAsync(
+            It.IsAny<IEnumerable<ChatMessage>>(),
+            It.IsAny<ChatOptions>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    // Genuine council prompts WITHOUT an explicit chart request must still reach the council.
+    [InlineData("How is our portfolio performing?", AgentIntent.PortfolioHealth)]
+    [InlineData("How is the overall performing?", AgentIntent.PortfolioHealth)]
+    public async Task RouteAsync_PortfolioHealthWithoutChart_StillRoutesToCouncil(
+        string message, string expectedIntent)
+    {
+        IChatClient chatClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.5}}");
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
+
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
+
+        result.Intent.Should().Be(expectedIntent);
+        result.Confidence.Should().Be(0.95);
+    }
+
+    #endregion
+
     #region Helpers
 
     private static IChatClient MockChatClient(string responseText)

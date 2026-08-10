@@ -126,6 +126,64 @@ public sealed class ToolResultBudgetTests
     }
 
     [Fact]
+    public void HistoricalDemand_Compaction_MarksAggregateComplete_NotTruncated()
+    {
+        // Regression for the P0: after compaction the model wrongly treated the aggregate
+        // as truncated/unusable and refused the comparison. The compacted result must now
+        // affirm the aggregate is complete and must NOT be flagged truncated.
+        ToolResultBudget budget = CreateBudget();
+        string raw = BuildHistoricalDemand(regions: ["West", "East", "South"], weeksPerRegion: 52);
+        raw.Length.Should().BeGreaterThan(6000);
+
+        BudgetedResult result = budget.Apply("GetHistoricalDemand", raw, Options());
+
+        result.Metrics.Compacted.Should().BeTrue();
+        result.Metrics.Truncated.Should().BeFalse(
+            "a faithful per-region rollup is not aggregate loss and must not signal 'data unusable'");
+
+        using var doc = JsonDocument.Parse(result.Json);
+        JsonElement compaction = doc.RootElement.GetProperty("compaction");
+        compaction.GetProperty("aggregate_complete").GetBoolean().Should().BeTrue();
+        compaction.TryGetProperty("sufficient_for", out JsonElement sufficient).Should().BeTrue();
+        sufficient.GetArrayLength().Should().BeGreaterThan(0);
+        compaction.TryGetProperty("narrowed_detail", out JsonElement narrowed).Should().BeTrue();
+        narrowed.GetArrayLength().Should().BeGreaterThan(0);
+        // The detail hint must not tell the model the data is unusable/truncated.
+        string hint = compaction.GetProperty("detail_hint").GetString()!;
+        hint.Should().NotContainAny("truncated", "unusable");
+        hint.ToLowerInvariant().Should().Contain("sufficient");
+    }
+
+    [Fact]
+    public void HistoricalDemand_Compaction_PreservesPerRegionVelocity()
+    {
+        // The depletion-velocity comparison relies on avg_weekly_volume per region — it
+        // must survive compaction with faithful semantics.
+        var compactor = new HistoricalDemandCompactor();
+        string raw = JsonSerializer.Serialize(new
+        {
+            period = new { start = "2024-01-01", end = "2024-12-31", months = 12 },
+            filters = new { brand = "Summit Vodka", region = "Northeast", channel = (string?)null },
+            summary = new { total_volume = 300.0, total_units = 30, weeks_of_data = 2, avg_weekly_volume = 150.0 },
+            weekly_data = new object[]
+            {
+                new { brand = "Summit Vodka", region = "Northeast", channel = "Retail", week_starting = "2024-01-01", volume = 100.0, units = 10, avg_daily_volume = 14.3 },
+                new { brand = "Summit Vodka", region = "Northeast", channel = "Retail", week_starting = "2024-01-08", volume = 200.0, units = 20, avg_daily_volume = 28.6 }
+            }
+        });
+
+        ToolCompactionOutcome outcome = compactor.Compact("GetHistoricalDemand", raw, Options());
+        outcome.Truncated.Should().BeFalse();
+
+        using var doc = JsonDocument.Parse(outcome.Json);
+        JsonElement region = doc.RootElement.GetProperty("by_region")[0];
+        region.GetProperty("region").GetString().Should().Be("Northeast");
+        region.GetProperty("volume").GetDouble().Should().Be(300.0);
+        // avg weekly velocity = total volume / distinct weeks = 300 / 2 = 150.
+        region.GetProperty("avg_weekly_volume").GetDouble().Should().Be(150.0);
+    }
+
+    [Fact]
     public void PortfolioDepletion_DropsSentimentNarrative_KeepsMetrics()
     {
         ToolResultBudget budget = CreateBudget();
@@ -166,6 +224,10 @@ public sealed class ToolResultBudgetTests
         first.GetProperty("brand").GetString().Should().Be("Apex Grill");
         first.GetProperty("depletions_yoy").GetString().Should().Be("+3.2%");
         first.TryGetProperty("sentiment_summary", out _).Should().BeFalse("verbose narrative is dropped");
+
+        // Comparison metrics are affirmed complete so the model proceeds to a chart.
+        JsonElement portfolioCompaction = doc.RootElement.GetProperty("compaction");
+        portfolioCompaction.GetProperty("aggregate_complete").GetBoolean().Should().BeTrue();
     }
 
     [Fact]
@@ -235,6 +297,39 @@ public sealed class ToolResultBudgetTests
         result.Metrics.Compacted.Should().BeFalse();
     }
 
+    [Fact]
+    public void ThreeBrandNortheastComparison_CompactContext_StaysWellUnderBudget()
+    {
+        // E-gate: the exact bar-comparison context (3 spirit brands x Northeast, each a
+        // full 12-month/multi-channel pull) must stay far below the configured budget and
+        // the <25K-token target — no regression toward the pre-optimization ~437K blow-up.
+        ToolResultBudget budget = CreateBudget();
+        ToolResultBudgetOptions options = Options();
+        string[] brands = ["Sierra Gold Tequila", "Ridgeline Bourbon", "Summit Vodka"];
+
+        int cumulativeChars = 0;
+        foreach (string brand in brands)
+        {
+            string raw = BuildBrandRegionDemand(brand, "Northeast", months: 12, channels: 3);
+            raw.Length.Should().BeGreaterThan(6000, "the raw pull is what previously blew the budget");
+
+            BudgetedResult result = budget.Apply("GetHistoricalDemand", raw, options);
+            result.Metrics.Compacted.Should().BeTrue();
+            result.Metrics.Truncated.Should().BeFalse();
+            result.Json.Length.Should().BeLessThan(options.MaxResultChars,
+                "each compacted brand pull must fit the per-result budget");
+            cumulativeChars += result.Json.Length;
+        }
+
+        // Add a representative chart result (exempt, but counts toward what the model sees).
+        cumulativeChars += 1200;
+
+        int estimatedTokens = cumulativeChars / options.CharsPerToken;
+        estimatedTokens.Should().BeLessThan(25_000, "the exact comparison must stay under the 25K target");
+        cumulativeChars.Should().BeLessThan(options.MaxCumulativeChars,
+            "three compact summaries plus a chart must fit the cumulative budget");
+    }
+
     private static string BuildHistoricalDemand(string[] regions, int weeksPerRegion)
     {
         var weekly = new List<object>();
@@ -260,6 +355,46 @@ public sealed class ToolResultBudgetTests
             period = new { start = "2024-01-01", end = "2024-12-31", months = 12 },
             filters = new { brand = "Apex Grill", region = (string?)null, channel = (string?)null },
             summary = new { total_volume = 100000.0, total_units = 10000, weeks_of_data = weeksPerRegion, avg_weekly_volume = 1923.0 },
+            weekly_data = weekly
+        });
+    }
+
+    private static string BuildBrandRegionDemand(string brand, string region, int months, int channels)
+    {
+        string[] channelNames = ["Retail", "OnPremise", "ECommerce"];
+        var weekly = new List<object>();
+        int weeks = months * 4;
+        double total = 0;
+        for (int c = 0; c < channels; c++)
+        {
+            for (int w = 0; w < weeks; w++)
+            {
+                double volume = 100.0 + w + (c * 25);
+                total += volume;
+                weekly.Add(new
+                {
+                    brand,
+                    region,
+                    channel = channelNames[c % channelNames.Length],
+                    week_starting = $"2024-W{w:00}",
+                    volume,
+                    units = 10 + w,
+                    avg_daily_volume = Math.Round(volume / 7, 1)
+                });
+            }
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            period = new { start = "2024-01-01", end = "2024-12-31", months },
+            filters = new { brand, region, channel = (string?)null },
+            summary = new
+            {
+                total_volume = total,
+                total_units = weekly.Count * 15,
+                weeks_of_data = weeks,
+                avg_weekly_volume = Math.Round(total / weeks, 1)
+            },
             weekly_data = weekly
         });
     }

@@ -130,4 +130,41 @@ describe('ChartRenderer', () => {
 
     expect(screen.getByText('Upper Bar')).toBeInTheDocument();
   });
+
+  it('renders a gauge with a finite 0-100 value and accessible label', () => {
+    // Mirrors the deterministic gauge the backend builds for an explicit
+    // "gauge chart for <brand> inventory health in <region>" request.
+    const spec: ChartSpec = {
+      type: 'gauge',
+      title: 'Pinnacle Hardware Inventory Health — Midwest',
+      data: [
+        { legend: 'Inventory Health', values: [{ x: 'Pinnacle Hardware — Midwest', y: 75 }] },
+      ],
+    };
+
+    const { container } = renderWithProvider(<ChartRenderer charts={[spec]} />);
+
+    // Title and the numeric gauge value render (real SVG gauge, not a blank card).
+    expect(screen.getByText('Pinnacle Hardware Inventory Health — Midwest')).toBeInTheDocument();
+    expect(screen.getByText('75%')).toBeInTheDocument();
+    expect(screen.getByText('Pinnacle Hardware — Midwest')).toBeInTheDocument();
+    const gauge = container.querySelector('svg[role="img"]');
+    expect(gauge).not.toBeNull();
+    expect(gauge?.getAttribute('aria-label')).toContain('75 percent');
+    // Not routed to the empty-state diagnostic.
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('clamps an out-of-range gauge value into the arc but shows the raw number', () => {
+    const spec: ChartSpec = {
+      type: 'gauge',
+      title: 'Supply Health',
+      data: [{ legend: 'Supply Health', values: [{ x: 'West', y: 140 }] }],
+    };
+
+    renderWithProvider(<ChartRenderer charts={[spec]} />);
+
+    // The label text shows the provided value; the arc geometry clamps internally.
+    expect(screen.getByText('140%')).toBeInTheDocument();
+  });
 });
