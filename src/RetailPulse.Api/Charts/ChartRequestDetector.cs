@@ -7,9 +7,12 @@ namespace RetailPulse.Api.Charts;
 /// Result of inspecting a user message for an <b>explicit</b> visualization request.
 /// </summary>
 /// <param name="IsExplicitChartRequest">
-/// True when the message unambiguously asks for a chart/graph/gauge/table visualization
-/// (a chart-type word paired with a chart noun, a bare "gauge", or a visualization verb
-/// paired with a chart noun).
+/// True when the message unambiguously asks for a chart/graph/gauge/table visualization:
+/// a chart-type word paired with a chart noun ("gauge chart"), a visualization verb paired
+/// with a chart noun ("plot the depletion as a graph"), or a chart-only type word used as a
+/// noun ("show a gauge", "gauge for inventory health"). A bare <em>verb</em> use of an
+/// ambiguous type word — "gauge the risk", "gauge customer sentiment" — is deliberately NOT
+/// treated as an explicit chart request.
 /// </param>
 /// <param name="ChartType">
 /// The canonical <see cref="Contracts.ChartSpec.Type"/> the user asked for
@@ -56,9 +59,25 @@ public static partial class ChartRequestDetector
         RegexOptions.IgnoreCase)]
     private static partial Regex VizVerbRegex();
 
-    // "gauge" is unambiguous in this domain — it only ever denotes a gauge chart.
-    [GeneratedRegex(@"\bgauge\b", RegexOptions.IgnoreCase)]
-    private static partial Regex GaugeRegex();
+    // A chart-type word used as a chart-object NOUN, without the literal word "chart"/"graph":
+    //   * a visualization verb + optional "me"/"us" + a determiner + the type
+    //     ("show a gauge", "plot a gauge", "give me a gauge"), or
+    //   * the type immediately followed by "for" ("gauge for inventory health").
+    // Restricted to chart-ONLY type words (gauge, donut, scatter, the compound bars) so that
+    // ambiguous ordinary-language words (bar, line, table, column, area, pie) never collide —
+    // e.g. "raise the bar for store performance", "draw a line in the sand", "table for two".
+    // Those ambiguous words still require the literal "<type> chart" phrasing (TypedChartRegex)
+    // or the chart-noun + visualization-verb path.
+    [GeneratedRegex(
+        @"\b(?:show|display|plot|graph|draw|render|visuali[sz]e|create|generate|make|build|give)\s+(?:me\s+|us\s+)?(?:a|an|the)\s+(?<type>grouped\s*bar|stacked\s*bar|horizontal\s*bar|gauge|donut|doughnut|scatter)\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex VizVerbTypedNounRegex();
+
+    // "<chart-only type> for ...": "gauge for inventory health", "gauge for stockout risk".
+    [GeneratedRegex(
+        @"\b(?<type>grouped\s*bar|stacked\s*bar|horizontal\s*bar|gauge|donut|doughnut|scatter)\s+for\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex TypedNounForRegex();
 
     // A standalone chart-type word (used when a chart noun/verb was found but no
     // "<type> chart" phrase, e.g. "show the depletion bars as a chart").
@@ -108,11 +127,12 @@ public static partial class ChartRequestDetector
             explicitRequest = true;
             chartType = NormalizeType(typed.Groups["type"].Value);
         }
-        else if (GaugeRegex().IsMatch(message))
+        else if (TryDetectTypeAsNoun(message, out string? nounType))
         {
-            // "gauge" alone unambiguously requests a gauge chart.
+            // A chart-only type word used as a noun ("show a gauge", "gauge for inventory
+            // health"). Bare verb uses of ambiguous type words are excluded by grammar.
             explicitRequest = true;
-            chartType = "gauge";
+            chartType = nounType;
         }
         else if (ChartNounRegex().IsMatch(message) && VizVerbRegex().IsMatch(message))
         {
@@ -128,6 +148,33 @@ public static partial class ChartRequestDetector
 
         string routedIntent = ResolveDomainIntent(message);
         return new ChartIntent(true, chartType, routedIntent);
+    }
+
+    /// <summary>
+    /// Detect a chart-only type word used as a chart-object noun (not the literal
+    /// "&lt;type&gt; chart" phrase). Matches a visualization verb + determiner + type
+    /// ("show a gauge") or "&lt;type&gt; for" ("gauge for inventory health"). Only chart-only
+    /// type words are considered so ambiguous ordinary language ("raise the bar for …",
+    /// "table for two", "draw a line in the sand", "gauge the risk") never collides.
+    /// </summary>
+    private static bool TryDetectTypeAsNoun(string message, out string? chartType)
+    {
+        Match viz = VizVerbTypedNounRegex().Match(message);
+        if (viz.Success)
+        {
+            chartType = NormalizeType(viz.Groups["type"].Value);
+            return true;
+        }
+
+        Match forMatch = TypedNounForRegex().Match(message);
+        if (forMatch.Success)
+        {
+            chartType = NormalizeType(forMatch.Groups["type"].Value);
+            return true;
+        }
+
+        chartType = null;
+        return false;
     }
 
     private static string ResolveDomainIntent(string message)

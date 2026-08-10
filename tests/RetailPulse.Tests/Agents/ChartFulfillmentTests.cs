@@ -48,10 +48,38 @@ public sealed class ChartFulfillmentTests
     [InlineData("What's the inventory level for Pinnacle Hardware?")]
     [InlineData("Summarize distributor sentiment this quarter")]
     [InlineData("")]
+    // Bare VERB uses of ambiguous type words must route normally — never a chart request.
+    [InlineData("How would you gauge our portfolio's performance this quarter?")]
+    [InlineData("gauge customer sentiment")]
+    [InlineData("gauge the risk")]
+    [InlineData("Can you gauge how the Northeast is trending?")]
+    // Ordinary-language collisions for other type words must not trip the detector.
+    [InlineData("Raise the bar for store performance next quarter")]
+    [InlineData("Draw a line in the sand on trade spend")]
+    [InlineData("Book a table for two at the distributor dinner")]
+    [InlineData("What's the bottom line on margin this year?")]
+    [InlineData("Table the discussion about planogram resets")]
     public void Detect_NonChartPrompt_IsNotExplicit(string message)
     {
         ChartIntent intent = ChartRequestDetector.Detect(message);
         intent.IsExplicitChartRequest.Should().BeFalse();
+    }
+
+    [Theory]
+    // A chart-only type word used as a noun (no literal "chart") is still explicit.
+    [InlineData("Show a gauge for Pinnacle Hardware inventory health", "gauge", AgentIntent.SupplyShipments)]
+    [InlineData("create a gauge for stockout risk in the West", "gauge", AgentIntent.SupplyShipments)]
+    [InlineData("render a gauge", "gauge", AgentIntent.General)]
+    [InlineData("gauge for supply health in the West", "gauge", AgentIntent.SupplyShipments)]
+    public void Detect_ChartOnlyTypeAsNoun_IsExplicit(
+        string message, string expectedType, string expectedIntent)
+    {
+        ChartIntent intent = ChartRequestDetector.Detect(message);
+
+        intent.IsExplicitChartRequest.Should().BeTrue();
+        intent.ChartType.Should().Be(expectedType);
+        intent.RoutedIntent.Should().Be(expectedIntent);
+        intent.RoutedIntent.Should().NotBe(AgentIntent.PortfolioHealth);
     }
 
     [Fact]
@@ -59,6 +87,25 @@ public sealed class ChartFulfillmentTests
     {
         ChartRequestDetector.Detect("gauge for supply health in the West")
             .ChartType.Should().Be("gauge");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_VerbGaugePortfolio_NoDiagnostic()
+    {
+        // "gauge" used as a verb about portfolio performance is NOT an explicit chart
+        // request, so the fulfillment invariant must be a no-op — no chart, no diagnostic.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            JsonSerializer.Serialize(new { note = "council prose only" }));
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "How would you gauge our portfolio's performance this quarter?",
+            response, charts, "The council's synthesis: healthy overall.");
+
+        result.Charts.Should().BeEmpty("a verb use of 'gauge' must never force a chart");
+        result.Reply.Should().Be("The council's synthesis: healthy overall.");
+        result.Reply.Should().NotContain("Chart unavailable");
     }
 
     // ── DeterministicChartBuilder ───────────────────────────────────────────

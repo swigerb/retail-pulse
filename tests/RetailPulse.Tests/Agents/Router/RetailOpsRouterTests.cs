@@ -709,6 +709,57 @@ public class RetailOpsRouterTests
         result.Confidence.Should().Be(0.95);
     }
 
+    [Fact]
+    public async Task RouteAsync_VerbGaugePortfolio_RoutesToCouncilNotChartSpecialist()
+    {
+        // "gauge" used as a VERB about portfolio performance must NOT trip the chart
+        // fast-path. It should fall through to normal classification (here the LLM,
+        // which classifies it as the portfolio-health council).
+        var mockClient = new Mock<IChatClient>();
+        mockClient
+            .Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant,
+                    $"{{\"intent\":\"{AgentIntent.PortfolioHealth}\",\"confidence\":0.95}}")));
+
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(mockClient.Object, specialists);
+
+        RoutingDecision result = await router.RouteAsync(
+            "How would you gauge our portfolio's performance this quarter?", null, null, null);
+
+        // Chart fast-path would have forced a chart specialist at confidence 0.95 with a
+        // single detected intent; instead the LLM classifier decides → council.
+        result.Intent.Should().Be(AgentIntent.PortfolioHealth);
+        mockClient.Verify(x => x.GetResponseAsync(
+            It.IsAny<IEnumerable<ChatMessage>>(),
+            It.IsAny<ChatOptions>(),
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce(),
+            "a verb use of 'gauge' must not be intercepted by the deterministic chart fast-path");
+    }
+
+    [Theory]
+    // Chart-only type word used as a noun (no literal "chart") still fast-paths to a specialist.
+    [InlineData("Show a gauge for Pinnacle Hardware inventory health in the Midwest", AgentIntent.SupplyShipments)]
+    [InlineData("create a gauge for stockout risk in the West", AgentIntent.SupplyShipments)]
+    public async Task RouteAsync_ChartOnlyTypeAsNoun_FastPathsToSpecialist(
+        string message, string expectedIntent)
+    {
+        IChatClient chatClient = MockChatClient(
+            $"{{\"intent\":\"{AgentIntent.General}\",\"confidence\":0.5}}");
+        List<ISpecialistAgent> specialists = CreateSpecialistsWithAllIntents();
+        RetailOpsRouter router = CreateRouter(chatClient, specialists);
+
+        RoutingDecision result = await router.RouteAsync(message, null, null, null);
+
+        result.Intent.Should().Be(expectedIntent);
+        result.Confidence.Should().Be(0.95);
+        result.DetectedIntents.Should().NotContain(AgentIntent.PortfolioHealth);
+    }
+
     #endregion
 
     #region Helpers
