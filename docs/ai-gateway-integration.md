@@ -22,20 +22,20 @@ The AI Gateway pattern places APIM between the Retail Pulse API and Azure AI Fou
 
 ## Deployment
 
-The APIM AI Gateway infrastructure is defined in `deploy/apim-ai-gateway/` and deployed via Bicep:
+The APIM AI Gateway infrastructure is defined in `infra/modules/apim.bicep` and `infra/modules/apim-openai-api.bicep` and deployed as part of the primary azd infrastructure:
 
 ```powershell
-.\deploy\apim-ai-gateway\deploy-apim-api.ps1 -SetUserSecrets
+azd provision
 ```
 
 This deploys:
 
 | File | Purpose |
 |------|---------|
-| `main.bicep` | Inference API, backend, policies, **diagnostics**, and subscription |
-| `policy.xml` | AI Gateway policies (token rate limiting, token metrics, MI auth) |
-| `openai-spec.json` | Azure OpenAI API spec imported into APIM |
-| `role-assignment.bicep` | Managed identity role assignment (APIM → Azure AI Foundry) |
+| `infra/modules/apim.bicep` | APIM instance, service diagnostic settings, and loggers |
+| `infra/modules/apim-openai-api.bicep` | Inference API, backend, policies, **diagnostics**, and subscription |
+| `infra/modules/apim-openai-policy.xml` | AI Gateway policies (token rate limiting, token metrics, MI auth) |
+| `infra/modules/apim-openai-role-assignment.bicep` | Managed identity role assignment (APIM → Azure AI Foundry) |
 
 ---
 
@@ -165,7 +165,7 @@ az rest --method PUT \
 
 ## AI Gateway Policies
 
-The policies in `deploy/apim-ai-gateway/policy.xml`:
+The policies in `infra/modules/apim-openai-policy.xml`:
 
 | Policy | Section | Description |
 |--------|---------|-------------|
@@ -232,11 +232,10 @@ Before deploying, ensure your APIM instance has:
 ### 2. Deploy the APIM AI Gateway
 
 ```powershell
-cd deploy/apim-ai-gateway
-.\deploy-apim-api.ps1 -SetUserSecrets
+azd provision
 ```
 
-This creates the inference API, backend, policies, **both diagnostic resources** (Application Insights + Azure Monitor with `largeLanguageModel`), and the subscription.
+This creates the APIM instance, instance-level diagnostic settings, loggers, inference API, backend, policies, **both API-level diagnostic resources** (Application Insights + Azure Monitor with `largeLanguageModel`), and the subscription.
 
 ### 3. Configure Retail Pulse
 

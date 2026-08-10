@@ -28,6 +28,12 @@ param entraApiScope string = 'access_as_user'
 @description('API audience / Application ID URI (defaults to api://{clientId} when unset)')
 param entraAudience string = ''
 
+@description('Name of the Azure AI Foundry / Cognitive Services account used by the AI gateway backend')
+param aiFoundryAccountName string = 'aiagents-3rsdmhyb'
+
+@description('Resource group containing the Azure AI Foundry / Cognitive Services account used by the AI gateway backend')
+param aiFoundryResourceGroupName string = 'rg-repodigest-agents-demo-eus-001'
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -91,6 +97,30 @@ module staticWebApp './modules/static-web-app.bicep' = {
   }
 }
 
+module apim './modules/apim.bicep' = {
+  name: 'apim'
+  scope: rg
+  params: {
+    location: location
+    resourceToken: resourceToken
+    tags: tags
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    appInsightsId: monitoring.outputs.appInsightsId
+    appInsightsInstrumentationKey: monitoring.outputs.appInsightsInstrumentationKey
+  }
+}
+
+module apimOpenAiApi './modules/apim-openai-api.bicep' = {
+  name: 'apim-openai-api'
+  scope: rg
+  params: {
+    apimName: apim.outputs.apimName
+    apimPrincipalId: apim.outputs.apimPrincipalId
+    aiFoundryAccountName: aiFoundryAccountName
+    aiFoundryResourceGroupName: aiFoundryResourceGroupName
+  }
+}
+
 output AZURE_RESOURCE_GROUP string = rg.name
 // Dedicated Basic ACR. Emitting AZURE_CONTAINER_REGISTRY_ENDPOINT is what tells
 // azd to push service images to THIS registry instead of provisioning its own
@@ -112,6 +142,11 @@ output AZURE_LOG_ANALYTICS_WORKSPACE_ID string = monitoring.outputs.logAnalytics
 output AZURE_STATIC_WEB_APP_NAME string = staticWebApp.outputs.staticWebAppName
 output AZURE_FRONTEND_APP_NAME string = staticWebApp.outputs.staticWebAppName
 output AZURE_FRONTEND_APP_URL string = staticWebApp.outputs.staticWebAppUrl
+output AZURE_APIM_NAME string = apim.outputs.apimName
+output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
+output AZURE_APIM_INFERENCE_ENDPOINT string = apimOpenAiApi.outputs.inferenceEndpoint
+output AZURE_APIM_INFERENCE_API_NAME string = apimOpenAiApi.outputs.inferenceApiName
+output AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME string = apimOpenAiApi.outputs.subscriptionName
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and

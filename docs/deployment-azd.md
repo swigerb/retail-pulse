@@ -13,7 +13,7 @@ Retail Pulse supports one-command deployment to Azure using the [Azure Developer
 | Frontend | Azure Static Web Apps | React/Vite static build (Standard SKU); calls the Container Apps API directly over CORS |
 | Monitoring | Application Insights + Log Analytics | Full OpenTelemetry pipeline |
 | App data storage | Container-local temp (no durable volume) | The API's SQLite stores (cost/audit/memory/approvals/alerts) live in the replica's temp dir. **No Azure Files mount** — tenant governance forbids account-key CIFS mounts (see the incident note below), so observability history is per-replica and resets on replacement. |
-| AI Gateway | Azure API Management | Existing APIM Bicep in `deploy/apim-ai-gateway/` |
+| AI Gateway | Azure API Management | First-class azd IaC in `infra/modules/apim*.bicep` |
 | Authentication | Microsoft Entra ID | Single-tenant SPA/API app registration (MSAL PKCE). See [authentication-entra.md](./authentication-entra.md). Set `RETAIL_PULSE_ENTRA_*` before `azd provision`; the postprovision hook flips `RequireAuth` on, pins `Authentication__Mode=Entra` (provider-neutral mode contract — see [ADR-005](./adr/005-provider-neutral-authentication.md)), and disables Easy Auth. |
 
 ## Prerequisites
@@ -41,7 +41,7 @@ azd up
 ```
 
 This single command will:
-1. Provision all Azure resources (Container Registry, Container Apps Environment, Container Apps, Static Web App, App Insights, Log Analytics). Provisioning captures the API and frontend origins as azd environment values (`VITE_API_ORIGIN`, `RETAIL_PULSE_FRONTEND_ORIGIN`, `MCP_SERVER_BASE_URL`) and the dedicated registry coordinates (`AZURE_CONTAINER_REGISTRY_ENDPOINT`, `AZURE_CONTAINER_REGISTRY_NAME`, `AZURE_CONTAINER_REGISTRY_RESOURCE_ID`). A **postprovision hook** then binds each Container App's system-assigned identity to `AcrPull`, applies the synthetic-demo runtime environment, and disables ACA platform auth on the demo API.
+1. Provision all Azure resources (Container Registry, Container Apps Environment, Container Apps, Static Web App, App Insights, Log Analytics, Azure API Management). Provisioning captures the API and frontend origins as azd environment values (`VITE_API_ORIGIN`, `RETAIL_PULSE_FRONTEND_ORIGIN`, `MCP_SERVER_BASE_URL`), the dedicated registry coordinates (`AZURE_CONTAINER_REGISTRY_ENDPOINT`, `AZURE_CONTAINER_REGISTRY_NAME`, `AZURE_CONTAINER_REGISTRY_RESOURCE_ID`), and the APIM gateway coordinates (`AZURE_APIM_NAME`, `AZURE_APIM_GATEWAY_URL`, `AZURE_APIM_INFERENCE_ENDPOINT`, `AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME`). A **postprovision hook** then binds each Container App's system-assigned identity to `AcrPull`, applies the synthetic-demo runtime environment, and disables ACA platform auth on the demo API.
 2. Build the .NET services and containerize them (pushed to the dedicated Container Registry)
 3. Deploy backend containers to Azure Container Apps (the postprovision hook has already applied the API's model, CORS, auth, and MCP settings)
 4. Build the React frontend (`npm run build`) **with `VITE_API_ORIGIN` injected from the provisioned API origin** and deploy `dist/` to Azure Static Web Apps
@@ -150,12 +150,17 @@ azd env select dev
 
 ## AI Gateway (APIM)
 
-The AI Gateway (APIM) is deployed separately using the existing Bicep in `deploy/apim-ai-gateway/`. After `azd up`, configure the API service to point to your APIM endpoint:
+The AI Gateway is provisioned directly by `infra/main.bicep`:
 
-```bash
-# Set APIM endpoint as the OpenAI endpoint for the API service
-azd env set AZURE_OPENAI_ENDPOINT https://your-apim.azure-api.net/openai
-```
+- `infra/modules/apim.bicep` creates the Developer-tier APIM instance, service-level diagnostic settings, and the `appinsights-logger` / `azuremonitor` loggers.
+- `infra/modules/apim-openai-api.bicep` attaches the Azure AI Foundry backend, inference API, AI Gateway policy, API-level diagnostics, APIM subscription, and the cross-resource-group `Cognitive Services OpenAI User` assignment for the APIM managed identity.
+
+`azd provision` now emits:
+
+- `AZURE_APIM_NAME`
+- `AZURE_APIM_GATEWAY_URL`
+- `AZURE_APIM_INFERENCE_ENDPOINT`
+- `AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME`
 
 ## Deployment behavior & operational tradeoffs
 
