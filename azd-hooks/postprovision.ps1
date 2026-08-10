@@ -51,11 +51,41 @@ function Invoke-Az {
     return $result
 }
 
+function Get-ApimSubscriptionPrimaryKey {
+    param(
+        [Parameter(Mandatory)][string] $ResourceGroup,
+        [Parameter(Mandatory)][string] $ApimName,
+        [Parameter(Mandatory)][string] $SubscriptionName
+    )
+
+    $subscriptionId = (Invoke-Az `
+        -Arguments @('account', 'show', '--query', 'id', '--output', 'tsv') `
+        -FailureMessage 'Failed to read the active Azure subscription id for APIM secret lookup' | Out-String).Trim()
+
+    if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
+        throw 'Active Azure subscription id is empty; cannot retrieve the APIM subscription key.'
+    }
+
+    $uri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/subscriptions/$SubscriptionName/listSecrets?api-version=2024-06-01-preview"
+    $response = (Invoke-Az `
+        -Arguments @('rest', '--method', 'post', '--uri', $uri, '--output', 'json') `
+        -FailureMessage "Failed to retrieve APIM subscription secrets for '$SubscriptionName' on '$ApimName'" | Out-String) | ConvertFrom-Json
+
+    $primaryKey = $response.primaryKey
+    if ([string]::IsNullOrWhiteSpace($primaryKey)) {
+        throw "APIM subscription '$SubscriptionName' on '$ApimName' did not return a primaryKey."
+    }
+
+    return $primaryKey.Trim()
+}
+
 $resourceGroup  = Get-RequiredEnv 'AZURE_RESOURCE_GROUP'
 $registryName   = Get-RequiredEnv 'AZURE_CONTAINER_REGISTRY_NAME'
 $registryServer = Get-RequiredEnv 'AZURE_CONTAINER_REGISTRY_ENDPOINT'
 $registryId     = Get-RequiredEnv 'AZURE_CONTAINER_REGISTRY_RESOURCE_ID'
-$openAiEndpoint = Get-RequiredEnv 'AZURE_OPENAI_ENDPOINT'
+$apimName       = Get-RequiredEnv 'AZURE_APIM_NAME'
+$apimInferenceEndpoint = Get-RequiredEnv 'AZURE_APIM_INFERENCE_ENDPOINT'
+$apimInferenceSubscriptionName = Get-RequiredEnv 'AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME'
 $apiUrl         = Get-RequiredEnv 'AZURE_API_APP_URL'
 $mcpServerUrl   = Get-RequiredEnv 'AZURE_MCP_SERVER_APP_URL'
 $frontendOrigin = Get-RequiredEnv 'RETAIL_PULSE_FRONTEND_ORIGIN'
@@ -114,6 +144,23 @@ foreach ($app in $apps) {
 
 Write-Host 'Configuring production auth + runtime settings for the API...'
 
+$apimSubscriptionSecretName = 'apim-sub-key'
+Write-Host "Retrieving APIM inference subscription key '$apimInferenceSubscriptionName' from '$apimName'..."
+$apimSubscriptionPrimaryKey = Get-ApimSubscriptionPrimaryKey `
+    -ResourceGroup $resourceGroup `
+    -ApimName $apimName `
+    -SubscriptionName $apimInferenceSubscriptionName
+
+Invoke-Az `
+    -Arguments @(
+        'containerapp', 'secret', 'set',
+        '--name', $apps[0],
+        '--resource-group', $resourceGroup,
+        '--secrets', "$apimSubscriptionSecretName=$apimSubscriptionPrimaryKey",
+        '--output', 'none'
+    ) `
+    -FailureMessage "Failed to store the APIM subscription key as a secret on '$($apps[0])'" | Out-Null
+
 # The API is the security boundary for the SWA + ACA architecture. It deploys as
 # Production with real Entra JWT validation enabled (Security__RequireAuth=true).
 # ACA platform (Easy Auth) stays disabled below so the in-process JwtBearer handler
@@ -124,8 +171,9 @@ Invoke-Az `
         '--name', $apps[0],
         '--resource-group', $resourceGroup,
         '--set-env-vars',
-        "OpenAI__Endpoint=$openAiEndpoint",
-        'OpenAI__UseManagedIdentity=true',
+        "OpenAI__Endpoint=$apimInferenceEndpoint",
+        'OpenAI__UseManagedIdentity=false',
+        "OpenAI__ApimSubscriptionKey=secretref:$apimSubscriptionSecretName",
         'OpenAI__Deployment=gpt-5.4-mini-2026-03-17',
         'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17',
         "McpServer__BaseUrl=$mcpServerUrl",

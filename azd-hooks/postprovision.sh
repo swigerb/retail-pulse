@@ -30,7 +30,9 @@ require_env AZURE_API_APP_URL
 require_env AZURE_MCP_SERVER_APP_NAME
 require_env AZURE_MCP_SERVER_APP_URL
 require_env AZURE_TEAMS_BOT_APP_NAME
-require_env AZURE_OPENAI_ENDPOINT
+require_env AZURE_APIM_NAME
+require_env AZURE_APIM_INFERENCE_ENDPOINT
+require_env AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME
 require_env RETAIL_PULSE_FRONTEND_ORIGIN
 require_env AZURE_STATIC_WEB_APP_NAME
 require_env AZURE_LOCATION
@@ -45,6 +47,9 @@ resource_group="$AZURE_RESOURCE_GROUP"
 registry_name="$AZURE_CONTAINER_REGISTRY_NAME"
 registry_server="$AZURE_CONTAINER_REGISTRY_ENDPOINT"
 registry_id="$AZURE_CONTAINER_REGISTRY_RESOURCE_ID"
+apim_name="$AZURE_APIM_NAME"
+apim_inference_endpoint="$AZURE_APIM_INFERENCE_ENDPOINT"
+apim_inference_subscription_name="$AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME"
 entra_tenant_id="$RETAIL_PULSE_ENTRA_TENANT_ID"
 entra_client_id="$RETAIL_PULSE_ENTRA_CLIENT_ID"
 entra_api_scope="${RETAIL_PULSE_ENTRA_API_SCOPE:-access_as_user}"
@@ -97,6 +102,33 @@ done
 
 echo 'Configuring production auth + runtime settings for the API...'
 
+subscription_id=$(az account show --query id --output tsv)
+if [ -z "$subscription_id" ]; then
+    echo 'Active Azure subscription id is empty; cannot retrieve the APIM subscription key.' >&2
+    exit 1
+fi
+
+apim_subscription_secret_name='apim-sub-key'
+apim_subscription_secrets_uri="https://management.azure.com/subscriptions/$subscription_id/resourceGroups/$resource_group/providers/Microsoft.ApiManagement/service/$apim_name/subscriptions/$apim_inference_subscription_name/listSecrets?api-version=2024-06-01-preview"
+
+echo "Retrieving APIM inference subscription key '$apim_inference_subscription_name' from '$apim_name'..."
+apim_subscription_primary_key=$(az rest \
+    --method post \
+    --uri "$apim_subscription_secrets_uri" \
+    --query primaryKey \
+    --output tsv)
+
+if [ -z "$apim_subscription_primary_key" ]; then
+    echo "APIM subscription '$apim_inference_subscription_name' on '$apim_name' did not return a primaryKey." >&2
+    exit 1
+fi
+
+az containerapp secret set \
+    --name "$AZURE_API_APP_NAME" \
+    --resource-group "$resource_group" \
+    --secrets "$apim_subscription_secret_name=$apim_subscription_primary_key" \
+    --output none
+
 # The API is the security boundary. It deploys as Production with real Entra JWT
 # validation enabled (Security__RequireAuth=true). ACA platform (Easy Auth) stays
 # disabled below so the in-process JwtBearer handler is the sole gate; direct ACA
@@ -105,8 +137,9 @@ az containerapp update \
     --name "$AZURE_API_APP_NAME" \
     --resource-group "$resource_group" \
     --set-env-vars \
-    "OpenAI__Endpoint=$AZURE_OPENAI_ENDPOINT" \
-    'OpenAI__UseManagedIdentity=true' \
+    "OpenAI__Endpoint=$apim_inference_endpoint" \
+    'OpenAI__UseManagedIdentity=false' \
+    "OpenAI__ApimSubscriptionKey=secretref:$apim_subscription_secret_name" \
     'OpenAI__Deployment=gpt-5.4-mini-2026-03-17' \
     'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17' \
     "McpServer__BaseUrl=$AZURE_MCP_SERVER_APP_URL" \

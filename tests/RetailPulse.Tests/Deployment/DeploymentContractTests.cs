@@ -125,7 +125,9 @@ public partial class DeploymentContractTests
                      "AZURE_MCP_SERVER_APP_NAME",
                      "AZURE_MCP_SERVER_APP_URL",
                      "AZURE_TEAMS_BOT_APP_NAME",
-                     "AZURE_OPENAI_ENDPOINT",
+                     "AZURE_APIM_NAME",
+                     "AZURE_APIM_INFERENCE_ENDPOINT",
+                     "AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME",
                      "RETAIL_PULSE_FRONTEND_ORIGIN",
                      "AZURE_STATIC_WEB_APP_NAME",
                      "AZURE_LOCATION",
@@ -177,6 +179,29 @@ public partial class DeploymentContractTests
             $"{hookFile} must inject the Entra tenant id into the API");
         script.Should().Contain("MicrosoftEntra__ClientId=",
             $"{hookFile} must inject the Entra client id/audience into the API");
+    }
+
+    [Theory]
+    [InlineData("postprovision.ps1")]
+    [InlineData("postprovision.sh")]
+    public void PostprovisionHook_WiresApiThroughApimGatewayUsingSecretReference(string hookFile)
+    {
+        string script = Normalize(File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile)));
+
+        script.Should().Contain("listSecrets",
+            $"{hookFile} must retrieve the APIM subscription key live instead of persisting it in azd outputs");
+        script.Should().Contain("containerapp secret set",
+            $"{hookFile} must store the APIM subscription key as a Container Apps secret");
+        script.Should().Contain("OpenAI__Endpoint=",
+            $"{hookFile} must update the API to point at the APIM inference endpoint");
+        script.Should().Contain("AZURE_APIM_INFERENCE_ENDPOINT",
+            $"{hookFile} must source the APIM inference endpoint from azd environment outputs");
+        script.Should().Contain("OpenAI__UseManagedIdentity=false",
+            $"{hookFile} must disable direct managed-identity auth when routing through APIM");
+        script.Should().Contain("apim-sub-key",
+            $"{hookFile} must use a stable Container Apps secret name for the APIM subscription key");
+        script.Should().Contain("OpenAI__ApimSubscriptionKey=secretref:",
+            $"{hookFile} must wire the API to the APIM subscription key secret reference");
     }
 
     [Theory]

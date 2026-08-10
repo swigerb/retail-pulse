@@ -25,6 +25,7 @@ using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
+using RetailPulse.Api.OpenAI;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Resilience;
 using RetailPulse.Api.Scorecard;
@@ -660,24 +661,11 @@ builder.Services.AddSingleton<ConversationExporter>();
 builder.Services.AddSingleton<IConversationExport>(sp => sp.GetRequiredService<ConversationExporter>());
 
 // Register IChatClient — Azure OpenAI via APIM AI Gateway.
-// In Production we fail fast if the API key is missing rather than silently
-// using "demo-key" which would surface as opaque 401s at runtime.
-string openAiEndpoint = builder.Configuration["OpenAI:Endpoint"]
-    ?? (builder.Environment.IsDevelopment()
-        ? "https://bsapim-dev-northcentralus-001.azure-api.net/inference"
-        : null)
-    ?? throw new InvalidOperationException(
-        "Configuration value 'OpenAI:Endpoint' is required outside of Development.");
-
-bool useManagedIdentity = builder.Configuration.GetValue("OpenAI:UseManagedIdentity", false);
-string? openAiApiKey = builder.Configuration["OpenAI:ApiKey"];
-if (!useManagedIdentity && string.IsNullOrWhiteSpace(openAiApiKey))
-{
-    openAiApiKey = builder.Environment.IsDevelopment()
-        ? "demo-key"
-        : throw new InvalidOperationException(
-            "Configuration value 'OpenAI:ApiKey' is required outside of Development.");
-}
+// In Production we fail fast if neither an APIM subscription key nor a direct
+// OpenAI API key is configured while managed identity is disabled.
+var openAiConnection = OpenAiConnectionSettings.Load(
+    builder.Configuration,
+    builder.Environment);
 
 // NetworkTimeout caps a single HTTP attempt (one LLM roundtrip) to the AI Gateway.
 // 45s accommodates complex reasoning chains and tool-augmented responses that
@@ -693,15 +681,7 @@ var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
     RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 2)
 };
 
-Azure.AI.OpenAI.AzureOpenAIClient azureClient = useManagedIdentity
-    ? new Azure.AI.OpenAI.AzureOpenAIClient(
-        new Uri(openAiEndpoint),
-        new Azure.Identity.DefaultAzureCredential(),
-        azureClientOptions)
-    : new Azure.AI.OpenAI.AzureOpenAIClient(
-        new Uri(openAiEndpoint),
-        new System.ClientModel.ApiKeyCredential(openAiApiKey!),
-        azureClientOptions);
+Azure.AI.OpenAI.AzureOpenAIClient azureClient = openAiConnection.CreateClient(azureClientOptions);
 
 string agentDeployment = builder.Configuration["OpenAI:Deployment"] ?? agentDef.Model;
 
