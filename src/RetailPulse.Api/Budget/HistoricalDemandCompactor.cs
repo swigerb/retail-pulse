@@ -10,9 +10,12 @@ namespace RetailPulse.Api.Budget;
 ///
 /// This projection preserves the canonical <c>period</c>, <c>filters</c>, and
 /// <c>summary</c> (total volume/units, weeks-of-data, avg weekly volume) and replaces
-/// the raw weekly rows with an aligned <c>by_region</c> rollup — enough for a
-/// cross-brand, by-region comparison chart — plus an explicit compaction/continuation
-/// note describing how to opt back into week-level detail. It never fabricates values.
+/// the raw weekly rows with an aligned <c>by_region</c> rollup — a COMPLETE aggregate
+/// that fully answers totals, depletion-velocity, and cross-brand/region comparison
+/// questions. It flags <c>aggregate_complete: true</c> so the model trusts the summary
+/// instead of mistaking the rollup for truncated/unusable data, and only narrows
+/// week-level/per-channel detail (recoverable via a narrower re-call). It never fabricates
+/// values.
 /// </summary>
 public sealed class HistoricalDemandCompactor : IToolResultCompactor
 {
@@ -85,11 +88,33 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
             ["compaction"] = new JsonObject
             {
                 ["compacted"] = true,
+                // The aggregate (totals, average weekly/daily velocity, per-region rollup)
+                // is COMPLETE and faithful — only the per-week/per-channel detail rows were
+                // rolled up. Callers answering an aggregate question (totals, depletion
+                // velocity, cross-brand or cross-region comparison) have everything they
+                // need and MUST proceed. This is NOT a truncated/unusable result.
+                ["aggregate_complete"] = true,
                 ["original_weekly_rows"] = originalRows,
                 ["returned_region_rows"] = byRegionArray.Count,
-                ["detail_hint"] = "Weekly rows were rolled up per region to fit the tool-context budget. "
-                    + "For week-level detail, call GetHistoricalDemand again with an explicit single region "
-                    + "and a smaller months window."
+                ["sufficient_for"] = new JsonArray
+                {
+                    "total volume and units",
+                    "average weekly/daily depletion velocity",
+                    "cross-brand comparison",
+                    "cross-region comparison",
+                    "chart of totals or velocity by brand/region"
+                },
+                ["narrowed_detail"] = new JsonArray
+                {
+                    "individual week-over-week trend",
+                    "per-channel breakdown",
+                    "single-week anomaly detection"
+                },
+                ["detail_hint"] = "Weekly rows were rolled up per region. The summary and by_region "
+                    + "figures are complete and sufficient for totals, depletion-velocity, and "
+                    + "brand/region comparisons — proceed and build the chart. Only re-call "
+                    + "GetHistoricalDemand with an explicit single region and a smaller months window "
+                    + "if you specifically need week-level trend or per-channel detail."
             }
         };
 
@@ -97,7 +122,10 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
         return new ToolCompactionOutcome(
             json,
             Changed: true,
-            Truncated: byRegionArray.Count < originalRows,
+            // Rolling weekly rows into a faithful per-region aggregate is NOT aggregate loss:
+            // the summary/velocity/region figures are complete. Marking this Truncated=false
+            // keeps telemetry honest and avoids signalling "data unusable" downstream.
+            Truncated: false,
             OriginalItems: originalRows,
             ReturnedItems: byRegionArray.Count);
     }

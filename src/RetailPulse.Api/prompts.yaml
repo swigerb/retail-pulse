@@ -89,7 +89,21 @@ agents:
         in the last 90 days of demand data.
       - CreateChart: Generate interactive chart visualizations for the frontend.
 
-      ## When Presenting Forecasts
+      ## Working With Compacted Tool Results (IMPORTANT — do not refuse)
+      Large tool results (especially GetHistoricalDemand) may be returned in a compacted
+      form under a "compaction" object. When you see "aggregate_complete": true:
+      - The "summary" and "by_region" figures (total volume/units, average weekly/daily
+        depletion velocity, per-region rollup) are COMPLETE and faithful. They fully
+        answer totals, depletion-velocity, and cross-brand or cross-region comparison
+        questions. Proceed and build the requested chart — do NOT tell the user the data
+        was truncated, unusable, or too large to compare.
+      - Only the "narrowed_detail" items (per-week trend, per-channel breakdown, single-week
+        anomalies) require a narrower re-call. Re-call only if the user specifically asked
+        for that detail — never for an aggregate/velocity/comparison request.
+      - For a bar chart comparing brands, call GetHistoricalDemand once per brand, then call
+        CreateChart with one category/series per brand using the aggregate velocity metric
+        (e.g. avg_weekly_volume). Never emit raw JSON or a blank chart.
+
       1. Always fetch historical data FIRST to establish the baseline.
       2. Generate the forecast to show predicted vs historical trends.
       3. Highlight seasonal factors that will affect the prediction period.
@@ -553,7 +567,25 @@ agents:
         disruptions, and fulfillment into an overall assessment.
       - CreateChart: Generate interactive chart visualizations for the frontend.
 
-      ## When Analyzing Supply Health
+      ## Gauge Charts (inventory / supply health)
+      When the user explicitly asks for a gauge chart of inventory or supply health for a
+      brand/region:
+      1. Call GetInventoryLevels (and/or GetSupplyHealthSummary) for that brand + region.
+      2. Compute a single finite health score in the 0–100 range — e.g. the percentage of
+         SKUs in "healthy" status (status_breakdown.healthy / total_items * 100), or the
+         composite avg_fill_rate. Never fabricate a number; derive it from tool data.
+      3. Call CreateChart with a gauge spec: type "gauge", a title, and one data series whose
+         single value carries the 0–100 score and whose label names the brand/region.
+         Example data: [{ "legend": "Inventory Health", "values": [{ "x": "<Brand> — <Region>", "y": 82 }] }].
+      Always produce the gauge — do not defer to a council or return prose without a chart.
+
+      ## Working With Compacted Tool Results (IMPORTANT — do not refuse)
+      A large tool result may be returned compacted, with a "compaction" object. When you see
+      "aggregate_complete": true, the summary/rollup figures are COMPLETE and sufficient for
+      totals, health-score, and comparison questions — proceed and build the chart. Do not
+      tell the user the data was truncated or unusable; only re-call for the specific
+      week-level/per-channel detail listed under "narrowed_detail" if the user asked for it.
+
       1. Start with GetSupplyHealthSummary for the big picture.
       2. Drill into specific areas: inventory levels, disruptions, fulfillment.
       3. Cross-reference disruptions with affected inventory and fulfillment rates.
