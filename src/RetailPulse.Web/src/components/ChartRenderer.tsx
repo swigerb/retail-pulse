@@ -9,7 +9,7 @@ import {
 import { Card, makeStyles } from '@fluentui/react-components';
 import type { ChartSpec, ChartSeries, ForecastData } from '../types';
 import { ForecastChart } from './forecast';
-import { chartIsRenderable } from './chartBindability';
+import { chartIsRenderable, chartHasVisibleMagnitude } from './chartBindability';
 
 const BRAND_COLORS = ['#1565C0', '#42A5F5', '#4682B4', '#2E8B57', '#1E88E5', '#64B5F6', '#5F9EA0', '#0D47A1'];
 
@@ -344,8 +344,10 @@ export default function ChartRenderer({ charts, forecastData }: { charts: ChartS
           return <ForecastChart key={spec.title || `forecast-${i}`} data={spec.forecast} />;
         }
         // Enforce the renderable invariant at the render boundary: a spec with no
-        // bindable datapoints surfaces a diagnostic instead of an empty chart card.
-        if (!chartIsRenderable(spec)) {
+        // bindable datapoints — or one with no visible magnitude (all-zero
+        // payload, or a ranking chart with too few marks to be a real ranking)
+        // — surfaces a diagnostic instead of an empty chart card.
+        if (!chartIsRenderable(spec) || !chartHasVisibleMagnitude(spec)) {
           return <ChartUnavailable key={spec.title || `chart-${i}`} title={spec.title} />;
         }
         return <SingleChart key={spec.title || `chart-${i}`} spec={spec} />;

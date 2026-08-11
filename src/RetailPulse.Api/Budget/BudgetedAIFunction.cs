@@ -97,12 +97,15 @@ internal sealed class BudgetedAIFunction : AIFunction
             return cached;
         }
 
-        // 2) Distinct-call cap: refuse to invoke beyond the cap.
-        if (ctx.DistinctCalls >= _options.MaxToolCalls)
+        // 2) Distinct-call cap: refuse to invoke beyond the cap. Chart-intent requests
+        //    use the tighter MaxToolCallsForChartIntent so ranking/comparison prompts
+        //    never fan out into per-brand tool storms.
+        int effectiveCap = ctx.IsChartIntent
+            ? Math.Min(_options.MaxToolCalls, _options.MaxToolCallsForChartIntent)
+            : _options.MaxToolCalls;
+        if (ctx.DistinctCalls >= effectiveCap)
         {
-            string capJson = Diagnostic(
-                $"Tool-call budget reached ({_options.MaxToolCalls} distinct calls). "
-                + "Synthesize an answer from the results already gathered instead of calling more tools.");
+            string capJson = Diagnostic(BuildBudgetCapNotice(effectiveCap));
             var capMetrics = new ToolResultMetrics
             {
                 ToolName = toolName,
@@ -131,8 +134,9 @@ internal sealed class BudgetedAIFunction : AIFunction
         {
             finalJson = Diagnostic(
                 $"Cumulative tool-context budget ({_options.MaxCumulativeChars} chars) reached. "
-                + "This result was withheld to protect the context window. Synthesize an answer from the "
-                + "results already gathered, or re-call with a narrower filter.");
+                + "The aggregate results already gathered are COMPLETE — synthesize an answer "
+                + "and call CreateChart. Do not describe the data as missing; re-call with a "
+                + "narrower filter only if the user asked for detail outside the aggregate.");
             metrics = metrics with
             {
                 ReturnedChars = finalJson.Length,
@@ -183,6 +187,20 @@ internal sealed class BudgetedAIFunction : AIFunction
 
     private static string Diagnostic(string message) =>
         JsonSerializer.Serialize(new { budget_notice = message });
+
+    /// <summary>
+    /// Builds the per-request tool-call cap notice. The wording deliberately avoids the
+    /// words "truncated" / "placeholder" — those cues have been observed causing the
+    /// model to parrot a refusal narrative ("historical demand pulls were truncated /
+    /// placeholder zeros") back to the user even when the aggregate results already
+    /// gathered are complete and chartable. The instruction here is unambiguous:
+    /// synthesise from what you already have and call CreateChart.
+    /// </summary>
+    internal static string BuildBudgetCapNotice(int cap) =>
+        $"Tool-call budget reached ({cap} distinct calls). "
+        + "The aggregate results already gathered are COMPLETE and sufficient to answer "
+        + "this request — synthesize the answer from them and call CreateChart. Do not "
+        + "call more tools. Do not describe the data as missing.";
 
     private void EmitTelemetry(ToolResultMetrics m)
     {

@@ -234,6 +234,7 @@ public class RetailPulseAgentTests
             hubContext.Object,
             [],
             Mock.Of<ILogger<RetailPulseAgent>>(),
-            configuration);
+            configuration,
+            new TenantConfiguration());
     }
 }

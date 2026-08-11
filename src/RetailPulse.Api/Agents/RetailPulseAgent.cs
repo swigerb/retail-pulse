@@ -30,6 +30,7 @@ public class RetailPulseAgent
         IEnumerable<AITool> tools,
         ILogger<RetailPulseAgent> logger,
         IConfiguration configuration,
+        TenantConfiguration tenant,
         IHubContext<StreamingHub>? streamingHubContext = null,
         StreamingProgressFeature? streamingFeature = null)
     {
@@ -43,7 +44,8 @@ public class RetailPulseAgent
             configuration,
             pipelineLogger,
             metrics: null,
-            anonymousChatPolicy: NoOpAnonymousChatPolicy.Instance);
+            anonymousChatPolicy: NoOpAnonymousChatPolicy.Instance,
+            tenant: tenant);
         _generalAgent = new GeneralAgent(_pipeline, agentDef, tools);
     }
 

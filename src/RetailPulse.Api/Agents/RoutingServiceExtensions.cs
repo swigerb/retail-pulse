@@ -9,6 +9,7 @@ using RetailPulse.Api.Caching;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Telemetry;
+using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
@@ -70,7 +71,8 @@ public static class RoutingServiceExtensions
             IAnonymousChatPolicy anonymousChatPolicy = sp.GetRequiredService<IAnonymousChatPolicy>();
             Budget.ToolResultBudget? toolBudget = sp.GetService<Budget.ToolResultBudget>();
             Budget.ToolResultBudgetOptions? budgetOptions = sp.GetService<Budget.ToolResultBudgetOptions>();
-            return new AgentExecutionPipeline(chatClient, hubContext, streamingHubContext, streamingFeature, configuration, logger, metrics, anonymousChatPolicy, toolBudget, budgetOptions);
+            TenantConfiguration tenant = sp.GetRequiredService<TenantConfiguration>();
+            return new AgentExecutionPipeline(chatClient, hubContext, streamingHubContext, streamingFeature, configuration, logger, metrics, anonymousChatPolicy, tenant, toolBudget, budgetOptions);
         });
 
         // Register GeneralAgent as ISpecialistAgent

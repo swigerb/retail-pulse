@@ -108,6 +108,7 @@ public sealed class AnonymousPipelineCompositionTests
         services.AddSignalR();
         services.AddHttpContextAccessor();
         services.AddSingleton(config);
+        services.AddSingleton(new TenantConfiguration());
 
         // The capturing model client the composed pipeline will call.
         services.AddSingleton<IChatClient>(chatClient);
