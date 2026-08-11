@@ -37,7 +37,7 @@ public sealed class ChartIntentTokenBudgetTests
             // Emit a payload of the target size; the budget wrapper measures it after
             // per-tool compaction, but for a generic fake we return raw JSON that will
             // hit the MaxResultChars cap and be clipped.
-            string filler = new string('x', _resultBytes);
+            string filler = new('x', _resultBytes);
             return ValueTask.FromResult<object?>(JsonSerializer.Serialize(new { data = filler }));
         }
     }
@@ -64,8 +64,10 @@ public sealed class ChartIntentTokenBudgetTests
         using IDisposable scope = RequestToolContext.Begin("session-1", isChartIntent: true);
         for (int i = 0; i < 8; i++)
         {
-            var args = new AIFunctionArguments();
-            args["ix"] = i;
+            var args = new AIFunctionArguments
+            {
+                ["ix"] = i
+            };
             await wrapped.InvokeAsync(args);
         }
 

@@ -40,16 +40,13 @@ public sealed class ChartFulfillmentContractTests
     [InlineData("horizontal bar chart comparing all brands by YoY growth", AgentIntent.General)]
     // Bare velocity phrasing still routes to demand.
     [InlineData("bar chart comparing depletion velocity for all spirits brands", AgentIntent.DemandForecasting)]
-    public void ChartRequestDetector_Routes_Correctly(string message, string expectedIntent)
-    {
-        ChartRequestDetector.Detect(message).RoutedIntent.Should().Be(expectedIntent);
-    }
+    public void ChartRequestDetector_Routes_Correctly(string message, string expectedIntent) => ChartRequestDetector.Detect(message).RoutedIntent.Should().Be(expectedIntent);
 
     [Fact]
     public void ChartUnavailableDiagnostic_ContainsNoBannedFallbackPhrases()
     {
         // Invoke the internal diagnostic via reflection to keep the test hermetic.
-        System.Reflection.MethodInfo? m = typeof(RetailPulse.Api.Agents.AgentExecutionPipeline)
+        System.Reflection.MethodInfo? m = typeof(Api.Agents.AgentExecutionPipeline)
             .GetMethod("BuildChartUnavailableDiagnostic",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         m.Should().NotBeNull("the fail-closed diagnostic helper must remain in place");
@@ -62,7 +59,7 @@ public sealed class ChartFulfillmentContractTests
     [Fact]
     public void BudgetCapNotice_ContainsNoBannedFallbackPhrases()
     {
-        string notice = RetailPulse.Api.Budget.BudgetedAIFunction.BuildBudgetCapNotice(5);
+        string notice = Api.Budget.BudgetedAIFunction.BuildBudgetCapNotice(5);
         AssertNoBannedPhrases(notice);
     }
 

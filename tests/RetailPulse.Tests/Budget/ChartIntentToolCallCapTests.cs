@@ -47,8 +47,10 @@ public sealed class ChartIntentToolCallCapTests
 
     private static AIFunctionArguments Args(string brand)
     {
-        var a = new AIFunctionArguments();
-        a["brand"] = brand;
+        var a = new AIFunctionArguments
+        {
+            ["brand"] = brand
+        };
         return a;
     }
 
@@ -84,7 +86,7 @@ public sealed class ChartIntentToolCallCapTests
         // Calls 6, 7, 8 must all return the budget_notice diagnostic.
         for (int i = 5; i < 8; i++)
         {
-            using JsonDocument doc = JsonDocument.Parse((string)results[i]!);
+            using var doc = JsonDocument.Parse((string)results[i]!);
             doc.RootElement.TryGetProperty("budget_notice", out _)
                 .Should().BeTrue($"invocation #{i + 1} is beyond the chart-intent cap");
         }
@@ -94,7 +96,7 @@ public sealed class ChartIntentToolCallCapTests
     public async Task ChartIntent_UsesLowerOfMaxToolCallsAndChartCap()
     {
         // Even if the general cap is looser (12), the chart-intent cap (5) wins.
-        var options = DefaultOptions();
+        ToolResultBudgetOptions options = DefaultOptions();
         options.MaxToolCalls = 12;
         options.MaxToolCallsForChartIntent = 5;
 

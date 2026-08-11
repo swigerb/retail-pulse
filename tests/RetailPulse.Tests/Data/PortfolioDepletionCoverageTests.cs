@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
@@ -70,30 +71,30 @@ public class PortfolioDepletionCoverageTests : IDisposable
     private void AssertEveryBrandHasFiniteGrowth(object result, string expectedRegion)
     {
         // Serialize once and use the same reflection-free path other data tests use.
-        string json = System.Text.Json.JsonSerializer.Serialize(result);
-        using var doc = System.Text.Json.JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        string json = JsonSerializer.Serialize(result);
+        using var doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
 
-        root.TryGetProperty("brands", out var brands)
+        root.TryGetProperty("brands", out JsonElement brands)
             .Should().BeTrue("the aggregate must expose a brands[] array");
-        brands.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Array);
+        brands.ValueKind.Should().Be(JsonValueKind.Array);
 
         int expectedCount = _tenant.Brands.Count;
         brands.GetArrayLength().Should().Be(expectedCount,
             $"one row per tenant brand ({expectedCount}) is expected for region '{expectedRegion}'");
 
         var seenBrands = new List<string>();
-        foreach (var brand in brands.EnumerateArray())
+        foreach (JsonElement brand in brands.EnumerateArray())
         {
             brand.TryGetProperty("error", out _).Should().BeFalse(
                 $"no brand row may be an error shape for region '{expectedRegion}': {brand}");
 
-            brand.TryGetProperty("brand", out var brandName).Should().BeTrue();
+            brand.TryGetProperty("brand", out JsonElement brandName).Should().BeTrue();
             seenBrands.Add(brandName.GetString()!);
 
-            brand.TryGetProperty("metrics", out var metrics)
+            brand.TryGetProperty("metrics", out JsonElement metrics)
                 .Should().BeTrue($"brand row must carry metrics ({brandName.GetString()})");
-            metrics.TryGetProperty("depletions_yoy", out var yoy)
+            metrics.TryGetProperty("depletions_yoy", out JsonElement yoy)
                 .Should().BeTrue($"metrics must carry depletions_yoy ({brandName.GetString()})");
             string yoyString = yoy.GetString() ?? "";
             TryParseSignedPercent(yoyString, out double value)
@@ -102,7 +103,7 @@ public class PortfolioDepletionCoverageTests : IDisposable
         }
 
         // Every tenant brand appears — no silent drops.
-        foreach (var expected in _tenant.Brands)
+        foreach (BrandConfig expected in _tenant.Brands)
         {
             seenBrands.Should().Contain(expected.Name,
                 $"tenant brand '{expected.Name}' must appear in aggregate for region '{expectedRegion}'");

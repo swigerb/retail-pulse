@@ -103,30 +103,27 @@ internal static class DeterministicChartBuilder
         bool isHorizontalRanking = false)
     {
         _ = isHorizontalRanking; // reserved: caller signals the ranking contract via the outer TryBuild
-        if (gaugeFirst)
-        {
-            return TryBuildGauge(payloads) ?? TryBuildDemandBar(payloads, requestedType);
-        }
-
-        return (requestedType?.ToLowerInvariant()) switch
-        {
-            // Horizontal-bar RANKING has a single legitimate shape: a portfolio growth
-            // ranking built from GetPortfolioDepletionStats' brands[] payload. If that
-            // is not present we FAIL CLOSED (return null) rather than silently rebrand
-            // a velocity bar as growth or emit a groupedBar under a horizontalBar
-            // request — the P0 failure this fix addresses. The caller enforces the
-            // fail-closed contract via the chart-unavailable diagnostic.
-            "horizontalbar" => TryBuildGrowthRanking(payloads),
-            "groupedbar" or "stackedbar" => TryBuildGroupedRegionBar(payloads, requestedType)
-                ?? TryBuildDemandBar(payloads, requestedType),
-            "line" => TryBuildDemandLine(payloads)
-                ?? TryBuildDemandBar(payloads, "line"),
-            "pie" or "donut" => TryBuildShareOrMixPie(payloads, requestedType ?? "pie")
-                ?? TryBuildDemandBar(payloads, requestedType),
-            "table" => TryBuildDepletionStatsTable(payloads)
-                ?? TryBuildDemandBar(payloads, "bar"),
-            _ => TryBuildDemandBar(payloads, requestedType) ?? TryBuildGauge(payloads),
-        };
+        return gaugeFirst
+            ? TryBuildGauge(payloads) ?? TryBuildDemandBar(payloads, requestedType)
+            : (requestedType?.ToLowerInvariant()) switch
+            {
+                // Horizontal-bar RANKING has a single legitimate shape: a portfolio growth
+                // ranking built from GetPortfolioDepletionStats' brands[] payload. If that
+                // is not present we FAIL CLOSED (return null) rather than silently rebrand
+                // a velocity bar as growth or emit a groupedBar under a horizontalBar
+                // request — the P0 failure this fix addresses. The caller enforces the
+                // fail-closed contract via the chart-unavailable diagnostic.
+                "horizontalbar" => TryBuildGrowthRanking(payloads),
+                "groupedbar" or "stackedbar" => TryBuildGroupedRegionBar(payloads, requestedType)
+                    ?? TryBuildDemandBar(payloads, requestedType),
+                "line" => TryBuildDemandLine(payloads)
+                    ?? TryBuildDemandBar(payloads, "line"),
+                "pie" or "donut" => TryBuildShareOrMixPie(payloads, requestedType ?? "pie")
+                    ?? TryBuildDemandBar(payloads, requestedType),
+                "table" => TryBuildDepletionStatsTable(payloads)
+                    ?? TryBuildDemandBar(payloads, "bar"),
+                _ => TryBuildDemandBar(payloads, requestedType) ?? TryBuildGauge(payloads),
+            };
     }
 
     private static List<JsonElement> CollectToolPayloads(Microsoft.Extensions.AI.ChatResponse response)

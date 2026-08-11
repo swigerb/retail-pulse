@@ -52,7 +52,7 @@ public sealed class HorizontalBarRankingContractTests
             .Should().BeTrue("a complete 12-brand payload must yield the growth ranking");
 
         chart.Should().NotBeNull();
-        chart!.Type.Should().Be("horizontalBar");
+        chart.Type.Should().Be("horizontalBar");
         chart.Data.Should().HaveCount(1);
         chart.Data[0].Values.Should().HaveCount(AllTenantBrands.Length,
             "all 12 seeded brands must appear as marks");
