@@ -37,3 +37,15 @@ hooks:
       shell: sh
       run: ./azd-hooks/postprovision.sh
     continueOnError: false
+  predeploy:
+    windows:
+      shell: pwsh
+      # Serializes the shared RetailPulse.ServiceDefaults project build before
+      # azd's parallel api/mcpserver/teamsbot publish — fixes the sourcelink.json
+      # writer race that caused intermittent publish failures during the
+      # issue #67 P0 incident. See azd-hooks/predeploy.ps1 for the full writeup.
+      run: ./azd-hooks/predeploy.ps1
+    posix:
+      shell: sh
+      run: ./azd-hooks/predeploy.sh
+    continueOnError: false
