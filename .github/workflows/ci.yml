@@ -248,3 +248,27 @@ jobs:
 
       - name: Check formatting
         run: dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic
+
+  bicep:
+    name: Bicep (compile + lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # az CLI ships pre-installed on ubuntu-latest; `az bicep install` grabs the
+      # latest CLI-bundled Bicep compiler. Compile every module transitively via
+      # the entry point — a broken module (missing param, wrong resource type,
+      # invalid reference) fails the build, which is the cheapest possible gate
+      # for regressions of the APIM AI Gateway / container-apps contract.
+      - name: Install Bicep
+        run: az bicep install
+
+      - name: Bicep build (compile + lint)
+        run: az bicep build --file infra/main.bicep --outfile /tmp/main.compiled.json
+
+      - name: Upload compiled ARM template
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bicep-compiled
+          path: /tmp/main.compiled.json
