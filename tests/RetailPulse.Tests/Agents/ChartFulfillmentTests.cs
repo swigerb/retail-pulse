@@ -71,6 +71,12 @@ public sealed class ChartFulfillmentTests
     [InlineData("create a gauge for stockout risk in the West", "gauge", AgentIntent.SupplyShipments)]
     [InlineData("render a gauge", "gauge", AgentIntent.General)]
     [InlineData("gauge for supply health in the West", "gauge", AgentIntent.SupplyShipments)]
+    // "table" as a chart-object noun is only explicit when followed by a data cue that a
+    // seating/verb use never carries — the curated home-improvement prompt qualifies.
+    [InlineData("Create a table showing depletion stats for all home improvement brands by region",
+        "table", AgentIntent.DemandForecasting)]
+    [InlineData("Show me a table listing brand performance by region", "table", AgentIntent.General)]
+    [InlineData("Generate a table comparing depletion trends across regions", "table", AgentIntent.DemandForecasting)]
     public void Detect_ChartOnlyTypeAsNoun_IsExplicit(
         string message, string expectedType, string expectedIntent)
     {
