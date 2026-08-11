@@ -12,14 +12,14 @@ public class OpenAiConnectionSettingsTests
     public void Load_PrefersApimSubscriptionKey_WhenManagedIdentityDisabled()
     {
         IConfiguration config = CreateConfig(
-            endpoint: "https://gateway.example.com/inference/openai",
+            endpoint: "https://gateway.example.com/inference",
             useManagedIdentity: false,
             apiKey: "direct-key",
             apimSubscriptionKey: "apim-sub-key");
 
         var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
 
-        settings.Endpoint.Should().Be("https://gateway.example.com/inference/openai");
+        settings.Endpoint.Should().Be("https://gateway.example.com/inference");
         settings.AuthenticationMode.Should().Be(OpenAiAuthenticationMode.ApiKey);
         settings.ApiKey.Should().Be("apim-sub-key");
         settings.ApiKeySource.Should().Be("OpenAI:ApimSubscriptionKey");
@@ -28,12 +28,14 @@ public class OpenAiConnectionSettingsTests
     [Fact]
     public void Load_FallsBackToDirectApiKey_WhenApimSubscriptionKeyMissing()
     {
+        // Direct AOAI endpoint is only valid in Development or with the explicit
+        // OpenAI:AllowDirectEndpoint escape hatch (see AI Gateway invariants below).
         IConfiguration config = CreateConfig(
             endpoint: "https://contoso.openai.azure.com",
             useManagedIdentity: false,
             apiKey: "direct-key");
 
-        var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
+        var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: true));
 
         settings.AuthenticationMode.Should().Be(OpenAiAuthenticationMode.ApiKey);
         settings.ApiKey.Should().Be("direct-key");
@@ -49,7 +51,7 @@ public class OpenAiConnectionSettingsTests
             apiKey: "direct-key",
             apimSubscriptionKey: "apim-sub-key");
 
-        var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
+        var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: true));
 
         settings.AuthenticationMode.Should().Be(OpenAiAuthenticationMode.ManagedIdentity);
         settings.ApiKey.Should().BeNull();
@@ -60,7 +62,7 @@ public class OpenAiConnectionSettingsTests
     public void Load_UsesDevelopmentFallbackKey_WhenManagedIdentityDisabledAndNoKeyConfigured()
     {
         IConfiguration config = CreateConfig(
-            endpoint: "https://gateway.example.com/inference/openai",
+            endpoint: "https://gateway.example.com/inference",
             useManagedIdentity: false);
 
         var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: true));
@@ -86,13 +88,122 @@ public class OpenAiConnectionSettingsTests
     public void Load_ThrowsOutsideDevelopment_WhenManagedIdentityDisabledAndNoKeyConfigured()
     {
         IConfiguration config = CreateConfig(
-            endpoint: "https://gateway.example.com/inference/openai",
+            endpoint: "https://gateway.example.com/inference",
             useManagedIdentity: false);
 
         Action act = () => OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*OpenAI:ApimSubscriptionKey*OpenAI:ApiKey*");
+    }
+
+    // ── AI Gateway invariants ────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("https://gateway.example.com/inference/openai")]
+    [InlineData("https://gateway.example.com/openai")]
+    public void Load_RejectsEndpointEndingInOpenAi_RegardlessOfEnvironment(string endpoint)
+    {
+        IConfiguration config = CreateConfig(
+            endpoint: endpoint,
+            useManagedIdentity: false,
+            apimSubscriptionKey: "apim-sub-key");
+
+        Action act = () => OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*doubled*openai*");
+    }
+
+    [Fact]
+    public void Load_RejectsEndpointEndingInOpenAi_EvenInDevelopment()
+    {
+        // The SDK-appends-/openai regression from #55 is not environment-specific:
+        // a Development run against APIM with an /openai-suffixed endpoint also
+        // produces a doubled path at request time.
+        IConfiguration config = CreateConfig(
+            endpoint: "https://gateway.example.com/inference/openai",
+            useManagedIdentity: false);
+
+        Action act = () => OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: true));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*openai*");
+    }
+
+    [Theory]
+    [InlineData("https://contoso.openai.azure.com")]
+    [InlineData("https://aiservices-abc.cognitiveservices.azure.com")]
+    [InlineData("https://foundry-xyz.services.ai.azure.com")]
+    public void Load_RejectsDirectAzureOpenAiEndpoint_OutsideDevelopment(string endpoint)
+    {
+        IConfiguration config = CreateConfig(
+            endpoint: endpoint,
+            useManagedIdentity: false,
+            apimSubscriptionKey: "apim-sub-key");
+
+        Action act = () => OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*APIM AI Gateway*");
+    }
+
+    [Fact]
+    public void Load_AllowsDirectAzureOpenAiEndpoint_InDevelopment()
+    {
+        IConfiguration config = CreateConfig(
+            endpoint: "https://contoso.openai.azure.com",
+            useManagedIdentity: false);
+
+        var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: true));
+
+        settings.Endpoint.Should().Be("https://contoso.openai.azure.com");
+    }
+
+    [Fact]
+    public void Load_AllowsDirectAzureOpenAiEndpoint_WhenExplicitEscapeHatchSet()
+    {
+        var data = new Dictionary<string, string?>
+        {
+            ["OpenAI:Endpoint"] = "https://contoso.openai.azure.com",
+            ["OpenAI:UseManagedIdentity"] = "true",
+            ["OpenAI:AllowDirectEndpoint"] = "true",
+        };
+        IConfiguration config = new ConfigurationBuilder().AddInMemoryCollection(data).Build();
+
+        var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
+
+        settings.Endpoint.Should().Be("https://contoso.openai.azure.com");
+        settings.AuthenticationMode.Should().Be(OpenAiAuthenticationMode.ManagedIdentity);
+    }
+
+    [Fact]
+    public void Load_ThrowsWhenEndpointIsNotAbsoluteUrl()
+    {
+        IConfiguration config = CreateConfig(
+            endpoint: "/inference",
+            useManagedIdentity: false,
+            apimSubscriptionKey: "apim-sub-key");
+
+        Action act = () => OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*absolute URL*");
+    }
+
+    [Fact]
+    public void Load_AcceptsCanonicalApimInferenceEndpoint()
+    {
+        IConfiguration config = CreateConfig(
+            endpoint: "https://apim-abc.azure-api.net/inference",
+            useManagedIdentity: false,
+            apimSubscriptionKey: "apim-sub-key");
+
+        var settings = OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
+
+        settings.Endpoint.Should().Be("https://apim-abc.azure-api.net/inference");
+        settings.AuthenticationMode.Should().Be(OpenAiAuthenticationMode.ApiKey);
+        settings.ApiKeySource.Should().Be("OpenAI:ApimSubscriptionKey");
     }
 
     private static IConfiguration CreateConfig(
