@@ -122,3 +122,28 @@ az containerapp auth update \
     --output none
 
 echo 'Post-provision configuration complete: secretless ACR pull, SWA linked backend, and ACA platform-auth disabled.'
+
+# ── Mandatory APIM AI Gateway live gate (issue #67) ────────────────────────
+# See postprovision.ps1 for the full rationale: a successful `azd provision`
+# only means the ARM deployments succeeded, not that the AI Gateway
+# invariants (backend, policy, token-limit, emit-token-metric, diagnostics,
+# RBAC, ACA wiring) are correct on the live resources. Run the verifier here
+# so a live invariant failure fails `azd up`/`azd provision` itself.
+# Verify-ApimAiGateway.ps1 is pwsh (cross-platform); invoke it via `pwsh`,
+# which ships alongside `az`/`azd` on every supported posix CI/dev image.
+echo ''
+echo 'Running mandatory APIM AI Gateway live verification gate...'
+verify_script="$(dirname "$0")/../scripts/Verify-ApimAiGateway.ps1"
+set +e
+pwsh -NoProfile -File "$verify_script"
+verify_exit_code=$?
+set -e
+
+if [ "$verify_exit_code" -eq 0 ]; then
+    echo 'APIM AI Gateway live verification: PASS. Provisioning gate satisfied.'
+elif [ "$verify_exit_code" -eq 2 ]; then
+    echo 'APIM AI Gateway live verification: SKIPPED (environment precondition not met — see script output above). Provisioning continues, but this environment has NOT been live-verified.'
+else
+    echo "APIM AI Gateway live verification FAILED (Verify-ApimAiGateway.ps1 exited $verify_exit_code). One or more AI Gateway invariants are missing on the live deployment — see failures listed above. Failing 'azd provision'/'azd up' rather than reporting false success (issue #67)." >&2
+    exit 1
+fi
