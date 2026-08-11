@@ -80,7 +80,11 @@ public partial class AgentExecutionPipeline
                     missing.Count);
                 charts.RemoveAll(c => string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase));
                 string diag = BuildRankingCoverageDiagnostic(missing, roster.Count);
-                string updated = string.IsNullOrWhiteSpace(reply) ? diag : $"{reply}\n\n{diag}";
+                // Scrub the model's fallback/truncation narrative from the prose so
+                // the user-visible reply cannot claim a chart was produced when we
+                // are in fact failing closed (issue #74 P0 failure #2).
+                string scrubbed = StripFallbackClaims(reply);
+                string updated = string.IsNullOrWhiteSpace(scrubbed) ? diag : $"{scrubbed}\n\n{diag}";
                 return new ChartFulfillmentResult(charts, updated);
             }
         }
