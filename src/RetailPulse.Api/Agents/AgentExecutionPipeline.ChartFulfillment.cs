@@ -29,10 +29,45 @@ public partial class AgentExecutionPipeline
     {
         ChartIntent intent = ChartRequestDetector.Detect(userMessage);
 
-        // Not an explicit chart request → never force a chart.
+        // Not an explicit chart request → never force a chart, and drop any chart the
+        // model produced anyway. Group A (#76): production sweep showed the LLM emitting
+        // ChartSpecs on prose prompts that contain trigger nouns ("Compare", "Show me
+        // ... trends") but NO explicit chart noun. The ChartRequestDetector unit test
+        // classifies these as prose correctly, but the fulfillment path only ever
+        // enforced "chart must exist when requested" — it never enforced the inverse
+        // "chart must NOT exist when not requested". The specialist has CreateChart
+        // wired into its toolkit for the legitimate chart prompts, and nothing stopped
+        // the model from calling it on a prose prompt. That is the exact test/production
+        // divergence for the #76 Group A regression (recurrence of the #50 bug class).
+        //
+        // Enforcing this inverse invariant here is deterministic (same prompt → same
+        // decision, regardless of model non-determinism) and tenant-generic (driven
+        // only by the detector, no prompt/brand literals).
         if (!intent.IsExplicitChartRequest)
         {
+            if (charts.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Chart-fulfillment: dropping {Count} model-emitted chart(s) on a non-chart prompt — "
+                    + "the detector classifies this as prose (no explicit chart noun), so a chart on the "
+                    + "response would be an unrequested visualization (issue #76 Group A).",
+                    charts.Count);
+                charts.Clear();
+            }
             return new ChartFulfillmentResult(charts, reply);
+        }
+
+        // Explicit chart request with a user-stated type. Group D (#76): user asked
+        // for a "bar chart" but the model emitted a horizontalBar. The user's stated
+        // type must win over model/heuristic drift. We coerce the Type field on any
+        // chart whose declared type is in the SAME structural family as the user's
+        // request (bar shapes / line shapes / pie shapes) — those share a data shape
+        // so the coercion is a pure rendering-orientation fix. Cross-family mismatches
+        // are left alone (data would not bind). Deterministic: same input → same
+        // coercion, and a no-op when types already match.
+        if (!string.IsNullOrWhiteSpace(intent.ChartType))
+        {
+            CoerceChartTypesToUserRequest(charts, intent.ChartType);
         }
 
         bool isPortfolioRanking = IsPortfolioRankingIntent(userMessage, intent);
@@ -136,6 +171,61 @@ public partial class AgentExecutionPipeline
             : $"{reply}\n\n{diagnostic}";
 
         return new ChartFulfillmentResult(charts, updatedReply);
+    }
+
+    // Structural chart-type families: within a family the ChartSpec data shape is
+    // interchangeable, so coercing between family members is a rendering-orientation
+    // fix (Group D). Cross-family coercion is unsafe because the data would not bind.
+    private static readonly string[][] _chartTypeFamilies =
+    [
+        ["bar", "horizontalBar", "column", "stackedBar", "groupedBar"],
+        ["line", "area"],
+        ["pie", "donut"],
+    ];
+
+    private static string[]? FamilyFor(string type)
+    {
+        foreach (string[] family in _chartTypeFamilies)
+        {
+            foreach (string member in family)
+            {
+                if (string.Equals(member, type, StringComparison.OrdinalIgnoreCase))
+                    return family;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Coerce every chart whose declared type is in the same structural family as the
+    /// user-stated type to that user-stated type. Preserves the chart data verbatim —
+    /// only the <c>Type</c> rendering hint changes. No-op when types already match or
+    /// when the mismatch crosses families (unsafe: data shape would not bind). This is
+    /// the deterministic fix for the #76 Group D failure ("Show me a bar chart …" →
+    /// production returned horizontalBar).
+    /// </summary>
+    internal void CoerceChartTypesToUserRequest(List<ChartSpec> charts, string requestedType)
+    {
+        string[]? requestedFamily = FamilyFor(requestedType);
+        if (requestedFamily is null) return;
+
+        for (int i = 0; i < charts.Count; i++)
+        {
+            ChartSpec chart = charts[i];
+            if (chart is null) continue;
+            if (string.Equals(chart.Type, requestedType, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string[]? actualFamily = FamilyFor(chart.Type);
+            if (actualFamily is null || !ReferenceEquals(actualFamily, requestedFamily))
+                continue; // Cross-family or unknown: leave alone.
+
+            _logger.LogInformation(
+                "Chart-fulfillment: coercing model-emitted '{ModelType}' chart to user-stated "
+                + "'{RequestedType}' (same structural family) — issue #76 Group D.",
+                chart.Type, requestedType);
+            charts[i] = chart with { Type = requestedType };
+        }
     }
 
     private static IReadOnlyList<string> ComputeMissingBrands(

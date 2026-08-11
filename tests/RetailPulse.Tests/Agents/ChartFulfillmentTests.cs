@@ -247,7 +247,245 @@ public sealed class ChartFulfillmentTests
         result.Reply.Should().Be("Done.");
     }
 
+    // ── Issue #76 Group A: chart emitted on prose prompts ───────────────────
+    //
+    // Production sweep found the LLM emitting ChartSpecs on prose prompts that
+    // contain trigger nouns ("Compare X vs Y", "Show me … trends") but NO explicit
+    // chart noun. The ChartRequestDetector unit test classified these as prose
+    // correctly (see Detect_NonChartPrompt_IsNotExplicit above), but the
+    // fulfillment path only enforced "chart must exist when requested" — never
+    // the inverse. The specialist has CreateChart wired into its toolkit, so
+    // nothing stopped the model from calling it on a prose prompt.
+
+    [Theory]
+    // The exact prompts from the #76 sweep failure taxonomy Group A (#1, #5, #14, #16, #17).
+    [InlineData("Compare depletion trends across all regions for this quarter")]
+    [InlineData("Compare Harvest Table vs FreshMart sell-through rates by region")]
+    [InlineData("Compare ClearDesk Technology vs Paper Products sell-through by region")]
+    [InlineData("Show me Urban Living depletion trends across all regions this quarter")]
+    [InlineData("Compare Foundry Home vs Urban Living performance in the West Coast")]
+    public void EnforceChartFulfillment_ProsePromptWithModelEmittedChart_DropsChart(string prosePrompt)
+    {
+        // Precondition: the detector classifies this as prose. If this ever flips,
+        // the invariant would be enforced from the other side — but the drop path
+        // is the belt-and-braces guarantee against model non-determinism.
+        ChartRequestDetector.Detect(prosePrompt).IsExplicitChartRequest.Should().BeFalse(
+            "these prompts contain trigger nouns but no explicit chart noun");
+
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactedDemand("Sierra Gold Tequila", "Northeast", 820.0));
+
+        // Simulate the production defect: the LLM produced a chart via CreateChart
+        // on a prose prompt.
+        var emitted = new ChartSpec
+        {
+            Type = "bar",
+            Title = "Unrequested chart",
+            Data = [new ChartSeries { Legend = "s", Values = [new ChartDataPoint { X = "A", Y = 1 }] }]
+        };
+        var charts = new List<ChartSpec> { emitted };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            prosePrompt, response, charts, "Here is the comparison.");
+
+        result.Charts.Should().BeEmpty(
+            "a prose prompt must never surface a chart, regardless of what the model emitted (issue #76 Group A)");
+        result.Reply.Should().Be("Here is the comparison.",
+            "the prose reply is untouched — only the unrequested chart is dropped");
+    }
+
+    // ── Issue #76 Group A: determinism ──────────────────────────────────────
+    //
+    // Chart-emission for a given prompt+chart-set must be deterministic — same input,
+    // same decision. This guards against the #76 stability regression where the
+    // same prompt sometimes charted and sometimes didn't across reruns.
+
+    [Fact]
+    public void EnforceChartFulfillment_ProsePrompt_IsDeterministicAcrossRepeatedCalls()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+
+        var results = new List<int>();
+        for (int i = 0; i < 20; i++)
+        {
+            MeaiChatResponse response = ResponseWithToolResults(
+                CompactedDemand("Summit Vodka", "Northeast", 910.0));
+            var charts = new List<ChartSpec>
+            {
+                new()
+                {
+                    Type = "bar",
+                    Title = $"Attempt {i}",
+                    Data = [new ChartSeries { Legend = "s", Values = [new ChartDataPoint { X = "A", Y = i }] }]
+                }
+            };
+
+            AgentExecutionPipeline.ChartFulfillmentResult r = pipeline.EnforceChartFulfillment(
+                "Compare Harvest Table vs FreshMart sell-through rates by region",
+                response, charts, "Comparison prose.");
+            results.Add(r.Charts.Count);
+        }
+
+        results.Should().OnlyContain(c => c == 0,
+            "identical prose prompts must yield identical (zero-chart) decisions across every rerun (issue #76 stability)");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitChartPrompt_IsDeterministicAcrossRepeatedCalls()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+
+        var typeResults = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < 20; i++)
+        {
+            MeaiChatResponse response = ResponseWithToolResults(
+                CompactedDemand("Sierra Gold Tequila", "Northeast", 820.0),
+                CompactedDemand("Ridgeline Bourbon", "Northeast", 640.0),
+                CompactedDemand("Summit Vodka", "Northeast", 910.0));
+
+            var charts = new List<ChartSpec>();
+            AgentExecutionPipeline.ChartFulfillmentResult r = pipeline.EnforceChartFulfillment(
+                "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast",
+                response, charts, "Here you go.");
+            typeResults.Add(r.Charts.Single().Type);
+        }
+
+        typeResults.Should().ContainSingle().Which.Should().Be("bar",
+            "identical explicit-chart prompts must yield the same chart type on every rerun");
+    }
+
+    // ── Issue #76 Group D: user-stated chart type must win ──────────────────
+
+    [Fact]
+    public void EnforceChartFulfillment_UserAskedBar_ModelEmittedHorizontalBar_CoercesToBar()
+    {
+        // The exact #20 failure from the sweep: prompt asks for "bar chart" but the
+        // model emitted a horizontalBar. User's stated type must win.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactedDemand("Sierra Gold Tequila", "Northeast", 820.0));
+
+        var modelChart = new ChartSpec
+        {
+            Type = "horizontalBar",
+            Title = "Depletion velocity - Northeast",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "Avg Weekly Depletion Velocity",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Sierra Gold Tequila", Y = 820.0 },
+                        new ChartDataPoint { X = "Ridgeline Bourbon",   Y = 640.0 },
+                        new ChartDataPoint { X = "Summit Vodka",        Y = 910.0 }
+                    ]
+                }
+            ]
+        };
+        var charts = new List<ChartSpec> { modelChart };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast",
+            response, charts, "Here is the bar chart.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("bar",
+            "the user explicitly asked for a bar chart — the model's horizontalBar drift must be corrected (issue #76 Group D)");
+        result.Charts[0].Data.Should().BeEquivalentTo(modelChart.Data,
+            "coercion is a rendering-orientation fix; the underlying data must be preserved verbatim");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_CrossFamilyMismatch_LeavesTypeAlone()
+    {
+        // If the model emits e.g. a pie chart when the user asked for a bar chart,
+        // the data shapes are not interchangeable — the coercion path is a no-op
+        // and the existing invariants (roster coverage, structured diagnostic)
+        // handle it. This guards the safety of the coercion.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactedDemand("Sierra Gold Tequila", "Northeast", 820.0));
+
+        var modelChart = new ChartSpec
+        {
+            Type = "pie",
+            Title = "Unrelated pie",
+            Data = [new ChartSeries { Legend = "s", Values = [new ChartDataPoint { X = "A", Y = 1 }] }]
+        };
+        var charts = new List<ChartSpec> { modelChart };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a bar chart of depletion velocity in the Northeast",
+            response, charts, "Here.");
+
+        result.Charts[0].Type.Should().Be("pie",
+            "cross-family type mismatches are not silently coerced — data shapes would not bind");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_HorizontalBarRankingRosterComplete_NotCoercedByBarKeyword()
+    {
+        // Belt-and-braces: the #74 horizontal-bar ranking invariant must not be
+        // undone by this new coercion. When the user explicitly asked for
+        // "horizontal bar chart", the detector reports chartType=horizontalBar
+        // (no coercion applies), and the roster-coverage branch owns the chart.
+        AgentExecutionPipeline pipeline = CreatePipelineWithRoster(["A", "B", "C", "D", "E", "F"]);
+        MeaiChatResponse response = ResponseWithToolResults(PortfolioDepletionPayload(
+            ("A", 10.0), ("B", 20.0), ("C", 30.0), ("D", 40.0), ("E", 50.0), ("F", 60.0)));
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show a horizontal bar chart ranking all brands by depletion growth rate",
+            response, charts, "Ranking.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("horizontalBar",
+            "explicit horizontalBar request stays horizontalBar — the #74 gate must be preserved");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
+
+    private static AgentExecutionPipeline CreatePipelineWithRoster(IEnumerable<string> brands)
+    {
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        var tenant = new TenantConfiguration
+        {
+            Company = "TestCo",
+            BrandsList = [.. brands.Select(b => new BrandConfig { Name = b, Category = "spirits" })],
+        };
+        return new AgentExecutionPipeline(
+            AgentTestFixtures.CreateMockChatClient("{}"),
+            hubContext: AgentTestFixtures.CreateMockHubContext(),
+            streamingHubContext: null,
+            streamingFeature: null,
+            configuration: config,
+            logger: NullLogger<AgentExecutionPipeline>.Instance,
+            metrics: null,
+            anonymousChatPolicy: Api.Auth.NoOpAnonymousChatPolicy.Instance,
+            tenant: tenant);
+    }
+
+    private static string PortfolioDepletionPayload(params (string Brand, double GrowthYoy)[] rows) =>
+        JsonSerializer.Serialize(new
+        {
+            region = "All Regions",
+            period = "YTD",
+            brandCount = rows.Length,
+            brands = rows.Select(r => new
+            {
+                brand = r.Brand,
+                region = "All Regions",
+                metrics = new
+                {
+                    depletions_yoy = (r.GrowthYoy >= 0 ? "+" : "") + r.GrowthYoy.ToString("0.0") + "%",
+                    sell_through_yoy = "+1.2%",
+                    inventory_weeks_on_hand = 6.5,
+                    status = "OnTrack",
+                },
+            }).ToArray(),
+        });
 
     private static AgentExecutionPipeline CreatePipeline()
     {
