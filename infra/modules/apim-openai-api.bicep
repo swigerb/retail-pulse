@@ -204,7 +204,17 @@ resource subscription 'Microsoft.ApiManagement/service/subscriptions@2024-06-01-
 
 output inferenceApiName string = api.name
 output inferenceApiPath string = api.properties.path
-output inferenceEndpoint string = '${apim.properties.gatewayUrl}/${api.properties.path}'
+// NOTE: The Azure OpenAI SDK (AzureOpenAIClient) appends '/openai/deployments/{id}/...'
+// to whatever endpoint it is given. The APIM API path already ends in '/openai'
+// (see `path: '${inferenceApiPath}/openai'` above) purely so the OpenAPI import
+// matches the real AOAI '/openai/deployments/...' route shape. If this output
+// included that trailing '/openai' segment, the SDK would double it up into
+// '.../inference/openai/openai/deployments/...', which APIM rejects with 404
+// OperationNotFound (root cause of the 2026-08-11 production incident — see
+// .squad/decisions/inbox/kroger-incident-*.md). Emit only the base path
+// ('.../inference') so the SDK's own '/openai/deployments/...' suffix lands on
+// the API's actual registered path.
+output inferenceEndpoint string = '${apim.properties.gatewayUrl}/${inferenceApiPath}'
 output subscriptionName string = subscription.name
 
 // Live APIM subscription primary key, resolved at Bicep deploy time via
