@@ -13,8 +13,8 @@ param logAnalyticsWorkspaceId string
 @description('Application Insights resource ID used by the APIM logger')
 param appInsightsId string
 
-@description('Application Insights instrumentation key used by the APIM logger')
-param appInsightsInstrumentationKey string
+@description('Application Insights connection string used by the APIM logger')
+param appInsightsConnectionString string
 
 @description('Publisher email required by Azure API Management')
 param publisherEmail string = 'noreply@retail-pulse.example.com'
@@ -74,7 +74,13 @@ resource appInsightsLogger 'Microsoft.ApiManagement/service/loggers@2024-06-01-p
   name: 'appinsights-logger'
   properties: {
     credentials: {
-      instrumentationKey: appInsightsInstrumentationKey
+      // Connection string is used instead of instrumentationKey so APIM
+      // provisions a resource-scoped applicationInsights logger without
+      // depending on a hidden Logger-Credentials-* NamedValue for the iKey.
+      // The connection string is a public identifier for telemetry ingestion,
+      // not a secret; consistent with the rest of the deployment's non-secret
+      // observability wiring.
+      connectionString: appInsightsConnectionString
     }
     description: 'Retail Pulse APIM logger for Application Insights'
     isBuffered: false

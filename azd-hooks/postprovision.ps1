@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
 # Post-provision hook (Windows/pwsh) — wires ACR pull auth for every Container
-# App to its own system-assigned managed identity, with no registry secrets.
+# App to its own system-assigned managed identity, with no registry secrets,
+# and links the API container app to the Static Web App backend.
 #
 # Why this runs as a hook instead of purely in Bicep:
 # Configuring a Container App to pull from ACR using its OWN system-assigned
@@ -14,6 +15,15 @@ $ErrorActionPreference = 'Stop'
 # breaks the cycle deterministically. It is fully idempotent: every `azd up` /
 # `azd provision` re-asserts the desired state, so clean and repeated deploys are
 # self-contained.
+#
+# Runtime configuration for the API (APIM endpoint, subscription-key secret,
+# Entra auth mode, allowed origins, ASPNETCORE_ENVIRONMENT=Production) now lives
+# in `infra/modules/container-apps.bicep`. It used to live here as a series of
+# `az containerapp update --set-env-vars` calls, which meant a re-provision that
+# recreated the API resource from Bicep would leave the active revision with no
+# APIM wiring (the §7 regression on issue #51). Keeping runtime config in Bicep
+# closes that loop — this hook now only handles the identity/registry/backend
+# links that genuinely require post-resource-creation steps.
 #
 # Values are derived from the azd environment (the infra outputs captured by
 # `azd provision`), exposed to this hook as process environment variables.
@@ -28,19 +38,6 @@ function Get-RequiredEnv {
     return $value.Trim()
 }
 
-function Get-OptionalEnv {
-    param(
-        [Parameter(Mandatory)][string] $Name,
-        [Parameter(Mandatory)][string] $Default
-    )
-
-    $value = [Environment]::GetEnvironmentVariable($Name)
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        return $Default
-    }
-    return $value.Trim()
-}
-
 function Invoke-Az {
     param([Parameter(Mandatory)][string[]] $Arguments, [Parameter(Mandatory)][string] $FailureMessage)
 
@@ -51,54 +48,12 @@ function Invoke-Az {
     return $result
 }
 
-function Get-ApimSubscriptionPrimaryKey {
-    param(
-        [Parameter(Mandatory)][string] $ResourceGroup,
-        [Parameter(Mandatory)][string] $ApimName,
-        [Parameter(Mandatory)][string] $SubscriptionName
-    )
-
-    $subscriptionId = (Invoke-Az `
-        -Arguments @('account', 'show', '--query', 'id', '--output', 'tsv') `
-        -FailureMessage 'Failed to read the active Azure subscription id for APIM secret lookup' | Out-String).Trim()
-
-    if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-        throw 'Active Azure subscription id is empty; cannot retrieve the APIM subscription key.'
-    }
-
-    $uri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/subscriptions/$SubscriptionName/listSecrets?api-version=2024-06-01-preview"
-    $response = (Invoke-Az `
-        -Arguments @('rest', '--method', 'post', '--uri', $uri, '--output', 'json') `
-        -FailureMessage "Failed to retrieve APIM subscription secrets for '$SubscriptionName' on '$ApimName'" | Out-String) | ConvertFrom-Json
-
-    $primaryKey = $response.primaryKey
-    if ([string]::IsNullOrWhiteSpace($primaryKey)) {
-        throw "APIM subscription '$SubscriptionName' on '$ApimName' did not return a primaryKey."
-    }
-
-    return $primaryKey.Trim()
-}
-
 $resourceGroup  = Get-RequiredEnv 'AZURE_RESOURCE_GROUP'
 $registryName   = Get-RequiredEnv 'AZURE_CONTAINER_REGISTRY_NAME'
 $registryServer = Get-RequiredEnv 'AZURE_CONTAINER_REGISTRY_ENDPOINT'
 $registryId     = Get-RequiredEnv 'AZURE_CONTAINER_REGISTRY_RESOURCE_ID'
-$apimName       = Get-RequiredEnv 'AZURE_APIM_NAME'
-$apimInferenceEndpoint = Get-RequiredEnv 'AZURE_APIM_INFERENCE_ENDPOINT'
-$apimInferenceSubscriptionName = Get-RequiredEnv 'AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME'
-$apiUrl         = Get-RequiredEnv 'AZURE_API_APP_URL'
-$mcpServerUrl   = Get-RequiredEnv 'AZURE_MCP_SERVER_APP_URL'
-$frontendOrigin = Get-RequiredEnv 'RETAIL_PULSE_FRONTEND_ORIGIN'
 $staticWebApp   = Get-RequiredEnv 'AZURE_STATIC_WEB_APP_NAME'
 $location       = Get-RequiredEnv 'AZURE_LOCATION'
-# Entra auth configuration. Tenant/client IDs are CONFIGURATION, not secrets; the
-# parent captures them via `azd env set` from the Setup-EntraAuth.ps1 output. These
-# are read with Get-RequiredEnv so a deploy fails fast rather than silently shipping
-# an anonymous, Development-mode API (the exact regression this hook now prevents).
-$entraTenantId  = Get-RequiredEnv 'RETAIL_PULSE_ENTRA_TENANT_ID'
-$entraClientId  = Get-RequiredEnv 'RETAIL_PULSE_ENTRA_CLIENT_ID'
-$entraApiScope  = Get-OptionalEnv 'RETAIL_PULSE_ENTRA_API_SCOPE' 'access_as_user'
-$entraAppRole   = Get-OptionalEnv 'RETAIL_PULSE_ENTRA_APP_ROLE'  'RetailPulse.User'
 $apps = @(
     (Get-RequiredEnv 'AZURE_API_APP_NAME'),
     (Get-RequiredEnv 'AZURE_MCP_SERVER_APP_NAME'),
@@ -142,69 +97,6 @@ foreach ($app in $apps) {
     Write-Host '   registry auth bound to system identity'
 }
 
-Write-Host 'Configuring production auth + runtime settings for the API...'
-
-$apimSubscriptionSecretName = 'apim-sub-key'
-Write-Host "Retrieving APIM inference subscription key '$apimInferenceSubscriptionName' from '$apimName'..."
-$apimSubscriptionPrimaryKey = Get-ApimSubscriptionPrimaryKey `
-    -ResourceGroup $resourceGroup `
-    -ApimName $apimName `
-    -SubscriptionName $apimInferenceSubscriptionName
-
-Invoke-Az `
-    -Arguments @(
-        'containerapp', 'secret', 'set',
-        '--name', $apps[0],
-        '--resource-group', $resourceGroup,
-        '--secrets', "$apimSubscriptionSecretName=$apimSubscriptionPrimaryKey",
-        '--output', 'none'
-    ) `
-    -FailureMessage "Failed to store the APIM subscription key as a secret on '$($apps[0])'" | Out-Null
-
-# The API is the security boundary for the SWA + ACA architecture. It deploys as
-# Production with real Entra JWT validation enabled (Security__RequireAuth=true).
-# ACA platform (Easy Auth) stays disabled below so the in-process JwtBearer handler
-# is the sole gate; direct ACA REST/SignalR are protected independent of SWA routing.
-Invoke-Az `
-    -Arguments @(
-        'containerapp', 'update',
-        '--name', $apps[0],
-        '--resource-group', $resourceGroup,
-        '--set-env-vars',
-        "OpenAI__Endpoint=$apimInferenceEndpoint",
-        'OpenAI__UseManagedIdentity=false',
-        "OpenAI__ApimSubscriptionKey=secretref:$apimSubscriptionSecretName",
-        'OpenAI__Deployment=gpt-5.4-mini-2026-03-17',
-        'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17',
-        "McpServer__BaseUrl=$mcpServerUrl",
-        'Security__RequireAuth=true',
-        # Provider-neutral auth is explicitly pinned to Entra for production (see
-        # Security/ProviderNeutralAuthentication.cs). This is a deploy-time re-assertion of the
-        # committed appsettings.Production.json value; the API fails closed on a missing/unknown
-        # mode and refuses to start under GitHub/Anonymous. It matches the SPA's VITE_AUTH_MODE
-        # (also pinned to Entra by infra/main.bicep) — ProviderNeutralDeploymentContractTests
-        # asserts the parity.
-        'Authentication__Mode=Entra',
-        "Security__AllowedOrigins__0=$frontendOrigin",
-        "MicrosoftEntra__TenantId=$entraTenantId",
-        "MicrosoftEntra__ClientId=$entraClientId",
-        "MicrosoftEntra__ApiScope=$entraApiScope",
-        "MicrosoftEntra__AppRole=$entraAppRole",
-        # The governance hotfix removed the Azure Files durable mount, so there is no
-        # durable data-directory path to pin. Flipping the API to Production would
-        # otherwise fail closed in DataDirectoryResolver. This is a synthetic demo, so
-        # we explicitly opt in to a writable per-replica ephemeral data directory —
-        # honestly non-durable: observability history resets on replica replacement
-        # (see docs/deployment-azd.md). A future policy-compatible durable backing can
-        # drop this flag and configure a mounted durable path instead. This is NOT the
-        # durable-storage requirement flag; an explicit require-durable=true still
-        # fails closed.
-        'RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true',
-        'ASPNETCORE_ENVIRONMENT=Production',
-        '--output', 'none'
-    ) `
-    -FailureMessage "Failed to configure API runtime settings for '$($apps[0])'" | Out-Null
-
 # SWA proxies relative /api requests to ACA. SignalR intentionally bypasses this
 # link and uses VITE_API_ORIGIN because linked backends do not proxy WebSockets.
 $apiResourceId = (Invoke-Az `
@@ -223,25 +115,9 @@ if (-not ($linkedBackends | Where-Object { $_.backendResourceId -eq $apiResource
 # Linking enables the SWA identity provider on the /api proxy path, but ACA platform
 # (Easy Auth) is deliberately kept DISABLED: it would issue login redirects that break
 # bearer-token REST/SignalR clients calling ACA directly. The in-process Entra JwtBearer
-# handler (Security__RequireAuth=true above) is the real security boundary.
+# handler (Security__RequireAuth=true, set in Bicep) is the real security boundary.
 Invoke-Az `
     -Arguments @('containerapp', 'auth', 'update', '--name', $apps[0], '--resource-group', $resourceGroup, '--enabled', 'false', '--output', 'none') `
     -FailureMessage "Failed to disable Container Apps platform auth for the API '$($apps[0])'" | Out-Null
 
-Invoke-Az `
-    -Arguments @('containerapp', 'update', '--name', $apps[1], '--resource-group', $resourceGroup, '--set-env-vars', 'ASPNETCORE_ENVIRONMENT=Development', '--output', 'none') `
-    -FailureMessage "Failed to configure MCP runtime settings for '$($apps[1])'" | Out-Null
-
-Invoke-Az `
-    -Arguments @(
-        'containerapp', 'update',
-        '--name', $apps[2],
-        '--resource-group', $resourceGroup,
-        '--set-env-vars',
-        'ASPNETCORE_ENVIRONMENT=Development',
-        "TeamsBot__ApiBaseUrl=$apiUrl",
-        '--output', 'none'
-    ) `
-    -FailureMessage "Failed to configure Teams bot runtime settings for '$($apps[2])'" | Out-Null
-
-Write-Host 'Post-provision configuration complete: secretless ACR pull and production Entra auth runtime settings are ready.'
+Write-Host 'Post-provision configuration complete: secretless ACR pull, SWA linked backend, and ACA platform-auth disabled.'

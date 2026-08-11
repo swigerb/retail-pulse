@@ -34,6 +34,18 @@ param aiFoundryAccountName string = 'aiagents-3rsdmhyb'
 @description('Resource group containing the Azure AI Foundry / Cognitive Services account used by the AI gateway backend')
 param aiFoundryResourceGroupName string = 'rg-repodigest-agents-demo-eus-001'
 
+@description('Azure OpenAI deployment name that the API sends chat/completions to (through APIM)')
+param openAiDeployment string = 'gpt-5.4-mini-2026-03-17'
+
+@description('Fully-qualified image reference for the API container app. Defaults to the ACA placeholder when SERVICE_API_IMAGE_NAME is empty.')
+param apiImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('Fully-qualified image reference for the MCP server container app.')
+param mcpServerImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('Fully-qualified image reference for the Teams bot container app.')
+param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -78,16 +90,6 @@ module containerAppsEnv './modules/container-apps-env.bicep' = {
   }
 }
 
-module containerApps './modules/container-apps.bicep' = {
-  name: 'container-apps'
-  scope: rg
-  params: {
-    location: location
-    environmentId: containerAppsEnv.outputs.environmentId
-    tags: tags
-  }
-}
-
 module staticWebApp './modules/static-web-app.bicep' = {
   name: 'static-web-app'
   scope: rg
@@ -106,7 +108,7 @@ module apim './modules/apim.bicep' = {
     tags: tags
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     appInsightsId: monitoring.outputs.appInsightsId
-    appInsightsInstrumentationKey: monitoring.outputs.appInsightsInstrumentationKey
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
 }
 
@@ -118,6 +120,33 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     apimPrincipalId: apim.outputs.apimPrincipalId
     aiFoundryAccountName: aiFoundryAccountName
     aiFoundryResourceGroupName: aiFoundryResourceGroupName
+  }
+}
+
+// containerApps runs AFTER apimOpenAiApi and staticWebApp so it can consume the
+// APIM inference endpoint + subscription key (via listSecrets()) and the SWA
+// frontend origin declaratively. This is what makes `azd provision` re-assert
+// the AI Gateway wiring on every run (§7 fix — the previous ordering left the
+// APIM env vars to a postprovision `az containerapp update`, which lost them
+// whenever Bicep re-created the container-app resource).
+module containerApps './modules/container-apps.bicep' = {
+  name: 'container-apps'
+  scope: rg
+  params: {
+    location: location
+    environmentId: containerAppsEnv.outputs.environmentId
+    tags: tags
+    apiImageName: apiImageName
+    mcpServerImageName: mcpServerImageName
+    teamsBotImageName: teamsBotImageName
+    apimInferenceEndpoint: apimOpenAiApi.outputs.inferenceEndpoint
+    apimSubscriptionKey: apimOpenAiApi.outputs.subscriptionKey
+    openAiDeployment: openAiDeployment
+    frontendOrigin: staticWebApp.outputs.staticWebAppUrl
+    entraTenantId: entraTenantId
+    entraClientId: entraClientId
+    entraApiScope: entraApiScope
+    containerRegistryLoginServer: containerRegistry.outputs.loginServer
   }
 }
 

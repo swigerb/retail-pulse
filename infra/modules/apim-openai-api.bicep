@@ -124,6 +124,13 @@ resource apiAppInsightsDiagnostics 'Microsoft.ApiManagement/service/apis/diagnos
       samplingType: 'fixed'
       percentage: 100
     }
+    // `metrics: true` is what actually routes `azure-openai-emit-token-metric`
+    // custom metrics (namespace `RetailPulse`, dimensions API/Operation/
+    // Subscription ID) into Application Insights `customMetrics` / AppMetrics.
+    // Without this flag the emit-token policy fires but the metric channel is
+    // silently dropped — request logs still flow but the AI Gateway token
+    // dashboard sees zero rows.
+    metrics: true
     verbosity: 'information'
     logClientIp: true
     frontend: {
@@ -199,3 +206,12 @@ output inferenceApiName string = api.name
 output inferenceApiPath string = api.properties.path
 output inferenceEndpoint string = '${apim.properties.gatewayUrl}/${api.properties.path}'
 output subscriptionName string = subscription.name
+
+// Live APIM subscription primary key, resolved at Bicep deploy time via
+// listSecrets(). Consumed by container-apps.bicep to declaratively bind the
+// API container app to APIM as an ACA secret + `secretRef` env var — so
+// `azd provision` re-asserts the APIM wiring on every run and a subsequent
+// re-provision cannot silently strip the AI Gateway configuration off the
+// active revision. Marked @secure() so ARM masks it in deployment outputs.
+@secure()
+output subscriptionKey string = subscription.listSecrets().primaryKey

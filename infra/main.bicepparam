@@ -12,3 +12,16 @@ param entraApiScope = readEnvironmentVariable('RETAIL_PULSE_ENTRA_API_SCOPE', 'a
 param entraAudience = readEnvironmentVariable('RETAIL_PULSE_ENTRA_AUDIENCE', '')
 param aiFoundryAccountName = readEnvironmentVariable('AZURE_OPENAI_ACCOUNT_NAME', 'aiagents-3rsdmhyb')
 param aiFoundryResourceGroupName = readEnvironmentVariable('AZURE_OPENAI_RESOURCE_GROUP_NAME', 'rg-repodigest-agents-demo-eus-001')
+
+// Model deployment consumed by the API through APIM. Overridable via `azd env set`.
+param openAiDeployment = readEnvironmentVariable('AZURE_OPENAI_DEPLOYMENT', 'gpt-5.4-mini-2026-03-17')
+
+// Container image references. azd populates SERVICE_<name>_IMAGE_NAME after a
+// successful `azd deploy <service>`; on the FIRST provision these are empty and
+// Bicep falls back to the ACA placeholder image (so provision still succeeds).
+// On every subsequent provision the previously-deployed image is passed through
+// declaratively, which stops the active revision from being reset to the
+// placeholder on re-provision (§7 fix).
+param apiImageName = readEnvironmentVariable('SERVICE_API_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
+param mcpServerImageName = readEnvironmentVariable('SERVICE_MCPSERVER_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
+param teamsBotImageName = readEnvironmentVariable('SERVICE_TEAMSBOT_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
