@@ -129,10 +129,14 @@ internal sealed class OpenAiConnectionSettings
         IHostEnvironment environment,
         bool allowDirectEndpoint)
     {
-        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri))
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
+            // Note: on Linux `Uri.TryCreate("/inference", UriKind.Absolute, ...)`
+            // succeeds because a leading `/` parses as a file:// URI. Requiring
+            // an http(s) scheme keeps the invariant cross-platform.
             throw new InvalidOperationException(
-                $"Configuration value 'OpenAI:Endpoint' ('{endpoint}') must be an absolute URL.");
+                $"Configuration value 'OpenAI:Endpoint' ('{endpoint}') must be an absolute http(s) URL.");
         }
 
         // Doubled `/openai/openai` — the P0 incident #55 shape. `AzureOpenAIClient`
