@@ -65,12 +65,63 @@ param(
     [string]$ApiContainerAppName = $env:AZURE_API_APP_NAME,
     [string]$InferenceApiName = ($env:AZURE_APIM_INFERENCE_API_NAME | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_)) { 'retail-pulse-inference-api' } else { $_ } }),
     [string]$AiFoundryAccountName = 'aiagents-3rsdmhyb',
-    [string]$AiFoundryResourceGroup = 'rg-repodigest-agents-demo-eus-001'
+    [string]$AiFoundryResourceGroup = 'rg-repodigest-agents-demo-eus-001',
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = 'Stop'
 $failures = [System.Collections.Generic.List[string]]::new()
 $checks = 0
+
+# ── ARM REST helpers ─────────────────────────────────────────────────────
+# The `az apim backend`, `az apim api policy`, and `az apim api diagnostic`
+# subcommands live in the `apim` az extension, which is NOT part of core az CLI
+# and is not installed on every dev/CI box (see issue #68). To keep the verifier
+# self-sufficient — and to avoid silently swallowing "command not found" as a
+# false FAIL — we call the ARM REST API directly through `az rest`, which is
+# always available whenever `az` itself is installed.
+#
+# Every helper below returns $null on 404 (resource genuinely missing → let the
+# Assert record a FAIL with a clear message) and throws on any other error so
+# the outer Assert catch can attach the message. UTF-8 BOMs that ARM sometimes
+# prepends to policy XML are stripped before regex matching.
+
+$script:ArmApimApiVersion       = '2024-06-01-preview'
+$script:ArmContainerAppApiVer   = '2024-03-01'
+$script:ArmAuthorizationApiVer  = '2022-04-01'
+
+function Invoke-ArmGet {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$AllowNotFound
+    )
+    $url = "https://management.azure.com$Path"
+    # Capture stderr so we can distinguish 404 from real auth/connectivity errors.
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $raw = az rest --method get --url $url --only-show-errors 2>$stderrFile
+        if ($LASTEXITCODE -ne 0) {
+            $err = (Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue)
+            if ($AllowNotFound -and ($err -match 'ResourceNotFound' -or $err -match '\bNotFound\b' -or $err -match 'Status:\s*404')) {
+                return $null
+            }
+            throw ("ARM GET {0} failed: {1}" -f $Path, ($err.Trim()))
+        }
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        return ($raw | ConvertFrom-Json)
+    }
+    finally {
+        Remove-Item -LiteralPath $stderrFile -ErrorAction SilentlyContinue
+    }
+}
+
+function Remove-Bom {
+    param($Value)
+    if ($null -eq $Value) { return $null }
+    if ([string]::IsNullOrEmpty([string]$Value)) { return [string]$Value }
+    # UTF-8 BOM as literal char + zero-width no-break space fallback.
+    return ([string]$Value).TrimStart([char]0xFEFF, [char]0xEF, [char]0xBB, [char]0xBF)
+}
 
 function Test-Prereq {
     if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
@@ -89,6 +140,40 @@ function Test-Prereq {
         }
     }
 }
+
+# Offline self-test — exercises the BOM-strip helper and the FAIL path of
+# Assert without needing an Azure signin. Run with `-SelfTest` to validate the
+# script's own logic on a dev/CI box.
+function Invoke-SelfTest {
+    $failed = 0
+    function _Expect([string]$name, [bool]$cond) {
+        if ($cond) { Write-Host "  [ok]   selftest: $name" -ForegroundColor Green }
+        else { Write-Host "  [FAIL] selftest: $name" -ForegroundColor Red; $script:_selfFailed++ }
+    }
+    $script:_selfFailed = 0
+    Write-Host "Self-test"
+
+    # Remove-Bom leaves clean strings unchanged
+    _Expect 'Remove-Bom passes clean string through' ((Remove-Bom '<policies/>') -eq '<policies/>')
+    # Remove-Bom strips a single leading BOM char
+    $bom = [char]0xFEFF
+    _Expect 'Remove-Bom strips leading U+FEFF' ((Remove-Bom "$bom<policies/>") -eq '<policies/>')
+    # Remove-Bom handles null / empty
+    _Expect 'Remove-Bom tolerates empty' ((Remove-Bom '') -eq '')
+    _Expect 'Remove-Bom tolerates null' ($null -eq (Remove-Bom $null))
+    # BOM-prefixed policy still matches the same regex we use live
+    $bomPolicy = "$bom<policies><inbound><set-backend-service backend-id=""retail-pulse-foundry"" /></inbound></policies>"
+    _Expect 'BOM-prefixed policy matches backend regex after strip' ((Remove-Bom $bomPolicy) -match '<set-backend-service\s+backend-id="retail-pulse-foundry"')
+
+    if ($script:_selfFailed -gt 0) {
+        Write-Host ("SELFTEST FAIL ({0} case(s))" -f $script:_selfFailed) -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "SELFTEST PASS" -ForegroundColor Green
+    exit 0
+}
+
+if ($SelfTest) { Invoke-SelfTest }
 
 function Assert([string]$name, [scriptblock]$predicate, [string]$detail = '') {
     $script:checks++
@@ -118,25 +203,36 @@ Write-Host ("  inferenceApi        = {0}" -f $InferenceApiName)
 Write-Host ("  aiFoundryAccount    = {0} (rg: {1})" -f $AiFoundryAccountName, $AiFoundryResourceGroup)
 Write-Host ""
 
+# Resolve subscription id up-front — several ARM paths need it.
+$sub = (az account show --query id -o tsv 2>$null)
+if ([string]::IsNullOrWhiteSpace($sub)) {
+    Write-Host "SKIP: could not resolve subscription id from 'az account show'." -ForegroundColor Yellow
+    exit 2
+}
+$apimBase = "/subscriptions/$sub/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName"
+
 # ── APIM instance ─────────────────────────────────────────────────────────
 Write-Host "APIM instance"
-$apim = az apim show -g $ResourceGroup -n $ApimName 2>$null | ConvertFrom-Json
+$apim = Invoke-ArmGet -Path ("{0}?api-version={1}" -f $apimBase, $script:ArmApimApiVersion) -AllowNotFound
 Assert 'apim: exists' { $null -ne $apim } "APIM '$ApimName' not found in '$ResourceGroup'"
 Assert 'apim: identity.type = SystemAssigned' { $apim.identity.type -eq 'SystemAssigned' } "identity.type = $($apim.identity.type)"
 $apimPrincipalId = $apim.identity.principalId
-$gatewayUrl = $apim.gatewayUrl
+$gatewayUrl = $apim.properties.gatewayUrl
 
 # ── Inference API ─────────────────────────────────────────────────────────
 Write-Host "Inference API"
-$api = az apim api show -g $ResourceGroup --service-name $ApimName --api-id $InferenceApiName 2>$null | ConvertFrom-Json
+$api = Invoke-ArmGet -Path ("{0}/apis/{1}?api-version={2}" -f $apimBase, $InferenceApiName, $script:ArmApimApiVersion) -AllowNotFound
 Assert 'api: exists' { $null -ne $api } "'$InferenceApiName' not found on '$ApimName'"
-Assert 'api: subscriptionRequired = true' { $api.subscriptionRequired -eq $true } "subscriptionRequired = $($api.subscriptionRequired)"
-Assert 'api: path ends in /openai (SDK-compatible)' { $api.path -match '/openai$' } "path = $($api.path)"
+Assert 'api: subscriptionRequired = true' { $api.properties.subscriptionRequired -eq $true } "subscriptionRequired = $($api.properties.subscriptionRequired)"
+Assert 'api: path ends in /openai (SDK-compatible)' { $api.properties.path -match '/openai$' } "path = $($api.properties.path)"
 
 # ── API policy (token-limit + emit-token-metric) ──────────────────────────
+# Read via ARM so we don't require the `apim` az extension. ARM returns the
+# policy XML inside properties.value; strip any UTF-8 BOM before regex.
 Write-Host "API policy"
-$policyJson = az apim api policy show -g $ResourceGroup --service-name $ApimName --api-id $InferenceApiName 2>$null
-$policyValue = ($policyJson | ConvertFrom-Json).value
+$policyDoc  = Invoke-ArmGet -Path ("{0}/apis/{1}/policies/policy?api-version={2}&format=rawxml" -f $apimBase, $InferenceApiName, $script:ArmApimApiVersion) -AllowNotFound
+$policyValue = Remove-Bom ($policyDoc.properties.value)
+Assert 'policy: exists on inference API' { -not [string]::IsNullOrWhiteSpace($policyValue) } 'no policy document attached to inference API'
 Assert 'policy: sets backend service (retail-pulse-foundry)' { $policyValue -match '<set-backend-service\s+backend-id="retail-pulse-foundry"' } 'policy did not reference the AOAI backend'
 Assert 'policy: managed-identity auth to cognitiveservices.azure.com' { $policyValue -match '<authentication-managed-identity\s+resource="https://cognitiveservices\.azure\.com"' } 'policy is not using MI auth to AOAI'
 Assert 'policy: azure-openai-token-limit configured' { $policyValue -match '<azure-openai-token-limit\s+counter-key="@\(context\.Subscription\.Id\)"' } 'token-limit missing or wrong counter-key'
@@ -144,32 +240,32 @@ Assert 'policy: azure-openai-emit-token-metric in RetailPulse namespace' { $poli
 
 # ── Backend ──────────────────────────────────────────────────────────────
 Write-Host "Backend"
-$backend = az apim backend show -g $ResourceGroup --service-name $ApimName --backend-id retail-pulse-foundry 2>$null | ConvertFrom-Json
+$backendDoc = Invoke-ArmGet -Path ("{0}/backends/retail-pulse-foundry?api-version={1}" -f $apimBase, $script:ArmApimApiVersion) -AllowNotFound
+$backend = $backendDoc.properties
 Assert 'backend: retail-pulse-foundry exists' { $null -ne $backend } 'backend retail-pulse-foundry not found'
 Assert 'backend: url targets /openai on cognitiveservices' { $backend.url -match '/openai$' -and ($backend.url -match 'cognitiveservices\.azure\.com|\.services\.ai\.azure\.com') } "backend url = $($backend.url)"
 Assert 'backend: MI credentials to cognitiveservices.azure.com' { $backend.credentials.managedIdentity.resource -eq 'https://cognitiveservices.azure.com' } 'backend is not MI-authenticated to AOAI'
 
 # ── Diagnostics (API + instance) ──────────────────────────────────────────
 Write-Host "Diagnostics"
-$apiAppInsightsDiag = az apim api diagnostic show -g $ResourceGroup --service-name $ApimName --api-id $InferenceApiName --diagnostic-id applicationinsights 2>$null | ConvertFrom-Json
+$apiAppInsightsDoc = Invoke-ArmGet -Path ("{0}/apis/{1}/diagnostics/applicationinsights?api-version={2}" -f $apimBase, $InferenceApiName, $script:ArmApimApiVersion) -AllowNotFound
+$apiAppInsightsDiag = $apiAppInsightsDoc.properties
 Assert 'api diag: applicationinsights present' { $null -ne $apiAppInsightsDiag } 'API-level applicationinsights diagnostic missing'
 Assert 'api diag: metrics = true (routes emit-token-metric)' { $apiAppInsightsDiag.metrics -eq $true } "metrics = $($apiAppInsightsDiag.metrics)"
 
-# azuremonitor + largeLanguageModel logs cannot be read by the api-diagnostic-show CLI (it flattens
-# the LLM block); fall back to a direct ARM GET.
-$sub = (az account show --query id -o tsv)
-$armPath = "/subscriptions/$sub/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/apis/$InferenceApiName/diagnostics/azuremonitor?api-version=2024-06-01-preview"
-$azMonRaw = az rest --method get --url "https://management.azure.com$armPath" 2>$null
-$azMonDiag = $null; if ($azMonRaw) { $azMonDiag = $azMonRaw | ConvertFrom-Json }
-Assert 'api diag: azuremonitor present' { $null -ne $azMonDiag } 'API-level azuremonitor diagnostic missing'
-Assert 'api diag: largeLanguageModel logs enabled' { $azMonDiag.properties.largeLanguageModel.logs -eq 'enabled' } 'largeLanguageModel logs not enabled — GatewayLlmLogs stay dark'
+$azMonDoc = Invoke-ArmGet -Path ("{0}/apis/{1}/diagnostics/azuremonitor?api-version={2}" -f $apimBase, $InferenceApiName, $script:ArmApimApiVersion) -AllowNotFound
+Assert 'api diag: azuremonitor present' { $null -ne $azMonDoc } 'API-level azuremonitor diagnostic missing'
+Assert 'api diag: largeLanguageModel logs enabled' { $azMonDoc.properties.largeLanguageModel.logs -eq 'enabled' } 'largeLanguageModel logs not enabled — GatewayLlmLogs stay dark'
 
 # ── RBAC: Cognitive Services OpenAI User on AI Foundry ────────────────────
 Write-Host "RBAC"
 if ($apimPrincipalId) {
-    $roleAssignments = az role assignment list --assignee $apimPrincipalId --scope "/subscriptions/$sub/resourceGroups/$AiFoundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$AiFoundryAccountName" 2>$null | ConvertFrom-Json
-    $hasOpenAiUser = ($roleAssignments | Where-Object { $_.roleDefinitionId -match '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd' })
-    Assert 'rbac: APIM MI has Cognitive Services OpenAI User on AI Foundry account' { $null -ne $hasOpenAiUser } 'Role assignment missing — the MI backend policy will 403'
+    $scope = "/subscriptions/$sub/resourceGroups/$AiFoundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$AiFoundryAccountName"
+    $filter = "principalId eq '$apimPrincipalId'"
+    $encodedFilter = [System.Uri]::EscapeDataString($filter)
+    $roleDoc = Invoke-ArmGet -Path ("{0}/providers/Microsoft.Authorization/roleAssignments?api-version={1}&`$filter={2}" -f $scope, $script:ArmAuthorizationApiVer, $encodedFilter)
+    $hasOpenAiUser = @($roleDoc.value) | Where-Object { $_.properties.roleDefinitionId -match '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd' }
+    Assert 'rbac: APIM MI has Cognitive Services OpenAI User on AI Foundry account' { $null -ne $hasOpenAiUser -and @($hasOpenAiUser).Count -gt 0 } 'Role assignment missing — the MI backend policy will 403'
 }
 else {
     Assert 'rbac: APIM principalId available' { $false } 'Could not read APIM principalId to check role assignments'
@@ -177,7 +273,7 @@ else {
 
 # ── ACA API container app wiring ──────────────────────────────────────────
 Write-Host "ACA API container app"
-$apiApp = az containerapp show -g $ResourceGroup -n $ApiContainerAppName 2>$null | ConvertFrom-Json
+$apiApp = Invoke-ArmGet -Path ("/subscriptions/{0}/resourceGroups/{1}/providers/Microsoft.App/containerApps/{2}?api-version={3}" -f $sub, $ResourceGroup, $ApiContainerAppName, $script:ArmContainerAppApiVer) -AllowNotFound
 Assert 'aca: API container app exists' { $null -ne $apiApp } "container app '$ApiContainerAppName' not found"
 
 $env = $apiApp.properties.template.containers[0].env
