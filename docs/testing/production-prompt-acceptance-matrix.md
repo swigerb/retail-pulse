@@ -108,15 +108,25 @@ Every curated prompt — regardless of response class — must additionally sati
 
 ## Production sweep procedure
 
+Per issue #63, the per-prompt sweep report is posted as a **comment on
+issue #59** (markdown table, no screenshots committed). The summary counts
+and app version are recorded in
+[`production-prompt-acceptance-results.md`](./production-prompt-acceptance-results.md).
+
 1. Sign in at [https://calm-wave-04edb640f.7.azurestaticapps.net/](https://calm-wave-04edb640f.7.azurestaticapps.net/)
-   using the SWA-configured identity provider.
+   as Publix (interactive Entra) or via service-principal replay once #57 lands.
 2. Open DevTools → Console.
 3. Paste `scripts/browser-chart-acceptance.js`, run
-   `await runChartAcceptance()`. Copy the `COPY-TO-DOCS:` JSON into
-   `production-prompt-acceptance-results.md` under "Chart results".
-4. Paste `scripts/browser-prompt-library-acceptance.js`, run
-   `await runPromptLibraryAcceptance()`. Copy the `COPY-TO-DOCS:` JSON into
-   `production-prompt-acceptance-results.md` under "Prose results".
-5. Any failure MUST block merge. Attach the exact failing prompt, the
-   observed failures array, and the app version (git SHA — visible in the
-   footer or via `curl -s https://…/index.html | grep -o 'assets/index-[a-f0-9]*'`).
+   `await runChartAcceptance()`. Verify 9/9 PASS.
+4. Verify **G3** explicitly: the horizontal-bar depletion-growth prompt
+   renders `horizontalBar` with ≥ 6 finite marks. Regression = P0.
+5. Paste `scripts/browser-prompt-library-acceptance.js`, run
+   `await runPromptLibraryAcceptance()`. Verify 17/17 PASS.
+6. Post the per-prompt markdown table (both runs) as a comment on **#59**.
+   Do NOT commit `COPY-TO-DOCS:` payloads, screenshots, or console dumps.
+7. Update `production-prompt-acceptance-results.md` with the summary block
+   only (app version, date, identity provider, tester, counts, G3 verdict,
+   link to the #59 comment).
+8. Any failure blocks merge. Report the exact failing prompt(s), the
+   observed `failures` array, and the app version. Never print or commit
+   tokens, subscription keys, or the `.auth/me` payload.
