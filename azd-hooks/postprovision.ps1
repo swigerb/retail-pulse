@@ -121,3 +121,36 @@ Invoke-Az `
     -FailureMessage "Failed to disable Container Apps platform auth for the API '$($apps[0])'" | Out-Null
 
 Write-Host 'Post-provision configuration complete: secretless ACR pull, SWA linked backend, and ACA platform-auth disabled.'
+
+# ── Mandatory APIM AI Gateway live gate (issue #67) ────────────────────────
+# `azd provision` reporting "Succeeded" only means the ARM deployments
+# succeeded — it says nothing about whether the AI Gateway invariants
+# (backend, policy, token-limit, emit-token-metric, diagnostics, RBAC, ACA
+# wiring) are actually correct on the live resources. Prior to this fix,
+# Verify-ApimAiGateway.ps1 was a manual, optional, best-effort script that
+# nobody was required to run before declaring `azd up` successful — which is
+# exactly how the #67 P0 slipped through. Run it here, as part of
+# postprovision, so a live invariant failure fails the `azd up` /
+# `azd provision` command itself (non-zero exit propagates to azd), not just
+# a follow-up manual check that can be skipped or forgotten.
+#
+# The script's own exit-2 "skip" path is reserved for genuine
+# environment-level preconditions (no az CLI, not signed in, no ARM token,
+# missing required azd outputs) — once those preconditions are met, EVERY
+# invariant failure is a hard [FAIL] that surfaces as exit 1 here too. A
+# signed-in, reachable az session can never mask a real failure as a skip.
+$verifyScript = Join-Path $PSScriptRoot '..\scripts\Verify-ApimAiGateway.ps1'
+Write-Host ''
+Write-Host 'Running mandatory APIM AI Gateway live verification gate...'
+& pwsh -NoProfile -File $verifyScript
+$verifyExitCode = $LASTEXITCODE
+
+if ($verifyExitCode -eq 0) {
+    Write-Host 'APIM AI Gateway live verification: PASS. Provisioning gate satisfied.'
+}
+elseif ($verifyExitCode -eq 2) {
+    Write-Host 'APIM AI Gateway live verification: SKIPPED (environment precondition not met — see script output above). Provisioning continues, but this environment has NOT been live-verified.' -ForegroundColor Yellow
+}
+else {
+    throw "APIM AI Gateway live verification FAILED (Verify-ApimAiGateway.ps1 exited $verifyExitCode). One or more AI Gateway invariants are missing on the live deployment — see failures listed above. Failing 'azd provision' / 'azd up' rather than reporting false success (issue #67)."
+}
