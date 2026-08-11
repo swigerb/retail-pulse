@@ -31,7 +31,33 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly IAnonymousChatPolicy _anonymousChatPolicy;
     private readonly ToolResultBudget? _toolBudget;
     private readonly ToolResultBudgetOptions _budgetOptions;
-    private readonly TenantConfiguration? _tenant;
+    private readonly TenantConfiguration _tenant;
+
+    /// <summary>
+    /// True when a tenant roster with at least one brand is wired into this pipeline.
+    /// Composition-root regression tests assert this is true for every production
+    /// agent registration — a false value here means portfolio-ranking coverage
+    /// enforcement (issue #74) is silently disabled and would ship a partial chart.
+    /// </summary>
+    internal bool HasTenantRoster => _tenant.Brands.Count > 0;
+
+    /// <summary>
+    /// Assistant-prose fallback/truncation vocabulary that must never appear in the
+    /// final user-visible reply when a valid roster-complete chart was in fact
+    /// produced (issue #74 P0 regression). Kept in sync with the banned list in
+    /// <c>ChartFulfillmentContractTests</c> so tests and runtime agree on the
+    /// forbidden vocabulary.
+    /// </summary>
+    private static readonly string[] _fallbackClaimVocabulary =
+    [
+        "truncated",
+        "placeholder zero",
+        "should not be used",
+        "chart shell",
+        "unable to rank",
+        "falling back",
+        "fallback",
+    ];
 
     private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -53,9 +79,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         ILogger<AgentExecutionPipeline> logger,
         RetailPulseMetrics? metrics,
         IAnonymousChatPolicy anonymousChatPolicy,
+        TenantConfiguration tenant,
         ToolResultBudget? toolBudget = null,
-        ToolResultBudgetOptions? budgetOptions = null,
-        TenantConfiguration? tenant = null)
+        ToolResultBudgetOptions? budgetOptions = null)
     {
         _chatClient = chatClient;
         _hubContext = hubContext;
@@ -68,7 +94,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             ?? throw new ArgumentNullException(nameof(anonymousChatPolicy));
         _toolBudget = toolBudget;
         _budgetOptions = budgetOptions ?? new ToolResultBudgetOptions();
-        _tenant = tenant;
+        _tenant = tenant ?? throw new ArgumentNullException(nameof(tenant),
+            "TenantConfiguration is required — portfolio-ranking coverage enforcement " +
+            "(issue #74) fails closed without it. Production DI must resolve it from the service provider.");
     }
 
     /// <summary>
@@ -83,7 +111,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         IConfiguration configuration,
         ILogger<AgentExecutionPipeline> logger,
         RetailPulseMetrics? metrics = null)
-        : this(chatClient, hubContext, null, null, configuration, logger, metrics, NoOpAnonymousChatPolicy.Instance)
+        : this(chatClient, hubContext, null, null, configuration, logger, metrics, NoOpAnonymousChatPolicy.Instance, new TenantConfiguration())
     {
     }
 

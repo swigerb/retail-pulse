@@ -44,7 +44,7 @@ public partial class AgentExecutionPipeline
         // non-fulfilling and replaced with the deterministic ranking built from the
         // tool payload (which the compactor preserves in full). This is tenant-generic
         // — driven by tenant.yaml, no brand or count literals.
-        IReadOnlyCollection<string>? roster = isPortfolioRanking && _tenant is { Brands.Count: > 0 }
+        IReadOnlyCollection<string>? roster = isPortfolioRanking && _tenant.Brands.Count > 0
             ? _tenant.Brands.Select(b => b.Name).ToArray()
             : null;
 
@@ -68,7 +68,7 @@ public partial class AgentExecutionPipeline
                     // roster-complete chart is the source of truth for this intent.
                     charts.RemoveAll(c => string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase));
                     charts.Add(rebuilt);
-                    return new ChartFulfillmentResult(charts, reply);
+                    return new ChartFulfillmentResult(charts, StripFallbackClaims(reply));
                 }
 
                 // Coverage impossible from the current tool payload — fail closed with a
@@ -88,7 +88,16 @@ public partial class AgentExecutionPipeline
         // Already fulfilled by the model / inline recovery.
         if (charts.Count > 0)
         {
-            return new ChartFulfillmentResult(charts, reply);
+            // If a roster-complete portfolio ranking chart is present, scrub any
+            // fallback/truncation vocabulary the model may have narrated into the
+            // prose (issue #74) — the chart is authoritative and the prose must
+            // not undermine it.
+            string sanitizedReply = (roster is { Count: > 0 } && charts.Any(c =>
+                    string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)
+                    && DeterministicChartBuilder.CoversRoster(c, roster)))
+                ? StripFallbackClaims(reply)
+                : reply;
+            return new ChartFulfillmentResult(charts, sanitizedReply);
         }
 
         // Deterministic, no-LLM reconstruction from this turn's tool results. For a
@@ -195,5 +204,50 @@ public partial class AgentExecutionPipeline
                 return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Removes lines from the model's prose that contain fallback/truncation
+    /// vocabulary when a valid roster-complete chart was in fact produced.
+    /// The chart is authoritative; leaving hallucinated "truncated / fallback /
+    /// placeholder / should not be used" language in the final assistant message
+    /// undermines it and is the exact P0 regression for issue #74 (Publix
+    /// production failure #2). Whole sentences containing any banned token are
+    /// dropped; if the entire reply is fallback narrative, a neutral confirmation
+    /// is substituted so the chart is not orphaned.
+    /// </summary>
+    internal static string StripFallbackClaims(string? reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply))
+        {
+            return "Here is the requested portfolio ranking across all configured tenant brands.";
+        }
+
+        string[] lines = reply.Split('\n');
+        var kept = new List<string>(lines.Length);
+        bool anyStripped = false;
+        foreach (string rawLine in lines)
+        {
+            bool banned = false;
+            foreach (string phrase in _fallbackClaimVocabulary)
+            {
+                if (rawLine.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                {
+                    banned = true;
+                    break;
+                }
+            }
+            if (banned)
+            {
+                anyStripped = true;
+                continue;
+            }
+            kept.Add(rawLine);
+        }
+
+        string cleaned = string.Join('\n', kept).Trim();
+        return string.IsNullOrWhiteSpace(cleaned)
+            ? "Here is the requested portfolio ranking across all configured tenant brands."
+            : anyStripped ? cleaned : reply;
     }
 }
