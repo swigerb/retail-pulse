@@ -87,6 +87,7 @@ if (!File.Exists(tenantConfigPath))
 }
 var tenantProvider = new FileTenantProvider(tenantConfigPath);
 builder.Services.AddSingleton<ITenantProvider>(tenantProvider);
+builder.Services.AddSingleton(tenantProvider.GetTenant());
 
 // Add our custom ActivitySource to the OTel pipeline
 builder.Services.AddOpenTelemetry()
@@ -353,6 +354,17 @@ builder.Services.AddSingleton(sp =>
 {
     var options = new RetailPulse.Api.Budget.ToolResultBudgetOptions();
     builder.Configuration.GetSection(RetailPulse.Api.Budget.ToolResultBudgetOptions.SectionName).Bind(options);
+    // Portfolio-wide aggregate tool: the compacted 12-brand payload is the
+    // source of truth for horizontal-bar ranking coverage (issue #74). The
+    // default 6 KB per-tool cap can clip brand rows below the 12-brand roster
+    // threshold, which then triggers the fail-closed diagnostic even though
+    // the tool did return complete data. Raise the ceiling ONLY for this tool
+    // to preserve full portfolio coverage; the compactor still strips the
+    // verbose per-brand sentiment narrative so the aggregate stays lean.
+    if (!options.PerToolMaxResultChars.ContainsKey("GetPortfolioDepletionStats"))
+    {
+        options.PerToolMaxResultChars["GetPortfolioDepletionStats"] = 20_000;
+    }
     return options;
 });
 builder.Services.AddSingleton<RetailPulse.Api.Budget.IToolResultCompactor, RetailPulse.Api.Budget.HistoricalDemandCompactor>();

@@ -34,6 +34,40 @@ internal static class DeterministicChartBuilder
         Microsoft.Extensions.AI.ChatResponse response,
         string? requestedType,
         out ChartSpec? chart)
+        => TryBuild(response, requestedType, minMarks: 0, out chart);
+
+    /// <summary>
+    /// Attempt to build a chart of the requested kind, subject to a minimum-finite-marks
+    /// contract. When <paramref name="minMarks"/> is greater than zero the result is
+    /// rejected unless the cleaned chart carries at least that many finite datapoints;
+    /// for horizontal-bar ranking requests the builder additionally requires at least
+    /// one non-zero mark and refuses to fall through to a velocity chart when only
+    /// historical-demand payloads (i.e. no <c>brands[]</c> growth aggregate) are
+    /// present. This is the fail-closed contract that stops a growth-ranking prompt
+    /// from surfacing a zero-valued or velocity-relabelled chart shell.
+    /// </summary>
+    public static bool TryBuild(
+        Microsoft.Extensions.AI.ChatResponse response,
+        string? requestedType,
+        int minMarks,
+        out ChartSpec? chart)
+        => TryBuild(response, requestedType, minMarks, requiredBrands: null, out chart);
+
+    /// <summary>
+    /// Overload adding a portfolio-coverage contract for horizontal-bar ranking requests:
+    /// when <paramref name="requiredBrands"/> is non-empty AND the requested type is
+    /// <c>horizontalBar</c>, the produced ranking chart MUST contain a mark for every
+    /// required brand (case-insensitive). This is the tenant-generic guard that stops a
+    /// portfolio ranking from silently dropping half the portfolio because the model
+    /// emitted only the brands it happened to prioritize — the source of truth is the
+    /// aggregate tool payload, and coverage is enforced against the tenant roster.
+    /// </summary>
+    public static bool TryBuild(
+        Microsoft.Extensions.AI.ChatResponse response,
+        string? requestedType,
+        int minMarks,
+        IReadOnlyCollection<string>? requiredBrands,
+        out ChartSpec? chart)
     {
         chart = null;
         List<JsonElement> payloads = CollectToolPayloads(response);
@@ -43,16 +77,87 @@ internal static class DeterministicChartBuilder
         }
 
         bool gaugeFirst = string.Equals(requestedType, "gauge", StringComparison.OrdinalIgnoreCase);
+        bool isHorizontalRanking = string.Equals(requestedType, "horizontalBar", StringComparison.OrdinalIgnoreCase);
 
-        ChartSpec? built = SelectBuilder(payloads, requestedType, gaugeFirst);
+        ChartSpec? built = SelectBuilder(payloads, requestedType, gaugeFirst, isHorizontalRanking);
 
-        if (built is not null && ChartSpecValidator.TryGetRenderable(built, out ChartSpec? renderable) && renderable is not null)
+        if (built is null)
         {
-            chart = renderable;
-            return true;
+            return false;
         }
 
-        return false;
+        int effectiveMinMarks = Math.Max(minMarks, 1);
+        if (!ChartSpecValidator.TryGetRenderable(built, minSeries: 1, minMarks: effectiveMinMarks, out ChartSpec? renderable)
+            || renderable is null)
+        {
+            return false;
+        }
+
+        // Ranking contract: a horizontalBar growth ranking must not be all zeros.
+        // A chart of exclusively-zero marks passes chartIsRenderable but paints as
+        // an empty shell with no visible bars — the exact P0 failure. Require at
+        // least one non-zero finite mark whenever a horizontal ranking is asked for.
+        if (isHorizontalRanking && !ChartSpecValidator.HasNonZeroFinitePoint(renderable))
+        {
+            return false;
+        }
+
+        // Portfolio coverage contract: when the caller supplies the tenant roster and the
+        // request is a horizontal-bar ranking ("rank ALL brands …"), the built chart MUST
+        // cover every tenant brand. If any is missing, fail closed so the pipeline can
+        // surface the chart-unavailable diagnostic listing exactly which brands were
+        // omitted — never silently return a partial portfolio.
+        if (isHorizontalRanking && requiredBrands is { Count: > 0 })
+        {
+            var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ChartSeries s in renderable.Data)
+            {
+                foreach (ChartDataPoint p in s.Values)
+                {
+                    if (p?.X is not null)
+                        present.Add(p.X);
+                }
+            }
+            foreach (string brand in requiredBrands)
+            {
+                if (!present.Contains(brand))
+                    return false;
+            }
+        }
+
+        chart = renderable;
+        return true;
+    }
+
+    /// <summary>
+    /// True when the given chart is a horizontal-bar ranking that covers every brand in
+    /// <paramref name="requiredBrands"/> (case-insensitive) and has at least one non-zero
+    /// finite mark. Used by the fulfillment invariant to decide whether a model-emitted
+    /// chart already satisfies the portfolio-coverage contract or must be replaced with
+    /// the deterministic reconstruction from tool results.
+    /// </summary>
+    public static bool CoversRoster(ChartSpec? chart, IReadOnlyCollection<string> requiredBrands)
+    {
+        if (chart is null || requiredBrands.Count == 0)
+            return false;
+        if (!ChartSpecValidator.HasNonZeroFinitePoint(chart))
+            return false;
+
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ChartSeries s in chart.Data)
+        {
+            foreach (ChartDataPoint p in s.Values)
+            {
+                if (p?.X is not null && double.IsFinite(p.Y))
+                    present.Add(p.X);
+            }
+        }
+        foreach (string brand in requiredBrands)
+        {
+            if (!present.Contains(brand))
+                return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -62,15 +167,24 @@ internal static class DeterministicChartBuilder
     /// velocity bar while portfolio growth data is present, and a grouped/region request
     /// prefers the two-brand region rollup.
     /// </summary>
-    private static ChartSpec? SelectBuilder(IReadOnlyList<JsonElement> payloads, string? requestedType, bool gaugeFirst)
+    private static ChartSpec? SelectBuilder(
+        IReadOnlyList<JsonElement> payloads,
+        string? requestedType,
+        bool gaugeFirst,
+        bool isHorizontalRanking = false)
     {
+        _ = isHorizontalRanking; // reserved: caller signals the ranking contract via the outer TryBuild
         return gaugeFirst
             ? TryBuildGauge(payloads) ?? TryBuildDemandBar(payloads, requestedType)
             : (requestedType?.ToLowerInvariant()) switch
             {
-                "horizontalbar" => TryBuildGrowthRanking(payloads)
-                    ?? TryBuildGroupedRegionBar(payloads, requestedType)
-                    ?? TryBuildDemandBar(payloads, requestedType),
+                // Horizontal-bar RANKING has a single legitimate shape: a portfolio growth
+                // ranking built from GetPortfolioDepletionStats' brands[] payload. If that
+                // is not present we FAIL CLOSED (return null) rather than silently rebrand
+                // a velocity bar as growth or emit a groupedBar under a horizontalBar
+                // request — the P0 failure this fix addresses. The caller enforces the
+                // fail-closed contract via the chart-unavailable diagnostic.
+                "horizontalbar" => TryBuildGrowthRanking(payloads),
                 "groupedbar" or "stackedbar" => TryBuildGroupedRegionBar(payloads, requestedType)
                     ?? TryBuildDemandBar(payloads, requestedType),
                 "line" => TryBuildDemandLine(payloads)

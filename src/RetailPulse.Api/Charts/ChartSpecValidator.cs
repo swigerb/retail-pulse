@@ -133,4 +133,28 @@ internal static class ChartSpecValidator
         renderable = changed ? chart with { Data = cleanedSeries } : chart;
         return true;
     }
+
+    /// <summary>
+    /// True when the cleaned chart carries at least one finite datapoint whose Y value
+    /// is non-zero. Used by ranking-style acceptance (horizontal-bar growth ranking):
+    /// a chart of exclusively-zero marks passes <see cref="IsRenderable"/> because zero
+    /// is a legal finite metric — but it paints as an empty shell with zero-width bars,
+    /// which is the exact P0 failure this helper prevents. Never fabricates values.
+    /// </summary>
+    public static bool HasNonZeroFinitePoint(ChartSpec? chart)
+    {
+        if (chart is null) return false;
+        foreach (ChartSeries s in chart.Data)
+        {
+            if (s is null) continue;
+            foreach (ChartDataPoint p in s.Values)
+            {
+                if (p is not null && double.IsFinite(p.Y) && p.Y != 0.0)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 }

@@ -113,6 +113,21 @@ public static partial class ChartRequestDetector
     /// </summary>
     private static readonly (string Intent, string[] Cues)[] _domainCues =
     [
+        // Portfolio-wide ranking / cross-brand growth-rate asks MUST be evaluated
+        // BEFORE the depletion/velocity cues below. The prompt "rank all brands by
+        // depletion growth rate" contains the word "depletion" but its intent is a
+        // one-shot portfolio ranking answerable ONLY by GetPortfolioDepletionStats,
+        // which the General (retail-pulse) agent owns. If depletion won first, the
+        // request would fan out to per-brand GetHistoricalDemand on the demand
+        // specialist and blow the tool-call budget. Cues are intent-shape only
+        // (no brand/tenant literals) so this rule generalises to any tenant.
+        (AgentIntent.General, [
+            "rank all brands", "ranking all brands", "rank brands", "brands ranked",
+            "growth rate", "yoy growth", "year-over-year growth", "year over year growth",
+            "top brands", "top-performing brand", "fastest growing", "fastest-growing",
+            "portfolio ranking", "all brands by", "compare all brands",
+            "brand ranking", "cross-brand ranking",
+        ]),
         (AgentIntent.Planogram, ["planogram", "shelf", "facing", "sku placement", "aisle", "merchandis"]),
         (AgentIntent.MarginAnalysis, ["margin", "profit", "profitability", "cogs", "gross margin", "p&l", "pnl"]),
         (AgentIntent.PromotionTrade, ["promotion", "promo", "trade spend", "trade-spend", "deal effectiveness", "promotional"]),
