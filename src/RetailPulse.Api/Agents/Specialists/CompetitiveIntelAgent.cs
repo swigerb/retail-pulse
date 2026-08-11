@@ -18,7 +18,7 @@ namespace RetailPulse.Api.Agents.Specialists;
 /// Integrates with proactive alert system for real-time threat detection.
 /// Temperature 0.4 balances analytical precision with creative strategy.
 /// </summary>
-public class CompetitiveIntelAgent : ISpecialistAgent
+public class CompetitiveIntelAgent : ISpecialistAgent, IPrefetchableAgent
 {
     private readonly IAgentExecutionPipeline _pipeline;
     private readonly AgentDefinition _agentDef;
@@ -51,7 +51,13 @@ public class CompetitiveIntelAgent : ISpecialistAgent
         _alertService = alertService;
     }
 
-    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
+    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default) =>
+        HandleWithPrefetchAsync(request, null, ct);
+
+    public Task<ChatResponse> HandleWithPrefetchAsync(
+        ChatRequest request,
+        IReadOnlyDictionary<string, string>? prefetchedData,
+        CancellationToken ct = default)
     {
         var context = new AgentExecutionContext
         {
@@ -62,7 +68,8 @@ public class CompetitiveIntelAgent : ISpecialistAgent
             Request = request,
             Tools = _tools,
             FallbackReply = "I wasn't able to generate a competitive analysis.",
-            OnToolResult = CheckAndFireAlertsAsync
+            OnToolResult = CheckAndFireAlertsAsync,
+            PrefetchedData = prefetchedData,
         };
 
         return _pipeline.ExecuteAsync(context, ct);

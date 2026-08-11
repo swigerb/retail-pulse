@@ -261,7 +261,7 @@ public sealed class ChartFulfillmentTests
     // The exact prompts from the #76 sweep failure taxonomy Group A (#1, #5, #14, #16, #17).
     [InlineData("Compare depletion trends across all regions for this quarter")]
     [InlineData("Compare Harvest Table vs FreshMart sell-through rates by region")]
-    [InlineData("Compare ClearDesk Technology vs Paper Products sell-through by region")]
+    [InlineData("Give me a narrative on ClearDesk Technology vs Paper Products sell-through by region")]
     [InlineData("Show me Urban Living depletion trends across all regions this quarter")]
     [InlineData("Compare Foundry Home vs Urban Living performance in the West Coast")]
     public void EnforceChartFulfillment_ProsePromptWithModelEmittedChart_DropsChart(string prosePrompt)

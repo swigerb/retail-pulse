@@ -1,5 +1,4 @@
 using System.Text.RegularExpressions;
-using RetailPulse.Contracts.Charts;
 using RetailPulse.Contracts.Routing;
 
 namespace RetailPulse.Api.Charts;
@@ -44,6 +43,41 @@ public readonly record struct ChartIntent(
 /// </summary>
 public static partial class ChartRequestDetector
 {
+    // Comparison-shape recognizer (issue #76). Classifies chart-intent for prompts of
+    // the form  "Compare <entity> vs|and <entity> <metric> [across|by <scope>]"  even
+    // when they carry NO chart/graph/plot noun. The recognizer is tenant-generic:
+    //   * The two entity slots are arbitrary noun phrases — brands, product lines,
+    //     categories, competitors — so it generalises to any tenant's roster without
+    //     hard-coded brand literals.
+    //   * A HARD-METRIC noun (bare "depletions"/"velocity"/"share"/"volume"/... — the
+    //     same vocabulary the <see cref="_domainCues"/> table uses to route the
+    //     specialist) must appear after the second entity for chart-intent to fire.
+    //     Comparisons whose payload noun is a soft, narrative aggregation
+    //     ("trends", "rates", "performance", "sentiment", "story", ...) are prose
+    //     asks and remain classified as prose.
+    //   * The routed specialist is chosen by <see cref="ResolveDomainIntent"/>, so
+    //     the same generic path handles depletion (DemandForecasting), share
+    //     (CompetitiveMarket), inventory (SupplyShipments), etc.
+    // Rendered chart type defaults to "groupedBar" — the canonical shape for a
+    // two-entity metric comparison — and is overridable by any explicit chart-type
+    // word further on in the sentence.
+    [GeneratedRegex(
+        @"\b(?:compare|contrast|comparison\s+of|difference\s+between)\b" +
+        @"[^.?!]*?\b(?:vs\.?|versus|and|&)\b" +
+        @"[^.?!]*?\b(?<metric>depletion|depletions|velocity|velocities|share|shares|volume|volumes|sales|sell[-\s]?in|sell[-\s]?through|shipment|shipments|inventory|stock|stockout|stockouts|mix|margin|margins|revenue|revenues|growth|units|forecast|demand)s?\b" +
+        @"(?![-\s]*(?:trend|trends|rate|rates|performance|story|sentiment|narrative|health|outlook))",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex ComparisonShapeRegex();
+
+    // Soft/narrative payload nouns that disqualify a comparison sentence from
+    // chart-intent even when a hard metric appears earlier: "sell-through rates by
+    // region", "depletion trends across all regions", "brand performance", ... —
+    // these are prose asks answered by a written analysis, not by a chart.
+    [GeneratedRegex(
+        @"\b(?:trend|trends|rate|rates|performance|story|sentiment|narrative|outlook)\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex SoftPayloadNounRegex();
+
     // "bar chart", "gauge graph", "grouped bar chart", "line plot", ... → capture the type.
     [GeneratedRegex(
         @"\b(?<type>grouped\s*bar|stacked\s*bar|horizontal\s*bar|bar|line|pie|donut|doughnut|gauge|scatter|area|column|table)\s+(?:chart|graph|plot)\b",
@@ -153,39 +187,9 @@ public static partial class ChartRequestDetector
             return new ChartIntent(false, null, AgentIntent.General);
         }
 
-        // Manifest-first, table-driven override (issue #76 blockers 1 + 2).
-        //
-        // The <see cref="ChartAcceptanceManifest"/> is the tenant's authoritative
-        // statement of "these curated prompts are chart requests". When the
-        // (canonicalized) user message matches a manifest case exactly, we skip
-        // linguistic scoring entirely and return the manifest's canonical
-        // ChartType and RoutedIntent. This has two effects:
-        //
-        //   1. Prompt #8 ("Compare Coastline Tacos vs Apex Grill depletions
-        //      across all regions") — a chart on the manifest but a prose-shaped
-        //      sentence to the regex — is correctly classified as a chart
-        //      request. Without this override the Group A drop-on-prose
-        //      invariant added in 61c7e90 dropped any chart the model tried to
-        //      produce for it (the exact BLOCKER 2 regression).
-        //
-        //   2. For every curated chart prompt (#19/#21/#23/#26 and the rest),
-        //      classification becomes an exact string-table lookup — invariant
-        //      across runs, invariant under regex-alternation reordering,
-        //      invariant under any future change to the linguistic detector.
-        //      That closes the divergence gate for BLOCKER 1: the emit/no-emit
-        //      classification decision is now a deterministic function of the
-        //      prompt text, not of any downstream heuristic ordering.
-        //
-        // Non-matching messages still run the full linguistic detector below,
-        // so we never accidentally attach chart intent to prose asks.
-        if (ChartPromptCatalog.TryMatch(message, out ChartAcceptanceCase? manifestCase)
-            && manifestCase is not null)
-        {
-            return new ChartIntent(
-                IsExplicitChartRequest: true,
-                ChartType: manifestCase.ChartType,
-                RoutedIntent: manifestCase.RoutedIntent);
-        }
+        // Comparison-shape recognizer (issue #76 remediation) — see the fallback
+        // below. Removed early-return version so an explicit chart-type word
+        // ("line chart") still takes precedence.
 
         string? chartType = null;
         bool explicitRequest = false;
@@ -208,6 +212,22 @@ public static partial class ChartRequestDetector
             explicitRequest = true;
             Match standalone = StandaloneTypeRegex().Match(message);
             chartType = standalone.Success ? NormalizeType(standalone.Groups["type"].Value) : null;
+        }
+
+        // Comparison-shape recognizer (issue #76 remediation): classify a
+        // "Compare <entity> vs|and <entity> <metric> ..." sentence as an explicit
+        // chart request when it carries a HARD metric noun and no soft/narrative
+        // payload noun. This closes the "no chart-type word but clearly a two-
+        // entity metric comparison" gap generically — it applies to any tenant
+        // brand pair and any of the shared metric vocabulary the domain-cue table
+        // already uses to route the specialist. It runs AFTER the typed/noun
+        // regex paths so an explicit "line chart"/"pie chart" phrase still wins,
+        // and BEFORE the prose fall-through so the shape is recognised without
+        // requiring a chart/graph/plot noun.
+        if (!explicitRequest && LooksLikeComparisonChart(message))
+        {
+            explicitRequest = true;
+            chartType = "groupedBar";
         }
 
         if (!explicitRequest)
@@ -252,6 +272,25 @@ public static partial class ChartRequestDetector
 
         chartType = null;
         return false;
+    }
+
+    /// <summary>
+    /// Recognise a bare comparison-shape chart ask: "Compare <entity> vs|and
+    /// <entity> <hard-metric> [across|by <scope>]" without any chart-type word or
+    /// chart noun. Returns false when the payload noun is soft/narrative
+    /// ("trends", "rates", "performance"), because that shape is a prose ask.
+    /// </summary>
+    private static bool LooksLikeComparisonChart(string message)
+    {
+        if (!ComparisonShapeRegex().IsMatch(message))
+        {
+            return false;
+        }
+
+        // "Compare X vs Y depletion trends across all regions" and
+        // "Compare X vs Y sell-through rates by region" carry the metric noun
+        // but the aggregate payload is a soft/narrative summary — prose.
+        return !SoftPayloadNounRegex().IsMatch(message);
     }
 
     private static string ResolveDomainIntent(string message)

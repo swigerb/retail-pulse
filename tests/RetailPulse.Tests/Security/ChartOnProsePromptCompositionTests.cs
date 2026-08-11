@@ -47,7 +47,7 @@ public sealed class ChartOnProsePromptCompositionTests
     [
         ["Compare depletion trends across all regions for this quarter"],
         ["Compare Harvest Table vs FreshMart sell-through rates by region"],
-        ["Compare ClearDesk Technology vs Paper Products sell-through by region"],
+        ["Give me a narrative on ClearDesk Technology vs Paper Products sell-through by region"],
         ["Show me Urban Living depletion trends across all regions this quarter"],
         ["Compare Foundry Home vs Urban Living performance in the West Coast"],
     ];
