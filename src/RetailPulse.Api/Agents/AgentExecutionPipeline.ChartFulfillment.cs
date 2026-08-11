@@ -72,36 +72,48 @@ public partial class AgentExecutionPipeline
 
         bool isPortfolioRanking = IsPortfolioRankingIntent(userMessage, intent);
 
-        // Portfolio-ranking coverage invariant: when the user asked for a ranking of
-        // ALL tenant brands and the tenant roster is available, the answer MUST cover
-        // every brand. The aggregate tool payload is the source of truth; a
-        // model-emitted chart that silently drops half the portfolio is treated as
-        // non-fulfilling and replaced with the deterministic ranking built from the
-        // tool payload (which the compactor preserves in full). This is tenant-generic
-        // — driven by tenant.yaml, no brand or count literals.
-        IReadOnlyCollection<string>? roster = isPortfolioRanking && _tenant.Brands.Count > 0
-            ? _tenant.Brands.Select(b => b.Name).ToArray()
-            : null;
+        // Roster-coverage invariant. When the user asked for a chart covering a
+        // KNOWN SUBSET of the tenant roster — either every brand (portfolio ranking)
+        // or every brand in a specific tenant category ("all X brands …") — the
+        // answer MUST cover every brand in that subset. A model-emitted chart that
+        // silently drops half the group is treated as non-fulfilling and replaced
+        // with the deterministic reconstruction from the tool payload, which the
+        // compactor preserves in full. Tenant-generic: the roster is driven entirely
+        // by tenant.yaml (no brand or count literals) so this also catches Publix
+        // sweep #25 ("all home improvement brands by region") — the same failure
+        // class as #74 but for a category-scoped subset and the table chart type.
+        (IReadOnlyCollection<string> Brands, string Scope)? coverage =
+            ResolveCoverageRoster(userMessage, intent, isPortfolioRanking);
+        IReadOnlyCollection<string>? roster = coverage?.Brands;
+        // Chart types that participate in the coverage invariant. Kept in sync with
+        // DeterministicChartBuilder — every builder here must accept the requiredBrands
+        // contract in TryBuild.
+        static bool ChartTypeParticipatesInCoverage(string? type) =>
+            string.Equals(type, "horizontalBar", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "table", StringComparison.OrdinalIgnoreCase);
 
-        if (roster is { Count: > 0 })
+        if (roster is { Count: > 0 } && ChartTypeParticipatesInCoverage(intent.ChartType))
         {
             bool alreadyCovers = charts.Any(c =>
-                string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)
+                ChartTypeParticipatesInCoverage(c?.Type)
                 && DeterministicChartBuilder.CoversRoster(c, roster));
 
             if (!alreadyCovers)
             {
-                int minMarks = Math.Max(6, roster.Count);
+                int minMarks = Math.Max(
+                    ChartSpecValidator.MinimumMarksForType(intent.ChartType),
+                    roster.Count);
                 if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, minMarks, roster, out ChartSpec? rebuilt)
                     && rebuilt is not null)
                 {
                     _logger.LogInformation(
-                        "Chart-fulfillment: replacing model-emitted horizontalBar with deterministic "
-                        + "portfolio ranking covering all {BrandCount} tenant brands.",
-                        roster.Count);
-                    // Drop any prior horizontalBar model chart(s) — the deterministic
-                    // roster-complete chart is the source of truth for this intent.
-                    charts.RemoveAll(c => string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase));
+                        "Chart-fulfillment: replacing model-emitted {ChartType} with deterministic "
+                        + "chart covering all {BrandCount} required tenant brand(s) for scope '{Scope}'.",
+                        intent.ChartType, roster.Count, coverage!.Value.Scope);
+                    // Drop any prior chart(s) of a coverage-participating type — the
+                    // deterministic roster-complete chart is the source of truth for
+                    // this intent.
+                    charts.RemoveAll(c => ChartTypeParticipatesInCoverage(c?.Type));
                     charts.Add(rebuilt);
                     return new ChartFulfillmentResult(charts, StripFallbackClaims(reply));
                 }
@@ -111,9 +123,9 @@ public partial class AgentExecutionPipeline
                 // partial model chart so the user is not silently misled.
                 IReadOnlyList<string> missing = ComputeMissingBrands(charts, roster);
                 _logger.LogWarning(
-                    "Chart-fulfillment: portfolio ranking missing {Missing} brand(s) — failing closed.",
-                    missing.Count);
-                charts.RemoveAll(c => string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase));
+                    "Chart-fulfillment: {Scope} coverage missing {Missing} brand(s) — failing closed.",
+                    coverage!.Value.Scope, missing.Count);
+                charts.RemoveAll(c => ChartTypeParticipatesInCoverage(c?.Type));
                 string diag = BuildRankingCoverageDiagnostic(missing, roster.Count);
                 // Scrub the model's fallback/truncation narrative from the prose so
                 // the user-visible reply cannot claim a chart was produced when we
@@ -127,12 +139,12 @@ public partial class AgentExecutionPipeline
         // Already fulfilled by the model / inline recovery.
         if (charts.Count > 0)
         {
-            // If a roster-complete portfolio ranking chart is present, scrub any
+            // If a roster-complete coverage-scoped chart is present, scrub any
             // fallback/truncation vocabulary the model may have narrated into the
             // prose (issue #74) — the chart is authoritative and the prose must
             // not undermine it.
             string sanitizedReply = (roster is { Count: > 0 } && charts.Any(c =>
-                    string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)
+                    ChartTypeParticipatesInCoverage(c?.Type)
                     && DeterministicChartBuilder.CoversRoster(c, roster)))
                 ? StripFallbackClaims(reply)
                 : reply;
@@ -236,28 +248,145 @@ public partial class AgentExecutionPipeline
         foreach (ChartSpec chart in charts)
         {
             if (chart is null) continue;
-            if (!string.Equals(chart.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(chart.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(chart.Type, "table", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             foreach (ChartSeries s in chart.Data)
             {
                 foreach (ChartDataPoint p in s.Values)
                 {
-                    if (p?.X is not null && double.IsFinite(p.Y))
-                        present.Add(p.X);
+                    if (p?.X is null || !double.IsFinite(p.Y)) continue;
+                    // Table labels take the shape "Brand — Region"; coverage is on
+                    // the brand token only (tenant-generic — no brand or region literals).
+                    present.Add(ExtractBrandToken(p.X));
                 }
             }
         }
         return [.. roster.Where(b => !present.Contains(b))];
     }
 
+    /// <summary>
+    /// Splits a chart label of the form "Brand — Region" into its brand token, or
+    /// returns the label unchanged when no em-dash separator is present. Used by
+    /// the coverage invariant so a table row labelled "Pinnacle Hardware — Southeast"
+    /// counts toward the brand roster (Publix sweep #25).
+    /// </summary>
+    internal static string ExtractBrandToken(string label)
+    {
+        if (string.IsNullOrEmpty(label)) return label;
+        int sep = label.IndexOf(" — ", StringComparison.Ordinal);
+        return sep > 0 ? label[..sep].Trim() : label.Trim();
+    }
+
     private static string BuildRankingCoverageDiagnostic(IReadOnlyList<string> missing, int rosterCount)
     {
         string list = missing.Count == 0
-            ? "one or more portfolio brands"
+            ? "one or more required brands"
             : string.Join(", ", missing);
-        return $"⚠️ Chart unavailable: a portfolio ranking must cover every configured brand "
-            + $"({rosterCount} total for this tenant), but the following were not returned by the "
+        return $"⚠️ Chart unavailable: this request must cover every required brand "
+            + $"({rosterCount} total for this scope), but the following were not returned by the "
             + $"underlying data tools: {list}. This is a data-availability issue, not a rendering "
-            + "failure — a partial ranking would silently mis-rank the portfolio, so no chart is emitted.";
+            + "failure — a partial answer would silently mis-represent the scope, so no chart is emitted.";
+    }
+
+    /// <summary>
+    /// Resolves the brand roster that a chart response MUST cover, or <c>null</c>
+    /// when the request does not have a bounded brand scope. Two shapes are handled:
+    /// <list type="bullet">
+    ///   <item>portfolio ranking (existing #74 invariant) — every tenant brand;</item>
+    ///   <item>category-scoped requests such as "all home improvement brands …"
+    ///     (Publix sweep #25) — every brand in the matched tenant category.</item>
+    /// </list>
+    /// Tenant-generic: category matching walks <c>tenant.yaml</c>'s configured
+    /// categories, no prompt or brand literals. When multiple categories match
+    /// the message the smallest (most specific) match wins so "all X and Y brands"
+    /// does not silently collapse into an unrelated category.
+    /// </summary>
+    private (IReadOnlyCollection<string> Brands, string Scope)? ResolveCoverageRoster(
+        string? userMessage,
+        ChartIntent intent,
+        bool isPortfolioRanking)
+    {
+        if (_tenant.Brands.Count == 0) return null;
+
+        if (isPortfolioRanking)
+        {
+            return (_tenant.Brands.Select(b => b.Name).ToArray(), "portfolio");
+        }
+
+        if (string.IsNullOrWhiteSpace(userMessage))
+        {
+            return null;
+        }
+
+        // Category-scoped "all X brands" pattern: only fires when the message
+        // contains both an "all …/every … brands" quantifier and the name of a
+        // configured tenant category.
+        if (!HasCategoryQuantifier(userMessage))
+        {
+            return null;
+        }
+
+        BrandConfig[] matched = FindCategoryScopedBrands(userMessage);
+        if (matched.Length < 2)
+        {
+            return null;
+        }
+
+        string category = matched[0].Category;
+        return (matched.Select(b => b.Name).ToArray(), $"category:{category}");
+    }
+
+    private static bool HasCategoryQuantifier(string message)
+    {
+        string[] cues =
+        [
+            "all ",
+            "every ",
+            "each ",
+        ];
+        foreach (string cue in cues)
+        {
+            int idx = message.IndexOf(cue, StringComparison.OrdinalIgnoreCase);
+            while (idx >= 0)
+            {
+                // Require "brand" or "brands" (or "category") in the tail so we
+                // don't misfire on "all regions", "all quarters", etc.
+                int tailStart = idx + cue.Length;
+                int windowEnd = Math.Min(message.Length, tailStart + 80);
+                string tail = message[tailStart..windowEnd];
+                if (tail.Contains("brand", StringComparison.OrdinalIgnoreCase)
+                    || tail.Contains("categor", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                idx = message.IndexOf(cue, idx + 1, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        return false;
+    }
+
+    private BrandConfig[] FindCategoryScopedBrands(string message)
+    {
+        // Rank matching categories by descending name length so the most specific
+        // wins ("Quick-Serve Restaurant" beats "Restaurant") — tenant-generic.
+        IEnumerable<string> categories = _tenant.Brands
+            .Select(b => b.Category)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(c => c.Length);
+
+        foreach (string category in categories)
+        {
+            if (message.Contains(category, StringComparison.OrdinalIgnoreCase))
+            {
+                return [.. _tenant.Brands.Where(b => string.Equals(b.Category, category, StringComparison.OrdinalIgnoreCase))];
+            }
+        }
+        return [];
     }
 
     private static string BuildChartUnavailableDiagnostic(string? chartType)

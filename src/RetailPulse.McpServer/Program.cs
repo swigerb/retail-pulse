@@ -95,9 +95,9 @@ app.MapGet("/api/depletion-stats", (string brand, string region, RetailPulseDb d
 })
 .WithName("GetDepletionStats");
 
-app.MapGet("/api/portfolio-depletion-stats", (string region, RetailPulseDb data, string period = "YTD") =>
+app.MapGet("/api/portfolio-depletion-stats", (string region, RetailPulseDb data, string period = "YTD", string? category = null, string? brands = null) =>
 {
-    object result = data.GetPortfolioDepletionStats(region, period);
+    object result = data.GetPortfolioDepletionStats(region, period, category, brands);
     return Results.Ok(result);
 })
 .WithName("GetPortfolioDepletionStats");

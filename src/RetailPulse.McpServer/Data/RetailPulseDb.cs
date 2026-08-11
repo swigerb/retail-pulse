@@ -617,33 +617,95 @@ public class RetailPulseDb
     }
 
     public object GetPortfolioDepletionStats(string region, string period)
+        => GetPortfolioDepletionStats(region, period, category: null, brandsFilter: null);
+
+    /// <summary>
+    /// Category- and comparison-aware portfolio depletion aggregate. Supersedes the
+    /// prior single-region/all-brands shape so category rollups and small-set brand
+    /// comparisons can be answered in ONE tool call from complete seeded data —
+    /// eliminating the per-brand and per-region fan-out that blew the 5-call cap on
+    /// Publix sweep prompts #17 and #25 (issue #76).
+    /// <para>
+    /// Filtering is tenant-generic (driven entirely by <c>tenant.yaml</c>): a
+    /// <paramref name="category"/> restricts brands to that tenant category; an
+    /// explicit <paramref name="brandsFilter"/> comma list restricts to a specific
+    /// comparison set. The region axis fans out when <paramref name="region"/> is
+    /// blank, "All", "AllRegions", "Aggregate", or "Portfolio" — one row per brand
+    /// per configured tenant region — so a "by region" ask covers every region
+    /// without per-region tool calls.
+    /// </para>
+    /// </summary>
+    public object GetPortfolioDepletionStats(string region, string period, string? category, string? brandsFilter)
     {
         // A portfolio-wide "growth rate" ask has no natural region qualifier — treat a
-        // missing/blank/"all"/"aggregate" region as the National aggregate. This is what
-        // the horizontal-bar "rank all brands by depletion growth rate" prompt drives
-        // through the tool: one call, per-brand YoY answered from complete seeded data.
-        string normalizedRegion = string.IsNullOrWhiteSpace(region) ? "National" : region.Trim();
-        if (normalizedRegion.Equals("all", StringComparison.OrdinalIgnoreCase)
-            || normalizedRegion.Equals("aggregate", StringComparison.OrdinalIgnoreCase)
-            || normalizedRegion.Equals("portfolio", StringComparison.OrdinalIgnoreCase))
+        // missing/blank/"all"/"aggregate" region as the National aggregate for the
+        // legacy single-region shape. "AllRegions"/"ByRegion" fans the region axis
+        // out over every tenant region so a table "by region" resolves in ONE call.
+        string requestedRegion = string.IsNullOrWhiteSpace(region) ? "National" : region.Trim();
+        bool fanRegions =
+            requestedRegion.Equals("allregions", StringComparison.OrdinalIgnoreCase)
+            || requestedRegion.Equals("all_regions", StringComparison.OrdinalIgnoreCase)
+            || requestedRegion.Equals("all-regions", StringComparison.OrdinalIgnoreCase)
+            || requestedRegion.Equals("byregion", StringComparison.OrdinalIgnoreCase)
+            || requestedRegion.Equals("by_region", StringComparison.OrdinalIgnoreCase)
+            || requestedRegion.Equals("every region", StringComparison.OrdinalIgnoreCase);
+        if (!fanRegions && (
+            requestedRegion.Equals("all", StringComparison.OrdinalIgnoreCase)
+            || requestedRegion.Equals("aggregate", StringComparison.OrdinalIgnoreCase)
+            || requestedRegion.Equals("portfolio", StringComparison.OrdinalIgnoreCase)))
         {
-            normalizedRegion = "National";
+            requestedRegion = "National";
         }
 
         string normalizedPeriod = string.IsNullOrWhiteSpace(period) ? "YTD" : period.Trim();
 
-        var results = new List<object>();
-        foreach (BrandConfig brand in _tenant.Brands)
+        // Tenant-generic brand filter: category first, then explicit brand list.
+        IEnumerable<BrandConfig> filtered = _tenant.Brands;
+        string? normalizedCategory = null;
+        if (!string.IsNullOrWhiteSpace(category)
+            && !category.Trim().Equals("all", StringComparison.OrdinalIgnoreCase))
         {
-            results.Add(GetDepletionStats(brand.Name, normalizedRegion, normalizedPeriod));
+            normalizedCategory = category.Trim();
+            filtered = filtered.Where(b =>
+                b.Category.Equals(normalizedCategory, StringComparison.OrdinalIgnoreCase));
+        }
+
+        HashSet<string>? explicitBrands = null;
+        if (!string.IsNullOrWhiteSpace(brandsFilter))
+        {
+            explicitBrands = new HashSet<string>(
+                brandsFilter.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                StringComparer.OrdinalIgnoreCase);
+            if (explicitBrands.Count > 0)
+            {
+                filtered = filtered.Where(b => explicitBrands.Contains(b.Name));
+            }
+        }
+
+        List<BrandConfig> brandList = [.. filtered];
+
+        string[] regionsAxis = fanRegions
+            ? [.. _tenant.Regions]
+            : [requestedRegion];
+
+        var results = new List<object>(brandList.Count * regionsAxis.Length);
+        foreach (BrandConfig brand in brandList)
+        {
+            foreach (string r in regionsAxis)
+            {
+                results.Add(GetDepletionStats(brand.Name, r, normalizedPeriod));
+            }
         }
 
         return new
         {
             brands = results,
-            region = normalizedRegion,
+            region = fanRegions ? "AllRegions" : requestedRegion,
+            regions = regionsAxis,
             period = normalizedPeriod,
-            brandCount = results.Count
+            brandCount = brandList.Count,
+            category = normalizedCategory,
+            filteredBrands = explicitBrands?.ToArray()
         };
     }
 

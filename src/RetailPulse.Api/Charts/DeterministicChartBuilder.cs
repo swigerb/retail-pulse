@@ -103,19 +103,21 @@ internal static class DeterministicChartBuilder
         }
 
         // Portfolio coverage contract: when the caller supplies the tenant roster and the
-        // request is a horizontal-bar ranking ("rank ALL brands …"), the built chart MUST
-        // cover every tenant brand. If any is missing, fail closed so the pipeline can
-        // surface the chart-unavailable diagnostic listing exactly which brands were
-        // omitted — never silently return a partial portfolio.
-        if (isHorizontalRanking && requiredBrands is { Count: > 0 })
+        // request is a horizontal-bar ranking or a table ("all X brands …"), the built
+        // chart MUST cover every required brand. If any is missing, fail closed so the
+        // pipeline can surface the chart-unavailable diagnostic listing exactly which
+        // brands were omitted — never silently return a partial portfolio or a table
+        // that drops half the requested category (Publix sweep #25).
+        bool coversTable = string.Equals(requestedType, "table", StringComparison.OrdinalIgnoreCase);
+        if ((isHorizontalRanking || coversTable) && requiredBrands is { Count: > 0 })
         {
             var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (ChartSeries s in renderable.Data)
             {
                 foreach (ChartDataPoint p in s.Values)
                 {
-                    if (p?.X is not null)
-                        present.Add(p.X);
+                    if (p?.X is null) continue;
+                    present.Add(ExtractBrandTokenFromLabel(p.X));
                 }
             }
             foreach (string brand in requiredBrands)
@@ -130,11 +132,13 @@ internal static class DeterministicChartBuilder
     }
 
     /// <summary>
-    /// True when the given chart is a horizontal-bar ranking that covers every brand in
-    /// <paramref name="requiredBrands"/> (case-insensitive) and has at least one non-zero
-    /// finite mark. Used by the fulfillment invariant to decide whether a model-emitted
-    /// chart already satisfies the portfolio-coverage contract or must be replaced with
-    /// the deterministic reconstruction from tool results.
+    /// True when the given chart is a horizontal-bar ranking or table that covers
+    /// every brand in <paramref name="requiredBrands"/> (case-insensitive) and has
+    /// at least one non-zero finite mark. Table labels of the form "Brand — Region"
+    /// count under their brand token so a table row per region still satisfies the
+    /// brand roster (Publix sweep #25). Used by the fulfillment invariant to decide
+    /// whether a model-emitted chart already satisfies the coverage contract or
+    /// must be replaced with the deterministic reconstruction from tool results.
     /// </summary>
     public static bool CoversRoster(ChartSpec? chart, IReadOnlyCollection<string> requiredBrands)
     {
@@ -148,8 +152,8 @@ internal static class DeterministicChartBuilder
         {
             foreach (ChartDataPoint p in s.Values)
             {
-                if (p?.X is not null && double.IsFinite(p.Y))
-                    present.Add(p.X);
+                if (p?.X is null || !double.IsFinite(p.Y)) continue;
+                present.Add(ExtractBrandTokenFromLabel(p.X));
             }
         }
         foreach (string brand in requiredBrands)
@@ -158,6 +162,18 @@ internal static class DeterministicChartBuilder
                 return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Extracts the brand token from a chart X-value that may include a region
+    /// suffix ("Brand — Region"). Deterministic, tenant-generic — no brand or
+    /// region literals. Matches <c>AgentExecutionPipeline.ExtractBrandToken</c>.
+    /// </summary>
+    internal static string ExtractBrandTokenFromLabel(string label)
+    {
+        if (string.IsNullOrEmpty(label)) return label;
+        int sep = label.IndexOf(" — ", StringComparison.Ordinal);
+        return sep > 0 ? label[..sep].Trim() : label.Trim();
     }
 
     /// <summary>
