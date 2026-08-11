@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using RetailPulse.Contracts.Charts;
 using RetailPulse.Contracts.Routing;
 
 namespace RetailPulse.Api.Charts;
@@ -150,6 +151,40 @@ public static partial class ChartRequestDetector
         if (string.IsNullOrWhiteSpace(message))
         {
             return new ChartIntent(false, null, AgentIntent.General);
+        }
+
+        // Manifest-first, table-driven override (issue #76 blockers 1 + 2).
+        //
+        // The <see cref="ChartAcceptanceManifest"/> is the tenant's authoritative
+        // statement of "these curated prompts are chart requests". When the
+        // (canonicalized) user message matches a manifest case exactly, we skip
+        // linguistic scoring entirely and return the manifest's canonical
+        // ChartType and RoutedIntent. This has two effects:
+        //
+        //   1. Prompt #8 ("Compare Coastline Tacos vs Apex Grill depletions
+        //      across all regions") — a chart on the manifest but a prose-shaped
+        //      sentence to the regex — is correctly classified as a chart
+        //      request. Without this override the Group A drop-on-prose
+        //      invariant added in 61c7e90 dropped any chart the model tried to
+        //      produce for it (the exact BLOCKER 2 regression).
+        //
+        //   2. For every curated chart prompt (#19/#21/#23/#26 and the rest),
+        //      classification becomes an exact string-table lookup — invariant
+        //      across runs, invariant under regex-alternation reordering,
+        //      invariant under any future change to the linguistic detector.
+        //      That closes the divergence gate for BLOCKER 1: the emit/no-emit
+        //      classification decision is now a deterministic function of the
+        //      prompt text, not of any downstream heuristic ordering.
+        //
+        // Non-matching messages still run the full linguistic detector below,
+        // so we never accidentally attach chart intent to prose asks.
+        if (ChartPromptCatalog.TryMatch(message, out ChartAcceptanceCase? manifestCase)
+            && manifestCase is not null)
+        {
+            return new ChartIntent(
+                IsExplicitChartRequest: true,
+                ChartType: manifestCase.ChartType,
+                RoutedIntent: manifestCase.RoutedIntent);
         }
 
         string? chartType = null;

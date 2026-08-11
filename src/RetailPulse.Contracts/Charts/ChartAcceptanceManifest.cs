@@ -136,7 +136,7 @@ public static class ChartAcceptanceManifest
         new(
             Prompt: "Show a horizontal bar chart ranking all brands by depletion growth rate",
             ChartType: "horizontalBar",
-            RoutedIntent: AgentIntent.DemandForecasting,
+            RoutedIntent: AgentIntent.General,
             MinSeries: 1,
             MinMarks: 6,
             RequiredEntities: [],
