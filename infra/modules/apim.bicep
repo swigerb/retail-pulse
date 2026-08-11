@@ -93,6 +93,48 @@ resource azureMonitorLogger 'Microsoft.ApiManagement/service/loggers@2024-06-01-
   }
 }
 
+// Instance-level applicationinsights diagnostic. Required in addition to the API-level
+// diagnostic for `azure-openai-emit-token-metric` custom metrics to reach App Insights /
+// AppMetrics — API-level alone lets the emit-token policy fire but the metric channel
+// stays dark without the instance-level route to the applicationInsights logger.
+resource apimAppInsightsDiagnostics 'Microsoft.ApiManagement/service/diagnostics@2024-06-01-preview' = {
+  parent: apim
+  name: 'applicationinsights'
+  properties: {
+    loggerId: appInsightsLogger.id
+    sampling: {
+      samplingType: 'fixed'
+      percentage: 100
+    }
+    verbosity: 'information'
+    logClientIp: true
+    frontend: {
+      request: {
+        body: {
+          bytes: 8192
+        }
+      }
+      response: {
+        body: {
+          bytes: 0
+        }
+      }
+    }
+    backend: {
+      request: {
+        body: {
+          bytes: 8192
+        }
+      }
+      response: {
+        body: {
+          bytes: 0
+        }
+      }
+    }
+  }
+}
+
 output apimId string = apim.id
 output apimName string = apim.name
 output apimPrincipalId string = apim.identity.principalId
