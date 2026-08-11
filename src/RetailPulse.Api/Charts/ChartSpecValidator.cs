@@ -29,6 +29,48 @@ internal static class ChartSpecValidator
     public static bool IsRenderable(ChartSpec? chart) => TryGetRenderable(chart, out _);
 
     /// <summary>
+    /// Minimum number of finite marks a chart of the given type must carry to be
+    /// meaningful (not just non-empty). A single-value gauge needs 1; a comparison
+    /// bar/line needs at least 2 to compare; a pie/donut needs 2 sectors to show a
+    /// breakdown. This backs the acceptance invariant "correct semantics, not only
+    /// existence" — a one-bar "comparison" or a single-sector pie is rejected.
+    /// </summary>
+    public static int MinimumMarksForType(string? type) => (type?.ToLowerInvariant()) switch
+    {
+        "gauge" => 1,
+        "pie" or "donut" => 2,
+        "line" or "bar" or "groupedbar" or "stackedbar" or "horizontalbar" => 2,
+        "table" => 1,
+        _ => 1,
+    };
+
+    /// <summary>
+    /// Renderable AND carries at least <paramref name="minMarks"/> finite marks across
+    /// all cleaned series, and at least <paramref name="minSeries"/> legend-bearing
+    /// series. Use for acceptance/semantic gating (a chart that renders but is trivially
+    /// under-populated — e.g. a grouped bar with a single mark — is rejected). Never
+    /// fabricates or reorders data.
+    /// </summary>
+    public static bool TryGetRenderable(ChartSpec? chart, int minSeries, int minMarks, out ChartSpec? renderable)
+    {
+        renderable = null;
+        if (!TryGetRenderable(chart, out ChartSpec? cleaned) || cleaned is null)
+        {
+            return false;
+        }
+
+        int series = cleaned.Data.Count;
+        int marks = cleaned.Data.Sum(s => s.Values.Count(p => p is not null && double.IsFinite(p.Y)));
+        if (series < Math.Max(1, minSeries) || marks < Math.Max(1, minMarks))
+        {
+            return false;
+        }
+
+        renderable = cleaned;
+        return true;
+    }
+
+    /// <summary>
     /// Produces a cleaned chart that contains only legend-bearing series with finite
     /// datapoints. Returns false (and a null chart) when nothing renderable remains,
     /// so callers can surface a diagnostic instead of a blank card. Never fabricates
