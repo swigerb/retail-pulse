@@ -47,6 +47,19 @@ jobs:
             --results-directory ./test-results \
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
+      # Explicit fail-fast gate for the curated chart acceptance matrix (issue #50):
+      # the manifest contract test, the semantic acceptance matrix (9 prompts × real
+      # ChartSpec assertions), the token/tool-call performance-budget matrix, and the
+      # existing chart-fulfillment invariant. Runs after the coverage-instrumented
+      # suite so a chart-matrix regression trips CI with a targeted signal instead
+      # of being buried in the broader test log.
+      - name: Chart acceptance matrix (backend)
+        run: |
+          dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
+            --no-build \
+            --configuration Release \
+            --filter "FullyQualifiedName~ChartAcceptance|FullyQualifiedName~ChartFulfillment"
+
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -121,6 +134,13 @@ jobs:
 
       - name: Test
         run: npx vitest run
+
+      # Explicit fail-fast gate for the curated chart acceptance matrix (issue #50):
+      # the manifest contract test + the real-Recharts render matrix. Runs after the
+      # broad test step so a manifest drift or an under-populated chart trips CI with
+      # a targeted, easy-to-diagnose failure.
+      - name: Chart acceptance matrix (frontend)
+        run: npx vitest run src/__tests__/chartAcceptance.contract.test.ts src/__tests__/chartAcceptance.matrix.test.tsx
 
   security:
     name: Security (Vulnerable Packages)
