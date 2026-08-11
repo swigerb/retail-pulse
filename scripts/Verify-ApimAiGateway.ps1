@@ -76,19 +76,56 @@ $checks = 0
 # ── ARM REST helpers ─────────────────────────────────────────────────────
 # The `az apim backend`, `az apim api policy`, and `az apim api diagnostic`
 # subcommands live in the `apim` az extension, which is NOT part of core az CLI
-# and is not installed on every dev/CI box (see issue #68). To keep the verifier
-# self-sufficient — and to avoid silently swallowing "command not found" as a
-# false FAIL — we call the ARM REST API directly through `az rest`, which is
-# always available whenever `az` itself is installed.
+# and is not installed on every dev/CI box (see issue #68). We call ARM
+# directly through PowerShell-native Invoke-WebRequest so we depend only on
+# the AAD token az can hand us, not on `az rest` (which has a fatal Windows
+# `charmap` codec bug on BOM-prefixed responses — see #70).
 #
 # Every helper below returns $null on 404 (resource genuinely missing → let the
 # Assert record a FAIL with a clear message) and throws on any other error so
 # the outer Assert catch can attach the message. UTF-8 BOMs that ARM sometimes
-# prepends to policy XML are stripped before regex matching.
+# prepends to policy XML are stripped at both the byte layer (ConvertFrom-ArmBytes)
+# and the string layer (Remove-Bom) before regex matching.
 
 $script:ArmApimApiVersion       = '2024-06-01-preview'
 $script:ArmContainerAppApiVer   = '2024-03-01'
 $script:ArmAuthorizationApiVer  = '2022-04-01'
+
+# We deliberately do NOT call ARM through `az rest`. On Windows, when the ARM
+# response body contains a UTF-8 BOM (as APIM's `GET .../policies/policy` does
+# whenever the policy XML was authored with a BOM), the az CLI's response
+# handler tries to write the BOM back to the current console codepage (cp1252)
+# and dies with a `'charmap' codec can't encode character '\ufeff'`
+# UnicodeEncodeError before returning anything to the caller. This masks
+# perfectly healthy live deployments as failures. See issue #70.
+#
+# The fix is to skip `az rest` and call ARM directly with `Invoke-RestMethod`
+# using an AAD token acquired once via `az account get-access-token`. We read
+# the raw bytes, strip any leading BOM, then parse. All ARM helpers below share
+# a single token, refreshed once per script run.
+$script:_armToken = $null
+function Get-ArmToken {
+    if ($script:_armToken) { return $script:_armToken }
+    $tok = az account get-access-token --resource https://management.azure.com --query accessToken -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tok)) {
+        throw 'Could not acquire an ARM access token via az. Run az login and retry.'
+    }
+    $script:_armToken = $tok.Trim()
+    return $script:_armToken
+}
+
+function ConvertFrom-ArmBytes {
+    # Take a raw byte[] payload, strip a leading UTF-8 BOM if present, decode
+    # as UTF-8, and return the resulting string. Isolated so the self-test can
+    # exercise the exact same code path without any Azure round-trip.
+    param([byte[]]$Bytes)
+    if ($null -eq $Bytes -or $Bytes.Length -eq 0) { return '' }
+    $start = 0
+    if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) {
+        $start = 3
+    }
+    return [System.Text.Encoding]::UTF8.GetString($Bytes, $start, $Bytes.Length - $start)
+}
 
 function Invoke-ArmGet {
     param(
@@ -96,22 +133,30 @@ function Invoke-ArmGet {
         [switch]$AllowNotFound
     )
     $url = "https://management.azure.com$Path"
-    # Capture stderr so we can distinguish 404 from real auth/connectivity errors.
-    $stderrFile = [System.IO.Path]::GetTempFileName()
-    try {
-        $raw = az rest --method get --url $url --only-show-errors 2>$stderrFile
-        if ($LASTEXITCODE -ne 0) {
-            $err = (Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue)
-            if ($AllowNotFound -and ($err -match 'ResourceNotFound' -or $err -match '\bNotFound\b' -or $err -match 'Status:\s*404')) {
-                return $null
-            }
-            throw ("ARM GET {0} failed: {1}" -f $Path, ($err.Trim()))
-        }
-        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-        return ($raw | ConvertFrom-Json)
+    $headers = @{
+        Authorization = "Bearer $(Get-ArmToken)"
+        Accept        = 'application/json'
     }
-    finally {
-        Remove-Item -LiteralPath $stderrFile -ErrorAction SilentlyContinue
+    try {
+        # -SkipHeaderValidation lets us include the raw bearer token even on
+        # older PS hosts. We ask for the raw response so we can decode the
+        # bytes ourselves and strip a leading BOM before JSON parsing.
+        $resp = Invoke-WebRequest -Uri $url -Headers $headers -Method Get -UseBasicParsing -ErrorAction Stop
+        $text = ConvertFrom-ArmBytes -Bytes $resp.RawContentStream.ToArray()
+        if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+        return ($text | ConvertFrom-Json)
+    }
+    catch [System.Net.WebException], [Microsoft.PowerShell.Commands.HttpResponseException] {
+        $status = $null
+        if ($_.Exception.Response) {
+            try { $status = [int]$_.Exception.Response.StatusCode } catch {}
+        }
+        if ($AllowNotFound -and $status -eq 404) { return $null }
+        $bodyText = ''
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            $bodyText = $_.ErrorDetails.Message
+        }
+        throw ("ARM GET {0} failed ({1}): {2}" -f $Path, $status, $bodyText)
     }
 }
 
@@ -141,11 +186,11 @@ function Test-Prereq {
     }
 }
 
-# Offline self-test — exercises the BOM-strip helper and the FAIL path of
-# Assert without needing an Azure signin. Run with `-SelfTest` to validate the
-# script's own logic on a dev/CI box.
+# Offline self-test — exercises the byte-level BOM stripper, the string-level
+# BOM stripper, and the missing-resource hard-FAIL path of Assert without
+# needing an Azure signin. Run with `-SelfTest` to validate the script's own
+# logic on a dev/CI box.
 function Invoke-SelfTest {
-    $failed = 0
     function _Expect([string]$name, [bool]$cond) {
         if ($cond) { Write-Host "  [ok]   selftest: $name" -ForegroundColor Green }
         else { Write-Host "  [FAIL] selftest: $name" -ForegroundColor Red; $script:_selfFailed++ }
@@ -153,17 +198,77 @@ function Invoke-SelfTest {
     $script:_selfFailed = 0
     Write-Host "Self-test"
 
-    # Remove-Bom leaves clean strings unchanged
+    # ── string-level Remove-Bom ─────────────────────────────────────────
     _Expect 'Remove-Bom passes clean string through' ((Remove-Bom '<policies/>') -eq '<policies/>')
-    # Remove-Bom strips a single leading BOM char
     $bom = [char]0xFEFF
     _Expect 'Remove-Bom strips leading U+FEFF' ((Remove-Bom "$bom<policies/>") -eq '<policies/>')
-    # Remove-Bom handles null / empty
     _Expect 'Remove-Bom tolerates empty' ((Remove-Bom '') -eq '')
     _Expect 'Remove-Bom tolerates null' ($null -eq (Remove-Bom $null))
-    # BOM-prefixed policy still matches the same regex we use live
     $bomPolicy = "$bom<policies><inbound><set-backend-service backend-id=""retail-pulse-foundry"" /></inbound></policies>"
     _Expect 'BOM-prefixed policy matches backend regex after strip' ((Remove-Bom $bomPolicy) -match '<set-backend-service\s+backend-id="retail-pulse-foundry"')
+
+    # ── byte-level ConvertFrom-ArmBytes (the actual az-rest-replacement path) ──
+    # This is the regression that broke PR #69 on Windows: az rest can't decode
+    # a UTF-8 BOM in an ARM response body. Prove the byte path handles it.
+    $utf8 = [System.Text.Encoding]::UTF8
+    $rawJson  = '{"properties":{"value":"<policies><inbound><set-backend-service backend-id=\"retail-pulse-foundry\" /><authentication-managed-identity resource=\"https://cognitiveservices.azure.com\" /></inbound></policies>"}}'
+    $withBom  = @(0xEF, 0xBB, 0xBF) + $utf8.GetBytes($rawJson)
+    $withoutBom = $utf8.GetBytes($rawJson)
+    $decodedBom    = ConvertFrom-ArmBytes -Bytes $withBom
+    $decodedClean  = ConvertFrom-ArmBytes -Bytes $withoutBom
+    _Expect 'ConvertFrom-ArmBytes strips a leading UTF-8 BOM from raw bytes' ($decodedBom -eq $rawJson)
+    _Expect 'ConvertFrom-ArmBytes leaves non-BOM payload untouched' ($decodedClean -eq $rawJson)
+    _Expect 'ConvertFrom-ArmBytes returns empty for null bytes' ((ConvertFrom-ArmBytes -Bytes $null) -eq '')
+    _Expect 'ConvertFrom-ArmBytes returns empty for zero-length bytes' ((ConvertFrom-ArmBytes -Bytes ([byte[]]@())) -eq '')
+
+    # The full end-to-end proof: given the raw bytes ARM would return for a
+    # BOM-prefixed policy document, we successfully parse JSON and every live
+    # policy regex matches the extracted XML.
+    try {
+        $doc = $decodedBom | ConvertFrom-Json
+        $policy = Remove-Bom $doc.properties.value
+        _Expect 'end-to-end: BOM ARM payload → JSON parses' ($null -ne $doc)
+        _Expect 'end-to-end: extracted policy matches backend regex'          ($policy -match '<set-backend-service\s+backend-id="retail-pulse-foundry"')
+        _Expect 'end-to-end: extracted policy matches MI-auth regex'          ($policy -match '<authentication-managed-identity\s+resource="https://cognitiveservices\.azure\.com"')
+    }
+    catch {
+        _Expect ("end-to-end: BOM ARM payload → JSON parses (threw: {0})" -f $_.Exception.Message) $false
+    }
+
+    # ── missing-resource hard-FAIL path ────────────────────────────────
+    # Simulate Invoke-ArmGet returning $null (the -AllowNotFound path). Assert
+    # must record a FAIL for a check that dereferences the missing document,
+    # not silently pass. This protects against the class of regression where
+    # the script would "pass" against an unprovisioned RG.
+    # NOTE: the two Assert calls below are *expected* to print [FAIL] — that's
+    # the behaviour under test. The subsequent _Expect lines assert that the
+    # failure was correctly recorded.
+    Write-Host '  (the next two [FAIL] lines are expected — testing the FAIL path)' -ForegroundColor DarkGray
+    $script:failures.Clear()
+    $script:checks = 0
+    Assert 'selftest-missing: fake backend exists' { $null -ne $null } 'expected FAIL'
+    _Expect 'Assert records FAIL when resource is $null'  ($script:failures.Count -eq 1)
+    $script:failures.Clear(); $script:checks = 0
+    Assert 'selftest-throwing: fake regex on null' { ($null).properties -match 'foo' } 'expected FAIL'
+    _Expect 'Assert records FAIL when predicate throws' ($script:failures.Count -eq 1)
+    $script:failures.Clear(); $script:checks = 0
+
+    # ── convention guard: no az rest invocations remain in this script ──
+    # We forbid `az rest` calls because of the Windows charmap codec bug on
+    # BOM-prefixed ARM responses (#70). Scan for the actual invocation pattern
+    # (start of a statement) rather than any literal substring, so the literal
+    # inside this very check doesn't false-positive.
+    $scriptPath = $PSCommandPath
+    $selfSource = Get-Content -LiteralPath $scriptPath -Raw
+    $codeOnly = ($selfSource -split "`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+    # Match `az rest` only when it appears as a command call: preceded by
+    # start-of-line, `& `, `$(`, `= `, `| `, `; `, `if (`, or similar; NOT
+    # inside a quoted string. Simplest safe form: line begins with optional
+    # whitespace then `az rest`, or has `& az rest` / `$(az rest`.
+    $hasCall = ($codeOnly -split "`n" | Where-Object {
+        $_ -match '^\s*az\s+rest\b' -or $_ -match '[&$(]\s*az\s+rest\b'
+    }).Count -gt 0
+    _Expect 'no live az rest invocation remains in Verify-ApimAiGateway.ps1' (-not $hasCall)
 
     if ($script:_selfFailed -gt 0) {
         Write-Host ("SELFTEST FAIL ({0} case(s))" -f $script:_selfFailed) -ForegroundColor Red
@@ -172,8 +277,6 @@ function Invoke-SelfTest {
     Write-Host "SELFTEST PASS" -ForegroundColor Green
     exit 0
 }
-
-if ($SelfTest) { Invoke-SelfTest }
 
 function Assert([string]$name, [scriptblock]$predicate, [string]$detail = '') {
     $script:checks++
@@ -192,6 +295,8 @@ function Assert([string]$name, [scriptblock]$predicate, [string]$detail = '') {
         $script:failures.Add($name)
     }
 }
+
+if ($SelfTest) { Invoke-SelfTest }
 
 Test-Prereq
 
