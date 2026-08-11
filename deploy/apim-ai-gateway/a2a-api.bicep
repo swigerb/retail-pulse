@@ -1,8 +1,10 @@
-@description('Name of existing APIM instance')
-param apimName string = 'bsapim-dev-northcentralus-001'
+// Optional attach-on for an already-provisioned APIM instance.
+// This file is NOT part of the primary azd-managed Retail Pulse gateway flow.
+@description('Name of an existing APIM instance that should expose the A2A API')
+param apimName string
 
-@description('Gateway URL for the APIM instance')
-param gatewayUrl string = 'https://bsapim-dev-northcentralus-001.azure-api.net'
+@description('Gateway URL for the existing APIM instance')
+param gatewayUrl string
 
 resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' existing = {
   name: apimName

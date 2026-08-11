@@ -113,6 +113,51 @@ public class HealthCheckTests
         result.Status.Should().Be(HealthStatus.Unhealthy);
     }
 
+    [Fact]
+    public async Task AzureOpenAiHealthCheck_UsesApimSubscriptionKeyHeader_WhenConfigured()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        DelegatingHandler handler = CreateCapturingHandler(HttpStatusCode.OK, request => capturedRequest = request);
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig(
+            endpoint: "https://test.azure-api.net/inference/openai",
+            apiKey: "direct-key",
+            apimSubscriptionKey: "apim-sub-key",
+            useManagedIdentity: false);
+        var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
+
+        var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
+
+        result.Status.Should().Be(HealthStatus.Healthy);
+        capturedRequest.Should().NotBeNull();
+        HttpRequestMessage request = capturedRequest ?? throw new InvalidOperationException("Expected the health check to issue a request.");
+        request.Headers.TryGetValues("api-key", out IEnumerable<string>? headerValues).Should().BeTrue();
+        headerValues.Should().ContainSingle().Which.Should().Be("apim-sub-key");
+    }
+
+    [Fact]
+    public async Task AzureOpenAiHealthCheck_DoesNotSendApiKeyHeader_WhenManagedIdentityEnabled()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        DelegatingHandler handler = CreateCapturingHandler(HttpStatusCode.OK, request => capturedRequest = request);
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig(
+            endpoint: "https://test.openai.azure.com",
+            apiKey: "direct-key",
+            apimSubscriptionKey: "apim-sub-key",
+            useManagedIdentity: true);
+        var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
+
+        var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
+
+        result.Status.Should().Be(HealthStatus.Healthy);
+        capturedRequest.Should().NotBeNull();
+        HttpRequestMessage request = capturedRequest ?? throw new InvalidOperationException("Expected the health check to issue a request.");
+        request.Headers.Contains("api-key").Should().BeFalse();
+    }
+
     #endregion
 
     #region Helpers
@@ -129,6 +174,9 @@ public class HealthCheckTests
         handler.Object.InnerHandler = new HttpClientHandler();
         return handler.Object;
     }
+
+    private static DelegatingHandler CreateCapturingHandler(HttpStatusCode statusCode, Action<HttpRequestMessage> onRequest) =>
+        new CallbackHandler(onRequest, () => new HttpResponseMessage(statusCode));
 
     private static DelegatingHandler CreateThrowingHandler(Exception ex)
     {
@@ -159,15 +207,30 @@ public class HealthCheckTests
         return factory;
     }
 
-    private static IConfiguration CreateConfig(string? endpoint, string? apiKey)
+    private static IConfiguration CreateConfig(
+        string? endpoint,
+        string? apiKey,
+        string? apimSubscriptionKey = null,
+        bool? useManagedIdentity = null)
     {
         var configData = new Dictionary<string, string?>();
         if (endpoint != null) configData["OpenAI:Endpoint"] = endpoint;
         if (apiKey != null) configData["OpenAI:ApiKey"] = apiKey;
+        if (apimSubscriptionKey != null) configData["OpenAI:ApimSubscriptionKey"] = apimSubscriptionKey;
+        if (useManagedIdentity.HasValue) configData["OpenAI:UseManagedIdentity"] = useManagedIdentity.Value.ToString();
 
         return new ConfigurationBuilder()
             .AddInMemoryCollection(configData)
             .Build();
+    }
+
+    private sealed class CallbackHandler(Action<HttpRequestMessage> onRequest, Func<HttpResponseMessage> responseFactory) : DelegatingHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            onRequest(request);
+            return Task.FromResult(responseFactory());
+        }
     }
 
     #endregion

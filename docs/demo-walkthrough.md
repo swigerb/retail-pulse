@@ -55,19 +55,20 @@ This launches the API (`:5100`), MCP Server (`:5200`), Teams Bot (`:5300`), Reac
 
 ### Act 0: Infrastructure Setup (One-Time)
 
-Before the first demo run, deploy the APIM AI Gateway:
+Before the first demo run, provision the APIM AI Gateway infrastructure:
 
 1. Open a terminal in the repo root
 2. Run the deployment:
    ```powershell
-   .\deploy\apim-ai-gateway\deploy-apim-api.ps1 -SetUserSecrets
+   azd provision
    ```
-3. This deploys the inference API to APIM and sets your subscription key automatically
+3. This provisions the APIM instance, inference API, policy, diagnostics, and subscription from the repo's `infra\` modules
 4. Verify the deployment:
    ```powershell
    # Test the endpoint directly
-   $key = dotnet user-secrets list --project src/RetailPulse.Api | Select-String "OpenAI:ApiKey" | ForEach-Object { ($_ -split " = ")[1] }
-   curl "https://bsapim-dev-northcentralus-001.azure-api.net/inference/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-03-01-preview" `
+   $endpoint = (azd env get-values | Select-String "AZURE_APIM_INFERENCE_ENDPOINT" | ForEach-Object { ($_ -split "=", 2)[1].Trim('"') })
+   $key = dotnet user-secrets list --project src/RetailPulse.Api | Select-String "OpenAI:ApimSubscriptionKey" | ForEach-Object { ($_ -split " = ")[1] }
+   curl "$endpoint/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-03-01-preview" `
      -H "api-key: $key" `
      -H "Content-Type: application/json" `
      -d '{"messages":[{"role":"user","content":"Hello"}]}'

@@ -2,6 +2,7 @@
   "resourcesResourceGroups": "rg-",
   "insightsComponents": "appi-",
   "operationalInsightsWorkspaces": "log-",
+  "apiManagementService": "apim-",
   "appManagedEnvironments": "cae-",
   "appContainerApps": "ca-",
   "webSites": "app-",

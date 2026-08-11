@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using RetailPulse.Api.OpenAI;
 
 namespace RetailPulse.Api.Health;
 
@@ -34,10 +35,14 @@ public class AzureOpenAiHealthCheck : IHealthCheck
             }
 
             HttpClient client = _httpClientFactory.CreateClient();
-            string apiKey = _configuration["OpenAI:ApiKey"] ?? "";
+            bool useManagedIdentity = _configuration.GetValue("OpenAI:UseManagedIdentity", false);
+            string? apiKey = OpenAiConnectionSettings.ResolveConfiguredApiKey(_configuration);
 
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{endpoint}/models");
-            request.Headers.Add("api-key", apiKey);
+            if (!useManagedIdentity && !string.IsNullOrWhiteSpace(apiKey))
+            {
+                request.Headers.Add(OpenAiConnectionSettings.ApimSubscriptionKeyHeaderName, apiKey);
+            }
 
             HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 

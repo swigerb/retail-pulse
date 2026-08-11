@@ -1,5 +1,7 @@
-@description('Name of existing APIM instance')
-param apimName string = 'bsapim-dev-northcentralus-001'
+// Optional attach-on for an already-provisioned APIM instance.
+// This file is NOT part of the primary azd-managed Retail Pulse gateway flow.
+@description('Name of an existing APIM instance that should expose the MCP API')
+param apimName string
 
 @description('Backend URL for the MCP server')
 param mcpServerUrl string = 'http://localhost:5200'

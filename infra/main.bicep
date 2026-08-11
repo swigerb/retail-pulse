@@ -28,6 +28,24 @@ param entraApiScope string = 'access_as_user'
 @description('API audience / Application ID URI (defaults to api://{clientId} when unset)')
 param entraAudience string = ''
 
+@description('Name of the Azure AI Foundry / Cognitive Services account used by the AI gateway backend')
+param aiFoundryAccountName string = 'aiagents-3rsdmhyb'
+
+@description('Resource group containing the Azure AI Foundry / Cognitive Services account used by the AI gateway backend')
+param aiFoundryResourceGroupName string = 'rg-repodigest-agents-demo-eus-001'
+
+@description('Azure OpenAI deployment name that the API sends chat/completions to (through APIM)')
+param openAiDeployment string = 'gpt-5.4-mini-2026-03-17'
+
+@description('Fully-qualified image reference for the API container app. Defaults to the ACA placeholder when SERVICE_API_IMAGE_NAME is empty.')
+param apiImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('Fully-qualified image reference for the MCP server container app.')
+param mcpServerImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('Fully-qualified image reference for the Teams bot container app.')
+param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -72,6 +90,45 @@ module containerAppsEnv './modules/container-apps-env.bicep' = {
   }
 }
 
+module staticWebApp './modules/static-web-app.bicep' = {
+  name: 'static-web-app'
+  scope: rg
+  params: {
+    resourceToken: resourceToken
+    tags: tags
+  }
+}
+
+module apim './modules/apim.bicep' = {
+  name: 'apim'
+  scope: rg
+  params: {
+    location: location
+    resourceToken: resourceToken
+    tags: tags
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    appInsightsId: monitoring.outputs.appInsightsId
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+  }
+}
+
+module apimOpenAiApi './modules/apim-openai-api.bicep' = {
+  name: 'apim-openai-api'
+  scope: rg
+  params: {
+    apimName: apim.outputs.apimName
+    apimPrincipalId: apim.outputs.apimPrincipalId
+    aiFoundryAccountName: aiFoundryAccountName
+    aiFoundryResourceGroupName: aiFoundryResourceGroupName
+  }
+}
+
+// containerApps runs AFTER apimOpenAiApi and staticWebApp so it can consume the
+// APIM inference endpoint + subscription key (via listSecrets()) and the SWA
+// frontend origin declaratively. This is what makes `azd provision` re-assert
+// the AI Gateway wiring on every run (§7 fix — the previous ordering left the
+// APIM env vars to a postprovision `az containerapp update`, which lost them
+// whenever Bicep re-created the container-app resource).
 module containerApps './modules/container-apps.bicep' = {
   name: 'container-apps'
   scope: rg
@@ -79,15 +136,17 @@ module containerApps './modules/container-apps.bicep' = {
     location: location
     environmentId: containerAppsEnv.outputs.environmentId
     tags: tags
-  }
-}
-
-module staticWebApp './modules/static-web-app.bicep' = {
-  name: 'static-web-app'
-  scope: rg
-  params: {
-    resourceToken: resourceToken
-    tags: tags
+    apiImageName: apiImageName
+    mcpServerImageName: mcpServerImageName
+    teamsBotImageName: teamsBotImageName
+    apimInferenceEndpoint: apimOpenAiApi.outputs.inferenceEndpoint
+    apimSubscriptionKey: apimOpenAiApi.outputs.subscriptionKey
+    openAiDeployment: openAiDeployment
+    frontendOrigin: staticWebApp.outputs.staticWebAppUrl
+    entraTenantId: entraTenantId
+    entraClientId: entraClientId
+    entraApiScope: entraApiScope
+    containerRegistryLoginServer: containerRegistry.outputs.loginServer
   }
 }
 
@@ -112,6 +171,11 @@ output AZURE_LOG_ANALYTICS_WORKSPACE_ID string = monitoring.outputs.logAnalytics
 output AZURE_STATIC_WEB_APP_NAME string = staticWebApp.outputs.staticWebAppName
 output AZURE_FRONTEND_APP_NAME string = staticWebApp.outputs.staticWebAppName
 output AZURE_FRONTEND_APP_URL string = staticWebApp.outputs.staticWebAppUrl
+output AZURE_APIM_NAME string = apim.outputs.apimName
+output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
+output AZURE_APIM_INFERENCE_ENDPOINT string = apimOpenAiApi.outputs.inferenceEndpoint
+output AZURE_APIM_INFERENCE_API_NAME string = apimOpenAiApi.outputs.inferenceApiName
+output AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME string = apimOpenAiApi.outputs.subscriptionName
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and
