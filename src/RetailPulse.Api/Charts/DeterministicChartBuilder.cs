@@ -44,9 +44,7 @@ internal static class DeterministicChartBuilder
 
         bool gaugeFirst = string.Equals(requestedType, "gauge", StringComparison.OrdinalIgnoreCase);
 
-        ChartSpec? built = gaugeFirst
-            ? TryBuildGauge(payloads) ?? TryBuildDemandBar(payloads, requestedType)
-            : TryBuildDemandBar(payloads, requestedType) ?? TryBuildGauge(payloads);
+        ChartSpec? built = SelectBuilder(payloads, requestedType, gaugeFirst);
 
         if (built is not null && ChartSpecValidator.TryGetRenderable(built, out ChartSpec? renderable) && renderable is not null)
         {
@@ -55,6 +53,34 @@ internal static class DeterministicChartBuilder
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Chooses the deterministic builder that matches the requested chart type, falling
+    /// back through the other shape-driven builders when the primary data shape is absent.
+    /// Order is type-led so a horizontal-bar ranking request never collapses into a plain
+    /// velocity bar while portfolio growth data is present, and a grouped/region request
+    /// prefers the two-brand region rollup.
+    /// </summary>
+    private static ChartSpec? SelectBuilder(IReadOnlyList<JsonElement> payloads, string? requestedType, bool gaugeFirst)
+    {
+        return gaugeFirst
+            ? TryBuildGauge(payloads) ?? TryBuildDemandBar(payloads, requestedType)
+            : (requestedType?.ToLowerInvariant()) switch
+            {
+                "horizontalbar" => TryBuildGrowthRanking(payloads)
+                    ?? TryBuildGroupedRegionBar(payloads, requestedType)
+                    ?? TryBuildDemandBar(payloads, requestedType),
+                "groupedbar" or "stackedbar" => TryBuildGroupedRegionBar(payloads, requestedType)
+                    ?? TryBuildDemandBar(payloads, requestedType),
+                "line" => TryBuildDemandLine(payloads)
+                    ?? TryBuildDemandBar(payloads, "line"),
+                "pie" or "donut" => TryBuildShareOrMixPie(payloads, requestedType ?? "pie")
+                    ?? TryBuildDemandBar(payloads, requestedType),
+                "table" => TryBuildDepletionStatsTable(payloads)
+                    ?? TryBuildDemandBar(payloads, "bar"),
+                _ => TryBuildDemandBar(payloads, requestedType) ?? TryBuildGauge(payloads),
+            };
     }
 
     private static List<JsonElement> CollectToolPayloads(Microsoft.Extensions.AI.ChatResponse response)
@@ -153,6 +179,336 @@ internal static class DeterministicChartBuilder
             [
                 new ChartSeries { Legend = "Avg Weekly Depletion Velocity", Values = points }
             ]
+        };
+    }
+
+    /// <summary>
+    /// Build a grouped (or stacked) bar of depletion volume by region for every distinct
+    /// brand demand payload. Reads the compacted <c>by_region</c> rollup (region → volume)
+    /// from each brand's GetHistoricalDemand result and emits one series per brand with a
+    /// shared region category axis. This is the deterministic fix for the empty grouped-bar
+    /// P0: two brand series × the available regions, every mark a finite volume drawn from
+    /// real data. Missing/unparseable region volumes are skipped — never coerced to zero —
+    /// so a brand that genuinely has no data for a region simply omits that mark rather than
+    /// planting a fake zero bar.
+    /// </summary>
+    private static ChartSpec? TryBuildGroupedRegionBar(IReadOnlyList<JsonElement> payloads, string? requestedType)
+    {
+        var series = new List<ChartSeries>();
+        var seenBrands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (JsonElement payload in payloads)
+        {
+            if (payload.ValueKind != JsonValueKind.Object)
+                continue;
+            if (!payload.TryGetProperty("by_region", out JsonElement byRegion) || byRegion.ValueKind != JsonValueKind.Array)
+                continue;
+            if (!payload.TryGetProperty("summary", out JsonElement summary) || summary.ValueKind != JsonValueKind.Object)
+                continue;
+
+            string brand = ReadBrand(payload) ?? $"Series {series.Count + 1}";
+            if (!seenBrands.Add(brand))
+                continue;
+
+            var points = new List<ChartDataPoint>();
+            foreach (JsonElement row in byRegion.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object)
+                    continue;
+                if (!row.TryGetProperty("region", out JsonElement regionEl) || regionEl.ValueKind != JsonValueKind.String)
+                    continue;
+                // Prefer volume; never substitute zero for a missing metric.
+                if (!TryReadDouble(row, "volume", out double volume) || !double.IsFinite(volume))
+                    continue;
+                points.Add(new ChartDataPoint { X = regionEl.GetString()!, Y = Math.Round(volume, 1) });
+            }
+
+            if (points.Count > 0)
+                series.Add(new ChartSeries { Legend = brand, Values = points });
+        }
+
+        // A grouped/region comparison needs at least two brand series to be meaningful.
+        if (series.Count < 2)
+            return null;
+
+        string type = string.Equals(requestedType, "stackedBar", StringComparison.OrdinalIgnoreCase)
+            ? "stackedBar"
+            : "groupedBar";
+        string brands = string.Join(" vs ", series.Select(s => s.Legend));
+
+        return new ChartSpec
+        {
+            Type = type,
+            Title = $"{brands} — Depletion Volume by Region",
+            XAxisTitle = "Region",
+            YAxisTitle = "Depletion Volume",
+            Data = series,
+        };
+    }
+
+    /// <summary>
+    /// Build a line of depletion volume across regions from a single brand's compacted
+    /// <c>by_region</c> rollup ("depletion trends across all regions"). One series, one
+    /// finite point per region. Missing region volumes are skipped, never zero-filled.
+    /// </summary>
+    private static ChartSpec? TryBuildDemandLine(IReadOnlyList<JsonElement> payloads)
+    {
+        foreach (JsonElement payload in payloads)
+        {
+            if (payload.ValueKind != JsonValueKind.Object)
+                continue;
+            if (!payload.TryGetProperty("by_region", out JsonElement byRegion) || byRegion.ValueKind != JsonValueKind.Array)
+                continue;
+            if (!payload.TryGetProperty("summary", out JsonElement summary) || summary.ValueKind != JsonValueKind.Object)
+                continue;
+
+            var points = new List<ChartDataPoint>();
+            foreach (JsonElement row in byRegion.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object)
+                    continue;
+                if (!row.TryGetProperty("region", out JsonElement regionEl) || regionEl.ValueKind != JsonValueKind.String)
+                    continue;
+                if (!TryReadDouble(row, "volume", out double volume) || !double.IsFinite(volume))
+                    continue;
+                points.Add(new ChartDataPoint { X = regionEl.GetString()!, Y = Math.Round(volume, 1) });
+            }
+
+            if (points.Count >= 2)
+            {
+                string brand = ReadBrand(payload) ?? "Depletion";
+                return new ChartSpec
+                {
+                    Type = "line",
+                    Title = $"{brand} Depletion Trend by Region",
+                    XAxisTitle = "Region",
+                    YAxisTitle = "Depletion Volume",
+                    Data = [new ChartSeries { Legend = brand, Values = points }],
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Build a horizontal bar ranking every portfolio brand by depletion growth rate
+    /// (YoY %), sorted descending. Reads the single compacted GetPortfolioDepletionStats
+    /// payload (<c>brands[].depletions_yoy</c>) — one bounded response, no per-brand
+    /// fan-out. This is the deterministic fix for the "ranking all brands by depletion
+    /// growth rate" refusal. Brands whose growth value is missing/unparseable are excluded
+    /// entirely — never charted as zero growth.
+    /// </summary>
+    private static ChartSpec? TryBuildGrowthRanking(IReadOnlyList<JsonElement> payloads)
+    {
+        foreach (JsonElement payload in payloads)
+        {
+            if (payload.ValueKind != JsonValueKind.Object)
+                continue;
+            if (!payload.TryGetProperty("brands", out JsonElement brands) || brands.ValueKind != JsonValueKind.Array)
+                continue;
+
+            var ranked = new List<(string Brand, double Growth)>();
+            foreach (JsonElement brand in brands.EnumerateArray())
+            {
+                if (brand.ValueKind != JsonValueKind.Object)
+                    continue;
+                string? name = ReadNestedString(brand, "brand");
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                // Compacted portfolio flattens metrics onto the row; raw nests under "metrics".
+                if (!TryReadPercent(brand, "depletions_yoy", out double growth)
+                    && !(brand.TryGetProperty("metrics", out JsonElement metrics)
+                        && metrics.ValueKind == JsonValueKind.Object
+                        && TryReadPercent(metrics, "depletions_yoy", out growth)))
+                {
+                    continue; // missing growth → excluded, never zero-filled
+                }
+
+                if (double.IsFinite(growth))
+                    ranked.Add((name, growth));
+            }
+
+            if (ranked.Count >= 2)
+            {
+                var points = ranked
+                    .OrderByDescending(r => r.Growth)
+                    .Select(r => new ChartDataPoint { X = r.Brand, Y = Math.Round(r.Growth, 1) })
+                    .ToList();
+
+                return new ChartSpec
+                {
+                    Type = "horizontalBar",
+                    Title = "Brands Ranked by Depletion Growth Rate (YoY)",
+                    XAxisTitle = "Depletion Growth Rate % (YoY)",
+                    YAxisTitle = "Brand",
+                    Data = [new ChartSeries { Legend = "Depletion Growth Rate % (YoY)", Values = points }],
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Build a pie/donut of market-share or variant-mix percentages from a single payload.
+    /// Reads market share (<c>share_data[].share_percent</c>) or variant mix
+    /// (<c>variants[].mix_percent</c>) into one series of finite percentage sectors.
+    /// Missing/unparseable percentages are skipped, never zero-filled.
+    /// </summary>
+    private static ChartSpec? TryBuildShareOrMixPie(IReadOnlyList<JsonElement> payloads, string requestedType)
+    {
+        string type = string.Equals(requestedType, "donut", StringComparison.OrdinalIgnoreCase) ? "donut" : "pie";
+
+        foreach (JsonElement payload in payloads)
+        {
+            if (payload.ValueKind != JsonValueKind.Object)
+                continue;
+
+            // Variant mix: variants[].variant + mix_percent.
+            if (payload.TryGetProperty("variants", out JsonElement variants) && variants.ValueKind == JsonValueKind.Array)
+            {
+                var points = new List<ChartDataPoint>();
+                foreach (JsonElement v in variants.EnumerateArray())
+                {
+                    if (v.ValueKind != JsonValueKind.Object) continue;
+                    string? label = ReadNestedString(v, "variant");
+                    if (string.IsNullOrWhiteSpace(label)) continue;
+                    if (!TryReadDouble(v, "mix_percent", out double mix) || !double.IsFinite(mix)) continue;
+                    points.Add(new ChartDataPoint { X = label, Y = Math.Round(mix, 1) });
+                }
+                if (points.Count >= 2)
+                {
+                    string brand = ReadBrand(payload) ?? "Variant";
+                    return new ChartSpec
+                    {
+                        Type = type,
+                        Title = $"{brand} Variant Mix",
+                        Data = [new ChartSeries { Legend = "Variant Mix %", Values = points }],
+                    };
+                }
+            }
+
+            // Market share: share_data[].brand + share_percent.
+            if (payload.TryGetProperty("share_data", out JsonElement shareData) && shareData.ValueKind == JsonValueKind.Array)
+            {
+                var points = new List<ChartDataPoint>();
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (JsonElement s in shareData.EnumerateArray())
+                {
+                    if (s.ValueKind != JsonValueKind.Object) continue;
+                    string? label = ReadNestedString(s, "brand");
+                    if (string.IsNullOrWhiteSpace(label) || !seen.Add(label)) continue;
+                    if (!TryReadDouble(s, "share_percent", out double share) || !double.IsFinite(share)) continue;
+                    points.Add(new ChartDataPoint { X = label, Y = Math.Round(share, 1) });
+                }
+                if (points.Count >= 2)
+                {
+                    return new ChartSpec
+                    {
+                        Type = type,
+                        Title = "Market Share Breakdown",
+                        Data = [new ChartSeries { Legend = "Market Share %", Values = points }],
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Build a per-brand depletion-stats table from portfolio-depletion payloads. The
+    /// compacted <c>GetPortfolioDepletionStats</c> response flattens per-brand metrics on
+    /// the row; the raw response nests them under <c>metrics</c>. Both shapes are read.
+    /// When the caller (e.g. the home-improvement table prompt) fans out per region, each
+    /// portfolio payload contributes its region's brand rows and the table's X label
+    /// becomes <c>Brand — Region</c> so distinct region rows don't collide. Missing/
+    /// unparseable numeric cells are dropped, never zero-filled. Non-numeric status
+    /// values are excluded (the ChartSpec contract requires finite Y). The renderer's
+    /// table falls back to <c>—</c> for absent cells so a brand with only two of three
+    /// metrics still renders with real data plus a placeholder.
+    /// </summary>
+    private static ChartSpec? TryBuildDepletionStatsTable(IReadOnlyList<JsonElement> payloads)
+    {
+        var depletionsYoy = new List<ChartDataPoint>();
+        var sellThroughYoy = new List<ChartDataPoint>();
+        var inventoryWeeks = new List<ChartDataPoint>();
+        var seenLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var contributingRegions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (JsonElement payload in payloads)
+        {
+            if (payload.ValueKind != JsonValueKind.Object)
+                continue;
+            if (!payload.TryGetProperty("brands", out JsonElement brands) || brands.ValueKind != JsonValueKind.Array)
+                continue;
+
+            string? payloadRegion = payload.TryGetProperty("region", out JsonElement rEl)
+                && rEl.ValueKind == JsonValueKind.String ? rEl.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(payloadRegion))
+                contributingRegions.Add(payloadRegion);
+
+            foreach (JsonElement brand in brands.EnumerateArray())
+            {
+                if (brand.ValueKind != JsonValueKind.Object)
+                    continue;
+                string? name = ReadNestedString(brand, "brand");
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+                string? rowRegion = ReadNestedString(brand, "region") ?? payloadRegion;
+
+                JsonElement source = brand;
+                if (brand.TryGetProperty("metrics", out JsonElement metrics)
+                    && metrics.ValueKind == JsonValueKind.Object
+                    && !brand.TryGetProperty("depletions_yoy", out _))
+                {
+                    source = metrics;
+                }
+
+                string label = string.IsNullOrWhiteSpace(rowRegion) ? name : $"{name} — {rowRegion}";
+                if (!seenLabels.Add(label))
+                    continue;
+
+                if (TryReadPercent(source, "depletions_yoy", out double depYoy) && double.IsFinite(depYoy))
+                    depletionsYoy.Add(new ChartDataPoint { X = label, Y = Math.Round(depYoy, 1) });
+
+                if (TryReadPercent(source, "sell_through_yoy", out double sellYoy) && double.IsFinite(sellYoy))
+                    sellThroughYoy.Add(new ChartDataPoint { X = label, Y = Math.Round(sellYoy, 1) });
+
+                if (TryReadDouble(source, "inventory_weeks_on_hand", out double weeks) && double.IsFinite(weeks))
+                    inventoryWeeks.Add(new ChartDataPoint { X = label, Y = Math.Round(weeks, 1) });
+            }
+        }
+
+        var series = new List<ChartSeries>();
+        if (depletionsYoy.Count > 0)
+            series.Add(new ChartSeries { Legend = "Depletions YoY %", Values = depletionsYoy });
+        if (sellThroughYoy.Count > 0)
+            series.Add(new ChartSeries { Legend = "Sell-Through YoY %", Values = sellThroughYoy });
+        if (inventoryWeeks.Count > 0)
+            series.Add(new ChartSeries { Legend = "Inventory (weeks on hand)", Values = inventoryWeeks });
+
+        int marks = series.Sum(s => s.Values.Count);
+        if (series.Count == 0 || seenLabels.Count < 2 || marks < 2)
+            return null;
+
+        string regionAxisLabel = contributingRegions.Count > 0 ? "Brand / Region" : "Brand";
+        string titleSuffix = contributingRegions.Count switch
+        {
+            0 => string.Empty,
+            1 => $" — {contributingRegions.First()}",
+            _ => " by Region",
+        };
+
+        return new ChartSpec
+        {
+            Type = "table",
+            Title = $"Depletion Stats{titleSuffix}",
+            XAxisTitle = regionAxisLabel,
+            YAxisTitle = "Depletion Stats",
+            Data = series,
         };
     }
 
@@ -273,6 +629,33 @@ internal static class DeterministicChartBuilder
             if (el.ValueKind == JsonValueKind.String)
                 return double.TryParse(el.GetString(), out value);
         }
+        return false;
+    }
+
+    /// <summary>
+    /// Reads a percentage metric that may be a number (3.2) or a formatted string
+    /// ("+3.2%", "-1.5 %"). Returns false when the property is absent or unparseable
+    /// so callers can EXCLUDE the entity rather than substitute a fabricated zero.
+    /// </summary>
+    private static bool TryReadPercent(JsonElement obj, string property, out double value)
+    {
+        value = 0;
+        if (!obj.TryGetProperty(property, out JsonElement el))
+            return false;
+
+        if (el.ValueKind == JsonValueKind.Number)
+            return el.TryGetDouble(out value);
+
+        if (el.ValueKind == JsonValueKind.String)
+        {
+            string? raw = el.GetString();
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+            string cleaned = raw.Replace("%", string.Empty).Replace("+", string.Empty).Trim();
+            return double.TryParse(cleaned, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out value);
+        }
+
         return false;
     }
 }

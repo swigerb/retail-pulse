@@ -79,6 +79,25 @@ public static partial class ChartRequestDetector
         RegexOptions.IgnoreCase)]
     private static partial Regex TypedNounForRegex();
 
+    // Data-table request: "table" is deeply ambiguous in ordinary English ("book a table
+    // for two", "table the discussion", "on the table"), so we only treat it as a chart
+    // request when three conditions all hold in order:
+    //   1. a visualization verb (create/show/display/generate/give/make/build/render/plot),
+    //   2. an article (a|an|the),
+    //   3. the word "table" IMMEDIATELY followed by a data cue that a mere seating/verb
+    //      use never carries — "showing", "listing", "containing", "comparing", "ranking",
+    //      "breaking down", "summarizing", "displaying", "of <plural>", "with", or
+    //      "for all <plural>" / "for the <plural>".
+    // "Create a table showing depletion stats for all home improvement brands by region"
+    // and "Show me a table listing brand performance by region" both match; "Book a table
+    // for two", "Table the discussion", "Give me a table for the meeting" do not, because
+    // "Book" is not a viz verb, "Table" here has no article, and "for the meeting" lacks
+    // the plural-noun data cue.
+    [GeneratedRegex(
+        @"\b(?:show|display|plot|create|generate|make|build|give|render)\s+(?:me\s+|us\s+)?(?:a|an|the)\s+table\s+(?:showing|listing|containing|comparing|ranking|summari[sz]ing|displaying|breaking\s+down|of\s+\w+s?\b|with\s+\w+|for\s+(?:all|the)\s+\w+s?\b)",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex VizVerbTableWithDataCueRegex();
+
     // A standalone chart-type word (used when a chart noun/verb was found but no
     // "<type> chart" phrase, e.g. "show the depletion bars as a chart").
     [GeneratedRegex(
@@ -153,9 +172,11 @@ public static partial class ChartRequestDetector
     /// <summary>
     /// Detect a chart-only type word used as a chart-object noun (not the literal
     /// "&lt;type&gt; chart" phrase). Matches a visualization verb + determiner + type
-    /// ("show a gauge") or "&lt;type&gt; for" ("gauge for inventory health"). Only chart-only
-    /// type words are considered so ambiguous ordinary language ("raise the bar for …",
-    /// "table for two", "draw a line in the sand", "gauge the risk") never collides.
+    /// ("show a gauge") or "&lt;type&gt; for" ("gauge for inventory health"), plus the
+    /// data-table pattern "create a table showing …" (a viz verb + article + "table" +
+    /// a data cue like "showing"/"listing"/"of"/"for all"). Ordinary-language "table"
+    /// uses ("book a table for two", "table the discussion", "give me a table for the
+    /// meeting") do NOT match because they lack the plural-noun/data cue.
     /// </summary>
     private static bool TryDetectTypeAsNoun(string message, out string? chartType)
     {
@@ -170,6 +191,12 @@ public static partial class ChartRequestDetector
         if (forMatch.Success)
         {
             chartType = NormalizeType(forMatch.Groups["type"].Value);
+            return true;
+        }
+
+        if (VizVerbTableWithDataCueRegex().IsMatch(message))
+        {
+            chartType = "table";
             return true;
         }
 
