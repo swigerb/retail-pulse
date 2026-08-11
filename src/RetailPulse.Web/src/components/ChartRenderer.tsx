@@ -210,13 +210,14 @@ function RenderGauge({ spec }: { spec: ChartSpec }) {
   const angle = (pct / 100) * 180;
   const accessibleLabel = `${spec.title}${label ? ` — ${label}` : ''}: ${value} percent`;
   return (
-    <div className={styles.gaugeContainer}>
+    <div className={styles.gaugeContainer} data-testid="chart-gauge">
       <svg
         width={220}
         height={130}
         viewBox="0 0 220 130"
         role="img"
         aria-label={accessibleLabel}
+        data-testid="chart-gauge-svg"
       >
         <title>{accessibleLabel}</title>
         <path d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={16} strokeLinecap="round" />
@@ -246,8 +247,8 @@ function RenderTable({ spec }: { spec: ChartSpec }) {
     return m;
   }, [spec.data]);
   return (
-    <div className={styles.tableWrapper}>
-      <table className={styles.table}>
+    <div className={styles.tableWrapper} data-testid="chart-table-wrapper">
+      <table className={styles.table} data-testid="chart-table">
         <thead>
           <tr>
             <th className={styles.th}>{spec.xAxisTitle || ''}</th>
@@ -302,8 +303,8 @@ function SingleChart({ spec }: { spec: ChartSpec }) {
       break;
   }
   return (
-    <Card className={styles.chartCard} appearance="subtle">
-      <div className={styles.chartTitle}>{spec.title}</div>
+    <Card className={styles.chartCard} appearance="subtle" data-testid="chart-card" data-chart-type={t}>
+      <div className={styles.chartTitle} data-testid="chart-title">{spec.title}</div>
       {content}
     </Card>
   );
@@ -316,7 +317,7 @@ function SingleChart({ spec }: { spec: ChartSpec }) {
 function ChartUnavailable({ title }: { title?: string }) {
   const styles = useStyles();
   return (
-    <div className={styles.unavailableCard} role="note">
+    <div className={styles.unavailableCard} role="note" data-testid="chart-unavailable">
       {title ? <div className={styles.unavailableTitle}>{title}</div> : null}
       <div className={styles.unavailableNote}>
         Chart unavailable — the data returned couldn&apos;t be rendered as a chart.
