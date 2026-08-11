@@ -58,3 +58,8 @@ appsettings.*.local.json
 # Azure Developer CLI
 .azure/
 .squad/.cache/
+
+azd-up.log
+rp76-*.log
+rp76-verify-results.xml
+apim-verify.log

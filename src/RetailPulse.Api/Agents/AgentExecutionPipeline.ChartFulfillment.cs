@@ -125,12 +125,23 @@ public partial class AgentExecutionPipeline
                 _logger.LogWarning(
                     "Chart-fulfillment: {Scope} coverage missing {Missing} brand(s) — failing closed.",
                     coverage!.Value.Scope, missing.Count);
-                charts.RemoveAll(c => ChartTypeParticipatesInCoverage(c?.Type));
+                // When we are failing closed on a coverage-scoped chart request, drop
+                // EVERY model-emitted chart — not just the coverage-participating types
+                // (issue #76 Publix sweep: a groupedBar chart the model emitted alongside
+                // an unfulfillable table request survived the previous narrower filter
+                // and gave the user a rogue chart under a "chart unavailable" prose
+                // header). If the requested chart cannot be produced with full roster
+                // coverage, NO chart is a truthful outcome; a partial chart is not.
+                charts.Clear();
                 string diag = BuildRankingCoverageDiagnostic(missing, roster.Count);
                 // Scrub the model's fallback/truncation narrative from the prose so
                 // the user-visible reply cannot claim a chart was produced when we
-                // are in fact failing closed (issue #74 P0 failure #2).
+                // are in fact failing closed (issue #74 P0 failure #2). Also strip
+                // any raw JSON code fence the model may have inlined in prose
+                // (issue #76 Publix sweep: model emitted a ```json { "chart": ... }```
+                // block alongside the refusal, leaking schema to the user).
                 string scrubbed = StripFallbackClaims(reply);
+                scrubbed = StripJsonCodeFences(scrubbed);
                 string updated = string.IsNullOrWhiteSpace(scrubbed) ? diag : $"{scrubbed}\n\n{diag}";
                 return new ChartFulfillmentResult(charts, updated);
             }
@@ -472,5 +483,32 @@ public partial class AgentExecutionPipeline
         return string.IsNullOrWhiteSpace(cleaned)
             ? "Here is the requested portfolio ranking across all configured tenant brands."
             : anyStripped ? cleaned : reply;
+    }
+
+    // Matches a fenced code block whose info string is empty or 'json' (case-
+    // insensitive). Multi-line, non-greedy body. Used by the fail-closed path so a
+    // model that leaks a raw chart-spec JSON blob alongside a chart-unavailable
+    // refusal cannot surface schema fragments to the end user (issue #76 sweep #25).
+    [System.Text.RegularExpressions.GeneratedRegex(@"```(?:json)?\s*[\r\n][\s\S]*?```",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex JsonCodeFencePattern();
+
+    /// <summary>
+    /// Removes any ``` ... ``` or ```json ... ``` fenced code blocks from
+    /// <paramref name="reply"/>. Only touches complete fences; unfenced JSON is
+    /// left alone (the inline-chart extractor handles those). Called from the
+    /// coverage fail-closed path so a leaked schema fragment never reaches the
+    /// user under a refusal header.
+    /// </summary>
+    [System.Text.RegularExpressions.GeneratedRegex(@"(\r?\n){3,}")]
+    private static partial System.Text.RegularExpressions.Regex ExcessiveBlankLinesPatternForFenceStrip();
+
+    internal static string StripJsonCodeFences(string? reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply)) return reply ?? string.Empty;
+        string stripped = JsonCodeFencePattern().Replace(reply, string.Empty);
+        // Collapse the extra blank lines the fence removal leaves behind.
+        stripped = ExcessiveBlankLinesPatternForFenceStrip().Replace(stripped, "\n\n").Trim();
+        return stripped;
     }
 }
