@@ -108,7 +108,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         var sw = Stopwatch.StartNew();
         using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
-        using IDisposable budgetScope = RequestToolContext.Begin(sessionId);
+        using IDisposable budgetScope = RequestToolContext.Begin(
+            sessionId,
+            isChartIntent: Charts.ChartRequestDetector.Detect(request.Message).IsExplicitChartRequest);
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
@@ -386,7 +388,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         var sw = Stopwatch.StartNew();
         using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
-        using IDisposable budgetScope = RequestToolContext.Begin(sessionId);
+        using IDisposable budgetScope = RequestToolContext.Begin(
+            sessionId,
+            isChartIntent: Charts.ChartRequestDetector.Detect(request.Message).IsExplicitChartRequest);
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase

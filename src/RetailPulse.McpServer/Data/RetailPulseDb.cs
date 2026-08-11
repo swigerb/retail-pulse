@@ -618,10 +618,18 @@ public class RetailPulseDb
 
     public object GetPortfolioDepletionStats(string region, string period)
     {
-        if (string.IsNullOrWhiteSpace(region))
-            return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+        // A portfolio-wide "growth rate" ask has no natural region qualifier — treat a
+        // missing/blank/"all"/"aggregate" region as the National aggregate. This is what
+        // the horizontal-bar "rank all brands by depletion growth rate" prompt drives
+        // through the tool: one call, per-brand YoY answered from complete seeded data.
+        string normalizedRegion = string.IsNullOrWhiteSpace(region) ? "National" : region.Trim();
+        if (normalizedRegion.Equals("all", StringComparison.OrdinalIgnoreCase)
+            || normalizedRegion.Equals("aggregate", StringComparison.OrdinalIgnoreCase)
+            || normalizedRegion.Equals("portfolio", StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedRegion = "National";
+        }
 
-        string normalizedRegion = region.Trim();
         string normalizedPeriod = string.IsNullOrWhiteSpace(period) ? "YTD" : period.Trim();
 
         var results = new List<object>();

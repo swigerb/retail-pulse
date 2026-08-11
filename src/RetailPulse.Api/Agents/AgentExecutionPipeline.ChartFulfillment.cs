@@ -41,8 +41,16 @@ public partial class AgentExecutionPipeline
             return new ChartFulfillmentResult(charts, reply);
         }
 
-        // Deterministic, no-LLM reconstruction from this turn's tool results.
-        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, out ChartSpec? built) && built is not null)
+        // Deterministic, no-LLM reconstruction from this turn's tool results. For a
+        // horizontal-bar ranking ask we raise the minimum-marks floor to the P0
+        // contract (>= 6 finite marks, at least one non-zero) so an underpopulated
+        // or all-zero result FAILS CLOSED to the chart-unavailable diagnostic below
+        // rather than reaching the frontend as an empty shell.
+        int minMarks = IsPortfolioRankingIntent(userMessage, intent)
+            ? Math.Max(6, ChartSpecValidator.MinimumMarksForType(intent.ChartType))
+            : ChartSpecValidator.MinimumMarksForType(intent.ChartType);
+
+        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, minMarks, out ChartSpec? built) && built is not null)
         {
             _logger.LogInformation(
                 "Chart-fulfillment: reconstructed a {ChartType} chart deterministically from tool results "
@@ -74,5 +82,36 @@ public partial class AgentExecutionPipeline
             + "underlying data tools returned no chartable values for this request. This is a "
             + "data-availability issue, not a rendering failure — please retry with a specific "
             + "brand and region, or confirm the entity exists for this tenant.";
+    }
+
+    /// <summary>
+    /// True when the explicit chart request is asking for a portfolio ranking / growth
+    /// comparison across brands. Intent-shape only (no brand/tenant literals) so this
+    /// generalises to any tenant. When true, the fulfillment path enforces a stricter
+    /// minimum-marks floor (>= 6 finite marks with at least one non-zero) so a chart
+    /// of zeros or a velocity fallback can never surface as a "growth ranking".
+    /// </summary>
+    private static bool IsPortfolioRankingIntent(string? userMessage, ChartIntent intent)
+    {
+        if (!string.Equals(intent.ChartType, "horizontalBar", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (string.IsNullOrWhiteSpace(userMessage))
+            return false;
+
+        string m = userMessage;
+        string[] rankingCues =
+        [
+            "rank all brands", "ranking all brands", "rank brands", "brands ranked",
+            "growth rate", "yoy growth", "year-over-year growth", "year over year growth",
+            "top brands", "fastest growing", "fastest-growing",
+            "portfolio ranking", "all brands by", "compare all brands",
+            "brand ranking", "cross-brand ranking",
+        ];
+        foreach (string cue in rankingCues)
+        {
+            if (m.Contains(cue, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 }

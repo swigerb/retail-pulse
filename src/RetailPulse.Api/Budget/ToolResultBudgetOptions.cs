@@ -25,6 +25,17 @@ public sealed class ToolResultBudgetOptions
     /// <summary>Maximum number of distinct (non-deduplicated) tool invocations per request.</summary>
     public int MaxToolCalls { get; set; } = 8;
 
+    /// <summary>
+    /// Tighter distinct-call cap that applies when the current request was classified
+    /// as an explicit chart-request intent (see <see cref="RequestToolContext.Begin"/>).
+    /// Chart intents should never fan out into per-brand tool storms: the aggregate
+    /// tools (e.g. <c>GetPortfolioDepletionStats</c>) answer cross-brand ranking in
+    /// one call. Enforcing a hard 5-call ceiling here prevents pathological sequential
+    /// fan-outs from exhausting the tool-context budget and hallucinating "truncated"
+    /// refusal prose.
+    /// </summary>
+    public int MaxToolCallsForChartIntent { get; set; } = 5;
+
     /// <summary>Rough characters-per-token divisor used for token estimation and telemetry.</summary>
     public int CharsPerToken { get; set; } = 4;
 

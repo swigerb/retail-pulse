@@ -34,6 +34,23 @@ internal static class DeterministicChartBuilder
         Microsoft.Extensions.AI.ChatResponse response,
         string? requestedType,
         out ChartSpec? chart)
+        => TryBuild(response, requestedType, minMarks: 0, out chart);
+
+    /// <summary>
+    /// Attempt to build a chart of the requested kind, subject to a minimum-finite-marks
+    /// contract. When <paramref name="minMarks"/> is greater than zero the result is
+    /// rejected unless the cleaned chart carries at least that many finite datapoints;
+    /// for horizontal-bar ranking requests the builder additionally requires at least
+    /// one non-zero mark and refuses to fall through to a velocity chart when only
+    /// historical-demand payloads (i.e. no <c>brands[]</c> growth aggregate) are
+    /// present. This is the fail-closed contract that stops a growth-ranking prompt
+    /// from surfacing a zero-valued or velocity-relabelled chart shell.
+    /// </summary>
+    public static bool TryBuild(
+        Microsoft.Extensions.AI.ChatResponse response,
+        string? requestedType,
+        int minMarks,
+        out ChartSpec? chart)
     {
         chart = null;
         List<JsonElement> payloads = CollectToolPayloads(response);
@@ -43,16 +60,33 @@ internal static class DeterministicChartBuilder
         }
 
         bool gaugeFirst = string.Equals(requestedType, "gauge", StringComparison.OrdinalIgnoreCase);
+        bool isHorizontalRanking = string.Equals(requestedType, "horizontalBar", StringComparison.OrdinalIgnoreCase);
 
-        ChartSpec? built = SelectBuilder(payloads, requestedType, gaugeFirst);
+        ChartSpec? built = SelectBuilder(payloads, requestedType, gaugeFirst, isHorizontalRanking);
 
-        if (built is not null && ChartSpecValidator.TryGetRenderable(built, out ChartSpec? renderable) && renderable is not null)
+        if (built is null)
         {
-            chart = renderable;
-            return true;
+            return false;
         }
 
-        return false;
+        int effectiveMinMarks = Math.Max(minMarks, 1);
+        if (!ChartSpecValidator.TryGetRenderable(built, minSeries: 1, minMarks: effectiveMinMarks, out ChartSpec? renderable)
+            || renderable is null)
+        {
+            return false;
+        }
+
+        // Ranking contract: a horizontalBar growth ranking must not be all zeros.
+        // A chart of exclusively-zero marks passes chartIsRenderable but paints as
+        // an empty shell with no visible bars — the exact P0 failure. Require at
+        // least one non-zero finite mark whenever a horizontal ranking is asked for.
+        if (isHorizontalRanking && !ChartSpecValidator.HasNonZeroFinitePoint(renderable))
+        {
+            return false;
+        }
+
+        chart = renderable;
+        return true;
     }
 
     /// <summary>
@@ -62,25 +96,37 @@ internal static class DeterministicChartBuilder
     /// velocity bar while portfolio growth data is present, and a grouped/region request
     /// prefers the two-brand region rollup.
     /// </summary>
-    private static ChartSpec? SelectBuilder(IReadOnlyList<JsonElement> payloads, string? requestedType, bool gaugeFirst)
+    private static ChartSpec? SelectBuilder(
+        IReadOnlyList<JsonElement> payloads,
+        string? requestedType,
+        bool gaugeFirst,
+        bool isHorizontalRanking = false)
     {
-        return gaugeFirst
-            ? TryBuildGauge(payloads) ?? TryBuildDemandBar(payloads, requestedType)
-            : (requestedType?.ToLowerInvariant()) switch
-            {
-                "horizontalbar" => TryBuildGrowthRanking(payloads)
-                    ?? TryBuildGroupedRegionBar(payloads, requestedType)
-                    ?? TryBuildDemandBar(payloads, requestedType),
-                "groupedbar" or "stackedbar" => TryBuildGroupedRegionBar(payloads, requestedType)
-                    ?? TryBuildDemandBar(payloads, requestedType),
-                "line" => TryBuildDemandLine(payloads)
-                    ?? TryBuildDemandBar(payloads, "line"),
-                "pie" or "donut" => TryBuildShareOrMixPie(payloads, requestedType ?? "pie")
-                    ?? TryBuildDemandBar(payloads, requestedType),
-                "table" => TryBuildDepletionStatsTable(payloads)
-                    ?? TryBuildDemandBar(payloads, "bar"),
-                _ => TryBuildDemandBar(payloads, requestedType) ?? TryBuildGauge(payloads),
-            };
+        _ = isHorizontalRanking; // reserved: caller signals the ranking contract via the outer TryBuild
+        if (gaugeFirst)
+        {
+            return TryBuildGauge(payloads) ?? TryBuildDemandBar(payloads, requestedType);
+        }
+
+        return (requestedType?.ToLowerInvariant()) switch
+        {
+            // Horizontal-bar RANKING has a single legitimate shape: a portfolio growth
+            // ranking built from GetPortfolioDepletionStats' brands[] payload. If that
+            // is not present we FAIL CLOSED (return null) rather than silently rebrand
+            // a velocity bar as growth or emit a groupedBar under a horizontalBar
+            // request — the P0 failure this fix addresses. The caller enforces the
+            // fail-closed contract via the chart-unavailable diagnostic.
+            "horizontalbar" => TryBuildGrowthRanking(payloads),
+            "groupedbar" or "stackedbar" => TryBuildGroupedRegionBar(payloads, requestedType)
+                ?? TryBuildDemandBar(payloads, requestedType),
+            "line" => TryBuildDemandLine(payloads)
+                ?? TryBuildDemandBar(payloads, "line"),
+            "pie" or "donut" => TryBuildShareOrMixPie(payloads, requestedType ?? "pie")
+                ?? TryBuildDemandBar(payloads, requestedType),
+            "table" => TryBuildDepletionStatsTable(payloads)
+                ?? TryBuildDemandBar(payloads, "bar"),
+            _ => TryBuildDemandBar(payloads, requestedType) ?? TryBuildGauge(payloads),
+        };
     }
 
     private static List<JsonElement> CollectToolPayloads(Microsoft.Extensions.AI.ChatResponse response)
