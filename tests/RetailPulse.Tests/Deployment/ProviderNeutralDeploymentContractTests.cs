@@ -18,15 +18,19 @@ public sealed class ProviderNeutralDeploymentContractTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
 
-    [Theory]
-    [InlineData("postprovision.ps1")]
-    [InlineData("postprovision.sh")]
-    public void PostprovisionHook_PinsApiAuthenticationModeToEntra(string hookFile)
+    [Fact]
+    public void ContainerAppsBicep_PinsApiAuthenticationModeToEntra()
     {
-        string script = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile));
+        // The API's Authentication__Mode was moved from the postprovision hook into
+        // container-apps.bicep so every `azd provision` re-asserts it declaratively
+        // (issue #51 §7 fix — the hook path let a re-provision drop the value off
+        // the active revision). This test keeps the pin on the new source of truth.
+        string bicep = File.ReadAllText(Path.Combine(
+            RepoRoot, "infra", "modules", "container-apps.bicep"));
 
-        script.Should().Contain("Authentication__Mode=Entra",
-            $"{hookFile} must explicitly pin the API to the Entra authentication mode (not merely default to it)");
+        bicep.Should().MatchRegex(
+            "'Authentication__Mode'\\s*[^}]*value:\\s*'Entra'",
+            "container-apps.bicep must explicitly pin the API to the Entra authentication mode");
     }
 
     [Theory]
@@ -40,6 +44,20 @@ public sealed class ProviderNeutralDeploymentContractTests
             $"{hookFile} must never deploy the API in Anonymous authentication mode");
         script.Should().NotContain("Authentication__Mode=GitHub",
             $"{hookFile} must never deploy the API in GitHub authentication mode");
+    }
+
+    [Fact]
+    public void ContainerAppsBicep_NeverSelectsGitHubOrAnonymousMode()
+    {
+        string bicep = File.ReadAllText(Path.Combine(
+            RepoRoot, "infra", "modules", "container-apps.bicep"));
+
+        bicep.Should().NotMatchRegex(
+            "'Authentication__Mode'\\s*[^}]*value:\\s*'Anonymous'",
+            "container-apps.bicep must never deploy the API in Anonymous authentication mode");
+        bicep.Should().NotMatchRegex(
+            "'Authentication__Mode'\\s*[^}]*value:\\s*'GitHub'",
+            "container-apps.bicep must never deploy the API in GitHub authentication mode");
     }
 
     [Fact]
@@ -203,25 +221,26 @@ public sealed class ProviderNeutralDeploymentContractTests
     [Fact]
     public void DeploymentContract_FrontendAndApiAuthModesAreInParity()
     {
-        // End-to-end parity for the LIVE path: the frontend VITE_AUTH_MODE (infra output) and the
-        // API Authentication__Mode (both postprovision hooks + committed Production settings) must
-        // all resolve to the SAME provider — Entra. This is the single guardrail that proves the
-        // two halves of a deployment can never diverge into a mixed/misconfigured provider state.
-        string bicep = File.ReadAllText(Path.Combine(RepoRoot, "infra", "main.bicep"));
-        string ps1 = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", "postprovision.ps1"));
-        string sh = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", "postprovision.sh"));
+        // End-to-end parity for the LIVE path: the frontend VITE_AUTH_MODE (infra output),
+        // the deployed API's Authentication__Mode (now Bicep-owned in container-apps.bicep,
+        // was previously in the postprovision hooks), and the committed Production settings
+        // must all resolve to the SAME provider — Entra. This is the single guardrail that
+        // proves the two halves of a deployment can never diverge into a mixed/misconfigured
+        // provider state.
+        string mainBicep = File.ReadAllText(Path.Combine(RepoRoot, "infra", "main.bicep"));
+        string caBicep = File.ReadAllText(Path.Combine(
+            RepoRoot, "infra", "modules", "container-apps.bicep"));
         string prod = File.ReadAllText(Path.Combine(
             RepoRoot, "src", "RetailPulse.Api", "appsettings.Production.json"));
 
         const string frontendMode = "Entra";
 
-        bicep.Should().MatchRegex(
+        mainBicep.Should().MatchRegex(
             "output\\s+VITE_AUTH_MODE\\s+string\\s*=\\s*'" + frontendMode + "'",
             "frontend VITE_AUTH_MODE must be " + frontendMode);
-        ps1.Should().Contain($"Authentication__Mode={frontendMode}",
-            "the pwsh hook API mode must match the frontend mode");
-        sh.Should().Contain($"Authentication__Mode={frontendMode}",
-            "the sh hook API mode must match the frontend mode");
+        caBicep.Should().MatchRegex(
+            "'Authentication__Mode'\\s*[^}]*value:\\s*'" + frontendMode + "'",
+            "the API's Bicep-declared Authentication__Mode must match the frontend mode");
         prod.Should().MatchRegex(
             "\"Authentication\"\\s*:\\s*\\{[^}]*\"Mode\"\\s*:\\s*\"" + frontendMode + "\"",
             "the committed Production API mode must match the frontend mode");

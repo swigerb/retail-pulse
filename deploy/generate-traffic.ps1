@@ -7,7 +7,7 @@
     Requests, Performance, and Availability data in Azure Monitor.
 #>
 param(
-    [string]$GatewayUrl = "https://bsapim-dev-northcentralus-001.azure-api.net",
+    [string]$GatewayUrl = "",
     [Parameter(Mandatory=$true)][string]$ApiKey,
     [string]$Model = "gpt-5.4-mini",
     [string]$ApiVersion = "2025-03-01-preview",
@@ -15,6 +15,16 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+
+if ([string]::IsNullOrWhiteSpace($GatewayUrl)) {
+    $GatewayUrl = [Environment]::GetEnvironmentVariable("AZURE_APIM_GATEWAY_URL")
+}
+
+if ([string]::IsNullOrWhiteSpace($GatewayUrl)) {
+    throw "GatewayUrl is required. Pass -GatewayUrl explicitly or export AZURE_APIM_GATEWAY_URL from 'azd env get-values'."
+}
+
+$GatewayUrl = $GatewayUrl.TrimEnd('/')
 $endpoint = "$GatewayUrl/inference/openai/deployments/$Model/chat/completions?api-version=$ApiVersion"
 
 $headers = @{

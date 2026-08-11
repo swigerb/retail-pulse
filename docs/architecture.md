@@ -150,8 +150,10 @@ POST {apim_gateway}/inference/openai/deployments/{model}/chat/completions?api-ve
 
 Example:
 ```
-POST https://bsapim-dev-northcentralus-001.azure-api.net/inference/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-03-01-preview
+POST ${AZURE_APIM_INFERENCE_ENDPOINT}/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-03-01-preview
 ```
+
+Retrieve `AZURE_APIM_INFERENCE_ENDPOINT` from `azd env get-values` after `azd provision`; there is no longer a repo-wide hardcoded APIM hostname.
 
 ### Why APIM as AI Gateway?
 

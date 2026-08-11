@@ -2,7 +2,7 @@
   "openapi": "3.0.1",
   "info": {
     "title": "Retail Pulse Inference API",
-    "description": "Azure OpenAI chat completions proxied through Azure API Management's AI Gateway for the Retail Pulse brand intelligence platform.\n\n## Overview\nThis API powers the Retail Pulse analytics agent, providing tool-augmented chat completions with function calling for depletion analysis, field sentiment, and shipment pipeline analytics across the tenant brand portfolio.\n\n## Key Features\n- **AI Gateway Protection** — Token rate limiting (10,000 TPM), circuit breaker, and metric emission\n- **Managed Identity Auth** — APIM authenticates to Azure AI Foundry via system-assigned managed identity\n- **Tool Calling** — Supports OpenAI function calling for brand analytics tools (GetDepletionStats, GetFieldSentiment, GetShipmentStats, AnalyzeShipments)\n- **Full Observability** — Every request is metered and traced via APIM AI Gateway policies\n\n## Authentication\nUse the `api-key` header with your APIM subscription key. APIM handles backend authentication to Azure AI Foundry.\n\n## Rate Limits\n- 10,000 tokens per minute per subscription\n- Circuit breaker trips on HTTP 429 for 1 minute\n\n## Supported Brands\nTenant-configured brands (defined in tenant.yaml)",
+    "description": "Azure OpenAI chat completions proxied through Azure API Management's AI Gateway for the Retail Pulse brand intelligence platform.\n\n## Overview\nThis API powers the Retail Pulse analytics agent, providing tool-augmented chat completions with function calling for depletion analysis, field sentiment, and shipment pipeline analytics across the tenant brand portfolio.\n\n## Key Features\n- **AI Gateway Protection** — Token rate limiting, circuit breaker, and metric emission\n- **Managed Identity Auth** — APIM authenticates to Azure AI Foundry via system-assigned managed identity\n- **Tool Calling** — Supports OpenAI function calling for brand analytics tools (GetDepletionStats, GetFieldSentiment, GetShipmentStats, AnalyzeShipments)\n- **Full Observability** — Every request is metered and traced via APIM AI Gateway policies\n\n## Authentication\nUse the `api-key` header with your APIM subscription key. APIM handles backend authentication to Azure AI Foundry.\n\n## Rate Limits\n- Token-per-minute throttling per APIM subscription\n- Circuit breaker trips on HTTP 429 for 1 minute\n\n## Supported Brands\nTenant-configured brands (defined in tenant.yaml)",
     "version": "2025-03-01-preview",
     "contact": {
       "name": "Retail Pulse",
@@ -19,8 +19,10 @@
       "post": {
         "operationId": "createChatCompletion",
         "summary": "Create Chat Completion",
-        "description": "Creates a chat completion for the given conversation messages using the specified model deployment. Supports function/tool calling for brand analytics tools including GetDepletionStats, GetFieldSentiment, GetShipmentStats, and AnalyzeShipments. The agent uses these tools to analyze brand performance across the three-tier distribution system.",
-        "tags": ["Chat Completions"],
+        "description": "Creates a chat completion for the given conversation messages using the specified model deployment. Supports function/tool calling for brand analytics tools including GetDepletionStats, GetFieldSentiment, GetShipmentStats, and AnalyzeShipments.",
+        "tags": [
+          "Chat Completions"
+        ],
         "parameters": [
           {
             "name": "deployment-id",
@@ -29,7 +31,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "The deployment name (e.g. gpt-5.4-mini)"
+            "description": "The deployment name (for example gpt-5.4-mini)."
           },
           {
             "name": "api-version",
@@ -39,7 +41,7 @@
               "type": "string",
               "default": "2025-03-01-preview"
             },
-            "description": "The API version to use"
+            "description": "The Azure OpenAI API version to use."
           }
         ],
         "requestBody": {
@@ -83,7 +85,7 @@
             "items": {
               "$ref": "#/components/schemas/ChatMessage"
             },
-            "description": "The messages to generate chat completions for."
+            "description": "The conversation messages to generate chat completions for."
           },
           "model": {
             "type": "string",

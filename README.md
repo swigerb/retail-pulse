@@ -345,18 +345,12 @@ See [docs/deployment-azd.md](docs/deployment-azd.md) for full documentation.
 
 ### APIM AI Gateway
 
-The `deploy/apim-ai-gateway/` directory contains Bicep templates to deploy Azure API Management as an AI Gateway fronting Azure OpenAI:
+The primary AI Gateway is now provisioned by `azd up` as part of `infra/main.bicep` via:
 
-```powershell
-cd deploy/apim-ai-gateway
-.\deploy-apim-api.ps1
-```
+- `infra/modules/apim.bicep` — Developer-tier APIM instance, managed identity, service diagnostics, and loggers
+- `infra/modules/apim-openai-api.bicep` — Azure OpenAI backend, inference API, policy, API diagnostics, subscription, and cross-RG RBAC
 
-This deploys:
-- **main.bicep** — APIM instance with managed identity
-- **policy.xml** — Token metering, rate limiting, content safety policies
-- **role-assignment.bicep** — RBAC for APIM → Azure OpenAI access
-- **a2a-api.bicep** / **mcp-api.bicep** — Agent-to-agent and MCP API definitions
+`deploy/apim-ai-gateway/` now only contains optional attach-on templates for wiring MCP/A2A APIs onto an already-existing APIM instance in a separate workflow.
 
 ### One-Click Local Deploy
 
