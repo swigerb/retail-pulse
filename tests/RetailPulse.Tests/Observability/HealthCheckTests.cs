@@ -175,10 +175,8 @@ public class HealthCheckTests
         return handler.Object;
     }
 
-    private static DelegatingHandler CreateCapturingHandler(HttpStatusCode statusCode, Action<HttpRequestMessage> onRequest)
-    {
-        return new CallbackHandler(onRequest, () => new HttpResponseMessage(statusCode));
-    }
+    private static DelegatingHandler CreateCapturingHandler(HttpStatusCode statusCode, Action<HttpRequestMessage> onRequest) =>
+        new CallbackHandler(onRequest, () => new HttpResponseMessage(statusCode));
 
     private static DelegatingHandler CreateThrowingHandler(Exception ex)
     {

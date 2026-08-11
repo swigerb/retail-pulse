@@ -1,7 +1,7 @@
+using System.ClientModel;
 using Azure.AI.OpenAI;
 using Azure.Identity;
 using Microsoft.Extensions.Hosting;
-using System.ClientModel;
 
 namespace RetailPulse.Api.OpenAI;
 
