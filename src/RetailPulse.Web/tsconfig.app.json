@@ -25,6 +25,7 @@
   "include": ["src"],
   "exclude": [
     "src/__tests__/lockfileIntegrity.test.ts",
-    "src/__tests__/chartAcceptance.contract.test.ts"
+    "src/__tests__/chartAcceptance.contract.test.ts",
+    "src/__tests__/promptAcceptance.contract.test.ts"
   ]
 }
