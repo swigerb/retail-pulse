@@ -167,11 +167,12 @@ export function PromptLibrary({ categories, onSelect, disabled }: PromptLibraryP
           icon={<Lightbulb24Regular />}
           disabled={disabled}
           aria-label="Prompt ideas"
+          data-testid="prompt-library-trigger"
         >
           Prompt ideas
         </Button>
       </PopoverTrigger>
-      <PopoverSurface className={styles.surface} aria-label="Prompt library">
+      <PopoverSurface className={styles.surface} aria-label="Prompt library" data-testid="prompt-library-panel">
         <div className={styles.panel}>
           <div className={styles.header}>
             <Text as="h2" className={styles.title}>
@@ -181,11 +182,12 @@ export function PromptLibrary({ categories, onSelect, disabled }: PromptLibraryP
               Browse a category and pick a prompt to send.
             </Text>
           </div>
-          <div className={styles.categoryChips} role="group" aria-label="Prompt categories">
+          <div className={styles.categoryChips} role="group" aria-label="Prompt categories" data-testid="prompt-library-categories">
             <button
               type="button"
               className={`${styles.categoryChip} ${selectedCategory === null ? styles.categoryChipActive : ''}`}
               aria-pressed={selectedCategory === null}
+              data-testid="prompt-library-category-all"
               onClick={() => setSelectedCategory(null)}
             >
               🏪 All
@@ -196,15 +198,16 @@ export function PromptLibrary({ categories, onSelect, disabled }: PromptLibraryP
                 type="button"
                 className={`${styles.categoryChip} ${selectedCategory === cat.id ? styles.categoryChipActive : ''}`}
                 aria-pressed={selectedCategory === cat.id}
+                data-testid={`prompt-library-category-${cat.id}`}
                 onClick={() => setSelectedCategory(cat.id)}
               >
                 {cat.emoji} {cat.label}
               </button>
             ))}
           </div>
-          <div className={styles.promptList}>
+          <div className={styles.promptList} data-testid="prompt-library-list">
             {visibleCategories.map((cat) => (
-              <div key={cat.id} className={styles.promptGroup}>
+              <div key={cat.id} className={styles.promptGroup} data-testid={`prompt-library-group-${cat.id}`}>
                 {!selectedCategory && (
                   <Text className={styles.groupLabel}>
                     {cat.emoji} {cat.label}
@@ -215,6 +218,9 @@ export function PromptLibrary({ categories, onSelect, disabled }: PromptLibraryP
                     key={`${cat.id}-${i}`}
                     type="button"
                     className={styles.promptButton}
+                    data-testid="prompt-library-item"
+                    data-prompt-category={cat.id}
+                    data-prompt-index={i}
                     onClick={() => handlePromptClick(prompt)}
                     disabled={disabled}
                   >
