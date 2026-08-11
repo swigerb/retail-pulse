@@ -5,7 +5,8 @@
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
         <azure-openai-token-limit counter-key="@(context.Subscription.Id)"
             tokens-per-minute="{tokens-per-minute}" estimate-prompt-tokens="true"
-            tokens-consumed-header-name="x-tokens-consumed" />
+            tokens-consumed-header-name="x-tokens-consumed"
+            retry-after-header-name="Retry-After" />
         <azure-openai-emit-token-metric namespace="RetailPulse">
             <dimension name="API ID" value="@(context.Api.Id)" />
             <dimension name="Operation ID" value="@(context.Operation.Id)" />

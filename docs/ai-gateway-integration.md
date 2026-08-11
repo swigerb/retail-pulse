@@ -22,20 +22,20 @@ The AI Gateway pattern places APIM between the Retail Pulse API and Azure AI Fou
 
 ## Deployment
 
-The APIM AI Gateway infrastructure is defined in `deploy/apim-ai-gateway/` and deployed via Bicep:
+The APIM AI Gateway infrastructure is defined in `infra/modules/apim.bicep` and `infra/modules/apim-openai-api.bicep` and deployed as part of the primary azd infrastructure:
 
 ```powershell
-.\deploy\apim-ai-gateway\deploy-apim-api.ps1 -SetUserSecrets
+azd provision
 ```
 
 This deploys:
 
 | File | Purpose |
 |------|---------|
-| `main.bicep` | Inference API, backend, policies, **diagnostics**, and subscription |
-| `policy.xml` | AI Gateway policies (token rate limiting, token metrics, MI auth) |
-| `openai-spec.json` | Azure OpenAI API spec imported into APIM |
-| `role-assignment.bicep` | Managed identity role assignment (APIM → Azure AI Foundry) |
+| `infra/modules/apim.bicep` | APIM instance, service diagnostic settings, and loggers |
+| `infra/modules/apim-openai-api.bicep` | Inference API, backend, policies, **diagnostics**, and subscription |
+| `infra/modules/apim-openai-policy.xml` | AI Gateway policies (token rate limiting, token metrics, MI auth) |
+| `infra/modules/apim-openai-role-assignment.bicep` | Managed identity role assignment (APIM → Azure AI Foundry) |
 
 ---
 
@@ -165,7 +165,7 @@ az rest --method PUT \
 
 ## AI Gateway Policies
 
-The policies in `deploy/apim-ai-gateway/policy.xml`:
+The policies in `infra/modules/apim-openai-policy.xml`:
 
 | Policy | Section | Description |
 |--------|---------|-------------|
@@ -191,19 +191,19 @@ Without this flag, Azure OpenAI omits the `usage` block from the final SSE chunk
 
 ## How the App Connects
 
-In `src/RetailPulse.Api/Program.cs`, the `AzureOpenAIClient` points at APIM:
+APIM is now provisioned as first-class IaC via `infra/modules/apim.bicep` (instance, identity, diagnostics, loggers) and `infra/modules/apim-openai-api.bicep` (backend, inference API, policy, diagnostics, subscription, and role assignment). `azd provision` emits the runtime values the app and scripts consume: `AZURE_APIM_GATEWAY_URL`, `AZURE_APIM_INFERENCE_ENDPOINT`, `AZURE_APIM_INFERENCE_API_NAME`, and `AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME`.
+
+In `src/RetailPulse.Api/OpenAI/OpenAiConnectionSettings.cs`, the app requires an explicit `OpenAI:Endpoint` and prefers an APIM subscription key when managed identity is disabled:
 
 ```csharp
-var openAiEndpoint = builder.Configuration["OpenAI:Endpoint"]
-    ?? "https://bsapim-dev-northcentralus-001.azure-api.net/inference";
-var openAiApiKey = builder.Configuration["OpenAI:ApiKey"] ?? "demo-key";
+string endpoint = configuration["OpenAI:Endpoint"]
+    ?? throw new InvalidOperationException("Configuration value 'OpenAI:Endpoint' is required.");
 
-var azureClient = new AzureOpenAIClient(
-    new Uri(openAiEndpoint),
-    new ApiKeyCredential(openAiApiKey));
+string? apiKey = configuration["OpenAI:ApimSubscriptionKey"]
+    ?? configuration["OpenAI:ApiKey"];
 ```
 
-The `ApiKey` is the **APIM subscription key** (not an Azure OpenAI key). APIM authenticates to the backend using its own managed identity — no AI model keys are stored in or transit through the application.
+`OpenAI:ApimSubscriptionKey` is the **APIM subscription key** (not an Azure OpenAI key). APIM authenticates to the backend using its own managed identity — no AI model keys are stored in or transit through the application. `OpenAI:ApiKey` remains as the fallback when intentionally bypassing APIM.
 
 ### URL Pattern
 
@@ -213,7 +213,7 @@ POST {apim_gateway}/inference/openai/deployments/{model}/chat/completions?api-ve
 
 Example:
 ```
-POST https://bsapim-dev-northcentralus-001.azure-api.net/inference/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2024-10-21
+POST https://<your-apim-gateway>.azure-api.net/inference/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-03-01-preview
 ```
 
 ---
@@ -232,24 +232,30 @@ Before deploying, ensure your APIM instance has:
 ### 2. Deploy the APIM AI Gateway
 
 ```powershell
-cd deploy/apim-ai-gateway
-.\deploy-apim-api.ps1 -SetUserSecrets
+azd provision
 ```
 
-This creates the inference API, backend, policies, **both diagnostic resources** (Application Insights + Azure Monitor with `largeLanguageModel`), and the subscription.
+This creates the APIM instance, instance-level diagnostic settings, loggers, inference API, backend, policies, **both API-level diagnostic resources** (Application Insights + Azure Monitor with `largeLanguageModel`), and the subscription.
+
+To inspect the emitted endpoints:
+
+```powershell
+azd env get-values | Select-String "AZURE_APIM_(GATEWAY_URL|INFERENCE_ENDPOINT|INFERENCE_API_NAME|INFERENCE_SUBSCRIPTION_NAME)"
+```
 
 ### 3. Configure Retail Pulse
 
-If you used `-SetUserSecrets`, this is done automatically. Otherwise:
+For local development, set the endpoint and subscription key explicitly. The app no longer hardcodes any sandbox APIM URL:
 
 ```bash
-dotnet user-secrets set "OpenAI:ApiKey" "<your-apim-subscription-key>" --project src/RetailPulse.Api
-dotnet user-secrets set "AiGateway:SubscriptionKey" "<your-apim-subscription-key>" --project src/RetailPulse.Api
+dotnet user-secrets set "OpenAI:Endpoint" "https://<your-apim-gateway>.azure-api.net/inference" --project src/RetailPulse.Api
+dotnet user-secrets set "OpenAI:ApimSubscriptionKey" "<your-apim-subscription-key>" --project src/RetailPulse.Api
 ```
 
 > **Bypass APIM:** To go direct to Azure AI Foundry (e.g., for debugging):
 > ```bash
 > dotnet user-secrets set "OpenAI:Endpoint" "https://<your-ai-foundry>.services.ai.azure.com/api/projects/<project>/openai/v1" --project src/RetailPulse.Api
+> dotnet user-secrets set "OpenAI:ApiKey" "<your-direct-openai-key>" --project src/RetailPulse.Api
 > ```
 
 ### 4. Verify Analytics
@@ -310,12 +316,13 @@ If the AI Gateway Dev Portal shows no data, verify each layer:
 
 | Setting | Description | Default |
 |---|---|---|
-| `OpenAI:Endpoint` | APIM gateway URL for inference API | `https://bsapim-dev-northcentralus-001.azure-api.net/inference` |
-| `OpenAI:ApiKey` | APIM subscription key | _(required)_ |
-| `AiGateway:Enabled` | Enable APIM header injection | `false` |
-| `AiGateway:SubscriptionKeyHeader` | Header name for the APIM subscription key | `Ocp-Apim-Subscription-Key` |
-| `AiGateway:SubscriptionKey` | APIM subscription key value | _(empty)_ |
-| `AiGateway:TraceEnabled` | Add `Ocp-Apim-Trace: true` header for request tracing | `false` |
+| `AZURE_APIM_GATEWAY_URL` | azd output for the APIM gateway base URL | emitted by `azd provision` |
+| `AZURE_APIM_INFERENCE_ENDPOINT` | azd output for the APIM inference endpoint | emitted by `azd provision` |
+| `AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME` | azd output for the APIM subscription resource name | emitted by `azd provision` |
+| `OpenAI:Endpoint` | Runtime endpoint used by the API (`.../inference` for APIM, or a direct Azure OpenAI endpoint when bypassing APIM) | _(required)_ |
+| `OpenAI:ApimSubscriptionKey` | Primary caller credential when routing through APIM | _(required for APIM mode)_ |
+| `OpenAI:ApiKey` | Fallback credential when bypassing APIM directly | _(optional fallback)_ |
+| `OpenAI:UseManagedIdentity` | Uses `DefaultAzureCredential` instead of an API key when calling Azure OpenAI directly | `false` |
 
 ## Demo Flow
 

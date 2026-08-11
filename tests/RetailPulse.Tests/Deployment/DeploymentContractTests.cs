@@ -114,6 +114,12 @@ public partial class DeploymentContractTests
     {
         string script = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile));
 
+        // The postprovision hook now handles only the steps that MUST run after Bicep:
+        // the ACR AcrPull grant + system-identity registry bind, the SWA linked-backend,
+        // and the ACA platform-auth disable. The API's APIM/Entra runtime env moved into
+        // container-apps.bicep (see DeployedApi_IsWiredThroughApimGatewayUsingSecretReference
+        // and DeployedApi_IsDeployedAsAuthenticatedProduction). These are the values the hook
+        // still needs to derive from the azd environment.
         foreach (string requiredEnv in new[]
                  {
                      "AZURE_RESOURCE_GROUP",
@@ -121,16 +127,10 @@ public partial class DeploymentContractTests
                      "AZURE_CONTAINER_REGISTRY_ENDPOINT",
                      "AZURE_CONTAINER_REGISTRY_RESOURCE_ID",
                      "AZURE_API_APP_NAME",
-                     "AZURE_API_APP_URL",
                      "AZURE_MCP_SERVER_APP_NAME",
-                     "AZURE_MCP_SERVER_APP_URL",
                      "AZURE_TEAMS_BOT_APP_NAME",
-                     "AZURE_OPENAI_ENDPOINT",
-                     "RETAIL_PULSE_FRONTEND_ORIGIN",
                      "AZURE_STATIC_WEB_APP_NAME",
                      "AZURE_LOCATION",
-                     "RETAIL_PULSE_ENTRA_TENANT_ID",
-                     "RETAIL_PULSE_ENTRA_CLIENT_ID",
                  })
         {
             script.Should().Contain(requiredEnv,
@@ -154,60 +154,93 @@ public partial class DeploymentContractTests
             $"{hookFile} must disable platform auth after linking because the link enables the SWA identity provider");
     }
 
-    // ── API deploys as authenticated Production (issue: anonymous prod) ──────
+    // ── API runtime config is declared in container-apps.bicep (idempotent) ──
+    //
+    // The API's APIM AI-Gateway wiring and Production Entra auth used to live in
+    // the postprovision hook as `az containerapp update --set-env-vars`. That
+    // pattern is not re-asserted by `azd provision`, so a subsequent provision
+    // that recreated the ACA resource from Bicep would drop the AI-Gateway env
+    // vars off the active revision (issue #51 §7). Both concerns now live in
+    // infra/modules/container-apps.bicep so every `azd provision` re-emits them
+    // declaratively. These tests keep the contract on the new source of truth.
 
-    [Theory]
-    [InlineData("postprovision.ps1")]
-    [InlineData("postprovision.sh")]
-    public void PostprovisionHook_DeploysApiAsAuthenticatedProduction(string hookFile)
+    [Fact]
+    public void DeployedApi_IsDeployedAsAuthenticatedProduction()
     {
-        string script = Normalize(File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile)));
+        string bicep = File.ReadAllText(Path.Combine(
+            RepoRoot, "infra", "modules", "container-apps.bicep"));
 
-        // The API must run real auth in Production. These are the exact settings that
-        // were dangerously wrong in the live deployment (anonymous, Development mode).
-        script.Should().Contain("Security__RequireAuth=true",
-            $"{hookFile} must deploy the API with real auth enabled");
-        script.Should().NotContain("Security__RequireAuth=false",
-            $"{hookFile} must never ship the API with auth disabled (anonymous production)");
-        script.Should().Contain("ASPNETCORE_ENVIRONMENT=Production",
-            $"{hookFile} must deploy the API in the Production environment");
-
-        // Tenant-scoped Entra values must be injected so JwtBearer can validate tokens.
-        script.Should().Contain("MicrosoftEntra__TenantId=",
-            $"{hookFile} must inject the Entra tenant id into the API");
-        script.Should().Contain("MicrosoftEntra__ClientId=",
-            $"{hookFile} must inject the Entra client id/audience into the API");
+        bicep.Should().Contain("'Security__RequireAuth'",
+            "container-apps.bicep must set Security__RequireAuth on the API");
+        bicep.Should().MatchRegex(
+            "'Security__RequireAuth'\\s*[^}]*value:\\s*'true'",
+            "the API's Security__RequireAuth must be 'true' (never anonymous production)");
+        bicep.Should().MatchRegex(
+            "'ASPNETCORE_ENVIRONMENT'\\s*[^}]*value:\\s*'Production'",
+            "the API must deploy in the Production ASP.NET Core environment");
+        bicep.Should().Contain("'MicrosoftEntra__TenantId'",
+            "container-apps.bicep must inject the Entra tenant id into the API");
+        bicep.Should().Contain("'MicrosoftEntra__ClientId'",
+            "container-apps.bicep must inject the Entra client id/audience into the API");
     }
 
-    [Theory]
-    [InlineData("postprovision.ps1")]
-    [InlineData("postprovision.sh")]
-    public void PostprovisionHook_FailsFastWhenEntraConfigMissing(string hookFile)
+    [Fact]
+    public void DeployedApi_IsWiredThroughApimGatewayUsingSecretReference()
     {
-        // The Entra tenant/client values are read as REQUIRED azd env values so a
-        // misconfigured deploy fails loudly instead of silently shipping anonymous.
-        string raw = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile));
-        string script = Normalize(raw);
+        string bicep = File.ReadAllText(Path.Combine(
+            RepoRoot, "infra", "modules", "container-apps.bicep"));
 
-        script.Should().Contain("RETAIL_PULSE_ENTRA_TENANT_ID",
-            $"{hookFile} must require the Entra tenant id from the azd environment");
-        script.Should().Contain("RETAIL_PULSE_ENTRA_CLIENT_ID",
-            $"{hookFile} must require the Entra client id from the azd environment");
+        bicep.Should().Contain("apim-sub-key",
+            "container-apps.bicep must declare a stable ACA secret name for the APIM subscription key");
+        bicep.Should().Contain("apimSubscriptionKey",
+            "container-apps.bicep must consume the APIM subscription key at Bicep-time (via listSecrets on the module output)");
+        bicep.Should().MatchRegex(
+            "'OpenAI__ApimSubscriptionKey'\\s*[^}]*secretRef:\\s*apimSubscriptionKeySecretName",
+            "the API must reference the APIM subscription key via a secretRef, never inline");
+        bicep.Should().MatchRegex(
+            "'OpenAI__Endpoint'\\s*[^}]*value:\\s*apimInferenceEndpoint",
+            "the API must send inference calls to the APIM inference endpoint (not direct AOAI)");
+        bicep.Should().MatchRegex(
+            "'OpenAI__UseManagedIdentity'\\s*[^}]*value:\\s*'false'",
+            "the API must disable direct managed-identity auth when routing through APIM");
 
-        if (hookFile.EndsWith(".sh", StringComparison.Ordinal))
-        {
-            script.Should().Contain("require_env RETAIL_PULSE_ENTRA_TENANT_ID",
-                $"{hookFile} must fail fast (require_env) when the Entra tenant id is missing");
-            script.Should().Contain("require_env RETAIL_PULSE_ENTRA_CLIENT_ID",
-                $"{hookFile} must fail fast (require_env) when the Entra client id is missing");
-        }
-        else
-        {
-            script.Should().Contain("Get-RequiredEnv RETAIL_PULSE_ENTRA_TENANT_ID",
-                $"{hookFile} must fail fast (Get-RequiredEnv) when the Entra tenant id is missing");
-            script.Should().Contain("Get-RequiredEnv RETAIL_PULSE_ENTRA_CLIENT_ID",
-                $"{hookFile} must fail fast (Get-RequiredEnv) when the Entra client id is missing");
-        }
+        // The APIM primary key flows in from apim-openai-api.bicep as a @secure() output.
+        string apimApi = File.ReadAllText(Path.Combine(
+            RepoRoot, "infra", "modules", "apim-openai-api.bicep"));
+        apimApi.Should().Contain("subscription.listSecrets()",
+            "apim-openai-api.bicep must resolve the APIM subscription primary key via listSecrets()");
+        apimApi.Should().MatchRegex(
+            "@secure\\(\\)\\s*output\\s+subscriptionKey\\s+string",
+            "apim-openai-api.bicep must expose the APIM subscription key as a @secure() output");
+    }
+
+    [Fact]
+    public void MainBicep_PipesApimAndSwaOutputsThroughToContainerApps()
+    {
+        // Ordering matters: staticWebApp + apimOpenAiApi must run BEFORE containerApps so
+        // their outputs (frontend origin, APIM inference endpoint, APIM subscription key)
+        // can flow into the API's declarative env. This is the ordering that closes the
+        // §7 regression on issue #51.
+        string bicep = File.ReadAllText(Path.Combine(RepoRoot, "infra", "main.bicep"));
+
+        int staticIndex = bicep.IndexOf("module staticWebApp ", StringComparison.Ordinal);
+        int apimOpenAiIndex = bicep.IndexOf("module apimOpenAiApi ", StringComparison.Ordinal);
+        int containerAppsIndex = bicep.IndexOf("module containerApps ", StringComparison.Ordinal);
+
+        staticIndex.Should().BeGreaterThan(-1);
+        apimOpenAiIndex.Should().BeGreaterThan(-1);
+        containerAppsIndex.Should().BeGreaterThan(-1);
+        staticIndex.Should().BeLessThan(containerAppsIndex,
+            "staticWebApp must be declared before containerApps so frontendOrigin can flow into the API");
+        apimOpenAiIndex.Should().BeLessThan(containerAppsIndex,
+            "apimOpenAiApi must be declared before containerApps so the APIM endpoint + key can flow into the API");
+
+        bicep.Should().Contain("apimInferenceEndpoint: apimOpenAiApi.outputs.inferenceEndpoint",
+            "main.bicep must pipe the APIM inference endpoint into the containerApps module");
+        bicep.Should().Contain("apimSubscriptionKey: apimOpenAiApi.outputs.subscriptionKey",
+            "main.bicep must pipe the APIM subscription key into the containerApps module");
+        bicep.Should().Contain("frontendOrigin: staticWebApp.outputs.staticWebAppUrl",
+            "main.bicep must pipe the Static Web App origin into the containerApps module for CORS");
     }
 
     // ── main.bicep: dedicated registry + azd-consumed outputs ───────────────

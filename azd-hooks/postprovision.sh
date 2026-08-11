@@ -3,12 +3,19 @@
 # for the full rationale.
 #
 # Wires ACR pull auth for every Container App to its own system-assigned managed
-# identity, with no registry secrets. Doing it here (after provision) breaks the
+# identity, with no registry secrets, and links the API container app to the
+# Static Web App backend. Doing these here (after provision) breaks the
 # ARM/Bicep identity-sequencing cycle deterministically and is fully idempotent:
-# every `azd up` / `azd provision` re-asserts the desired state, so clean and
-# repeated deploys are self-contained. Values are derived from the azd
-# environment (infra outputs captured by `azd provision`), exposed to this hook
-# as process environment variables.
+# every `azd up` / `azd provision` re-asserts the desired state.
+#
+# Runtime configuration for the API (APIM endpoint, subscription-key secret,
+# Entra auth mode, allowed origins, ASPNETCORE_ENVIRONMENT=Production) now lives
+# in `infra/modules/container-apps.bicep`. It used to live here as `az
+# containerapp update --set-env-vars` calls, which meant a re-provision that
+# recreated the API resource from Bicep left the active revision with no APIM
+# wiring (the §7 regression on issue #51). Keeping runtime config in Bicep
+# closes that loop — this hook now only handles the identity/registry/backend
+# links that genuinely require post-resource-creation steps.
 
 set -eu
 
@@ -26,29 +33,15 @@ require_env AZURE_CONTAINER_REGISTRY_NAME
 require_env AZURE_CONTAINER_REGISTRY_ENDPOINT
 require_env AZURE_CONTAINER_REGISTRY_RESOURCE_ID
 require_env AZURE_API_APP_NAME
-require_env AZURE_API_APP_URL
 require_env AZURE_MCP_SERVER_APP_NAME
-require_env AZURE_MCP_SERVER_APP_URL
 require_env AZURE_TEAMS_BOT_APP_NAME
-require_env AZURE_OPENAI_ENDPOINT
-require_env RETAIL_PULSE_FRONTEND_ORIGIN
 require_env AZURE_STATIC_WEB_APP_NAME
 require_env AZURE_LOCATION
-# Entra auth configuration. Tenant/client IDs are CONFIGURATION, not secrets; the
-# parent captures them via `azd env set` from the Setup-EntraAuth.ps1 output. Read
-# with require_env so a deploy fails fast rather than silently shipping an anonymous,
-# Development-mode API (the exact regression this hook now prevents).
-require_env RETAIL_PULSE_ENTRA_TENANT_ID
-require_env RETAIL_PULSE_ENTRA_CLIENT_ID
 
 resource_group="$AZURE_RESOURCE_GROUP"
 registry_name="$AZURE_CONTAINER_REGISTRY_NAME"
 registry_server="$AZURE_CONTAINER_REGISTRY_ENDPOINT"
 registry_id="$AZURE_CONTAINER_REGISTRY_RESOURCE_ID"
-entra_tenant_id="$RETAIL_PULSE_ENTRA_TENANT_ID"
-entra_client_id="$RETAIL_PULSE_ENTRA_CLIENT_ID"
-entra_api_scope="${RETAIL_PULSE_ENTRA_API_SCOPE:-access_as_user}"
-entra_app_role="${RETAIL_PULSE_ENTRA_APP_ROLE:-RetailPulse.User}"
 
 echo "Configuring ACR pull via system-assigned identity on registry '$registry_name'..."
 
@@ -95,32 +88,6 @@ for app in "$AZURE_API_APP_NAME" "$AZURE_MCP_SERVER_APP_NAME" "$AZURE_TEAMS_BOT_
     echo '   registry auth bound to system identity'
 done
 
-echo 'Configuring production auth + runtime settings for the API...'
-
-# The API is the security boundary. It deploys as Production with real Entra JWT
-# validation enabled (Security__RequireAuth=true). ACA platform (Easy Auth) stays
-# disabled below so the in-process JwtBearer handler is the sole gate; direct ACA
-# REST/SignalR are protected independent of SWA routing.
-az containerapp update \
-    --name "$AZURE_API_APP_NAME" \
-    --resource-group "$resource_group" \
-    --set-env-vars \
-    "OpenAI__Endpoint=$AZURE_OPENAI_ENDPOINT" \
-    'OpenAI__UseManagedIdentity=true' \
-    'OpenAI__Deployment=gpt-5.4-mini-2026-03-17' \
-    'OpenAI__RouterDeployment=gpt-5.4-mini-2026-03-17' \
-    "McpServer__BaseUrl=$AZURE_MCP_SERVER_APP_URL" \
-    'Security__RequireAuth=true' \
-    'Authentication__Mode=Entra' \
-    "Security__AllowedOrigins__0=$RETAIL_PULSE_FRONTEND_ORIGIN" \
-    "MicrosoftEntra__TenantId=$entra_tenant_id" \
-    "MicrosoftEntra__ClientId=$entra_client_id" \
-    "MicrosoftEntra__ApiScope=$entra_api_scope" \
-    "MicrosoftEntra__AppRole=$entra_app_role" \
-    'RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true' \
-    'ASPNETCORE_ENVIRONMENT=Production' \
-    --output none
-
 # SWA proxies relative /api requests to ACA. SignalR intentionally bypasses
 # this link via VITE_API_ORIGIN because linked backends do not proxy WebSockets.
 api_resource_id=$(az containerapp show \
@@ -147,25 +114,11 @@ fi
 # Linking enables the SWA identity provider on the /api proxy path, but ACA platform
 # (Easy Auth) is deliberately kept DISABLED: it would issue login redirects that break
 # bearer-token REST/SignalR clients calling ACA directly. The in-process Entra JwtBearer
-# handler (Security__RequireAuth=true above) is the real security boundary.
+# handler (Security__RequireAuth=true, set in Bicep) is the real security boundary.
 az containerapp auth update \
     --name "$AZURE_API_APP_NAME" \
     --resource-group "$resource_group" \
     --enabled false \
     --output none
 
-az containerapp update \
-    --name "$AZURE_MCP_SERVER_APP_NAME" \
-    --resource-group "$resource_group" \
-    --set-env-vars 'ASPNETCORE_ENVIRONMENT=Development' \
-    --output none
-
-az containerapp update \
-    --name "$AZURE_TEAMS_BOT_APP_NAME" \
-    --resource-group "$resource_group" \
-    --set-env-vars \
-    'ASPNETCORE_ENVIRONMENT=Development' \
-    "TeamsBot__ApiBaseUrl=$AZURE_API_APP_URL" \
-    --output none
-
-echo 'Post-provision configuration complete: secretless ACR pull and production Entra auth runtime settings are ready.'
+echo 'Post-provision configuration complete: secretless ACR pull, SWA linked backend, and ACA platform-auth disabled.'

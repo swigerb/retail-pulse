@@ -7,7 +7,120 @@ param environmentId string
 @description('Tags for resources')
 param tags object = {}
 
-var placeholderImage = 'mcr.microsoft.com/k8se/quickstart:latest'
+@description('Fully-qualified container image reference for the API. Defaults to the ACA placeholder when the service has not been deployed yet.')
+param apiImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('Fully-qualified container image reference for the MCP server. Defaults to the ACA placeholder when the service has not been deployed yet.')
+param mcpServerImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('Fully-qualified container image reference for the Teams bot. Defaults to the ACA placeholder when the service has not been deployed yet.')
+param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
+
+@description('APIM inference endpoint (e.g. https://<apim>.azure-api.net/inference/openai) that the API routes model calls through')
+param apimInferenceEndpoint string
+
+@description('APIM subscription primary key used by the API to authenticate to the AI Gateway. Stored as an ACA secret.')
+@secure()
+param apimSubscriptionKey string
+
+@description('Azure OpenAI deployment name that the API sends chat/completions to (through APIM)')
+param openAiDeployment string = 'gpt-5.4-mini-2026-03-17'
+
+@description('Allowed frontend origin (Static Web App URL) for API CORS')
+param frontendOrigin string
+
+@description('MCP server base URL exposed to the API. Optional — resolved from the MCP container app FQDN when empty.')
+param mcpServerBaseUrl string = ''
+
+@description('Entra tenant (directory) ID for the API JwtBearer handler')
+param entraTenantId string
+
+@description('Entra application (client) ID for the API')
+param entraClientId string
+
+@description('Entra API scope name (e.g. access_as_user)')
+param entraApiScope string = 'access_as_user'
+
+@description('Entra API app role required by the API')
+param entraAppRole string = 'RetailPulse.User'
+
+@description('ACR login server for the private registry that hosts the service images. When set, containers pull via system-assigned identity so `azd provision` re-asserts the registry auth binding declaratively.')
+param containerRegistryLoginServer string = ''
+
+var apimSubscriptionKeySecretName = 'apim-sub-key'
+
+// The `registries` block binds a container app's image-pull auth to its own
+// system-assigned identity, with no admin credentials. It is only emitted when
+// the image points at the private ACR — an omitted block on a first-ever
+// create using the mcr.microsoft.com placeholder keeps the initial provision
+// unauthenticated (which is what the placeholder allows). Once `azd deploy`
+// has pushed real images and captured SERVICE_<name>_IMAGE_NAME into the azd
+// env, subsequent provisions include the block and the AcrPull grant issued by
+// the postprovision hook (idempotent) satisfies it. This is what closes the
+// §7 regression where a re-provision would silently drop the registry block
+// off the API container app and revert the active revision to the placeholder.
+var usePrivateRegistry = !empty(containerRegistryLoginServer)
+var privateRegistryBlock = usePrivateRegistry
+  ? [
+      {
+        server: containerRegistryLoginServer
+        identity: 'system'
+      }
+    ]
+  : []
+var apiUsesPrivateRegistry = usePrivateRegistry && startsWith(apiImageName, containerRegistryLoginServer)
+var mcpUsesPrivateRegistry = usePrivateRegistry && startsWith(mcpServerImageName, containerRegistryLoginServer)
+var teamsBotUsesPrivateRegistry = usePrivateRegistry && startsWith(teamsBotImageName, containerRegistryLoginServer)
+
+resource mcpServer 'Microsoft.App/containerApps@2024-03-01' = {
+  name: 'ca-retailpulse-mcp'
+  location: location
+  tags: union(tags, {
+    'azd-service-name': 'mcpserver'
+  })
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    managedEnvironmentId: environmentId
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: mcpUsesPrivateRegistry ? privateRegistryBlock : []
+      ingress: {
+        external: true
+        targetPort: 8080
+        transport: 'auto'
+        allowInsecure: false
+      }
+    }
+    template: {
+      containers: [
+        {
+          name: 'mcpserver'
+          image: mcpServerImageName
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'ASPNETCORE_ENVIRONMENT'
+              value: 'Development'
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 1
+      }
+    }
+  }
+}
+
+var effectiveMcpBaseUrl = empty(mcpServerBaseUrl)
+  ? 'https://${mcpServer.properties.configuration.ingress.fqdn}'
+  : mcpServerBaseUrl
 
 resource api 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'ca-retailpulse-api'
@@ -22,6 +135,20 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
     managedEnvironmentId: environmentId
     configuration: {
       activeRevisionsMode: 'Single'
+      registries: apiUsesPrivateRegistry ? privateRegistryBlock : []
+      // The APIM subscription primary key comes in through Bicep-time
+      // listSecrets() on the APIM subscription and lands here as an ACA
+      // secret. Declaring it in Bicep is what makes `azd provision`
+      // idempotent for the AI Gateway wiring: a subsequent re-provision
+      // cannot silently strip the APIM subscription-key `secretRef` off the
+      // active revision the way the previous `az containerapp update` -only
+      // path could.
+      secrets: [
+        {
+          name: apimSubscriptionKeySecretName
+          value: apimSubscriptionKey
+        }
+      ]
       ingress: {
         external: true
         targetPort: 8080
@@ -33,11 +160,81 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'api'
-          image: placeholderImage
+          image: apiImageName
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
           }
+          // Runtime configuration for the deployed API. Declared in Bicep so
+          // every `azd provision` re-asserts the AI Gateway path:
+          //   OpenAI__Endpoint  → APIM inference API (never direct AOAI)
+          //   OpenAI__ApimSubscriptionKey → ACA secret `apim-sub-key`
+          //   Authentication__Mode = Entra (production, fail-closed)
+          //   Security__RequireAuth = true (JWT bearer gate)
+          // This is what closes the §7 regression where a re-provision would
+          // drop these values off the active revision.
+          env: [
+            {
+              name: 'OpenAI__Endpoint'
+              value: apimInferenceEndpoint
+            }
+            {
+              name: 'OpenAI__UseManagedIdentity'
+              value: 'false'
+            }
+            {
+              name: 'OpenAI__ApimSubscriptionKey'
+              secretRef: apimSubscriptionKeySecretName
+            }
+            {
+              name: 'OpenAI__Deployment'
+              value: openAiDeployment
+            }
+            {
+              name: 'OpenAI__RouterDeployment'
+              value: openAiDeployment
+            }
+            {
+              name: 'McpServer__BaseUrl'
+              value: effectiveMcpBaseUrl
+            }
+            {
+              name: 'Security__RequireAuth'
+              value: 'true'
+            }
+            {
+              name: 'Authentication__Mode'
+              value: 'Entra'
+            }
+            {
+              name: 'Security__AllowedOrigins__0'
+              value: frontendOrigin
+            }
+            {
+              name: 'MicrosoftEntra__TenantId'
+              value: entraTenantId
+            }
+            {
+              name: 'MicrosoftEntra__ClientId'
+              value: entraClientId
+            }
+            {
+              name: 'MicrosoftEntra__ApiScope'
+              value: entraApiScope
+            }
+            {
+              name: 'MicrosoftEntra__AppRole'
+              value: entraAppRole
+            }
+            {
+              name: 'RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE'
+              value: 'true'
+            }
+            {
+              name: 'ASPNETCORE_ENVIRONMENT'
+              value: 'Production'
+            }
+          ]
         }
       ]
       // The API's SQLite stores (cost/audit/memory/approvals/alerts) live in the
@@ -71,45 +268,6 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
-resource mcpServer 'Microsoft.App/containerApps@2024-03-01' = {
-  name: 'ca-retailpulse-mcp'
-  location: location
-  tags: union(tags, {
-    'azd-service-name': 'mcpserver'
-  })
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {
-    managedEnvironmentId: environmentId
-    configuration: {
-      activeRevisionsMode: 'Single'
-      ingress: {
-        external: true
-        targetPort: 8080
-        transport: 'auto'
-        allowInsecure: false
-      }
-    }
-    template: {
-      containers: [
-        {
-          name: 'mcpserver'
-          image: placeholderImage
-          resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
-          }
-        }
-      ]
-      scale: {
-        minReplicas: 0
-        maxReplicas: 1
-      }
-    }
-  }
-}
-
 resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'ca-retailpulse-teamsbot'
   location: location
@@ -123,6 +281,7 @@ resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
     managedEnvironmentId: environmentId
     configuration: {
       activeRevisionsMode: 'Single'
+      registries: teamsBotUsesPrivateRegistry ? privateRegistryBlock : []
       ingress: {
         external: true
         targetPort: 8080
@@ -134,11 +293,21 @@ resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'teamsbot'
-          image: placeholderImage
+          image: teamsBotImageName
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
           }
+          env: [
+            {
+              name: 'ASPNETCORE_ENVIRONMENT'
+              value: 'Development'
+            }
+            {
+              name: 'TeamsBot__ApiBaseUrl'
+              value: 'https://${api.properties.configuration.ingress.fqdn}'
+            }
+          ]
         }
       ]
       scale: {
