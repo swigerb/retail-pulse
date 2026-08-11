@@ -272,3 +272,17 @@ jobs:
         with:
           name: bicep-compiled
           path: /tmp/main.compiled.json
+
+  verify-script-selftest:
+    name: Verify-ApimAiGateway offline self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The verifier's offline self-test proves the BOM-safe byte decoder, the
+      # missing-resource hard-FAIL semantics, and the "no `az rest` invocation
+      # regression" convention guard — no Azure signin required. Runs on Linux
+      # to guarantee cross-platform pwsh compatibility. Regression fence for #70.
+      - name: Run Verify-ApimAiGateway.ps1 -SelfTest
+        shell: pwsh
+        run: ./scripts/Verify-ApimAiGateway.ps1 -SelfTest
