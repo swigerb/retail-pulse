@@ -504,6 +504,36 @@ internal static class DeterministicChartBuilder
                 }
             }
 
+            // National-aggregate market share: national_share.entries[].brand + share_percent
+            // (Publix #76 Group B). This aggregate is small enough to survive the tool
+            // compactor's array truncation of the raw share_data list, so a pie/donut
+            // "market share breakdown ... nationally" prompt gets a clean rollup.
+            if (payload.TryGetProperty("national_share", out JsonElement natShare)
+                && natShare.ValueKind == JsonValueKind.Object
+                && natShare.TryGetProperty("entries", out JsonElement natEntries)
+                && natEntries.ValueKind == JsonValueKind.Array)
+            {
+                var points = new List<ChartDataPoint>();
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (JsonElement s in natEntries.EnumerateArray())
+                {
+                    if (s.ValueKind != JsonValueKind.Object) continue;
+                    string? label = ReadNestedString(s, "brand");
+                    if (string.IsNullOrWhiteSpace(label) || !seen.Add(label)) continue;
+                    if (!TryReadDouble(s, "share_percent", out double share) || !double.IsFinite(share)) continue;
+                    points.Add(new ChartDataPoint { X = label, Y = Math.Round(share, 1) });
+                }
+                if (points.Count >= 2)
+                {
+                    return new ChartSpec
+                    {
+                        Type = type,
+                        Title = "Market Share Breakdown (National)",
+                        Data = [new ChartSeries { Legend = "Market Share %", Values = points }],
+                    };
+                }
+            }
+
             // Market share: share_data[].brand + share_percent.
             if (payload.TryGetProperty("share_data", out JsonElement shareData) && shareData.ValueKind == JsonValueKind.Array)
             {

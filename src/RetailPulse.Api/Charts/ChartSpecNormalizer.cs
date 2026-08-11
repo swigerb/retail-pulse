@@ -136,16 +136,76 @@ internal static class ChartSpecNormalizer
             }
             if (data.ValueKind == JsonValueKind.Object)
             {
-                return SeriesFromLabelledObject(data, chartTitle);
+                List<ChartSeries> labelled = SeriesFromLabelledObject(data, chartTitle);
+                if (labelled.Count > 0) return labelled;
+                // Gauge single-value shapes commonly nest under "data": {"value":75,"max":100}.
+                List<ChartSeries> gauge = SeriesFromSingleValue(data, chartTitle);
+                if (gauge.Count > 0) return gauge;
             }
         }
 
         // Full-config (Chart.js-style) schema: a top-level "series" array paired with
         // labels under xAxis.categories / top-level categories or labels. Each series
         // carries its numbers under "data" or "values".
-        return root.TryGetProperty("series", out JsonElement topSeries) && topSeries.ValueKind == JsonValueKind.Array
-            ? SeriesFromSeriesArray(topSeries, GatherLabels(root), chartTitle)
-            : [];
+        if (root.TryGetProperty("series", out JsonElement topSeries) && topSeries.ValueKind == JsonValueKind.Array)
+        {
+            return SeriesFromSeriesArray(topSeries, GatherLabels(root), chartTitle);
+        }
+
+        // Gauge / KPI-style shapes emit the number at the top level ("value":75, or
+        // "score":82, or "percent":90). Without this the chart-JSON leak sanitizer
+        // failed to recognise the payload as a chart, leaked it into the reply text,
+        // and produced Publix sweep #76 Group E (prompt #26).
+        return SeriesFromSingleValue(root, chartTitle);
+    }
+
+    private static readonly string[] _singleValueKeys =
+    [
+        "value", "score", "percent", "percentage", "y", "current", "level"
+    ];
+
+    private static readonly string[] _singleValueLabelKeys =
+    [
+        "label", "name", "title", "category"
+    ];
+
+    // Recognises a single-value gauge/KPI shape: { value: 75 }, { value: 75, max: 100 },
+    // { score: 82, label: "Inventory Health" }. Emits a one-point series so gauges
+    // survive the chart-recognition contract used by the inline sanitizer.
+    private static List<ChartSeries> SeriesFromSingleValue(JsonElement obj, string chartTitle)
+    {
+        if (obj.ValueKind != JsonValueKind.Object) return [];
+
+        double? found = null;
+        foreach (string key in _singleValueKeys)
+        {
+            if (obj.TryGetProperty(key, out JsonElement el) && TryElementToDouble(el, out double v))
+            {
+                found = v;
+                break;
+            }
+        }
+        if (found is null) return [];
+
+        string label = chartTitle;
+        foreach (string key in _singleValueLabelKeys)
+        {
+            if (obj.TryGetProperty(key, out JsonElement el) && el.ValueKind == JsonValueKind.String
+                && el.GetString() is { Length: > 0 } s)
+            {
+                label = s;
+                break;
+            }
+        }
+
+        return
+        [
+            new ChartSeries
+            {
+                Legend = chartTitle,
+                Values = [new ChartDataPoint { X = label, Y = found.Value }],
+            },
+        ];
     }
 
     // Collects category labels shared by all series, checking the common locations

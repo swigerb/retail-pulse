@@ -2740,12 +2740,93 @@ public class RetailPulseDb
             return change != null && (double)change < -2.0;
         }).ToList();
 
+        // Publix sweep #76 Group B / issue #74 national-region gap analogue:
+        // when the caller did not scope to a specific region we ALSO return a
+        // per-brand national aggregate for the most recent period, in the exact
+        // shape the deterministic pie/donut builder consumes
+        // (<c>share_data[].brand + share_percent</c>). The raw per-region rows
+        // remain for backwards compatibility, but the aggregate is small enough
+        // to survive the tool-context budget's array compactor and gives the
+        // "market share breakdown ... nationally" prompt a clean, complete
+        // rollup regardless of how the generic compactor truncates the raw list.
+        object? nationalShare = null;
+        List<object>? aggregatedShareData = null;
+        if (string.IsNullOrWhiteSpace(region))
+        {
+            using SqliteCommand aggCmd = conn.CreateCommand();
+            var aggFilters = new List<string>();
+            if (!string.IsNullOrWhiteSpace(brand))
+            {
+                aggFilters.Add("Brand LIKE @brand");
+                aggCmd.Parameters.AddWithValue("@brand", $"%{brand}%");
+            }
+            if (!string.IsNullOrWhiteSpace(category))
+            {
+                aggFilters.Add("Category LIKE @category");
+                aggCmd.Parameters.AddWithValue("@category", $"%{category}%");
+            }
+            if (!string.IsNullOrWhiteSpace(period))
+            {
+                aggFilters.Add("Period LIKE @period");
+                aggCmd.Parameters.AddWithValue("@period", $"%{period}%");
+            }
+            string aggWhereBase = aggFilters.Count > 0 ? $" AND {string.Join(" AND ", aggFilters)}" : "";
+            aggCmd.CommandText = $"""
+                WITH latest AS (
+                    SELECT MAX(Period) AS p FROM MarketShare
+                    WHERE 1=1{aggWhereBase}
+                )
+                SELECT Brand, Category, ROUND(AVG(SharePercent), 1) AS Avg
+                FROM MarketShare
+                WHERE Period = (SELECT p FROM latest){aggWhereBase}
+                GROUP BY Brand, Category
+                ORDER BY Avg DESC
+                LIMIT 32
+                """;
+            using SqliteDataReader aggReader = aggCmd.ExecuteReader();
+            aggregatedShareData = [];
+            string? latestPeriod = null;
+            while (aggReader.Read())
+            {
+                string aggBrand = aggReader.GetString(0);
+                string aggCategory = aggReader.GetString(1);
+                double aggShare = aggReader.GetDouble(2);
+                aggregatedShareData.Add(new
+                {
+                    brand = aggBrand,
+                    category = aggCategory,
+                    region = "National",
+                    share_percent = aggShare,
+                });
+            }
+            if (aggregatedShareData.Count > 0)
+            {
+                using SqliteCommand periodCmd = conn.CreateCommand();
+                periodCmd.CommandText = "SELECT MAX(Period) FROM MarketShare";
+                object? periodResult = periodCmd.ExecuteScalar();
+                latestPeriod = periodResult as string;
+                nationalShare = new
+                {
+                    period = latestPeriod,
+                    aggregation = "avg_across_regions",
+                    brand_count = aggregatedShareData.Count,
+                    entries = aggregatedShareData,
+                };
+            }
+        }
+
         return new
         {
             filters = new { brand = brand ?? "all", category = category ?? "all", region = region ?? "all", period = period ?? "all" },
+            filters_applied = new { brand, category, region = region ?? "National", period },
             total_records = records.Count,
             significant_share_losses = shareLosses.Count,
-            share_data = records
+            share_data = records,
+            // Publix #76 Group B: a per-brand national aggregate for the most
+            // recent period, in a shape the deterministic pie/donut builder can
+            // consume alongside share_data. Small enough to survive the tool
+            // compactor's array truncation of the raw share_data list.
+            national_share = nationalShare,
         };
     }
 

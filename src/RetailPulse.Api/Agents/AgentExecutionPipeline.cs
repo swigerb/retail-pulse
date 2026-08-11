@@ -207,7 +207,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         long postProcessStart = sw.ElapsedMilliseconds;
         string rawText = response.Text;
-        string reply = SanitizeReplyText(string.IsNullOrWhiteSpace(rawText) ? context.FallbackReply : rawText);
+        bool usedFallbackReply = string.IsNullOrWhiteSpace(rawText);
+        string reply = SanitizeReplyText(usedFallbackReply ? context.FallbackReply : rawText);
 
         List<ChartSpec> charts = ExtractChartSpecs(response);
 
@@ -227,6 +228,30 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         charts = fulfillment.Charts;
         reply = fulfillment.Reply;
 
+        // Group G — the forbidden-vocabulary scrub must apply to EVERY final user-visible
+        // reply, not only the portfolio-ranking fulfillment path. The model was observed
+        // narrating "truncated"/"fallback" for prose-only prompts (#2, #5) and for the
+        // Group B chart-returns-no-chart pie prompt (#21). Apply once at the last mile.
+        // Skip when the reply is the caller-supplied fallback string (which may
+        // legitimately contain the word "fallback" as part of its name).
+        if (!usedFallbackReply)
+        {
+            string scrubbed = ScrubBannedSentences(reply);
+            reply = string.IsNullOrWhiteSpace(scrubbed) ? reply : scrubbed;
+        }
+
+        // Group C — required-entity label projection. Given the tenant roster we can
+        // detect entities the user actually named (brand/variant names present in the
+        // user message via substring match against the tenant catalog), and require that
+        // every emitted chart exposes each of them as a legend, category, or in its
+        // title. When a chart is present but silently drops a requested label, we fail
+        // closed to the chart-unavailable diagnostic rather than shipping a mislabelled
+        // ranking. Tenant-generic — no brand literals in code.
+        ChartLabelProjectionResult labelProjection = EnforceRequiredEntityLabels(
+            context.Request.Message, response, charts, reply);
+        charts = labelProjection.Charts;
+        reply = labelProjection.Reply;
+
         using Activity? responseActivity = AgentTelemetry.StartAgentResponse(context.AgentName);
         long responseDurationMs = sw.ElapsedMilliseconds - postProcessStart;
         await collector.RecordSpanAsync(
@@ -244,10 +269,14 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         _metrics?.RecordAgentExecutionDuration(context.AgentName, totalDurationMs);
 
+        ToolContextTelemetry? toolContext = BuildToolContextTelemetry(thoughtActivity);
+
         return new ChatResponse(
             reply, sessionId, [.. collector.Spans],
             charts.Count > 0 ? charts : null,
-            totalDurationMs, tokenUsage);
+            totalDurationMs, tokenUsage,
+            Routing: null,
+            ToolContext: toolContext);
     }
 
     /// <summary>
@@ -485,7 +514,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         long postProcessStart = sw.ElapsedMilliseconds;
         string rawText = response.Text;
-        string reply = SanitizeReplyText(string.IsNullOrWhiteSpace(rawText) ? context.FallbackReply : rawText);
+        bool usedFallbackReply = string.IsNullOrWhiteSpace(rawText);
+        string reply = SanitizeReplyText(usedFallbackReply ? context.FallbackReply : rawText);
 
         List<ChartSpec> charts = ExtractChartSpecs(response);
 
@@ -504,6 +534,20 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply);
         charts = fulfillment.Charts;
         reply = fulfillment.Reply;
+
+        // Group G — global forbidden-vocabulary scrub for the streaming path as well.
+        // Skip when the reply is the caller-supplied fallback string.
+        if (!usedFallbackReply)
+        {
+            string scrubbed = ScrubBannedSentences(reply);
+            reply = string.IsNullOrWhiteSpace(scrubbed) ? reply : scrubbed;
+        }
+
+        // Group C — required-entity label enforcement on the streaming path.
+        ChartLabelProjectionResult labelProjection = EnforceRequiredEntityLabels(
+            context.Request.Message, response, charts, reply);
+        charts = labelProjection.Charts;
+        reply = labelProjection.Reply;
 
         // Stream the reply token-by-token via StreamingHub for progressive rendering
         await StreamReplyAsync(sessionId, context.AgentName, reply, ct);
@@ -525,10 +569,14 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         _metrics?.RecordAgentExecutionDuration(context.AgentName, totalDurationMs);
 
+        ToolContextTelemetry? toolContext = BuildToolContextTelemetry(thoughtActivity);
+
         return new ChatResponse(
             reply, sessionId, [.. collector.Spans],
             charts.Count > 0 ? charts : null,
-            totalDurationMs, tokenUsage);
+            totalDurationMs, tokenUsage,
+            Routing: null,
+            ToolContext: toolContext);
     }
 
     /// <summary>
@@ -693,6 +741,83 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         }
 
         return new TokenUsage(inputTokens, outputTokens, totalTokens, cost);
+    }
+
+    /// <summary>
+    /// Sentence-scoped scrub of the fallback/truncation vocabulary. Unlike
+    /// <see cref="StripFallbackClaims"/> this variant NEVER substitutes a
+    /// chart-oriented neutral confirmation — it simply returns the surviving
+    /// sentences (or an empty string when the entire reply was banned prose).
+    /// Use this for the pipeline-wide last-mile scrub so a non-chart prompt
+    /// whose reply text happens to include "fallback" or "truncated" is
+    /// cleaned without swapping in a portfolio-ranking confirmation the user
+    /// never asked for (Publix #76 Group G).
+    /// </summary>
+    internal static string ScrubBannedSentences(string? reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply))
+        {
+            return string.Empty;
+        }
+
+        // Split on line boundaries first so multi-line formatting is preserved,
+        // then split each surviving line into sentences and drop only the
+        // sentences that carry banned tokens. This scrubs "The dataset was
+        // truncated so I fell back to a placeholder chart." as a whole
+        // sentence while leaving neighbouring legitimate prose intact.
+        string[] lines = reply.Split('\n');
+        var keptLines = new List<string>(lines.Length);
+
+        foreach (string rawLine in lines)
+        {
+            string cleanedLine = ScrubBannedSentencesInLine(rawLine);
+            if (!string.IsNullOrWhiteSpace(cleanedLine))
+            {
+                keptLines.Add(cleanedLine);
+            }
+        }
+
+        string cleaned = string.Join('\n', keptLines).Trim();
+        return cleaned;
+    }
+
+    private static string ScrubBannedSentencesInLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return line;
+
+        // Sentence tokenizer: split on . ? ! keeping the delimiter attached.
+        var sentences = new List<string>();
+        int start = 0;
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+            if (c is '.' or '?' or '!')
+            {
+                sentences.Add(line[start..(i + 1)]);
+                start = i + 1;
+            }
+        }
+        if (start < line.Length)
+        {
+            sentences.Add(line[start..]);
+        }
+
+        var kept = new List<string>(sentences.Count);
+        foreach (string sentence in sentences)
+        {
+            bool banned = false;
+            foreach (string phrase in _fallbackClaimVocabulary)
+            {
+                if (sentence.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                {
+                    banned = true;
+                    break;
+                }
+            }
+            if (!banned) kept.Add(sentence);
+        }
+
+        return string.Concat(kept).Trim();
     }
 
     /// <summary>

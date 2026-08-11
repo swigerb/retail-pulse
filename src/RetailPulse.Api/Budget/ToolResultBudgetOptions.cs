@@ -20,10 +20,26 @@ public sealed class ToolResultBudgetOptions
     /// Once exceeded, further tool results are replaced with a compact diagnostic so the
     /// model context cannot explode.
     /// </summary>
-    public int MaxCumulativeChars { get; set; } = 24_000;
+    /// <remarks>
+    /// Aligned to the documented 25K tool-context budget referenced by the Publix
+    /// acceptance sweep (#76). The response now exposes the live counter under
+    /// <c>ToolContext.CumulativeChars</c> so acceptance tooling can gate on the real
+    /// in-API measurement rather than an over-counting wire proxy.
+    /// </remarks>
+    public int MaxCumulativeChars { get; set; } = 25_000;
 
     /// <summary>Maximum number of distinct (non-deduplicated) tool invocations per request.</summary>
-    public int MaxToolCalls { get; set; } = 8;
+    /// <remarks>
+    /// Lowered from 8 → 5 as part of Publix production sweep #76 Group F: prompts #1, #8, #17
+    /// were observed fanning out to eight sequential per-region tool calls before the cap
+    /// bit, exhausting the tool-context budget and inducing the "truncated"/"fallback"
+    /// narrative in Groups B/G. Any answer that legitimately needs more than 5 distinct
+    /// tool invocations should be answered by an aggregate tool (e.g.
+    /// <c>GetPortfolioDepletionStats</c>, <c>GetHistoricalDemand</c> with region=National)
+    /// rather than by per-region fan-out. Chart-intent requests remain capped by the
+    /// tighter <see cref="MaxToolCallsForChartIntent"/> when it is lower.
+    /// </remarks>
+    public int MaxToolCalls { get; set; } = 5;
 
     /// <summary>
     /// Tighter distinct-call cap that applies when the current request was classified
