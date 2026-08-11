@@ -25,9 +25,18 @@ public sealed class RequestToolContext
     /// <summary>Stable key for the calling principal (e.g. provider:subject or session id).</summary>
     public string PrincipalKey { get; }
 
-    private RequestToolContext(string principalKey)
+    /// <summary>
+    /// True when the current request was classified as an explicit chart-request intent
+    /// (see <see cref="Charts.ChartRequestDetector"/>). Budget-boundary callers use this
+    /// to apply the tighter <see cref="ToolResultBudgetOptions.MaxToolCallsForChartIntent"/>
+    /// cap so ranking/comparison requests can never fan out into per-brand tool storms.
+    /// </summary>
+    public bool IsChartIntent { get; }
+
+    private RequestToolContext(string principalKey, bool isChartIntent)
     {
         PrincipalKey = principalKey;
+        IsChartIntent = isChartIntent;
     }
 
     public static RequestToolContext? Current => _current.Value;
@@ -36,9 +45,19 @@ public sealed class RequestToolContext
     /// Begin a budget scope for the current async flow. Returns a disposable that clears
     /// the scope on dispose so the AsyncLocal slot does not leak across requests.
     /// </summary>
-    public static IDisposable Begin(string principalKey)
+    public static IDisposable Begin(string principalKey) => Begin(principalKey, isChartIntent: false);
+
+    /// <summary>
+    /// Begin a budget scope with an explicit chart-intent flag (see
+    /// <see cref="IsChartIntent"/>). Use this overload from the request pipeline when
+    /// <see cref="Charts.ChartRequestDetector"/> reports an explicit chart request so
+    /// the tighter per-request tool-call cap applies.
+    /// </summary>
+    public static IDisposable Begin(string principalKey, bool isChartIntent)
     {
-        _current.Value = new RequestToolContext(string.IsNullOrWhiteSpace(principalKey) ? "anonymous" : principalKey);
+        _current.Value = new RequestToolContext(
+            string.IsNullOrWhiteSpace(principalKey) ? "anonymous" : principalKey,
+            isChartIntent);
         return new Scope();
     }
 

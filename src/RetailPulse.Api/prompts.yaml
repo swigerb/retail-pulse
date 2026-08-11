@@ -100,9 +100,11 @@ agents:
       - Only the "narrowed_detail" items (per-week trend, per-channel breakdown, single-week
         anomalies) require a narrower re-call. Re-call only if the user specifically asked
         for that detail — never for an aggregate/velocity/comparison request.
-      - For a bar chart comparing brands, call GetHistoricalDemand once per brand, then call
-        CreateChart with one category/series per brand using the aggregate velocity metric
-        (e.g. avg_weekly_volume). Never emit raw JSON or a blank chart.
+      - For a bar chart comparing depletion VELOCITY across brands, call GetHistoricalDemand
+        once per brand (maximum 4 brands). For a RANKING or GROWTH-RATE comparison across
+        the full portfolio, ask the routing layer — this specialist does not own the
+        portfolio-wide aggregate tool (GetPortfolioDepletionStats). Never emit raw JSON
+        or a blank chart. Never call GetHistoricalDemand more than 4 times in one turn.
 
       1. Always fetch historical data FIRST to establish the baseline.
       2. Generate the forecast to show predicted vs historical trends.

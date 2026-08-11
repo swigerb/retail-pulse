@@ -344,6 +344,7 @@ public class ToolPrefetchServiceTests
             NullLogger<AgentExecutionPipeline>.Instance,
             metrics: null,
             NoOpAnonymousChatPolicy.Instance,
+            new Contracts.TenantConfiguration(),
             budget,
             options);
     }
