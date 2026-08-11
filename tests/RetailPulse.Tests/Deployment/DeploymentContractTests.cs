@@ -215,6 +215,32 @@ public partial class DeploymentContractTests
     }
 
     [Fact]
+    public void ApimOpenAiApiBicep_InferenceEndpointOutputDoesNotDoubleAppendOpenAiSegment()
+    {
+        // Root cause of the 2026-08-11 production incident: the APIM API's registered
+        // path is '{inferenceApiPath}/openai' (so its OpenAPI import matches AOAI's real
+        // '/openai/deployments/...' route shape), but Azure.AI.OpenAI's AzureOpenAIClient
+        // itself appends '/openai/deployments/{id}/...' to whatever endpoint it is given.
+        // If `inferenceEndpoint` echoed the API's full registered path (including the
+        // trailing '/openai'), the SDK would double it up into
+        // '.../inference/openai/openai/deployments/...', which APIM rejects as 404
+        // OperationNotFound before any agent/tool execution starts. The output must use
+        // only the base `inferenceApiPath` (e.g. '.../inference'), never
+        // `api.properties.path` (e.g. '.../inference/openai').
+        string apimApi = File.ReadAllText(Path.Combine(
+            RepoRoot, "infra", "modules", "apim-openai-api.bicep"));
+
+        apimApi.Should().Contain(
+            "output inferenceEndpoint string = '${apim.properties.gatewayUrl}/${inferenceApiPath}'",
+            "inferenceEndpoint must be built from the base inferenceApiPath param, not api.properties.path, " +
+            "so the AzureOpenAIClient's own '/openai/deployments/...' suffix does not get doubled");
+        apimApi.Should().NotMatchRegex(
+            @"output\s+inferenceEndpoint\s+string\s*=\s*'\$\{apim\.properties\.gatewayUrl\}/\$\{api\.properties\.path\}'",
+            "inferenceEndpoint must not be derived from api.properties.path (that path already ends in " +
+            "'/openai', which combined with the SDK's own suffix produces a double '/openai/openai/' segment)");
+    }
+
+    [Fact]
     public void MainBicep_PipesApimAndSwaOutputsThroughToContainerApps()
     {
         // Ordering matters: staticWebApp + apimOpenAiApi must run BEFORE containerApps so
