@@ -42,6 +42,19 @@ public partial class DeploymentContractTests
         AssertHookWired(hooks, "postprovision", "./azd-hooks/postprovision.ps1", "./azd-hooks/postprovision.sh");
     }
 
+    [Fact]
+    public void AzureYaml_PredeployHook_IsWiredCrossPlatform()
+    {
+        // Fixes the shared RetailPulse.ServiceDefaults sourcelink.json publish
+        // race (issue #67): api/mcpserver/teamsbot publish in parallel and all
+        // three write into the same shared project's obj/ output. A single
+        // sequential solution build here, before azd's parallel per-service
+        // publish, means MSBuild sees the shared project as already built and
+        // skips regenerating it — no concurrent writers, no race.
+        YamlMappingNode hooks = HooksNode();
+        AssertHookWired(hooks, "predeploy", "./azd-hooks/predeploy.ps1", "./azd-hooks/predeploy.sh");
+    }
+
     private static void AssertHookWired(YamlMappingNode hooks, string hookName, string windowsRun, string posixRun)
     {
         YamlNode? hook = GetChild(hooks, hookName);
@@ -66,6 +79,62 @@ public partial class DeploymentContractTests
     {
         File.Exists(Path.Combine(RepoRoot, "azd-hooks", "postprovision.ps1")).Should().BeTrue();
         File.Exists(Path.Combine(RepoRoot, "azd-hooks", "postprovision.sh")).Should().BeTrue();
+    }
+
+    // ── Mandatory APIM AI Gateway live gate (issue #67) ──────────────────────
+    //
+    // A successful `azd provision` only proves the ARM deployments succeeded —
+    // it says nothing about whether the AI Gateway invariants (backend, policy,
+    // token-limit, emit-token-metric, diagnostics, RBAC, ACA wiring) are correct
+    // on the live resources. Prior to this fix, Verify-ApimAiGateway.ps1 was an
+    // optional manual script nobody was required to run, which is how the #67
+    // P0 slipped through a "successful" `azd up`. These tests pin the hooks to
+    // invoke it as a hard postprovision gate.
+
+    [Theory]
+    [InlineData("postprovision.ps1")]
+    [InlineData("postprovision.sh")]
+    public void PostprovisionHook_InvokesMandatoryApimAiGatewayVerifier(string hookFile)
+    {
+        string script = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile));
+
+        script.Should().Contain("Verify-ApimAiGateway.ps1",
+            $"{hookFile} must invoke scripts/Verify-ApimAiGateway.ps1 as a mandatory postprovision gate");
+    }
+
+    [Fact]
+    public void PostprovisionPs1Hook_FailsProvisionOnVerifierFailure_ButNotOnSkip()
+    {
+        string script = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", "postprovision.ps1"));
+
+        // Exit 0 = pass, exit 2 = environment-precondition skip (no az / not
+        // signed in / missing required azd outputs) — only those two paths may
+        // avoid throwing. Any other exit code (in particular exit 1, "one or
+        // more live invariants failed") must `throw`, which pwsh propagates as
+        // a non-zero hook exit and fails `azd provision`/`azd up` itself.
+        script.Should().MatchRegex(
+            @"if\s*\(\s*\$verifyExitCode\s+-eq\s+0\s*\)",
+            "postprovision.ps1 must branch on the verifier's exit code, treating 0 as pass");
+        script.Should().MatchRegex(
+            @"elseif\s*\(\s*\$verifyExitCode\s+-eq\s+2\s*\)",
+            "postprovision.ps1 must treat exit 2 (environment precondition, e.g. not signed in) as skip, not failure");
+        script.Should().Contain("throw",
+            "postprovision.ps1 must throw (fail the hook / provision) on any verifier exit code other than 0 or 2");
+    }
+
+    [Fact]
+    public void PostprovisionShHook_FailsProvisionOnVerifierFailure_ButNotOnSkip()
+    {
+        string script = File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", "postprovision.sh"));
+
+        script.Should().MatchRegex(
+            @"if\s*\[\s*""\$verify_exit_code""\s+-eq\s+0\s*\]",
+            "postprovision.sh must branch on the verifier's exit code, treating 0 as pass");
+        script.Should().MatchRegex(
+            @"elif\s*\[\s*""\$verify_exit_code""\s+-eq\s+2\s*\]",
+            "postprovision.sh must treat exit 2 (environment precondition) as skip, not failure");
+        script.Should().Contain("exit 1",
+            "postprovision.sh must exit non-zero (fail the hook / provision) on any verifier exit code other than 0 or 2");
     }
 
     [Fact]
@@ -152,6 +221,56 @@ public partial class DeploymentContractTests
             $"{hookFile} must link SWA relative /api requests to the ACA API");
         authIndex.Should().BeGreaterThan(linkIndex,
             $"{hookFile} must disable platform auth after linking because the link enables the SWA identity provider");
+    }
+
+    // ── Predeploy hook: shared-project publish race fix (issue #67) ──────────
+    //
+    // `azd up`/`azd deploy` publishes the api, mcpserver, and teamsbot container
+    // app services in parallel. All three reference the shared
+    // RetailPulse.ServiceDefaults project; each parallel `dotnet publish`
+    // independently rebuilds it and writes its generated
+    // RetailPulse.ServiceDefaults.sourcelink.json into the same shared obj/
+    // directory — three concurrent writers racing on one file, causing
+    // intermittent publish failures. The predeploy hook runs one sequential
+    // `dotnet restore` + `dotnet build` of the whole solution first, so the
+    // shared project is already up to date before the parallel publish phase
+    // starts and MSBuild skips regenerating it.
+
+    [Theory]
+    [InlineData("predeploy.ps1")]
+    [InlineData("predeploy.sh")]
+    public void PredeployHook_Exists(string hookFile)
+    {
+        File.Exists(Path.Combine(RepoRoot, "azd-hooks", hookFile)).Should().BeTrue(
+            $"azd-hooks/{hookFile} must exist to serialize the shared-project build before azd's parallel per-service publish");
+    }
+
+    [Fact]
+    public void PredeployShellHook_UsesLfLineEndings()
+    {
+        byte[] bytes = File.ReadAllBytes(Path.Combine(RepoRoot, "azd-hooks", "predeploy.sh"));
+        bytes.Should().NotContain((byte)'\r', "predeploy.sh must use LF line endings for POSIX shells");
+    }
+
+    [Theory]
+    [InlineData("predeploy.ps1")]
+    [InlineData("predeploy.sh")]
+    public void PredeployHook_BuildsWholeSolutionSequentially_BeforeParallelPublish(string hookFile)
+    {
+        string script = Normalize(File.ReadAllText(Path.Combine(RepoRoot, "azd-hooks", hookFile)));
+
+        script.Should().Contain("dotnet restore",
+            $"{hookFile} must restore the whole solution once before any service publish");
+        script.Should().Contain("dotnet build",
+            $"{hookFile} must build the whole solution once before any service publish");
+        script.Should().Contain("RetailPulse.slnx",
+            $"{hookFile} must target the full solution file (not a single project) so every project sharing " +
+            "RetailPulse.ServiceDefaults is pre-built before the parallel per-service publish races on it");
+
+        int restoreIndex = script.IndexOf("dotnet restore", StringComparison.Ordinal);
+        int buildIndex = script.IndexOf("dotnet build", StringComparison.Ordinal);
+        buildIndex.Should().BeGreaterThan(restoreIndex,
+            $"{hookFile} must restore before building");
     }
 
     // ── API runtime config is declared in container-apps.bicep (idempotent) ──
