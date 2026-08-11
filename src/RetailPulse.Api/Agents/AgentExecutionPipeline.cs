@@ -31,6 +31,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly IAnonymousChatPolicy _anonymousChatPolicy;
     private readonly ToolResultBudget? _toolBudget;
     private readonly ToolResultBudgetOptions _budgetOptions;
+    private readonly TenantConfiguration? _tenant;
 
     private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -53,7 +54,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         RetailPulseMetrics? metrics,
         IAnonymousChatPolicy anonymousChatPolicy,
         ToolResultBudget? toolBudget = null,
-        ToolResultBudgetOptions? budgetOptions = null)
+        ToolResultBudgetOptions? budgetOptions = null,
+        TenantConfiguration? tenant = null)
     {
         _chatClient = chatClient;
         _hubContext = hubContext;
@@ -66,6 +68,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             ?? throw new ArgumentNullException(nameof(anonymousChatPolicy));
         _toolBudget = toolBudget;
         _budgetOptions = budgetOptions ?? new ToolResultBudgetOptions();
+        _tenant = tenant;
     }
 
     /// <summary>

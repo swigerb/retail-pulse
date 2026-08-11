@@ -87,6 +87,7 @@ if (!File.Exists(tenantConfigPath))
 }
 var tenantProvider = new FileTenantProvider(tenantConfigPath);
 builder.Services.AddSingleton<ITenantProvider>(tenantProvider);
+builder.Services.AddSingleton(tenantProvider.GetTenant());
 
 // Add our custom ActivitySource to the OTel pipeline
 builder.Services.AddOpenTelemetry()

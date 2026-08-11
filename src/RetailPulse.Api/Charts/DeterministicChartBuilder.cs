@@ -51,6 +51,23 @@ internal static class DeterministicChartBuilder
         string? requestedType,
         int minMarks,
         out ChartSpec? chart)
+        => TryBuild(response, requestedType, minMarks, requiredBrands: null, out chart);
+
+    /// <summary>
+    /// Overload adding a portfolio-coverage contract for horizontal-bar ranking requests:
+    /// when <paramref name="requiredBrands"/> is non-empty AND the requested type is
+    /// <c>horizontalBar</c>, the produced ranking chart MUST contain a mark for every
+    /// required brand (case-insensitive). This is the tenant-generic guard that stops a
+    /// portfolio ranking from silently dropping half the portfolio because the model
+    /// emitted only the brands it happened to prioritize — the source of truth is the
+    /// aggregate tool payload, and coverage is enforced against the tenant roster.
+    /// </summary>
+    public static bool TryBuild(
+        Microsoft.Extensions.AI.ChatResponse response,
+        string? requestedType,
+        int minMarks,
+        IReadOnlyCollection<string>? requiredBrands,
+        out ChartSpec? chart)
     {
         chart = null;
         List<JsonElement> payloads = CollectToolPayloads(response);
@@ -85,7 +102,61 @@ internal static class DeterministicChartBuilder
             return false;
         }
 
+        // Portfolio coverage contract: when the caller supplies the tenant roster and the
+        // request is a horizontal-bar ranking ("rank ALL brands …"), the built chart MUST
+        // cover every tenant brand. If any is missing, fail closed so the pipeline can
+        // surface the chart-unavailable diagnostic listing exactly which brands were
+        // omitted — never silently return a partial portfolio.
+        if (isHorizontalRanking && requiredBrands is { Count: > 0 })
+        {
+            var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ChartSeries s in renderable.Data)
+            {
+                foreach (ChartDataPoint p in s.Values)
+                {
+                    if (p?.X is not null)
+                        present.Add(p.X);
+                }
+            }
+            foreach (string brand in requiredBrands)
+            {
+                if (!present.Contains(brand))
+                    return false;
+            }
+        }
+
         chart = renderable;
+        return true;
+    }
+
+    /// <summary>
+    /// True when the given chart is a horizontal-bar ranking that covers every brand in
+    /// <paramref name="requiredBrands"/> (case-insensitive) and has at least one non-zero
+    /// finite mark. Used by the fulfillment invariant to decide whether a model-emitted
+    /// chart already satisfies the portfolio-coverage contract or must be replaced with
+    /// the deterministic reconstruction from tool results.
+    /// </summary>
+    public static bool CoversRoster(ChartSpec? chart, IReadOnlyCollection<string> requiredBrands)
+    {
+        if (chart is null || requiredBrands.Count == 0)
+            return false;
+        if (!ChartSpecValidator.HasNonZeroFinitePoint(chart))
+            return false;
+
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ChartSeries s in chart.Data)
+        {
+            foreach (ChartDataPoint p in s.Values)
+            {
+                if (p?.X is not null && double.IsFinite(p.Y))
+                    present.Add(p.X);
+            }
+        }
+        foreach (string brand in requiredBrands)
+        {
+            if (!present.Contains(brand))
+                return false;
+        }
         return true;
     }
 

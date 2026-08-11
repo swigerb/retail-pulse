@@ -35,6 +35,56 @@ public partial class AgentExecutionPipeline
             return new ChartFulfillmentResult(charts, reply);
         }
 
+        bool isPortfolioRanking = IsPortfolioRankingIntent(userMessage, intent);
+
+        // Portfolio-ranking coverage invariant: when the user asked for a ranking of
+        // ALL tenant brands and the tenant roster is available, the answer MUST cover
+        // every brand. The aggregate tool payload is the source of truth; a
+        // model-emitted chart that silently drops half the portfolio is treated as
+        // non-fulfilling and replaced with the deterministic ranking built from the
+        // tool payload (which the compactor preserves in full). This is tenant-generic
+        // — driven by tenant.yaml, no brand or count literals.
+        IReadOnlyCollection<string>? roster = isPortfolioRanking && _tenant is { Brands.Count: > 0 }
+            ? _tenant.Brands.Select(b => b.Name).ToArray()
+            : null;
+
+        if (roster is { Count: > 0 })
+        {
+            bool alreadyCovers = charts.Any(c =>
+                string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)
+                && DeterministicChartBuilder.CoversRoster(c, roster));
+
+            if (!alreadyCovers)
+            {
+                int minMarks = Math.Max(6, roster.Count);
+                if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, minMarks, roster, out ChartSpec? rebuilt)
+                    && rebuilt is not null)
+                {
+                    _logger.LogInformation(
+                        "Chart-fulfillment: replacing model-emitted horizontalBar with deterministic "
+                        + "portfolio ranking covering all {BrandCount} tenant brands.",
+                        roster.Count);
+                    // Drop any prior horizontalBar model chart(s) — the deterministic
+                    // roster-complete chart is the source of truth for this intent.
+                    charts.RemoveAll(c => string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase));
+                    charts.Add(rebuilt);
+                    return new ChartFulfillmentResult(charts, reply);
+                }
+
+                // Coverage impossible from the current tool payload — fail closed with a
+                // diagnostic listing exactly which brands are missing, and drop any
+                // partial model chart so the user is not silently misled.
+                IReadOnlyList<string> missing = ComputeMissingBrands(charts, roster);
+                _logger.LogWarning(
+                    "Chart-fulfillment: portfolio ranking missing {Missing} brand(s) — failing closed.",
+                    missing.Count);
+                charts.RemoveAll(c => string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase));
+                string diag = BuildRankingCoverageDiagnostic(missing, roster.Count);
+                string updated = string.IsNullOrWhiteSpace(reply) ? diag : $"{reply}\n\n{diag}";
+                return new ChartFulfillmentResult(charts, updated);
+            }
+        }
+
         // Already fulfilled by the model / inline recovery.
         if (charts.Count > 0)
         {
@@ -46,11 +96,11 @@ public partial class AgentExecutionPipeline
         // contract (>= 6 finite marks, at least one non-zero) so an underpopulated
         // or all-zero result FAILS CLOSED to the chart-unavailable diagnostic below
         // rather than reaching the frontend as an empty shell.
-        int minMarks = IsPortfolioRankingIntent(userMessage, intent)
+        int fallbackMinMarks = isPortfolioRanking
             ? Math.Max(6, ChartSpecValidator.MinimumMarksForType(intent.ChartType))
             : ChartSpecValidator.MinimumMarksForType(intent.ChartType);
 
-        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, minMarks, out ChartSpec? built) && built is not null)
+        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, fallbackMinMarks, out ChartSpec? built) && built is not null)
         {
             _logger.LogInformation(
                 "Chart-fulfillment: reconstructed a {ChartType} chart deterministically from tool results "
@@ -73,6 +123,38 @@ public partial class AgentExecutionPipeline
             : $"{reply}\n\n{diagnostic}";
 
         return new ChartFulfillmentResult(charts, updatedReply);
+    }
+
+    private static IReadOnlyList<string> ComputeMissingBrands(
+        IReadOnlyList<ChartSpec> charts,
+        IReadOnlyCollection<string> roster)
+    {
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ChartSpec chart in charts)
+        {
+            if (chart is null) continue;
+            if (!string.Equals(chart.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (ChartSeries s in chart.Data)
+            {
+                foreach (ChartDataPoint p in s.Values)
+                {
+                    if (p?.X is not null && double.IsFinite(p.Y))
+                        present.Add(p.X);
+                }
+            }
+        }
+        return [.. roster.Where(b => !present.Contains(b))];
+    }
+
+    private static string BuildRankingCoverageDiagnostic(IReadOnlyList<string> missing, int rosterCount)
+    {
+        string list = missing.Count == 0
+            ? "one or more portfolio brands"
+            : string.Join(", ", missing);
+        return $"⚠️ Chart unavailable: a portfolio ranking must cover every configured brand "
+            + $"({rosterCount} total for this tenant), but the following were not returned by the "
+            + $"underlying data tools: {list}. This is a data-availability issue, not a rendering "
+            + "failure — a partial ranking would silently mis-rank the portfolio, so no chart is emitted.";
     }
 
     private static string BuildChartUnavailableDiagnostic(string? chartType)
