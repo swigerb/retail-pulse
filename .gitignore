@@ -63,3 +63,5 @@ azd-up.log
 rp76-*.log
 rp76-verify-results.xml
 apim-verify.log
+
+azd-deploy.log

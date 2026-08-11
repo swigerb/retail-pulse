@@ -54,7 +54,11 @@ public partial class AgentExecutionPipeline
                     charts.Count);
                 charts.Clear();
             }
-            return new ChartFulfillmentResult(charts, reply);
+            // Even on a prose reply the model sometimes echoes a raw ```json { ... } ```
+            // chart-spec block inside the answer text (Publix sweep #76 spot-14 prose ask
+            // returned a fenced bar-chart JSON blob). Scrub any fenced JSON so the user
+            // sees prose only, matching the detector's decision.
+            return new ChartFulfillmentResult(charts, StripJsonCodeFences(reply));
         }
 
         // Explicit chart request with a user-stated type. Group D (#76): user asked
@@ -115,7 +119,7 @@ public partial class AgentExecutionPipeline
                     // this intent.
                     charts.RemoveAll(c => ChartTypeParticipatesInCoverage(c?.Type));
                     charts.Add(rebuilt);
-                    return new ChartFulfillmentResult(charts, StripFallbackClaims(reply));
+                    return new ChartFulfillmentResult(charts, StripJsonCodeFences(StripFallbackClaims(reply)));
                 }
 
                 // Coverage impossible from the current tool payload — fail closed with a
@@ -159,6 +163,11 @@ public partial class AgentExecutionPipeline
                     && DeterministicChartBuilder.CoversRoster(c, roster)))
                 ? StripFallbackClaims(reply)
                 : reply;
+            // Whenever a chart is present, scrub any fenced JSON blob the model
+            // echoed alongside the answer — the chart is the authoritative binding
+            // and a raw ```json {"chart":...}``` next to it leaks internal schema
+            // (issue #76 Publix sweep det-19-r1 line ask leaked a spec fence).
+            sanitizedReply = StripJsonCodeFences(sanitizedReply);
             return new ChartFulfillmentResult(charts, sanitizedReply);
         }
 
@@ -178,7 +187,7 @@ public partial class AgentExecutionPipeline
                 + "for an explicit chart request that returned prose-only.",
                 built.Type);
             charts.Add(built);
-            return new ChartFulfillmentResult(charts, reply);
+            return new ChartFulfillmentResult(charts, StripJsonCodeFences(reply));
         }
 
         // No renderable chart and no data to build one — surface a precise, structured
@@ -189,9 +198,10 @@ public partial class AgentExecutionPipeline
             intent.ChartType ?? "chart");
 
         string diagnostic = BuildChartUnavailableDiagnostic(intent.ChartType);
-        string updatedReply = string.IsNullOrWhiteSpace(reply)
+        string scrubbedReplyForDiag = StripJsonCodeFences(reply);
+        string updatedReply = string.IsNullOrWhiteSpace(scrubbedReplyForDiag)
             ? diagnostic
-            : $"{reply}\n\n{diagnostic}";
+            : $"{scrubbedReplyForDiag}\n\n{diagnostic}";
 
         return new ChartFulfillmentResult(charts, updatedReply);
     }

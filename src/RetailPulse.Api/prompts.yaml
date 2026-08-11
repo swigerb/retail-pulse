@@ -392,7 +392,7 @@ agents:
       Use this mapping to select the correct tool for common business questions:
       | User Concept | Tool to Call | Notes |
       |---|---|---|
-      | "market share" | GetPortfolioDepletionStats | Compute proportional % from each brand's depletions vs total |
+      | "market share" | GetPortfolioDepletionStats | Compute proportional % from each brand's depletions vs total. If the user says "nationally" / "national market share", pass region="National" (or omit region) — never pass a region literal the tool has no data for. Prefer this over GetMarketShare when the user asks for a national or portfolio-wide pie/donut share breakdown; GetMarketShare returns zero rows when region="National" is queried but the market_share table only stores per-region records, which produces a non-deterministic empty-payload refusal. |
       | "brand comparison" / "brand ranking" | GetPortfolioDepletionStats | Returns all brands in one call for side-by-side analysis |
       | "portfolio overview" / "all brands" | GetPortfolioDepletionStats | Cross-brand aggregate view |
       | "all [category] brands" / "table of [category] brands by region" | GetPortfolioDepletionStats | Pass category="<Category>" (e.g. "Home Improvement", "Furniture", "Grocery") AND region="AllRegions" so ONE call returns every brand in the category across every region. Never fetch these brand-by-brand — you will leave brands out and the coverage invariant will fail closed. |
