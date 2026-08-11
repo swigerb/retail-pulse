@@ -177,18 +177,21 @@ public class OpenAiConnectionSettingsTests
         settings.AuthenticationMode.Should().Be(OpenAiAuthenticationMode.ManagedIdentity);
     }
 
-    [Fact]
-    public void Load_ThrowsWhenEndpointIsNotAbsoluteUrl()
+    [Theory]
+    [InlineData("/inference")]        // Linux: parses as file:///inference — must be rejected
+    [InlineData("apim.example.com/inference")] // no scheme
+    [InlineData("ftp://apim.example.com/inference")] // non-http scheme
+    public void Load_ThrowsWhenEndpointIsNotAbsoluteHttpUrl(string endpoint)
     {
         IConfiguration config = CreateConfig(
-            endpoint: "/inference",
+            endpoint: endpoint,
             useManagedIdentity: false,
             apimSubscriptionKey: "apim-sub-key");
 
         Action act = () => OpenAiConnectionSettings.Load(config, CreateEnvironment(isDevelopment: false));
 
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*absolute URL*");
+            .WithMessage("*absolute http(s) URL*");
     }
 
     [Fact]
