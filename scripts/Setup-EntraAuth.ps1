@@ -8,6 +8,10 @@
     Creates and configures ONE single-tenant Entra application + service principal:
       * Public SPA client (PKCE, no client secret / no password credential).
       * Delegated API scope (default: access_as_user) exposed as api://{clientId}.
+      * Pre-authorized client applications (default: the Azure CLI public client
+        04b07795-8ddb-461a-bbee-02f9e1bf7b46) on the delegated API scope, so operators
+        can run `az account get-access-token --scope api://{clientId}/access_as_user`
+        non-interactively for headless acceptance sweeps against the deployed API.
       * App role (default: RetailPulse.User) required for API/hub authorization.
       * Service principal with appRoleAssignmentRequired = true (assignment required).
       * SPA + Web redirect URIs derived from -FrontendOrigin (and -RedirectUri).
@@ -68,6 +72,14 @@
 .PARAMETER ApiScopeName
     Delegated scope name exposed by the API. Default: access_as_user.
 
+.PARAMETER PreAuthorizedClientAppId
+    appId(s) of public client applications that are pre-authorized on the delegated API
+    scope. Pre-authorized clients skip the interactive user-consent prompt for the scope,
+    which is what lets `az account get-access-token --scope api://{clientId}/{scope}` (and
+    other headless MSAL public clients) acquire a delegated user token non-interactively.
+    Default: the well-known Azure CLI first-party client (04b07795-8ddb-461a-bbee-02f9e1bf7b46).
+    May be passed multiple times. Pass an empty array to disable and clear the list.
+
 .PARAMETER AppRoleValue
     App role value required for protected API/hub access. Default: RetailPulse.User.
 
@@ -101,6 +113,14 @@ param(
     [string[]]$RedirectUri = @(),
 
     [string]$ApiScopeName = 'access_as_user',
+
+    # Public client appIds that skip the interactive user-consent prompt for the delegated
+    # API scope. Default = Azure CLI (04b07795-8ddb-461a-bbee-02f9e1bf7b46) so headless
+    # acceptance sweeps can acquire a delegated user token via
+    # `az account get-access-token --scope api://{clientId}/{scope}`.
+    # GUID-validated to prevent injection into the Graph PATCH body.
+    [ValidatePattern('(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
+    [string[]]$PreAuthorizedClientAppId = @('04b07795-8ddb-461a-bbee-02f9e1bf7b46'),
 
     [string]$AppRoleValue = 'RetailPulse.User',
 
@@ -292,7 +312,7 @@ $redirects = @()
 foreach ($u in @($FrontendOrigin + $RedirectUri)) {
     if (-not [string]::IsNullOrWhiteSpace($u)) { $redirects += $u.TrimEnd('/') }
 }
-$redirects = $redirects | Select-Object -Unique
+$redirects = @($redirects | Select-Object -Unique)
 if ($redirects.Count -eq 0) {
     Write-Warning 'No -FrontendOrigin / -RedirectUri supplied. SPA redirect URIs will be left unset.'
 }
@@ -381,7 +401,59 @@ else {
     }
 }
 
-# --- 5. App role (RetailPulse.User) -------------------------------------------
+# --- 5. Pre-authorized client applications ------------------------------------
+# Public clients listed here skip the interactive user-consent prompt for the delegated
+# API scope. This is what enables `az account get-access-token --scope api://{clientId}/{scope}`
+# to return a delegated user token non-interactively for headless acceptance sweeps.
+# The list is fully reconciled to $PreAuthorizedClientAppId (SET, not merge) so removing
+# an entry from the parameter removes it from the app.
+Write-Section "Pre-authorized client applications on scope '$ApiScopeName'"
+if (-not $appApi) {
+    $appApi = if ($app) { Invoke-Graph -Method GET -Url "$graph/applications/$($app.id)?`$select=api" } else { $null }
+}
+$existingPreAuth = @()
+if ($appApi -and $appApi.api -and $appApi.api.preAuthorizedApplications) {
+    $existingPreAuth = @($appApi.api.preAuthorizedApplications)
+}
+$scopeIdForPreAuth = $null
+if ($scope) { $scopeIdForPreAuth = $scope.id } elseif ($Apply) { $scopeIdForPreAuth = $scopeId }
+$desiredPreAuth = @()
+if ($scopeIdForPreAuth -and $PreAuthorizedClientAppId.Count -gt 0) {
+    $desiredPreAuth = @($PreAuthorizedClientAppId | ForEach-Object {
+            [pscustomobject]@{ appId = $_; delegatedPermissionIds = @($scopeIdForPreAuth) }
+        })
+}
+function ConvertTo-PreAuthKey($entries) {
+    ($entries | ForEach-Object {
+        $ids = @($_.delegatedPermissionIds | Sort-Object) -join ','
+        "$($_.appId)|$ids"
+    } | Sort-Object) -join ';'
+}
+$existingKey = ConvertTo-PreAuthKey $existingPreAuth
+$desiredKey = ConvertTo-PreAuthKey $desiredPreAuth
+if ($existingKey -eq $desiredKey) {
+    if ($desiredPreAuth.Count -gt 0) {
+        Write-Skip "preAuthorizedApplications already reconciled: $(($desiredPreAuth | ForEach-Object { $_.appId }) -join ', ')"
+    } else {
+        Write-Skip 'preAuthorizedApplications already empty'
+    }
+}
+else {
+    $preview = if ($desiredPreAuth.Count -gt 0) { ($desiredPreAuth | ForEach-Object { $_.appId }) -join ', ' } else { '<empty>' }
+    Write-Plan "Reconcile preAuthorizedApplications to: $preview (scope '$ApiScopeName')"
+    if ($Apply -and $app) {
+        $api = if ($appApi.api) { $appApi.api } else { @{} }
+        $apiBody = @{}
+        foreach ($p in $api.PSObject.Properties) {
+            if ($p.Name -ne 'preAuthorizedApplications') { $apiBody[$p.Name] = $p.Value }
+        }
+        $apiBody['preAuthorizedApplications'] = @($desiredPreAuth)
+        Invoke-Graph -Method PATCH -Url "$graph/applications/$($app.id)" -Body @{ api = $apiBody } | Out-Null
+        Write-Done "preAuthorizedApplications reconciled ($preview)"
+    }
+}
+
+# --- 6. App role (RetailPulse.User) -------------------------------------------
 Write-Section "App role '$AppRoleValue'"
 $appRoles = if ($app) {
     $r = Invoke-Graph -Method GET -Url "$graph/applications/$($app.id)?`$select=appRoles"
@@ -410,7 +482,7 @@ else {
     }
 }
 
-# --- 6. Redirect URIs (reconcile SPA + Web) -----------------------------------
+# --- 7. Redirect URIs (reconcile SPA + Web) -----------------------------------
 Write-Section 'Redirect URIs'
 if ($redirects.Count -gt 0 -and $app) {
     $current = Invoke-Graph -Method GET -Url "$graph/applications/$($app.id)?`$select=spa,web"
@@ -435,7 +507,7 @@ else {
     Write-Skip 'No redirect URIs to reconcile'
 }
 
-# --- 7. Service principal + assignmentRequired --------------------------------
+# --- 8. Service principal + assignmentRequired --------------------------------
 Write-Section 'Service principal (assignment required)'
 $sp = $null
 if ($resolvedClientId -and $resolvedClientId -notlike '<*') {
@@ -464,7 +536,7 @@ else {
     }
 }
 
-# --- 8. Assign the operator the app role --------------------------------------
+# --- 9. Assign the operator the app role --------------------------------------
 Write-Section "App-role assignment for $AssignUserUpn"
 if ($sp -and $Apply) {
     # URL-encode the UPN before placing it in the Graph path segment so guest UPNs
@@ -500,7 +572,7 @@ else {
     Write-Plan "Assign $AssignUserUpn to app role '$AppRoleValue' on the service principal"
 }
 
-# --- 9. Emit SAFE config (no secrets) -----------------------------------------
+# --- 10. Emit SAFE config (no secrets) -----------------------------------------
 Write-Section 'Safe configuration output (non-secret)'
 $finalScope = "$audience/$ApiScopeName"
 [PSCustomObject]@{
