@@ -151,6 +151,62 @@ public partial class AgentExecutionPipeline
             }
         }
 
+        // ── Deterministic auto-emit for table / pie / donut chart intents ──
+        //
+        // The generalization of the #74 architecture (deterministic reconstruction
+        // when the model chart is absent or non-covering) to the table & pie/donut
+        // families (issue #76 acceptance gaps #21 and #25). For these intents the
+        // required data shape is unambiguous and comes from a single aggregate
+        // (GetPortfolioDepletionStats.brands[] or national_share.entries[]) that
+        // the ToolPrefetchService already pre-calls into context. Chart emission
+        // must be a function of (routed intent × chart type × available data) —
+        // NOT of whether the specialist happened to call CreateChart on this run.
+        //
+        // Behavior when the user asked for a table / pie / donut:
+        //   * If the model emitted a same-family chart already, keep it (below).
+        //   * Otherwise, attempt deterministic reconstruction from tool payloads.
+        //     If it succeeds we ADD the deterministic chart of the correct family
+        //     and DROP any cross-family model chart (an un-requested visualization,
+        //     the same failure class as #76 Group A). If it fails we fall through
+        //     to the normal fulfilment path (fail-closed diagnostic below).
+        //
+        // Deliberately scoped to table / pie / donut so it cannot regress the
+        // existing bar/line safety invariants (test EnforceChartFulfillment_
+        // CrossFamilyMismatch_LeavesTypeAlone). Bar/line intents keep the model
+        // chart when present — their data shapes are less unambiguous to rebuild
+        // and #74's roster path already handles the bar/horizontalBar coverage
+        // case explicitly.
+        static bool IsDeterministicAutoEmitFamily(string? type) =>
+            string.Equals(type, "table", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "pie", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "donut", StringComparison.OrdinalIgnoreCase);
+
+        if (IsDeterministicAutoEmitFamily(intent.ChartType))
+        {
+            bool alreadyHasCorrectFamilyChart = charts.Any(c => SameFamily(c?.Type, intent.ChartType));
+            if (!alreadyHasCorrectFamilyChart)
+            {
+                int autoMinMarks = ChartSpecValidator.MinimumMarksForType(intent.ChartType);
+                // Prefer coverage-checked reconstruction when a roster is known
+                // (category-scoped table request). Otherwise unrestricted build.
+                bool built = roster is { Count: > 0 } && ChartTypeParticipatesInCoverage(intent.ChartType)
+                    ? DeterministicChartBuilder.TryBuild(response, intent.ChartType, Math.Max(autoMinMarks, roster.Count), roster, out ChartSpec? autoChart)
+                    : DeterministicChartBuilder.TryBuild(response, intent.ChartType, autoMinMarks, out autoChart);
+
+                if (built && autoChart is not null)
+                {
+                    int droppedCrossFamily = charts.RemoveAll(c => !SameFamily(c?.Type, intent.ChartType));
+                    _logger.LogInformation(
+                        "Chart-fulfillment: deterministic auto-emit of {ChartType} chart from tool payloads "
+                        + "for an explicit {IntentType} request (dropped {Dropped} cross-family model chart(s)) — "
+                        + "chart emission is now a function of intent × data, not model choice (issue #76).",
+                        autoChart.Type, intent.ChartType, droppedCrossFamily);
+                    charts.Add(autoChart);
+                    return new ChartFulfillmentResult(charts, StripJsonCodeFences(StripFallbackClaims(reply)));
+                }
+            }
+        }
+
         // Already fulfilled by the model / inline recovery.
         if (charts.Count > 0)
         {
@@ -180,13 +236,13 @@ public partial class AgentExecutionPipeline
             ? Math.Max(6, ChartSpecValidator.MinimumMarksForType(intent.ChartType))
             : ChartSpecValidator.MinimumMarksForType(intent.ChartType);
 
-        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, fallbackMinMarks, out ChartSpec? built) && built is not null)
+        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, fallbackMinMarks, out ChartSpec? built2) && built2 is not null)
         {
             _logger.LogInformation(
                 "Chart-fulfillment: reconstructed a {ChartType} chart deterministically from tool results "
                 + "for an explicit chart request that returned prose-only.",
-                built.Type);
-            charts.Add(built);
+                built2.Type);
+            charts.Add(built2);
             return new ChartFulfillmentResult(charts, StripJsonCodeFences(reply));
         }
 
@@ -227,6 +283,28 @@ public partial class AgentExecutionPipeline
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="a"/> and <paramref name="b"/> belong to the same
+    /// structural chart-type family (see <see cref="_chartTypeFamilies"/>). Tables
+    /// are treated as their own family — a table intent is only satisfied by a
+    /// table chart. Used by the deterministic auto-emit path to decide whether the
+    /// model-emitted chart already fulfils the user's stated chart family.
+    /// </summary>
+    private static bool SameFamily(string? a, string? b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) return true;
+        // Table has no family peers — an exact-type match is required.
+        if (string.Equals(a, "table", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(b, "table", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        string[]? fa = FamilyFor(a);
+        string[]? fb = FamilyFor(b);
+        return fa is not null && fb is not null && ReferenceEquals(fa, fb);
     }
 
     /// <summary>

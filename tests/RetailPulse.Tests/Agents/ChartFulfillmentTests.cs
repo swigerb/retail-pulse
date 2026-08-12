@@ -445,6 +445,291 @@ public sealed class ChartFulfillmentTests
             "explicit horizontalBar request stays horizontalBar — the #74 gate must be preserved");
     }
 
+    // ── Issue #76 architecture-level fix: deterministic auto-emit from prefetched ──
+    // data for table / pie / donut chart intents.
+    //
+    // Kroger's #74 architecture generalised: chart emission for an explicit chart
+    // intent must be a function of (intent × data), NOT of the model's choice to
+    // call CreateChart. When the required data is present in this turn's tool
+    // results — whether prefetched or fetched by the specialist — the pipeline
+    // MUST emit the chart deterministically. Preserves fail-closed: if the data
+    // cannot support the contract, no forged chart is produced.
+
+    private static string PortfolioDepletionByRegionPayload(params (string Brand, string Region, double DepYoy)[] rows) =>
+        JsonSerializer.Serialize(new
+        {
+            region = "AllRegions",
+            period = "YTD",
+            brandCount = rows.Length,
+            brands = rows.Select(r => new
+            {
+                brand = r.Brand,
+                region = r.Region,
+                metrics = new
+                {
+                    depletions_yoy = (r.DepYoy >= 0 ? "+" : "") + r.DepYoy.ToString("0.0") + "%",
+                    sell_through_yoy = "+1.5%",
+                    inventory_weeks_on_hand = 6.0,
+                },
+            }).ToArray(),
+        });
+
+    private static string NationalSharePayload(params (string Brand, double SharePercent)[] rows) =>
+        JsonSerializer.Serialize(new
+        {
+            scope = "National",
+            period = "YTD",
+            national_share = new
+            {
+                entries = rows.Select(r => new { brand = r.Brand, share_percent = r.SharePercent }).ToArray(),
+            },
+        });
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitTableIntent_ModelEmittedNoChart_AutoEmitsFromPrefetch()
+    {
+        AgentExecutionPipeline pipeline = CreatePipelineWithHomeImprovementRoster();
+        MeaiChatResponse response = ResponseWithToolResults(PortfolioDepletionByRegionPayload(
+            ("Pinnacle Hardware", "Northeast", 4.2),
+            ("Pinnacle Hardware", "Southeast", 3.1),
+            ("Pinnacle Hardware", "Midwest", 5.8),
+            ("Summit Outdoor", "Northeast", 6.4),
+            ("Summit Outdoor", "Southeast", 2.9),
+            ("Summit Outdoor", "Midwest", 7.1)));
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a table showing depletion stats for all home improvement brands by region",
+            response, charts, "Here's the data.");
+
+        result.Charts.Should().ContainSingle("deterministic auto-emit must produce a table when data is present, regardless of model choice");
+        result.Charts[0].Type.Should().Be("table");
+        result.Reply.Should().NotContain("Chart unavailable");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitPieIntent_ModelEmittedNoChart_AutoEmitsFromPrefetch()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(NationalSharePayload(
+            ("Alpha Grocery", 32.5),
+            ("Bravo Grocery", 24.1),
+            ("Charlie Grocery", 18.7),
+            ("Delta Grocery", 14.9),
+            ("Echo Grocery", 9.8)));
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a pie chart of national grocery market share",
+            response, charts, "Sure, here it is.");
+
+        result.Charts.Should().ContainSingle("deterministic auto-emit must produce a pie when national_share data is present");
+        result.Charts[0].Type.Should().Be("pie");
+        result.Charts[0].Data[0].Values.Should().HaveCountGreaterThanOrEqualTo(2);
+        result.Reply.Should().NotContain("Chart unavailable");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitDonutIntent_ModelEmittedNoChart_AutoEmitsFromPrefetch()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(NationalSharePayload(
+            ("Alpha", 40.0), ("Bravo", 30.0), ("Charlie", 20.0), ("Delta", 10.0)));
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a donut chart of national market share breakdown",
+            response, charts, "Here.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("donut");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitTableIntent_DeterministicAcrossRepeatedCalls()
+    {
+        // Repeated invocations with the same prompt + tool payloads must yield
+        // identical emission decisions and chart types — Kroger's determinism
+        // guarantee for the auto-emit path.
+        AgentExecutionPipeline pipeline = CreatePipelineWithHomeImprovementRoster();
+
+        var typeResults = new HashSet<string>(StringComparer.Ordinal);
+        var countResults = new HashSet<int>();
+        for (int i = 0; i < 20; i++)
+        {
+            MeaiChatResponse response = ResponseWithToolResults(PortfolioDepletionByRegionPayload(
+                ("Pinnacle Hardware", "Northeast", 4.2),
+                ("Pinnacle Hardware", "Southeast", 3.1),
+                ("Pinnacle Hardware", "Midwest", 5.8),
+                ("Summit Outdoor", "Northeast", 6.4),
+                ("Summit Outdoor", "Southeast", 2.9),
+                ("Summit Outdoor", "Midwest", 7.1)));
+
+            var charts = new List<ChartSpec>();
+            AgentExecutionPipeline.ChartFulfillmentResult r = pipeline.EnforceChartFulfillment(
+                "Create a table showing depletion stats for all home improvement brands by region",
+                response, charts, "Data.");
+            countResults.Add(r.Charts.Count);
+            if (r.Charts.Count > 0) typeResults.Add(r.Charts[0].Type);
+        }
+
+        countResults.Should().ContainSingle().Which.Should().Be(1,
+            "the same table intent + same data must ALWAYS emit exactly one chart");
+        typeResults.Should().ContainSingle().Which.Should().Be("table",
+            "the same table intent + same data must ALWAYS emit a table");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitPieIntent_DeterministicAcrossRepeatedCalls()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+
+        var typeResults = new HashSet<string>(StringComparer.Ordinal);
+        var countResults = new HashSet<int>();
+        for (int i = 0; i < 20; i++)
+        {
+            MeaiChatResponse response = ResponseWithToolResults(NationalSharePayload(
+                ("Alpha", 40.0), ("Bravo", 30.0), ("Charlie", 20.0), ("Delta", 10.0)));
+
+            var charts = new List<ChartSpec>();
+            AgentExecutionPipeline.ChartFulfillmentResult r = pipeline.EnforceChartFulfillment(
+                "Show me a pie chart of national grocery market share",
+                response, charts, "Here.");
+            countResults.Add(r.Charts.Count);
+            if (r.Charts.Count > 0) typeResults.Add(r.Charts[0].Type);
+        }
+
+        countResults.Should().ContainSingle().Which.Should().Be(1);
+        typeResults.Should().ContainSingle().Which.Should().Be("pie");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitPieIntent_AbsentData_FailsClosedNotForged()
+    {
+        // Fail-closed: even under the new deterministic auto-emit path, when the
+        // required data is absent the pipeline must emit the chart-unavailable
+        // diagnostic — NEVER a forged pie from irrelevant payloads.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            JsonSerializer.Serialize(new { note = "no share data here" }));
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a pie chart of national grocery market share",
+            response, charts, "I couldn't find the share data.");
+
+        result.Charts.Should().BeEmpty("no chartable data → no chart is emitted, never a forged shell");
+        result.Reply.Should().Contain("Chart unavailable");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitTableIntent_InsufficientRoster_FailsClosed()
+    {
+        // Fail-closed for a category-scoped table request: the roster requires
+        // BOTH Pinnacle Hardware AND Summit Outdoor. If the aggregate only has
+        // one of them, no forged partial table is emitted.
+        AgentExecutionPipeline pipeline = CreatePipelineWithHomeImprovementRoster();
+        MeaiChatResponse response = ResponseWithToolResults(PortfolioDepletionByRegionPayload(
+            ("Pinnacle Hardware", "Northeast", 4.2),
+            ("Pinnacle Hardware", "Southeast", 3.1)));
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a table showing depletion stats for all home improvement brands by region",
+            response, charts, "Partial data.");
+
+        result.Charts.Should().BeEmpty("missing brand → fail-closed, never a partial table");
+        result.Reply.Should().Contain("Chart unavailable");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitPieIntent_ModelEmittedCrossFamilyBar_ReplacedWithDeterministicPie()
+    {
+        // When the user asked for a pie/donut but the model emitted a cross-family
+        // bar chart, and the tool payloads support a deterministic pie, prefer the
+        // deterministic pie and drop the un-requested bar. This is the inverse of
+        // the existing "cross-family mismatch leaves alone" contract, which fires
+        // only when the model chart is already in a family we cannot rebuild —
+        // for pie/donut/table the underlying data shape is unambiguous, so the
+        // architecture-level fix (issue #76) is intent-driven emission.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(NationalSharePayload(
+            ("Alpha", 40.0), ("Bravo", 30.0), ("Charlie", 20.0), ("Delta", 10.0)));
+
+        var wrongFamilyChart = new ChartSpec
+        {
+            Type = "bar",
+            Title = "Unrequested bar",
+            Data = [new ChartSeries { Legend = "s", Values = [new ChartDataPoint { X = "A", Y = 1 }] }]
+        };
+        var charts = new List<ChartSpec> { wrongFamilyChart };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a pie chart of national grocery market share",
+            response, charts, "Here.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("pie");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ExplicitPieIntent_ModelEmittedSameFamilyDonut_Kept()
+    {
+        // Symmetry: when the model already emitted a same-family chart (donut for
+        // a pie intent), keep the model chart — deterministic auto-emit only
+        // fires when the model failed to produce one of the correct family.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(NationalSharePayload(
+            ("Alpha", 40.0), ("Bravo", 30.0), ("Charlie", 20.0), ("Delta", 10.0)));
+
+        var modelDonut = new ChartSpec
+        {
+            Type = "donut",
+            Title = "Model donut",
+            Data = [new ChartSeries { Legend = "Market Share %", Values =
+            [
+                new ChartDataPoint { X = "Alpha", Y = 40.0 },
+                new ChartDataPoint { X = "Bravo", Y = 30.0 }
+            ] }]
+        };
+        var charts = new List<ChartSpec> { modelDonut };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a pie chart of national market share",
+            response, charts, "Here.");
+
+        result.Charts.Should().ContainSingle();
+        // Coercion path flips donut→pie (same family) — the important invariant is
+        // that we did NOT drop the model chart and rebuild.
+        result.Charts[0].Title.Should().Be("Model donut", "same-family model chart is preserved, not rebuilt");
+    }
+
+    private static AgentExecutionPipeline CreatePipelineWithHomeImprovementRoster()
+    {
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        var tenant = new TenantConfiguration
+        {
+            Company = "TestCo",
+            BrandsList =
+            [
+                new BrandConfig { Name = "Pinnacle Hardware", Category = "Home Improvement" },
+                new BrandConfig { Name = "Summit Outdoor",    Category = "Home Improvement" },
+                new BrandConfig { Name = "Alpha Spirits",     Category = "Spirits" },
+                new BrandConfig { Name = "Bravo Spirits",     Category = "Spirits" },
+            ],
+        };
+        return new AgentExecutionPipeline(
+            AgentTestFixtures.CreateMockChatClient("{}"),
+            hubContext: AgentTestFixtures.CreateMockHubContext(),
+            streamingHubContext: null,
+            streamingFeature: null,
+            configuration: config,
+            logger: NullLogger<AgentExecutionPipeline>.Instance,
+            metrics: null,
+            anonymousChatPolicy: Api.Auth.NoOpAnonymousChatPolicy.Instance,
+            tenant: tenant);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static AgentExecutionPipeline CreatePipelineWithRoster(IEnumerable<string> brands)
