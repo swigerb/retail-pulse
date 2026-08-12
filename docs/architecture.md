@@ -188,7 +188,7 @@ Retrieve `AZURE_APIM_INFERENCE_ENDPOINT` from `azd env get-values` after `azd pr
 
 ## Endpoint Extensions Pattern (Sprint 2)
 
-`Program.cs` has been decomposed from a 2,300+ line god file into a composition-only root that delegates to dedicated endpoint group classes in `src/RetailPulse.Api/Endpoints/`:
+`Program.cs` is a composition-only root that delegates to dedicated endpoint group classes in `src/RetailPulse.Api/Endpoints/`:
 
 | Endpoint Group | File | Routes |
 |---|---|---|
@@ -551,7 +551,7 @@ Request
   ├─→ SecurityHeadersMiddleware    Add CSP, HSTS, X-Frame-Options
   ├─→ ExceptionHandlingMiddleware  Catch unhandled → RFC 7807 Problem Details
   ├─→ Rate Limiter                 4-tier rate limiting (strict/standard/relaxed/upload)
-  ├─→ API Versioning               Route /api/v1/* vs legacy /api/*
+  ├─→ API surface                  Unversioned (`/api/*`); backwards-compatible evolution
   ├─→ ChatRequestValidator         Input validation (length, XSS, format)
   │
   └─→ Endpoint Handler (ChatEndpoints)

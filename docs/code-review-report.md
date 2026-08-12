@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-Retail Pulse has a strong demo foundation: clean solution-level project boundaries, Aspire orchestration is non-containerized, tenant configuration is centralized, SQLite access generally uses parameters, and the agent-router architecture is the right direction. The production readiness gaps are concentrated in the API surface: endpoints and hubs are effectively unauthenticated by default, no rate limiting exists around expensive AI and state-changing routes, and `Program.cs` has become a 2,300+ line composition root plus endpoint implementation file.
+Retail Pulse has a strong demo foundation: clean solution-level project boundaries, Aspire orchestration is non-containerized, tenant configuration is centralized, SQLite access generally uses parameters, and the agent-router architecture is the right direction. The production readiness gaps identified in this audit have since been addressed: authentication is now Entra-required in Production (`Security:RequireAuth=true` pinned by Bicep), rate limiting is enforced on every endpoint group via `strict` / `moderate` / `relaxed` / `upload` policies, and the previously monolithic `Program.cs` has been decomposed into a composition-only root plus per-domain endpoint classes under `src/RetailPulse.Api/Endpoints/` (current `Program.cs` is under 1,000 lines).
 
 The next sprints should harden the boundary first, then split the monolith, then clean up duplication and drift. If this only stays a local demo, some risks are tolerable. If it faces a real tenant network, they are not.
 
@@ -57,7 +57,7 @@ The next sprints should harden the boundary first, then split the monolith, then
 ### [HIGH] API Composition Root Has Become a God File
 **Location:** `src/RetailPulse.Api/Program.cs:31`, `src/RetailPulse.Api/Program.cs:835`, `src/RetailPulse.Api/Program.cs:2380`  
 **Category:** Architecture  
-**Description:** `Program.cs` now performs tenant prompt hydration, service registration, chat orchestration, proxy routes, knowledge routes, cards, observability, guardrails, scorecard, escalation, DTOs, and helpers. At more than 2,300 lines, it is difficult to review, test, and safely evolve.  
+**Description:** At the time of this audit, `Program.cs` performed tenant prompt hydration, service registration, chat orchestration, proxy routes, knowledge routes, cards, observability, guardrails, scorecard, escalation, DTOs, and helpers in a single ~2,300-line file. The composition root has since been decomposed into a per-domain layout under `src/RetailPulse.Api/Endpoints/` (`ChatEndpoints`, `KnowledgeEndpoints`, `ObservabilityEndpoints`, `CardEndpoints`, `AlertEndpoints`, `ApprovalEndpoints`, `GuardrailEndpoints`, etc.); today's `Program.cs` is a composition-only root under 1,000 lines. This finding is retained as historical context — the follow-up work has landed.
 **Recommendation:** Keep `Program.cs` as composition only. Move endpoint groups into extension classes (`MapChatEndpoints`, `MapObservabilityEndpoints`, etc.), move prompt hydration into a service, and put DTOs in contract/source files.  
 **Effort:** Large (4hr+)
 
