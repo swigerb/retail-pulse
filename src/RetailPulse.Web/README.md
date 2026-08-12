@@ -1,6 +1,16 @@
-# React + TypeScript + Vite
+# Retail Pulse Web (React + TypeScript + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The Retail Pulse React dashboard: chat panel, real-time SignalR telemetry, chart
+rendering, and observability views. Runs on Vite + React 19 + TypeScript against the
+`RetailPulse.Api` backend. The Aspire AppHost launches this project automatically
+(`AddNpmApp` → `npm run dev`), so day-to-day contributors do not need to start it by
+hand.
+
+See also:
+
+- [FRONTEND.md](../../docs/FRONTEND.md) — architecture, component catalog, and provider-neutral sign-in.
+- [authentication-matrix.md](../../docs/authentication-matrix.md) — full mode / environment behavior table.
+- [ADR-005](../../docs/adr/005-provider-neutral-authentication.md) — provider-neutral authentication foundation.
 
 ## Feature flags / Navigation
 
@@ -95,7 +105,7 @@ not with `dotnet`**:
 
 - At runtime the Aspire AppHost launches it (`AddNpmApp` → `npm run dev`).
 - CI installs from the committed lockfile with `npm ci` (through the internal package
-  feed proxy — see **Supply chain** below) and then runs `npm run build`.
+  feed proxy — see **Supply chain** above) and then runs `npm run build`.
 
 The `.esproj` is intentionally configured as visibility-only
 (`ShouldRunNpmInstall=false`, `ShouldRunBuildScript=false`), so a solution-wide
@@ -103,72 +113,22 @@ The `.esproj` is intentionally configured as visibility-only
 Use the npm scripts below (or the VS UI) to install, build, run, and test the app.
 VS users need the Node.js workload installed locally.
 
-Currently, two official plugins are available:
+## npm scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Script | Purpose |
+|--------|---------|
+| `npm ci` | Reproducible install from `package-lock.json` (routed through the internal proxy). |
+| `npm run dev` | Vite dev server on `http://localhost:5173` (started automatically by Aspire). |
+| `npm run build` | Production build → `dist/`. Runs `prebuild` (auth config gate) first. |
+| `npm test` | Vitest test runner (unit + component + contract). |
+| `npm run test:provider-matrix` | Full provider-neutral auth matrix — config gate + Entra/GitHub/Anonymous builds + emitted-`index.html` meta assertions. |
+| `npm run test:provider-matrix:gate` | Fast config gate only (skips full builds). |
 
-## React Compiler
+## Reference
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- [Vite](https://vite.dev/) — build tool and dev server.
+- [React 19](https://react.dev/) — UI framework.
+- [Recharts](https://recharts.org/) — chart rendering.
+- [Fluent UI React v9](https://react.fluentui.dev/) — design system.
+- [Microsoft SignalR client](https://learn.microsoft.com/aspnet/core/signalr/javascript-client) — real-time telemetry hubs.
+- [MSAL React](https://learn.microsoft.com/entra/identity-platform/tutorial-single-page-app-react-sign-in) — Entra sign-in in `Entra` mode.

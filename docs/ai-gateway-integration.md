@@ -37,6 +37,36 @@ This deploys:
 | `infra/modules/apim-openai-policy.xml` | AI Gateway policies (token rate limiting, token metrics, MI auth) |
 | `infra/modules/apim-openai-role-assignment.bicep` | Managed identity role assignment (APIM → Azure AI Foundry) |
 
+### Mandatory post-provision verifier gate
+
+`azd provision` reporting "Succeeded" only proves the ARM deployments succeeded — it does
+not prove the AI Gateway invariants (backend, policy, token-limit, emit-token-metric,
+diagnostics, RBAC, ACA wiring) are actually correct on the live resources. Every
+`azd provision` / `azd up` therefore runs a **mandatory** live verifier from the
+post-provision hook:
+
+- `scripts/Verify-ApimAiGateway.ps1` — reads a bearer token via `az account get-access-token`
+  and calls ARM REST (`Invoke-RestMethod`) directly to inspect every invariant on the live
+  APIM instance. It does **not** shell out to `az apim`/`az rest` subcommands (which have a
+  known Windows UTF-8 BOM crash on APIM policy responses) and it does not swallow errors.
+- `azd-hooks/postprovision.ps1` and `azd-hooks/postprovision.sh` invoke the verifier and
+  **fail** the whole `azd up` on any non-zero, non-skip exit. Exit `0` = PASS, exit `2` is
+  a genuine environment-precondition skip (no `az` CLI / not signed in / missing azd
+  outputs); every other non-zero exit is a hard fail.
+
+The verifier is complemented by static contract tests under
+`tests/RetailPulse.Tests/Deployment/`, including
+`CompiledArmDeploymentGraphTests` which runs `az bicep build` and asserts on the compiled
+ARM JSON so that a module-boundary regression cannot silently drop the gateway.
+
+### `deploy/apim-ai-gateway/` — optional attach-on templates only
+
+`deploy/apim-ai-gateway/` no longer provisions the primary Retail Pulse APIM gateway; that
+is now the responsibility of `infra/modules/apim*.bicep` above. The residual files
+(`mcp-api.bicep`, `a2a-api.bicep`) are optional attach-on templates for wiring extra
+MCP/A2A APIs onto an **already-existing** APIM instance in a separate workflow. See
+[`deploy/apim-ai-gateway/README.md`](../deploy/apim-ai-gateway/README.md).
+
 ---
 
 ## Observability: The Three Telemetry Layers

@@ -162,6 +162,13 @@ The AI Gateway is provisioned directly by `infra/main.bicep`:
 - `AZURE_APIM_INFERENCE_ENDPOINT`
 - `AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME`
 
+Every `azd provision` / `azd up` also runs the mandatory
+[APIM AI Gateway live verifier](./ai-gateway-integration.md#mandatory-post-provision-verifier-gate)
+(`scripts/Verify-ApimAiGateway.ps1`, invoked from `azd-hooks/postprovision.*`) as a
+hard gate — a live invariant failure fails the whole `azd up` rather than reporting
+false success. This is the primary defense against a "provisioning succeeded" report
+that masks a broken gateway.
+
 ## Deployment behavior & operational tradeoffs
 
 The current `azd` topology is tuned for a **low-cost public demo**. The following
@@ -332,13 +339,13 @@ weakens these:
 - `ASPNETCORE_ENVIRONMENT=Production` with no configured path **and no**
   `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` → startup fails.
 
-The auth cutover (this PR, rebased on top of the storage hotfix) flips the API to
-`Production`. It resolves the resulting fail-closed startup by option (b): it
+The Entra auth cutover (already merged to `main`, rebased on top of the storage hotfix) runs
+the API in `Production`. It resolves the resulting fail-closed startup by option (b): it
 **explicitly** acknowledges non-durable storage via
 `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` for the synthetic demo, rather than
 reintroducing the policy-incompatible Azure Files mount. The Production/required
-fail-closed path is **not** weakened — a future policy-compatible durable backing
-(see options below) can drop the opt-out and set a real durable path instead.
+fail-closed path is **not** weakened — a future policy-compatible durable backing (see
+options below) can drop the opt-out and set a real durable path instead.
 
 The **MCP server** still writes its seeded retail dataset (`retailpulse.db`) under
 the OS temp directory. That is intentional and safe: it **re-seeds from
@@ -383,31 +390,38 @@ Constraints verified from code/IaC: `infra/modules/container-apps.bicep`
 Log Analytics exist), `DataDirectoryResolver`/`SqliteMount` (local SQLite model),
 and the governance failure mode described in the incident note above.
 
-### Public-demo auth posture
+### Live auth posture (Entra-only, fail-closed)
 
-The postprovision hook sets `Security__RequireAuth=false`, disables ACA platform auth,
-and runs the API/MCP/bot with their fixed synthetic Development identities. When auth is disabled the API installs
-an allow-all default authorization policy, which is what lets the SignalR hubs
-(`.RequireAuthorization()`) and other protected endpoints serve the anonymous demo
-frontend. Because ingress is **external**, this means the API — and the paid model calls
-behind it — is **publicly reachable without authentication**, protected only by the
-built-in rate limiter. Acceptable for a throwaway demo; do **not** use this posture for
-anything with real data or cost exposure. Set `Security__RequireAuth=true` (and wire an
-identity provider) for non-demo environments.
+The deployed stack is **Entra-only**. The Bicep pins the API's environment to:
 
-> **Anonymous mode is a safer alternative to this posture, but is not deployed.**
-> Sprint 1 adds a first-class, fail-closed `Authentication:Mode=Anonymous` provider
-> (server-minted short-lived session tokens, read-only enforcement, per-subject/per-IP
-> rate limits, and a daily request/token/cost circuit breaker) — see
-> [security.md → Anonymous mode](security.md#anonymous-mode-opt-in-never-deployed) and
-> [ADR-005](adr/005-provider-neutral-authentication.md). Unlike `Security__RequireAuth=false`,
-> it does not leave the model surface unauthenticated. It is **not** enabled by any
-> deployment artifact this sprint: `appsettings.Production.json`, the Bicep, and the azd
-> postprovision hooks all remain pinned to `Entra`, and a deployment-contract test asserts
-> the hooks never configure Anonymous guardrails. A hosted Anonymous enable would be a
-> deliberate, separate decision requiring `Anonymous:AllowHosted=true`, a strong signing
-> key, positive daily ceilings, and — because the ceilings are replica-local — a single
-> replica (`maxReplicas=1`). It is not equivalent to authenticated production.
+- `Authentication__Mode=Entra` (provider-neutral mode contract — see
+  [ADR-005](adr/005-provider-neutral-authentication.md))
+- `Security__RequireAuth=true` (in-process JWT bearer gate is the authoritative boundary)
+- `ASPNETCORE_ENVIRONMENT=Production`
+- `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true` (honest opt-out for the demo's non-durable
+  SQLite stores — see the storage section above)
+
+The post-provision hook (`azd-hooks/postprovision.*`) also:
+
+- Grants each Container App's system-assigned managed identity `AcrPull` on the
+  dedicated Container Registry (idempotent).
+- Links the API Container App as the Static Web App's `/api` backend so relative
+  `/api/*` calls stay same-origin, while SignalR intentionally uses the absolute
+  `VITE_API_ORIGIN` (linked backends do not proxy WebSockets).
+- **Disables** ACA platform auth (Easy Auth) on the API. Easy Auth would issue login
+  redirects that break bearer-token REST and SignalR clients calling ACA directly; the
+  in-process Entra `JwtBearer` handler is the real security boundary.
+- Runs the **mandatory APIM AI Gateway live verifier**
+  (`scripts/Verify-ApimAiGateway.ps1`) as a hard gate — a live invariant failure fails
+  the whole `azd up` rather than reporting false success. See
+  [AI Gateway Integration → Mandatory post-provision verifier gate](ai-gateway-integration.md#mandatory-post-provision-verifier-gate).
+
+The Anonymous and GitHub provider modes are fully implemented but **never deployed** by
+`azd up` — they are opt-in, fail-closed capabilities for non-production environments
+only. A deployment-contract test
+(`tests/RetailPulse.Tests/Deployment/ProviderNeutralDeploymentContractTests.cs`) asserts
+that neither Bicep nor the azd hooks ever configure GitHub/Anonymous guardrails, and
+that `VITE_AUTH_MODE` (frontend) and `Authentication__Mode` (API) both equal `Entra`.
 
 #### Safe web-build mode templates (`.env.*.example`)
 

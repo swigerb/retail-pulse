@@ -10,7 +10,6 @@
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
 [![Aspire 13.3](https://img.shields.io/badge/Aspire-13.3.0-6C3BAA)](https://learn.microsoft.com/dotnet/aspire/)
 [![CI](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-70%25_target-brightgreen)](./coverage-report)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Overview
@@ -261,7 +260,7 @@ retail-pulse/
 │       ├── src/components/           # ChatPanel, SpanTimeline, Charts, ErrorBoundary
 │       └── src/hooks/                # SignalR connection, telemetry
 ├── tests/
-│   ├── RetailPulse.Tests/            # xUnit + integration tests (1815 passing)
+│   ├── RetailPulse.Tests/            # xUnit + integration tests (~2,669 passing)
 │   ├── RetailPulse.LoadTests/        # NBomber load test scenarios
 │   └── RetailPulse.Benchmarks/       # BenchmarkDotNet performance suite
 ├── deploy/                           # Deployment & infrastructure
@@ -297,9 +296,9 @@ Charts are rendered **client-side**. The LLM emits structured `ChartSpec` JSON a
 
 **9 chart types:** line, bar, grouped bar, stacked bar, horizontal bar, pie, donut, gauge, and table. See [Chart Rendering Guide](docs/chart-rendering.md).
 
-### APIM AI Gateway (Optional)
+### APIM AI Gateway
 
-Route all LLM calls through Azure API Management for token metering, rate limiting, and governance. See [AI Gateway Integration](docs/ai-gateway-integration.md).
+Retail Pulse routes all LLM traffic through an [Azure API Management](https://learn.microsoft.com/azure/api-management/api-management-key-concepts) instance provisioned as first-class IaC by `azd up`. The AI Gateway applies token-per-minute rate limits, emits token-usage metrics, authenticates to Azure AI Foundry with a managed identity, and captures full request/response traces. See [AI Gateway Integration](docs/ai-gateway-integration.md).
 
 ### Foundry Shipment Agent (Optional)
 
@@ -314,7 +313,7 @@ Retail Pulse implements enterprise-grade patterns:
 - **Security** — CSP/HSTS/X-Frame-Options headers, input validation, SHA256 hash-chain audit log
 - **Performance** — MCP response cache, keyword fast-path routing, lightweight council voting, cache warming
 - **API Versioning** — `/api/v1/chat` with Sunset header on legacy endpoint
-- **Testing** — 1815+ unit/integration/contract/E2E tests, load tests, mutation testing, benchmarks
+- **Testing** — 3,200+ unit/integration/contract/E2E tests across backend (xUnit) and frontend (Vitest), plus load tests, mutation testing, and benchmarks
 
 ---
 
@@ -345,12 +344,24 @@ See [docs/deployment-azd.md](docs/deployment-azd.md) for full documentation.
 
 ### APIM AI Gateway
 
-The primary AI Gateway is now provisioned by `azd up` as part of `infra/main.bicep` via:
+The primary AI Gateway is provisioned by `azd up` as part of `infra/main.bicep` via:
 
 - `infra/modules/apim.bicep` — Developer-tier APIM instance, managed identity, service diagnostics, and loggers
 - `infra/modules/apim-openai-api.bicep` — Azure OpenAI backend, inference API, policy, API diagnostics, subscription, and cross-RG RBAC
 
-`deploy/apim-ai-gateway/` now only contains optional attach-on templates for wiring MCP/A2A APIs onto an already-existing APIM instance in a separate workflow.
+Every `azd provision` / `azd up` runs a **mandatory** post-provision AI Gateway verifier
+(`scripts/Verify-ApimAiGateway.ps1`, invoked from `azd-hooks/postprovision.ps1` and
+`postprovision.sh`) that inspects the live APIM resource, API, policy, backend,
+diagnostics, and ACA wiring via ARM REST. A live invariant failure fails the whole
+`azd up`, so a successful deployment cannot silently ship with a broken gateway.
+Coverage is locked in by the deployment-side contract tests
+(`tests/RetailPulse.Tests/Deployment/`), which include a compiled-ARM graph check
+(`CompiledArmDeploymentGraphTests`) that runs `az bicep build` and asserts the
+compiled JSON — not just the Bicep source — still declares the gateway.
+
+`deploy/apim-ai-gateway/` now only contains optional attach-on templates for wiring
+additional MCP/A2A APIs onto an **already-existing** APIM instance in a separate
+workflow — it does not provision the primary gateway.
 
 ### One-Click Local Deploy
 
@@ -586,7 +597,7 @@ All tenant configuration lives in `tenant.yaml` at the repo root. Changes take e
 
 ## Tests
 
-**1815+ tests passing** across xUnit (.NET), Vitest (frontend), load tests, and benchmarks. Covers agent telemetry, chart/tool behavior, prompt config, tenant validation, simulated metrics, session management (TTL eviction), SignalR session-group broadcasting, Teams Adaptive Card builders, and performance profiling.
+**3,200+ tests passing** across xUnit (.NET backend, ~2,669 tests), Vitest (frontend, ~552 tests), NBomber load tests, and BenchmarkDotNet benchmarks. Covers agent telemetry, chart/tool behavior, prompt config, tenant validation, simulated metrics, session management (TTL eviction), SignalR session-group broadcasting, Teams Adaptive Card builders, and performance profiling.
 
 ```bash
 # Run all .NET tests

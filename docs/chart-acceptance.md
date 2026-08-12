@@ -2,8 +2,8 @@
 
 This document is the durable, human-readable index of the **curated chart-prompt
 acceptance matrix** the codebase enforces automatically for issue
-[#50](../.github). It complements — and is verified against — the machine
-sources of truth:
+[#50](https://github.com/swigerb/retail-pulse/issues/50). It complements — and is
+verified against — the machine sources of truth:
 
 * **Prompt source** — `src/RetailPulse.Web/src/constants/prompts.ts` (Charts
   category + the QSR two-brand comparison).
