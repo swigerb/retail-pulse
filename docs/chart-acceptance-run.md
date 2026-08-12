@@ -33,12 +33,15 @@ does the same thing end-to-end for each curated prompt.
 > **Status:** The chart-acceptance matrix landed on `main` via PR #53 ("P0 #50:
 > Systemic chart acceptance matrix for all curated prompts") and is enforced on every
 > CI run by the backend `ChartAcceptanceMatrixTests` / `ChartAcceptancePerformanceTests`
-> and the frontend `chartAcceptance.matrix.test.tsx` suites. This log file remains the
-> record of human, in-browser sign-off; the automated matrix is the durable gate.
+> and the frontend `chartAcceptance.matrix.test.tsx` suites. Those tests are the
+> durable gate — CI will fail before merge if any curated prompt regresses.
 >
-> The `[]` block below is an intentional **empty-log placeholder**, not a failed run —
-> no live browser sign-off has been recorded since the matrix landed on `main`. Paste
-> your run's `COPY-TO-DOCS` JSON here when you exercise the browser runner.
+> The JSON block below is an intentional **empty-log placeholder**, not a failed run.
+> Live browser sign-off is optional and only needs to be captured when an operator
+> exercises the DevTools runner against a deployed build; the automated matrix
+> guards the invariants regardless. When you do run the browser runner, replace
+> the `[]` below with the JSON emitted by the `COPY-TO-DOCS:` log line and record
+> the date, provider mode, and app version (git SHA) alongside it.
 
 ```json
 []

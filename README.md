@@ -248,7 +248,7 @@ retail-pulse/
 │   │   ├── Telemetry/                # Custom business metrics (OpenTelemetry)
 │   │   ├── Tools/                    # MCP tool wrappers
 │   │   ├── Validation/               # Input validation (ChatRequestValidator)
-│   │   └── prompts.yaml              # Agent prompt configuration (tenant-templated)
+│   │   └── prompts.yaml              # Agent prompt configuration (`src/RetailPulse.Api/prompts.yaml`, tenant-templated)
 │   ├── RetailPulse.McpServer/        # MCP server (data tools)
 │   │   ├── Tools/                    # MCP tool definitions (parameterized queries)
 │   │   └── Data/                     # SQLite-backed tenant-driven metrics
@@ -396,6 +396,8 @@ The CI pipeline runs on every push and PR to `main`:
 | **security** | Check for vulnerable NuGet packages |
 | **provider-matrix** | Auth provider matrix: `npm ci` + frontend build/meta gate, and the backend Security + Deployment suites emitted to TRX with a conservative count gate (`scripts/Test-BackendAuthMatrix.ps1`) |
 | **lint** | Verify code style (`dotnet format --verify-no-changes`) |
+| **bicep** | Compile every Bicep module transitively from `infra/main.bicep` via `az bicep build` — cheapest possible regression gate for the APIM AI Gateway / Container Apps contract; uploads the compiled ARM template as an artifact |
+| **verify-apim** | `Verify-ApimAiGateway offline self-test` — runs `scripts/Verify-ApimAiGateway.ps1 -SelfTest` (no Azure signin, no live APIM traffic) to lock in the shape and header/body contracts of the live-verification script itself so a broken script can't silently pass a live deploy |
 
 ### Run locally
 
