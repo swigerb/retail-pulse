@@ -88,7 +88,7 @@ retailpulse.tool_call_duration_ms
 
 The RetailPulse metrics are automatically exported via OpenTelemetry when running under Aspire:
 
-1. **Local development**: Metrics appear in the Aspire dashboard at `https://localhost:18888`
+1. **Local development**: Metrics appear in the Aspire dashboard. The AppHost HTTPS profile pins the dashboard at `https://localhost:17152` (`src/RetailPulse.AppHost/Properties/launchSettings.json`); Aspire prints the exact `Login to the dashboard at https://localhost:XXXXX/login?t=<token>` URL to the terminal on every launch — use the printed URL if you have overridden the profile.
 2. **Azure Monitor**: Set `APPLICATIONINSIGHTS_CONNECTION_STRING` for production telemetry
 3. **Custom OTLP**: Set `OTEL_EXPORTER_OTLP_ENDPOINT` for Grafana/Prometheus/Jaeger
 

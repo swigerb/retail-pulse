@@ -36,7 +36,7 @@ dotnet user-secrets set "OpenAI:Endpoint" "https://your-resource.openai.azure.co
 
 ```bash
 # Install frontend dependencies (first time only)
-cd src/RetailPulse.Web && npm install && cd ../..
+cd src/RetailPulse.Web && npm ci && cd ../..
 
 # Start the full stack
 dotnet run --project src/RetailPulse.AppHost

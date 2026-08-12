@@ -262,11 +262,18 @@ Get resolved approval history (last 50).
 
 ## Demand Forecasting
 
-### GET /api/demand/forecast
+### Demand forecasting is an MCP-tool-driven capability, not a REST endpoint
 
-_Not a standalone REST endpoint._ Demand forecasting is handled through the chat endpoint — the router dispatches to the Demand Forecast specialist agent which calls MCP tools (`GenerateForecast`, `GetHistoricalDemand`, etc.) via tool invocation.
+There is no `GET /api/demand/forecast` route on the API. Demand forecasting is exposed
+through the chat pipeline — the router classifies intent as `demand/forecasting`,
+dispatches to the `DemandForecastAgent` specialist, and the agent invokes MCP tools
+(`GenerateForecast`, `GetHistoricalDemand`, `GetSellThrough`, etc.) via
+`RetailPulse.McpServer` tool invocation. Callers should `POST /api/chat` (or
+`POST /api/chat/stream` for token streaming) with a natural-language question — the
+`agentsConsulted` field of the response will contain `"demand-forecasting"` when the
+router selected this specialist.
 
-See [MCP-TOOLS.md](MCP-TOOLS.md) for the full tool reference.
+See [MCP-TOOLS.md](MCP-TOOLS.md) for the full tool reference used by this specialist.
 
 ---
 
@@ -938,6 +945,52 @@ Get daily cost trend.
 
 **Response (200):** Array of daily cost data points.
 
+---
+
+### GET /api/observability/costs/tools
+
+Get per-tool call counts and duration for the current period. Sourced from the
+in-memory `ITraceCollector` rather than the persisted cost tracker, so numbers
+reset with the process and reflect only spans that closed successfully.
+
+| Query Param | Type | Default | Description |
+|-------------|------|---------|-------------|
+| `period` | string | `"week"` | `day`, `week`, `month` — mirrors the other cost endpoints for UI consistency |
+
+**Response (200):** Array of `{ tool, callCount, totalDurationMs, avgDurationMs }` rows sorted by `callCount` descending. Powers the "Tool Usage" table in the CostDashboard component.
+
+---
+
+## Conversation Memory
+
+Long-lived per-user memory entries surfaced by the SPA's **Memory** panel and used by the agent middleware to inject recall context into subsequent turns. All routes require the same Entra bearer as the rest of the API and resolve the caller's stable `oid` claim via `UserIdentity.Resolve(HttpContext.User)`.
+
+### GET /api/memory
+
+List the current user's memory entries (most recent first, capped at 100).
+
+**Response (200):**
+```json
+[
+  {
+    "id": "mem_01HXR9...",
+    "content": "Prefers Q3 promo review meetings on Tuesdays.",
+    "storedAt": "2026-08-10T14:22:11.000Z",
+    "expiresAt": "2027-08-10T14:22:11.000Z",
+    "type": "preference"
+  }
+]
+```
+
+`type` is one of `conversation` (rolling summary), `preference` (user-stated preference), or `entity` (extracted entity mention).
+
+### DELETE /api/memory/{id}
+
+Delete a single memory entry belonging to the current user.
+
+**Response (204):** No content on success. Returns 404 if the entry does not exist or belongs to a different user (fail-closed).
+
+---
 ---
 
 ### GET /api/observability/audit
