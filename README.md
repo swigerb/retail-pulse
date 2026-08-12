@@ -154,6 +154,8 @@ Navigate to [http://localhost:5173](http://localhost:5173) and start asking ques
 ./deploy/deploy.sh
 ```
 
+> **Note:** Deployment scripts use user secrets for all credentials. No API keys are stored in source.
+
 ---
 
 ## Tenant Configuration
@@ -364,18 +366,6 @@ compiled JSON — not just the Bicep source — still declares the gateway.
 `deploy/apim-ai-gateway/` now only contains optional attach-on templates for wiring
 additional MCP/A2A APIs onto an **already-existing** APIM instance in a separate
 workflow — it does not provision the primary gateway.
-
-### One-Click Local Deploy
-
-```powershell
-# Windows
-.\deploy\deploy.ps1
-
-# Linux/Mac
-./deploy/deploy.sh
-```
-
-> **Note:** Deployment scripts use user secrets for all credentials — no API keys are stored in source.
 
 ### Infrastructure Security
 
