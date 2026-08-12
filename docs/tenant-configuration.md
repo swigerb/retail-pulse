@@ -271,7 +271,7 @@ theme:
 
 ## How Tenant Configuration Flows Through the System
 
-1. **Prompts** — `prompts.yaml` uses `{{tenant.*}}` template placeholders. The AI agent's system prompt is automatically populated with your company name, brands, and regions.
+1. **Prompts** — `src/RetailPulse.Api/prompts.yaml` uses `{{tenant.*}}` template placeholders. The AI agent's system prompt is automatically populated with your company name, brands, and regions.
 
 2. **Data Seeding** — `RetailPulseDb` seeds a SQLite database with realistic metrics based on the brands and regions defined in `tenant.yaml`. Data is re-seeded automatically when `tenant.yaml` changes.
 

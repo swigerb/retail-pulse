@@ -1,5 +1,13 @@
 # Retail Pulse Full Code Review Report
 
+> **Internal audit — historical reference.** This report captures a snapshot review
+> from 2026-05-13; several of the critical/high findings below were remediated on
+> `main` in the interim (see the Executive Summary notes and the Costco backend
+> hotfix in the docs release chain). It is retained here for provenance rather
+> than as the current-state security or architecture reference — for the shipped
+> posture see [security.md](security.md), [architecture.md](architecture.md), and
+> [authentication-entra.md](authentication-entra.md).
+
 **Reviewer:** Kroger — Lead  
 **Requested by:** Brian Swiger  
 **Review date:** 2026-05-13T20:12:05.840-04:00  

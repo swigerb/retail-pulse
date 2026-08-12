@@ -420,7 +420,7 @@ ngrok http 5000
 Start all services via Aspire:
 
 ```powershell
-cd C:\Users\brswig\source\repos\retail-pulse
+cd <path-to-your-clone>\retail-pulse
 dotnet run --project src/RetailPulse.AppHost
 ```
 
@@ -515,7 +515,7 @@ This starts:
 **Symptoms:** "There was a problem reaching this app" or "We couldn't upload your custom app".
 
 **Fixes:**
-1. **Validate manifest:** Use [Teams App Validator](https://dev.teams.microsoft.com/appvalidation.html) to check for errors
+1. **Validate manifest:** Use the [Teams Developer Portal](https://dev.teams.microsoft.com/) validator (open your app and run the built-in validation) or the [Teams Toolkit CLI](https://learn.microsoft.com/microsoftteams/platform/toolkit/teams-toolkit-cli-commands) `teamsapp validate` command to check for errors
 2. **Check ZIP structure:** The ZIP must contain `manifest.json`, `color.png`, `outline.png` at the root (no folders)
 3. **Check app size:** The ZIP must be < 10 MB
 4. **Verify bot ID:** `id` and `botId` in manifest must match your Entra ID app registration client ID
