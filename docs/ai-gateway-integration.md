@@ -12,6 +12,18 @@ Retail Pulse routes all LLM calls through Azure API Management (APIM) configured
 
 The AI Gateway pattern places APIM between the Retail Pulse API and Azure AI Foundry, giving operators visibility and control over every LLM interaction.
 
+## Official Microsoft resources
+
+Azure AI Gateway is a capability set within Azure API Management (APIM) — not a separate Azure product or service.
+
+- [Azure API Management overview](https://learn.microsoft.com/en-us/azure/api-management/)
+- [AI gateway capabilities in Azure API Management (canonical)](https://learn.microsoft.com/en-us/azure/api-management/genai-gateway-capabilities)
+- [Sample repo: Azure-Samples/AI-Gateway](https://github.com/Azure-Samples/AI-Gateway)
+- [Policy reference — authentication-managed-identity](https://learn.microsoft.com/en-us/azure/api-management/authentication-managed-identity-policy)
+- [Policy reference — azure-openai-token-limit (canonical id: llm-token-limit)](https://learn.microsoft.com/en-us/azure/api-management/llm-token-limit-policy)
+- [Policy reference — azure-openai-emit-token-metric (canonical id: llm-emit-token-metric)](https://learn.microsoft.com/en-us/azure/api-management/llm-emit-token-metric-policy)
+- [Monitor / diagnostics / LLM logging](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-use-azure-monitor)
+
 ## Architecture
 
 ![Retail Pulse AI Gateway Architecture](retail-pulse-ai-gateway.png)
