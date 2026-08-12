@@ -849,6 +849,7 @@ competitiveToolsFactory: sp =>
     DetectThreatsTool detectThreatsTool = sp.GetRequiredService<DetectThreatsTool>();
     CompetitiveLandscapeTool competitiveLandscapeTool = sp.GetRequiredService<CompetitiveLandscapeTool>();
     ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
+    PortfolioDepletionStatsTool portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
     CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
     return cachingWrapper.WrapAll(
@@ -857,6 +858,7 @@ competitiveToolsFactory: sp =>
         AIFunctionFactory.Create(marketShareTool.GetMarketShare),
         AIFunctionFactory.Create(detectThreatsTool.DetectThreats),
         AIFunctionFactory.Create(competitiveLandscapeTool.GetCompetitiveLandscape),
+        AIFunctionFactory.Create(portfolioTool.GetPortfolioDepletionStats),
         AIFunctionFactory.Create(chartTool.CreateChart)
     ]);
 },
