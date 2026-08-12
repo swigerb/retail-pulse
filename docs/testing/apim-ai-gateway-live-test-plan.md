@@ -17,7 +17,7 @@ This plan validates the new Developer-tier Azure API Management gateway for the 
 
 > **Name placeholders:** the child names below match the shipped Bicep in
 > `infra/modules/apim-openai-api.bicep` (`retail-pulse-inference-api`,
-> `retail-pulse-foundry`, `retail-pulse-sub`). If a future Bicep revision renames a
+> `retail-pulse-foundry`, `retail-pulse-inference-sub`). If a future Bicep revision renames a
 > child resource or emits different outputs, update those variables before execution.
 
 ## Operator setup
@@ -34,7 +34,7 @@ $AiFoundryResourceGroup = '<UPDATE-WHEN-KROGER-LANDS-OUTPUT-OR-CONFIRMED-RG>'
 $ApiContainerAppName = 'ca-retailpulse-api'
 $ApimApiName = 'retail-pulse-inference-api'
 $ApimBackendName = 'retail-pulse-foundry'
-$ApimSubscriptionName = 'retail-pulse-sub'
+$ApimSubscriptionName = 'retail-pulse-inference-sub'
 $DeploymentName = 'gpt-5.4-mini-2026-03-17' # replace if infra/app wiring uses a different deployment
 $ApiVersion = '2025-03-01-preview'
 $Marker = "apim-live-test-$([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))"

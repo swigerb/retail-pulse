@@ -260,7 +260,7 @@ retail-pulse/
 │       ├── src/components/           # ChatPanel, SpanTimeline, Charts, ErrorBoundary
 │       └── src/hooks/                # SignalR connection, telemetry
 ├── tests/
-│   ├── RetailPulse.Tests/            # xUnit + integration tests (2,669 passing)
+│   ├── RetailPulse.Tests/            # xUnit + integration tests (~2,669 passing)
 │   ├── RetailPulse.LoadTests/        # NBomber load test scenarios
 │   └── RetailPulse.Benchmarks/       # BenchmarkDotNet performance suite
 ├── deploy/                           # Deployment & infrastructure
