@@ -14,7 +14,7 @@ Retail Pulse supports one-command deployment to Azure using the [Azure Developer
 | Monitoring | Application Insights + Log Analytics | Full OpenTelemetry pipeline |
 | App data storage | Container-local temp (no durable volume) | The API's SQLite stores (cost/audit/memory/approvals/alerts) live in the replica's temp dir. **No Azure Files mount** — tenant governance forbids account-key CIFS mounts (see the incident note below), so observability history is per-replica and resets on replacement. |
 | AI Gateway | Azure API Management | First-class azd IaC in `infra/modules/apim*.bicep` |
-| Authentication | Microsoft Entra ID | Single-tenant SPA/API app registration (MSAL PKCE). See [authentication-entra.md](./authentication-entra.md). Set `RETAIL_PULSE_ENTRA_*` before `azd provision`; the postprovision hook flips `RequireAuth` on, pins `Authentication__Mode=Entra` (provider-neutral mode contract — see [ADR-005](./adr/005-provider-neutral-authentication.md)), and disables Easy Auth. |
+| Authentication | Microsoft Entra ID | Single-tenant SPA/API app registration (MSAL PKCE). See [authentication-entra.md](./authentication-entra.md). Set `RETAIL_PULSE_ENTRA_*` before `azd provision`; `infra/modules/container-apps.bicep` pins `Authentication__Mode=Entra`, `Security__RequireAuth=true`, and `ASPNETCORE_ENVIRONMENT=Production` directly on the API Container App (provider-neutral mode contract — see [ADR-005](./adr/005-provider-neutral-authentication.md)), and the postprovision hook then disables ACA platform (Easy Auth) so it can't double-wrap the in-process JWT boundary. |
 
 ## Prerequisites
 
@@ -41,13 +41,13 @@ azd up
 ```
 
 This single command will:
-1. Provision all Azure resources (Container Registry, Container Apps Environment, Container Apps, Static Web App, App Insights, Log Analytics, Azure API Management). Provisioning captures the API and frontend origins as azd environment values (`VITE_API_ORIGIN`, `RETAIL_PULSE_FRONTEND_ORIGIN`, `MCP_SERVER_BASE_URL`), the dedicated registry coordinates (`AZURE_CONTAINER_REGISTRY_ENDPOINT`, `AZURE_CONTAINER_REGISTRY_NAME`, `AZURE_CONTAINER_REGISTRY_RESOURCE_ID`), and the APIM gateway coordinates (`AZURE_APIM_NAME`, `AZURE_APIM_GATEWAY_URL`, `AZURE_APIM_INFERENCE_ENDPOINT`, `AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME`). A **postprovision hook** then binds each Container App's system-assigned identity to `AcrPull`, applies the synthetic-demo runtime environment, and disables ACA platform auth on the demo API.
+1. Provision all Azure resources (Container Registry, Container Apps Environment, Container Apps, Static Web App, App Insights, Log Analytics, Azure API Management). Provisioning captures the API and frontend origins as azd environment values (`VITE_API_ORIGIN`, `RETAIL_PULSE_FRONTEND_ORIGIN`, `MCP_SERVER_BASE_URL`), the dedicated registry coordinates (`AZURE_CONTAINER_REGISTRY_ENDPOINT`, `AZURE_CONTAINER_REGISTRY_NAME`, `AZURE_CONTAINER_REGISTRY_RESOURCE_ID`), and the APIM gateway coordinates (`AZURE_APIM_NAME`, `AZURE_APIM_GATEWAY_URL`, `AZURE_APIM_INFERENCE_ENDPOINT`, `AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME`). The API's runtime env (model/APIM endpoint, subscription-key ref, CORS origin, MCP base URL, Entra identifiers, `Authentication__Mode=Entra`, `Security__RequireAuth=true`, `ASPNETCORE_ENVIRONMENT=Production`, `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`) is asserted directly on the Container App by `infra/modules/container-apps.bicep`. A **postprovision hook** then binds each Container App's system-assigned identity to `AcrPull` on the registry, links the Static Web App to the API backend, and disables ACA platform (Easy Auth) on the API.
 2. Build the .NET services and containerize them (pushed to the dedicated Container Registry)
-3. Deploy backend containers to Azure Container Apps (the postprovision hook has already applied the API's model, CORS, auth, and MCP settings)
+3. Deploy backend containers to Azure Container Apps (Bicep has already pinned the API's model, CORS, auth-mode, and MCP settings on the Container App revision template)
 4. Build the React frontend (`npm run build`) **with `VITE_API_ORIGIN` injected from the provisioned API origin** and deploy `dist/` to Azure Static Web Apps
 5. Output the frontend URL and connection strings
 
-Because provisioning runs first, both the API-origin injection into the frontend build and the frontend-origin injection into API CORS happen automatically in a single `azd up` — no manual two-pass step is required. Runtime settings are asserted by the postprovision hook rather than relying on `azure.yaml` service environment-variable updates, which are not consistently applied to pre-existing ACA targets. See [Build-time API origin injection](#build-time-api-origin-injection-vite_api_origin) for the one ordering caveat.
+Because provisioning runs first, both the API-origin injection into the frontend build and the frontend-origin injection into API CORS happen automatically in a single `azd up` — no manual two-pass step is required. Runtime settings are asserted directly by `infra/modules/container-apps.bicep` on the Container App revision template, rather than by `azure.yaml` service environment-variable updates (which are not consistently applied to pre-existing ACA targets); the postprovision hook then layers the identity/RBAC glue and disables Easy Auth. See [Build-time API origin injection](#build-time-api-origin-injection-vite_api_origin) for the one ordering caveat.
 
 ## Environment Configuration
 
@@ -109,9 +109,9 @@ so azd's `${...}` substitution and Vite's `import.meta.env` resolve them:
 
 **Frontend/API mode parity.** `VITE_AUTH_MODE` (frontend) **must equal**
 `Authentication__Mode` (API) so the rendered sign-in UX matches the boundary the API
-enforces. The live Bicep emits `output VITE_AUTH_MODE = 'Entra'` and the postprovision
-hook pins `Authentication__Mode=Entra`, so the deployed pair is always `Entra`. A
-deployment contract test
+enforces. The live Bicep emits `output VITE_AUTH_MODE = 'Entra'` and
+`infra/modules/container-apps.bicep` pins `Authentication__Mode=Entra` directly on
+the API Container App, so the deployed pair is always `Entra`. A deployment contract test
 (`tests/RetailPulse.Tests/Deployment/ProviderNeutralDeploymentContractTests.cs`)
 asserts this parity and that the Bicep/hooks never emit `GitHub`/`Anonymous`. Non-live
 web builds can be produced from the secret-free templates
@@ -231,17 +231,25 @@ pull happens later during deploy, there is normally enough delay for propagation
 If a very first deploy ever races propagation, simply re-run `azd deploy` (or
 `azd up`) — the hook is idempotent and the grant will already be in place.
 
-### Managed identity → Azure OpenAI requires an out-of-band role assignment
+### Managed identity → Azure OpenAI via APIM subscription key (shipped) or direct MI (opt-in)
 
 Each Container App (`api`, `mcpserver`, `teamsbot`) is provisioned with a
-**system-assigned managed identity** (`infra/modules/container-apps.bicep`), and the
-`api` service sets `OpenAI__UseManagedIdentity=true` (`azure.yaml`), so the API
-authenticates to the model endpoint with `DefaultAzureCredential` instead of an API key.
+**system-assigned managed identity** (`infra/modules/container-apps.bicep`). In the
+shipped topology the API talks to Azure OpenAI **through APIM**, not directly:
+`infra/modules/container-apps.bicep` pins `OpenAI__UseManagedIdentity=false` and passes
+`OpenAI__ApimSubscriptionKey` (an ACA secret referencing the APIM subscription's primary
+key) so the API authenticates to APIM with an `Ocp-Apim-Subscription-Key` header. APIM
+itself then uses **its own** managed identity (via `<authentication-managed-identity>` in
+`infra/modules/apim-openai-policy.xml`) to call the Azure AI Foundry backend — no AI-model
+keys are stored in or transit through the API. This is the mode the shipped Bicep and the
+mandatory verifier gate enforce.
 
-**The model endpoint is external to this Bicep** — it is supplied via
+**If you point `OpenAI__Endpoint` at a direct Azure OpenAI resource** (bypassing APIM),
+set `OpenAI__UseManagedIdentity=true` so the API authenticates with `DefaultAzureCredential`
+instead. The direct model endpoint is **external to this Bicep** — it is supplied via
 `AZURE_OPENAI_ENDPOINT` and is not provisioned here — so the infra **cannot** create the
 required RBAC. After `azd up` you must grant the API's principal access on the target
-resource, e.g. for a direct Azure OpenAI resource:
+resource:
 
 ```bash
 az role assignment create \
@@ -251,10 +259,9 @@ az role assignment create \
 ```
 
 The API's principal id is exposed as the `apiPrincipalId` output of the container-apps
-module. **If you point `AZURE_OPENAI_ENDPOINT` at the APIM AI Gateway instead of a direct
-Azure OpenAI resource**, `DefaultAzureCredential` bearer tokens will only work if APIM is
-configured to accept AAD tokens (or to inject the upstream key itself); otherwise set
-`OpenAI__UseManagedIdentity=false` and provide a subscription key via `OpenAI__ApiKey`.
+module. To go the other direction — bypass APIM AND use a raw API key — set
+`OpenAI__UseManagedIdentity=false` and provide the key via `OpenAI__ApiKey` instead of
+`OpenAI__ApimSubscriptionKey`.
 
 ### Scale-to-zero (cold start) and in-memory state loss
 
@@ -523,9 +530,13 @@ build azd already performs.
 
 The **postprovision** hook (`azd-hooks/postprovision.ps1` / `azd-hooks/postprovision.sh`,
 same per-OS selection) wires secretless ACR pull for the three Container Apps,
-idempotently links SWA `/api` traffic to ACA, and applies the synthetic-demo runtime
-settings (managed-identity model endpoint, MCP/API URLs, CORS origin, demo auth mode,
-and Teams bot API URL).
+idempotently links SWA `/api` traffic to ACA, disables ACA platform (Easy Auth) on
+the API, and runs the mandatory APIM AI Gateway live verifier as a hard gate. The
+API's runtime env (model endpoint, APIM subscription key ref, MCP/API URLs, CORS
+origin, `Authentication__Mode=Entra`, `Security__RequireAuth=true`,
+`ASPNETCORE_ENVIRONMENT=Production`, Teams bot API URL) is pinned directly on the
+Container App revision template by `infra/modules/container-apps.bicep` — not by the
+hook — so a re-provision re-asserts the same env.
 
 The prompt model remains `gpt-5.4-mini`; Azure deployment selection is separate:
 `OpenAI__Deployment=gpt-5.4-mini-2026-03-17`. Versioned deployment names make
