@@ -22,7 +22,7 @@ This plan validates the new Developer-tier Azure API Management gateway for the 
 
 ## Operator setup
 
-Run all commands from the repo root (`C:\src\worktrees\retail-pulse-apim-gateway`) in **PowerShell**.
+Run all commands from the repo root in **PowerShell**.
 
 ```powershell
 $SubscriptionId = '44847a42-6b69-4e6c-b7e5-ce7140469dd6'
