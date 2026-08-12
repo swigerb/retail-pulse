@@ -224,7 +224,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         // Chart-fulfillment invariant: an explicit chart request must yield a renderable
         // chart (reconstructed deterministically from tool results if the model emitted
         // none) or a structured chart-unavailable diagnostic — never silent prose-only.
-        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply);
+        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply, context.PrefetchedData);
         charts = fulfillment.Charts;
         reply = fulfillment.Reply;
 
@@ -531,7 +531,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         // Chart-fulfillment invariant (streaming): reconstruct deterministically or append
         // a structured chart-unavailable diagnostic before streaming, so the streamed reply
         // matches the final response and never silently omits an explicitly requested chart.
-        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply);
+        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply, context.PrefetchedData);
         charts = fulfillment.Charts;
         reply = fulfillment.Reply;
 

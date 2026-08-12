@@ -26,6 +26,14 @@ public partial class AgentExecutionPipeline
         Microsoft.Extensions.AI.ChatResponse response,
         List<ChartSpec> charts,
         string reply)
+        => EnforceChartFulfillment(userMessage, response, charts, reply, prefetchedData: null);
+
+    internal ChartFulfillmentResult EnforceChartFulfillment(
+        string? userMessage,
+        Microsoft.Extensions.AI.ChatResponse response,
+        List<ChartSpec> charts,
+        string reply,
+        IReadOnlyDictionary<string, string>? prefetchedData)
     {
         ChartIntent intent = ChartRequestDetector.Detect(userMessage);
 
@@ -107,7 +115,7 @@ public partial class AgentExecutionPipeline
                 int minMarks = Math.Max(
                     ChartSpecValidator.MinimumMarksForType(intent.ChartType),
                     roster.Count);
-                if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, minMarks, roster, out ChartSpec? rebuilt)
+                if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, minMarks, roster, prefetchedData, out ChartSpec? rebuilt)
                     && rebuilt is not null)
                 {
                     _logger.LogInformation(
@@ -190,8 +198,8 @@ public partial class AgentExecutionPipeline
                 // Prefer coverage-checked reconstruction when a roster is known
                 // (category-scoped table request). Otherwise unrestricted build.
                 bool built = roster is { Count: > 0 } && ChartTypeParticipatesInCoverage(intent.ChartType)
-                    ? DeterministicChartBuilder.TryBuild(response, intent.ChartType, Math.Max(autoMinMarks, roster.Count), roster, out ChartSpec? autoChart)
-                    : DeterministicChartBuilder.TryBuild(response, intent.ChartType, autoMinMarks, out autoChart);
+                    ? DeterministicChartBuilder.TryBuild(response, intent.ChartType, Math.Max(autoMinMarks, roster.Count), roster, prefetchedData, out ChartSpec? autoChart)
+                    : DeterministicChartBuilder.TryBuild(response, intent.ChartType, autoMinMarks, requiredBrands: null, prefetchedData, out autoChart);
 
                 if (built && autoChart is not null)
                 {
@@ -236,7 +244,7 @@ public partial class AgentExecutionPipeline
             ? Math.Max(6, ChartSpecValidator.MinimumMarksForType(intent.ChartType))
             : ChartSpecValidator.MinimumMarksForType(intent.ChartType);
 
-        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, fallbackMinMarks, out ChartSpec? built2) && built2 is not null)
+        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, fallbackMinMarks, requiredBrands: null, prefetchedData, out ChartSpec? built2) && built2 is not null)
         {
             _logger.LogInformation(
                 "Chart-fulfillment: reconstructed a {ChartType} chart deterministically from tool results "

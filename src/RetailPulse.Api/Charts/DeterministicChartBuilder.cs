@@ -34,7 +34,7 @@ internal static class DeterministicChartBuilder
         Microsoft.Extensions.AI.ChatResponse response,
         string? requestedType,
         out ChartSpec? chart)
-        => TryBuild(response, requestedType, minMarks: 0, out chart);
+        => TryBuild(response, requestedType, minMarks: 0, requiredBrands: null, prefetchedData: null, out chart);
 
     /// <summary>
     /// Attempt to build a chart of the requested kind, subject to a minimum-finite-marks
@@ -51,7 +51,7 @@ internal static class DeterministicChartBuilder
         string? requestedType,
         int minMarks,
         out ChartSpec? chart)
-        => TryBuild(response, requestedType, minMarks, requiredBrands: null, out chart);
+        => TryBuild(response, requestedType, minMarks, requiredBrands: null, prefetchedData: null, out chart);
 
     /// <summary>
     /// Overload adding a portfolio-coverage contract for horizontal-bar ranking requests:
@@ -68,9 +68,26 @@ internal static class DeterministicChartBuilder
         int minMarks,
         IReadOnlyCollection<string>? requiredBrands,
         out ChartSpec? chart)
+        => TryBuild(response, requestedType, minMarks, requiredBrands, prefetchedData: null, out chart);
+
+    /// <summary>
+    /// Full overload including prefetched tool data. The <see cref="Prefetch.ToolPrefetchService"/>
+    /// injects its aggregate results into the SYSTEM PROMPT (not as tool-result messages), so
+    /// deterministic reconstruction from prefetched payloads requires an explicit hand-off —
+    /// without it, the fulfillment path cannot see the pre-called
+    /// <c>GetPortfolioDepletionStats</c>/<c>GetMarketShare</c> data that closes the #21/#25
+    /// acceptance gaps regardless of which tools the model actually decided to call.
+    /// </summary>
+    public static bool TryBuild(
+        Microsoft.Extensions.AI.ChatResponse response,
+        string? requestedType,
+        int minMarks,
+        IReadOnlyCollection<string>? requiredBrands,
+        IReadOnlyDictionary<string, string>? prefetchedData,
+        out ChartSpec? chart)
     {
         chart = null;
-        List<JsonElement> payloads = CollectToolPayloads(response);
+        List<JsonElement> payloads = CollectToolPayloads(response, prefetchedData);
         if (payloads.Count == 0)
         {
             return false;
@@ -213,7 +230,9 @@ internal static class DeterministicChartBuilder
             };
     }
 
-    private static List<JsonElement> CollectToolPayloads(Microsoft.Extensions.AI.ChatResponse response)
+    private static List<JsonElement> CollectToolPayloads(
+        Microsoft.Extensions.AI.ChatResponse response,
+        IReadOnlyDictionary<string, string>? prefetchedData)
     {
         var payloads = new List<JsonElement>();
         foreach (ChatMessage msg in response.Messages)
@@ -235,6 +254,30 @@ internal static class DeterministicChartBuilder
                 catch (JsonException)
                 {
                     // Non-JSON tool output — ignore for deterministic charting.
+                }
+            }
+        }
+
+        // Prefetched aggregate payloads are injected into the SYSTEM PROMPT by
+        // AgentExecutionPipeline (not as tool-result messages), so they will not
+        // appear in response.Messages. Merge them here so the deterministic builder
+        // sees the pre-called GetPortfolioDepletionStats / GetMarketShare rollups
+        // regardless of which tools the model actually chose to call this turn
+        // (issue #76 acceptance gaps #21 and #25). Deterministic: same prefetch
+        // input → same payload → same chart.
+        if (prefetchedData is { Count: > 0 })
+        {
+            foreach ((string _, string json) in prefetchedData)
+            {
+                if (string.IsNullOrWhiteSpace(json)) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(json, _docOptions);
+                    payloads.Add(doc.RootElement.Clone());
+                }
+                catch (JsonException)
+                {
+                    // Non-JSON prefetch entry — ignore.
                 }
             }
         }

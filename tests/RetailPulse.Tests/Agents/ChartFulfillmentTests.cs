@@ -730,6 +730,73 @@ public sealed class ChartFulfillmentTests
             tenant: tenant);
     }
 
+    [Fact]
+    public void EnforceChartFulfillment_PrefetchedDataOnly_ReconstructsTableEvenWhenNoToolResults()
+    {
+        // The critical wire test: the ToolPrefetchService injects its aggregate
+        // payload into the SYSTEM PROMPT, not into response.Messages as tool
+        // results — so the deterministic builder cannot see it via the normal
+        // FunctionResultContent scan. This test proves the prefetchedData
+        // parameter is threaded through and merged into the payload set, so
+        // a table intent with ZERO tool calls (model failed to call anything)
+        // still emits the table when the prefetch has the roster data.
+        // Closes the #76 wiring gap Kroger identified.
+        AgentExecutionPipeline pipeline = CreatePipelineWithHomeImprovementRoster();
+        MeaiChatResponse response = ResponseWithToolResults(); // NO tool results
+
+        var prefetched = new Dictionary<string, string>
+        {
+            ["GetPortfolioDepletionStats"] = PortfolioDepletionByRegionPayload(
+                ("Pinnacle Hardware", "Northeast", 4.2),
+                ("Pinnacle Hardware", "Southeast", 3.1),
+                ("Pinnacle Hardware", "Midwest", 5.8),
+                ("Summit Outdoor", "Northeast", 6.4),
+                ("Summit Outdoor", "Southeast", 2.9),
+                ("Summit Outdoor", "Midwest", 7.1)),
+        };
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a table showing depletion stats for all home improvement brands by region",
+            response, charts, "Here's the data.", prefetched);
+
+        result.Charts.Should().ContainSingle(
+            "prefetched aggregate must be usable for deterministic reconstruction — the pipeline injects it via the system prompt, so the fulfillment path has to receive it explicitly (issue #76)");
+        result.Charts[0].Type.Should().Be("table");
+        result.Reply.Should().NotContain("Chart unavailable");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_PrefetchedNationalShare_ReconstructsPieEvenWhenModelCalledWrongTool()
+    {
+        // Same wire — but for the #21 pie / national grocery market share case.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        // The model's own tool call returned zero share records (the exact prod
+        // failure mode). The prefetch has the correct national_share.entries[]
+        // payload from GetMarketShare(category="Grocery").
+        MeaiChatResponse response = ResponseWithToolResults(
+            JsonSerializer.Serialize(new { share_data = Array.Empty<object>() }));
+
+        var prefetched = new Dictionary<string, string>
+        {
+            ["GetMarketShare"] = NationalSharePayload(
+                ("FreshMart", 45.2),
+                ("Harvest Table", 30.6),
+                ("Coastal Creamery", 14.8),
+                ("Mountain Trail Granola", 9.4)),
+        };
+
+        var charts = new List<ChartSpec>();
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a pie chart showing market share breakdown for our grocery brands nationally",
+            response, charts, "I couldn't get the share.", prefetched);
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("pie");
+        result.Charts[0].Data[0].Values.Should().HaveCountGreaterThanOrEqualTo(2);
+        result.Reply.Should().NotContain("Chart unavailable");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static AgentExecutionPipeline CreatePipelineWithRoster(IEnumerable<string> brands)

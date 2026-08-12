@@ -19,6 +19,7 @@ public partial class ToolPrefetchService
     private readonly SeasonalityFactorsTool _seasonalityTool;
 #pragma warning restore CS0618
     private readonly PortfolioDepletionStatsTool? _portfolioDepletionTool;
+    private readonly MarketShareTool? _marketShareTool;
     private readonly ToolResultCache _toolCache;
     private readonly ILogger<ToolPrefetchService> _logger;
 
@@ -63,13 +64,15 @@ public partial class ToolPrefetchService
         SeasonalityFactorsTool seasonalityTool,
         ToolResultCache toolCache,
         ILogger<ToolPrefetchService> logger,
-        PortfolioDepletionStatsTool? portfolioDepletionTool = null)
+        PortfolioDepletionStatsTool? portfolioDepletionTool = null,
+        MarketShareTool? marketShareTool = null)
     {
         _historicalDemandTool = historicalDemandTool;
         _seasonalityTool = seasonalityTool;
         _toolCache = toolCache;
         _logger = logger;
         _portfolioDepletionTool = portfolioDepletionTool;
+        _marketShareTool = marketShareTool;
     }
 #pragma warning restore CS0618
 
@@ -298,6 +301,45 @@ public partial class ToolPrefetchService
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Chart-aggregate prefetch (national share) failed");
+                }
+            }
+
+            // Also pre-call the market-share tool with the correct category filter,
+            // which is the authoritative source for `national_share.entries[].share_percent`
+            // that DeterministicChartBuilder.TryBuildShareOrMixPie consumes to build a pie
+            // (issue #76 sweep #21). The model has been observed calling GetMarketShare
+            // with wrong or missing args on this prompt, producing 0 records and forcing
+            // fail-closed; a deterministic pre-call with (category=<detected>) guarantees
+            // the pie-shape payload is present in tool context regardless of the model's
+            // subsequent tool-argument choice. Tenant-generic — no brand/category literals.
+            if (_marketShareTool is not null && entities.Category is not null)
+            {
+                var msArgs = new Dictionary<string, object?>
+                {
+                    ["category"] = entities.Category,
+                };
+                string? msCached = _toolCache.TryGet("GetMarketShare", msArgs);
+                if (msCached is not null)
+                {
+                    results["GetMarketShare"] = msCached;
+                }
+                else
+                {
+                    try
+                    {
+                        string json = await _marketShareTool.GetMarketShare(
+                            brand: null,
+                            category: entities.Category,
+                            region: null,
+                            period: null,
+                            cancellationToken: ct);
+                        results["GetMarketShare"] = json;
+                        _toolCache.Set("GetMarketShare", msArgs, json);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Chart-aggregate prefetch (market share by category) failed for category={Category}", entities.Category);
+                    }
                 }
             }
         }
