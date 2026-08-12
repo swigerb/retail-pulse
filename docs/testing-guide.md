@@ -436,7 +436,7 @@ dotnet test RetailPulse.slnx --collect:"XPlat Code Coverage"
 
 Contract tests verify the API's request/response shape stays stable:
 
-- **ChatEndpointContractTests** — Validates POST /api/v1/chat request schema, response structure, and error format (RFC 7807)
+- **ChatEndpointContractTests** — Validates `POST /api/chat` request schema, response structure, and error format (RFC 7807)
 - **McpToolContractTests** — Validates MCP tool schemas haven't changed (breaking change detection)
 
 These use `WebApplicationFactory<Program>` with mocked external services.

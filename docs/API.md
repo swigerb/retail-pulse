@@ -1085,32 +1085,38 @@ Get the Teams message extension manifest JSON.
 
 ---
 
-## API Versioning
+## Streaming Chat
 
-The API uses URL-based versioning. The current version is `v1`.
+### POST /api/chat/stream
 
-### Versioned Endpoint
+Same request contract and pipeline as `POST /api/chat`, but streams the assistant
+response as **Server-Sent Events (SSE)** so the SPA can render tokens as they are
+produced. Middleware order (auth → guardrails → router → specialist → memory) is
+identical; the only difference is that the specialist's `IChatClient` runs in
+streaming mode and each token/tool-boundary is flushed to the client as an SSE
+`data:` frame. Final `total_duration_ms` / `token_usage` / `routing` metadata is
+delivered as a trailing SSE event so the UI can populate the SpansSummary and
+telemetry pane at the end of the turn.
 
-| Endpoint | Version | Status |
-|----------|---------|--------|
-| `POST /api/v1/chat` | v1 (current) | Active |
-| `POST /api/chat` | Legacy (unversioned) | Deprecated — includes `Sunset` header |
-
-The legacy `/api/chat` endpoint still works but returns a `Sunset` header indicating deprecation. Migrate to `/api/v1/chat`.
+Use `/api/chat` for classic request/response clients (Teams bot, integration
+tests); use `/api/chat/stream` for the SPA.
 
 ---
 
 ## Health Endpoints
 
-### GET /health/live
+Health probes are wired by `RetailPulse.ServiceDefaults.MapDefaultEndpoints()`
+(Aspire convention) and are always anonymous, even under
+`Security:RequireAuth=true`.
 
-Liveness probe — returns 200 if the process is running.
+### GET /health
 
-**Response (200):** `Healthy`
-
-### GET /health/ready
-
-Readiness probe — verifies downstream dependencies (MCP server, Azure OpenAI).
+**Readiness probe.** Runs all health checks tagged `ready`, currently
+`mcp-server` (pings the MCP server's own `/health`) and `azure-openai` (verifies
+the Azure OpenAI / APIM connection is reachable and the configured deployment
+resolves). Returns 200 with a JSON body listing each check's status; returns 503
+if any `ready`-tagged check is unhealthy — Container Apps / Kubernetes should
+remove the instance from the load balancer when this happens.
 
 **Response (200):**
 ```json
@@ -1123,7 +1129,14 @@ Readiness probe — verifies downstream dependencies (MCP server, Azure OpenAI).
 }
 ```
 
-**Response (503):** Service Unavailable — one or more dependencies unhealthy.
+### GET /alive
+
+**Liveness probe.** Filters health checks to none (no `ready` tag), so it returns
+200 as long as the process is running and the ASP.NET Core pipeline can respond.
+Use for Kubernetes / Container Apps liveness probes — an unhealthy `/health` will
+NOT restart the container, but a failing `/alive` will.
+
+**Response (200):** `Healthy`
 
 ---
 
@@ -1147,7 +1160,7 @@ All errors follow [RFC 7807 Problem Details](https://www.rfc-editor.org/rfc/rfc7
   "title": "Validation Error",
   "status": 400,
   "detail": "Message exceeds maximum length of 2000 characters",
-  "instance": "/api/v1/chat",
+  "instance": "/api/chat",
   "traceId": "abc-123-def",
   "correlationId": "550e8400-e29b-41d4-a716-446655440000"
 }
