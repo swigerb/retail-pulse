@@ -52,9 +52,9 @@ public record ChartDataPoint
 |------|-----|----------------|-------------------|
 | Line | `line` | `LineChart` | `Chart.Line` |
 | Bar | `bar` | `BarChart` | `Chart.HorizontalBar` |
-| Grouped Bar | `groupedBar` | `BarChart` (multi-series) | `Chart.HorizontalBar` |
-| Stacked Bar | `stackedBar` | `BarChart` (stacked) | `Chart.HorizontalBar` |
-| Horizontal Bar | `horizontalBar` | `BarChart` (horizontal) | `Chart.HorizontalBar` |
+| Grouped Bar | `groupedbar` | `BarChart` (multi-series) | `Chart.HorizontalBar` |
+| Stacked Bar | `stackedbar` | `BarChart` (stacked) | `Chart.HorizontalBar` |
+| Horizontal Bar | `horizontalbar` | `BarChart` (horizontal) | `Chart.HorizontalBar` |
 | Pie | `pie` | `PieChart` | `Chart.Donut` |
 | Donut | `donut` | `PieChart` (inner radius) | `Chart.Donut` |
 | Gauge | `gauge` | Custom `PieChart` | `Chart.Donut` (partial) |
@@ -64,20 +64,48 @@ public record ChartDataPoint
 
 ## Default Chart Colors
 
-Default palette applied when no explicit `Color` is set on a series:
+Default palette applied when no explicit `Color` is set on a series (the `BRAND_COLORS`
+array in `src/RetailPulse.Web/src/components/ChartRenderer.tsx`) — a blue-forward
+sequence with two supporting greens/blue-greens:
 
-| Swatch | Hex | Name |
-|--------|-----|------|
-| 🔵 | `#1B4D7A` | Primary Blue |
-| 🟡 | `#E8A838` | Accent Gold |
-| 🔵 | `#4682B4` | Steel Blue |
-| 🟢 | `#2E8B57` | Sea Green |
-| 🟤 | `#CD853F` | Peru |
-| 🟠 | `#B8860B` | Dark Goldenrod |
-| 🩵 | `#5F9EA0` | Cadet Blue |
-| 🧡 | `#D2691E` | Chocolate |
+| Order | Hex | Name |
+|-------|-----|------|
+| 1 | `#1565C0` | Primary Blue |
+| 2 | `#42A5F5` | Sky Blue |
+| 3 | `#4682B4` | Steel Blue |
+| 4 | `#2E8B57` | Sea Green |
+| 5 | `#1E88E5` | Primary Blue 500 |
+| 6 | `#64B5F6` | Light Sky Blue |
+| 7 | `#5F9EA0` | Cadet Blue |
+| 8 | `#0D47A1` | Deep Blue |
 
-Background: `#111111` · Accent: `#E8A838` · Text: `#F5F5F0`
+Recharts axes/legend/tooltip pull from a fixed dark-mode set: axis ticks and legend
+labels `#A0A0A0`, tooltip background `#1A1A1A` with `rgba(66,165,245,0.3)` border, and
+tooltip label `#42A5F5`. The gauge chart's active arc is `#42A5F5`.
+
+The application shell in `src/RetailPulse.Web/src/App.css` defines the semantic CSS
+variables the rest of the UI (surfaces, borders, scrollbars, accents) is built from:
+
+| CSS variable | Value |
+|--------------|-------|
+| `--brand-primary` | `#1565C0` |
+| `--brand-primary-light` | `#1E88E5` |
+| `--brand-accent` | `#42A5F5` |
+| `--brand-accent-light` | `#64B5F6` |
+| `--brand-deep-black` | `#080808` |
+| `--color-bg` | `#080808` |
+| `--color-bg-elevated` | `#0D0D0D` |
+| `--color-surface` | `#1A1A1A` |
+| `--color-surface-hover` | `#242424` |
+| `--color-surface-alt` | `#111111` |
+| `--color-text` | `#F5F5F0` |
+| `--color-text-muted` | `#A0A0A0` |
+| `--color-text-subtle` | `#666666` |
+
+Domain-specific palettes (`FORECAST_COLORS`, `AGENT_ROUTING_CONFIG`, `PROMO_COLORS`,
+`SEASONAL_COLORS`, `COUNCIL_COLORS`, `CARD_COLORS`, `OBSERVABILITY_COLORS`,
+`STORE_COLORS`, `MARGIN_COLORS`, `SCORECARD_COLORS`) live in
+`src/RetailPulse.Web/src/constants/agentRouting.ts` — see [Constants & Theming](#constants--theming) in FRONTEND.md for the full breakdown.
 
 ---
 
