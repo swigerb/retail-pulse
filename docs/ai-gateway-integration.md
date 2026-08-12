@@ -201,7 +201,7 @@ The policies in `infra/modules/apim-openai-policy.xml`:
 |--------|---------|-------------|
 | `set-backend-service` | inbound | Routes to the Azure AI Foundry backend |
 | `authentication-managed-identity` | inbound | Authenticates to backend via APIM managed identity |
-| `azure-openai-token-limit` | inbound | Rate limits to 10,000 TPM per subscription |
+| `azure-openai-token-limit` | inbound | Rate limits to **80,000 TPM** per subscription (default; `tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`) |
 | `azure-openai-emit-token-metric` | inbound | Emits token usage to App Insights `customMetrics` |
 | Circuit breaker (on backend) | — | Trips on 429 responses for 1 minute |
 
@@ -243,7 +243,7 @@ POST {apim_gateway}/inference/openai/deployments/{model}/chat/completions?api-ve
 
 Example:
 ```
-POST https://<your-apim-gateway>.azure-api.net/inference/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-03-01-preview
+POST https://<your-apim-gateway>.azure-api.net/inference/openai/deployments/gpt-5.4-mini-2026-03-17/chat/completions?api-version=2025-03-01-preview
 ```
 
 ---

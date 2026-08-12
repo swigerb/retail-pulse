@@ -52,8 +52,9 @@ so the token rides the `?access_token` query string the API honours **only** on 
 **Local dev / not‑yet‑provisioned:** when `VITE_ENTRA_TENANT_ID` / `_CLIENT_ID`
 are empty, `isConfigured` is `false` — no MSAL is loaded, `AuthGate` renders its
 children directly, and the API's Development auth handler stamps a local identity.
-There is **no anonymous fallback in Production**: the azd hooks set
-`Security__RequireAuth=true` and `ASPNETCORE_ENVIRONMENT=Production`.
+There is **no anonymous fallback in Production**: `infra/modules/container-apps.bicep`
+pins `Security__RequireAuth=true` and `ASPNETCORE_ENVIRONMENT=Production` directly on
+the API Container App.
 
 ---
 
@@ -106,7 +107,9 @@ Resolution is deterministic and never auto-detects a provider:
   startup — the app fails closed**.
 
 Production pins `Authentication__Mode=Entra` explicitly in
-`appsettings.Production.json` and the azd hooks; it never merely defaults to it.
+`appsettings.Production.json` and in the shipped Bicep
+(`infra/modules/container-apps.bicep` sets the env var on the API Container App); it
+never merely defaults to it.
 The normalized principal seam (`IPrincipalNormalizer` / `NormalizedPrincipal`)
 maps Entra claims to a provider-neutral identity for future providers without
 changing the `RetailPulse.User` + `access_as_user` requirement.
@@ -126,9 +129,11 @@ changing the `RetailPulse.User` + `access_as_user` requirement.
 - `infra/main.bicepparam` reads the `RETAIL_PULSE_ENTRA_*` env vars; `infra/main.bicep`
   round‑trips them as `VITE_ENTRA_*` outputs, which azd exposes to the Static Web
   App (Vite) build — exactly like `VITE_API_ORIGIN`.
-- The API values are injected at runtime by the `azd-hooks/postprovision.*` hooks
-  (which also set `Security__RequireAuth=true`, `ASPNETCORE_ENVIRONMENT=Production`,
-  and **disable ACA Easy Auth** so it can't interfere with the in‑process JWT boundary).
+- The API values are pinned directly on the Container App revision template by
+  `infra/modules/container-apps.bicep` (which also sets `Security__RequireAuth=true`
+  and `ASPNETCORE_ENVIRONMENT=Production`). The `azd-hooks/postprovision.*` hooks
+  then **disable ACA Easy Auth** so it can't interfere with the in-process JWT
+  boundary.
 - All of these are **public identifiers — never secrets**.
 
 ---
@@ -171,7 +176,8 @@ azd env set RETAIL_PULSE_ENTRA_CLIENT_ID <clientId>
 azd env set RETAIL_PULSE_ENTRA_API_SCOPE access_as_user
 azd env set RETAIL_PULSE_ENTRA_AUDIENCE api://<clientId>
 
-# Provision (postprovision hook flips RequireAuth on + disables Easy Auth) then deploy
+# Provision (Bicep pins Authentication__Mode=Entra + RequireAuth=true directly on
+# the API Container App; the postprovision hook disables Easy Auth) then deploy
 azd provision
 azd deploy
 

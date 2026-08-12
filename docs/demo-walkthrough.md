@@ -68,7 +68,7 @@ Before the first demo run, provision the APIM AI Gateway infrastructure:
    # Test the endpoint directly
    $endpoint = (azd env get-values | Select-String "AZURE_APIM_INFERENCE_ENDPOINT" | ForEach-Object { ($_ -split "=", 2)[1].Trim('"') })
    $key = dotnet user-secrets list --project src/RetailPulse.Api | Select-String "OpenAI:ApimSubscriptionKey" | ForEach-Object { ($_ -split " = ")[1] }
-   curl "$endpoint/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-03-01-preview" `
+   curl "$endpoint/openai/deployments/gpt-5.4-mini-2026-03-17/chat/completions?api-version=2025-03-01-preview" `
      -H "api-key: $key" `
      -H "Content-Type: application/json" `
      -d '{"messages":[{"role":"user","content":"Hello"}]}'
