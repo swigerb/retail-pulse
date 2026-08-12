@@ -300,6 +300,8 @@ Charts are rendered **client-side**. The LLM emits structured `ChartSpec` JSON a
 
 Retail Pulse routes all LLM traffic through an [Azure API Management](https://learn.microsoft.com/azure/api-management/api-management-key-concepts) instance provisioned as first-class IaC by `azd up`. The AI Gateway applies token-per-minute rate limits, emits token-usage metrics, authenticates to Azure AI Foundry with a managed identity, and captures full request/response traces. See [AI Gateway Integration](docs/ai-gateway-integration.md).
 
+See [Official Microsoft resources](docs/ai-gateway-integration.md#official-microsoft-resources) for canonical links, including [AI gateway capabilities in Azure API Management](https://learn.microsoft.com/en-us/azure/api-management/genai-gateway-capabilities) and the [Azure-Samples/AI-Gateway](https://github.com/Azure-Samples/AI-Gateway) sample repo.
+
 ### Foundry Shipment Agent (Optional)
 
 Deploy a specialist agent to Azure AI Foundry for Three-Tier Distribution pipeline analysis. Disabled by default - the app runs fully without it using a local analyzer. See [Architecture](docs/architecture.md).
