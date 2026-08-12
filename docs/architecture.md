@@ -45,7 +45,7 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 |------|-----------|-------------|
 | **1. User sends message** | `ChatPanel.tsx` | Frontend sends `POST /api/chat` with `{ message, sessionId, history }`. Conversation history (up to 10 turns) is included for context continuity. |
 | **2. Agent builds prompt** | `RetailPulseAgent.cs` | Assembles a message array: system prompt (from `prompts.yaml`) + conversation history + current user message. Starts a `Stopwatch` to measure wall-clock duration. |
-| **3. Model inference** | Azure OpenAI via APIM | The `IChatClient` (backed by `AzureOpenAIClient`) sends the messages to APIM. APIM applies token limiting (10k TPM), emits metrics, and forwards to Azure OpenAI using managed identity. Model: `gpt-5.4-mini`. |
+| **3. Model inference** | Azure OpenAI via APIM | The `IChatClient` (backed by `AzureOpenAIClient`) sends the messages to APIM. APIM applies token limiting (default **80,000 TPM** per subscription — configurable via the `tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`), emits metrics, and forwards to Azure OpenAI using managed identity. Model: `gpt-5.4-mini` (shipped deployment `gpt-5.4-mini-2026-03-17`). |
 | **4. Tool selection** | Azure OpenAI | The model examines the user's question and the available tool schemas, then decides which tools to call and with what parameters. For a portfolio-wide question, it may call `GetPortfolioDepletionStats`; for a single brand, `GetDepletionStats`. |
 | **5. Tool execution loop** | MAF (`UseFunctionInvocation`) | Microsoft.Extensions.AI middleware intercepts each tool call. It invokes the registered `AITool` implementation, captures the result, and sends it back to the model. The model may call additional tools or generate its final response. Tools execute sequentially within a single turn. |
 | **6. API proxy call** | e.g., `DepletionStatsTool.cs` | Each tool is an HTTP proxy. It calls the MCP Server's REST endpoint (e.g., `GET /api/depletion-stats?brand=X&region=Y&period=Z`). If the MCP Server is unreachable, the tool returns hardcoded fallback data and logs a warning. |
@@ -136,7 +136,7 @@ Retail Pulse uses Azure API Management as an AI Gateway following the [Azure-Sam
 1. **RetailPulse API** sends chat completion requests to APIM using the Azure OpenAI SDK
 2. **APIM** validates the `api-key` header (subscription key)
 3. **AI Gateway policies** apply (see [`infra/modules/apim-openai-policy.xml`](../infra/modules/apim-openai-policy.xml)):
-   - `azure-openai-token-limit`: Rate limits to 10,000 tokens per minute per subscription
+   - `azure-openai-token-limit`: Rate limits to **80,000 tokens per minute** per subscription by default (`tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`)
    - `azure-openai-emit-token-metric`: Emits token usage metrics to Application Insights `customMetrics`
    - Circuit breaker: Trips on 429s for 1 minute
 4. **APIM** forwards to Azure AI Foundry using its managed identity (no keys in transit)
@@ -150,7 +150,7 @@ POST {apim_gateway}/inference/openai/deployments/{model}/chat/completions?api-ve
 
 Example:
 ```
-POST ${AZURE_APIM_INFERENCE_ENDPOINT}/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2025-03-01-preview
+POST ${AZURE_APIM_INFERENCE_ENDPOINT}/openai/deployments/gpt-5.4-mini-2026-03-17/chat/completions?api-version=2025-03-01-preview
 ```
 
 Retrieve `AZURE_APIM_INFERENCE_ENDPOINT` from `azd env get-values` after `azd provision`; there is no longer a repo-wide hardcoded APIM hostname.
