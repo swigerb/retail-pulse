@@ -404,26 +404,23 @@ Contact the development team or file an issue in the repository.
 
 ## Test Infrastructure Overview
 
-RetailPulse has **1815+ tests** across multiple testing strategies:
+RetailPulse has **3,200+ tests** across multiple testing strategies:
 
 | Category | Location | Framework | Count |
 |----------|----------|-----------|-------|
-| Unit tests | tests/RetailPulse.Tests/ | xUnit + FluentAssertions + Moq | ~1700 |
-| Contract tests | tests/RetailPulse.Tests/Contract/ | WebApplicationFactory | ~10 |
-| E2E demo scenarios | tests/RetailPulse.Tests/E2E/ | WebApplicationFactory | 5 |
-| OWASP security | tests/RetailPulse.Tests/Security/ | xUnit | ~20 |
-| Chaos tests | tests/RetailPulse.Tests/Chaos/ | xUnit | ~15 |
-| Value object tests | tests/RetailPulse.Tests/ValueObjects/ | xUnit | 45 |
+| Backend unit + integration + contract + E2E | tests/RetailPulse.Tests/ | xUnit + FluentAssertions + Moq + WebApplicationFactory | ~2,669 |
 | Load tests | tests/RetailPulse.LoadTests/ | NBomber | 2 scenarios |
 | Benchmarks | tests/RetailPulse.Benchmarks/ | BenchmarkDotNet | 3 suites |
-| Frontend | src/RetailPulse.Web/ | Vitest | ~250 |
+| Frontend | src/RetailPulse.Web/ | Vitest + Testing Library | ~552 |
+
+Backend coverage includes OWASP/security suites (`Security/`), chaos suites (`Chaos/`), value-object suites (`ValueObjects/`), deployment/IaC contract suites (`Deployment/`), and provider-matrix suites — all in the single `RetailPulse.Tests` project.
 
 ---
 
 ## Running All Tests
 
 ```bash
-# Backend (all 1815 tests)
+# Backend (all ~2,669 tests)
 dotnet test RetailPulse.slnx --verbosity quiet
 
 # Frontend
