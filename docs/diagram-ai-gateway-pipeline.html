@@ -378,7 +378,7 @@
           <span class="step">3</span>
           <div>
             <span class="policy-name">azure-openai-token-limit</span>
-            <div class="policy-desc">Enforces 10,000 tokens-per-minute rate limit per subscription. Returns 429 if exceeded.</div>
+            <div class="policy-desc">Enforces 80,000 tokens-per-minute rate limit per subscription (default). Returns 429 if exceeded.</div>
           </div>
         </div>
         <div class="policy-step">
@@ -407,7 +407,7 @@
           <span class="step">6</span>
           <div>
             <span style="font-size:12px;color:#e8f5e9;font-weight:600">Forward to Azure AI Foundry</span>
-            <div class="policy-desc">POST /openai/deployments/gpt-5.4-mini/chat/completions - authenticated via managed identity</div>
+            <div class="policy-desc">POST /openai/deployments/gpt-5.4-mini-2026-03-17/chat/completions - authenticated via managed identity</div>
           </div>
         </div>
       </div>
