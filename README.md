@@ -312,7 +312,7 @@ Retail Pulse implements enterprise-grade patterns:
 - **Observability** — Correlation IDs, custom OpenTelemetry metrics, SLO/SLI definitions, health checks
 - **Security** — CSP/HSTS/X-Frame-Options headers, input validation, SHA256 hash-chain audit log
 - **Performance** — MCP response cache, keyword fast-path routing, lightweight council voting, cache warming
-- **API Versioning** — `/api/v1/chat` with Sunset header on legacy endpoint
+- **API Versioning** — No URL-based versioning. The API surface is unversioned (`/api/*`) and evolves via additive, backwards-compatible changes; breaking changes require a coordinated deprecation with the SPA.
 - **Testing** — 3,200+ unit/integration/contract/E2E tests across backend (xUnit) and frontend (Vitest), plus load tests, mutation testing, and benchmarks
 
 ---

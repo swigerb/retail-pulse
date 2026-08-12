@@ -304,10 +304,13 @@ attack surface. The live build stays `Entra`.
   [ADR-005](adr/005-provider-neutral-authentication.md) for the full flow.
 - **JWT Bearer (Teams bot channel):** Teams-to-bot activity is validated by `TeamsSsoHandler`
   in the bot pipeline (independent of the SPA/API auth above).
-- **Optional API key gate:** `ApiKeyAuthMiddleware` remains available for scenarios that need
-  an extra pre-auth header check (`ApiKey:Enabled=true` + `ApiKey:Value=<secret>`). It is
-  **disabled by default** and is not enabled by the shipped Bicep — Entra Bearer is the
-  Production gate.
+- **Optional API key gate (MCP profile):** `ApiKeyAuthMiddleware` remains available as a pre-auth
+  header check (`ApiKey:Enabled=true` + `ApiKey:Value=<secret>`, header name defaults to
+  `X-Api-Key`). It is **disabled by default** on the API and is **not** enabled by the shipped
+  Bicep — Entra bearer + `Security:RequireAuth=true` is the Production gate for the REST/SPA
+  surface. The middleware exists specifically for the MCP server profile (`src/RetailPulse.McpServer`),
+  where server-to-server callers pin a rotating shared secret in front of the tool endpoints; do
+  not enable it on the public API.
 - **Managed Identity:** For Azure OpenAI (via APIM) and other Azure resources — no client
   secrets in code.
 
@@ -319,12 +322,14 @@ Four tiers of rate limiting (ASP.NET Core Rate Limiter):
 
 | Policy | Limit | Applies To |
 |--------|-------|-----------|
-| `strict` | 10 req/min | `/api/v1/chat`, AI-intensive routes |
-| `standard` | 30 req/min | General API endpoints |
-| `relaxed` | 100 req/min | Health checks, static resources |
-| `upload` | 5 req/min | File upload endpoints |
+| `strict` | 10 req/min | `POST /api/chat`, `POST /api/chat/stream`, `POST /api/council/convene`, `POST /api/escalate` — AI-intensive routes |
+| `moderate` | 30 req/min | State-changing endpoints (approvals, alerts, cards, guardrails config, knowledge deletes) |
+| `relaxed` | 100 req/min | Read-only reporting endpoints (health, margin, observability lists, planogram gets) |
+| `upload` | 5 req/min | `POST /api/knowledge/upload` — file / large-body upload endpoint |
 
-Rate limit responses include `Retry-After` header.
+Rate limit responses include `Retry-After` header. Policy names are declared in
+`src/RetailPulse.Api/Program.cs` and referenced by `RequireRateLimiting(...)` on
+each endpoint group in `src/RetailPulse.Api/Endpoints/`.
 
 ---
 

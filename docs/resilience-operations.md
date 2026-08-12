@@ -116,10 +116,13 @@ Use correlation IDs to trace requests across all services in Aspire Dashboard or
 
 | Endpoint | Type | What it checks |
 |----------|------|---------------|
-| `/health/live` | Liveness | Process is running |
-| `/health/ready` | Readiness | MCP server reachable + Azure OpenAI accessible |
+| `/health` | Readiness | Runs `ready`-tagged health checks (MCP server reachable + Azure OpenAI accessible). 200 healthy / 503 unhealthy. |
+| `/alive` | Liveness | Filters out all health checks — 200 whenever the ASP.NET Core pipeline is responsive. |
 
-**Kubernetes/Container Apps:** Use `/health/live` for liveness probes and `/health/ready` for readiness probes. If readiness fails, the instance is removed from the load balancer until recovery.
+Both endpoints are anonymous even under `Security:RequireAuth=true` and are wired by
+`RetailPulse.ServiceDefaults.MapDefaultEndpoints()` (Aspire convention).
+
+**Kubernetes/Container Apps:** Use `/alive` for liveness probes and `/health` for readiness probes. If readiness fails, the instance is removed from the load balancer until recovery; a failing liveness probe restarts the container.
 
 ---
 
