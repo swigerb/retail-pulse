@@ -95,17 +95,21 @@ The header bar contains toggle buttons that switch the main content area between
 
 | Tab | Icon | What It Shows |
 |-----|------|---------------|
-| Approvals | Badge | Pending human-in-the-loop approvals for promotions and campaigns |
-| Campaign Planner | 🎯 | Promotion planning workspace with ROI modeling and approval gates |
-| Competitive | 🛡️ | Competitive intelligence — threats, market share, pricing alerts |
-| Knowledge Base | 📚 | RAG-indexed documents the agent uses for grounded answers |
-| Health Council | 💓 | Multi-agent consensus scoring for brand/portfolio health |
-| Security | ✅ | Guardrails dashboard — blocked requests, PII redaction, jailbreak stats |
-| Cards | 🃏 | Adaptive Cards for structured agent responses (voting, sign-offs) |
-| Observability | 👁️ | Token usage, cost tracking, audit log, conversation export |
-| Stores | 🏢 | Store operations — heatmap, stockout risks, planograms, performance |
-| Financials | 💰 | P&L waterfall chart and margin driver analysis |
-| Portfolio | ⭐ | Portfolio Scorecard — weighted brand scoring with drill-down explainability |
+| Approvals | Fluent UI `Badge` (count) | Pending human-in-the-loop approvals for promotions and campaigns |
+| Campaign Planner | `TargetArrow24Regular` | Promotion planning workspace with ROI modeling and approval gates |
+| Competitive | `Shield24Regular` | Competitive intelligence — threats, market share, pricing alerts |
+| Knowledge Base | `Library24Regular` | RAG-indexed documents the agent uses for grounded answers |
+| Health Council | `HeartPulse24Regular` | Multi-agent consensus scoring for brand/portfolio health |
+| Security | `ShieldCheckmark24Regular` | Guardrails dashboard — blocked requests, PII redaction, jailbreak stats |
+| Cards | `CardUi24Regular` | Adaptive Cards for structured agent responses (voting, sign-offs) |
+| Observability | `Eye24Regular` | Token usage, cost tracking, audit log, conversation export |
+| Stores | `Building24Regular` | Store operations — heatmap, stockout risks, planograms, performance |
+| Financials | `Money24Regular` | P&L waterfall chart and margin driver analysis |
+| Portfolio | `Star24Regular` | Portfolio Scorecard — weighted brand scoring with drill-down explainability |
+
+Icons are imported from `@fluentui/react-icons`; the "New Chat" button uses
+`Add24Regular` and the telemetry drawer toggle uses `DataUsage24Regular` (open) /
+`Dismiss24Regular` (close).
 
 ### Tab Details
 
@@ -231,10 +235,12 @@ Inline "⚡ Cached" pill badge with tooltip showing time saved and TTL remaining
 - **Props:** `cacheInfo: CacheInfo`
 
 #### `ChartRenderer`
-Polymorphic chart renderer — takes a `ChartSpec` array and renders line, bar, pie, donut, gauge, or table charts via Recharts. Also supports forecast chart variant when `forecastData` is provided.
+Polymorphic chart renderer — takes a `ChartSpec` array and dispatches on the spec's
+`type` field to render one of nine supported chart shapes via Recharts. Also supports
+the forecast chart variant when `forecastData` is provided.
 
 - **Props:** `charts: ChartSpec[]`, `forecastData?: ForecastData`
-- **Chart types:** line, bar, pie, donut, gauge, table
+- **Chart types (9):** `line`, `bar`, `groupedbar`, `stackedbar`, `horizontalbar`, `pie`, `donut`, `gauge`, `table`
 
 ### Agent Routing
 
@@ -332,13 +338,13 @@ Modal-style detail panel for a single competitor with charts and a close button.
 RAG document manager with search, upload, delete, and stats sections.
 
 - **State:** `docs`, `query`, `results`, `loading`
-- **Services:** `fetchDocuments()` → `GET /api/knowledge/documents`; `deleteDocument()` → `DELETE /api/knowledge/documents/{id}`; `searchKnowledgeBase()` → `GET /api/knowledge/search?q=`
+- **Services:** `fetchDocuments()` → `GET /api/knowledge/documents`; `deleteDocument()` → `DELETE /api/knowledge/documents/{id}`; `searchKnowledgeBase()` → `POST /api/knowledge/search` (JSON body)
 
 #### `DocumentUpload`
 Drag-and-drop upload interface for `.md` and `.txt` documents.
 
 - **Props:** `onUploadComplete: () => void`
-- **Services:** `uploadDocument()` → `POST /api/knowledge/documents`
+- **Services:** `uploadDocument()` → `POST /api/knowledge/upload` (JSON body)
 
 #### `CitationBadge`
 Inline citation pill with hover tooltip previewing the source document passage.
@@ -522,10 +528,12 @@ Tabbed container for the three observability views: Cost Dashboard, Audit Log, a
 - **State:** `activeTab`
 
 #### `CostDashboard`
-Token usage and cost charts with period selector (24h / 7d / 30d). Shows metric summary cards, trend line chart, agent cost breakdown bar chart, and tool usage table.
+Token usage and cost charts with a **Today / This Week / This Month** period selector.
+Shows metric summary cards, trend area/line chart, agent cost breakdown bar chart, and
+tool usage table.
 
 - **State:** `selectedPeriod`, `data`, `loading`
-- **Services:** `fetchCostDashboard()` → `GET /api/observability/costs?period=`
+- **Services:** `fetchCostDashboard(period)` fans out to four `/api/observability` endpoints in parallel: `GET /api/observability/costs?period=`, `GET /api/observability/costs/agents?period=`, `GET /api/observability/costs/trend?days=`, `GET /api/observability/costs/tools?period=`. The summary endpoint is required; the other three fall back to empty sections on 404 so partial telemetry still renders.
 
 #### `AuditLogViewer`
 Filterable, paginated audit log table with expandable detail rows. Supports text search, action type, and date range filters.
@@ -621,7 +629,15 @@ Visual list of telemetry spans with type icon, duration bar, token count, timest
 
 ## API Service Layer
 
-All services live in `src/services/` and wrap `fetch()` calls with typed responses. Base URL defaults to the Vite dev server proxy or production origin.
+All services live in `src/services/` and wrap `fetch()` calls with typed responses. Base URL resolution is centralized in `src/config/apiOrigin.ts` and `src/config/telemetryHubUrl.ts`, and is deliberately **different for REST vs SignalR**:
+
+- **REST `/api/**`** — services call same-origin paths (e.g. `fetch('/api/chat')`) and pass them through `resolveApiUrl(path)`. `resolveApiUrl` returns the path unchanged unless `VITE_API_ORIGIN` is set to a bare HTTP(S) origin at build time, in which case it prefixes that origin. This lets a single build cover three deploy topologies:
+  - **Vite dev** (`npm run dev` on `http://localhost:5173`) — `VITE_API_ORIGIN` is unset; the browser hits the SPA origin and the app-host / dev workflow serves API and SPA under the same origin.
+  - **Azure Static Web Apps with a linked backend** (the shipped `azd up` topology) — `VITE_API_ORIGIN` is left unset so `/api/*` calls stay on the SWA origin and are proxied to the linked Container App backend. This is what the `azd-hooks/postprovision.*` `az staticwebapp backends link` step configures.
+  - **Cross-origin SPA host** (e.g. a static bundle served from a different origin than the API) — set `VITE_API_ORIGIN=https://api.example.com` at build time; `resolveApiUrl` then rewrites REST calls to absolute URLs and CORS at the API takes over.
+- **SignalR `/hubs/telemetry`** — the SPA-linked backend proxy on SWA does **not** proxy WebSockets, so `resolveTelemetryHubUrl(VITE_API_ORIGIN)` always prefers the absolute API origin when one is available and only falls back to the relative `/hubs/telemetry` path in dev. The Container App is public and validates the bearer token itself (`?access_token=<jwt>` for hubs), so the direct WebSocket handshake works without the SWA proxy.
+
+A malformed `VITE_API_ORIGIN` (path, query, credentials, non-http protocol) is rejected — `resolveApiOrigin` returns `null` and callers stay on the same-origin default. This behavior is contract-tested by `apiOrigin.test.ts`, `telemetryHubUrl.test.ts`, and `authorizedFetch.test.ts`.
 
 | Service | Endpoints | Used By |
 |---------|-----------|---------|
@@ -631,10 +647,10 @@ All services live in `src/services/` and wrap `fetch()` calls with typed respons
 | `competitiveApi.ts` | `GET /api/competitive/pricing`, `GET /api/competitive/market-share`, `GET /api/competitive/threats`, `GET /api/competitive/competitor/{name}`, `POST /api/competitive/threats/{threatId}/response-plan` | CompetitiveDashboard, ThreatCards |
 | `councilApi.ts` | `POST /api/council/convene`, `GET /api/council/history` | CouncilPanel, CouncilHistory |
 | `guardrailsApi.ts` | `GET /api/guardrails/stats`, `GET /api/guardrails/config`, `PUT /api/guardrails/config`, `POST /api/guardrails/config/reset` | GuardrailsDashboard, GuardrailsConfig |
-| `knowledgeApi.ts` | `GET /api/knowledge/documents`, `POST /api/knowledge/documents`, `DELETE /api/knowledge/documents/{id}`, `GET /api/knowledge/search`, `GET /api/knowledge/stats` | KnowledgeBasePanel, DocumentUpload, KnowledgeStats |
+| `knowledgeApi.ts` | `GET /api/knowledge/documents`, `POST /api/knowledge/upload`, `DELETE /api/knowledge/documents/{id}`, `POST /api/knowledge/search`, `GET /api/knowledge/stats` | KnowledgeBasePanel, DocumentUpload, KnowledgeStats |
 | `marginApi.ts` | `GET /api/margin/waterfall`, `GET /api/margin/drivers`, `GET /api/escalation/{traceId}` | MarginWaterfall, MarginDrivers, EscalationPath |
 | `memoryApi.ts` | `GET /api/memory`, `DELETE /api/memory/{id}`, `DELETE /api/memory` | MemoryPanel |
-| `observabilityApi.ts` | `GET /api/observability/costs`, `GET /api/observability/audit`, `GET /api/observability/export/sessions`, `GET /api/observability/export/{sessionId}/preview`, `POST /api/observability/export/{sessionId}` | CostDashboard, AuditLogViewer, ConversationExport |
+| `observabilityApi.ts` | `GET /api/observability/costs`, `GET /api/observability/costs/agents`, `GET /api/observability/costs/trend`, `GET /api/observability/costs/tools`, `GET /api/observability/audit`, `GET /api/observability/export/sessions`, `GET /api/observability/export/{sessionId}/preview`, `POST /api/observability/export/{sessionId}` | CostDashboard, AuditLogViewer, ConversationExport |
 | `promoApi.ts` | `POST /api/taskmodule/promo`, `GET /api/campaigns`, `POST /api/taskmodule/promo/submit` | PromoTaskModule |
 | `scorecardApi.ts` | `GET /api/portfolio/scorecard`, `GET /api/portfolio/brand/{brandName}`, `GET /api/explain/{traceId}` | PortfolioScorecard, BrandScoreCard, ExplanationPanel |
 | `storeApi.ts` | `GET /api/stores/performance`, `GET /api/stores/{storeId}/planogram`, `GET /api/stores/stockout-risks` | StoreHeatmap, PlanogramDiagram, StockoutAlert, StorePerformanceTable |
@@ -642,16 +658,28 @@ All services live in `src/services/` and wrap `fetch()` calls with typed respons
 
 ## Real-Time (SignalR)
 
-The app maintains one SignalR connection to `/hubs/telemetry`:
+The app maintains one SignalR connection to `/hubs/telemetry`. Two client methods are
+invoked (`JoinSession`, plus the connection lifecycle handshake); the hub then dispatches
+the following server-to-client events (verified against
+`src/RetailPulse.Web/src/services/telemetryHub.ts`,
+`src/RetailPulse.Web/src/components/Dashboard.tsx`, and
+`src/RetailPulse.Web/src/components/cards/AdaptiveCardPanel.tsx`):
 
-| Event | Direction | Used By |
-|-------|-----------|---------|
-| `ReceiveSpan` | Server → Client | Dashboard (live spans) |
-| `ReceiveTotalDuration` | Server → Client | Dashboard (total ms) |
-| `ReceiveTokenUsage` | Server → Client | Dashboard (token counts) |
-| `approval_requested` | Server → Client | Dashboard (pending approvals) |
-| `approval_resolved` | Server → Client | Dashboard (approval status) |
-| `card_updated` | Server → Client | AdaptiveCardPanel (live card sync) |
+| Event | Direction | Handler | Used By |
+|-------|-----------|---------|---------|
+| `Connected` | Server → Client | Startup handshake — session banner + reconnect logging | telemetryHub |
+| `SpanReceived` | Server → Client | Push a single agent/tool span onto the live-spans list | Dashboard (`liveSpans`) |
+| `progress` | Server → Client | Per-turn progress ticks (phase, duration, tokens if available) | Dashboard (streaming progress) |
+| `approval_requested` | Server → Client | New pending approval | Dashboard (`pendingApprovals`) |
+| `approval_resolved` | Server → Client | Approval decided (`id`, `status`, `decidedBy`, `decidedAt`) | Dashboard (`approvalHistory`) |
+| `alert_fired` | Server → Client | Guardrails / operational alert | Dashboard (`alerts`) |
+| `trace_started` | Server → Client | New trace opened for a chat turn | Dashboard (`traces`) |
+| `span_completed` | Server → Client | Span closed with duration/tokens | Dashboard (`traces`) |
+| `trace_completed` | Server → Client | Trace closed — final totals | Dashboard (`traces`) |
+| `card:action` | Server → Client | Adaptive Card action (vote, comment, sign-off) | AdaptiveCardPanel |
+| `card:lifecycle` | Server → Client | Adaptive Card lifecycle change (created, resolved, expired) | AdaptiveCardPanel |
+
+The client calls `connection.invoke('JoinSession', sessionId)` after every connect / reconnect so the hub can broadcast events to the correct SignalR group.
 
 ## Constants & Theming
 
