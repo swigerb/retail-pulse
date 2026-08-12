@@ -20,13 +20,13 @@ does the same thing end-to-end for each curated prompt.
 
 ## Latest run
 
-> **Status:** pending live sign-off on `squad/50-all-chart-prompt-acceptance`
-> for the PR opened against `main`. The automated matrix suites (backend
-> `ChartAcceptanceMatrixTests`, backend `ChartAcceptancePerformanceTests`,
-> frontend `chartAcceptance.matrix.test.tsx`) all pass on this branch, so the
-> production build satisfies the same invariants that the browser runner
-> checks. The reviewer approving the PR is expected to record the live
-> outcome here (or in a PR comment linked here) before merge.
+> **Status:** The chart-acceptance matrix landed on `main` via PR #53 ("P0 #50:
+> Systemic chart acceptance matrix for all curated prompts") and is enforced on every
+> CI run by the backend `ChartAcceptanceMatrixTests` / `ChartAcceptancePerformanceTests`
+> and the frontend `chartAcceptance.matrix.test.tsx` suites. This log file remains the
+> record of human, in-browser sign-off; the automated matrix is the durable gate.
+> Re-run the browser runner (per **How to update this file**) when you want a fresh
+> human record and paste the resulting JSON below.
 
 ```json
 []

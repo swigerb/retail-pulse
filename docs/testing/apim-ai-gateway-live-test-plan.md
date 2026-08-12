@@ -1,6 +1,10 @@
 # APIM AI gateway live test plan
 
-> **Status:** Proactive prep only — written ahead of Kroger/Costco landing the final infra + app wiring so live validation can start immediately after merge.
+> **Status:** Reference live-verification plan. The APIM AI Gateway landed on `main`
+> via PR #52 (first-class azd IaC) and the mandatory post-provision verifier gate
+> landed via PR #73 (`Verify-ApimAiGateway.ps1` wired into `azd-hooks/postprovision.*`
+> as a hard fail). This plan documents the manual live checks that complement — and
+> are automated by — that verifier for the `retailpulse-demo-eus-001` environment.
 
 ## Scope
 
@@ -11,7 +15,10 @@ This plan validates the new Developer-tier Azure API Management gateway for the 
 - AI Foundry account: `aiagents-3rsdmhyb`
 - Expected APIM behaviors: managed-identity backend auth, token-per-minute limiting, token custom metrics, LLM diagnostics, and application traffic flowing through APIM
 
-> **Name placeholders:** this draft assumes Kroger keeps the prototype child names from `deploy\apim-ai-gateway\` (`retail-pulse-inference-api`, `retail-pulse-foundry`, `retail-pulse-sub`). If the landed `infra\modules\apim*.bicep` uses different child names or outputs, replace those three variables before execution.
+> **Name placeholders:** the child names below match the shipped Bicep in
+> `infra/modules/apim-openai-api.bicep` (`retail-pulse-inference-api`,
+> `retail-pulse-foundry`, `retail-pulse-inference-sub`). If a future Bicep revision renames a
+> child resource or emits different outputs, update those variables before execution.
 
 ## Operator setup
 
@@ -27,7 +34,7 @@ $AiFoundryResourceGroup = '<UPDATE-WHEN-KROGER-LANDS-OUTPUT-OR-CONFIRMED-RG>'
 $ApiContainerAppName = 'ca-retailpulse-api'
 $ApimApiName = 'retail-pulse-inference-api'
 $ApimBackendName = 'retail-pulse-foundry'
-$ApimSubscriptionName = 'retail-pulse-sub'
+$ApimSubscriptionName = 'retail-pulse-inference-sub'
 $DeploymentName = 'gpt-5.4-mini-2026-03-17' # replace if infra/app wiring uses a different deployment
 $ApiVersion = '2025-03-01-preview'
 $Marker = "apim-live-test-$([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))"

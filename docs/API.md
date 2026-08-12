@@ -2,7 +2,14 @@
 
 > **Base URL:** `http://localhost:5100` (local dev via Aspire)
 >
-> **Authentication:** All endpoints require an `x-api-key` header (configured via `ApiKey:Value` setting).
+> **Authentication:** Production runs in `Authentication__Mode=Entra` with
+> `Security__RequireAuth=true`. Every protected REST call carries a
+> `Authorization: Bearer <token>` header; SignalR clients pass the same token via the
+> `?access_token=<token>` query string (honored **only** on `/hubs/*`). Both must
+> present the `RetailPulse.User` app role and the `access_as_user` scope. See
+> [Entra Authentication](authentication-entra.md), the [authentication matrix](authentication-matrix.md),
+> and [ADR-005](adr/005-provider-neutral-authentication.md). Local `Development`
+> environments bypass authentication via `DevelopmentAuthHandler`.
 
 ---
 

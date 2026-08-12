@@ -296,9 +296,20 @@ attack surface. The live build stays `Entra`.
 - No API key required.
 
 ### Production
-- **API Key:** Required via `x-api-key` header (configured in `ApiKey:Value`)
-- **JWT Bearer:** For Teams bot integration (validated by `TeamsSsoHandler`)
-- **Managed Identity:** For Azure OpenAI and APIM (no secrets in code)
+- **Entra Bearer (primary):** `Authentication:Mode=Entra` and `Security:RequireAuth=true` are
+  pinned by `infra/modules/container-apps.bicep`. All `/api/**` calls require an
+  `Authorization: Bearer <token>` JWT issued by the tenant's Entra app registration; SignalR
+  hubs accept the same token via `?access_token=...`. See
+  [`authentication-entra.md`](authentication-entra.md) and
+  [ADR-005](adr/005-provider-neutral-authentication.md) for the full flow.
+- **JWT Bearer (Teams bot channel):** Teams-to-bot activity is validated by `TeamsSsoHandler`
+  in the bot pipeline (independent of the SPA/API auth above).
+- **Optional API key gate:** `ApiKeyAuthMiddleware` remains available for scenarios that need
+  an extra pre-auth header check (`ApiKey:Enabled=true` + `ApiKey:Value=<secret>`). It is
+  **disabled by default** and is not enabled by the shipped Bicep — Entra Bearer is the
+  Production gate.
+- **Managed Identity:** For Azure OpenAI (via APIM) and other Azure resources — no client
+  secrets in code.
 
 ---
 

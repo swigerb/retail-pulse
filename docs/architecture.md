@@ -107,7 +107,7 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 | Decision | Rationale |
 |----------|-----------|
 | **Why APIM for AI?** | Token metering per team/department. Rate limiting prevents runaway costs. Content safety policies. Complete audit trail for compliance. |
-| **Separate from core demo** | The app works without APIM. Gateway is an enterprise overlay — add it when the conversation turns to production governance. |
+| **First-class in `azd up`** | Provisioned by `infra/modules/apim.bicep` + `infra/modules/apim-openai-api.bicep`; a mandatory post-provision verifier (`scripts/Verify-ApimAiGateway.ps1`) asserts every AI Gateway invariant on the live resource and fails `azd up` if any is missing. The app can still be pointed directly at Azure OpenAI for local debugging, but the deployed stack always routes through APIM. |
 
 ---
 
@@ -135,9 +135,9 @@ Retail Pulse uses Azure API Management as an AI Gateway following the [Azure-Sam
 
 1. **RetailPulse API** sends chat completion requests to APIM using the Azure OpenAI SDK
 2. **APIM** validates the `api-key` header (subscription key)
-3. **AI Gateway policies** apply:
-   - `llm-token-limit`: Rate limits to 10,000 tokens per minute per subscription
-   - `llm-emit-token-metric`: Emits token usage metrics to Azure Monitor (namespace: RetailPulse)
+3. **AI Gateway policies** apply (see [`infra/modules/apim-openai-policy.xml`](../infra/modules/apim-openai-policy.xml)):
+   - `azure-openai-token-limit`: Rate limits to 10,000 tokens per minute per subscription
+   - `azure-openai-emit-token-metric`: Emits token usage metrics to Application Insights `customMetrics`
    - Circuit breaker: Trips on 429s for 1 minute
 4. **APIM** forwards to Azure AI Foundry using its managed identity (no keys in transit)
 5. **Azure AI Foundry** processes with the `gpt-5.4-mini` deployment
