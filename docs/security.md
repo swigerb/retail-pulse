@@ -79,7 +79,7 @@ defaults):
     "ContentSafety": {
       "Enabled": false,
       "Endpoint": "",              // https://<account>.cognitiveservices.azure.com
-      "TimeoutMs": 2000,
+      "TimeoutMs": 1500,
       "OnUnavailable": "FailOpen",  // or "FailClosed"
       "PromptShieldsEnabled": true,
       "CheckInput": true,
@@ -141,11 +141,14 @@ Every evaluator call emits a dedicated span:
 | Retrieved knowledge | `guardrails.contentsafety.retrieved_knowledge`|
 | Tool result         | `guardrails.contentsafety.tool_result`       |
 
-Tag names include `guardrails.contentsafety.decision`,
+Tag names include `guardrails.contentsafety.stage`,
+`guardrails.contentsafety.decision`,
 `guardrails.contentsafety.latency_ms`,
-`guardrails.contentsafety.prompt_shield.jailbreak`, and
-`guardrails.contentsafety.categories`. Payload content is never included in
-a span tag.
+`guardrails.contentsafety.prompt_shield.jailbreak`,
+`guardrails.contentsafety.prompt_shield.indirect`, and one
+`guardrails.contentsafety.category.<hate|sexual|violence|selfharm>` tag per
+category hit (value is the severity). Payload content is never included in a
+span tag.
 
 ### Provisioning
 

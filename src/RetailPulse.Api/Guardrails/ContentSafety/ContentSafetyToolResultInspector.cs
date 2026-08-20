@@ -68,11 +68,10 @@ public sealed class ContentSafetyToolResultInspector
         {
             case ContentSafetyDecision.Blocked:
                 {
-                    string detectionType = evaluation.PromptShieldJailbreakDetected
-                        ? ContentSafetyDetectionTypes.PromptShield
-                        : evaluation.PromptShieldIndirectInjectionDetected
-                            ? ContentSafetyDetectionTypes.IndirectInjection
-                            : evaluation.PrimaryCategory ?? ContentSafetyDetectionTypes.PromptShield;
+                    // Tool-result stage does not run Prompt Shields, so a
+                    // block without a category is never a prompt-shield hit.
+                    string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
+                    (string? category, int? severity) = PickCategoryAndSeverity(evaluation);
 
                     await _log.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),
@@ -80,7 +79,10 @@ public sealed class ContentSafetyToolResultInspector
                         $"Tool result from '{toolName}' blocked by Content Safety",
                         detectionType,
                         userId,
-                        ContentSafetyActions.Blocked), cancellationToken).ConfigureAwait(false);
+                        ContentSafetyActions.Blocked,
+                        Category: category,
+                        Severity: severity,
+                        Decision: evaluation.Decision.ToString()), cancellationToken).ConfigureAwait(false);
 
                     _logger.LogWarning(
                         "Content Safety blocked tool result from '{Tool}' (decision={Decision}, categories={CategoryCount})",
@@ -101,7 +103,10 @@ public sealed class ContentSafetyToolResultInspector
                         $"Content Safety unavailable while checking tool result from '{toolName}'",
                         ContentSafetyDetectionTypes.Unavailable,
                         userId,
-                        action), cancellationToken).ConfigureAwait(false);
+                        action,
+                        Category: null,
+                        Severity: null,
+                        Decision: evaluation.Decision.ToString()), cancellationToken).ConfigureAwait(false);
 
                     if (cfg.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
                     {
@@ -112,13 +117,17 @@ public sealed class ContentSafetyToolResultInspector
                 }
             case ContentSafetyDecision.Flagged:
                 {
+                    (string? category, int? severity) = PickCategoryAndSeverity(evaluation);
                     await _log.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),
                         DateTime.UtcNow,
                         $"Tool result from '{toolName}' flagged by Content Safety",
-                        evaluation.PrimaryCategory ?? ContentSafetyDetectionTypes.PromptShield,
+                        ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation),
                         userId,
-                        ContentSafetyActions.Flagged), cancellationToken).ConfigureAwait(false);
+                        ContentSafetyActions.Flagged,
+                        Category: category,
+                        Severity: severity,
+                        Decision: evaluation.Decision.ToString()), cancellationToken).ConfigureAwait(false);
                     return ContentSafetyToolResultOutcome.PassThrough(toolResultJson);
                 }
 
@@ -142,6 +151,18 @@ public sealed class ContentSafetyToolResultInspector
             }
         };
         return envelope.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
+    }
+
+    private static (string? Category, int? Severity) PickCategoryAndSeverity(ContentSafetyResult evaluation)
+    {
+        if (evaluation.Categories.Count == 0) return (null, null);
+        ContentSafetyCategoryHit top = evaluation.Categories[0];
+        for (int i = 1; i < evaluation.Categories.Count; i++)
+        {
+            if (evaluation.Categories[i].Severity > top.Severity)
+                top = evaluation.Categories[i];
+        }
+        return (top.Category, top.Severity);
     }
 }
 

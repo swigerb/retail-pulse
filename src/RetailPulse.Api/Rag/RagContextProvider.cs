@@ -116,18 +116,23 @@ public class RagContextProvider
             {
                 case ContentSafetyDecision.Blocked:
                     {
-                        string detectionType = evaluation.PromptShieldIndirectInjectionDetected
-                            ? ContentSafetyDetectionTypes.IndirectInjection
-                            : evaluation.PromptShieldJailbreakDetected
-                                ? ContentSafetyDetectionTypes.PromptShield
-                                : evaluation.PrimaryCategory ?? ContentSafetyDetectionTypes.IndirectInjection;
+                        // On the RAG stage, indirect-injection is the primary
+                        // signal — Prompt Shields runs the chunk as a
+                        // document, so we prefer that classification over a
+                        // user-prompt jailbreak flag when both are set.
+                        string detectionType = ContentSafetyDetectionTypes.ForResultWithShield(
+                            evaluation, preferIndirect: true);
+                        (string? category, int? severity) = PickCategoryAndSeverity(evaluation);
                         await LogAsync(new SuspiciousRequest(
                             Guid.NewGuid().ToString("N"),
                             DateTime.UtcNow,
                             $"Retrieved-knowledge chunk '{chunk.Title}#{chunk.ChunkIndex}' dropped by Content Safety",
                             detectionType,
                             userId,
-                            ContentSafetyActions.Dropped), ct).ConfigureAwait(false);
+                            ContentSafetyActions.Dropped,
+                            Category: category,
+                            Severity: severity,
+                            Decision: evaluation.Decision.ToString()), ct).ConfigureAwait(false);
                         _logger.LogWarning(
                             "Content Safety dropped RAG chunk '{Title}#{Chunk}' (type={Detection})",
                             chunk.Title, chunk.ChunkIndex, detectionType);
@@ -144,7 +149,10 @@ public class RagContextProvider
                             $"Content Safety unavailable while checking RAG chunk '{chunk.Title}#{chunk.ChunkIndex}'",
                             ContentSafetyDetectionTypes.Unavailable,
                             userId,
-                            action), ct).ConfigureAwait(false);
+                            action,
+                            Category: null,
+                            Severity: null,
+                            Decision: evaluation.Decision.ToString()), ct).ConfigureAwait(false);
                         if (cs.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
                         {
                             _logger.LogWarning(
@@ -156,15 +164,21 @@ public class RagContextProvider
                         break;
                     }
                 case ContentSafetyDecision.Flagged:
-                    await LogAsync(new SuspiciousRequest(
-                        Guid.NewGuid().ToString("N"),
-                        DateTime.UtcNow,
-                        $"Retrieved-knowledge chunk '{chunk.Title}#{chunk.ChunkIndex}' flagged by Content Safety",
-                        evaluation.PrimaryCategory ?? ContentSafetyDetectionTypes.IndirectInjection,
-                        userId,
-                        ContentSafetyActions.Flagged), ct).ConfigureAwait(false);
-                    survivors.Add(chunk);
-                    break;
+                    {
+                        (string? category, int? severity) = PickCategoryAndSeverity(evaluation);
+                        await LogAsync(new SuspiciousRequest(
+                            Guid.NewGuid().ToString("N"),
+                            DateTime.UtcNow,
+                            $"Retrieved-knowledge chunk '{chunk.Title}#{chunk.ChunkIndex}' flagged by Content Safety",
+                            ContentSafetyDetectionTypes.ForResultWithShield(evaluation, preferIndirect: true),
+                            userId,
+                            ContentSafetyActions.Flagged,
+                            Category: category,
+                            Severity: severity,
+                            Decision: evaluation.Decision.ToString()), ct).ConfigureAwait(false);
+                        survivors.Add(chunk);
+                        break;
+                    }
                 case ContentSafetyDecision.Passed:
                 default:
                     survivors.Add(chunk);
@@ -176,4 +190,16 @@ public class RagContextProvider
 
     private Task LogAsync(SuspiciousRequest request, CancellationToken ct) =>
         _suspiciousLog?.LogAsync(request, ct) ?? Task.CompletedTask;
+
+    private static (string? Category, int? Severity) PickCategoryAndSeverity(ContentSafetyResult evaluation)
+    {
+        if (evaluation.Categories.Count == 0) return (null, null);
+        ContentSafetyCategoryHit top = evaluation.Categories[0];
+        for (int i = 1; i < evaluation.Categories.Count; i++)
+        {
+            if (evaluation.Categories[i].Severity > top.Severity)
+                top = evaluation.Categories[i];
+        }
+        return (top.Category, top.Severity);
+    }
 }

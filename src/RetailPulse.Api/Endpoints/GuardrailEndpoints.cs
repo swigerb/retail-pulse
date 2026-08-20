@@ -19,7 +19,10 @@ public static class GuardrailEndpoints
                 requestText = r.RequestText,
                 detectionType = r.DetectionType,
                 userContext = r.UserContext,
-                action = r.Action
+                action = r.Action,
+                category = r.Category,
+                severity = r.Severity,
+                decision = r.Decision
             }));
         })
         .WithName("GetGuardrailsLog").RequireAuthorization().RequireRateLimiting("relaxed");

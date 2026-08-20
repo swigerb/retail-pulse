@@ -447,13 +447,10 @@ export interface GuardrailsConfigData {
 
 export type ContentSafetyFailPolicy = 'FailOpen' | 'FailClosed';
 
-export interface ContentSafetyCategoryThresholdsData {
-  hate: number;
-  sexual: number;
-  violence: number;
-  selfHarm: number;
-}
-
+// Aligned with `ContentSafetyConfigResponse` in
+// src/RetailPulse.Api/Endpoints/GuardrailEndpoints.cs — thresholds are
+// serialised as flat fields (`hateThreshold`, `sexualThreshold`, etc.), not a
+// nested object.
 export interface ContentSafetyConfigData {
   enabled: boolean;
   failPolicy: ContentSafetyFailPolicy;
@@ -462,7 +459,10 @@ export interface ContentSafetyConfigData {
   checkOutput: boolean;
   checkRetrievedKnowledge: boolean;
   checkToolResults: boolean;
-  thresholds: ContentSafetyCategoryThresholdsData;
+  hateThreshold: number;
+  sexualThreshold: number;
+  violenceThreshold: number;
+  selfHarmThreshold: number;
 }
 
 export type PiiRedactionType = 'email' | 'phone' | 'ssn' | 'address' | 'name' | 'credit_card' | 'unknown';

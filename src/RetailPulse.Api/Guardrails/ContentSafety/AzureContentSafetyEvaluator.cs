@@ -1,9 +1,12 @@
 using System.Diagnostics;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure;
 using Azure.AI.ContentSafety;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Contracts.Guardrails;
 
@@ -27,6 +30,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 {
     private readonly ContentSafetyClient _client;
     private readonly HttpClient _http;
+    private readonly ContentSafetyTokenProvider _tokens;
     private readonly GuardrailsConfig _guardrails;
     private readonly ILogger<AzureContentSafetyEvaluator> _logger;
 
@@ -46,11 +50,18 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
     public AzureContentSafetyEvaluator(
         ContentSafetyClient client,
         HttpClient http,
+        ContentSafetyTokenProvider tokens,
         GuardrailsConfig guardrails,
         ILogger<AzureContentSafetyEvaluator> logger)
     {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(guardrails);
+        ArgumentNullException.ThrowIfNull(logger);
         _client = client;
         _http = http;
+        _tokens = tokens;
         _guardrails = guardrails;
         _logger = logger;
     }
@@ -126,6 +137,25 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
             _logger.LogWarning(ex, "Content Safety service returned unavailable status at {Stage}.", stage);
             activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
             activity?.SetTag("guardrails.contentsafety.transport_error", true);
+            return WithLatency(ContentSafetyResult.ServiceUnavailable, startTicks);
+        }
+        catch (BrokenCircuitException ex)
+        {
+            // Polly opened the breaker — every call is short-circuited until
+            // the sampling window recovers. We translate this to
+            // ServiceUnavailable so the middleware's fail-open / fail-closed
+            // policy decides the request outcome and the audit row is written.
+            _logger.LogWarning(ex, "Content Safety circuit breaker open at {Stage}.", stage);
+            activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
+            activity?.SetTag("guardrails.contentsafety.breaker_open", true);
+            return WithLatency(ContentSafetyResult.ServiceUnavailable, startTicks);
+        }
+        catch (TimeoutRejectedException ex)
+        {
+            _logger.LogWarning(ex, "Content Safety Polly timeout rejected at {Stage} (limit {TimeoutMs}ms).",
+                stage, config.TimeoutMs);
+            activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
+            activity?.SetTag("guardrails.contentsafety.timeout", true);
             return WithLatency(ContentSafetyResult.ServiceUnavailable, startTicks);
         }
         catch (HttpRequestException ex)
@@ -210,6 +240,11 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
         using HttpContent content = JsonContent.Create(body, options: _jsonOptions);
         using HttpRequestMessage request = new(HttpMethod.Post, _promptShieldPath) { Content = content };
+        // Managed-identity bearer — matches Bicep's disableLocalAuth=true.
+        // The token provider caches under a semaphore so this call is
+        // synchronous once per rotation and never issues a per-request login.
+        string bearer = await _tokens.GetBearerAsync(ct).ConfigureAwait(false);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         using HttpResponseMessage response = await _http.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
 

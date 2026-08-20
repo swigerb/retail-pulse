@@ -48,6 +48,40 @@ implementations:
   reports state to `CircuitBreakerHealthCheck` so the existing readiness
   probe surfaces it.
 
+### Authentication and unified transport
+
+The provisioned Cognitive Services account sets `disableLocalAuth = true`
+in Bicep so **every** call — SDK and raw Prompt Shields — must present a
+managed-identity bearer token. DI registers a single
+`Azure.Core.TokenCredential` (`DefaultAzureCredential` at runtime,
+overridable in tests) that both paths share:
+
+* The SDK `ContentSafetyClient` receives it in its constructor and uses
+  its own token pipeline for `text:analyze`.
+* The raw Prompt Shields path uses `ContentSafetyTokenProvider`, a tiny
+  semaphore-guarded bearer cache with a 5-minute refresh buffer that
+  requests the scope `https://cognitiveservices.azure.com/.default`. It
+  never issues a per-request login — one live token is reused across all
+  concurrent Prompt Shields calls until its expiry approaches.
+
+Both HTTP paths flow through the **same** named `HttpClient`
+(`"ContentSafety"`) registered with the resilience pipeline. The SDK is
+wired to it via `ContentSafetyClientOptions.Transport =
+new HttpClientTransport(sharedHttpClient)`, which routes SDK requests
+through the same delegating handler chain as the raw path. Consequences:
+
+* One timeout + circuit breaker guards both failure classes. When the
+  breaker opens on either failure type, the next call for the other type
+  short-circuits too — the health check reports a single `contentsafety`
+  breaker.
+* `HttpClientTransport` constructed with an externally-supplied
+  `HttpClient` does not take ownership of it — the `IHttpClientFactory`
+  keeps managing lifetime, so there is no double-disposal.
+* `BrokenCircuitException` and `TimeoutRejectedException` bubble to the
+  evaluator and are translated to `ContentSafetyDecision.ServiceUnavailable`
+  so the middleware's fail-open / fail-closed policy — not an unbounded
+  exception — decides the request outcome.
+
 The regex layer runs first at every seam. Only when it passes does the
 middleware / RAG / tool-result path call the evaluator. The design deliberately
 preserves the regex layer's short-circuit semantics because it is the layer
@@ -80,6 +114,16 @@ No constructor of any type under `src/RetailPulse.Api/Agents/` changes; the
 per-agent code and the agent-execution pipeline remain untouched by this
 issue. Agent-specific instrumentation, if we want it, is a follow-up
 alongside issue #89 (which owns that tree).
+
+`ContentSafetyToolResultAmbient.Install` is **immutable and idempotent** by
+design. The first winner is committed with `Interlocked.CompareExchange`;
+installing the same instance again is a no-op, and installing a *different*
+instance throws `InvalidOperationException` so a wiring race is loud rather
+than silent. This is the smallest possible seam that keeps the tool-result
+coverage without editing anything under `src/RetailPulse.Api/Agents/`, and
+is explicitly the boundary line owned by issue #89. Once #89 refactors the
+agent-execution pipeline to constructor-inject its dependencies, the
+ambient accessor can be deleted in favour of DI.
 
 ### RAG seam
 
@@ -127,11 +171,16 @@ expose the endpoint URL — only the flags an operator can toggle at runtime.
 
 Every evaluator call emits a `guardrails.contentsafety.{input|output|
 retrieved_knowledge|tool_result}` `Activity` on the same `AgentTelemetry`
-`ActivitySource` used by the rest of the middleware, so existing OpenTelemetry
-exporters and traces pick it up with no extra plumbing. The tags include
-`decision`, `latency_ms`, `prompt_shield.jailbreak`,
-`prompt_shield.indirect`, and a `categories` list — decisions and category
-names only, never the payload.
+`ActivitySource` used by the rest of the middleware, so existing
+OpenTelemetry exporters and traces pick it up with no extra plumbing.
+Tag names, verified by an `ActivityListener` test:
+`guardrails.contentsafety.stage`,
+`guardrails.contentsafety.decision`,
+`guardrails.contentsafety.latency_ms`,
+`guardrails.contentsafety.prompt_shield.jailbreak`,
+`guardrails.contentsafety.prompt_shield.indirect`, and one
+`guardrails.contentsafety.category.<name>` tag per hit whose value is the
+integer severity. Decisions and category names only — never the payload.
 
 ## Consequences
 
