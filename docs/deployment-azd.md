@@ -91,8 +91,27 @@ infra/
     ├── container-registry.bicep # Dedicated Basic-SKU Azure Container Registry
     ├── container-apps-env.bicep # Container Apps Environment
     ├── container-apps.bicep     # API, MCP server, Teams Bot container apps
-    └── static-web-app.bicep    # Standard-SKU static frontend hosting (direct-CORS to the API)
+    ├── static-web-app.bicep    # Standard-SKU static frontend hosting (direct-CORS to the API)
+    ├── content-safety.bicep    # Optional Azure AI Content Safety (issue #100). Provisioned only when AZURE_CONTENT_SAFETY_ENABLED=true.
+    └── ai-search.bicep          # Optional Azure AI Search knowledge provider (issue #103). Provisioned only when AZURE_AI_SEARCH_ENABLED=true.
 ```
+
+### Optional features (opt-in, disabled by default)
+
+Two Wave-5 cloud-backed features ship as fully-optional modules. Each is
+gated by a single `azd env set` toggle; the default `azd up` leaves them
+off so no additional resources are provisioned and no additional cost is
+incurred.
+
+| Feature | Toggle | Provisioned when on | Docs |
+|---|---|---|---|
+| Azure AI Content Safety (input/output moderation, Prompt Shields) | `azd env set AZURE_CONTENT_SAFETY_ENABLED true` | `infra/modules/content-safety.bicep` — Cognitive Services (`kind=ContentSafety`), managed identity, `disableLocalAuth=true`. Postprovision hooks grant `Cognitive Services User`. | ADR-010 |
+| Azure AI Search knowledge provider (durable hybrid retrieval) | `azd env set AZURE_AI_SEARCH_ENABLED true` and `azd env set Knowledge__Provider__Mode AzureAISearch` | `infra/modules/ai-search.bicep` — Basic-SKU Search service with system identity and `disableLocalAuth=true`. Postprovision hooks grant `Search Service Contributor` + `Search Index Data Contributor`. Also requires `Knowledge__AzureAISearch__Endpoint` and `Knowledge__AzureAISearch__Embeddings__Endpoint`. | ADR-012, `docs/rag/azure-ai-search-index.md` |
+
+Neither feature is referenced by the default runtime path: with both
+toggles left at `false`, the API boots against the InMemory BM25
+knowledge base and the regex-only guardrails baseline — exactly the
+laptop-demo path.
 
 ### azd environment aliases (Bicep outputs → azure.yaml / Vite build)
 
