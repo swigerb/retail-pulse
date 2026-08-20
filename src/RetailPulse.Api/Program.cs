@@ -594,7 +594,7 @@ string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
 builder.Services.Configure<ApprovalOptions>(builder.Configuration.GetSection(ApprovalOptions.SectionName));
 builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IApprovalResumeStrategy, OrphanUnresumableStrategy>();
-builder.Services.AddSingleton<SqliteApprovalGate>(sp =>
+builder.Services.AddSingleton(sp =>
 {
     ApprovalOptions opts = sp.GetRequiredService<IOptions<ApprovalOptions>>().Value;
     return new SqliteApprovalGate(

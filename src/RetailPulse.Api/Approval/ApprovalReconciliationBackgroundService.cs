@@ -35,8 +35,10 @@ public sealed class ApprovalReconciliationBackgroundService : IHostedService
         // gate concrete type here. This keeps IApprovalGate lean for callers that
         // never need to reconcile.
         if (gate is not SqliteApprovalGate sqlite)
+        {
             throw new InvalidOperationException(
                 $"ApprovalReconciliationBackgroundService requires {nameof(SqliteApprovalGate)}; got {gate.GetType().Name}.");
+        }
 
         _gate = sqlite;
         _strategy = strategy;

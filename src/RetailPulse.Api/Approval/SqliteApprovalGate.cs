@@ -39,11 +39,6 @@ public sealed class SqliteApprovalGate : IApprovalGate
     private readonly ILogger<SqliteApprovalGate> _logger;
     private readonly TimeSpan _defaultTimeout;
     private readonly TimeProvider _timeProvider;
-    // Per-process instance id — distinguishes waits owned by THIS process from
-    // waits still stored Pending after a restart. New GUID per gate instance so
-    // two gates (e.g., two independent tests) never collide, and a real restart
-    // gets a fresh id so reconciliation can see the previous owner is gone.
-    private readonly string _instanceId;
 
     private const string _iso8601 = "yyyy-MM-ddTHH:mm:ss.fffzzz";
 
@@ -63,11 +58,13 @@ public sealed class SqliteApprovalGate : IApprovalGate
     internal const double BackoffMultiplier = 2.0;
 
     /// <summary>
-    /// Stable identity of the process that owns this gate. Exposed so the
-    /// reconciliation service and tests can assert that reconciliation only touches
-    /// rows written by a DIFFERENT process.
+    /// Stable identity of the process that owns this gate. New GUID per gate
+    /// instance so two gates (e.g., two independent tests) never collide, and a
+    /// real restart gets a fresh id so reconciliation can see the previous owner
+    /// is gone. Exposed so the reconciliation service and tests can assert that
+    /// reconciliation only touches rows written by a DIFFERENT process.
     /// </summary>
-    public string InstanceId => _instanceId;
+    public string InstanceId { get; }
 
     public SqliteApprovalGate(
         string dbPath,
@@ -78,7 +75,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         _logger = logger;
         _defaultTimeout = defaultTimeout ?? TimeSpan.FromMinutes(5);
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _instanceId = Guid.NewGuid().ToString("N");
+        InstanceId = Guid.NewGuid().ToString("N");
 
         string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
@@ -199,7 +196,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         cmd.Parameters.AddWithValue("@reasoning", (object?)context.Reasoning ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@sessionId", (object?)context.SessionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@conversationId", (object?)context.ConversationId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@instanceId", _instanceId);
+        cmd.Parameters.AddWithValue("@instanceId", InstanceId);
         cmd.Parameters.AddWithValue("@heartbeatAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
         cmd.Parameters.AddWithValue("@timeoutSeconds", (long)_defaultTimeout.TotalSeconds);
         cmd.Parameters.AddWithValue("@createdAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
@@ -208,7 +205,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
         _logger.LogInformation(
             "Approval request {RequestId} created for agent {AgentId}, user {UserId}, urgency {Urgency}, instance {InstanceId}, timeout {TimeoutSeconds}s",
-            requestId, context.AgentId, context.UserId, context.Urgency, _instanceId, (long)_defaultTimeout.TotalSeconds);
+            requestId, context.AgentId, context.UserId, context.Urgency, InstanceId, (long)_defaultTimeout.TotalSeconds);
 
         return new ApprovalRequest(requestId, context, now, expiresAt);
     }
@@ -284,6 +281,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
             ApprovalDecision.Modified => ReasonHumanModified,
             ApprovalDecision.TimedOut => ReasonTimeout,
             ApprovalDecision.Orphaned => ReasonOrphanedOnRestart,
+            ApprovalDecision.Pending => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Cannot record Pending as a terminal decision."),
             _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Cannot record Pending as a terminal decision.")
         };
 
@@ -334,7 +332,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
             string? owningInstance = await ReadOwningInstanceAsync(row.RequestId, ct);
             if (owningInstance is null)
                 continue;
-            if (string.Equals(owningInstance, _instanceId, StringComparison.Ordinal))
+            if (string.Equals(owningInstance, InstanceId, StringComparison.Ordinal))
                 continue;
 
             ApprovalResumeAction action = await strategy.DecideAsync(row, ct);
@@ -352,7 +350,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
                         terminated++;
                         _logger.LogWarning(
                             "Approval {RequestId} orphaned on restart (previous instance {PreviousInstance}, current {CurrentInstance})",
-                            row.RequestId, owningInstance, _instanceId);
+                            row.RequestId, owningInstance, InstanceId);
                     }
                     break;
                 case ApprovalResumeAction.Resume:
@@ -361,8 +359,11 @@ public sealed class SqliteApprovalGate : IApprovalGate
                     await AdoptRowAsync(row.RequestId, ct);
                     _logger.LogInformation(
                         "Approval {RequestId} adopted by current instance {CurrentInstance} for resume (was {PreviousInstance})",
-                        row.RequestId, _instanceId, owningInstance);
+                        row.RequestId, InstanceId, owningInstance);
                     break;
+                default:
+                    throw new InvalidOperationException(
+                        $"Unknown {nameof(ApprovalResumeAction)} value '{action}' returned by resume strategy.");
             }
         }
 
@@ -410,10 +411,9 @@ public sealed class SqliteApprovalGate : IApprovalGate
         CancellationToken ct)
     {
         (bool _, ApprovalRequest? current) = await TryConditionalTransitionAsync(requestId, decision, reason, comment, ct);
-        if (current is null)
-            throw new KeyNotFoundException($"Approval request '{requestId}' not found.");
-
-        return new ApprovalResult(current.RequestId, current.Decision, current.Comment, current.RespondedAt, current.TerminalReason);
+        return current is null
+            ? throw new KeyNotFoundException($"Approval request '{requestId}' not found.")
+            : new ApprovalResult(current.RequestId, current.Decision, current.Comment, current.RespondedAt, current.TerminalReason);
     }
 
     private async Task<(bool won, ApprovalRequest? current)> TryConditionalTransitionAsync(
@@ -460,7 +460,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
             WHERE RequestId = @id AND AgentInstanceId = @instanceId AND Decision = 'Pending'
             """;
         cmd.Parameters.AddWithValue("@id", requestId);
-        cmd.Parameters.AddWithValue("@instanceId", _instanceId);
+        cmd.Parameters.AddWithValue("@instanceId", InstanceId);
         cmd.Parameters.AddWithValue("@heartbeatAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -476,7 +476,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
             WHERE RequestId = @id AND Decision = 'Pending'
             """;
         cmd.Parameters.AddWithValue("@id", requestId);
-        cmd.Parameters.AddWithValue("@instanceId", _instanceId);
+        cmd.Parameters.AddWithValue("@instanceId", InstanceId);
         cmd.Parameters.AddWithValue("@heartbeatAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);
     }
