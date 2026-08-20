@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Routing;
@@ -579,8 +580,33 @@ builder.Services.AddScoped(sp =>
 // durable backing. See DataDirectoryResolver.
 string dataDirectory = DataDirectoryResolver.Resolve(builder.Configuration, builder.Environment);
 string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
-builder.Services.AddSingleton<IApprovalGate>(sp =>
-    new SqliteApprovalGate(approvalDbPath, sp.GetRequiredService<ILogger<SqliteApprovalGate>>()));
+// Human-in-the-loop approval gate. Restart-safe (issue #91): every Pending row
+// carries the durable identity of the process that owns its in-process waiter, the
+// authoritative timeout used to create it, and a heartbeat; the startup
+// reconciliation service closes rows abandoned by a previous process through the
+// configured resume strategy so an approval never silently loses its execution.
+// TimeProvider is injected so timeout/backoff tests never touch the wall clock.
+builder.Services.Configure<ApprovalOptions>(builder.Configuration.GetSection(ApprovalOptions.SectionName));
+builder.Services.TryAddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IApprovalResumeStrategy, OrphanUnresumableStrategy>();
+builder.Services.AddSingleton(sp =>
+{
+    ApprovalOptions opts = sp.GetRequiredService<IOptions<ApprovalOptions>>().Value;
+    return new SqliteApprovalGate(
+        approvalDbPath,
+        sp.GetRequiredService<ILogger<SqliteApprovalGate>>(),
+        opts.DefaultTimeout,
+        sp.GetRequiredService<TimeProvider>());
+});
+builder.Services.AddSingleton<IApprovalGate>(sp => sp.GetRequiredService<SqliteApprovalGate>());
+// Reconciliation runs during host startup as a hosted service. Ordering with the
+// web host is not strictly guaranteed here — traffic may briefly race the sweep —
+// so correctness does NOT depend on completing before Kestrel accepts requests.
+// Race-safety is enforced at the row: every Pending → terminal write is a single
+// conditional SQL UPDATE and RespondAsync returns the actual persisted winner,
+// so a late human response can never silently overwrite a row that reconciliation
+// (or a concurrent waiter) has already closed.
+builder.Services.AddHostedService<ApprovalReconciliationBackgroundService>();
 
 // Approval tool — available to specialist agents for high-impact recommendations
 builder.Services.AddScoped(sp =>
