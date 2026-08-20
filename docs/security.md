@@ -41,6 +41,124 @@ Validation errors return RFC 7807 Problem Details with specific error descriptio
 
 ---
 
+## Content Safety (optional second layer)
+
+> **Status:** disabled by default. See
+> [ADR-010](adr/010-content-safety-layering.md) for the full design rationale.
+
+The regex-based guardrails
+([`GuardrailsMiddleware`](../src/RetailPulse.Api/Middleware/GuardrailsMiddleware.cs))
+can be layered with Azure AI Content Safety and Prompt Shields for defence in
+depth. The layer is opt-in; when disabled, the runtime is byte-for-byte
+identical to the regex-only baseline (no `ContentSafetyClient` is
+constructed, no HTTP handler is registered, `DefaultAzureCredential` is not
+resolved).
+
+### Coverage
+
+All four trust boundaries are covered:
+
+| Stage                | Where                                      | Prompt Shields | Categories |
+| -------------------- | ------------------------------------------ | -------------- | ---------- |
+| Input                | `GuardrailsMiddleware.CheckInputAsync`     | Yes (user)     | Yes        |
+| Output               | `GuardrailsMiddleware.FilterOutputAsync`   | No             | Yes        |
+| Retrieved knowledge  | `RagContextProvider.FilterByContentSafety` | Yes (document) | Yes        |
+| Tool result          | `Budget/BudgetedAIFunction` (ambient hook) | No             | Yes        |
+
+PII redaction runs before Content Safety on the output path so raw PII is
+never included in a moderation call.
+
+### Configuration
+
+`Guardrails:ContentSafety` in `appsettings.json` (all values shown are
+defaults):
+
+```jsonc
+{
+  "Guardrails": {
+    "ContentSafety": {
+      "Enabled": false,
+      "Endpoint": "",              // https://<account>.cognitiveservices.azure.com
+      "TimeoutMs": 2000,
+      "OnUnavailable": "FailOpen",  // or "FailClosed"
+      "PromptShieldsEnabled": true,
+      "CheckInput": true,
+      "CheckOutput": true,
+      "CheckRetrievedKnowledge": true,
+      "CheckToolResults": true,
+      "Thresholds": { "Hate": 4, "Sexual": 4, "Violence": 4, "SelfHarm": 4 }
+    }
+  }
+}
+```
+
+There is deliberately **no** key / secret field. Authentication is via
+`DefaultAzureCredential` — locally that resolves to the developer's Azure CLI
+context; in production it resolves to the container app's system-assigned
+identity, which is granted `Cognitive Services User` on the resource by the
+postprovision hook. The `/api/guardrails/config` endpoint never returns the
+`Endpoint` value so an operator cannot leak it through the audit surface.
+
+### Fail-open vs fail-closed
+
+`OnUnavailable` is explicit. When the circuit breaker opens or the timeout
+trips:
+
+* `FailOpen` (default) — the request continues and a `content-safety-
+  unavailable` audit row is written with `Action = failopen-passed`. Use for
+  general-purpose or exploratory deployments where availability is more
+  important than a temporary softening of the second layer.
+* `FailClosed` — the request is refused with a distinct "Content Safety
+  layer is temporarily unavailable" message and a `failclosed-blocked` audit
+  row. Use for regulated deployments where the second layer is part of the
+  compliance posture.
+
+**Runbook — Content Safety unavailable.** Check the guardrails dashboard for
+`content-safety-unavailable` blocks (fail-closed) or a spike of
+`failopen-passed` rows (fail-open). The circuit breaker state is exposed by
+the existing readiness health check (`contentSafetyCircuitState`); a
+persistent `Open` value means the Azure region is degraded. Recovery is
+automatic once the breaker's sampling window sees successes again — no
+restart or configuration change is required.
+
+### Language support
+
+Prompt Shields is language-tuned for English at GA. Non-English payloads
+are still analysed by the text-moderation categories (Hate, Sexual,
+Violence, SelfHarm), but jailbreak detection quality varies. Regulated
+deployments should treat Prompt Shields as one signal alongside the regex
+jailbreak patterns rather than the sole defence, and review
+`content-safety-prompt-shield` audit rows to calibrate.
+
+### Telemetry
+
+Every evaluator call emits a dedicated span:
+
+| Stage               | Span name                                    |
+| ------------------- | -------------------------------------------- |
+| Input               | `guardrails.contentsafety.input`             |
+| Output              | `guardrails.contentsafety.output`            |
+| Retrieved knowledge | `guardrails.contentsafety.retrieved_knowledge`|
+| Tool result         | `guardrails.contentsafety.tool_result`       |
+
+Tag names include `guardrails.contentsafety.decision`,
+`guardrails.contentsafety.latency_ms`,
+`guardrails.contentsafety.prompt_shield.jailbreak`, and
+`guardrails.contentsafety.categories`. Payload content is never included in
+a span tag.
+
+### Provisioning
+
+`infra/modules/content-safety.bicep` provisions a `ContentSafety`
+Cognitive Services account with `disableLocalAuth = true` and a
+system-assigned managed identity. `main.bicep` includes the module only
+when `contentSafetyEnabled = true`, so the default `azd up` is unchanged.
+The postprovision hook (`azd-hooks/postprovision.{ps1,sh}`) grants each
+container app's system identity the `Cognitive Services User` role on the
+resource idempotently — a re-provision never duplicates the assignment.
+
+---
+
 ## Audit Log
 
 All chat interactions are recorded in a tamper-evident audit log (`DurableAuditLog`):

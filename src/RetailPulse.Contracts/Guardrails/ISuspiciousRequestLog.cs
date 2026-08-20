@@ -41,4 +41,6 @@ public record GuardrailsStats(
     int JailbreakAttempts,
     int PiiDetections,
     int AccessDenials,
-    DateTime Since);
+    DateTime Since,
+    int ContentSafetyBlocks = 0,
+    int ContentSafetyFlags = 0);

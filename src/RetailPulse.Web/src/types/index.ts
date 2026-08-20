@@ -405,7 +405,17 @@ export interface CacheInfo {
 
 // --- Guardrails types (Sprint 3.2) ---
 
-export type GuardrailDetectionType = 'jailbreak' | 'pii' | 'access';
+export type GuardrailDetectionType =
+  | 'jailbreak'
+  | 'pii'
+  | 'access'
+  | 'content-safety-hate'
+  | 'content-safety-sexual'
+  | 'content-safety-violence'
+  | 'content-safety-selfharm'
+  | 'content-safety-prompt-shield'
+  | 'content-safety-indirect-injection'
+  | 'content-safety-unavailable';
 
 export interface BlockedRequest {
   id: string;
@@ -421,6 +431,8 @@ export interface GuardrailsStats {
   jailbreakAttempts: number;
   piiDetections: number;
   accessDenials: number;
+  contentSafetyBlocks: number;
+  contentSafetyFlags: number;
   recentBlocked: BlockedRequest[];
   blocksPerHour: Array<{ hour: string; count: number }>;
 }
@@ -430,6 +442,27 @@ export interface GuardrailsConfigData {
   piiEnabled: boolean;
   accessControlEnabled: boolean;
   blockedPatterns: string;
+  contentSafety?: ContentSafetyConfigData;
+}
+
+export type ContentSafetyFailPolicy = 'FailOpen' | 'FailClosed';
+
+export interface ContentSafetyCategoryThresholdsData {
+  hate: number;
+  sexual: number;
+  violence: number;
+  selfHarm: number;
+}
+
+export interface ContentSafetyConfigData {
+  enabled: boolean;
+  failPolicy: ContentSafetyFailPolicy;
+  promptShieldsEnabled: boolean;
+  checkInput: boolean;
+  checkOutput: boolean;
+  checkRetrievedKnowledge: boolean;
+  checkToolResults: boolean;
+  thresholds: ContentSafetyCategoryThresholdsData;
 }
 
 export type PiiRedactionType = 'email' | 'phone' | 'ssn' | 'address' | 'name' | 'credit_card' | 'unknown';

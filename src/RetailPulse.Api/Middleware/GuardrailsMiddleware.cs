@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using RetailPulse.Api.Guardrails;
+using RetailPulse.Api.Guardrails.ContentSafety;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Guardrails;
 
@@ -18,6 +19,7 @@ public class GuardrailsMiddleware
     private readonly ISuspiciousRequestLog _suspiciousLog;
     private readonly ITenantProvider _tenantProvider;
     private readonly ILogger<GuardrailsMiddleware> _logger;
+    private readonly IContentSafetyEvaluator _contentSafety;
 
     /// <summary>
     /// SQL injection patterns — case-insensitive substring matching.
@@ -36,16 +38,22 @@ public class GuardrailsMiddleware
         "I can't help with that request. My guardrails detected potentially harmful content ({type}). " +
         "Please rephrase your question about retail operations and I'll be happy to assist.";
 
+    private const string _unavailableRefusal =
+        "I can't process that request right now. The content safety layer is temporarily unavailable and " +
+        "this deployment is configured to fail closed. Please retry shortly.";
+
     public GuardrailsMiddleware(
         GuardrailsConfig config,
         ISuspiciousRequestLog suspiciousLog,
         ITenantProvider tenantProvider,
-        ILogger<GuardrailsMiddleware> logger)
+        ILogger<GuardrailsMiddleware> logger,
+        IContentSafetyEvaluator? contentSafety = null)
     {
         _config = config;
         _suspiciousLog = suspiciousLog;
         _tenantProvider = tenantProvider;
         _logger = logger;
+        _contentSafety = contentSafety ?? NoOpContentSafetyEvaluator.Instance;
     }
 
     /// <summary>
@@ -129,6 +137,31 @@ public class GuardrailsMiddleware
             }
         }
 
+        // ── Content Safety (remote, optional) — runs only after the pattern
+        //     layer has passed. On disabled path the evaluator is a no-op.
+        ContentSafetyConfig cs = _config.ContentSafety;
+        if (cs.Enabled && cs.CheckInput)
+        {
+            ContentSafetyResult evaluation = await _contentSafety.EvaluateAsync(
+                message,
+                ContentSafetyStage.Input,
+                new ContentSafetyEvaluationContext(
+                    UserId: userId,
+                    CheckPromptShield: cs.PromptShieldsEnabled),
+                ct).ConfigureAwait(false);
+
+            GuardrailResult? contentSafetyOutcome = await HandleContentSafetyDecisionAsync(
+                evaluation,
+                message,
+                userId,
+                activity,
+                ct).ConfigureAwait(false);
+            if (contentSafetyOutcome is not null)
+            {
+                return contentSafetyOutcome;
+            }
+        }
+
         activity?.SetTag("guardrails.blocked", false);
         return GuardrailResult.Passed();
     }
@@ -138,20 +171,26 @@ public class GuardrailsMiddleware
     /// </summary>
     public async Task<string> FilterOutputAsync(string response, string userId, CancellationToken ct = default)
     {
-        if (!_config.PiiDetectionEnabled || !_config.AutoRedactPii)
+        ContentSafetyConfig cs = _config.ContentSafety;
+        bool piiEnabled = _config.PiiDetectionEnabled && _config.AutoRedactPii;
+        bool contentSafetyEnabled = cs.Enabled && cs.CheckOutput;
+        if (!piiEnabled && !contentSafetyEnabled)
             return response;
 
         using Activity? activity = AgentTelemetry.Source.StartActivity("guardrails.output_filter", ActivityKind.Internal);
         string redacted = response;
         int redactionCount = 0;
 
-        foreach ((string? name, Regex? pattern) in GuardrailPatterns.PiiPatterns)
+        if (piiEnabled)
         {
-            MatchCollection matches = pattern.Matches(redacted);
-            if (matches.Count > 0)
+            foreach ((string? name, Regex? pattern) in GuardrailPatterns.PiiPatterns)
             {
-                redactionCount += matches.Count;
-                redacted = pattern.Replace(redacted, $"[REDACTED:{name.ToUpperInvariant()}]");
+                MatchCollection matches = pattern.Matches(redacted);
+                if (matches.Count > 0)
+                {
+                    redactionCount += matches.Count;
+                    redacted = pattern.Replace(redacted, $"[REDACTED:{name.ToUpperInvariant()}]");
+                }
             }
         }
 
@@ -171,7 +210,171 @@ public class GuardrailsMiddleware
                 redactionCount, userId);
         }
 
+        if (contentSafetyEnabled)
+        {
+            ContentSafetyResult evaluation = await _contentSafety.EvaluateAsync(
+                redacted,
+                ContentSafetyStage.Output,
+                new ContentSafetyEvaluationContext(UserId: userId, CheckPromptShield: false),
+                ct).ConfigureAwait(false);
+
+            string? substitute = await HandleContentSafetyOutputAsync(
+                evaluation, redacted, userId, activity, ct).ConfigureAwait(false);
+            if (substitute is not null)
+            {
+                return substitute;
+            }
+        }
+
         return redacted;
+    }
+
+    private async Task<GuardrailResult?> HandleContentSafetyDecisionAsync(
+        ContentSafetyResult evaluation,
+        string message,
+        string userId,
+        Activity? activity,
+        CancellationToken ct)
+    {
+        ContentSafetyConfig cs = _config.ContentSafety;
+        switch (evaluation.Decision)
+        {
+            case ContentSafetyDecision.Blocked:
+                {
+                    string detectionType = evaluation.PromptShieldJailbreakDetected
+                        ? ContentSafetyDetectionTypes.PromptShield
+                        : evaluation.PromptShieldIndirectInjectionDetected
+                            ? ContentSafetyDetectionTypes.IndirectInjection
+                            : evaluation.PrimaryCategory ?? ContentSafetyDetectionTypes.PromptShield;
+
+                    activity?.SetTag("guardrails.blocked", true);
+                    activity?.SetTag("guardrails.type", detectionType);
+
+                    await _suspiciousLog.LogAsync(new SuspiciousRequest(
+                        Guid.NewGuid().ToString("N"),
+                        DateTime.UtcNow,
+                        Truncate(message, 200),
+                        detectionType,
+                        userId,
+                        ContentSafetyActions.Blocked), ct).ConfigureAwait(false);
+
+                    _logger.LogWarning(
+                        "Content Safety blocked input from user {UserId}: type={DetectionType}, categories={CategoryCount}",
+                        userId, detectionType, evaluation.Categories.Count);
+
+                    return GuardrailResult.Blocked(_defaultRefusal.Replace("{type}", "content safety"));
+                }
+            case ContentSafetyDecision.ServiceUnavailable:
+                {
+                    string action = cs.OnUnavailable == ContentSafetyFailPolicy.FailClosed
+                        ? ContentSafetyActions.FailClosedBlocked
+                        : ContentSafetyActions.FailOpenPassed;
+
+                    await _suspiciousLog.LogAsync(new SuspiciousRequest(
+                        Guid.NewGuid().ToString("N"),
+                        DateTime.UtcNow,
+                        Truncate(message, 200),
+                        ContentSafetyDetectionTypes.Unavailable,
+                        userId,
+                        action), ct).ConfigureAwait(false);
+
+                    if (cs.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
+                    {
+                        activity?.SetTag("guardrails.blocked", true);
+                        activity?.SetTag("guardrails.type", ContentSafetyDetectionTypes.Unavailable);
+                        _logger.LogWarning(
+                            "Content Safety unavailable for user {UserId}; fail-closed policy blocking request.",
+                            userId);
+                        return GuardrailResult.Blocked(_unavailableRefusal);
+                    }
+
+                    _logger.LogInformation(
+                        "Content Safety unavailable for user {UserId}; fail-open policy allowing request.",
+                        userId);
+                    return null;
+                }
+            case ContentSafetyDecision.Flagged:
+                {
+                    await _suspiciousLog.LogAsync(new SuspiciousRequest(
+                        Guid.NewGuid().ToString("N"),
+                        DateTime.UtcNow,
+                        Truncate(message, 200),
+                        evaluation.PrimaryCategory ?? ContentSafetyDetectionTypes.PromptShield,
+                        userId,
+                        ContentSafetyActions.Flagged), ct).ConfigureAwait(false);
+                    return null;
+                }
+
+            case ContentSafetyDecision.Passed:
+            default:
+                return null;
+        }
+    }
+
+    private async Task<string?> HandleContentSafetyOutputAsync(
+        ContentSafetyResult evaluation,
+        string response,
+        string userId,
+        Activity? activity,
+        CancellationToken ct)
+    {
+        ContentSafetyConfig cs = _config.ContentSafety;
+        switch (evaluation.Decision)
+        {
+            case ContentSafetyDecision.Blocked:
+                {
+                    string detectionType = evaluation.PrimaryCategory ?? ContentSafetyDetectionTypes.PromptShield;
+                    activity?.SetTag("guardrails.output_blocked", true);
+                    activity?.SetTag("guardrails.type", detectionType);
+
+                    await _suspiciousLog.LogAsync(new SuspiciousRequest(
+                        Guid.NewGuid().ToString("N"),
+                        DateTime.UtcNow,
+                        Truncate(response, 200),
+                        detectionType,
+                        userId,
+                        ContentSafetyActions.Blocked), ct).ConfigureAwait(false);
+
+                    _logger.LogWarning(
+                        "Content Safety blocked model output for user {UserId}: type={DetectionType}",
+                        userId, detectionType);
+
+                    return _defaultRefusal.Replace("{type}", "content safety");
+                }
+            case ContentSafetyDecision.ServiceUnavailable:
+                {
+                    string action = cs.OnUnavailable == ContentSafetyFailPolicy.FailClosed
+                        ? ContentSafetyActions.FailClosedBlocked
+                        : ContentSafetyActions.FailOpenPassed;
+
+                    await _suspiciousLog.LogAsync(new SuspiciousRequest(
+                        Guid.NewGuid().ToString("N"),
+                        DateTime.UtcNow,
+                        Truncate(response, 200),
+                        ContentSafetyDetectionTypes.Unavailable,
+                        userId,
+                        action), ct).ConfigureAwait(false);
+
+                    return cs.OnUnavailable == ContentSafetyFailPolicy.FailClosed
+                        ? _unavailableRefusal
+                        : null;
+                }
+            case ContentSafetyDecision.Flagged:
+                {
+                    await _suspiciousLog.LogAsync(new SuspiciousRequest(
+                        Guid.NewGuid().ToString("N"),
+                        DateTime.UtcNow,
+                        Truncate(response, 200),
+                        evaluation.PrimaryCategory ?? ContentSafetyDetectionTypes.PromptShield,
+                        userId,
+                        ContentSafetyActions.Flagged), ct).ConfigureAwait(false);
+                    return null;
+                }
+
+            case ContentSafetyDecision.Passed:
+            default:
+                return null;
+        }
     }
 
     private static string Truncate(string text, int maxLength) =>
