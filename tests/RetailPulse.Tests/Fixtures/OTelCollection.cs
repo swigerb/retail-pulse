@@ -7,8 +7,8 @@ namespace RetailPulse.Tests.Fixtures;
 /// (e.g., <c>OTelRoutingSpanTests</c>) or emits activities on that source with
 /// tag values that could satisfy another OTel test's filter
 /// (e.g., <c>MafPrimitivesCharacterizationTests</c> exercising the real
-/// <see cref="RetailPulse.Api.Agents.Routing.RetailOpsRouter"/> or
-/// <see cref="RetailPulse.Api.Agents.AgentExecutionPipeline"/>).
+/// <see cref="Api.Agents.Routing.RetailOpsRouter"/> or
+/// <see cref="Api.Agents.AgentExecutionPipeline"/>).
 /// <para>
 /// The <see cref="System.Diagnostics.ActivityListener"/> API is process-wide:
 /// once a listener is registered it captures every matching

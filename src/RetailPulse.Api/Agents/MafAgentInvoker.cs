@@ -16,7 +16,7 @@ namespace RetailPulse.Api.Agents;
 /// <para>
 /// The adapter is intentionally minimal: it constructs a per-invocation
 /// <see cref="ChatClientAgent"/> around the caller-provided <see cref="IChatClient"/>
-/// and invokes <see cref="ChatClientAgent.RunAsync(System.Collections.Generic.IEnumerable{ChatMessage}, AgentSession, ChatClientAgentRunOptions, System.Threading.CancellationToken)"/>.
+/// and invokes <see cref="ChatClientAgent.RunAsync(IEnumerable{ChatMessage}, AgentSession, ChatClientAgentRunOptions, CancellationToken)"/>.
 /// The returned <see cref="AgentResponse"/> is a genuine MAF type; callers extract
 /// text, response messages, and token usage from it directly.
 /// </para>

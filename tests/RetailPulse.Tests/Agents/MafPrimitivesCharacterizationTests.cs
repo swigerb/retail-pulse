@@ -43,7 +43,7 @@ namespace RetailPulse.Tests.Agents;
 /// </para>
 /// <para>
 /// This class joins the shared <c>OTel</c> xUnit collection
-/// (<see cref="RetailPulse.Tests.Fixtures.OTelCollection"/>). Its router,
+/// (<see cref="OTelCollection"/>). Its router,
 /// specialist, and span-order tests emit spans on the
 /// <c>RetailPulse.Agent</c> <see cref="ActivitySource"/> — the same source that
 /// <c>OTelRoutingSpanTests</c> subscribes to with a process-wide
@@ -63,7 +63,7 @@ public class MafPrimitivesCharacterizationTests
     {
         var probe = MafChatClientProbe.WithAssistantReply("hello world");
 
-        var response = await MafAgentInvoker.RunAsync(
+        MafAgentResponse response = await MafAgentInvoker.RunAsync(
             probe,
             agentName: "test.agent",
             messages: [new ChatMessage(ChatRole.User, "hi")],
@@ -119,7 +119,7 @@ public class MafPrimitivesCharacterizationTests
             ct: CancellationToken.None);
 
         probe.Calls.Should().HaveCount(1);
-        var observed = probe.Calls[0].Options;
+        ChatOptions? observed = probe.Calls[0].Options;
         observed.Should().NotBeNull();
         observed.Temperature.Should().Be(0.42f, "MAF must forward temperature unchanged");
         observed.ResponseFormat.Should().BeSameAs(ChatResponseFormat.Json, "response format must be preserved");
@@ -143,7 +143,7 @@ public class MafPrimitivesCharacterizationTests
             EmptyConfiguration(),
             NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
 
-        var agent = new RetailPulse.Api.Agents.Specialists.GeneralAgent(
+        var agent = new GeneralAgent(
             pipeline,
             new AgentDefinition
             {
@@ -154,7 +154,7 @@ public class MafPrimitivesCharacterizationTests
             },
             tools: []);
 
-        var response = await agent.HandleAsync(new ChatRequest("hello"));
+        Contracts.ChatResponse response = await agent.HandleAsync(new ChatRequest("hello"));
 
         response.Reply.Should().Contain("hi from specialist");
         probe.Calls.Should().HaveCount(1, "the specialist should trigger exactly one chat client invocation via MAF");
@@ -186,7 +186,7 @@ public class MafPrimitivesCharacterizationTests
             specialists: [],
             Mock.Of<ILogger<RetailOpsRouter>>());
 
-        var decision = await router.RouteAsync(
+        RoutingDecision decision = await router.RouteAsync(
             "Give me a full portfolio deep dive across every domain",
             null, null, null);
 
@@ -203,8 +203,10 @@ public class MafPrimitivesCharacterizationTests
     [Fact]
     public async Task ConsensusOrchestrator_VoterAndSynthesizer_BothRouteThroughMaf()
     {
+#pragma warning disable JSON002 // deliberate stub-vote payload; not produced by application code
         var probe = MafChatClientProbe.WithAssistantReply(
             "{\"rating\":\"Green\",\"reasoning\":\"stable performance across domain\",\"confidence\":0.85,\"tags\":[]}");
+#pragma warning restore JSON002
 
         ISpecialistAgent[] specialists =
         [
@@ -217,10 +219,10 @@ public class MafPrimitivesCharacterizationTests
             specialists,
             probe,
             synthesisDef: new AgentDefinition { Name = "council-synth", SystemPrompt = "Synthesize.", Temperature = 0.1 },
-            voteDef:      new AgentDefinition { Name = "council-vote",  SystemPrompt = "Vote.",       Temperature = 0.0 },
+            voteDef: new AgentDefinition { Name = "council-vote", SystemPrompt = "Vote.", Temperature = 0.0 },
             Mock.Of<ILogger<ConsensusOrchestrator>>());
 
-        var verdict = await orchestrator.ConveneAsync(
+        CouncilVerdict verdict = await orchestrator.ConveneAsync(
             "Sierra Gold Tequila", "Southwest", CancellationToken.None);
 
         verdict.Should().NotBeNull();
@@ -250,16 +252,16 @@ public class MafPrimitivesCharacterizationTests
     /// documented as <c>"none"</c> and the specialist responds without an LLM.
     /// </summary>
     [Theory]
-    [InlineData("general",            true,  "Give me a summary of the retail landscape.")]
-    [InlineData("demand-forecasting", true,  "What is the demand forecast for Sierra Gold this quarter?")]
-    [InlineData("competitive-intel",  true,  "How is our competitive threat landscape looking this month?")]
-    [InlineData("supply-chain",       true,  "Are our supply chain shipments on track for the West region?")]
-    [InlineData("promo-planning",     true,  "Plan a summer promotion for premium spirits.")]
-    [InlineData("store-ops",          true,  "What operational issues should stores focus on this quarter?")]
-    [InlineData("planogram",          true,  "How should we adjust the planogram for the East region?")]
-    [InlineData("margin-analysis",    true,  "Analyze margin performance for tequila brands.")]
-    [InlineData("field-sentiment",    true,  "What is the field sentiment for Sierra Gold in the Northeast?")]
-    [InlineData("memory-management",  false, "Remember that I prefer premium tequila.")]
+    [InlineData("general", true, "Give me a summary of the retail landscape.")]
+    [InlineData("demand-forecasting", true, "What is the demand forecast for Sierra Gold this quarter?")]
+    [InlineData("competitive-intel", true, "How is our competitive threat landscape looking this month?")]
+    [InlineData("supply-chain", true, "Are our supply chain shipments on track for the West region?")]
+    [InlineData("promo-planning", true, "Plan a summer promotion for premium spirits.")]
+    [InlineData("store-ops", true, "What operational issues should stores focus on this quarter?")]
+    [InlineData("planogram", true, "How should we adjust the planogram for the East region?")]
+    [InlineData("margin-analysis", true, "Analyze margin performance for tequila brands.")]
+    [InlineData("field-sentiment", true, "What is the field sentiment for Sierra Gold in the Northeast?")]
+    [InlineData("memory-management", false, "Remember that I prefer premium tequila.")]
     public async Task Specialist_HandlerBehavior_MatchesMafRoutingContract_ForEachKey(
         string specialistKey, bool routesThroughMaf, string representativePrompt)
     {
@@ -274,7 +276,7 @@ public class MafPrimitivesCharacterizationTests
         specialist.Key.Should().Be(specialistKey,
             "the built specialist must own the intended DI key");
 
-        RetailPulse.Contracts.ChatResponse response =
+        Contracts.ChatResponse response =
             await specialist.HandleAsync(new ChatRequest(representativePrompt));
 
         response.Should().NotBeNull(
@@ -319,18 +321,18 @@ public class MafPrimitivesCharacterizationTests
 
         return key switch
         {
-            "general"            => new GeneralAgent(pipeline, Def("General"), []),
+            "general" => new GeneralAgent(pipeline, Def("General"), []),
             "demand-forecasting" => new DemandForecastAgent(pipeline, Def("Demand Forecast"), []),
-            "competitive-intel"  => new CompetitiveIntelAgent(
+            "competitive-intel" => new CompetitiveIntelAgent(
                                         pipeline, Def("Competitive Intel"), [],
                                         hubContext, Mock.Of<ILogger<CompetitiveIntelAgent>>()),
-            "supply-chain"       => new SupplyChainAgent(pipeline, Def("Supply Chain"), []),
-            "promo-planning"     => new PromoPlanningAgent(pipeline, Def("Promo Planning"), []),
-            "store-ops"          => new StoreOpsAgent(pipeline, Def("Store Ops"), []),
-            "planogram"          => new PlanogramAgent(pipeline, Def("Planogram"), []),
-            "margin-analysis"    => new MarginAgent(pipeline, Def("Margin"), []),
-            "field-sentiment"    => new FieldSentimentAgent(pipeline, Def("Field Sentiment"), []),
-            "memory-management"  => new MemoryManagementAgent(
+            "supply-chain" => new SupplyChainAgent(pipeline, Def("Supply Chain"), []),
+            "promo-planning" => new PromoPlanningAgent(pipeline, Def("Promo Planning"), []),
+            "store-ops" => new StoreOpsAgent(pipeline, Def("Store Ops"), []),
+            "planogram" => new PlanogramAgent(pipeline, Def("Planogram"), []),
+            "margin-analysis" => new MarginAgent(pipeline, Def("Margin"), []),
+            "field-sentiment" => new FieldSentimentAgent(pipeline, Def("Field Sentiment"), []),
+            "memory-management" => new MemoryManagementAgent(
                                         new FakeConversationMemory(),
                                         Mock.Of<ILogger<MemoryManagementAgent>>()),
             _ => throw new ArgumentException(
@@ -400,9 +402,9 @@ public class MafPrimitivesCharacterizationTests
             ActivityStopped = _ => { },
         };
         ActivitySource.AddActivityListener(testListener);
-        using var scopeActivity = testSource.StartActivity("test.scope");
+        using Activity? scopeActivity = testSource.StartActivity("test.scope");
         scopeActivity.Should().NotBeNull("the test scope Activity is required to correlate captured spans");
-        var scopeTraceId = scopeActivity.TraceId;
+        ActivityTraceId scopeTraceId = scopeActivity.TraceId;
 
         var probe = MafChatClientProbe.WithAssistantReply("done");
         var pipeline = new AgentExecutionPipeline(
@@ -411,7 +413,7 @@ public class MafPrimitivesCharacterizationTests
             EmptyConfiguration(),
             NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
 
-        var agent = new RetailPulse.Api.Agents.Specialists.GeneralAgent(
+        var agent = new GeneralAgent(
             pipeline,
             new AgentDefinition
             {
@@ -428,9 +430,9 @@ public class MafPrimitivesCharacterizationTests
             .Where(a => a.TraceId == scopeTraceId)
             .ToList();
 
-        var thoughtSpan = myActivities
+        Activity? thoughtSpan = myActivities
             .SingleOrDefault(a => a.OperationName == "agent.thought");
-        var responseSpan = myActivities
+        Activity? responseSpan = myActivities
             .SingleOrDefault(a => a.OperationName == "agent.response");
 
         thoughtSpan.Should().NotBeNull("every specialist run must open an agent.thought span");
@@ -485,7 +487,7 @@ public class MafPrimitivesCharacterizationTests
             CancellationToken cancellationToken = default)
         {
             IReadOnlyList<ChatMessage> captured = [.. messages];
-            var fromMaf = IsCalledFromMafFrame(new StackTrace(fNeedFileInfo: false));
+            bool fromMaf = IsCalledFromMafFrame(new StackTrace(fNeedFileInfo: false));
             Calls.Add(new CapturedCall(captured, options, fromMaf));
             return Task.FromResult(_responseFactory(captured, options));
         }
@@ -502,10 +504,10 @@ public class MafPrimitivesCharacterizationTests
 
         private static bool IsCalledFromMafFrame(StackTrace trace)
         {
-            foreach (var frame in trace.GetFrames())
+            foreach (StackFrame frame in trace.GetFrames())
             {
-                var declaring = frame?.GetMethod()?.DeclaringType;
-                var name = declaring?.FullName;
+                Type? declaring = frame?.GetMethod()?.DeclaringType;
+                string? name = declaring?.FullName;
                 if (name is not null && name.StartsWith("Microsoft.Agents.AI.", StringComparison.Ordinal))
                 {
                     return true;
