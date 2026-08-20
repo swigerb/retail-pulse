@@ -2,6 +2,7 @@ using System.ClientModel;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Agents.AI;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Auth;
@@ -32,6 +33,14 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
     private readonly ToolResultBudget? _toolBudget;
     private readonly ToolResultBudgetOptions _budgetOptions;
     private readonly TenantConfiguration _tenant;
+    private readonly ILoggerFactory? _loggerFactory;
+
+    /// <summary>
+    /// Distinct MAF agent name to use when invoking the shared <see cref="MafAgentInvoker"/>.
+    /// Kept internal so characterization tests can verify the pipeline actually
+    /// produces a MAF <see cref="AgentResponse"/> for every specialist run.
+    /// </summary>
+    internal const string MafSpecialistAgentSuffix = ".specialist";
 
     /// <summary>
     /// True when a tenant roster with at least one brand is wired into this pipeline.
@@ -81,7 +90,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         IAnonymousChatPolicy anonymousChatPolicy,
         TenantConfiguration tenant,
         ToolResultBudget? toolBudget = null,
-        ToolResultBudgetOptions? budgetOptions = null)
+        ToolResultBudgetOptions? budgetOptions = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _chatClient = chatClient;
         _hubContext = hubContext;
@@ -97,6 +107,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         _tenant = tenant ?? throw new ArgumentNullException(nameof(tenant),
             "TenantConfiguration is required — portfolio-ranking coverage enforcement " +
             "(issue #74) fails closed without it. Production DI must resolve it from the service provider.");
+        _loggerFactory = loggerFactory;
     }
 
     /// <summary>
@@ -153,11 +164,17 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             timestamp = DateTimeOffset.UtcNow
         }, ct);
 
-        Microsoft.Extensions.AI.ChatResponse response;
+        AgentResponse mafResponse;
 
         try
         {
-            response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
+            mafResponse = await MafAgentInvoker.RunAsync(
+                _chatClient,
+                context.AgentName + MafSpecialistAgentSuffix,
+                messages,
+                chatOptions,
+                _loggerFactory,
+                ct);
         }
         catch (ClientResultException ex) when (ex.Status == 429)
         {
@@ -184,6 +201,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         long thoughtDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", thoughtDurationMs);
+
+        // Adapt the MAF AgentResponse to a Microsoft.Extensions.AI.ChatResponse for the
+        // existing chart, tool-span, and token helpers. AgentResponseExtensions.AsChatResponse
+        // is a documented shallow copy (Messages/Usage list references are shared), so this
+        // is allocation-cheap and preserves the exact tool-call/tool-result content that the
+        // specialist span and chart extraction pipelines depend on.
+        Microsoft.Extensions.AI.ChatResponse response = mafResponse.AsChatResponse();
 
         (int inputTokens, int outputTokens, int totalTokens) = ExtractTokenCounts(response);
 
@@ -433,11 +457,17 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             timestamp = DateTimeOffset.UtcNow
         }, ct);
 
-        Microsoft.Extensions.AI.ChatResponse response;
+        AgentResponse mafResponse;
 
         try
         {
-            response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
+            mafResponse = await MafAgentInvoker.RunAsync(
+                _chatClient,
+                context.AgentName + MafSpecialistAgentSuffix,
+                messages,
+                chatOptions,
+                _loggerFactory,
+                ct);
         }
         catch (ClientResultException ex) when (ex.Status == 429)
         {
@@ -462,6 +492,11 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         long thoughtDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", thoughtDurationMs);
+
+        // Adapt the MAF AgentResponse to a Microsoft.Extensions.AI.ChatResponse for the
+        // existing chart, tool-span, and token helpers (see the non-streaming path for the
+        // full rationale).
+        Microsoft.Extensions.AI.ChatResponse response = mafResponse.AsChatResponse();
 
         (int inputTokens, int outputTokens, int totalTokens) = ExtractTokenCounts(response);
 

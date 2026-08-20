@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts.Consensus;
 using RetailPulse.Contracts.Routing;
@@ -20,6 +22,15 @@ public class ConsensusOrchestrator : IConsensusCouncil
     private readonly AgentDefinition _synthesisDef;
     private readonly AgentDefinition _voteDef;
     private readonly ILogger<ConsensusOrchestrator> _logger;
+    private readonly ILoggerFactory? _loggerFactory;
+
+    /// <summary>MAF agent name for lightweight voter runs, so characterization tests can
+    /// verify each vote flows through <see cref="MafAgentInvoker"/> (a real
+    /// <see cref="ChatClientAgent"/>) and not directly through <see cref="IChatClient"/>.</summary>
+    internal const string MafVoterAgentName = "ConsensusOrchestrator.voter";
+
+    /// <summary>MAF agent name for the synthesis run.</summary>
+    internal const string MafSynthesizerAgentName = "ConsensusOrchestrator.synthesizer";
 
     /// <summary>Per-agent timeout for the fan-out phase. Must be long enough for
     /// agents to complete tool calls (MCP server round-trips + LLM reasoning).
@@ -42,13 +53,15 @@ public class ConsensusOrchestrator : IConsensusCouncil
         IChatClient chatClient,
         AgentDefinition synthesisDef,
         AgentDefinition voteDef,
-        ILogger<ConsensusOrchestrator> logger)
+        ILogger<ConsensusOrchestrator> logger,
+        ILoggerFactory? loggerFactory = null)
     {
         _specialists = specialists;
         _chatClient = chatClient;
         _synthesisDef = synthesisDef;
         _voteDef = voteDef;
         _logger = logger;
+        _loggerFactory = loggerFactory;
     }
 
     public async Task<CouncilVerdict> ConveneAsync(string brand, string? region, CancellationToken ct = default)
@@ -110,7 +123,15 @@ public class ConsensusOrchestrator : IConsensusCouncil
                 ResponseFormat = ChatResponseFormat.Json
             };
 
-            ChatResponse response = await _chatClient.GetResponseAsync(messages, options, timeoutCts.Token);
+            // Route through MAF: the lightweight voter is a real ChatClientAgent invocation
+            // (no tools attached; UseProvidedChatClientAsIs preserves the DI decorator stack).
+            AgentResponse response = await MafAgentInvoker.RunAsync(
+                _chatClient,
+                $"{MafVoterAgentName}.{agent.Key}",
+                messages,
+                options,
+                _loggerFactory,
+                timeoutCts.Token);
             agentSw.Stop();
 
             string responseText = response.Text ?? "";
@@ -273,7 +294,14 @@ public class ConsensusOrchestrator : IConsensusCouncil
                 Temperature = (float)_synthesisDef.Temperature
             };
 
-            ChatResponse response = await _chatClient.GetResponseAsync(messages, options, ct);
+            // Synthesis also flows through MAF for parity with the specialist / router paths.
+            AgentResponse response = await MafAgentInvoker.RunAsync(
+                _chatClient,
+                MafSynthesizerAgentName,
+                messages,
+                options,
+                _loggerFactory,
+                ct);
             string responseText = response.Text ?? "";
 
             return ParseSynthesis(brand, region, votes, responseText, convenedAt, sw);
