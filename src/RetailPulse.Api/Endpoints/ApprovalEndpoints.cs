@@ -42,7 +42,8 @@ public static class ApprovalEndpoints
                     requestId = result.RequestId,
                     decision = result.Decision.ToString().ToLowerInvariant(),
                     comment = result.Comment,
-                    respondedAt = result.RespondedAt
+                    respondedAt = result.RespondedAt,
+                    terminalReason = result.TerminalReason
                 });
             }
             catch (KeyNotFoundException)
@@ -56,25 +57,38 @@ public static class ApprovalEndpoints
 
         app.MapPost("/api/approvals/{requestId}/respond", async (string requestId, ApprovalResponseDto body, IApprovalGate gate, IHubContext<TelemetryHub> hubContext, CancellationToken ct) =>
         {
-            if (!Enum.TryParse(body.Decision, true, out ApprovalDecision decision) || decision == ApprovalDecision.Pending || decision == ApprovalDecision.TimedOut)
+            if (!Enum.TryParse(body.Decision, true, out ApprovalDecision decision)
+                || decision is ApprovalDecision.Pending
+                             or ApprovalDecision.TimedOut
+                             or ApprovalDecision.Orphaned)
             {
                 return Results.BadRequest(new { error = "Decision must be 'Approved', 'Rejected', or 'Modified'." });
             }
 
             try
             {
-                await gate.RespondAsync(requestId, decision, body.Comment, ct);
+                // RespondAsync returns the actual persisted winner. If the conditional
+                // Pending → terminal write lost to a timeout, orphan reconciliation, or
+                // another human response, we must NOT echo the caller-requested decision
+                // — the HTTP response and the SignalR broadcast both report the actual
+                // stored outcome so exactly one user-visible resolution is observable.
+                ApprovalResult result = await gate.RespondAsync(requestId, decision, body.Comment, ct);
 
-                // Notify connected dashboard clients of the resolution
-                await hubContext.Clients.All.SendAsync("approval_resolved", new
+                var payload = new
                 {
-                    requestId,
-                    decision = decision.ToString().ToLowerInvariant(),
-                    comment = body.Comment,
-                    respondedAt = DateTimeOffset.UtcNow
-                });
+                    requestId = result.RequestId,
+                    decision = result.Decision.ToString().ToLowerInvariant(),
+                    comment = result.Comment,
+                    respondedAt = result.RespondedAt,
+                    terminalReason = result.TerminalReason
+                };
 
-                return Results.Ok(new { requestId, decision = decision.ToString().ToLowerInvariant(), comment = body.Comment });
+                // Notify connected dashboard clients of the resolution using the persisted
+                // winner so a lost-race response never advertises a decision that was not
+                // recorded.
+                await hubContext.Clients.All.SendAsync("approval_resolved", payload);
+
+                return Results.Ok(payload);
             }
             catch (KeyNotFoundException)
             {
@@ -102,7 +116,8 @@ public static class ApprovalEndpoints
                 timeoutAt = r.ExpiresAt,
                 status = r.Decision.ToString().ToLowerInvariant(),
                 decidedAt = r.RespondedAt,
-                comment = r.Comment
+                comment = r.Comment,
+                terminalReason = r.TerminalReason
             }));
         })
         .WithName("GetApprovalHistory")
