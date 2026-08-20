@@ -42,19 +42,13 @@ public sealed class KnowledgeProviderSelector
     /// Resolves the configured provider mode. See class-level docs for defaults
     /// and error behavior.
     /// </summary>
-    public KnowledgeProviderMode ResolveMode()
-    {
-        return ParseMode(_options.Value.Mode);
-    }
+    public KnowledgeProviderMode ResolveMode() => ParseMode(_options.Value.Mode);
 
     /// <summary>
     /// Resolves the configured degradation policy. See class-level docs for
     /// defaults and error behavior.
     /// </summary>
-    public KnowledgeDegradationMode ResolveDegradation()
-    {
-        return ParseDegradation(_options.Value.Degradation);
-    }
+    public KnowledgeDegradationMode ResolveDegradation() => ParseDegradation(_options.Value.Degradation);
 
     /// <summary>
     /// Materializes the primary provider from the registry using the resolved

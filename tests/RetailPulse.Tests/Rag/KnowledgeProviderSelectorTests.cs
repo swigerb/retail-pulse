@@ -23,7 +23,7 @@ public sealed class KnowledgeProviderSelectorTests
         string? degradation,
         KnowledgeProviderRegistry? registry = null)
     {
-        var options = Options.Create(new KnowledgeProviderOptions
+        IOptions<KnowledgeProviderOptions> options = Options.Create(new KnowledgeProviderOptions
         {
             Mode = mode,
             Degradation = degradation,
@@ -151,7 +151,7 @@ public sealed class KnowledgeProviderSelectorTests
 
         KnowledgeProviderSelector selector = CreateSelector(mode: "InMemory", degradation: null, registry: registry);
 
-        var services = new ServiceCollection().BuildServiceProvider();
+        ServiceProvider services = new ServiceCollection().BuildServiceProvider();
         IKnowledgeBase primary = selector.CreatePrimary(services);
 
         primary.Should().BeSameAs(concrete);
@@ -168,7 +168,7 @@ public sealed class KnowledgeProviderSelectorTests
         registry.Register(KnowledgeProviderMode.InMemory, _ => CreateInMemory());
 
         KnowledgeProviderSelector selector = CreateSelector(mode: "AzureAISearch", degradation: null, registry: registry);
-        var services = new ServiceCollection().BuildServiceProvider();
+        ServiceProvider services = new ServiceCollection().BuildServiceProvider();
 
         Action act = () => selector.CreatePrimary(services);
 
@@ -189,7 +189,7 @@ public sealed class KnowledgeProviderSelectorTests
         registry.Register(KnowledgeProviderMode.InMemory, _ => CreateInMemory());
 
         KnowledgeProviderSelector selector = CreateSelector(mode: "TotallyMadeUp", degradation: null, registry: registry);
-        var services = new ServiceCollection().BuildServiceProvider();
+        ServiceProvider services = new ServiceCollection().BuildServiceProvider();
 
         Action act = () => selector.CreatePrimary(services);
 

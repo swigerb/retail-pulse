@@ -2,7 +2,7 @@ namespace RetailPulse.Api.Rag;
 
 /// <summary>
 /// How the abstraction layer should behave when the configured
-/// <see cref="RetailPulse.Contracts.Rag.IKnowledgeBase"/> provider is
+/// <see cref="Contracts.Rag.IKnowledgeBase"/> provider is
 /// unreachable — at startup or at query time.
 ///
 /// The two options are the only supported policies. Silently returning an

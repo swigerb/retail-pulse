@@ -30,7 +30,6 @@ public sealed class DegradingKnowledgeBase : IKnowledgeBase
 {
     private readonly IKnowledgeBase _primary;
     private readonly IKnowledgeBase _fallback;
-    private readonly KnowledgeDegradationMode _degradation;
     private readonly ILogger<DegradingKnowledgeBase> _logger;
 
     // Startup-probe outcome. Until ProbeAsync has run, data-plane calls go to
@@ -45,7 +44,7 @@ public sealed class DegradingKnowledgeBase : IKnowledgeBase
     {
         _primary = primary ?? throw new ArgumentNullException(nameof(primary));
         _fallback = fallback ?? throw new ArgumentNullException(nameof(fallback));
-        _degradation = degradation;
+        DegradationMode = degradation;
         _logger = logger;
         _active = primary;
     }
@@ -64,7 +63,7 @@ public sealed class DegradingKnowledgeBase : IKnowledgeBase
     public bool PrimaryReplacedByFallback { get; private set; }
 
     /// <summary>Configured degradation policy (for observability).</summary>
-    public KnowledgeDegradationMode DegradationMode => _degradation;
+    public KnowledgeDegradationMode DegradationMode { get; }
 
     /// <inheritdoc />
     public async Task ProbeAsync(CancellationToken ct = default)
@@ -76,7 +75,7 @@ public sealed class DegradingKnowledgeBase : IKnowledgeBase
         catch (KnowledgeProviderUnavailableException ex)
         {
             string providerName = SafeProviderName(_primary);
-            if (_degradation == KnowledgeDegradationMode.FallbackToInMemory)
+            if (DegradationMode == KnowledgeDegradationMode.FallbackToInMemory)
             {
                 _logger.LogWarning(ex,
                     "Knowledge provider '{Provider}' failed startup probe — swapping to in-memory fallback " +
@@ -121,7 +120,7 @@ public sealed class DegradingKnowledgeBase : IKnowledgeBase
             return await operation(_active).ConfigureAwait(false);
         }
         catch (KnowledgeProviderUnavailableException ex)
-            when (_degradation == KnowledgeDegradationMode.FallbackToInMemory
+            when (DegradationMode == KnowledgeDegradationMode.FallbackToInMemory
                   && !ReferenceEquals(_active, _fallback))
         {
             _logger.LogWarning(ex,
@@ -139,7 +138,7 @@ public sealed class DegradingKnowledgeBase : IKnowledgeBase
             await operation(_active).ConfigureAwait(false);
         }
         catch (KnowledgeProviderUnavailableException ex)
-            when (_degradation == KnowledgeDegradationMode.FallbackToInMemory
+            when (DegradationMode == KnowledgeDegradationMode.FallbackToInMemory
                   && !ReferenceEquals(_active, _fallback))
         {
             _logger.LogWarning(ex,

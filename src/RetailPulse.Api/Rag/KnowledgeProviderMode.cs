@@ -1,7 +1,7 @@
 namespace RetailPulse.Api.Rag;
 
 /// <summary>
-/// Selects which <see cref="RetailPulse.Contracts.Rag.IKnowledgeBase"/>
+/// Selects which <see cref="Contracts.Rag.IKnowledgeBase"/>
 /// implementation the API uses at runtime. Bound from configuration through
 /// <see cref="KnowledgeProviderOptions"/>.
 ///

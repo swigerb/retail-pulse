@@ -620,7 +620,7 @@ builder.Services.AddHostedService<RetailPulse.Api.Startup.CacheWarmingService>()
 // Azure AI Search, #104 Foundry IQ) opt in via configuration without changing
 // call sites. See docs/adr/009-knowledge-provider-abstraction.md.
 builder.Services.AddSingleton<InMemoryKnowledgeBase>();
-builder.Services.AddSingleton<KnowledgeProviderRegistry>(sp =>
+builder.Services.AddSingleton(sp =>
 {
     // Every process registers the in-memory factory automatically so it is
     // always available as the default primary and as the fallback target for
@@ -633,7 +633,7 @@ builder.Services.AddSingleton<KnowledgeProviderRegistry>(sp =>
     return registry;
 });
 builder.Services.AddSingleton<KnowledgeProviderSelector>();
-builder.Services.AddSingleton<DegradingKnowledgeBase>(sp =>
+builder.Services.AddSingleton(sp =>
 {
     KnowledgeProviderSelector selector = sp.GetRequiredService<KnowledgeProviderSelector>();
     IKnowledgeBase primary = selector.CreatePrimary(sp);
