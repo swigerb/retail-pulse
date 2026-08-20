@@ -31,6 +31,15 @@ public interface ISpecialistAgent
     IReadOnlyList<string> SupportedIntents { get; }
 
     /// <summary>
+    /// Case-insensitive substrings that force a keyword fast-path match to this
+    /// agent's primary intent. Sourced from configuration
+    /// (<c>AgentDefinition.KeywordFastPaths</c>) — the router builds its fast-path
+    /// table from the union of every specialist's list plus any orchestration
+    /// intents. Empty by default so bespoke agents can opt out.
+    /// </summary>
+    IReadOnlyList<string> KeywordFastPaths => [];
+
+    /// <summary>
     /// Processes a chat request and returns a response.
     /// The specialist applies its own system prompt, tools, and temperature.
     /// </summary>

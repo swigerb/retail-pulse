@@ -1,54 +1,36 @@
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Models;
-using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
-using ChatRequest = RetailPulse.Contracts.ChatRequest;
-using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Api.Agents.Specialists;
 
 /// <summary>
-/// Planogram Optimization specialist — handles shelf layout optimization,
-/// product placement analysis, and planogram recommendations.
-/// Uses temperature 0.3 for analytical precision.
+/// Planogram Optimization specialist — thin shim over <see cref="ConfiguredSpecialistAgent"/>.
 /// </summary>
-public class PlanogramAgent : ISpecialistAgent
+public sealed class PlanogramAgent : ConfiguredSpecialistAgent
 {
-    private readonly IAgentExecutionPipeline _pipeline;
-    private readonly AgentDefinition _agentDef;
-    public string Model => _agentDef.Model;
-    private readonly IEnumerable<AITool> _tools;
-
-    public string Key => "planogram";
-    public string DisplayName => "Planogram Optimization Agent";
-    public IReadOnlyList<string> SupportedIntents { get; } =
-    [
-        AgentIntent.Planogram
-    ];
-
     public PlanogramAgent(
         IAgentExecutionPipeline pipeline,
         AgentDefinition agentDef,
         IEnumerable<AITool> tools)
+        : base(pipeline, EnsureDefaults(agentDef), tools)
     {
-        _pipeline = pipeline;
-        _agentDef = agentDef;
-        _tools = tools;
     }
 
-    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
+    private static AgentDefinition EnsureDefaults(AgentDefinition def)
     {
-        var context = new AgentExecutionContext
-        {
-            AgentName = _agentDef.Name,
-            SystemPrompt = _agentDef.SystemPrompt,
-            Temperature = (float)_agentDef.Temperature,
-            ModelName = _agentDef.Model,
-            Request = request,
-            Tools = _tools,
-            FallbackReply = "I wasn't able to generate a planogram optimization response."
-        };
+        ArgumentNullException.ThrowIfNull(def);
 
-        return _pipeline.ExecuteAsync(context, ct);
+        def = def.Clone();
+
+        if (string.IsNullOrWhiteSpace(def.Key))
+            def.Key = "planogram";
+        if (def.Intents.Count == 0)
+            def.Intents = [AgentIntent.Planogram];
+        if (string.IsNullOrWhiteSpace(def.DisplayName))
+            def.DisplayName = "Planogram Optimization Agent";
+        if (string.IsNullOrWhiteSpace(def.FallbackReply))
+            def.FallbackReply = "I wasn't able to generate a planogram optimization response.";
+        return def;
     }
 }

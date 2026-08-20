@@ -619,7 +619,7 @@ public class RetailOpsRouterTests
 
         // Use a message that won't hit keyword fast-path
         RoutingDecision result = await router.RouteAsync(
-            "Tell me about supply delays in the Midwest", null, null, null);
+            "Tell me about warehouse delays in the Midwest", null, null, null);
 
         result.Intent.Should().Be(AgentIntent.SupplyShipments);
         // Verify the router-specific client was called
@@ -788,6 +788,7 @@ public class RetailOpsRouterTests
             AgentIntent.PromotionTrade, AgentIntent.SupplyShipments,
             AgentIntent.CompetitiveMarket, AgentIntent.SentimentField
         ]);
+        general.Setup(s => s.KeywordFastPaths).Returns([]);
 
         return [general.Object];
     }
@@ -802,39 +803,96 @@ public class RetailOpsRouterTests
         var general = new Mock<ISpecialistAgent>();
         general.Setup(s => s.Key).Returns("general");
         general.Setup(s => s.DisplayName).Returns("General Agent");
-        general.Setup(s => s.SupportedIntents).Returns(
-        [
-            AgentIntent.General, AgentIntent.DemandForecasting,
-            AgentIntent.PromotionTrade, AgentIntent.SupplyShipments,
-            AgentIntent.CompetitiveMarket, AgentIntent.SentimentField
-        ]);
+        general.Setup(s => s.SupportedIntents).Returns([AgentIntent.General]);
+        general.Setup(s => s.KeywordFastPaths).Returns([]);
+
+        // Give each domain its own dedicated mock so keyword fast-paths route to the
+        // correct intent — issue #98 makes each specialist own one primary intent,
+        // matching production wiring. Broadcasting every intent from a single mock
+        // (as the pre-refactor tests did) collapses keyword → intent uniqueness.
+        var demand = new Mock<ISpecialistAgent>();
+        demand.Setup(s => s.Key).Returns("demand-forecasting");
+        demand.Setup(s => s.DisplayName).Returns("Demand Forecast Agent");
+        demand.Setup(s => s.SupportedIntents).Returns([AgentIntent.DemandForecasting]);
+        demand.Setup(s => s.KeywordFastPaths).Returns(
+            ["depletion", "sell-through", "sell through", "velocity", "forecast", "demand"]);
+
+        var promo = new Mock<ISpecialistAgent>();
+        promo.Setup(s => s.Key).Returns("promo-planning");
+        promo.Setup(s => s.DisplayName).Returns("Promo Planning Agent");
+        promo.Setup(s => s.SupportedIntents).Returns([AgentIntent.PromotionTrade]);
+        promo.Setup(s => s.KeywordFastPaths).Returns(
+            ["promotion", "promo", "campaign", "lift", "trade spend"]);
+
+        var supply = new Mock<ISpecialistAgent>();
+        supply.Setup(s => s.Key).Returns("supply-chain");
+        supply.Setup(s => s.DisplayName).Returns("Supply Chain Agent");
+        supply.Setup(s => s.SupportedIntents).Returns([AgentIntent.SupplyShipments]);
+        supply.Setup(s => s.KeywordFastPaths).Returns(
+            ["supply", "shipment", "inventory", "disruption", "fulfillment", "pipeline"]);
+
+        var competitive = new Mock<ISpecialistAgent>();
+        competitive.Setup(s => s.Key).Returns("competitive-intel");
+        competitive.Setup(s => s.DisplayName).Returns("Competitive Intel Agent");
+        competitive.Setup(s => s.SupportedIntents).Returns([AgentIntent.CompetitiveMarket]);
+        competitive.Setup(s => s.KeywordFastPaths).Returns(
+            ["competitor", "market share", "competitive", "rival"]);
+
+        var sentiment = new Mock<ISpecialistAgent>();
+        sentiment.Setup(s => s.Key).Returns("field-sentiment");
+        sentiment.Setup(s => s.DisplayName).Returns("Field Sentiment Agent");
+        sentiment.Setup(s => s.SupportedIntents).Returns([AgentIntent.SentimentField]);
+        sentiment.Setup(s => s.KeywordFastPaths).Returns(
+            ["sentiment", "distributor feedback", "field feedback", "field sales", "retailer satisfaction"]);
 
         var council = new Mock<ISpecialistAgent>();
         council.Setup(s => s.Key).Returns("council");
         council.Setup(s => s.DisplayName).Returns("Consensus Council");
         council.Setup(s => s.SupportedIntents).Returns([AgentIntent.PortfolioHealth]);
+        council.Setup(s => s.KeywordFastPaths).Returns([]);
 
         var planogram = new Mock<ISpecialistAgent>();
         planogram.Setup(s => s.Key).Returns("planogram");
         planogram.Setup(s => s.DisplayName).Returns("Planogram Agent");
         planogram.Setup(s => s.SupportedIntents).Returns([AgentIntent.Planogram]);
+        planogram.Setup(s => s.KeywordFastPaths).Returns(
+            ["planogram", "shelf layout", "shelf space", "facing", "sku placement", "brand blocking"]);
 
         var scorecard = new Mock<ISpecialistAgent>();
         scorecard.Setup(s => s.Key).Returns("scorecard");
         scorecard.Setup(s => s.DisplayName).Returns("Scorecard Agent");
         scorecard.Setup(s => s.SupportedIntents).Returns([AgentIntent.Scorecard]);
+        scorecard.Setup(s => s.KeywordFastPaths).Returns(
+            ["scorecard", "portfolio scoring", "brand ranking", "top brand", "worst brand", "executive brief"]);
 
         var storeOps = new Mock<ISpecialistAgent>();
         storeOps.Setup(s => s.Key).Returns("store-ops");
         storeOps.Setup(s => s.DisplayName).Returns("Store Ops Agent");
         storeOps.Setup(s => s.SupportedIntents).Returns([AgentIntent.StoreOps]);
+        storeOps.Setup(s => s.KeywordFastPaths).Returns(
+            ["store performance", "foot traffic", "conversion rate", "stockout", "underperforming store"]);
 
         var margin = new Mock<ISpecialistAgent>();
         margin.Setup(s => s.Key).Returns("margin");
         margin.Setup(s => s.DisplayName).Returns("Margin Agent");
         margin.Setup(s => s.SupportedIntents).Returns([AgentIntent.MarginAnalysis]);
+        margin.Setup(s => s.KeywordFastPaths).Returns(
+            ["margin", "profitability", "cogs", "gross margin", "net margin"]);
 
-        return [general.Object, council.Object, planogram.Object, scorecard.Object, storeOps.Object, margin.Object];
+        return
+        [
+            general.Object,
+            demand.Object,
+            promo.Object,
+            supply.Object,
+            competitive.Object,
+            sentiment.Object,
+            council.Object,
+            planogram.Object,
+            scorecard.Object,
+            storeOps.Object,
+            margin.Object,
+        ];
     }
 
     private static List<ISpecialistAgent> CreateSpecialistsWithMemoryIntent()
@@ -845,6 +903,12 @@ public class RetailOpsRouterTests
         memory.Setup(s => s.Key).Returns("memory-management");
         memory.Setup(s => s.DisplayName).Returns("Memory Management");
         memory.Setup(s => s.SupportedIntents).Returns([AgentIntent.MemoryManagement]);
+        memory.Setup(s => s.KeywordFastPaths).Returns(
+        [
+            "remember that", "remember this", "forget", "clear my", "clear my history",
+            "clear my data", "start fresh", "reset my context", "forget what I told you",
+            "what do you know about me",
+        ]);
 
         specialists.Add(memory.Object);
         return specialists;
@@ -866,7 +930,20 @@ public class RetailOpsRouterTests
             chatClient,
             routerDef,
             specialists,
-            Mock.Of<ILogger<RetailOpsRouter>>());
+            Mock.Of<ILogger<RetailOpsRouter>>(),
+            intentConfigs:
+            [
+                // Orchestration intents that have no specialist owner but still need
+                // keyword fast-paths in tests (matches Program.cs wiring).
+                new RouterIntentConfig(
+                    AgentIntent.PortfolioHealth,
+                    ["how healthy is", "brand health report", "portfolio health",
+                     "overall assessment for", "how is the portfolio"]),
+                new RouterIntentConfig(
+                    AgentIntent.Scorecard,
+                    ["scorecard", "portfolio scoring", "brand ranking",
+                     "top brand", "worst brand", "executive brief"]),
+            ]);
     }
 
     #endregion

@@ -9,6 +9,7 @@ using Moq;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
+using RetailPulse.Api.Agents.Tools;
 using RetailPulse.Api.Approval;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
@@ -148,7 +149,10 @@ public class RouterIntegrationTests
             Name = "General",
             Model = "gpt-5.4-mini",
             SystemPrompt = "Test prompt",
-            Temperature = 0.7
+            Temperature = 0.7,
+            Key = "general",
+            Role = "specialist",
+            Intents = ["general/fallback"]
         };
 
         var promptConfig = new PromptConfiguration
@@ -160,16 +164,18 @@ public class RouterIntegrationTests
                     Name = "Router",
                     Model = "gpt-5.4-mini",
                     SystemPrompt = "Classify intent",
-                    Temperature = 0.1
-                }
+                    Temperature = 0.1,
+                    Key = "router",
+                    Role = "orchestration"
+                },
+                ["general"] = generalDef
             }
         };
 
         Func<IServiceCollection> act = () => services.AddAgentRouting(
             promptConfig,
-            generalDef,
-            foundryEnabled: false,
-            toolsFactory: _ => []);
+            new AgentToolRegistry(),
+            orchestrationIntents: []);
 
         act.Should().NotThrow();
     }
@@ -185,9 +191,8 @@ public class RouterIntegrationTests
 
         Func<IServiceCollection> act = () => services.AddAgentRouting(
             promptConfig,
-            new AgentDefinition { Name = "General", SystemPrompt = "test" },
-            foundryEnabled: false,
-            toolsFactory: _ => []);
+            new AgentToolRegistry(),
+            orchestrationIntents: []);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*router*");

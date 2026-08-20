@@ -151,12 +151,25 @@ public sealed partial class TenantRosterPipelineCompositionTests
             {
                 Agents = new Dictionary<string, AgentDefinition>
                 {
-                    ["router"] = new AgentDefinition { Name = "router", SystemPrompt = "route" },
+                    ["router"] = new AgentDefinition
+                    {
+                        Name = "router",
+                        SystemPrompt = "route",
+                        Key = "router",
+                        Role = "orchestration",
+                    },
+                    ["general"] = new AgentDefinition
+                    {
+                        Name = "General",
+                        SystemPrompt = "gen",
+                        Key = "general",
+                        Role = "specialist",
+                        Intents = { "general/fallback" },
+                    },
                 },
             },
-            generalAgentDef: new AgentDefinition { Name = "General", SystemPrompt = "gen" },
-            foundryEnabled: false,
-            toolsFactory: _ => []);
+            toolRegistry: new Api.Agents.Tools.AgentToolRegistry(),
+            orchestrationIntents: []);
 
         return services.BuildServiceProvider();
     }

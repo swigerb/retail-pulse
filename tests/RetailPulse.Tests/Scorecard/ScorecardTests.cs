@@ -10,6 +10,7 @@ using Moq;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
+using RetailPulse.Api.Scorecard;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
 
@@ -250,17 +251,10 @@ public class ScorecardTests
             ["Margin Health"] = 0.15
         };
 
-        // Verify via reflection to ensure the actual orchestrator weights match
-        FieldInfo? field = typeof(Api.Scorecard.ScorecardOrchestrator)
-            .GetField("_scoringDimensions",
-                BindingFlags.NonPublic | BindingFlags.Static);
-        field.Should().NotBeNull("ScoringDimensions field should exist on ScorecardOrchestrator");
-
-        var dimensions = field.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        dimensions.Should().NotBeNull("ScoringDimensions should be castable to tuple array");
+        IReadOnlyList<ScorecardDimensionConfig> dimensions = GetDefaultDimensions();
         dimensions.Should().HaveCount(5, "there should be exactly 5 scoring dimensions");
 
-        Dictionary<string, double> actualWeights = dimensions.ToDictionary(d => d.Dimension, d => d.Weight);
+        var actualWeights = dimensions.ToDictionary(d => d.Dimension, d => d.Weight);
 
         foreach ((string? name, double expectedWeight) in expectedWeights)
         {
@@ -278,12 +272,7 @@ public class ScorecardTests
     [Fact]
     public void ScorecardOrchestrator_DimensionWeights_SumToOne()
     {
-        FieldInfo? field = typeof(Api.Scorecard.ScorecardOrchestrator)
-            .GetField("_scoringDimensions",
-                BindingFlags.NonPublic | BindingFlags.Static);
-
-        var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        double total = dimensions!.Sum(d => d.Weight);
+        double total = GetDefaultDimensions().Sum(d => d.Weight);
 
         total.Should().BeApproximately(1.0, 0.001,
             "portfolio scorecard dimension weights must sum to exactly 1.0");
@@ -292,31 +281,23 @@ public class ScorecardTests
     [Fact]
     public void ScorecardOrchestrator_DemandMomentum_HasHighestWeight()
     {
-        FieldInfo? field = typeof(Api.Scorecard.ScorecardOrchestrator)
-            .GetField("_scoringDimensions",
-                BindingFlags.NonPublic | BindingFlags.Static);
+        ScorecardDimensionConfig top = GetDefaultDimensions()
+            .OrderByDescending(d => d.Weight).First();
 
-        var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        (string? Dimension, double Weight, string? AgentKey) = dimensions!.OrderByDescending(d => d.Weight).First();
-
-        Dimension.Should().Be("Demand Momentum",
+        top.Dimension.Should().Be("Demand Momentum",
             "Demand Momentum should have the highest weight (0.25)");
-        Weight.Should().Be(0.25);
+        top.Weight.Should().Be(0.25);
     }
 
     [Fact]
     public void ScorecardOrchestrator_MarginHealth_HasLowestWeight()
     {
-        FieldInfo? field = typeof(Api.Scorecard.ScorecardOrchestrator)
-            .GetField("_scoringDimensions",
-                BindingFlags.NonPublic | BindingFlags.Static);
+        ScorecardDimensionConfig bottom = GetDefaultDimensions()
+            .OrderBy(d => d.Weight).First();
 
-        var dimensions = field!.GetValue(null) as (string Dimension, double Weight, string AgentKey)[];
-        (string? Dimension, double Weight, string? AgentKey) = dimensions!.OrderBy(d => d.Weight).First();
-
-        Dimension.Should().Be("Margin Health",
+        bottom.Dimension.Should().Be("Margin Health",
             "Margin Health should have the lowest weight (0.15)");
-        Weight.Should().Be(0.15);
+        bottom.Weight.Should().Be(0.15);
     }
 
     #endregion
@@ -324,6 +305,17 @@ public class ScorecardTests
     #region Test Infrastructure
 
     private static IScorecardService CreateScorecardService(bool simulateSlowBrands = false) => new MockScorecardService(ExpectedBrands, simulateSlowBrands);
+
+    private static IReadOnlyList<ScorecardDimensionConfig> GetDefaultDimensions()
+    {
+        FieldInfo? field = typeof(ScorecardOrchestrator)
+            .GetField("DefaultScoringDimensions",
+                BindingFlags.NonPublic | BindingFlags.Static);
+        field.Should().NotBeNull("DefaultScoringDimensions field should exist on ScorecardOrchestrator");
+        var dims = field.GetValue(null) as IReadOnlyList<ScorecardDimensionConfig>;
+        dims.Should().NotBeNull("DefaultScoringDimensions should expose a list of ScorecardDimensionConfig");
+        return dims;
+    }
 
     #endregion
 }

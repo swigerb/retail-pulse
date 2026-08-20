@@ -303,3 +303,86 @@ To see your theme changes:
 - **Primary color** — Used for headers, navigation, and primary buttons. Choose a dark, readable color.
 - **Accent color** — Used for highlights, active states, and charts. Choose a contrasting, vibrant color.
 - Ensure sufficient contrast between primary/accent colors and text for accessibility.
+
+---
+
+## Agent Definitions (`prompts.yaml`)
+
+Retail Pulse composes its agent roster from `src/RetailPulse.Api/prompts.yaml`
+at startup. Every specialist — routing intents, keyword fast-paths, tool
+bindings, council membership, scorecard weight — is declared there. Adding a
+new specialist is a config edit plus a restart: no C# class, no DI wiring,
+no rebuild. This is the promise formalised in [ADR-008](adr/008-data-driven-agent-definitions.md).
+
+### Schema
+
+Each entry under `agents:` is an `AgentDefinition`. Every field is optional
+unless noted; the loader supplies safe defaults.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `name` | string | Display name used in telemetry and logs. |
+| `model` | string | Model identifier resolved through the app's model catalog. Defaults to `gpt-4o`. |
+| `system_prompt` | string | The prompt sent to the LLM. Tenant tokens (`{tenant.company}`, `{tenant.brands}`, etc.) are hydrated at load time. |
+| `temperature` | number | Sampling temperature. Defaults to `0.7`. |
+| `tools` | list<string> | Tool names to bind. Each must be registered with `AgentToolRegistry` — an unknown name fails startup with an actionable error. |
+| `key` | string | Routing key. Lowercase kebab-case by convention. Defaults to the YAML section name. |
+| `display_name` | string | Human-readable label. Falls back to `name`. |
+| `role` | string | `"specialist"` (default), `"orchestration"`, or `"router"`. Orchestration entries (router / synth / vote prompts) are not registered as specialists. |
+| `intents` | list<string> | Router intents this agent handles. The router's known-intent set is the union of every specialist's list plus the orchestration intents. |
+| `keyword_fast_paths` | list<string> | Case-insensitive substrings that force a fast-path route to this agent's primary intent. Use strong, unambiguous phrases only. |
+| `fallback_reply` | string | Reply used when the LLM returns empty content. Falls back to a domain-neutral default. |
+| `council_participant` | bool | When true, the Portfolio Health Council fans out to this agent. |
+| `scorecard_dimension` | string | If set (with a positive `scorecard_weight`) this agent contributes a dimension to the brand scorecard. |
+| `scorecard_weight` | number | Weight for the scorecard dimension. Ordered by weight descending in the final report. |
+| `prefetchable` | bool | When true, the router calls the agent's `IPrefetchableAgent` hook to warm data before invocation. |
+
+### Worked example: adding a Loyalty Analytics specialist
+
+```yaml
+agents:
+  # ... existing agents ...
+
+  loyalty-analytics:
+    name: "Loyalty Analytics Agent"
+    model: "gpt-5.4-mini"
+    key: "loyalty-analytics"
+    display_name: "Loyalty Analytics"
+    role: "specialist"
+    intents:
+      - "loyalty/analytics"
+    keyword_fast_paths:
+      - "loyalty program"
+      - "reward redemption"
+    council_participant: false
+    fallback_reply: "I couldn't generate a loyalty analytics response."
+    system_prompt: |
+      You are a Loyalty Analytics specialist for {tenant.company}.
+      Analyze reward redemption trends, program enrolment velocity, and
+      loyalty-driven revenue lift across {tenant.brands}.
+    temperature: 0.2
+    tools:
+      - GetLoyaltyProgramMetrics
+      - CreateChart
+```
+
+After a restart the router advertises `loyalty/analytics` in its known intent
+set, the keyword fast-paths match the two phrases above, and the specialist
+is instantiated as a `ConfiguredSpecialistAgent` — no C# changes required.
+
+### Bespoke agents
+
+A small number of agents ship with hand-written classes because they carry
+real behaviour beyond an LLM call: `MemoryManagementAgent` (conversation
+memory store) and `CompetitiveIntelAgent` (SignalR alert side effects). Both
+still read their `AgentDefinition` from `prompts.yaml` — key, intents, and
+keyword fast-paths remain configurable — but the containing class is
+deliberately hardcoded because the behaviour cannot be expressed as a prompt.
+
+### Trust boundary
+
+`prompts.yaml` is trusted deployment input: the file is committed alongside
+the app or delivered through the same channel as `tenant.yaml`. Retail Pulse
+does not currently accept prompt definitions from arbitrary users. Safety
+validation of agent definitions (schema, prompt-injection heuristics, tool
+allow-listing) is tracked separately in issue #99.
