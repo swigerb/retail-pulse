@@ -127,6 +127,7 @@ public sealed class PlanBuilder
             InputTokens = input,
             OutputTokens = output,
             TotalTokens = total,
+            Model = _plannerDef.Model,
         };
     }
 

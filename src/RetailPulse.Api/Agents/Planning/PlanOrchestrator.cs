@@ -1,6 +1,7 @@
 using System.Text;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Observability;
 using RetailPulse.Contracts.Persistence;
 using RetailPulse.Contracts.Routing;
 
@@ -20,6 +21,7 @@ public sealed class PlanOrchestrator
     private readonly PlanBuilder _builder;
     private readonly PlanExecutor _executor;
     private readonly IPlanStore _planStore;
+    private readonly ICostTracker _costTracker;
     private readonly PlanPersistenceOptions _options;
     private readonly ILogger<PlanOrchestrator> _logger;
 
@@ -27,12 +29,14 @@ public sealed class PlanOrchestrator
         PlanBuilder builder,
         PlanExecutor executor,
         IPlanStore planStore,
+        ICostTracker costTracker,
         PlanPersistenceOptions options,
         ILogger<PlanOrchestrator> logger)
     {
         _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         _executor = executor ?? throw new ArgumentNullException(nameof(executor));
         _planStore = planStore ?? throw new ArgumentNullException(nameof(planStore));
+        _costTracker = costTracker ?? throw new ArgumentNullException(nameof(costTracker));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -49,6 +53,14 @@ public sealed class PlanOrchestrator
         // Step 1: build the plan.
         PlanBuildResult built = await _builder.BuildAsync(
             input.Request.Message, input.Roster, input.DetectedIntents, ct).ConfigureAwait(false);
+
+        // Plan-level cost attribution (#93): every planner LLM invocation gets
+        // its own UsageEvent with PlanId set and PlanStepId = null so the
+        // planner call is charged to the plan itself, not silently rolled into
+        // an aggregate total or double-counted against a specialist. Emitted
+        // even when the plan is unusable — the planner LLM still burned tokens
+        // producing that empty-steps response and we owe an honest audit trail.
+        await TryTrackPlannerUsageAsync(planId, built, ct).ConfigureAwait(false);
 
         if (built.IsUnusable)
         {
@@ -192,6 +204,46 @@ public sealed class PlanOrchestrator
         return string.IsNullOrWhiteSpace(reason)
             ? "The plan-first orchestrator did not produce a usable plan for this request."
             : $"The plan-first orchestrator did not produce a usable plan: {reason}.";
+    }
+
+    private async Task TryTrackPlannerUsageAsync(
+        string planId,
+        PlanBuildResult built,
+        CancellationToken ct)
+    {
+        int input = built.InputTokens ?? 0;
+        int output = built.OutputTokens ?? 0;
+        if (input == 0 && output == 0)
+        {
+            // No planner call happened (e.g. empty-roster short-circuit before
+            // the LLM), so there is nothing to attribute. Skipping keeps the
+            // cost feed honest — do not fabricate a zero-token event.
+            return;
+        }
+
+        string model = string.IsNullOrWhiteSpace(built.Model) ? "planner" : built.Model;
+        try
+        {
+            await _costTracker.TrackUsageAsync(new UsageEvent(
+                AgentId: "planner",
+                Model: model,
+                InputTokens: input,
+                OutputTokens: output,
+                ToolName: null,
+                Timestamp: DateTime.UtcNow,
+                CacheHit: false,
+                PlanId: planId,
+                PlanStepId: null), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Cost attribution never fails the plan. Log and move on so the
+            // caller still gets the plan reply.
+            _logger.LogWarning(
+                ex,
+                "Failed to record plan-level planner usage for plan {PlanId}.",
+                planId);
+        }
     }
 }
 

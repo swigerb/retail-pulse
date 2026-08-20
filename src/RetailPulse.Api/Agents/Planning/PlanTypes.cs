@@ -36,4 +36,12 @@ public sealed record PlanBuildResult
     public int? InputTokens { get; init; }
     public int? OutputTokens { get; init; }
     public int? TotalTokens { get; init; }
+
+    /// <summary>
+    /// Model name that produced <see cref="InputTokens"/>/<see cref="OutputTokens"/>
+    /// on the planner LLM call. Surfaced so <see cref="PlanOrchestrator"/> can
+    /// attribute the plan-level usage event (PlanStepId = null) to the correct
+    /// model without needing the planner definition again.
+    /// </summary>
+    public string? Model { get; init; }
 }

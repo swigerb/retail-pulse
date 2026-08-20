@@ -9,6 +9,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
+using RetailPulse.Api.Agents.Planning;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Agents.Tools;
@@ -1027,36 +1028,37 @@ if (plannerDef is not null)
     builder.Services.AddScoped(sp =>
     {
         IChatClient chatClient = sp.GetRequiredKeyedService<IChatClient>("router");
-        Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions> opts =
-            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions>>();
-        return new RetailPulse.Api.Agents.Planning.PlanBuilder(
+        IOptions<PlanPersistenceOptions> opts =
+            sp.GetRequiredService<IOptions<PlanPersistenceOptions>>();
+        return new PlanBuilder(
             chatClient,
             plannerDef,
             opts.Value,
-            sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.Planning.PlanBuilder>>(),
+            sp.GetRequiredService<ILogger<PlanBuilder>>(),
             sp.GetService<ILoggerFactory>());
     });
     builder.Services.AddScoped(sp =>
     {
-        Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions> opts =
-            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions>>();
-        return new RetailPulse.Api.Agents.Planning.PlanExecutor(
-            sp.GetRequiredService<RetailPulse.Api.Persistence.IPlanStore>(),
-            sp.GetRequiredService<RetailPulse.Contracts.Observability.ICostTracker>(),
-            sp.GetRequiredService<RetailPulse.Contracts.Tracing.ITraceCollector>(),
+        IOptions<PlanPersistenceOptions> opts =
+            sp.GetRequiredService<IOptions<PlanPersistenceOptions>>();
+        return new PlanExecutor(
+            sp.GetRequiredService<IPlanStore>(),
+            sp.GetRequiredService<ICostTracker>(),
+            sp.GetRequiredService<ITraceCollector>(),
             opts.Value,
-            sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.Planning.PlanExecutor>>());
+            sp.GetRequiredService<ILogger<PlanExecutor>>());
     });
     builder.Services.AddScoped(sp =>
     {
-        Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions> opts =
-            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions>>();
-        return new RetailPulse.Api.Agents.Planning.PlanOrchestrator(
-            sp.GetRequiredService<RetailPulse.Api.Agents.Planning.PlanBuilder>(),
-            sp.GetRequiredService<RetailPulse.Api.Agents.Planning.PlanExecutor>(),
-            sp.GetRequiredService<RetailPulse.Api.Persistence.IPlanStore>(),
+        IOptions<PlanPersistenceOptions> opts =
+            sp.GetRequiredService<IOptions<PlanPersistenceOptions>>();
+        return new PlanOrchestrator(
+            sp.GetRequiredService<PlanBuilder>(),
+            sp.GetRequiredService<PlanExecutor>(),
+            sp.GetRequiredService<IPlanStore>(),
+            sp.GetRequiredService<ICostTracker>(),
             opts.Value,
-            sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.Planning.PlanOrchestrator>>());
+            sp.GetRequiredService<ILogger<PlanOrchestrator>>());
     });
 }
 
@@ -1179,7 +1181,7 @@ if (app.Services.GetService<ISessionStore>() is not null)
 // Durable plan endpoints (issue #93) — mapped only when PlanPersistence:Enabled
 // is true. Mirrors the session-endpoints opt-in convention so no plan surface
 // exists when persistence is off.
-if (app.Services.GetService<RetailPulse.Api.Persistence.IPlanStore>() is not null)
+if (app.Services.GetService<IPlanStore>() is not null)
 {
     app.MapPlanEndpoints();
 }

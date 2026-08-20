@@ -54,7 +54,7 @@ public sealed class PlanBuilderTests
     [Fact]
     public async Task Multi_domain_plan_returns_ordered_distinct_specialists()
     {
-        const string json = @"{
+        const string json = /*lang=json,strict*/ @"{
             ""steps"": [
                 { ""specialist_key"": ""scorecard"", ""intent"": ""scorecard"", ""action"": ""summarize scorecard"" },
                 { ""specialist_key"": ""demand-forecasting"", ""intent"": ""demand"", ""action"": ""forecast demand"" },
@@ -92,7 +92,7 @@ public sealed class PlanBuilderTests
     [Fact]
     public async Task Unknown_specialist_key_is_unusable()
     {
-        const string json = @"{ ""steps"": [{ ""specialist_key"": ""not-a-real-agent"", ""intent"": ""x"", ""action"": ""y"" }] }";
+        const string json = /*lang=json,strict*/ @"{ ""steps"": [{ ""specialist_key"": ""not-a-real-agent"", ""intent"": ""x"", ""action"": ""y"" }] }";
         PlanBuilder builder = MakeBuilder(json);
 
         PlanBuildResult result = await builder.BuildAsync(
@@ -106,7 +106,7 @@ public sealed class PlanBuilderTests
     [Fact]
     public async Task Empty_step_list_with_reason_is_unusable_with_that_reason()
     {
-        const string json = @"{ ""steps"": [], ""reason"": ""single-domain, planner declined"" }";
+        const string json = /*lang=json,strict*/ @"{ ""steps"": [], ""reason"": ""single-domain, planner declined"" }";
         PlanBuilder builder = MakeBuilder(json);
 
         PlanBuildResult result = await builder.BuildAsync(
@@ -120,7 +120,7 @@ public sealed class PlanBuilderTests
     public async Task Step_count_over_max_is_unusable()
     {
         // 6 steps -> exceeds MaxStepCount=5
-        const string json = @"{ ""steps"": [
+        const string json = /*lang=json,strict*/ @"{ ""steps"": [
             { ""specialist_key"": ""scorecard"", ""action"": ""a"" },
             { ""specialist_key"": ""scorecard"", ""action"": ""a"" },
             { ""specialist_key"": ""scorecard"", ""action"": ""a"" },

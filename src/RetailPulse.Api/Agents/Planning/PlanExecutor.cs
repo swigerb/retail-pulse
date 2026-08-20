@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Agents.AI.Workflows;
 using RetailPulse.Api.Budget;
+using RetailPulse.Api.Charts;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts;
@@ -137,7 +138,19 @@ public sealed class PlanExecutor
         // is idempotent w.r.t. an existing scope (see the nesting comment
         // there), so per-step specialist invocations that also call Begin
         // will reuse this outer scope rather than resetting the counters.
-        using IDisposable planBudget = RequestToolContext.Begin(execution.PrincipalKey);
+        //
+        // ADR-006 chart-intent preservation (#93): compute the explicit chart
+        // request flag ONCE from the raw user request and set it on the outer
+        // plan scope. Nested per-step Begin() calls in specialist agents will
+        // detect the outer scope and reuse it via NestedScope (see
+        // RequestToolContext.Begin), so every step across a multi-domain chart
+        // request sees the tighter chart cap — not just whichever specialist
+        // opens the scope first, which would silently lose chart intent for
+        // the rest of the plan.
+        bool planIsChartIntent = ChartRequestDetector.Detect(execution.Request).IsExplicitChartRequest;
+        using IDisposable planBudget = RequestToolContext.Begin(
+            execution.PrincipalKey,
+            isChartIntent: planIsChartIntent);
 
         // Overall plan timeout: prevents a rogue specialist from stalling the
         // whole request forever if the per-step timeout was set generously.

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
+using RetailPulse.Api.Agents.Planning;
 using RetailPulse.Api.Auth;
 using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Hubs;
@@ -35,7 +36,7 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null, [FromServices] ISessionStore? sessionStore = null, [FromServices] IOptions<SessionPersistenceOptions>? sessionPersistenceOptions = null, [FromServices] RetailPulse.Api.Agents.Planning.PlanOrchestrator? planOrchestrator = null, [FromServices] IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions>? planPersistenceOptions = null) =>
+        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null, [FromServices] ISessionStore? sessionStore = null, [FromServices] IOptions<SessionPersistenceOptions>? sessionPersistenceOptions = null, [FromServices] PlanOrchestrator? planOrchestrator = null, [FromServices] IOptions<PlanPersistenceOptions>? planPersistenceOptions = null) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
             ValidationResult validation = ChatRequestValidator.Validate(request);
@@ -470,8 +471,8 @@ public static class ChatEndpoints
                 // fails fast with an honest terminal state (nothing hangs). The
                 // single-specialist path below is skipped entirely.
                 {
-                    RetailPulse.Api.Persistence.PlanPersistenceOptions planOpts =
-                        planPersistenceOptions?.Value ?? new RetailPulse.Api.Persistence.PlanPersistenceOptions();
+                    PlanPersistenceOptions planOpts =
+                        planPersistenceOptions?.Value ?? new PlanPersistenceOptions();
                     int planThreshold = Math.Max(1, planOpts.MinDetectedIntentsForPlan);
                     bool multiDomain = decision.DetectedIntents is { Count: > 0 } &&
                         decision.DetectedIntents.Count >= planThreshold;
@@ -486,8 +487,8 @@ public static class ChatEndpoints
                             roster.ToDictionary(s => s.Key, s => s, StringComparer.OrdinalIgnoreCase);
                         string tenantId = tenantProvider.GetTenant()?.Company ?? string.Empty;
 
-                        RetailPulse.Api.Agents.Planning.PlanOrchestrationResult planResult =
-                            await planOrchestrator.RunAsync(new RetailPulse.Api.Agents.Planning.PlanOrchestrationInput
+                        PlanOrchestrationResult planResult =
+                            await planOrchestrator.RunAsync(new PlanOrchestrationInput
                             {
                                 Request = enrichedRequest with { SessionId = sessionId },
                                 Subject = userId,

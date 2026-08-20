@@ -135,6 +135,12 @@ public sealed class PlanExecutorTests
     private static PlanExecutionRequest MakeExecutionRequest(
         Dictionary<string, ISpecialistAgent> lookup,
         params (string key, string intent, string action)[] steps)
+        => MakeExecutionRequest(lookup, "Do the multi-domain thing.", steps);
+
+    private static PlanExecutionRequest MakeExecutionRequest(
+        Dictionary<string, ISpecialistAgent> lookup,
+        string requestMessage,
+        params (string key, string intent, string action)[] steps)
     {
         var planned = steps.Select(s => new PlannerStep
         {
@@ -153,7 +159,7 @@ public sealed class PlanExecutorTests
             SessionId = "session-x",
             TraceId = "trace-x",
             ParentSpanId = null,
-            Request = "Do the multi-domain thing.",
+            Request = requestMessage,
             History = null,
             User = new UserContext("user-1", "User One", string.Empty),
             Plan = new PlanBuildResult { Steps = planned },
@@ -168,7 +174,7 @@ public sealed class PlanExecutorTests
         var store = new RecordingPlanStore();
         var cost = new RecordingCostTracker();
         var traces = new RecordingTraceCollector();
-        var executor = NewExecutor(store, cost, traces);
+        PlanExecutor executor = NewExecutor(store, cost, traces);
 
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
         {
@@ -176,7 +182,7 @@ public sealed class PlanExecutorTests
             ["demand-forecasting"] = MakeSpecialist("demand-forecasting", "demand-reply"),
         };
 
-        var request = MakeExecutionRequest(lookup,
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
             ("scorecard", "scorecard", "summarize"),
             ("demand-forecasting", "demand", "forecast"));
 
@@ -205,14 +211,14 @@ public sealed class PlanExecutorTests
         var store = new RecordingPlanStore();
         var cost = new RecordingCostTracker();
         var traces = new RecordingTraceCollector();
-        var executor = NewExecutor(store, cost, traces);
+        PlanExecutor executor = NewExecutor(store, cost, traces);
 
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
         {
             ["scorecard"] = MakeSpecialist("scorecard", "a", inputTokens: 111, outputTokens: 22),
             ["demand-forecasting"] = MakeSpecialist("demand-forecasting", "b", inputTokens: 333, outputTokens: 44),
         };
-        var request = MakeExecutionRequest(lookup,
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
             ("scorecard", "scorecard", "s"),
             ("demand-forecasting", "demand", "d"));
 
@@ -233,7 +239,7 @@ public sealed class PlanExecutorTests
         var store = new RecordingPlanStore();
         var cost = new RecordingCostTracker();
         var traces = new RecordingTraceCollector();
-        var executor = NewExecutor(store, cost, traces);
+        PlanExecutor executor = NewExecutor(store, cost, traces);
 
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
         {
@@ -243,7 +249,7 @@ public sealed class PlanExecutorTests
                 throwException: new InvalidOperationException("boom")),
             ["competitive-intel"] = MakeSpecialist("competitive-intel", "never-runs"),
         };
-        var request = MakeExecutionRequest(lookup,
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
             ("scorecard", "scorecard", "s"),
             ("demand-forecasting", "demand", "d"),
             ("competitive-intel", "competitive", "c"));
@@ -276,14 +282,14 @@ public sealed class PlanExecutorTests
             PlanTimeout = TimeSpan.FromSeconds(10),
             MaxStepCount = 5,
         };
-        var executor = NewExecutor(store, cost, traces, options);
+        PlanExecutor executor = NewExecutor(store, cost, traces, options);
 
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
         {
             ["slow"] = MakeSpecialist("slow", "never", delay: TimeSpan.FromSeconds(2)),
             ["scorecard"] = MakeSpecialist("scorecard", "never-runs"),
         };
-        var request = MakeExecutionRequest(lookup,
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
             ("slow", "slow", "sleep"),
             ("scorecard", "scorecard", "s"));
 
@@ -307,7 +313,7 @@ public sealed class PlanExecutorTests
         var store = new RecordingPlanStore();
         var cost = new RecordingCostTracker();
         var traces = new RecordingTraceCollector();
-        var executor = NewExecutor(store, cost, traces);
+        PlanExecutor executor = NewExecutor(store, cost, traces);
 
         var observed = new ConcurrentBag<RequestToolContext>();
         // Both specialists open their own Begin scope, exactly like the real
@@ -341,7 +347,7 @@ public sealed class PlanExecutorTests
             ["scorecard"] = step1,
             ["demand-forecasting"] = step2,
         };
-        var request = MakeExecutionRequest(lookup,
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
             ("scorecard", "scorecard", "s"),
             ("demand-forecasting", "demand", "d"));
 
@@ -360,15 +366,144 @@ public sealed class PlanExecutorTests
         var store = new RecordingPlanStore();
         var cost = new RecordingCostTracker();
         var traces = new RecordingTraceCollector();
-        var executor = NewExecutor(store, cost, traces);
+        PlanExecutor executor = NewExecutor(store, cost, traces);
 
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase);
-        var request = MakeExecutionRequest(lookup, ("ghost", "ghost", "x"));
+        PlanExecutionRequest request = MakeExecutionRequest(lookup, ("ghost", "ghost", "x"));
 
         PlanExecutionOutcome outcome = await executor.ExecuteAsync(request, CancellationToken.None);
 
         outcome.Steps.Should().HaveCount(1);
         outcome.Steps[0].Status.Should().Be(PlanStepStatus.Unusable);
         outcome.Status.Should().Be(PlanStatus.Unusable);
+    }
+
+    [Fact]
+    public async Task Plan_outer_scope_reflects_chart_intent_from_original_user_request()
+    {
+        // ADR-006 chart-intent preservation (#93): when the user request is an
+        // explicit chart request, the ONE outer plan budget scope must set
+        // IsChartIntent so the tighter chart cap applies to every step of a
+        // multi-domain chart request — not just whichever specialist happens
+        // to open a scope first, which would silently regress the invariant.
+        var store = new RecordingPlanStore();
+        var cost = new RecordingCostTracker();
+        var traces = new RecordingTraceCollector();
+        PlanExecutor executor = NewExecutor(store, cost, traces);
+
+        RequestToolContext? observedChartCtx = null;
+        RequestToolContext? observedPlainCtx = null;
+
+        ISpecialistAgent chartSpec = MakeSpecialist("scorecard", "reply-1",
+            onInvoke: () =>
+            {
+                using IDisposable inner = RequestToolContext.Begin("user-1");
+                observedChartCtx ??= RequestToolContext.Current;
+            });
+        ISpecialistAgent plainSpec = MakeSpecialist("demand-forecasting", "reply-2",
+            onInvoke: () =>
+            {
+                using IDisposable inner = RequestToolContext.Begin("user-1");
+                observedChartCtx ??= RequestToolContext.Current;
+            });
+
+        var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["scorecard"] = chartSpec,
+            ["demand-forecasting"] = plainSpec,
+        };
+
+        // "gauge chart" is an explicit-chart phrase per ChartRequestDetector.
+        PlanExecutionRequest chartRequest = MakeExecutionRequest(
+            lookup,
+            "Show me a gauge chart for portfolio health across every brand.",
+            ("scorecard", "scorecard", "s"),
+            ("demand-forecasting", "demand", "d"));
+
+        _ = await executor.ExecuteAsync(chartRequest, CancellationToken.None);
+
+        observedChartCtx.Should().NotBeNull().And.Match<RequestToolContext>(c => c.IsChartIntent,
+            "the plan's single outer RequestToolContext scope must carry chart intent " +
+            "so every step of a multi-domain chart request sees the tighter cap");
+
+        // Sanity: a plain multi-domain request opens a scope WITHOUT chart intent,
+        // proving the detector actually runs and the flag isn't stuck at true.
+        ISpecialistAgent plainA = MakeSpecialist("scorecard", "reply-a",
+            onInvoke: () => observedPlainCtx ??= RequestToolContext.Current);
+        ISpecialistAgent plainB = MakeSpecialist("demand-forecasting", "reply-b",
+            onInvoke: () => { });
+
+        var lookup2 = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["scorecard"] = plainA,
+            ["demand-forecasting"] = plainB,
+        };
+        PlanExecutionRequest plainRequest = MakeExecutionRequest(
+            lookup2,
+            "Compare scorecard and demand forecast for our top brands.",
+            ("scorecard", "scorecard", "s"),
+            ("demand-forecasting", "demand", "d"));
+
+        _ = await executor.ExecuteAsync(plainRequest, CancellationToken.None);
+
+        observedPlainCtx.Should().NotBeNull().And.Match<RequestToolContext>(c => !c.IsChartIntent,
+            "plain multi-domain requests must NOT get the tighter chart cap");
+    }
+
+    [Fact]
+    public async Task Full_width_five_step_plan_executes_every_edge_in_declared_order()
+    {
+        // ADR-011 pins the plan width at 5. This test proves the workflow
+        // graph really wires all five edges (step_i -> step_{i+1}) and each
+        // step runs exactly once, in order, when nothing fails.
+        var store = new RecordingPlanStore();
+        var cost = new RecordingCostTracker();
+        var traces = new RecordingTraceCollector();
+        PlanExecutor executor = NewExecutor(store, cost, traces);
+
+        var callOrder = new ConcurrentQueue<string>();
+        ISpecialistAgent Make(string key, string reply) => MakeSpecialist(
+            key, reply, onInvoke: () => callOrder.Enqueue(key));
+
+        var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["scorecard"] = Make("scorecard", "score-out"),
+            ["demand-forecasting"] = Make("demand-forecasting", "demand-out"),
+            ["competitive-intel"] = Make("competitive-intel", "comp-out"),
+            ["supply-chain"] = Make("supply-chain", "supply-out"),
+            ["margin"] = Make("margin", "margin-out"),
+        };
+
+        PlanExecutionRequest request = MakeExecutionRequest(
+            lookup,
+            ("scorecard", "scorecard", "start"),
+            ("demand-forecasting", "demand", "then demand"),
+            ("competitive-intel", "competitive", "then competitors"),
+            ("supply-chain", "supply", "then supply"),
+            ("margin", "margin", "then margin"));
+
+        PlanExecutionOutcome outcome = await executor.ExecuteAsync(request, CancellationToken.None);
+
+        outcome.Status.Should().Be(PlanStatus.Completed);
+        outcome.Steps.Should().HaveCount(5);
+        outcome.Steps.Select(s => s.SpecialistKey).Should().BeEquivalentTo(
+            ["scorecard", "demand-forecasting", "competitive-intel", "supply-chain", "margin"],
+            opts => opts.WithStrictOrdering(),
+            "every graph edge must fire in declared order without skipping or reordering");
+        outcome.Steps.Should().OnlyContain(s => s.Status == PlanStepStatus.Completed);
+
+        callOrder.Should().BeEquivalentTo(
+            ["scorecard", "demand-forecasting", "competitive-intel", "supply-chain", "margin"],
+            opts => opts.WithStrictOrdering());
+
+        // Persistence honesty: every step has a Completed status update,
+        // and the plan finishes with a Completed status update.
+        PlanStepUpdate[] stepUpdates = [.. store.StepUpdates];
+        for (int i = 0; i < 5; i++)
+        {
+            stepUpdates.Should().Contain(u =>
+                u.StepId == $"planZ-s{i}" && u.Status == PlanStepStatus.Completed);
+        }
+        store.StatusUpdates.Last().Status.Should().Be(PlanStatus.Completed);
     }
 }
