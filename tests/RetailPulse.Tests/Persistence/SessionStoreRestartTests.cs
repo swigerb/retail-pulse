@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Persistence;
@@ -82,5 +83,87 @@ public sealed class SessionStoreRestartTests : IDisposable
         // which does not survive a fresh connection on a network filesystem.
         File.Exists(_dbPath + "-wal").Should().BeFalse("DELETE journal mode leaves no persistent WAL sidecar");
         File.Exists(_dbPath + "-shm").Should().BeFalse("DELETE journal mode leaves no persistent SHM sidecar");
+    }
+
+    /// <summary>
+    /// Schema-compatibility guarantee for the durable-insertion-order fix. The
+    /// tie-breaker for identical timestamps is <c>rowid</c>, which every SQLite
+    /// regular-rowid table already carries — no <c>ALTER TABLE</c> is needed and
+    /// databases created before this change continue to order correctly on the
+    /// upgraded build. Simulate that by writing a user→assistant pair with the
+    /// same <c>DateTimeOffset</c> against the file, closing the store, opening a
+    /// fresh <see cref="SqliteSessionStore"/> against the same path, and asserting
+    /// the rehydrated transcript still returns user first, assistant second.
+    /// </summary>
+    [Fact]
+    public async Task InsertionOrder_SurvivesRestart_ForIdenticalTimestamps()
+    {
+        string sessionId = Guid.NewGuid().ToString("N");
+        DateTimeOffset persistNow = DateTimeOffset.UtcNow;
+
+        {
+            var writer = new SqliteSessionStore(_dbPath, Mock.Of<ILogger<SqliteSessionStore>>());
+            await writer.PersistTurnAsync(new SessionTurnWrite
+            {
+                SessionId = sessionId,
+                Subject = "alice",
+                TenantId = "Contoso",
+                Role = "user",
+                Content = "u-restart",
+                Timestamp = persistNow
+            });
+            await writer.PersistTurnAsync(new SessionTurnWrite
+            {
+                SessionId = sessionId,
+                Subject = "alice",
+                TenantId = "Contoso",
+                Role = "assistant",
+                Content = "a-restart",
+                Timestamp = persistNow
+            });
+        }
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+
+        var reader = new SqliteSessionStore(_dbPath, Mock.Of<ILogger<SqliteSessionStore>>());
+
+        SessionDetailDto? detail = await reader.GetSessionAsync("alice", sessionId);
+        detail.Should().NotBeNull();
+        detail.Turns.Should().HaveCount(2);
+        detail.Turns[0].Role.Should().Be("user", "the user turn was persisted before the assistant turn");
+        detail.Turns[0].Content.Should().Be("u-restart");
+        detail.Turns[1].Role.Should().Be("assistant");
+        detail.Turns[1].Content.Should().Be("a-restart");
+    }
+
+    /// <summary>
+    /// Backwards-compatibility guarantee: the durable-insertion-order fix relies
+    /// on the intrinsic <c>rowid</c> column of a regular-rowid SQLite table (a
+    /// TEXT PRIMARY KEY does not turn the table into WITHOUT ROWID). Confirm that
+    /// against the actual schema materialized on disk by
+    /// <see cref="SqliteSessionStore"/>: if the schema ever regressed to
+    /// <c>WITHOUT ROWID</c>, the tie-breaker would silently stop being monotonic
+    /// and this test would fail before any real transcript did.
+    /// </summary>
+    [Fact]
+    public void SessionTurnsTable_IsRegularRowidTable_ForInsertionOrderTieBreak()
+    {
+        _ = new SqliteSessionStore(_dbPath, Mock.Of<ILogger<SqliteSessionStore>>());
+
+        string connString = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadOnly
+        }.ToString();
+
+        using SqliteConnection conn = new(connString);
+        conn.Open();
+        using SqliteCommand cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'SessionTurns'";
+        string ddl = (string)cmd.ExecuteScalar()!;
+
+        ddl.Should().NotContain(
+            "WITHOUT ROWID",
+            "the store depends on rowid as the durable insertion-order tie-breaker for identical timestamps");
     }
 }

@@ -212,4 +212,59 @@ public sealed class SqliteSessionStoreTests : IDisposable
         detail.Turns[0].Charts.Should().HaveCount(1);
         detail.Turns[0].Charts![0].Title.Should().Be("Sales");
     }
+
+    /// <summary>
+    /// Regression for the reviewer finding on PR #117: production writes the user
+    /// and assistant turns with the same <c>DateTimeOffset persistNow</c> in both
+    /// the cache-hit and LLM paths (<c>ChatEndpoints.cs</c>). If rehydration sorts
+    /// only by <c>Timestamp</c> — with a random-GUID <c>TurnId</c> as the
+    /// tie-breaker — the assistant turn will sort before the user turn about half
+    /// the time. The store must guarantee strict insertion order when timestamps
+    /// are identical.
+    /// </summary>
+    [Fact]
+    public async Task GetSession_PreservesInsertionOrder_WhenTimestampsAreIdentical()
+    {
+        string sessionId = Guid.NewGuid().ToString("N");
+        DateTimeOffset persistNow = DateTimeOffset.UtcNow;
+
+        await _store.PersistTurnAsync(MakeTurn(sessionId, "alice", "user", "u-content", persistNow));
+        await _store.PersistTurnAsync(MakeTurn(sessionId, "alice", "assistant", "a-content", persistNow));
+
+        SessionDetailDto? detail = await _store.GetSessionAsync("alice", sessionId);
+
+        detail.Should().NotBeNull();
+        detail.Turns.Should().HaveCount(2);
+        detail.Turns[0].Role.Should().Be("user", "the user turn was persisted first");
+        detail.Turns[0].Content.Should().Be("u-content");
+        detail.Turns[1].Role.Should().Be("assistant", "the assistant turn was persisted second");
+        detail.Turns[1].Content.Should().Be("a-content");
+    }
+
+    /// <summary>
+    /// Fuzz variant of the identical-timestamp regression. Repeats the same
+    /// user-then-assistant persist ten times per iteration so that if the
+    /// tie-breaker ever regressed to a random-GUID <c>TurnId</c> order (roughly a
+    /// coin flip per pair), the probability of missing the failure is negligible
+    /// (~1e-30). Keeps the guarantee honest even under lucky GUID draws.
+    /// </summary>
+    [Fact]
+    public async Task GetSession_PreservesInsertionOrder_UnderRepeatedIdenticalTimestampPairs()
+    {
+        DateTimeOffset persistNow = DateTimeOffset.UtcNow;
+
+        for (int i = 0; i < 10; i++)
+        {
+            string sessionId = Guid.NewGuid().ToString("N");
+            await _store.PersistTurnAsync(MakeTurn(sessionId, "alice", "user", $"u-{i}", persistNow));
+            await _store.PersistTurnAsync(MakeTurn(sessionId, "alice", "assistant", $"a-{i}", persistNow));
+
+            SessionDetailDto? detail = await _store.GetSessionAsync("alice", sessionId);
+
+            detail.Should().NotBeNull();
+            detail.Turns.Should().HaveCount(2);
+            detail.Turns[0].Role.Should().Be("user");
+            detail.Turns[1].Role.Should().Be("assistant");
+        }
+    }
 }

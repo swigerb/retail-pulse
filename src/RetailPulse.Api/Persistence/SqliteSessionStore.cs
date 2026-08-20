@@ -270,7 +270,16 @@ public sealed class SqliteSessionStore : ISessionStore
                        ChartSpecsJson, SpanSummary, Timestamp
                 FROM SessionTurns
                 WHERE SessionId = @sid
-                ORDER BY Timestamp ASC, TurnId ASC
+                -- rowid tie-breaks identical timestamps by strict insertion order.
+                -- SessionTurns is a regular (rowid) table with TEXT PRIMARY KEY, so
+                -- every INSERT (which never sets rowid explicitly) receives a rowid
+                -- strictly greater than any previously inserted row. Ordering by
+                -- Timestamp first preserves historical chronology; the rowid
+                -- secondary sort is the durable insertion-order guarantee required
+                -- when production writes the user and assistant turns with the same
+                -- DateTimeOffset (issue #90). TurnId (random GUID) is not usable as
+                -- a tie-breaker because its ordinal is non-monotonic.
+                ORDER BY Timestamp ASC, rowid ASC
                 """;
             cmd.Parameters.AddWithValue("@sid", sessionId);
 
