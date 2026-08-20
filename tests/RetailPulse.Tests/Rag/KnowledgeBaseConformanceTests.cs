@@ -166,7 +166,7 @@ public abstract class KnowledgeBaseConformanceTests
             source: "supplier.md");
 
         IReadOnlyList<SearchResult> inScope = await kb.SearchAsync(
-            "uniqueterm-planogram uniqueterm-supplier", topK: 5, sources: new[] { "planogram.md" });
+            "uniqueterm-planogram uniqueterm-supplier", topK: 5, sources: ["planogram.md"]);
 
         inScope.Should().NotBeEmpty();
         inScope.Should().OnlyContain(r => r.Source == "planogram.md",

@@ -399,8 +399,8 @@ public static class ChatEndpoints
                     ["retrieval.agent_key"] = specialist.Key,
                     ["retrieval.enabled"] = retrieval.Enabled ? "true" : "false",
                     ["retrieval.scoped"] = retrieval.Scoped ? "true" : "false",
-                    ["retrieval.chunk_count"] = retrieval.ChunkCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["retrieval.duration_ms"] = retrieval.DurationMs.ToString("F2", System.Globalization.CultureInfo.InvariantCulture),
+                    ["retrieval.chunk_count"] = retrieval.ChunkCount.ToString(CultureInfo.InvariantCulture),
+                    ["retrieval.duration_ms"] = retrieval.DurationMs.ToString("F2", CultureInfo.InvariantCulture),
                 };
                 if (retrieval.Sources.Count > 0)
                 {
@@ -408,7 +408,7 @@ public static class ChatEndpoints
                 }
                 if (retrieval.BudgetTrimmedChunks > 0)
                 {
-                    ragTags["retrieval.budget_trimmed"] = retrieval.BudgetTrimmedChunks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    ragTags["retrieval.budget_trimmed"] = retrieval.BudgetTrimmedChunks.ToString(CultureInfo.InvariantCulture);
                 }
 
                 traceCollector.CaptureSpan(new TraceSpan(

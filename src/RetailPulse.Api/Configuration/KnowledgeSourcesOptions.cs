@@ -4,7 +4,7 @@ namespace RetailPulse.Api.Configuration;
 /// Configuration-backed catalog of named knowledge sources for per-agent
 /// knowledge binding (issue #105). A named source maps a logical name (used by
 /// <c>AgentDefinition.KnowledgeBaseName</c>) to the concrete document
-/// <see cref="RetailPulse.Contracts.Rag.SearchResult.Source"/> values that
+/// <see cref="Contracts.Rag.SearchResult.Source"/> values that
 /// belong to it. Multiple agents may reference the same name; unknown
 /// references fail startup.
 ///
@@ -44,7 +44,7 @@ public sealed class KnowledgeSourcesOptions
 /// <summary>
 /// A single named source's document members. The <see cref="Documents"/>
 /// values are compared verbatim against the <c>source</c> string persisted by
-/// <see cref="RetailPulse.Contracts.Rag.IKnowledgeBase.IngestDocumentAsync"/>
+/// <see cref="Contracts.Rag.IKnowledgeBase.IngestDocumentAsync"/>
 /// (typically the document's file name).
 /// </summary>
 public sealed class KnowledgeSourceDefinition

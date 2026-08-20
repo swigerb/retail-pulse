@@ -110,7 +110,7 @@ public sealed class PerAgentKnowledgeBindingTests
             ("planogram-agent", true, "planogram"),
             ("router", false, ""));
 
-        KnowledgeSourceRegistry registry = KnowledgeSourceRegistry.Build(sources, agents);
+        var registry = KnowledgeSourceRegistry.Build(sources, agents);
 
         registry.GetBinding("router").Enabled.Should().BeFalse();
         registry.GetBinding("planogram-agent").Enabled.Should().BeTrue();
@@ -123,7 +123,7 @@ public sealed class PerAgentKnowledgeBindingTests
         // Orchestration prompts and test doubles that never appear in the
         // agent map keep the pre-#105 default of unscoped, always-enabled
         // retrieval so nothing else regresses.
-        KnowledgeSourceRegistry registry =
+        var registry =
             KnowledgeSourceRegistry.Build(new KnowledgeSourcesOptions(), Agents());
 
         KnowledgeBinding fallback = registry.GetBinding("never-seen");
@@ -141,7 +141,7 @@ public sealed class PerAgentKnowledgeBindingTests
         // Sentinel that fails the test if the provider is called even once.
         // Proves the "no provider call, no latency, no token cost" guarantee.
         var spy = new SpyKnowledgeBase();
-        KnowledgeSourceRegistry registry = KnowledgeSourceRegistry.Build(
+        var registry = KnowledgeSourceRegistry.Build(
             new KnowledgeSourcesOptions(),
             Agents(("router", false, "")));
 
@@ -163,7 +163,7 @@ public sealed class PerAgentKnowledgeBindingTests
     public async Task EnabledAgent_UnscopedFallback_CallsProviderAndInjectsContext()
     {
         InMemoryKnowledgeBase kb = CreateSeededKb();
-        KnowledgeSourceRegistry registry = KnowledgeSourceRegistry.Build(
+        var registry = KnowledgeSourceRegistry.Build(
             new KnowledgeSourcesOptions(),
             Agents(("general", true, "")));
 
@@ -185,7 +185,7 @@ public sealed class PerAgentKnowledgeBindingTests
     public async Task ScopedAgent_OnlySeesInScopeSources()
     {
         InMemoryKnowledgeBase kb = CreateSeededKb();
-        KnowledgeSourceRegistry registry = KnowledgeSourceRegistry.Build(
+        var registry = KnowledgeSourceRegistry.Build(
             Sources(("planogram", "planogram.md")),
             Agents(("planogram-agent", true, "planogram")));
 
@@ -225,8 +225,8 @@ public sealed class PerAgentKnowledgeBindingTests
             await kb.IngestDocumentAsync($"Doc-{i}", body, $"doc-{i}.md");
         }
 
-        var budget = Options.Create(new ToolResultBudgetOptions { MaxResultChars = 800 });
-        KnowledgeSourceRegistry registry = KnowledgeSourceRegistry.Build(
+        IOptions<ToolResultBudgetOptions> budget = Options.Create(new ToolResultBudgetOptions { MaxResultChars = 800 });
+        var registry = KnowledgeSourceRegistry.Build(
             new KnowledgeSourcesOptions(),
             Agents(("general", true, "")));
         var provider = new RagContextProvider(
@@ -266,7 +266,7 @@ public sealed class PerAgentKnowledgeBindingTests
         guardrails.ContentSafety.Enabled = true;
         guardrails.ContentSafety.CheckRetrievedKnowledge = true;
 
-        KnowledgeSourceRegistry registry = KnowledgeSourceRegistry.Build(
+        var registry = KnowledgeSourceRegistry.Build(
             new KnowledgeSourcesOptions(),
             Agents(("general", true, "")));
         var provider = new RagContextProvider(
@@ -296,7 +296,7 @@ public sealed class PerAgentKnowledgeBindingTests
         var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == "RetailPulse.Agent",
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            Sample = (ref _) => ActivitySamplingResult.AllData,
             ActivityStopped = a =>
             {
                 if (a.OperationName == "rag.retrieve")
@@ -309,7 +309,7 @@ public sealed class PerAgentKnowledgeBindingTests
         try
         {
             InMemoryKnowledgeBase kb = CreateSeededKb();
-            KnowledgeSourceRegistry registry = KnowledgeSourceRegistry.Build(
+            var registry = KnowledgeSourceRegistry.Build(
                 Sources(("planogram", "planogram.md")),
                 Agents(("planogram-agent", true, "planogram")));
 

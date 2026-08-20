@@ -62,11 +62,10 @@ public sealed class KnowledgeSourceRegistry
         var namedTable = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         foreach ((string name, KnowledgeSourceDefinition def) in sourcesOptions.Named)
         {
-            var docs = def.Documents
+            string[] docs = [.. def.Documents
                 .Where(d => !string.IsNullOrWhiteSpace(d))
                 .Select(d => d.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+                .Distinct(StringComparer.OrdinalIgnoreCase)];
             if (docs.Length == 0)
             {
                 continue;
