@@ -1,8 +1,8 @@
 using FluentAssertions;
 using RetailPulse.Api.Guardrails.AgentDefinition;
+using RetailPulse.Contracts.Guardrails;
 using AgentDefinition = RetailPulse.Api.Models.AgentDefinition;
 using PromptConfiguration = RetailPulse.Api.Models.PromptConfiguration;
-using RetailPulse.Contracts.Guardrails;
 
 namespace RetailPulse.Tests.Guardrails.AgentDefinitions;
 
