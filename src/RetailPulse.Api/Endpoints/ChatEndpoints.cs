@@ -35,7 +35,7 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null, [FromServices] ISessionStore? sessionStore = null, [FromServices] IOptions<SessionPersistenceOptions>? sessionPersistenceOptions = null) =>
+        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null, [FromServices] ISessionStore? sessionStore = null, [FromServices] IOptions<SessionPersistenceOptions>? sessionPersistenceOptions = null, [FromServices] RetailPulse.Api.Agents.Planning.PlanOrchestrator? planOrchestrator = null, [FromServices] IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions>? planPersistenceOptions = null) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
             ValidationResult validation = ChatRequestValidator.Validate(request);
@@ -459,6 +459,67 @@ public static class ChatEndpoints
                         }
 
                         return Results.Ok(councilResponse);
+                    }
+                }
+
+                // Plan-first interception (issue #93): when the router flags multi-domain
+                // intent AND the caller is a real (non-anonymous) subject AND the plan
+                // orchestrator is registered, hand the whole request to the workflow-
+                // backed plan path. It opens one budget scope for the entire plan,
+                // persists steps as it runs, and either returns a composed reply or
+                // fails fast with an honest terminal state (nothing hangs). The
+                // single-specialist path below is skipped entirely.
+                {
+                    RetailPulse.Api.Persistence.PlanPersistenceOptions planOpts =
+                        planPersistenceOptions?.Value ?? new RetailPulse.Api.Persistence.PlanPersistenceOptions();
+                    int planThreshold = Math.Max(1, planOpts.MinDetectedIntentsForPlan);
+                    bool multiDomain = decision.DetectedIntents is { Count: > 0 } &&
+                        decision.DetectedIntents.Count >= planThreshold;
+                    bool councilIntent = decision.DetectedIntents?.Any(i =>
+                        string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true
+                        || string.Equals(decision.Intent, "council/health", StringComparison.OrdinalIgnoreCase);
+
+                    if (planOrchestrator is not null && !anonymous && multiDomain && !councilIntent)
+                    {
+                        List<ISpecialistAgent> roster = [.. specialists];
+                        var specialistLookup =
+                            roster.ToDictionary(s => s.Key, s => s, StringComparer.OrdinalIgnoreCase);
+                        string tenantId = tenantProvider.GetTenant()?.Company ?? string.Empty;
+
+                        RetailPulse.Api.Agents.Planning.PlanOrchestrationResult planResult =
+                            await planOrchestrator.RunAsync(new RetailPulse.Api.Agents.Planning.PlanOrchestrationInput
+                            {
+                                Request = enrichedRequest with { SessionId = sessionId },
+                                Subject = userId,
+                                PrincipalKey = userId,
+                                TenantId = tenantId,
+                                Roster = roster,
+                                SpecialistLookup = specialistLookup,
+                                DetectedIntents = decision.DetectedIntents ?? [],
+                                TraceId = traceId,
+                                ParentSpanId = chatActivity?.SpanId.ToString(),
+                            }, ct);
+
+                        var planChatResponse = new ChatResponse(
+                            planResult.Reply,
+                            sessionId,
+                            [],
+                            null,
+                            planResult.DurationMs,
+                            new TokenUsage(planResult.InputTokens, planResult.OutputTokens, planResult.TotalTokens),
+                            new RoutingInfo(
+                                "planner",
+                                "Plan Orchestrator",
+                                decision.Intent ?? "plan",
+                                decision.Confidence,
+                                planResult.DurationMs));
+
+                        if (!memoryDisabled)
+                        {
+                            await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, planResult.Reply, ct);
+                        }
+
+                        return Results.Ok(planChatResponse);
                     }
                 }
 

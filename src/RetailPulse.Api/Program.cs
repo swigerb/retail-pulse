@@ -293,6 +293,10 @@ AgentDefinition? councilSynthesisDef = TryResolveAgent("council-synthesis", prom
 AgentDefinition? councilVoteDef = TryResolveAgent("council-vote", promptConfig);
 AgentDefinition? scorecardSynthesisDef = TryResolveAgent("scorecard-synthesis", promptConfig);
 _ = TryResolveAgent("exec-brief", promptConfig); // referenced only for validation
+// Planner definition (issue #93). Optional so the API still boots when the
+// planner entry is absent from a tenant's prompts.yaml — the chat pipeline
+// falls back to the single-specialist path when it is missing.
+AgentDefinition? plannerDef = TryResolveAgent("planner", promptConfig);
 
 static AgentDefinition ResolveAgent(string sectionKey, PromptConfiguration cfg) =>
     cfg.Agents.TryGetValue(sectionKey, out AgentDefinition? d)
@@ -633,6 +637,14 @@ builder.Services.AddProactiveAlerts(alertsDbPath);
 // session endpoints refuse anonymous callers at entry. See SessionPersistenceOptions.
 string sessionsDbPath = Path.Combine(dataDirectory, "sessions.db");
 builder.Services.AddSessionPersistence(builder.Configuration, sessionsDbPath);
+
+// Durable plan/step persistence (issue #93). Off by default (see
+// PlanPersistenceOptions.Enabled). When on, plans and steps survive an API
+// restart, so an authenticated user can list and reopen owned plans. Mirrors
+// the SessionPersistence pattern above and lives under the shared data
+// directory so a single SMB-safe mount covers both stores.
+string plansDbPath = Path.Combine(dataDirectory, "plans.db");
+builder.Services.AddPlanPersistence(builder.Configuration, plansDbPath);
 
 // Distributed tracing — in-memory ring buffer with bounded-channel SignalR push
 builder.Services.AddSingleton<TelemetryPushChannel>();
@@ -1005,6 +1017,49 @@ if (scorecardSynthesisDef is not null)
     });
 }
 
+// Register the plan-first orchestrator (issue #93). Only wired when the planner
+// definition is present AND the plan store is registered (PlanPersistence:Enabled),
+// so the chat endpoint's `is not null` check on IPlanStore already gates the whole
+// plan-first path. Uses the router's IChatClient keyed instance so the planner
+// benefits from the router's decorator stack (function invocation cap, OTel).
+if (plannerDef is not null)
+{
+    builder.Services.AddScoped(sp =>
+    {
+        IChatClient chatClient = sp.GetRequiredKeyedService<IChatClient>("router");
+        Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions> opts =
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions>>();
+        return new RetailPulse.Api.Agents.Planning.PlanBuilder(
+            chatClient,
+            plannerDef,
+            opts.Value,
+            sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.Planning.PlanBuilder>>(),
+            sp.GetService<ILoggerFactory>());
+    });
+    builder.Services.AddScoped(sp =>
+    {
+        Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions> opts =
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions>>();
+        return new RetailPulse.Api.Agents.Planning.PlanExecutor(
+            sp.GetRequiredService<RetailPulse.Api.Persistence.IPlanStore>(),
+            sp.GetRequiredService<RetailPulse.Contracts.Observability.ICostTracker>(),
+            sp.GetRequiredService<RetailPulse.Contracts.Tracing.ITraceCollector>(),
+            opts.Value,
+            sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.Planning.PlanExecutor>>());
+    });
+    builder.Services.AddScoped(sp =>
+    {
+        Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions> opts =
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RetailPulse.Api.Persistence.PlanPersistenceOptions>>();
+        return new RetailPulse.Api.Agents.Planning.PlanOrchestrator(
+            sp.GetRequiredService<RetailPulse.Api.Agents.Planning.PlanBuilder>(),
+            sp.GetRequiredService<RetailPulse.Api.Agents.Planning.PlanExecutor>(),
+            sp.GetRequiredService<RetailPulse.Api.Persistence.IPlanStore>(),
+            opts.Value,
+            sp.GetRequiredService<ILogger<RetailPulse.Api.Agents.Planning.PlanOrchestrator>>());
+    });
+}
+
 // Register ExplainabilityService (singleton for cross-request trace storage)
 builder.Services.AddSingleton<RetailPulse.Api.Explainability.ExplainabilityService>();
 
@@ -1119,6 +1174,14 @@ app.MapCacheEndpoints();
 if (app.Services.GetService<ISessionStore>() is not null)
 {
     app.MapSessionEndpoints();
+}
+
+// Durable plan endpoints (issue #93) — mapped only when PlanPersistence:Enabled
+// is true. Mirrors the session-endpoints opt-in convention so no plan surface
+// exists when persistence is off.
+if (app.Services.GetService<RetailPulse.Api.Persistence.IPlanStore>() is not null)
+{
+    app.MapPlanEndpoints();
 }
 
 // Anonymous mode: map the single unauthenticated bootstrap endpoint that mints short-lived
