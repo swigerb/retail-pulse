@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using FluentAssertions;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -8,10 +9,13 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Routing;
+using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Consensus;
+using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Consensus;
+using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
 using RetailPulse.Tests.Fixtures;
 using MafAgentResponse = Microsoft.Agents.AI.AgentResponse;
@@ -37,7 +41,19 @@ namespace RetailPulse.Tests.Agents;
 /// pass in, proving MAF does not silently rewrap or re-decorate the caller stack
 /// (validates <c>UseProvidedChatClientAsIs = true</c> is effective).
 /// </para>
+/// <para>
+/// This class joins the shared <c>OTel</c> xUnit collection
+/// (<see cref="RetailPulse.Tests.Fixtures.OTelCollection"/>). Its router,
+/// specialist, and span-order tests emit spans on the
+/// <c>RetailPulse.Agent</c> <see cref="ActivitySource"/> — the same source that
+/// <c>OTelRoutingSpanTests</c> subscribes to with a process-wide
+/// <see cref="ActivityListener"/>. Serializing the two classes prevents the
+/// otherwise-inevitable cross-contamination where an <c>agent.routing</c> span
+/// emitted by a MAF characterization run gets picked up as the
+/// <c>LastOrDefault</c> match by an <c>OTelRoutingSpanTests</c> assertion.
+/// </para>
 /// </summary>
+[Collection("OTel")]
 public class MafPrimitivesCharacterizationTests
 {
     #region MafAgentInvoker direct contract
@@ -214,6 +230,144 @@ public class MafPrimitivesCharacterizationTests
             "the council must issue exactly one MAF-routed vote per participant plus one MAF-routed synthesis call");
         probe.Calls.Should().OnlyContain(c => c.WasCalledFromMafFrame,
             "every voter and synthesis call must flow through the shared MafAgentInvoker path");
+    }
+
+    #endregion
+
+    #region Specialist inventory (all 10 ISpecialistAgent keys)
+
+    /// <summary>
+    /// Representative characterization for every <see cref="ISpecialistAgent"/> key
+    /// registered by production DI. For the nine LLM-backed specialists this proves
+    /// that <see cref="ISpecialistAgent.HandleAsync"/> executes exactly one chat
+    /// invocation and that the invocation originates inside a
+    /// <c>Microsoft.Agents.AI.ChatClientAgent</c> stack frame — the acceptance
+    /// contract that all real specialist inference flows through MAF. For the
+    /// single rules-only specialist (<see cref="MemoryManagementAgent"/>) it
+    /// asserts the opposite: <see cref="IChatClient"/> must NOT be called, and
+    /// the deterministic rules-only reply must reach the caller unchanged. That
+    /// keeps the characterization honest — MemoryManagement's <c>Model</c> is
+    /// documented as <c>"none"</c> and the specialist responds without an LLM.
+    /// </summary>
+    [Theory]
+    [InlineData("general",            true,  "Give me a summary of the retail landscape.")]
+    [InlineData("demand-forecasting", true,  "What is the demand forecast for Sierra Gold this quarter?")]
+    [InlineData("competitive-intel",  true,  "How is our competitive threat landscape looking this month?")]
+    [InlineData("supply-chain",       true,  "Are our supply chain shipments on track for the West region?")]
+    [InlineData("promo-planning",     true,  "Plan a summer promotion for premium spirits.")]
+    [InlineData("store-ops",          true,  "What operational issues should stores focus on this quarter?")]
+    [InlineData("planogram",          true,  "How should we adjust the planogram for the East region?")]
+    [InlineData("margin-analysis",    true,  "Analyze margin performance for tequila brands.")]
+    [InlineData("field-sentiment",    true,  "What is the field sentiment for Sierra Gold in the Northeast?")]
+    [InlineData("memory-management",  false, "Remember that I prefer premium tequila.")]
+    public async Task Specialist_HandlerBehavior_MatchesMafRoutingContract_ForEachKey(
+        string specialistKey, bool routesThroughMaf, string representativePrompt)
+    {
+        // Each specialist gets a private probe so a parallel-safe execution
+        // (the OTel collection already serializes this class, but a scoped
+        // probe per invocation also removes any latent aliasing between rows).
+        var probe = MafChatClientProbe.WithAssistantReply(
+            $"[stub reply for '{specialistKey}']");
+
+        ISpecialistAgent specialist = BuildSpecialist(specialistKey, probe);
+
+        specialist.Key.Should().Be(specialistKey,
+            "the built specialist must own the intended DI key");
+
+        RetailPulse.Contracts.ChatResponse response =
+            await specialist.HandleAsync(new ChatRequest(representativePrompt));
+
+        response.Should().NotBeNull(
+            $"specialist '{specialistKey}' must return a well-formed ChatResponse for a representative prompt");
+
+        if (routesThroughMaf)
+        {
+            probe.Calls.Should().HaveCount(1,
+                $"LLM-backed specialist '{specialistKey}' must issue exactly one chat client " +
+                "invocation through the shared MafAgentInvoker path (no tools attached, so no " +
+                "additional round-trips are expected)");
+            probe.Calls[0].WasCalledFromMafFrame.Should().BeTrue(
+                $"specialist '{specialistKey}' must reach IChatClient through the " +
+                "Microsoft.Agents.AI.ChatClientAgent primitive — the byte-equivalent " +
+                "acceptance criterion for issue #89");
+        }
+        else
+        {
+            probe.Calls.Should().BeEmpty(
+                $"specialist '{specialistKey}' is documented as rules-only (Model = \"none\") — " +
+                "any IChatClient call would prove an LLM was silently invoked and would " +
+                "contradict the specialist's contract");
+            response.Reply.Should().Contain("remember",
+                "the rules-only store path must acknowledge the user's remember request in prose");
+        }
+    }
+
+    /// <summary>
+    /// Builds a real specialist for the given key using the same constructors
+    /// production DI does. LLM-backed specialists share a pipeline that wraps
+    /// the supplied <see cref="MafChatClientProbe"/>; <see cref="MemoryManagementAgent"/>
+    /// ignores the probe and uses an in-memory fake <see cref="IConversationMemory"/>.
+    /// </summary>
+    private static ISpecialistAgent BuildSpecialist(string key, IChatClient probe)
+    {
+        IHubContext<TelemetryHub> hubContext = AgentTestFixtures.CreateMockHubContext();
+        AgentExecutionPipeline pipeline = new(
+            probe,
+            hubContext,
+            EmptyConfiguration(),
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+
+        return key switch
+        {
+            "general"            => new GeneralAgent(pipeline, Def("General"), []),
+            "demand-forecasting" => new DemandForecastAgent(pipeline, Def("Demand Forecast"), []),
+            "competitive-intel"  => new CompetitiveIntelAgent(
+                                        pipeline, Def("Competitive Intel"), [],
+                                        hubContext, Mock.Of<ILogger<CompetitiveIntelAgent>>()),
+            "supply-chain"       => new SupplyChainAgent(pipeline, Def("Supply Chain"), []),
+            "promo-planning"     => new PromoPlanningAgent(pipeline, Def("Promo Planning"), []),
+            "store-ops"          => new StoreOpsAgent(pipeline, Def("Store Ops"), []),
+            "planogram"          => new PlanogramAgent(pipeline, Def("Planogram"), []),
+            "margin-analysis"    => new MarginAgent(pipeline, Def("Margin"), []),
+            "field-sentiment"    => new FieldSentimentAgent(pipeline, Def("Field Sentiment"), []),
+            "memory-management"  => new MemoryManagementAgent(
+                                        new FakeConversationMemory(),
+                                        Mock.Of<ILogger<MemoryManagementAgent>>()),
+            _ => throw new ArgumentException(
+                     $"Unknown specialist key '{key}' — add a factory row to keep the Theory in sync with production DI",
+                     nameof(key)),
+        };
+
+        static AgentDefinition Def(string name) => new()
+        {
+            Name = name,
+            Model = "gpt-4o",
+            SystemPrompt = $"You are the {name} specialist for retail analytics.",
+            Temperature = 0.4
+        };
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IConversationMemory"/> that satisfies
+    /// <see cref="MemoryManagementAgent"/>'s store/forget code paths without any
+    /// persistence. The Theory only asserts that (a) no LLM call is issued and
+    /// (b) the rules-only reply reaches the caller; a functional memory store
+    /// is not required to make either claim.
+    /// </summary>
+    private sealed class FakeConversationMemory : IConversationMemory
+    {
+        public Task StoreAsync(string userId, MemoryEntry entry, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task<IReadOnlyList<MemoryEntry>> RecallAsync(
+            string userId, string? query = null, int maxResults = 5, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<MemoryEntry>>([]);
+
+        public Task ForgetAsync(string userId, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task ForgetEntryAsync(string userId, string memoryId, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     #endregion
