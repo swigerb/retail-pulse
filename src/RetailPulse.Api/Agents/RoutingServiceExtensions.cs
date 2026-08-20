@@ -168,6 +168,7 @@ public static class RoutingServiceExtensions
         "scorecard-synthesis",
         "exec-brief",
         "retail-pulse", // legacy composite prompt — not a specialist
+        "planner", // #93: plan-first orchestration prompt — not a specialist
     };
 
     /// <summary>

@@ -55,6 +55,17 @@ public sealed class RequestToolContext
     /// </summary>
     public static IDisposable Begin(string principalKey, bool isChartIntent)
     {
+        // If a caller already opened an outer budget scope (for example the
+        // plan-first orchestrator wrapping a whole plan around per-step
+        // specialist invocations — see issue #93 and ADR-011), reuse it so the
+        // returned-character counter, dedup map, and distinct-call counter
+        // accumulate cumulatively across the whole plan instead of resetting
+        // per step. The nested scope is a no-op on dispose in that case so
+        // the AsyncLocal slot stays owned by whoever opened it first.
+        RequestToolContext? existing = _current.Value;
+        if (existing is not null)
+            return NestedScope.Instance;
+
         _current.Value = new RequestToolContext(
             string.IsNullOrWhiteSpace(principalKey) ? "anonymous" : principalKey,
             isChartIntent);
@@ -87,5 +98,16 @@ public sealed class RequestToolContext
     private sealed class Scope : IDisposable
     {
         public void Dispose() => _current.Value = null;
+    }
+
+    /// <summary>
+    /// Disposable returned by <see cref="Begin(string, bool)"/> when an outer
+    /// budget scope is already in force. Dispose is intentionally a no-op —
+    /// the scope is owned by the caller who opened it first.
+    /// </summary>
+    private sealed class NestedScope : IDisposable
+    {
+        public static readonly NestedScope Instance = new();
+        public void Dispose() { }
     }
 }
