@@ -68,7 +68,11 @@ for path in "${staged_cs[@]}"; do
     worktree_eol=$(printf '%s' "$eol_line" | awk '{print $2}')
     if [ "$index_eol" = "i/lf" ] && [ "$worktree_eol" = "w/crlf" ]; then
         if git diff --ignore-cr-at-eol --quiet -- "$path"; then
-            git checkout -- "$path"
+            # `git checkout -- <path>` will silently no-op on Git for Windows
+            # when core.autocrlf=true because the checked-out (CRLF) content
+            # matches the working tree, so strip \r bytes directly instead.
+            tmp="$path.pre-commit-tmp.$$"
+            tr -d '\r' < "$path" > "$tmp" && mv "$tmp" "$path"
             normalized=$((normalized + 1))
         fi
     fi
