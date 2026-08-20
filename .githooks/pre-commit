@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit - Retail Pulse formatting gate
+#
+# Purpose:
+#   Catches `dotnet format` violations locally, before commit, so the CI `lint`
+#   job (.github/workflows/ci.yml) does not become the first place we discover a
+#   mechanical formatting problem. CI remains the authority; this hook is an
+#   early warning, not a replacement.
+#
+# What it runs:
+#   dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic \
+#       --include <staged .cs files>
+#
+#   The verification flags and target solution match the CI command exactly.
+#   Scoping via `--include` keeps routine commits fast; CI still runs the full
+#   solution check on every push.
+#
+# CRLF handling:
+#   .gitattributes declares `* text=auto eol=lf`, so `git add` always stores LF
+#   in the index. A file authored on Windows with CRLF in the working tree
+#   would otherwise still trip `dotnet format`'s ENDOFLINE check even though the
+#   committed content is LF and CI-clean. When the working-tree copy differs
+#   from the index only by CRLF, the hook re-checks out from the index so what
+#   we verify on disk matches what will be committed. Files with real unstaged
+#   edits are left alone.
+#
+# Bypass:
+#   git commit --no-verify
+#
+#   Legitimate reasons: emergency hotfixes, WIP commits on a private branch,
+#   commits that touch no C# (docs, infra text), or when the local SDK version
+#   diverges from CI. See docs/contributing.md#pre-commit-formatting-hook.
+#
+# Shell:
+#   Bash. Git for Windows ships bash and uses it to run hooks even when the
+#   user invokes `git commit` from PowerShell or cmd, so a single bash hook
+#   covers Windows, Linux, and macOS.
+
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+# Collect staged .cs files (added / copied / modified / renamed). NUL-delimited
+# so paths with spaces are handled correctly.
+staged_cs=()
+while IFS= read -r -d '' path; do
+    case "$path" in
+        *.cs) staged_cs+=("$path") ;;
+    esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [ ${#staged_cs[@]} -eq 0 ]; then
+    echo "pre-commit: no staged C# files; skipping dotnet format check." >&2
+    exit 0
+fi
+
+# Normalize CRLF -> LF in the working tree for files whose index copy is already
+# LF (per .gitattributes) and whose only working-tree difference is line
+# endings. `git diff --ignore-cr-at-eol --quiet` succeeds iff the working-tree
+# file matches the index modulo CR, so we won't clobber genuine unstaged edits.
+normalized=0
+for path in "${staged_cs[@]}"; do
+    eol_line=$(git ls-files --eol -- "$path" 2>/dev/null | head -n 1 || true)
+    [ -n "$eol_line" ] || continue
+    # Fields (whitespace-padded): i/<eol>  w/<eol>  attr/...  <path>
+    index_eol=$(printf '%s' "$eol_line" | awk '{print $1}')
+    worktree_eol=$(printf '%s' "$eol_line" | awk '{print $2}')
+    if [ "$index_eol" = "i/lf" ] && [ "$worktree_eol" = "w/crlf" ]; then
+        if git diff --ignore-cr-at-eol --quiet -- "$path"; then
+            git checkout -- "$path"
+            normalized=$((normalized + 1))
+        fi
+    fi
+done
+
+if [ "$normalized" -gt 0 ]; then
+    echo "pre-commit: normalized CRLF -> LF in $normalized working-tree file(s) to match the staged index." >&2
+fi
+
+if ! command -v dotnet >/dev/null 2>&1; then
+    echo "pre-commit: 'dotnet' not on PATH; skipping format check (CI will still enforce)." >&2
+    exit 0
+fi
+
+echo "pre-commit: running dotnet format on ${#staged_cs[@]} staged C# file(s)..." >&2
+
+# `--include` accepts a comma-separated list.
+include_arg=$(printf '%s,' "${staged_cs[@]}")
+include_arg=${include_arg%,}
+
+if dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic --include "$include_arg"; then
+    echo "pre-commit: dotnet format passed." >&2
+    exit 0
+fi
+
+cat >&2 <<'MSG'
+
+pre-commit: dotnet format --verify-no-changes reported violations above.
+
+  Fix locally, then re-stage and commit:
+      dotnet format RetailPulse.slnx --include <files>
+      git add <files>
+      git commit
+
+  Bypass (only when you know why - see docs/contributing.md):
+      git commit --no-verify
+
+CI runs the full-solution formatter on every push and remains the authority.
+MSG
+exit 1
