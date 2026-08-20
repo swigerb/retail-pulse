@@ -147,4 +147,52 @@ public abstract class KnowledgeBaseConformanceTests
         hits.Should().NotContain(r => r.DocumentId == aId,
             "deleted documents must not appear in future searches");
     }
+
+    [Fact]
+    public async Task ScopedSearch_RestrictsResultsToRequestedSources()
+    {
+        // Issue #105: per-agent knowledge binding relies on identical source
+        // filtering semantics across providers. Two documents, only one in
+        // scope — the in-scope document must be returned and the out-of-scope
+        // document must NOT appear even if it shares vocabulary.
+        IKnowledgeBase kb = await CreateProviderAsync();
+        await kb.IngestDocumentAsync(
+            title: "Planogram Reference",
+            content: "Uniqueterm-planogram shelf-set anchors keep the top velocity SKUs in the eye-level bay.",
+            source: "planogram.md");
+        await kb.IngestDocumentAsync(
+            title: "Supplier Reference",
+            content: "Uniqueterm-supplier distributor service levels for fill rate and backhaul consolidation.",
+            source: "supplier.md");
+
+        IReadOnlyList<SearchResult> inScope = await kb.SearchAsync(
+            "uniqueterm-planogram uniqueterm-supplier", topK: 5, sources: ["planogram.md"]);
+
+        inScope.Should().NotBeEmpty();
+        inScope.Should().OnlyContain(r => r.Source == "planogram.md",
+            "scoped search MUST exclude out-of-scope documents from the result set");
+
+        IReadOnlyList<SearchResult> unscoped = await kb.SearchAsync("uniqueterm-planogram uniqueterm-supplier", topK: 5);
+        unscoped.Select(r => r.Source).Distinct().Should().Contain("supplier.md",
+            "an unscoped search over the same corpus must still surface both sources — " +
+            "the scoped result set is the restricted subset, not a permanent filter");
+    }
+
+    [Fact]
+    public async Task ScopedSearch_EmptySourcesCollection_BehavesLikeUnscoped()
+    {
+        // Providers must treat null/empty sources as "no filter" so callers
+        // can share one code path for the enabled-unscoped and enabled-scoped
+        // agent bindings.
+        IKnowledgeBase kb = await CreateProviderAsync();
+        await kb.IngestDocumentAsync("Doc A", "Uniqueterm-alpha retail merchandising anchor content.", "a.md");
+        await kb.IngestDocumentAsync("Doc B", "Uniqueterm-beta retail merchandising execution content.", "b.md");
+
+        IReadOnlyList<SearchResult> unscoped = await kb.SearchAsync("uniqueterm-alpha uniqueterm-beta", topK: 5);
+        IReadOnlyList<SearchResult> empty = await kb.SearchAsync("uniqueterm-alpha uniqueterm-beta", topK: 5, sources: []);
+
+        empty.Select(r => r.DocumentId).OrderBy(id => id).Should().BeEquivalentTo(
+            unscoped.Select(r => r.DocumentId).OrderBy(id => id),
+            "an empty sources collection must be treated as unscoped by every provider");
+    }
 }

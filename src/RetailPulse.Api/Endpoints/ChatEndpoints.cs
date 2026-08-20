@@ -380,13 +380,53 @@ public static class ChatEndpoints
                     enrichedRequest = request with { History = historyWithMemory };
                 }
 
-                // RAG context injection — search knowledge base for relevant grounding
-                string? ragContext = await ragProvider.GetContextAsync(request.Message, ct);
-                if (ragContext is not null)
+                // RAG context injection — per-agent binding (issue #105). The
+                // provider consults the specialist's `use_knowledge_base` +
+                // `knowledge_base_name` binding: a disabled agent short-circuits
+                // before any provider call so retrieval adds no latency and no
+                // token cost. Every retrieval — including the skip — is
+                // captured as a `rag.retrieve` trace span with the source,
+                // chunk count, and latency so the trace surface makes the
+                // grounding chain visible.
+                DateTimeOffset ragStart = DateTimeOffset.UtcNow;
+                RagRetrievalOutcome retrieval = await ragProvider
+                    .GetContextForAgentAsync(request.Message, userId, specialist.Key, ct)
+                    .ConfigureAwait(false);
+                DateTimeOffset ragEnd = DateTimeOffset.UtcNow;
+
+                var ragTags = new Dictionary<string, string>
+                {
+                    ["span.type"] = "retrieval",
+                    ["retrieval.agent_key"] = specialist.Key,
+                    ["retrieval.enabled"] = retrieval.Enabled ? "true" : "false",
+                    ["retrieval.scoped"] = retrieval.Scoped ? "true" : "false",
+                    ["retrieval.chunk_count"] = retrieval.ChunkCount.ToString(CultureInfo.InvariantCulture),
+                    ["retrieval.duration_ms"] = retrieval.DurationMs.ToString("F2", CultureInfo.InvariantCulture),
+                };
+                if (retrieval.Sources.Count > 0)
+                {
+                    ragTags["retrieval.source"] = string.Join(",", retrieval.Sources);
+                }
+                if (retrieval.BudgetTrimmedChunks > 0)
+                {
+                    ragTags["retrieval.budget_trimmed"] = retrieval.BudgetTrimmedChunks.ToString(CultureInfo.InvariantCulture);
+                }
+
+                traceCollector.CaptureSpan(new TraceSpan(
+                    SpanId: Guid.NewGuid().ToString("N")[..16],
+                    TraceId: traceId,
+                    ParentSpanId: chatActivity?.SpanId.ToString(),
+                    OperationName: "rag.retrieve",
+                    StartTime: ragStart,
+                    EndTime: ragEnd,
+                    DurationMs: (ragEnd - ragStart).TotalMilliseconds,
+                    Tags: ragTags));
+
+                if (retrieval.Context is not null)
                 {
                     var historyWithRag = new List<ChatHistoryMessage>(enrichedRequest.History ?? [])
                     {
-                        new("system", ragContext)
+                        new("system", retrieval.Context)
                     };
                     enrichedRequest = enrichedRequest with { History = historyWithRag };
                 }

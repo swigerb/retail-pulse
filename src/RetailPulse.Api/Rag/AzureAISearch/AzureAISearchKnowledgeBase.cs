@@ -182,7 +182,15 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken ct = default)
+    public Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken ct = default) =>
+        SearchAsync(query, topK, sources: null, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SearchResult>> SearchAsync(
+        string query,
+        int topK,
+        IReadOnlyCollection<string>? sources,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -228,6 +236,19 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
         searchOptions.Select.Add(AzureAISearchIndexSchema.SourceField);
         searchOptions.SearchFields.Add(AzureAISearchIndexSchema.TitleField);
         searchOptions.SearchFields.Add(AzureAISearchIndexSchema.ContentField);
+
+        // Named-source push-down: apply the source membership filter on the
+        // service so top-K/scoring select from in-scope hits only. Semantics
+        // match InMemoryKnowledgeBase — comparison is against the same
+        // `source` string persisted by IngestDocumentAsync.
+        if (sources is { Count: > 0 })
+        {
+            string filter = BuildSourceFilter(sources);
+            if (!string.IsNullOrEmpty(filter))
+            {
+                searchOptions.Filter = filter;
+            }
+        }
 
         if (_options.SemanticRankingEnabled)
         {
@@ -435,6 +456,33 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
 
     private static string EscapeODataString(string value) =>
         value.Replace("'", "''", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Builds an OData filter that constrains hits to chunks whose
+    /// <see cref="AzureAISearchIndexSchema.SourceField"/> matches one of the
+    /// supplied values. Uses <c>search.in</c> for the multi-value case so the
+    /// query stays a single term server-side.
+    /// </summary>
+    private static string BuildSourceFilter(IReadOnlyCollection<string> sources)
+    {
+        var distinct = sources
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (distinct.Count == 0) return string.Empty;
+
+        if (distinct.Count == 1)
+        {
+            return $"{AzureAISearchIndexSchema.SourceField} eq '{EscapeODataString(distinct[0])}'";
+        }
+
+        // search.in delimits the values with a caller-chosen separator; pick
+        // one that never appears in a filename by convention.
+        const string separator = "|";
+        string joined = string.Join(separator, distinct.Select(EscapeODataString));
+        return $"search.in({AzureAISearchIndexSchema.SourceField}, '{joined}', '{separator}')";
+    }
 
     private static bool IsTransport(RequestFailedException ex) =>
         ex.Status is 0 or

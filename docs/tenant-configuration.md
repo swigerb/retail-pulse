@@ -336,6 +336,8 @@ unless noted; the loader supplies safe defaults.
 | `scorecard_dimension` | string | If set (with a positive `scorecard_weight`) this agent contributes a dimension to the brand scorecard. |
 | `scorecard_weight` | number | Weight for the scorecard dimension. Ordered by weight descending in the final report. |
 | `prefetchable` | bool | When true, the router calls the agent's `IPrefetchableAgent` hook to warm data before invocation. |
+| `use_knowledge_base` | bool | Per-agent RAG toggle. Defaults to `true` so existing agents keep grounding. Set to `false` on orchestration prompts and any agent that must never retrieve — the pipeline short-circuits before any provider call so retrieval adds no latency and no token cost. |
+| `knowledge_base_name` | string | Optional logical knowledge source name. When empty (default), retrieval is unscoped over the entire corpus. When set, the value MUST match one of the names declared under `Knowledge:Sources:Named` in configuration — an unknown value aborts startup with the agent key, the unknown name, and the list of valid names. |
 
 ### Worked example: adding a Loyalty Analytics specialist
 
@@ -386,3 +388,95 @@ the app or delivered through the same channel as `tenant.yaml`. Retail Pulse
 does not currently accept prompt definitions from arbitrary users. Safety
 validation of agent definitions (schema, prompt-injection heuristics, tool
 allow-listing) is tracked separately in issue #99.
+
+## Per-agent knowledge binding (issue #105)
+
+Retail Pulse binds knowledge sources to specialists in two places:
+
+1. `Knowledge:Sources:Named` in configuration declares logical knowledge
+   sources — friendly names mapped to one or more provider `source` values.
+2. `use_knowledge_base` / `knowledge_base_name` on each `AgentDefinition`
+   binds an agent to a logical source (or opts it out of retrieval).
+
+### Naming knowledge sources in configuration
+
+```jsonc
+// appsettings.json
+"Knowledge": {
+  "Sources": {
+    "Named": {
+      "planogram":            { "Documents": [ "apex-planogram-shelf-set.md" ] },
+      "supplier-service":     { "Documents": [ "apex-supplier-service-levels.md" ] },
+      "promo-execution":      { "Documents": [ "apex-merchandising-promo-execution.md" ] },
+      "category-assortment":  { "Documents": [ "apex-category-assortment.md" ] }
+    }
+  }
+}
+```
+
+Every value in `Documents` must match the `source` string used when the
+document was ingested (typically the filename passed to
+`IKnowledgeBase.IngestDocumentAsync`). A single logical name can list
+multiple documents and multiple agents can bind to the same name — sharing is
+intentional so pods that touch the same domain draw from the same corpus.
+
+### Binding a specialist
+
+```yaml
+agents:
+  planogram:
+    name: "Planogram Optimization Agent"
+    key: "planogram"
+    use_knowledge_base: true
+    knowledge_base_name: "planogram"     # matches Knowledge:Sources:Named
+    # ... rest of definition
+
+  router:
+    name: "Retail Ops Router"
+    key: "router"
+    use_knowledge_base: false             # orchestration prompt — no retrieval
+    # ... rest of definition
+```
+
+Rules:
+
+- `use_knowledge_base: false` is a hard skip. `RagContextProvider` returns
+  before touching the knowledge provider and before creating a retrieval
+  activity, so a disabled agent pays zero latency and zero tokens for
+  grounding. The endpoint still captures a `rag.retrieve` trace span
+  tagged `retrieval.enabled=false` for observability.
+- `knowledge_base_name` accepts only names declared in
+  `Knowledge:Sources:Named`. Startup fails loud with a message that
+  contains the offending agent key, the unknown name, and the list of
+  valid names — no silent typo tolerance.
+- Leaving `knowledge_base_name` empty on an enabled agent keeps
+  retrieval unscoped (the entire corpus is eligible).
+- Retrieved chunks always flow through the existing Content Safety
+  indirect-injection path; the grounding block is bounded by the
+  ADR-006 tool-context budget (`Budget:ToolResult:MaxResultChars`) so a
+  large corpus cannot grow the model's context window unbounded.
+
+### Retrieval telemetry
+
+Every retrieval emits a `rag.retrieve` trace span with `span.type =
+retrieval` and the following tags:
+
+| Tag | Description |
+|-----|-------------|
+| `retrieval.agent_key` | Routing key of the agent that requested retrieval. |
+| `retrieval.enabled` | `false` when the agent's binding disabled retrieval. |
+| `retrieval.scoped` | `true` when the search was constrained to named sources. |
+| `retrieval.source` | Comma-joined named-source values (only when scoped). |
+| `retrieval.chunk_count` | Number of chunks kept in the grounding block. |
+| `retrieval.duration_ms` | Elapsed retrieval time in milliseconds. |
+| `retrieval.budget_trimmed` | Count of chunks dropped by the ADR-006 budget (present only when >0). |
+
+### Sample grounding corpus
+
+The default sample tenant ships with four fictional Apex-attributed documents
+covering the four named sources above. They are illustrative and contain no
+real customers, suppliers, or proprietary retailer material. Replace them for
+a real deployment by editing `KnowledgeBaseSeeder` (in-memory provider) or
+ingesting the target documents through the operator API (Azure AI Search
+provider). Named-source values in `appsettings.json` must match the `source`
+strings actually ingested.

@@ -3,6 +3,7 @@ agents:
     name: "Retail Ops Router"
     model: "gpt-5.4-mini"
     key: "router"
+    use_knowledge_base: false
     display_name: "Router"
     role: "orchestration"
     system_prompt: |
@@ -65,6 +66,8 @@ agents:
     name: "Demand Forecast Agent"
     model: "gpt-5.4-mini"
     key: "demand-forecasting"
+    use_knowledge_base: true
+    knowledge_base_name: "category-assortment"
     display_name: "Demand Forecasting"
     role: "specialist"
     intents:
@@ -169,6 +172,8 @@ agents:
     name: "Promotion Planning Agent"
     model: "gpt-5.4-mini"
     key: "promo-planning"
+    use_knowledge_base: true
+    knowledge_base_name: "promo-execution"
     display_name: "Promotion Planning"
     role: "specialist"
     intents:
@@ -260,6 +265,8 @@ agents:
     name: "Field Sentiment Agent"
     model: "gpt-5.4-mini"
     key: "field-sentiment"
+    use_knowledge_base: true
+    knowledge_base_name: ""
     display_name: "Field Sentiment"
     role: "specialist"
     intents:
@@ -304,6 +311,8 @@ agents:
     name: "Competitive Intelligence Agent"
     model: "gpt-5.4-mini"
     key: "competitive-intel"
+    use_knowledge_base: true
+    knowledge_base_name: ""
     display_name: "Competitive Intelligence"
     role: "bespoke"
     intents:
@@ -371,6 +380,8 @@ agents:
     name: "Retail Pulse Agent"
     model: "gpt-5.4-mini"
     key: "general"
+    use_knowledge_base: true
+    knowledge_base_name: "category-assortment"
     display_name: "General Agent"
     role: "specialist"
     intents:
@@ -599,6 +610,8 @@ agents:
     name: "Supply Chain Agent"
     model: "gpt-5.4-mini"
     key: "supply-chain"
+    use_knowledge_base: true
+    knowledge_base_name: "supplier-service"
     display_name: "Supply Chain"
     role: "specialist"
     intents:
@@ -697,6 +710,7 @@ agents:
     name: "Council Synthesis"
     model: "gpt-5.4-mini"
     key: "council-synthesis"
+    use_knowledge_base: false
     role: "orchestration"
     system_prompt: |
       You are the Portfolio Health Council synthesizer. Your role is to analyze
@@ -721,6 +735,7 @@ agents:
     name: "Council Vote Format"
     model: "gpt-5.4-mini"
     key: "council-vote"
+    use_knowledge_base: false
     role: "orchestration"
     system_prompt: |
       You are providing a structured health assessment vote as part of the
@@ -753,6 +768,8 @@ agents:
     name: "Store Operations Agent"
     model: "gpt-5.4-mini"
     key: "store-ops"
+    use_knowledge_base: true
+    knowledge_base_name: "promo-execution"
     display_name: "Store Operations"
     role: "specialist"
     intents:
@@ -816,6 +833,8 @@ agents:
     name: "Planogram Optimization Agent"
     model: "gpt-5.4-mini"
     key: "planogram"
+    use_knowledge_base: true
+    knowledge_base_name: "planogram"
     display_name: "Planogram Optimization"
     role: "specialist"
     intents:
@@ -878,6 +897,8 @@ agents:
     name: "Margin Analysis Agent"
     model: "gpt-5.4-mini"
     key: "margin-analysis"
+    use_knowledge_base: true
+    knowledge_base_name: ""
     display_name: "Margin Analysis"
     role: "specialist"
     intents:
@@ -951,6 +972,7 @@ agents:
     name: "Scorecard Synthesis"
     model: "gpt-5.4-mini"
     key: "scorecard-synthesis"
+    use_knowledge_base: false
     role: "orchestration"
     system_prompt: |
       You are the Portfolio Scorecard synthesizer. Your role is to produce
@@ -969,6 +991,7 @@ agents:
     name: "Executive Brief"
     model: "gpt-5.4-mini"
     key: "exec-brief"
+    use_knowledge_base: false
     role: "orchestration"
     system_prompt: |
       You generate concise executive briefs from portfolio data.
@@ -1030,6 +1053,7 @@ agents:
     name: "Memory Management Agent"
     model: "none"
     key: "memory-management"
+    use_knowledge_base: false
     display_name: "Memory Management"
     role: "bespoke"
     intents:
