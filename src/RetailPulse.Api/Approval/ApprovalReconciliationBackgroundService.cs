@@ -4,11 +4,16 @@ using RetailPulse.Contracts.Approval;
 namespace RetailPulse.Api.Approval;
 
 /// <summary>
-/// Startup reconciliation for durable approval requests. Runs before Kestrel begins
-/// accepting traffic (hosted services complete <see cref="IHostedService.StartAsync"/>
-/// before the generic web host service ends its own StartAsync in ASP.NET Core), so
-/// any Pending row left behind by a previous process is closed — or resumed — before
-/// the first HTTP request or agent invocation can create a new one.
+/// Startup reconciliation for durable approval requests. Runs as an
+/// <see cref="IHostedService"/> during host startup and sweeps every Pending row
+/// left behind by a previous process, closing it — or handing it to a resume
+/// strategy — through the configured <see cref="IApprovalResumeStrategy"/>. Ordering
+/// with the web host is not strictly guaranteed, so the first HTTP request or agent
+/// invocation may briefly race the sweep. That is safe: race-safety is enforced at
+/// the row via a single conditional <c>Pending → terminal</c> UPDATE, and
+/// <see cref="IApprovalGate.RespondAsync"/> returns the actual persisted winner
+/// instead of the caller-requested decision, so a late human response can never
+/// silently overwrite a row that this sweep has already terminated.
 ///
 /// <para>
 /// The delegated <see cref="IApprovalResumeStrategy"/> is the single seam Wave 2

@@ -604,10 +604,13 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<TimeProvider>());
 });
 builder.Services.AddSingleton<IApprovalGate>(sp => sp.GetRequiredService<SqliteApprovalGate>());
-// Reconciliation runs before Kestrel accepts traffic (Kestrel is itself a hosted
-// service that starts after all prior IHostedService StartAsync calls complete),
-// so a Pending row abandoned by a previous process cannot slip through into a new
-// human response window.
+// Reconciliation runs during host startup as a hosted service. Ordering with the
+// web host is not strictly guaranteed here — traffic may briefly race the sweep —
+// so correctness does NOT depend on completing before Kestrel accepts requests.
+// Race-safety is enforced at the row: every Pending → terminal write is a single
+// conditional SQL UPDATE and RespondAsync returns the actual persisted winner,
+// so a late human response can never silently overwrite a row that reconciliation
+// (or a concurrent waiter) has already closed.
 builder.Services.AddHostedService<ApprovalReconciliationBackgroundService>();
 
 // Approval tool — available to specialist agents for high-impact recommendations

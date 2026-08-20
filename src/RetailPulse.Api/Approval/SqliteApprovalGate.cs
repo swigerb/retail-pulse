@@ -17,9 +17,11 @@ namespace RetailPulse.Api.Approval;
 /// <see cref="TimeProvider"/>) instead of fixed-interval polling, and every
 /// Pending → terminal transition is a single conditional SQL update so a
 /// simultaneous human response and timeout race resolves to exactly one persisted
-/// winner. On losing the race the waiter re-reads the row and returns the actual
+/// winner. Both <see cref="WaitForApprovalAsync"/> and <see cref="RespondAsync"/>
+/// re-read the row after their conditional UPDATE and return the actual persisted
 /// winner, so the returned <see cref="ApprovalResult"/> and the stored row always
-/// agree — no double-resolution is possible.
+/// agree — no double-resolution is possible, and the endpoint layer can echo the
+/// returned result verbatim to HTTP callers and SignalR subscribers.
 ///
 /// <para>
 /// Restart safety: every row carries the id of the process that owns its waiter
@@ -272,7 +274,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         throw new OperationCanceledException(ct);
     }
 
-    public async Task RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default)
+    public async Task<ApprovalResult> RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default)
     {
         string reason = decision switch
         {
@@ -286,22 +288,35 @@ public sealed class SqliteApprovalGate : IApprovalGate
         };
 
         (bool won, ApprovalRequest? current) = await TryConditionalTransitionAsync(requestId, decision, reason, comment, ct);
+        if (current is null)
+        {
+            _logger.LogWarning("Approval {RequestId} was not updated — the request does not exist.", requestId);
+            throw new KeyNotFoundException($"Approval request '{requestId}' not found.");
+        }
+
         if (won)
         {
             _logger.LogInformation(
                 "Approval {RequestId} resolved as {Decision} ({Reason}) at {RespondedAt}",
-                requestId, decision, reason, current?.RespondedAt);
-        }
-        else if (current is null)
-        {
-            _logger.LogWarning("Approval {RequestId} was not updated — the request does not exist.", requestId);
+                requestId, decision, reason, current.RespondedAt);
         }
         else
         {
+            // Requested decision lost the race — an earlier terminal write already
+            // owned this row (timeout, orphan reconciliation, or another human).
+            // Return the persisted winner so the caller (endpoint + SignalR) reports
+            // the actual user-visible outcome instead of a decision it did not win.
             _logger.LogWarning(
-                "Approval {RequestId} was not updated — it is already {Decision} ({Reason}).",
-                requestId, current.Decision, current.TerminalReason);
+                "Approval {RequestId} response '{Requested}' rejected — row already terminal as {Decision} ({Reason}).",
+                requestId, decision, current.Decision, current.TerminalReason);
         }
+
+        return new ApprovalResult(
+            current.RequestId,
+            current.Decision,
+            current.Comment,
+            current.RespondedAt,
+            current.TerminalReason);
     }
 
     /// <summary>

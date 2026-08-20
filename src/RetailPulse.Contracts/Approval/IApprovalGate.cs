@@ -29,9 +29,23 @@ public interface IApprovalGate
     Task<ApprovalResult> WaitForApprovalAsync(string requestId, TimeSpan? timeout = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Records a human decision for a pending approval request.
+    /// Records a human decision for a pending approval request via a conditional
+    /// <c>Pending → terminal</c> update, and returns the actual persisted winner
+    /// so callers cannot echo a decision they did not win.
+    ///
+    /// <para>
+    /// If the requested decision wins the race, the returned
+    /// <see cref="ApprovalResult"/> reflects that decision, its terminal reason
+    /// (<c>HumanApproved</c>/<c>HumanRejected</c>/<c>HumanModified</c>), the comment
+    /// supplied here, and the timestamp of the write. If the row was already
+    /// terminal (timeout, orphan reconciliation, or an earlier human response),
+    /// the returned result is the previously persisted winner — never a synthetic
+    /// echo of <paramref name="decision"/>. Endpoint and SignalR payloads must
+    /// report the returned <see cref="ApprovalResult"/>, not the caller-requested
+    /// decision, so exactly one user-visible outcome is observable end-to-end.
+    /// </para>
     /// </summary>
-    Task RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default);
+    Task<ApprovalResult> RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default);
 
     /// <summary>
     /// Lists all pending approval requests for a given user.

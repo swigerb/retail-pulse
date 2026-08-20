@@ -67,18 +67,28 @@ public static class ApprovalEndpoints
 
             try
             {
-                await gate.RespondAsync(requestId, decision, body.Comment, ct);
+                // RespondAsync returns the actual persisted winner. If the conditional
+                // Pending → terminal write lost to a timeout, orphan reconciliation, or
+                // another human response, we must NOT echo the caller-requested decision
+                // — the HTTP response and the SignalR broadcast both report the actual
+                // stored outcome so exactly one user-visible resolution is observable.
+                ApprovalResult result = await gate.RespondAsync(requestId, decision, body.Comment, ct);
 
-                // Notify connected dashboard clients of the resolution
-                await hubContext.Clients.All.SendAsync("approval_resolved", new
+                var payload = new
                 {
-                    requestId,
-                    decision = decision.ToString().ToLowerInvariant(),
-                    comment = body.Comment,
-                    respondedAt = DateTimeOffset.UtcNow
-                });
+                    requestId = result.RequestId,
+                    decision = result.Decision.ToString().ToLowerInvariant(),
+                    comment = result.Comment,
+                    respondedAt = result.RespondedAt,
+                    terminalReason = result.TerminalReason
+                };
 
-                return Results.Ok(new { requestId, decision = decision.ToString().ToLowerInvariant(), comment = body.Comment });
+                // Notify connected dashboard clients of the resolution using the persisted
+                // winner so a lost-race response never advertises a decision that was not
+                // recorded.
+                await hubContext.Clients.All.SendAsync("approval_resolved", payload);
+
+                return Results.Ok(payload);
             }
             catch (KeyNotFoundException)
             {

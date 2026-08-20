@@ -395,6 +395,156 @@ public sealed class ApprovalLifecycleTests : IDisposable
     }
 
     // ────────────────────────────────────────────────────────────────────
+    // Endpoint / result contract — RespondAsync must return the persisted
+    // winner (never a caller-echoed decision) so the HTTP response and
+    // SignalR broadcast advertise exactly one user-visible outcome.
+    // See #91 approval hardening.
+    // ────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Respond_LateHumanResponseAfterTimeout_ReturnsPersistedTimedOutResult()
+    {
+        // Timeout fired via the waiter first; a subsequent human response arrives at
+        // the endpoint. The endpoint must report the persisted TimedOut winner,
+        // not the caller-echoed Approved decision the operator clicked.
+        var clock = new FakeClock(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+        SqliteApprovalGate gate = CreateGate(clock, TimeSpan.FromSeconds(60));
+        ApprovalRequest req = await gate.RequestApprovalAsync(MakeContext());
+
+        Task<ApprovalResult> waitTask = gate.WaitForApprovalAsync(req.RequestId, timeout: TimeSpan.FromSeconds(60));
+        for (int i = 0; i < 5; i++)
+        {
+            await Task.Yield();
+            clock.Advance(TimeSpan.FromSeconds(30));
+        }
+        ApprovalResult waiter = await waitTask.WaitAsync(TimeSpan.FromSeconds(5));
+        waiter.Decision.Should().Be(ApprovalDecision.TimedOut);
+
+        ApprovalResult endpointResult = await gate.RespondAsync(req.RequestId, ApprovalDecision.Approved, "late human");
+
+        endpointResult.Decision.Should().Be(ApprovalDecision.TimedOut, "the persisted winner is Timeout — the endpoint MUST NOT echo the caller-requested Approved");
+        endpointResult.TerminalReason.Should().Be(SqliteApprovalGate.ReasonTimeout);
+        endpointResult.Comment.Should().NotBe("late human");
+        endpointResult.RequestId.Should().Be(req.RequestId);
+
+        ApprovalResult stored = await gate.GetResultAsync(req.RequestId);
+        stored.Decision.Should().Be(endpointResult.Decision);
+        stored.TerminalReason.Should().Be(endpointResult.TerminalReason);
+        stored.Comment.Should().Be(endpointResult.Comment);
+        stored.RespondedAt.Should().Be(endpointResult.RespondedAt);
+    }
+
+    [Fact]
+    public async Task Respond_LateHumanResponseAfterOrphan_ReturnsPersistedOrphanedResult()
+    {
+        // Startup reconciliation orphaned the row before the human clicked Approve.
+        // The endpoint must return the persisted Orphaned outcome, not silently
+        // pretend the click succeeded.
+        var clock = new FakeClock(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+        SqliteApprovalGate firstGate = CreateGate(clock);
+        ApprovalRequest req = await firstGate.RequestApprovalAsync(MakeContext(sessionId: "s-orphan"));
+
+        SqliteApprovalGate secondGate = CreateGate(clock);
+        int terminated = await secondGate.ReconcilePendingAsync(new OrphanUnresumableStrategy());
+        terminated.Should().Be(1);
+
+        ApprovalResult endpointResult = await secondGate.RespondAsync(req.RequestId, ApprovalDecision.Approved, "late click");
+
+        endpointResult.Decision.Should().Be(ApprovalDecision.Orphaned, "reconciliation already closed the row — the endpoint MUST NOT echo Approved");
+        endpointResult.TerminalReason.Should().Be(SqliteApprovalGate.ReasonOrphanedOnRestart);
+        endpointResult.Comment.Should().NotBe("late click");
+
+        ApprovalResult stored = await secondGate.GetResultAsync(req.RequestId);
+        stored.Decision.Should().Be(endpointResult.Decision);
+        stored.TerminalReason.Should().Be(endpointResult.TerminalReason);
+        stored.Comment.Should().Be(endpointResult.Comment);
+    }
+
+    [Fact]
+    public async Task Respond_SecondHumanResponse_ReturnsFirstPersistedWinner()
+    {
+        // Two humans (or the same operator double-clicking) racing on one request —
+        // the second RespondAsync must return the FIRST persisted decision, not a
+        // synthetic echo of its own requested decision.
+        var clock = new FakeClock(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+        SqliteApprovalGate gate = CreateGate(clock);
+        ApprovalRequest req = await gate.RequestApprovalAsync(MakeContext());
+
+        ApprovalResult first = await gate.RespondAsync(req.RequestId, ApprovalDecision.Approved, "first click");
+        ApprovalResult second = await gate.RespondAsync(req.RequestId, ApprovalDecision.Rejected, "second click");
+
+        first.Decision.Should().Be(ApprovalDecision.Approved);
+        first.Comment.Should().Be("first click");
+        first.TerminalReason.Should().Be(SqliteApprovalGate.ReasonHumanApproved);
+
+        second.Decision.Should().Be(ApprovalDecision.Approved, "the second response MUST return the first persisted winner, not its own requested Rejected");
+        second.Comment.Should().Be("first click");
+        second.TerminalReason.Should().Be(SqliteApprovalGate.ReasonHumanApproved);
+        second.RespondedAt.Should().Be(first.RespondedAt);
+    }
+
+    [Fact]
+    public async Task Respond_MissingRequestId_ThrowsSoEndpointReturnsNotFound()
+    {
+        // The endpoint catches KeyNotFoundException and returns 404; RespondAsync
+        // must surface that condition instead of silently swallowing it.
+        var clock = new FakeClock(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+        SqliteApprovalGate gate = CreateGate(clock);
+
+        Func<Task<ApprovalResult>> act = () => gate.RespondAsync("does-not-exist", ApprovalDecision.Approved, "ghost");
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
+    public async Task Race_ConcurrentEndpointRespondVsWaiterTimeout_EndpointAndWaiterAgreeExactlyOnce()
+    {
+        // Concurrent human-vs-timeout at the endpoint boundary. RespondAsync (the
+        // endpoint call) and WaitForApprovalAsync (the agent's blocking waiter) must
+        // return the same terminal decision, matching the durable row exactly.
+        for (int trial = 0; trial < 15; trial++)
+        {
+            string dbPath = Path.Combine(Path.GetTempPath(), $"approval_endpoint_race_{Guid.NewGuid():N}.db");
+            try
+            {
+                var clock = new FakeClock(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+                SqliteApprovalGate gate = new(dbPath, Mock.Of<ILogger<SqliteApprovalGate>>(), TimeSpan.FromSeconds(60), clock);
+                ApprovalRequest req = await gate.RequestApprovalAsync(MakeContext());
+
+                Task<ApprovalResult> waitTask = gate.WaitForApprovalAsync(req.RequestId, timeout: TimeSpan.FromSeconds(60));
+                Task<ApprovalResult> endpointTask = Task.Run(async () =>
+                {
+                    await Task.Yield();
+                    return await gate.RespondAsync(req.RequestId, ApprovalDecision.Approved, "raced-endpoint");
+                });
+
+                clock.Advance(TimeSpan.FromSeconds(120));
+                await Task.WhenAll(waitTask, endpointTask).WaitAsync(TimeSpan.FromSeconds(5));
+
+                ApprovalResult waiter = await waitTask;
+                ApprovalResult endpoint = await endpointTask;
+                ApprovalResult stored = await gate.GetResultAsync(req.RequestId);
+
+                waiter.Decision.Should().BeOneOf(ApprovalDecision.Approved, ApprovalDecision.TimedOut);
+                endpoint.Decision.Should().Be(waiter.Decision, "the endpoint MUST report the same terminal outcome the waiter observes");
+                endpoint.TerminalReason.Should().Be(waiter.TerminalReason);
+                endpoint.Comment.Should().Be(waiter.Comment);
+                endpoint.RespondedAt.Should().Be(waiter.RespondedAt);
+
+                stored.Decision.Should().Be(endpoint.Decision, "the endpoint result MUST match the durable row exactly");
+                stored.TerminalReason.Should().Be(endpoint.TerminalReason);
+                stored.Comment.Should().Be(endpoint.Comment);
+                stored.RespondedAt.Should().Be(endpoint.RespondedAt);
+            }
+            finally
+            {
+                try { File.Delete(dbPath); } catch { }
+                try { File.Delete(dbPath + "-wal"); } catch { }
+                try { File.Delete(dbPath + "-shm"); } catch { }
+            }
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // Test fixtures — resume strategies + fake clock. The clock also supports
     // Task.Delay(TimeSpan, TimeProvider, CancellationToken) by scheduling every
     // callback registered through CreateTimer and firing them when Advance
