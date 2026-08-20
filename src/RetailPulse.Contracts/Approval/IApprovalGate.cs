@@ -19,14 +19,33 @@ public interface IApprovalGate
 
     /// <summary>
     /// Polls until a decision is recorded or the timeout elapses.
-    /// If the timeout expires, the decision is automatically set to <see cref="ApprovalDecision.TimedOut"/>.
+    /// If the timeout expires, the waiter attempts to transition the request to
+    /// <see cref="ApprovalDecision.TimedOut"/> via a single conditional SQL update
+    /// from <see cref="ApprovalDecision.Pending"/>. On losing that race (a human
+    /// resolved concurrently), the returned <see cref="ApprovalResult"/> reflects
+    /// the actual persisted winner so the caller and the row agree on exactly one
+    /// terminal outcome — never a double resolution.
     /// </summary>
     Task<ApprovalResult> WaitForApprovalAsync(string requestId, TimeSpan? timeout = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Records a human decision for a pending approval request.
+    /// Records a human decision for a pending approval request via a conditional
+    /// <c>Pending → terminal</c> update, and returns the actual persisted winner
+    /// so callers cannot echo a decision they did not win.
+    ///
+    /// <para>
+    /// If the requested decision wins the race, the returned
+    /// <see cref="ApprovalResult"/> reflects that decision, its terminal reason
+    /// (<c>HumanApproved</c>/<c>HumanRejected</c>/<c>HumanModified</c>), the comment
+    /// supplied here, and the timestamp of the write. If the row was already
+    /// terminal (timeout, orphan reconciliation, or an earlier human response),
+    /// the returned result is the previously persisted winner — never a synthetic
+    /// echo of <paramref name="decision"/>. Endpoint and SignalR payloads must
+    /// report the returned <see cref="ApprovalResult"/>, not the caller-requested
+    /// decision, so exactly one user-visible outcome is observable end-to-end.
+    /// </para>
     /// </summary>
-    Task RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default);
+    Task<ApprovalResult> RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default);
 
     /// <summary>
     /// Lists all pending approval requests for a given user.
@@ -48,7 +67,12 @@ public record ApprovalContext(
     string Action,
     string Impact,
     string Urgency,
-    string Reasoning
+    string Reasoning,
+    // Optional correlation to the durable session/conversation store (issue #90). Wave 1
+    // producers may leave both null; Wave 2 populates them so the resume strategy can
+    // rehydrate a checkpointed execution instead of orphaning on restart.
+    string? SessionId = null,
+    string? ConversationId = null
 );
 
 /// <summary>
@@ -61,7 +85,12 @@ public record ApprovalRequest(
     DateTimeOffset ExpiresAt,
     ApprovalDecision Decision = ApprovalDecision.Pending,
     string? Comment = null,
-    DateTimeOffset? RespondedAt = null
+    DateTimeOffset? RespondedAt = null,
+    // Human-readable reason for the terminal state (e.g., "HumanApproved",
+    // "HumanRejected", "HumanModified", "Timeout", "OrphanedOnRestart"). Null while
+    // the request is still <see cref="ApprovalDecision.Pending"/>. Additive with a
+    // default so existing constructors continue to compile.
+    string? TerminalReason = null
 );
 
 /// <summary>
@@ -71,7 +100,11 @@ public record ApprovalResult(
     string RequestId,
     ApprovalDecision Decision,
     string? Comment,
-    DateTimeOffset? RespondedAt
+    DateTimeOffset? RespondedAt,
+    // Distinguishable terminal reason (see <see cref="ApprovalRequest.TerminalReason"/>).
+    // Additive with a default so the existing surface remains binary-compatible for
+    // callers that only care about <see cref="Decision"/>.
+    string? TerminalReason = null
 );
 
 public enum ApprovalDecision
@@ -80,5 +113,9 @@ public enum ApprovalDecision
     Approved,
     Rejected,
     Modified,
-    TimedOut
+    TimedOut,
+    // Startup reconciliation terminated a request whose owning execution did not
+    // survive a restart and could not be resumed from a checkpoint. See
+    // <see cref="IApprovalResumeStrategy"/> for how Wave 2 replaces this default.
+    Orphaned
 }
