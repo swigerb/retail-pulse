@@ -19,6 +19,50 @@ public interface IKnowledgeBase
 {
     Task<string> IngestDocumentAsync(string title, string content, string source, CancellationToken ct = default);
     Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken ct = default);
+
+    /// <summary>
+    /// Same as <see cref="SearchAsync(string,int,CancellationToken)"/> but
+    /// restricted to chunks whose <see cref="SearchResult.Source"/> matches one
+    /// of the values in <paramref name="sources"/>. When <paramref name="sources"/>
+    /// is <c>null</c> or empty the search is unscoped (identical semantics to
+    /// the two-argument overload).
+    ///
+    /// The filter MUST be applied before top-K / scoring result selection so
+    /// callers receive a full <paramref name="topK"/> worth of in-scope hits
+    /// rather than a post-filtered remnant of an unscoped result set. Real
+    /// providers (in-memory, Azure AI Search) override this with a pre-scoring
+    /// filter; the default interface implementation is a post-hoc filter kept
+    /// solely so test doubles and legacy stubs stay source-compatible without
+    /// a provider-quality filter of their own.
+    ///
+    /// Source semantics are provider-local but must be identical across
+    /// providers: the value tested against <paramref name="sources"/> is the
+    /// same string that <see cref="IngestDocumentAsync"/> stored as the
+    /// <c>source</c> parameter (typically the document's file name).
+    /// </summary>
+    async Task<IReadOnlyList<SearchResult>> SearchAsync(
+        string query,
+        int topK,
+        IReadOnlyCollection<string>? sources,
+        CancellationToken ct = default)
+    {
+        IReadOnlyList<SearchResult> unscoped = await SearchAsync(query, topK, ct).ConfigureAwait(false);
+        if (sources is null || sources.Count == 0)
+        {
+            return unscoped;
+        }
+
+        var allowed = new HashSet<string>(sources, StringComparer.OrdinalIgnoreCase);
+        var filtered = new List<SearchResult>(unscoped.Count);
+        foreach (SearchResult result in unscoped)
+        {
+            if (allowed.Contains(result.Source))
+            {
+                filtered.Add(result);
+            }
+        }
+        return filtered;
+    }
     Task<IReadOnlyList<DocumentInfo>> ListDocumentsAsync(CancellationToken ct = default);
     Task DeleteDocumentAsync(string documentId, CancellationToken ct = default);
 

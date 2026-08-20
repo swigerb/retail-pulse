@@ -1,8 +1,17 @@
 namespace RetailPulse.Api.Rag;
 
 /// <summary>
-/// Seeds the knowledge base with sample retail/CPG documents on startup.
-/// Idempotent — skips documents that are already ingested.
+/// Seeds the in-memory knowledge base with the sample tenant's grounding
+/// corpus on startup. Idempotent — skips documents already present.
+///
+/// The four sample documents are fictional and explicitly attributed to
+/// "Apex Retail Group." They cover the four grounding surfaces exercised by
+/// per-agent knowledge binding (issue #105):
+/// planogram/shelf-set, supplier/distributor service, merchandising/promo
+/// execution, and category/assortment. Filenames match the values used in
+/// <c>appsettings.json</c> under <c>Knowledge:Sources:Named</c> so the
+/// startup source-name validation in
+/// <see cref="KnowledgeSourceRegistry"/> aligns with the seeded corpus.
 /// </summary>
 public static class KnowledgeBaseSeeder
 {
@@ -29,137 +38,137 @@ public static class KnowledgeBaseSeeder
 
     private static List<(string Title, string Source, string Content)> GetSampleDocuments() =>
     [
-        ("Holiday Planning Guide", "holiday-planning-guide.md", _holidayPlanningGuide),
-        ("Category Management Playbook", "category-management-playbook.md", _categoryManagementPlaybook),
-        ("Promotion Effectiveness Report", "promotion-effectiveness-report.md", _promotionEffectivenessReport),
-        ("Competitive Response Framework", "competitive-response-framework.md", _competitiveResponseFramework)
+        ("Apex Planogram & Shelf-Set Reference", "apex-planogram-shelf-set.md", _planogramShelfSet),
+        ("Apex Supplier & Distributor Service Levels", "apex-supplier-service-levels.md", _supplierServiceLevels),
+        ("Apex Merchandising & Promo Execution", "apex-merchandising-promo-execution.md", _merchandisingPromoExecution),
+        ("Apex Category & Assortment Reference", "apex-category-assortment.md", _categoryAssortment),
     ];
 
-    private const string _holidayPlanningGuide = """
-        # Holiday Planning Guide: Seasonal Best Practices for Retail & CPG
+    private const string _planogramShelfSet = """
+        # Apex Retail Group — Planogram & Shelf-Set Reference (Sample)
 
-        ## Planning Timeline
+        > Sample corpus notice. This document is a fictional grounding artifact attributed to the sample tenant "Apex Retail Group." It contains no real customer data, no real supplier data, and no proprietary retailer material.
 
-        Successful holiday execution begins 16-20 weeks before the season. Major retailers start holiday planning in June for Q4 execution. The critical milestones include: initial assortment planning (Week -20), promotional calendar lock (Week -16), inventory position review (Week -12), display and POS material production (Week -8), and store-level execution (Week -4).
+        ## Planogram Cadence
 
-        Early planning correlates strongly with holiday performance. Retailers who finalize assortments by August see 12-18% higher sell-through rates compared to those who delay until September. This is because early commitment enables better supplier negotiations, more lead time for exclusive products, and longer windows for team training.
+        Apex banners refresh planograms on a rolling six-week cadence tied to the internal Shelf-Set Wave calendar. Every wave carries a Wave ID (for example Wave-2026-14) and a scoped set of categories so field teams execute one banner-category slice at a time. Grocery banners (FreshMart, Harvest Table) refresh in odd waves; Spirits banners (Sierra Gold, Ridgeline, Summit Vodka) refresh in even waves; Quick-Serve, Home Improvement, Office Supply, and Furniture banners each roll on their own two-wave cycle.
 
-        ## Display Strategy
+        A shelf-set is considered live only after the planogram compliance photo has been uploaded and scored above the acceptance threshold for the banner. Threshold defaults live in the tenant configuration.
 
-        Holiday displays should go up in early October for maximum impact. Research shows that early-season displays (before October 15) generate 23% more incremental revenue than late-season setups. End-cap displays outperform inline placements by 3.2x during the holiday season, compared to 2.1x during regular periods.
+        ## Shelf-Set Compliance Fields
 
-        Themed displays that tell a story — such as "Holiday Entertaining" or "Gift Sets Under $25" — outperform generic seasonal displays by 40%. Cross-category bundling on displays (e.g., spirits + mixers + snacks) increases basket size by an average of $12.50 per transaction.
+        Every shelf-set reset records banner_id, store_id, wave_id, set_date, compliance_score (0-100 acceptance score from the compliance photo), facings_planned vs. facings_actual (product facings from the planogram vs. counted in-store), and void_count (empty facings observed during audit).
 
-        ## Inventory Management
+        A store is flagged for coaching when three consecutive resets land below the banner acceptance floor. Coaching flags never auto-close — the banner merchandising lead has to sign off.
 
-        Holiday inventory should follow a "build-peak-clear" model. Build inventory gradually from Week -8 to Week -2, peak inventory levels at Week 0 (Black Friday week), and aggressively promote clearance starting December 26. Safety stock should increase by 25-35% above normal levels for top-selling items.
+        ## Category Slotting Guardrails
 
-        The most common holiday inventory mistake is over-indexing on last year's winners. Consumer preferences shift annually — allocate 15-20% of holiday shelf space to new items and trending products. Use demand forecasting tools to model scenarios and adjust weekly.
+        Apex applies two hard guardrails when slotting a category. Anchor Placement: Category anchors (top three velocity SKUs, banner-neutral) must occupy the two most valuable eye-level bays. The category manager cannot slot a new SKU into an anchor position without documented replacement approval. Adjacent-Set Continuity: Two related planograms sharing a bay (for example spirits mixers next to Ridgeline Bourbon anchors) must publish resets in the same Wave. Cross-wave adjacency creates orphan facings and drops compliance scores.
 
-        ## Staffing and Training
+        ## Reset Escalations
 
-        Holiday staffing should increase by 30-50% in high-traffic locations. However, the quality of seasonal hires matters more than quantity. Retailers who invest in 4+ hours of product knowledge training for seasonal staff see 15% higher conversion rates and 8% higher average transaction values.
+        When a store misses a scheduled reset date, the workflow escalates in three steps. A store-level task opens with a 48-hour window. If the task ages out, the district merchandising manager is notified. If the reset is still open the following Monday, a banner-level exception review runs.
 
-        Schedule training sessions in early October, focusing on: key promotional items, upselling techniques, gift recommendation skills, and return/exchange policies. Role-playing exercises for handling difficult customer situations reduce holiday escalations by 22%.
+        Escalations are logged as planogram.reset_escalation events. Downstream analytics uses those events to rebuild banner-level reset health without needing raw store operations data.
+
+        ## Shelf-Set Vocabulary
+
+        Wave — the scheduled reset cycle window. Anchor — the top velocity SKUs a category keeps at eye level. Void — a facing planned by the planogram but empty at audit time. Continuity Pair — two planograms that share a bay and reset together. Coaching Flag — the marker raised when a store misses reset acceptance three cycles in a row.
         """;
 
-    private const string _categoryManagementPlaybook = """
-        # Category Management Playbook: Fundamentals for Retail Excellence
+    private const string _supplierServiceLevels = """
+        # Apex Retail Group — Supplier & Distributor Service Levels (Sample)
 
-        ## Category Definition and Role Assignment
+        > Sample corpus notice. This document is a fictional grounding artifact attributed to the sample tenant "Apex Retail Group." Distributor and supplier names, tiers, and metrics are illustrative only.
 
-        Effective category management begins with clear category definitions and role assignments. Every category should be classified into one of four roles: Destination (drives store trips, 5-7% of categories), Routine (fills regular needs, 55-65%), Seasonal (time-bound demand, 15-20%), and Convenience (impulse and fill-in, 10-20%).
+        ## Three-Tier Distribution Model
 
-        Category roles determine space allocation, promotional intensity, and pricing strategy. Destination categories receive premium placement and aggressive pricing to drive traffic. Routine categories optimize for margin while maintaining competitive price perception. Seasonal categories require dynamic space allocation that shifts throughout the year.
+        Apex operates a Three-Tier distribution model (Distributor to Wholesaler to Retailer). Every Apex banner is served by a portfolio of Tier-1 primary distributors and Tier-2 backup distributors. Distributor assignment is banner-scoped: FreshMart's Tier-1 for chilled goods is not necessarily Sierra Gold Tequila's Tier-1 for spirits.
 
-        ## Assortment Optimization
+        ## Service Level Metrics
 
-        The 80/20 rule applies strongly to retail assortments: typically 20% of SKUs generate 80% of category revenue. However, the long tail serves important purposes — variety drives perception of selection, which influences store choice for 43% of shoppers. The goal is not to eliminate the long tail but to optimize its footprint.
+        Apex tracks four supplier and distributor service metrics against the sample tenant service-level agreement. Fill Rate is cases shipped divided by cases ordered on the same purchase order, with a sample-tenant SLA floor of 96 percent. On-Time Delivery is the share of deliveries arriving inside the delivery window on the purchase order, with a floor of 94 percent. Order Accuracy is line items delivered with no substitutions and no case-count variance, floor 97 percent. Damage Rate is cases arriving damaged divided by cases shipped, floor below 1.0 percent.
 
-        SKU rationalization should be data-driven: analyze velocity (units/store/week), margin contribution, substitutability, and customer loyalty. Items below 0.5 units/store/week with available substitutes are candidates for delisting. Before cutting, verify the item doesn't serve a key demographic — removing the only organic or gluten-free option in a category can cost more than the shelf space saved.
+        A distributor falls into an SLA breach state when any two of these metrics stay below floor for two consecutive review periods. The distributor's next replenishment run is downgraded from Tier-1 to Tier-2 until the review board clears the breach.
 
-        ## Pricing Architecture
+        ## Fill-Rate Investigation Workflow
 
-        Category pricing should follow a Good-Better-Best framework. The "Good" tier anchors value perception and should be within 5% of key competitors. The "Better" tier is the profit engine — priced 20-40% above Good with meaningful quality differentiation. The "Best" tier drives aspiration and establishes category authority, priced 60-100%+ above Good.
+        When fill rate drops on a specific banner or category slice, the supply chain analyst pulls order coverage (did the purchase order request quantities the distributor could realistically supply for that region and week), distributor allocation (was Apex's slice of the distributor's regional capacity honored), the substitution log (were substitutes accepted at the receiving door or rejected as short-shipped), and backhaul exceptions (were any deliveries pushed to the next window due to backhaul consolidation).
 
-        Price gaps between tiers should be consistent and logical. If the gap between Good and Better is $3, the gap between Better and Best should be $4-6. Inconsistent gaps create confusion and can push consumers to the wrong tier for their needs.
+        The analyst records findings against the affected purchase order lines. Findings feed the monthly distributor scorecard.
 
-        ## Shelf Space Allocation
+        ## Backup Distributor Activation
 
-        Space-to-sales ratios should be reviewed quarterly. Categories with space-to-sales ratios above 1.2 are over-spaced; below 0.8 are under-spaced. Adjust by 10-15% per quarter to avoid disrupting established shopping patterns. Use planogram compliance data to ensure field execution matches headquarters intent.
+        Backup distributors get activated when the primary distributor's fill rate stays below floor for the banner for three consecutive weeks or when a single event drops fill rate below 80 percent for one week. Activation is a documented, banner-scoped decision — it never fires globally across all Apex banners at once.
 
-        Vertical blocking by brand outperforms horizontal layouts for most categories. Shoppers scan shelves vertically first, so stacking brand variants vertically improves findability by 18% and reduces out-of-stock perception by 12%.
+        ## Distributor Scorecard Grades
+
+        Distributor scorecards use a five-band grade. Grade A: all four service metrics above floor for the review period. Grade B: one metric below floor, none in breach state. Grade C: two metrics below floor, breach clock started. Grade D: breach confirmed, backup distributor activated for affected lines. Grade F: sustained breach across two review periods, contract renegotiation triggered per the sample tenant governance policy.
+
+        ## Vocabulary
+
+        Fill Rate — the primary service-level metric distributors negotiate against. Backhaul — return trip freight consolidation that can defer delivery windows. Tier-1 or Tier-2 — primary vs. backup distributor status for a banner. SLA Breach — the escalated state a distributor enters after two review periods below floor on two or more metrics.
         """;
 
-    private const string _promotionEffectivenessReport = """
-        # Promotion Effectiveness Report: Historical Analysis and Insights
+    private const string _merchandisingPromoExecution = """
+        # Apex Retail Group — Merchandising & Promo Execution (Sample)
 
-        ## Executive Summary
+        > Sample corpus notice. This document is a fictional grounding artifact attributed to the sample tenant "Apex Retail Group." Promotion mechanics, dates, and thresholds below are illustrative only.
 
-        Analysis of 850+ promotional campaigns across 12 brands and 6 regions over the past 18 months reveals significant variance in promotional effectiveness. The average promotional lift was 24.3%, but this masks a wide distribution: top-quartile promotions delivered 40%+ lift while bottom-quartile delivered less than 10%.
+        ## Promo Windows
 
-        The single strongest predictor of promotional success is alignment between promo type and category dynamics. Discount promotions work best for price-sensitive categories (grocery staples, household goods), while BOGO and bundle promotions outperform in categories where consumers stockpile (beverages, snacks, personal care).
+        Apex runs promotions inside named windows tied to the banner's fiscal calendar. Every promo window has a Window ID (for example PW-2026-Q1-03), a scoped list of banners, and a set of participating categories. Windows never span more than a single banner's fiscal period.
 
-        ## Promotion Type Analysis
+        ## Promo Types and Owners
 
-        Discount promotions (30% of campaigns): Average lift of 22%, but highest variance. Deep discounts (>25% off) deliver diminishing returns — the lift from 30% off is only 15% higher than from 20% off, but margin erosion doubles. The sweet spot is 15-20% off for 2-3 weeks.
+        Feature promos are owned by the banner merchandising lead and give a highlighted placement in the weekly ad plus an optional endcap. Endcap Display promos are owned by store operations, are planogram-driven, and require shelf-set continuity. Bundle promos are owned by the category manager and sell two or more SKUs together at a promo price. Threshold Discount promos are owned by the pricing lead and apply at basket threshold (spend or unit count). Sample or Demo promos are owned by field marketing and are in-store activations with staffed sampling in Apex-approved zones. A promo record without an accountable owner does not clear the promo review gate.
 
-        BOGO promotions (20% of campaigns): Average lift of 31%, the highest of any type. However, BOGO promotions carry the highest risk of pantry loading — 40% of incremental volume represents pulled-forward demand rather than true growth. Optimal for trial-generating purposes in categories with low repeat purchase rates.
+        ## Store-Level Execution Checklist
 
-        Display promotions (20% of campaigns): Average lift of 19%, but with the longest tail effect. Display-only promotions (no price reduction) maintain elevated sales for 2-3 weeks after the display is removed, compared to 0-1 weeks for price-based promotions. Best for new products and seasonal items.
+        Store operations validates every promo through five checks before the window opens. POS Sync: pricing rules present in the point-of-sale before the first sale of the window. Signage: required signage kits printed and hung in the primary and secondary zones. Endcap Shelf-Set: endcap facings match the promo planogram and adjacencies are preserved. Inventory Cover: projected sell-through covers the promo window with the banner's safety buffer. Team Brief: store team confirms the daily brief line item that describes the promo.
 
-        Digital promotions (20% of campaigns): Average lift of 17%, but with the lowest cost-per-incremental-unit. Digital coupons and targeted offers cost 40-60% less per incremental unit than traditional FSI or in-store promotions. ROI is highest when combined with in-store display support.
+        Missed checks generate promo.execution_exception events. Field sentiment surfaces recurring exception patterns to the pod that owns the affected banner.
 
-        Bundle promotions (10% of campaigns): Average lift of 26% on the anchor product, with 35% attach rate on companion products. Most effective when the bundle crosses categories (e.g., spirits + mixers, cereal + milk) and saves the consumer 10-15% vs. buying items separately.
+        ## Endcap Adjacency Rules
 
-        ## Regional Patterns
+        Endcap displays follow Apex adjacency rules to avoid confusing shopper flow. Two competing endcaps for the same banner do not run in the same store during overlapping windows. Cross-banner endcap adjacencies (for example a Sierra Gold Tequila endcap next to a FreshMart chilled mixers endcap) must publish coordinated planograms in the same Shelf-Set Wave. Endcaps required by Feature promos always outrank Endcap Display promos when a store has limited endcap inventory.
 
-        The Southeast region consistently outperforms on promotional lift (+15% vs. national average), likely due to higher price sensitivity and lower baseline promotional intensity. The West Coast shows the highest digital promotion adoption (2.3x national average) but lowest response to traditional print promotions.
+        ## Post-Window Review
 
-        ## Timing Insights
+        Every promo window closes with a two-pass review. The ops review asks whether the store-level execution checks landed inside their SLA windows. The category review asks whether the promo hit its unit and revenue targets and whether adjacent categories cannibalized or lifted. Both reviews land in the banner post-window packet.
 
-        Promotions launched on Monday-Wednesday outperform Thursday-Sunday launches by 8%. This is counter-intuitive but explained by the "discovery effect" — mid-week shoppers have more time to notice and respond to new promotions, creating word-of-mouth that amplifies weekend traffic.
+        ## Vocabulary
 
-        Avoid running promotions during the first two weeks of January and the last two weeks of August — consumer spending contraction during these periods reduces promotional responsiveness by 20-30%.
+        Promo Window — the named calendar slot inside which a promo runs. Endcap Kit — the signage, planogram, and inventory bundle a store receives before an endcap display goes live. Execution Exception — a promo check that failed store-level acceptance. Sell-Through Cover — the ratio of projected available units to promo demand for the window.
         """;
 
-    private const string _competitiveResponseFramework = """
-        # Competitive Response Framework: Responding to Competitor Moves
+    private const string _categoryAssortment = """
+        # Apex Retail Group — Category & Assortment Reference (Sample)
 
-        ## Response Triage
+        > Sample corpus notice. This document is a fictional grounding artifact attributed to the sample tenant "Apex Retail Group." Category segmentation, review cadences, and thresholds below are illustrative and not benchmarks.
 
-        Not every competitive move requires a response. Use the Impact-Urgency Matrix to prioritize:
-        - High Impact + High Urgency (respond within 48 hours): Competitor price cut on your top-10 items, new store opening within 3 miles, aggressive promotional blitz in your stronghold market.
-        - High Impact + Low Urgency (develop response in 2-4 weeks): Competitor launches private label in key category, new competitor enters market, competitor expands delivery coverage.
-        - Low Impact + High Urgency (monitor, minimal response): Competitor one-time event pricing, social media campaign targeting your brand, competitor hiring your staff.
-        - Low Impact + Low Urgency (log and review quarterly): Minor assortment changes, corporate announcements, executive changes.
+        ## Category Roles
 
-        ## Price Response Strategies
+        Every Apex category is assigned exactly one role at each banner. Roles are reviewed twice a fiscal year. Destination categories draw banner-defining trips and carry full depth, with exclusive lines allowed. Routine categories fill recurring baskets with moderate depth and competitive parity. Occasion categories anchor gifting or seasonal moments and their depth ramps with the seasonal window. Fill-In categories are convenience adjacencies to core baskets and stay narrow, curated, with no long-tail.
 
-        When a competitor cuts price on a key item, avoid the reflex to match immediately. Instead, follow the 3-step price response protocol:
+        A category cannot hold two roles at the same banner at the same time. A Ridgeline Bourbon anchor at a spirits banner can be Destination; at a grocery banner the same brand may play a Fill-In role.
 
-        Step 1: Verify the competitor's price is sustainable. Is this a temporary promotion (check flyer/digital ads) or a permanent price reduction? If temporary, consider whether your regular price still falls within an acceptable competitive index (target: 95-105% of competitor).
+        ## Assortment Review Cycle
 
-        Step 2: Assess cross-elasticity. Will the competitor's price cut actually pull your customers? In many categories, brand loyalty and convenience outweigh price differences of 5-10%. Use loyalty card data to identify price-sensitive segments vs. convenience-driven segments.
+        Assortment reviews follow a documented eight-step flow. Step one confirms the category role. Step two ingests consumer demand signals from the demand forecast pod. Step three reviews distributor and supplier service posture. Step four checks planogram feasibility with the current Shelf-Set Wave. Step five reviews margin architecture across Good, Better, and Best tier gaps. Step six covers innovation slot analysis — how many new SKUs the assortment can absorb. Step seven identifies rationalization candidates below the banner's velocity floor. Step eight runs a portfolio depletion check on affected suppliers.
 
-        Step 3: Choose response type. Options include: match price on the specific item (lowest cost, highest margin hit), respond with a bundle offer (protects margin, adds value), increase promotional frequency (temporary response), or invest in service/experience differentiation (long-term moat).
+        Reviews close with a decision packet stamped by the category manager and the banner merchandising lead.
 
-        ## New Competitor Entry
+        ## Assortment Guardrails
 
-        When a new competitor enters your market, the first 90 days are critical. Research shows that market share lost in the first 90 days is 3x harder to recover than share lost after the initial period.
+        Apex enforces four assortment guardrails during a review. Anchor Retention keeps anchors identified in the planogram reference in the assortment unless a rationalization case is documented and countersigned by the banner merchandising lead. The Regional Exception Register holds region-specific SKUs (for example West Coast citrus mixers) and re-validates them every review. Innovation Cap limits a single review to no more than two new SKUs per linear foot of shelf. Depletion Guard requires a supplier depletion review so an exit does not strand contract volume.
 
-        Defensive tactics for new competitor entry: increase promotional intensity by 15-20% in affected trade area (not chain-wide), enhance loyalty program offers for at-risk customers, deploy "store visit" offers (e.g., $5 off $50 purchase) to maintain traffic patterns, fast-track any planned store improvements or remodels.
+        ## Rationalization Signals
 
-        Avoid the "scorched earth" response of massive price cuts across all categories — this signals weakness and is rarely sustainable. Instead, target your response to the categories and customer segments where the new competitor is strongest.
+        SKUs enter rationalization scrutiny when any two of the following hold for two consecutive review periods: velocity below the banner's category-level floor, zero incremental basket association (no meaningful attach behavior), persistent void flags from the planogram reference, or sustained margin below the banner category floor. A single soft signal is a note, not a rationalization case. Rationalization cases are treated as reversible for two review periods so the category can be recovered if the exit hurts the assortment.
 
-        ## Market Intelligence
+        ## Vocabulary
 
-        Effective competitive response requires continuous intelligence. Assign competitive monitoring responsibilities: store managers should visit competitor stores bi-weekly and report pricing, assortment, and display changes. Category managers should track competitor digital presence (website, app, social media) weekly.
-
-        Build a competitive intelligence dashboard that tracks: competitor promotional frequency, price index on key items (weekly), customer survey data on competitor perception (quarterly), and market share data (monthly). Share competitive intelligence broadly — field teams often have the best early warning of competitive moves.
-
-        ## Long-term Competitive Advantage
-
-        The most effective competitive strategy is not reactive — it's building advantages that competitors cannot easily replicate. Focus on: exclusive product agreements with key suppliers, proprietary data and analytics capabilities, superior employee training and retention, community engagement and local relevance, and seamless omnichannel experience. These structural advantages create compounding returns and make reactive price wars less frequent and less necessary.
+        Anchor — the top-velocity SKUs a category keeps in prime shelf positions. Category Role — the strategic role the category plays for a banner. Innovation Slot — the reserved capacity for new SKUs during a review. Depletion Guard — the supplier-side check performed before delisting a SKU.
         """;
 }

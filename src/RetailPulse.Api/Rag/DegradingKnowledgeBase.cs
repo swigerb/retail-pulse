@@ -106,6 +106,14 @@ public sealed class DegradingKnowledgeBase : IKnowledgeBase
         WithFallbackAsync(kb => kb.SearchAsync(query, topK, ct), nameof(SearchAsync));
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<SearchResult>> SearchAsync(
+        string query,
+        int topK,
+        IReadOnlyCollection<string>? sources,
+        CancellationToken ct = default) =>
+        WithFallbackAsync(kb => kb.SearchAsync(query, topK, sources, ct), nameof(SearchAsync));
+
+    /// <inheritdoc />
     public Task<IReadOnlyList<DocumentInfo>> ListDocumentsAsync(CancellationToken ct = default) =>
         WithFallbackAsync(kb => kb.ListDocumentsAsync(ct), nameof(ListDocumentsAsync));
 

@@ -86,6 +86,21 @@ public static class AgentTelemetry
         return activity;
     }
 
+    // ── RAG retrieval spans (issue #105) ────────────────────────────────
+
+    /// <summary>
+    /// Starts a "rag.retrieve" activity tagged with the agent whose binding
+    /// initiated the retrieval. Callers set <c>retrieval.source</c>,
+    /// <c>retrieval.chunk_count</c>, and <c>retrieval.duration_ms</c> after
+    /// the search completes.
+    /// </summary>
+    public static Activity? StartRetrieval(string agentKey)
+    {
+        Activity? activity = Source.StartActivity("rag.retrieve", ActivityKind.Internal);
+        activity?.SetTag("retrieval.agent_key", agentKey);
+        return activity;
+    }
+
     // ── Approval spans ──────────────────────────────────────────────────
 
     public static Activity? StartApprovalRequest(string agentId, string action)

@@ -102,7 +102,14 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         return Task.FromResult(documentId);
     }
 
-    public Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken ct = default)
+    public Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken ct = default) =>
+        SearchAsync(query, topK, sources: null, ct);
+
+    public Task<IReadOnlyList<SearchResult>> SearchAsync(
+        string query,
+        int topK,
+        IReadOnlyCollection<string>? sources,
+        CancellationToken ct = default)
     {
         if (_chunks.IsEmpty)
             return Task.FromResult<IReadOnlyList<SearchResult>>([]);
@@ -110,6 +117,14 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         string[] queryTerms = Tokenize(query);
         if (queryTerms.Length == 0)
             return Task.FromResult<IReadOnlyList<SearchResult>>([]);
+
+        // Pre-scoring source membership filter. Applied before IDF/BM25 so a
+        // scoped call receives up to `topK` in-scope hits rather than a
+        // post-filtered remnant of an unscoped result set. When sources is
+        // null/empty the search is unscoped.
+        HashSet<string>? sourceSet = sources is { Count: > 0 }
+            ? new HashSet<string>(sources, StringComparer.OrdinalIgnoreCase)
+            : null;
 
         // Compute IDF for each query term
         var idfScores = new Dictionary<string, double>();
@@ -125,6 +140,9 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
         foreach (IndexedChunk chunk in _chunks.Values)
         {
             ct.ThrowIfCancellationRequested();
+
+            if (sourceSet is not null && !sourceSet.Contains(chunk.Source))
+                continue;
 
             double score = 0.0;
             foreach (string term in queryTerms)
