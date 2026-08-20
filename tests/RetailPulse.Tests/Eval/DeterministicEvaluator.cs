@@ -175,6 +175,7 @@ public sealed class DeterministicEvaluator
             mock.Setup(s => s.Key).Returns(SpecialistKeyForIntent(intent));
             mock.Setup(s => s.DisplayName).Returns($"Eval Stub ({intent})");
             mock.Setup(s => s.SupportedIntents).Returns([intent]);
+            mock.Setup(s => s.KeywordFastPaths).Returns(KeywordsForIntent(intent));
             specialists.Add(mock.Object);
         }
 
@@ -186,11 +187,22 @@ public sealed class DeterministicEvaluator
             Temperature = 0.0,
         };
 
+        // Mirror production orchestration intents (council/health, scorecard/portfolio)
+        // so keyword-fast-path golden cases route to them the same way the live API would.
+        var orchestrationIntents = new List<RouterIntentConfig>
+        {
+            new(AgentIntent.PortfolioHealth,
+                ["portfolio health", "overall health", "brand health", "health council"]),
+            new(AgentIntent.Scorecard,
+                ["scorecard", "brand scorecard", "performance scorecard"]),
+        };
+
         return new RetailOpsRouter(
             chatClient,
             routerDef,
             specialists,
-            NullLogger<RetailOpsRouter>.Instance);
+            NullLogger<RetailOpsRouter>.Instance,
+            intentConfigs: orchestrationIntents);
     }
 
     private static string SpecialistKeyForIntent(string intent) => intent switch
@@ -208,6 +220,39 @@ public sealed class DeterministicEvaluator
         AgentIntent.MarginAnalysis => "margin",
         AgentIntent.Scorecard => "scorecard",
         _ => "general",
+    };
+
+    /// <summary>
+    /// Mirrors the production keyword fast-paths declared in <c>prompts.yaml</c> per intent.
+    /// The evaluator has to seed these directly onto the stub specialists so that the router
+    /// can build the same keyword table it would in the live pipeline — without pulling the
+    /// full YAML loader into the eval harness.
+    /// </summary>
+    private static IReadOnlyList<string> KeywordsForIntent(string intent) => intent switch
+    {
+        AgentIntent.DemandForecasting =>
+            ["demand forecast", "sell-through", "velocity forecast"],
+        AgentIntent.PromotionTrade =>
+            ["promotion", "trade spend", "promo effectiveness", "promotion roi"],
+        AgentIntent.SentimentField =>
+            ["field rep", "field feedback", "distributor feedback", "rep feedback", "sentiment analysis"],
+        AgentIntent.CompetitiveMarket =>
+            ["pricing pressure", "market share", "price war", "competitor analysis", "competitive landscape"],
+        AgentIntent.SupplyShipments =>
+            ["shipment status", "inventory level", "fulfillment", "stockout", "stock out", "supply chain"],
+        AgentIntent.StoreOps =>
+            ["store operations", "store performance", "retail ops"],
+        AgentIntent.Planogram =>
+            ["planogram", "shelf space", "shelf placement"],
+        AgentIntent.MarginAnalysis =>
+            ["margin analysis", "profitability", "cost structure", "gross margin"],
+        AgentIntent.MemoryManagement =>
+            [
+                "remember that", "remember this", "forget", "clear my", "clear my history",
+                "clear my data", "start fresh", "reset my context", "forget what I told you",
+                "what do you know about me"
+            ],
+        _ => [],
     };
 }
 

@@ -1,3 +1,4 @@
+using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
@@ -16,18 +17,42 @@ public class MemoryManagementAgent : ISpecialistAgent
     private readonly IConversationMemory _memory;
     private readonly ILogger<MemoryManagementAgent> _logger;
 
-    public string Key => "memory-management";
-    public string DisplayName => "Memory Management";
+    public string Key { get; }
+    public string DisplayName { get; }
     public string Model => "none";
-    public IReadOnlyList<string> SupportedIntents { get; } = [AgentIntent.MemoryManagement];
+    public IReadOnlyList<string> SupportedIntents { get; }
+    public IReadOnlyList<string> KeywordFastPaths { get; }
 
     public MemoryManagementAgent(
         IConversationMemory memory,
-        ILogger<MemoryManagementAgent> logger)
+        ILogger<MemoryManagementAgent> logger,
+        AgentDefinition? definition = null)
     {
         _memory = memory;
         _logger = logger;
+
+        // Prefer the configured AgentDefinition when supplied so the memory-management
+        // taxonomy stays declared in prompts.yaml. Fall back to the previous hardcoded
+        // defaults when composed without config (unit tests, ad-hoc harnesses).
+        Key = string.IsNullOrWhiteSpace(definition?.Key) ? "memory-management" : definition.Key;
+        DisplayName = string.IsNullOrWhiteSpace(definition?.DisplayName)
+            ? "Memory Management"
+            : definition.EffectiveDisplayName;
+        SupportedIntents = (definition?.Intents is { Count: > 0 })
+            ? [.. definition.Intents]
+            : [AgentIntent.MemoryManagement];
+        KeywordFastPaths = (definition?.KeywordFastPaths is { Count: > 0 })
+            ? [.. definition.KeywordFastPaths]
+            : _defaultMemoryKeywords;
     }
+
+    /// <summary>Legacy hardcoded fast-paths — preserved when no config is provided.</summary>
+    private static readonly string[] _defaultMemoryKeywords =
+    [
+        "remember that", "remember this", "forget", "clear my", "clear my history",
+        "clear my data", "start fresh", "reset my context", "forget what I told you",
+        "what do you know about me",
+    ];
 
     public async Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
     {

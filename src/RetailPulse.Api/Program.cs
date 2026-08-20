@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
+using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Agents.Tools;
 using RetailPulse.Api.Alerts;
@@ -262,49 +263,43 @@ builder.Services.AddApiVersioning(options =>
 // Load prompts from YAML and resolve tenant placeholders via PromptTemplateEngine
 string promptsPath = Path.Combine(builder.Environment.ContentRootPath, "prompts.yaml");
 PromptConfiguration promptConfig = RetailPulseAgent.LoadPrompts(promptsPath);
-AgentDefinition agentDef = promptConfig.Agents["retail-pulse"];
-
 TenantConfiguration tenant = tenantProvider.GetTenant();
 var promptEngine = new RetailPulse.Api.Prompts.PromptTemplateEngine(tenant);
 
-// Hydrate all agent definitions with tenant placeholders
-promptEngine.Hydrate(agentDef);
+// Normalize + hydrate every configured agent definition once so downstream lookups
+// see effective keys and tenant-placeholder-free prompts. Section names become the
+// default Key when `key:` is omitted, preserving pre-refactor behavior for existing
+// entries and letting new specialists come in without any C# changes (issue #98).
+foreach ((string sectionKey, AgentDefinition def) in promptConfig.Agents)
+{
+    if (string.IsNullOrWhiteSpace(def.Key))
+    {
+        def.Key = sectionKey;
+    }
 
-AgentDefinition demandForecastDef = promptConfig.Agents["demand-forecast"];
-promptEngine.Hydrate(demandForecastDef);
+    // Router prompt is domain-generic; router entry stays un-hydrated so tenant
+    // placeholders don't accidentally leak into classification instructions.
+    if (!string.Equals(def.Key, "router", StringComparison.OrdinalIgnoreCase))
+    {
+        promptEngine.Hydrate(def);
+    }
+}
 
-// Router prompt doesn't need tenant placeholders (intent classification is domain-generic)
-AgentDefinition routerDef = promptConfig.Agents["router"];
+// Shorthand accessors kept for the orchestration wiring below.
+AgentDefinition agentDef = ResolveAgent("retail-pulse", promptConfig);
+AgentDefinition routerDef = ResolveAgent("router", promptConfig);
+AgentDefinition? councilSynthesisDef = TryResolveAgent("council-synthesis", promptConfig);
+AgentDefinition? councilVoteDef = TryResolveAgent("council-vote", promptConfig);
+AgentDefinition? scorecardSynthesisDef = TryResolveAgent("scorecard-synthesis", promptConfig);
+_ = TryResolveAgent("exec-brief", promptConfig); // referenced only for validation
 
-AgentDefinition? promoPlanningDef = promptConfig.Agents.TryGetValue("promo-planning", out AgentDefinition? promoDef) ? promoDef : null;
-if (promoPlanningDef != null) promptEngine.Hydrate(promoPlanningDef);
-
-AgentDefinition? competitiveIntelDef = promptConfig.Agents.TryGetValue("competitive-intel", out AgentDefinition? compDef) ? compDef : null;
-if (competitiveIntelDef != null) promptEngine.Hydrate(competitiveIntelDef);
-
-AgentDefinition? supplyChainDef = promptConfig.Agents.TryGetValue("supply-chain", out AgentDefinition? scDef) ? scDef : null;
-if (supplyChainDef != null) promptEngine.Hydrate(supplyChainDef);
-
-// Load council synthesis and vote prompt definitions
-AgentDefinition? councilSynthesisDef = promptConfig.Agents.TryGetValue("council-synthesis", out AgentDefinition? synthDef) ? synthDef : null;
-AgentDefinition? councilVoteDef = promptConfig.Agents.TryGetValue("council-vote", out AgentDefinition? vDef) ? vDef : null;
-
-AgentDefinition? storeOpsDef = promptConfig.Agents.TryGetValue("store-ops", out AgentDefinition? soDef) ? soDef : null;
-if (storeOpsDef != null) promptEngine.Hydrate(storeOpsDef);
-
-AgentDefinition? planogramDef = promptConfig.Agents.TryGetValue("planogram", out AgentDefinition? pgDef) ? pgDef : null;
-if (planogramDef != null) promptEngine.Hydrate(planogramDef);
-
-AgentDefinition? marginDef = promptConfig.Agents.TryGetValue("margin", out AgentDefinition? mrgDef) ? mrgDef : null;
-if (marginDef != null) promptEngine.Hydrate(marginDef);
-
-// Load scorecard and exec-brief synthesis definitions
-AgentDefinition? scorecardSynthesisDef = promptConfig.Agents.TryGetValue("scorecard-synthesis", out AgentDefinition? scSynthDef) ? scSynthDef : null;
-AgentDefinition? execBriefDef = promptConfig.Agents.TryGetValue("exec-brief", out AgentDefinition? ebDef) ? ebDef : null;
-
-// Load field-sentiment agent definition
-AgentDefinition? fieldSentimentDef = promptConfig.Agents.TryGetValue("field-sentiment", out AgentDefinition? fsDef) ? fsDef : null;
-if (fieldSentimentDef != null) promptEngine.Hydrate(fieldSentimentDef);
+static AgentDefinition ResolveAgent(string sectionKey, PromptConfiguration cfg) =>
+    cfg.Agents.TryGetValue(sectionKey, out AgentDefinition? d)
+        ? d
+        : throw new InvalidOperationException(
+            $"prompts.yaml is missing required agent section '{sectionKey}'.");
+static AgentDefinition? TryResolveAgent(string sectionKey, PromptConfiguration cfg) =>
+    cfg.Agents.TryGetValue(sectionKey, out AgentDefinition? d) ? d : null;
 
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
@@ -811,198 +806,123 @@ else
     builder.Services.AddScoped<LocalShipmentAnalyzer>();
 }
 
-// Register the multi-agent routing pipeline
-builder.Services.AddAgentRouting(promptConfig, agentDef, foundryEnabled, sp =>
-{
-    IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
-    DepletionStatsTool depletionTool = sp.GetRequiredService<DepletionStatsTool>();
-    PortfolioDepletionStatsTool portfolioTool = sp.GetRequiredService<PortfolioDepletionStatsTool>();
-    FieldSentimentTool sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
-    ShipmentStatsTool shipmentTool = sp.GetRequiredService<ShipmentStatsTool>();
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    VariantMixTool variantMixTool = sp.GetRequiredService<VariantMixTool>();
+// ── Named tool registry (issue #98) ─────────────────────────────────────
+// Every tool a specialist can request in prompts.yaml is registered here by name.
+// AgentToolRegistry.ValidateAllReferences() fails startup if a specialist references
+// a name we didn't register, so misconfiguration is caught before serving traffic.
+var toolRegistry = new AgentToolRegistry();
 
-    var tools = new List<AITool>
-    {
-        AIFunctionFactory.Create(depletionTool.GetDepletionStats),
-        AIFunctionFactory.Create(portfolioTool.GetPortfolioDepletionStats),
-        AIFunctionFactory.Create(sentimentTool.GetFieldSentiment),
-        AIFunctionFactory.Create(shipmentTool.GetShipmentStats),
-        AIFunctionFactory.Create(variantMixTool.GetVariantMix),
-        AIFunctionFactory.Create(chartTool.CreateChart)
-    };
+toolRegistry
+    .Register("GetDepletionStats", sp => AIFunctionFactory.Create(
+        sp.GetRequiredService<DepletionStatsTool>().GetDepletionStats))
+    .Register("GetPortfolioDepletionStats", sp => AIFunctionFactory.Create(
+        sp.GetRequiredService<PortfolioDepletionStatsTool>().GetPortfolioDepletionStats))
+    .Register("GetFieldSentiment", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<FieldSentimentTool>().GetFieldSentiment)))
+    .Register("GetShipmentStats", sp => AIFunctionFactory.Create(
+        sp.GetRequiredService<ShipmentStatsTool>().GetShipmentStats))
+    .Register("GetVariantMix", sp => AIFunctionFactory.Create(
+        sp.GetRequiredService<VariantMixTool>().GetVariantMix))
+    .Register("CreateChart", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<ChartDataTool>().CreateChart)))
+    .Register("AnalyzeShipments", sp => foundryEnabled
+        ? AIFunctionFactory.Create(sp.GetRequiredService<FoundryShipmentAgent>().AnalyzeShipments)
+        : AIFunctionFactory.Create(sp.GetRequiredService<LocalShipmentAnalyzer>().AnalyzeShipments));
 
-    // Add either Foundry or local shipment analyzer
-    if (foundryEnabled)
-    {
-        FoundryShipmentAgent foundryAgent = sp.GetRequiredService<FoundryShipmentAgent>();
-        tools.Add(AIFunctionFactory.Create(foundryAgent.AnalyzeShipments));
-    }
-    else
-    {
-        LocalShipmentAnalyzer localAnalyzer = sp.GetRequiredService<LocalShipmentAnalyzer>();
-        tools.Add(AIFunctionFactory.Create(localAnalyzer.AnalyzeShipments));
-    }
-
-    return tools;
-},
-demandForecastDef: demandForecastDef,
-demandToolsFactory: sp =>
-{
-#pragma warning disable CS0618 // Obsolete demand tool proxies still used in legacy agent pipeline
-    HistoricalDemandTool historicalDemandTool = sp.GetRequiredService<HistoricalDemandTool>();
-    ForecastTool forecastTool = sp.GetRequiredService<ForecastTool>();
-    SeasonalityFactorsTool seasonalityTool = sp.GetRequiredService<SeasonalityFactorsTool>();
-    DemandRisksTool demandRisksTool = sp.GetRequiredService<DemandRisksTool>();
+// Demand-forecasting tools (legacy obsolete proxies retained for parity)
+#pragma warning disable CS0618
+toolRegistry
+    .Register("GetHistoricalDemand", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<HistoricalDemandTool>().GetHistoricalDemand)))
+    .Register("GenerateForecast", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<ForecastTool>().GenerateForecast)))
+    .Register("GetSeasonalityFactors", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<SeasonalityFactorsTool>().GetSeasonalityFactors)))
+    .Register("IdentifyDemandRisks", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<DemandRisksTool>().IdentifyDemandRisks)));
 #pragma warning restore CS0618
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    ApprovalTool approvalTool = sp.GetRequiredService<ApprovalTool>();
-    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
 
-    return cachingWrapper.WrapAll(
-    [
-        AIFunctionFactory.Create(historicalDemandTool.GetHistoricalDemand),
-        AIFunctionFactory.Create(forecastTool.GenerateForecast),
-        AIFunctionFactory.Create(seasonalityTool.GetSeasonalityFactors),
-        AIFunctionFactory.Create(demandRisksTool.IdentifyDemandRisks),
-        AIFunctionFactory.Create(chartTool.CreateChart),
-        AIFunctionFactory.Create(approvalTool.RequestApproval)
-    ]);
-},
-promoPlanningDef: promoPlanningDef,
-promoToolsFactory: sp =>
+// Promotion tools
+toolRegistry
+    .Register("GetPromoHistory", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<PromoHistoryTool>().GetPromoHistory)))
+    .Register("CalculateLift", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<CalculateLiftTool>().CalculateLift)))
+    .Register("EvaluateTiming", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<EvaluateTimingTool>().EvaluateTiming)))
+    .Register("EstimateROI", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<EstimateROITool>().EstimateROI)))
+    .Register("RequestApproval", sp => AIFunctionFactory.Create(
+        sp.GetRequiredService<ApprovalTool>().RequestApproval));
+
+// Competitive intelligence tools
+toolRegistry
+    .Register("GetCompetitorPricing", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<CompetitorPricingTool>().GetCompetitorPricing)))
+    .Register("GetMarketShare", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<MarketShareTool>().GetMarketShare)))
+    .Register("DetectThreats", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<DetectThreatsTool>().DetectThreats)))
+    .Register("GetCompetitiveLandscape", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<CompetitiveLandscapeTool>().GetCompetitiveLandscape)));
+
+// Supply chain tools
+toolRegistry
+    .Register("GetInventoryLevels", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<InventoryLevelsTool>().GetInventoryLevels)))
+    .Register("GetSupplyDisruptions", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<SupplyDisruptionsTool>().GetSupplyDisruptions)))
+    .Register("GetFulfillmentRate", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<FulfillmentRateTool>().GetFulfillmentRate)))
+    .Register("GetSupplyHealthSummary", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<SupplyHealthTool>().GetSupplyHealthSummary)));
+
+// Store ops + planogram tools
+toolRegistry
+    .Register("GetStorePerformance", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<StorePerformanceTool>().GetStorePerformance)))
+    .Register("GetShelfLayout", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<ShelfLayoutTool>().GetShelfLayout)))
+    .Register("OptimizePlanogram", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<OptimizePlanogramTool>().OptimizePlanogram)))
+    .Register("PredictStockout", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<PredictStockoutTool>().PredictStockout)));
+
+// Margin analysis tools
+toolRegistry
+    .Register("GetMarginByBrand", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<MarginByBrandTool>().GetMarginByBrand)))
+    .Register("GetMarginDrivers", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<MarginDriversTool>().GetMarginDrivers)))
+    .Register("GetMarginTrend", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<MarginTrendTool>().GetMarginTrend)))
+    .Register("DetectMarginRisks", sp => WrapCached(sp, AIFunctionFactory.Create(
+        sp.GetRequiredService<DetectMarginRisksTool>().DetectMarginRisks)));
+
+// Orchestration intents — router fast-paths for in-process orchestrators that
+// have no specialist owner. Keeps council/health + scorecard/portfolio detectable
+// even when the ConsensusOrchestrator is not registered.
+var orchestrationIntents = new List<RouterIntentConfig>
 {
-    PromoHistoryTool promoHistoryTool = sp.GetRequiredService<PromoHistoryTool>();
-    CalculateLiftTool calculateLiftTool = sp.GetRequiredService<CalculateLiftTool>();
-    EvaluateTimingTool evaluateTimingTool = sp.GetRequiredService<EvaluateTimingTool>();
-    EstimateROITool estimateROITool = sp.GetRequiredService<EstimateROITool>();
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    ApprovalTool approvalTool = sp.GetRequiredService<ApprovalTool>();
-    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
+    new("council/health",
+        ["how healthy is", "brand health report", "portfolio health",
+         "overall assessment for", "how is the portfolio"]),
+    new("scorecard/portfolio",
+        ["scorecard", "portfolio scoring", "brand ranking",
+         "top brand", "worst brand", "executive brief"]),
+};
 
-    return cachingWrapper.WrapAll(
-    [
-        AIFunctionFactory.Create(promoHistoryTool.GetPromoHistory),
-        AIFunctionFactory.Create(calculateLiftTool.CalculateLift),
-        AIFunctionFactory.Create(evaluateTimingTool.EvaluateTiming),
-        AIFunctionFactory.Create(estimateROITool.EstimateROI),
-        AIFunctionFactory.Create(chartTool.CreateChart),
-        AIFunctionFactory.Create(approvalTool.RequestApproval)
-    ]);
-},
-competitiveIntelDef: competitiveIntelDef,
-competitiveToolsFactory: sp =>
+// Register the multi-agent routing pipeline — every specialist is now enumerated
+// from prompts.yaml (issue #98).
+builder.Services.AddAgentRouting(promptConfig, toolRegistry, orchestrationIntents);
+
+// Cache-aware tool wrapper used above. Kept local to Program.cs so the registry
+// stays free of composition-root concerns.
+static AITool WrapCached(IServiceProvider sp, AITool tool)
 {
-    CompetitorPricingTool competitorPricingTool = sp.GetRequiredService<CompetitorPricingTool>();
-    MarketShareTool marketShareTool = sp.GetRequiredService<MarketShareTool>();
-    DetectThreatsTool detectThreatsTool = sp.GetRequiredService<DetectThreatsTool>();
-    CompetitiveLandscapeTool competitiveLandscapeTool = sp.GetRequiredService<CompetitiveLandscapeTool>();
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
-
-    return cachingWrapper.WrapAll(
-    [
-        AIFunctionFactory.Create(competitorPricingTool.GetCompetitorPricing),
-        AIFunctionFactory.Create(marketShareTool.GetMarketShare),
-        AIFunctionFactory.Create(detectThreatsTool.DetectThreats),
-        AIFunctionFactory.Create(competitiveLandscapeTool.GetCompetitiveLandscape),
-        AIFunctionFactory.Create(chartTool.CreateChart)
-    ]);
-},
-supplyChainDef: supplyChainDef,
-supplyToolsFactory: sp =>
-{
-    InventoryLevelsTool inventoryTool = sp.GetRequiredService<InventoryLevelsTool>();
-    SupplyDisruptionsTool disruptionsTool = sp.GetRequiredService<SupplyDisruptionsTool>();
-    FulfillmentRateTool fulfillmentTool = sp.GetRequiredService<FulfillmentRateTool>();
-    SupplyHealthTool supplyHealthTool = sp.GetRequiredService<SupplyHealthTool>();
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
-
-    return cachingWrapper.WrapAll(
-    [
-        AIFunctionFactory.Create(inventoryTool.GetInventoryLevels),
-        AIFunctionFactory.Create(disruptionsTool.GetSupplyDisruptions),
-        AIFunctionFactory.Create(fulfillmentTool.GetFulfillmentRate),
-        AIFunctionFactory.Create(supplyHealthTool.GetSupplyHealthSummary),
-        AIFunctionFactory.Create(chartTool.CreateChart)
-    ]);
-},
-storeOpsDef: storeOpsDef,
-storeOpsToolsFactory: sp =>
-{
-    StorePerformanceTool storePerformanceTool = sp.GetRequiredService<StorePerformanceTool>();
-    ShelfLayoutTool shelfLayoutTool = sp.GetRequiredService<ShelfLayoutTool>();
-    OptimizePlanogramTool optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
-    PredictStockoutTool predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
-
-    return cachingWrapper.WrapAll(
-    [
-        AIFunctionFactory.Create(storePerformanceTool.GetStorePerformance),
-        AIFunctionFactory.Create(shelfLayoutTool.GetShelfLayout),
-        AIFunctionFactory.Create(optimizePlanogramTool.OptimizePlanogram),
-        AIFunctionFactory.Create(predictStockoutTool.PredictStockout),
-        AIFunctionFactory.Create(chartTool.CreateChart)
-    ]);
-},
-planogramDef: planogramDef,
-planogramToolsFactory: sp =>
-{
-    ShelfLayoutTool shelfLayoutTool = sp.GetRequiredService<ShelfLayoutTool>();
-    OptimizePlanogramTool optimizePlanogramTool = sp.GetRequiredService<OptimizePlanogramTool>();
-    PredictStockoutTool predictStockoutTool = sp.GetRequiredService<PredictStockoutTool>();
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
-
-    return cachingWrapper.WrapAll(
-    [
-        AIFunctionFactory.Create(shelfLayoutTool.GetShelfLayout),
-        AIFunctionFactory.Create(optimizePlanogramTool.OptimizePlanogram),
-        AIFunctionFactory.Create(predictStockoutTool.PredictStockout),
-        AIFunctionFactory.Create(chartTool.CreateChart)
-    ]);
-},
-marginDef: marginDef,
-marginToolsFactory: sp =>
-{
-    MarginByBrandTool marginByBrandTool = sp.GetRequiredService<MarginByBrandTool>();
-    MarginDriversTool marginDriversTool = sp.GetRequiredService<MarginDriversTool>();
-    MarginTrendTool marginTrendTool = sp.GetRequiredService<MarginTrendTool>();
-    DetectMarginRisksTool detectMarginRisksTool = sp.GetRequiredService<DetectMarginRisksTool>();
-    ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-    CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
-
-    return cachingWrapper.WrapAll(
-    [
-        AIFunctionFactory.Create(marginByBrandTool.GetMarginByBrand),
-        AIFunctionFactory.Create(marginDriversTool.GetMarginDrivers),
-        AIFunctionFactory.Create(marginTrendTool.GetMarginTrend),
-        AIFunctionFactory.Create(detectMarginRisksTool.DetectMarginRisks),
-        AIFunctionFactory.Create(chartTool.CreateChart)
-    ]);
-});
-
-// Register FieldSentimentAgent — dedicated agent with scoped tools (only sentiment + chart)
-if (fieldSentimentDef is not null)
-{
-    builder.Services.AddScoped(sp =>
-    {
-        IAgentExecutionPipeline pipeline = sp.GetRequiredService<IAgentExecutionPipeline>();
-        FieldSentimentTool sentimentTool = sp.GetRequiredService<FieldSentimentTool>();
-        ChartDataTool chartTool = sp.GetRequiredService<ChartDataTool>();
-        CachingToolWrapper cachingWrapper = sp.GetRequiredService<CachingToolWrapper>();
-
-        IList<AITool> tools = cachingWrapper.WrapAll(
-        [
-            AIFunctionFactory.Create(sentimentTool.GetFieldSentiment),
-            AIFunctionFactory.Create(chartTool.CreateChart)
-        ]);
-
-        return new FieldSentimentAgent(pipeline, fieldSentimentDef, tools);
-    });
-    builder.Services.AddScoped<ISpecialistAgent>(sp => sp.GetRequiredService<FieldSentimentAgent>());
+    CachingToolWrapper wrapper = sp.GetRequiredService<CachingToolWrapper>();
+    IList<AITool> wrapped = wrapper.WrapAll([tool]);
+    return wrapped[0];
 }
 
 // Register ConsensusOrchestrator for Portfolio Health Council
@@ -1013,9 +933,15 @@ if (councilSynthesisDef is not null && councilVoteDef is not null)
         IEnumerable<ISpecialistAgent> specialists = sp.GetServices<ISpecialistAgent>();
         IChatClient chatClient = sp.GetRequiredService<IChatClient>();
         ILogger<ConsensusOrchestrator> logger = sp.GetRequiredService<ILogger<ConsensusOrchestrator>>();
+        RouterAgentRoster roster = sp.GetRequiredService<RouterAgentRoster>();
 
         return new ConsensusOrchestrator(
-            specialists, chatClient, councilSynthesisDef, councilVoteDef, logger);
+            specialists,
+            chatClient,
+            councilSynthesisDef,
+            councilVoteDef,
+            logger,
+            councilParticipants: roster.GetCouncilParticipants());
     });
 }
 
@@ -1042,9 +968,14 @@ if (scorecardSynthesisDef is not null)
         IEnumerable<ISpecialistAgent> specialists = sp.GetServices<ISpecialistAgent>();
         IChatClient chatClient = sp.GetRequiredService<IChatClient>();
         ILogger<ScorecardOrchestrator> logger = sp.GetRequiredService<ILogger<ScorecardOrchestrator>>();
+        RouterAgentRoster roster = sp.GetRequiredService<RouterAgentRoster>();
 
         return new ScorecardOrchestrator(
-            specialists, chatClient, scorecardSynthesisDef, logger);
+            specialists,
+            chatClient,
+            scorecardSynthesisDef,
+            logger,
+            scoringDimensions: roster.GetScorecardDimensions());
     });
 }
 

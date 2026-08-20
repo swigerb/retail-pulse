@@ -1,54 +1,45 @@
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Models;
-using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
-using ChatRequest = RetailPulse.Contracts.ChatRequest;
-using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Api.Agents.Specialists;
 
 /// <summary>
 /// The General specialist — handles unclassified and general/fallback queries.
-/// This is the refactored RetailPulseAgent, preserving all existing tool access
-/// and behavior. The router sends anything it can't classify here.
+/// The router sends anything it can't classify here.
 /// </summary>
-public class GeneralAgent : ISpecialistAgent
+/// <remarks>
+/// Thin shim over <see cref="ConfiguredSpecialistAgent"/> retained so DI-keyed
+/// callers (composition root, tests) and the legacy <c>RetailPulseAgent</c>
+/// facade can reference a stable type. All behavior lives in the base class —
+/// per issue #98's "single specialist implementation" objective.
+/// </remarks>
+public sealed class GeneralAgent : ConfiguredSpecialistAgent
 {
-    private readonly IAgentExecutionPipeline _pipeline;
-    private readonly AgentDefinition _agentDef;
-    public string Model => _agentDef.Model;
-    private readonly IEnumerable<AITool> _tools;
-
-    public string Key => "general";
-    public string DisplayName => "General Agent";
-    public IReadOnlyList<string> SupportedIntents { get; } =
-    [
-        AgentIntent.General
-    ];
-
     public GeneralAgent(
         IAgentExecutionPipeline pipeline,
         AgentDefinition agentDef,
         IEnumerable<AITool> tools)
+        : base(pipeline, EnsureDefaults(agentDef), tools)
     {
-        _pipeline = pipeline;
-        _agentDef = agentDef;
-        _tools = tools;
     }
 
-    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
+    private static AgentDefinition EnsureDefaults(AgentDefinition def)
     {
-        var context = new AgentExecutionContext
-        {
-            AgentName = _agentDef.Name,
-            SystemPrompt = _agentDef.SystemPrompt,
-            Temperature = (float)_agentDef.Temperature,
-            ModelName = _agentDef.Model,
-            Request = request,
-            Tools = _tools,
-            FallbackReply = "I wasn't able to generate a response."
-        };
+        ArgumentNullException.ThrowIfNull(def);
 
-        return _pipeline.ExecuteAsync(context, ct);
+        def = def.Clone();
+
+        // The old class hardcoded Key="general" / General intent. Preserve that
+        // behavior for callers that construct with a minimally-populated definition
+        // (tests and legacy code paths) while still honoring an explicit Key/Intents
+        // supplied via prompts.yaml when they are present.
+        if (string.IsNullOrWhiteSpace(def.Key))
+            def.Key = "general";
+        if (def.Intents.Count == 0)
+            def.Intents = [AgentIntent.General];
+        if (string.IsNullOrWhiteSpace(def.DisplayName))
+            def.DisplayName = "General Agent";
+        return def;
     }
 }

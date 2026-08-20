@@ -122,9 +122,8 @@ public sealed class AnonymousPipelineCompositionTests
         // Production pipeline registration. This is the factory that previously omitted the policy.
         services.AddAgentRouting(
             promptConfig: RouterOnlyConfig(),
-            generalAgentDef: new AgentDefinition { Name = "General" },
-            foundryEnabled: false,
-            toolsFactory: _ => Tools());
+            toolRegistry: new Api.Agents.Tools.AgentToolRegistry(),
+            orchestrationIntents: []);
 
         return services.BuildServiceProvider();
     }
@@ -160,7 +159,21 @@ public sealed class AnonymousPipelineCompositionTests
     {
         Agents = new Dictionary<string, AgentDefinition>
         {
-            ["router"] = new AgentDefinition { Name = "router", SystemPrompt = "route" },
+            ["router"] = new AgentDefinition
+            {
+                Name = "router",
+                SystemPrompt = "route",
+                Key = "router",
+                Role = "orchestration",
+            },
+            ["general"] = new AgentDefinition
+            {
+                Name = "General",
+                SystemPrompt = "gen",
+                Key = "general",
+                Role = "specialist",
+                Intents = { "general/fallback" },
+            },
         },
     };
 

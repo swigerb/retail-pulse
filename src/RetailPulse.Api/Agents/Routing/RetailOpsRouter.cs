@@ -97,30 +97,22 @@ public partial class RetailOpsRouter : IAgentRouter
     ];
 
     /// <summary>
-    /// Keyword patterns mapped to their intent. Each entry has "strong" keywords that match
-    /// unambiguously on their own, regardless of message length or context. Short or generic
-    /// keywords that could fire on ambiguous queries are excluded — the LLM handles those.
+    /// Intent → keyword mapping consumed by the fast-path classifier. Populated from
+    /// configuration (each specialist's <c>AgentDefinition.KeywordFastPaths</c> plus
+    /// any orchestration intents supplied via <see cref="RouterIntentConfig"/>).
+    /// Data-driven per ADR-008 — no hardcoded keyword table remains here.
     /// </summary>
-    private static readonly (string Intent, string[] Keywords)[] _keywordPatterns =
-    [
-        (AgentIntent.DemandForecasting, ["demand forecast", "sell-through", "velocity forecast"]),
-        (AgentIntent.SupplyShipments, ["shipment status", "inventory level", "fulfillment", "stockout", "stock out", "supply chain"]),
-        (AgentIntent.CompetitiveMarket, ["pricing pressure", "market share", "price war", "competitor analysis", "competitive landscape"]),
-        (AgentIntent.SentimentField, ["field rep", "field feedback", "distributor feedback", "rep feedback", "sentiment analysis"]),
-        (AgentIntent.PortfolioHealth, ["portfolio health", "overall health", "brand health", "health council"]),
-        (AgentIntent.MarginAnalysis, ["margin analysis", "profitability", "cost structure", "gross margin"]),
-        (AgentIntent.Planogram, ["planogram", "shelf space", "shelf placement"]),
-        (AgentIntent.StoreOps, ["store operations", "store performance", "retail ops"]),
-        (AgentIntent.MemoryManagement, ["remember that", "remember this", "forget", "clear my", "clear my history", "clear my data", "start fresh", "reset my context", "forget what I told you", "what do you know about me"]),
-        (AgentIntent.PromotionTrade, ["promotion", "trade spend", "promo effectiveness", "promotion roi"]),
-        (AgentIntent.Scorecard, ["scorecard", "brand scorecard", "performance scorecard"]),
-    ];
+    public IReadOnlyList<(string Intent, string[] Keywords)> KeywordPatterns { get; }
+
+    /// <summary>Intents this router knows about — union of every specialist and orchestrator entry.</summary>
+    public IReadOnlyCollection<string> KnownIntents { get; }
 
     public RetailOpsRouter(
         IChatClient chatClient,
         AgentDefinition routerDef,
         IEnumerable<ISpecialistAgent> specialists,
         ILogger<RetailOpsRouter> logger,
+        IReadOnlyList<RouterIntentConfig>? intentConfigs = null,
         RetailPulseMetrics? metrics = null,
         RouterClassificationCache? classificationCache = null,
         ILoggerFactory? loggerFactory = null)
@@ -142,6 +134,40 @@ public partial class RetailOpsRouter : IAgentRouter
             }
         }
         _specialists = lookup;
+
+        // Build keyword fast-path table from configuration. Specialists contribute
+        // their KeywordFastPaths via ISpecialistAgent.KeywordFastPaths (populated
+        // from AgentDefinition), and orchestration intents (e.g., council/health)
+        // arrive as RouterIntentConfig entries because they have no specialist.
+        var patterns = new List<(string Intent, string[] Keywords)>();
+        var seenIntents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ISpecialistAgent specialist in lookup.Values.Distinct())
+        {
+            // Defensive against mocks and legacy impls that don't override the
+            // default interface member — treat null as empty.
+            IReadOnlyList<string> keywords = specialist.KeywordFastPaths ?? [];
+            if (keywords.Count == 0) continue;
+
+            string intent = specialist.SupportedIntents.Count > 0
+                ? specialist.SupportedIntents[0]
+                : AgentIntent.General;
+            patterns.Add((intent, [.. keywords]));
+            seenIntents.Add(intent);
+        }
+
+        if (intentConfigs is not null)
+        {
+            foreach (RouterIntentConfig cfg in intentConfigs)
+            {
+                if (cfg.KeywordFastPaths.Count == 0) continue;
+                patterns.Add((cfg.Intent, [.. cfg.KeywordFastPaths]));
+                seenIntents.Add(cfg.Intent);
+            }
+        }
+
+        KeywordPatterns = patterns;
+        KnownIntents = seenIntents;
     }
 
     public async Task<RoutingDecision> RouteAsync(
@@ -270,7 +296,13 @@ public partial class RetailOpsRouter : IAgentRouter
     /// Attempts to classify intent using simple keyword matching.
     /// Returns null if no confident match is found, allowing fallback to LLM classification.
     /// </summary>
-    private static IntentClassification? TryKeywordClassify(string message)
+    /// <remarks>
+    /// Instance method now — the keyword patterns are configuration-driven and live on the
+    /// router instance (issue #98). Structural fast-paths (memory commands, chart intent,
+    /// portfolio-performing regex, single-brand-lookup regex) remain hardcoded because they
+    /// encode routing behavior, not per-agent taxonomy.
+    /// </remarks>
+    private IntentClassification? TryKeywordClassify(string message)
     {
         // Memory commands have absolute priority — must not be intercepted by
         // brand-lookup shortcuts or portfolio regex patterns.
@@ -319,7 +351,7 @@ public partial class RetailOpsRouter : IAgentRouter
                 AgentIntent.General, _keywordMatchConfidence, [AgentIntent.General]);
         }
 
-        foreach ((string? intent, string[]? keywords) in _keywordPatterns)
+        foreach ((string? intent, string[]? keywords) in KeywordPatterns)
         {
             foreach (string keyword in keywords)
             {
@@ -407,14 +439,17 @@ public partial class RetailOpsRouter : IAgentRouter
             ct);
         string responseText = mafResponse.Text ?? "";
 
-        return ParseClassification(responseText, _logger);
+        return ParseClassification(responseText, _logger, KnownIntents);
     }
 
     /// <summary>
     /// Parses the LLM's JSON classification response into an IntentClassification.
     /// Expected format: { "intent": "demand/forecasting", "confidence": 0.92, "intents": ["demand/forecasting"] }
     /// </summary>
-    internal static IntentClassification ParseClassification(string json, ILogger? logger = null)
+    internal static IntentClassification ParseClassification(
+        string json,
+        ILogger? logger = null,
+        IReadOnlyCollection<string>? knownIntents = null)
     {
         try
         {
@@ -444,8 +479,14 @@ public partial class RetailOpsRouter : IAgentRouter
             if (detectedIntents.Count == 0)
                 detectedIntents.Add(intent);
 
-            // Normalize: ensure intent is a known value
-            if (!AgentIntent.All.Contains(intent))
+            // Normalize: ensure intent is a known value. The typed AgentIntent enum is
+            // the baseline; the router also injects its per-instance KnownIntents so
+            // purely-configured specialists (added via prompts.yaml, no C# change) route
+            // correctly under issue #98.
+            bool isKnown = AgentIntent.All.Contains(intent)
+                || (knownIntents is not null &&
+                    knownIntents.Contains(intent, StringComparer.OrdinalIgnoreCase));
+            if (!isKnown)
                 intent = AgentIntent.General;
 
             return new IntentClassification(intent, confidence, detectedIntents);
