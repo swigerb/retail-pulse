@@ -122,6 +122,40 @@ Invoke-Az `
 
 Write-Host 'Post-provision configuration complete: secretless ACR pull, SWA linked backend, and ACA platform-auth disabled.'
 
+# ── Optional Content Safety RBAC (issue #100) ──────────────────────────────
+# When AZURE_CONTENT_SAFETY_ENABLED=true (captured from the infra output), grant
+# every container app's system-assigned identity `Cognitive Services User` on
+# the Content Safety account so the API can call AnalyzeText / shieldPrompt
+# with a managed-identity token — no keys anywhere in configuration. The
+# assignment is idempotent: the JMESPath filter matches on principalId
+# client-side, so a re-provision never duplicates the role.
+$contentSafetyEnabled = [Environment]::GetEnvironmentVariable('AZURE_CONTENT_SAFETY_ENABLED')
+$contentSafetyResourceId = [Environment]::GetEnvironmentVariable('AZURE_CONTENT_SAFETY_RESOURCE_ID')
+if ($contentSafetyEnabled -and $contentSafetyEnabled.Trim().ToLowerInvariant() -eq 'true' -and -not [string]::IsNullOrWhiteSpace($contentSafetyResourceId)) {
+    Write-Host ''
+    Write-Host 'Granting Cognitive Services User on the Content Safety account to each container app system identity...'
+    foreach ($app in $apps) {
+        $csPrincipalId = (Invoke-Az `
+            -Arguments @('containerapp', 'show', '--name', $app, '--resource-group', $resourceGroup, '--query', 'identity.principalId', '--output', 'tsv') `
+            -FailureMessage "Failed to read container app '$app' principalId for Content Safety role assignment" | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($csPrincipalId)) { continue }
+
+        $csExisting = (Invoke-Az `
+            -Arguments @('role', 'assignment', 'list', '--scope', $contentSafetyResourceId, '--query', "[?principalId=='$csPrincipalId' && roleDefinitionName=='Cognitive Services User'].id", '--output', 'tsv') `
+            -FailureMessage "Failed to list Content Safety role assignments for '$app'" | Out-String).Trim()
+
+        if ([string]::IsNullOrWhiteSpace($csExisting)) {
+            Write-Host "-> $app : granting Cognitive Services User to $csPrincipalId"
+            Invoke-Az `
+                -Arguments @('role', 'assignment', 'create', '--assignee-object-id', $csPrincipalId, '--assignee-principal-type', 'ServicePrincipal', '--role', 'Cognitive Services User', '--scope', $contentSafetyResourceId, '--output', 'none') `
+                -FailureMessage "Failed to grant Cognitive Services User to '$app' on the Content Safety account" | Out-Null
+        }
+        else {
+            Write-Host "-> $app : Cognitive Services User already present"
+        }
+    }
+}
+
 # ── Mandatory APIM AI Gateway live gate (issue #67) ────────────────────────
 # `azd provision` reporting "Succeeded" only means the ARM deployments
 # succeeded — it says nothing about whether the AI Gateway invariants

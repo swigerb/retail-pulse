@@ -46,6 +46,9 @@ param mcpServerImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Fully-qualified image reference for the Teams bot container app.')
 param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
 
+@description('Enable the optional Azure AI Content Safety second layer. Disabled by default; no Content Safety account is provisioned when false.')
+param contentSafetyEnabled bool = false
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -176,6 +179,28 @@ output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
 output AZURE_APIM_INFERENCE_ENDPOINT string = apimOpenAiApi.outputs.inferenceEndpoint
 output AZURE_APIM_INFERENCE_API_NAME string = apimOpenAiApi.outputs.inferenceApiName
 output AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME string = apimOpenAiApi.outputs.subscriptionName
+
+// ── Optional Azure AI Content Safety second layer (issue #100) ─────────────
+// Provisioned only when contentSafetyEnabled = true so a default `azd up`
+// remains byte-for-byte identical to the regex-only guardrails baseline. The
+// module keys off managed identity — no account keys are ever emitted — and
+// the postprovision hook grants each container app system identity the
+// `Cognitive Services User` role on this account. When disabled the endpoint
+// output is an empty string so downstream consumers can safely branch on it.
+module contentSafety './modules/content-safety.bicep' = if (contentSafetyEnabled) {
+  name: 'content-safety'
+  scope: rg
+  params: {
+    location: location
+    resourceToken: resourceToken
+    tags: tags
+  }
+}
+
+output AZURE_CONTENT_SAFETY_ENABLED bool = contentSafetyEnabled
+output AZURE_CONTENT_SAFETY_ENDPOINT string = contentSafetyEnabled ? contentSafety!.outputs.endpoint : ''
+output AZURE_CONTENT_SAFETY_NAME string = contentSafetyEnabled ? contentSafety!.outputs.name : ''
+output AZURE_CONTENT_SAFETY_RESOURCE_ID string = contentSafetyEnabled ? contentSafety!.outputs.resourceId : ''
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and

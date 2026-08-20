@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using RetailPulse.Api.Guardrails.ContentSafety;
 
 namespace RetailPulse.Api.Budget;
 
@@ -128,6 +129,31 @@ internal sealed class BudgetedAIFunction : AIFunction
         BudgetedResult budgeted = _budget.Apply(toolName, rawJson, _options, durationMs);
         string finalJson = budgeted.Json;
         ToolResultMetrics metrics = budgeted.Metrics;
+
+        // 3a) Optional Content Safety layer for tool results. The inspector is
+        //     installed once by DI (see ContentSafetyToolResultAmbient); when
+        //     Content Safety is disabled it short-circuits internally and
+        //     returns the payload unchanged so this branch is a no-op on the
+        //     disabled path.
+        ContentSafetyToolResultInspector? inspector = ContentSafetyToolResultAmbient.Current;
+        if (inspector is not null)
+        {
+            ContentSafetyToolResultOutcome outcome = await inspector.InspectAsync(
+                toolName,
+                finalJson,
+                ctx.PrincipalKey,
+                cancellationToken).ConfigureAwait(false);
+            if (outcome.WasBlocked)
+            {
+                finalJson = outcome.Payload;
+                metrics = metrics with
+                {
+                    ReturnedChars = finalJson.Length,
+                    EstimatedTokens = _options.EstimateTokens(finalJson.Length),
+                    Truncated = true
+                };
+            }
+        }
 
         // 4) Cumulative per-request budget.
         if (ctx.CumulativeChars + finalJson.Length > _options.MaxCumulativeChars)
