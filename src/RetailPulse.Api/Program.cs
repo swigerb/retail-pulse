@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
@@ -584,8 +585,30 @@ builder.Services.AddScoped(sp =>
 // durable backing. See DataDirectoryResolver.
 string dataDirectory = DataDirectoryResolver.Resolve(builder.Configuration, builder.Environment);
 string approvalDbPath = Path.Combine(dataDirectory, "approvals.db");
-builder.Services.AddSingleton<IApprovalGate>(sp =>
-    new SqliteApprovalGate(approvalDbPath, sp.GetRequiredService<ILogger<SqliteApprovalGate>>()));
+// Human-in-the-loop approval gate. Restart-safe (issue #91): every Pending row
+// carries the durable identity of the process that owns its in-process waiter, the
+// authoritative timeout used to create it, and a heartbeat; the startup
+// reconciliation service closes rows abandoned by a previous process through the
+// configured resume strategy so an approval never silently loses its execution.
+// TimeProvider is injected so timeout/backoff tests never touch the wall clock.
+builder.Services.Configure<ApprovalOptions>(builder.Configuration.GetSection(ApprovalOptions.SectionName));
+builder.Services.TryAddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IApprovalResumeStrategy, OrphanUnresumableStrategy>();
+builder.Services.AddSingleton<SqliteApprovalGate>(sp =>
+{
+    ApprovalOptions opts = sp.GetRequiredService<IOptions<ApprovalOptions>>().Value;
+    return new SqliteApprovalGate(
+        approvalDbPath,
+        sp.GetRequiredService<ILogger<SqliteApprovalGate>>(),
+        opts.DefaultTimeout,
+        sp.GetRequiredService<TimeProvider>());
+});
+builder.Services.AddSingleton<IApprovalGate>(sp => sp.GetRequiredService<SqliteApprovalGate>());
+// Reconciliation runs before Kestrel accepts traffic (Kestrel is itself a hosted
+// service that starts after all prior IHostedService StartAsync calls complete),
+// so a Pending row abandoned by a previous process cannot slip through into a new
+// human response window.
+builder.Services.AddHostedService<ApprovalReconciliationBackgroundService>();
 
 // Approval tool — available to specialist agents for high-impact recommendations
 builder.Services.AddScoped(sp =>

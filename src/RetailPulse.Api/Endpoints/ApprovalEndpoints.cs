@@ -42,7 +42,8 @@ public static class ApprovalEndpoints
                     requestId = result.RequestId,
                     decision = result.Decision.ToString().ToLowerInvariant(),
                     comment = result.Comment,
-                    respondedAt = result.RespondedAt
+                    respondedAt = result.RespondedAt,
+                    terminalReason = result.TerminalReason
                 });
             }
             catch (KeyNotFoundException)
@@ -56,7 +57,10 @@ public static class ApprovalEndpoints
 
         app.MapPost("/api/approvals/{requestId}/respond", async (string requestId, ApprovalResponseDto body, IApprovalGate gate, IHubContext<TelemetryHub> hubContext, CancellationToken ct) =>
         {
-            if (!Enum.TryParse(body.Decision, true, out ApprovalDecision decision) || decision == ApprovalDecision.Pending || decision == ApprovalDecision.TimedOut)
+            if (!Enum.TryParse(body.Decision, true, out ApprovalDecision decision)
+                || decision is ApprovalDecision.Pending
+                             or ApprovalDecision.TimedOut
+                             or ApprovalDecision.Orphaned)
             {
                 return Results.BadRequest(new { error = "Decision must be 'Approved', 'Rejected', or 'Modified'." });
             }
@@ -102,7 +106,8 @@ public static class ApprovalEndpoints
                 timeoutAt = r.ExpiresAt,
                 status = r.Decision.ToString().ToLowerInvariant(),
                 decidedAt = r.RespondedAt,
-                comment = r.Comment
+                comment = r.Comment,
+                terminalReason = r.TerminalReason
             }));
         })
         .WithName("GetApprovalHistory")
