@@ -60,6 +60,26 @@ jobs:
             --configuration Release \
             --filter "FullyQualifiedName~ChartAcceptance|FullyQualifiedName~ChartFulfillment"
 
+      # Explicit fail-fast gate for the offline answer-quality harness (issue #110):
+      # runs the deterministic scorer over the versioned golden dataset, asserts the
+      # documented pass-rate threshold, and compares against the versioned baseline so
+      # any regression appears as a per-property diff. Model-graded rubric properties
+      # are intentionally not evaluated here — they are reported separately and never
+      # gate CI on their own.
+      - name: Answer quality gate (offline deterministic)
+        run: |
+          dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
+            --no-build \
+            --configuration Release \
+            --filter "FullyQualifiedName~RetailPulse.Tests.Eval"
+
+      - name: Upload eval harness report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-harness-report
+          path: tests/RetailPulse.Tests/bin/Release/net10.0/EvalArtifacts/eval-report-offline.json
+
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
