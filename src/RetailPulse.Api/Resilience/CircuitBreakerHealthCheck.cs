@@ -12,6 +12,8 @@ public class CircuitBreakerHealthCheck : IHealthCheck
     private static DateTimeOffset _lastStateChange = DateTimeOffset.UtcNow;
     private static CircuitBreakerState _contentSafetyState = CircuitBreakerState.Closed;
     private static DateTimeOffset _contentSafetyLastChange = DateTimeOffset.UtcNow;
+    private static CircuitBreakerState _knowledgeState = CircuitBreakerState.Closed;
+    private static DateTimeOffset _knowledgeLastChange = DateTimeOffset.UtcNow;
 
     public static void ReportState(CircuitBreakerState state)
     {
@@ -38,6 +40,22 @@ public class CircuitBreakerHealthCheck : IHealthCheck
         }
     }
 
+    /// <summary>
+    /// Reports the Azure AI Search embeddings breaker state on the same health
+    /// probe so a knowledge-provider outage is visible alongside MCP and
+    /// Content Safety. Exposed under <c>knowledgeCircuitState</c>. State never
+    /// escalates the overall health check status — the degradation policy at
+    /// the knowledge base decides fail-loud vs fallback.
+    /// </summary>
+    public static void ReportKnowledgeState(CircuitBreakerState state)
+    {
+        if (_knowledgeState != state)
+        {
+            _knowledgeState = state;
+            _knowledgeLastChange = DateTimeOffset.UtcNow;
+        }
+    }
+
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct = default)
     {
         var data = new Dictionary<string, object>
@@ -45,7 +63,9 @@ public class CircuitBreakerHealthCheck : IHealthCheck
             ["circuitState"] = _state.ToString(),
             ["lastStateChange"] = _lastStateChange.ToString("O"),
             ["contentSafetyCircuitState"] = _contentSafetyState.ToString(),
-            ["contentSafetyLastStateChange"] = _contentSafetyLastChange.ToString("O")
+            ["contentSafetyLastStateChange"] = _contentSafetyLastChange.ToString("O"),
+            ["knowledgeCircuitState"] = _knowledgeState.ToString(),
+            ["knowledgeLastStateChange"] = _knowledgeLastChange.ToString("O")
         };
 
         HealthCheckResult result = _state switch

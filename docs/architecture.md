@@ -739,6 +739,45 @@ The `ConsensusOrchestrator` uses direct LLM calls (not full agent execution) for
 
 ---
 
+## Knowledge Providers (RAG)
+
+`IKnowledgeBase` (in `RetailPulse.Contracts.Rag`) is the single surface
+every RAG consumer talks to (`RagContextProvider`, `/api/knowledge/*`
+endpoints, and the Teams message extension). The concrete provider is
+selected by configuration and materialised by
+`KnowledgeProviderSelector` + `KnowledgeProviderRegistry`. A
+`DegradingKnowledgeBase` decorator applies the configured
+`KnowledgeDegradationMode` policy so an unreachable backend either
+propagates loudly or falls back to the in-memory provider — it never
+silently returns an empty result.
+
+| Mode | Persistent | Cloud dep | Relevance | Use when |
+|---|---|---|---|---|
+| `InMemory` (default) | ❌ (volatile, seeded at startup) | ❌ | Lexical BM25 | Laptop demo, tests, default `azd up` |
+| `AzureAISearch` | ✅ | ✅ (Search + APIM embeddings) | Hybrid vector + BM25, optional semantic reranker | Real semantic retrieval over a substantial corpus |
+| `FoundryIQ` | reserved (#104) | ✅ | reserved | Foundry-managed corpora — not shipped yet |
+
+**Optional-default guarantee.** With no configuration a clean `dotnet
+run --project src/RetailPulse.AppHost` uses `InMemory`, boots without
+any cloud resource, and passes the full test suite. Selecting
+`AzureAISearch` without setting
+`Knowledge:AzureAISearch:Endpoint` fails startup with a clear message
+from `KnowledgeProviderRegistry` — never a silent degradation.
+
+**Consistent chunking.** Every provider chunks with the same
+`DocumentChunker`, so chunk boundaries stay portable across providers.
+
+**Score semantics.** Scores are provider-local and NOT comparable
+across providers. Consumers rank within a single provider's result set
+only; the contract exposes `KnowledgeBaseCapabilities.ScoreSemantics`
+for UI copy.
+
+See ADR-009 (seam) and ADR-012 (Azure AI Search implementation) for
+the full design. Reindex and lifecycle procedure lives in
+`docs/rag/azure-ai-search-index.md`.
+
+---
+
 ## Caching Architecture (Sprint 1)
 
 ### MCP Response Cache

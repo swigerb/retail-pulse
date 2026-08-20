@@ -164,6 +164,51 @@ if [ "$content_safety_enabled" = "true" ] && [ -n "$content_safety_resource_id" 
     done
 fi
 
+# ── Optional Azure AI Search RBAC (issue #103) ─────────────────────────────
+# When AZURE_AI_SEARCH_ENABLED=true, grant every container app's system-assigned
+# identity the two roles required by the API:
+#   * "Search Service Contributor" — needed once, so the app can auto-create /
+#     inspect the index (Program.cs ensures the index exists at first probe).
+#   * "Search Index Data Contributor" — required for ingest + delete +
+#     document CRUD against the target index.
+# Both assignments are idempotent (JMESPath filter on principalId + role name
+# client-side), so a re-provision never duplicates the role.
+ai_search_enabled=$(printf '%s' "${AZURE_AI_SEARCH_ENABLED:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+ai_search_resource_id="${AZURE_AI_SEARCH_RESOURCE_ID:-}"
+if [ "$ai_search_enabled" = "true" ] && [ -n "$ai_search_resource_id" ]; then
+    echo ''
+    echo 'Granting Azure AI Search roles to each container app system identity...'
+    for app in "$AZURE_API_APP_NAME" "$AZURE_MCP_SERVER_APP_NAME" "$AZURE_TEAMS_BOT_APP_NAME"; do
+        search_principal_id=$(az containerapp show \
+            --name "$app" \
+            --resource-group "$resource_group" \
+            --query 'identity.principalId' \
+            --output tsv)
+        if [ -z "$search_principal_id" ]; then
+            continue
+        fi
+
+        for role in 'Search Service Contributor' 'Search Index Data Contributor'; do
+            search_existing=$(az role assignment list \
+                --scope "$ai_search_resource_id" \
+                --query "[?principalId=='$search_principal_id' && roleDefinitionName=='$role'].id" \
+                --output tsv)
+
+            if [ -z "$search_existing" ]; then
+                echo "-> $app : granting '$role' to $search_principal_id"
+                az role assignment create \
+                    --assignee-object-id "$search_principal_id" \
+                    --assignee-principal-type ServicePrincipal \
+                    --role "$role" \
+                    --scope "$ai_search_resource_id" \
+                    --output none
+            else
+                echo "-> $app : '$role' already present"
+            fi
+        done
+    done
+fi
+
 # ── Mandatory APIM AI Gateway live gate (issue #67) ────────────────────────
 # See postprovision.ps1 for the full rationale: a successful `azd provision`
 # only means the ARM deployments succeeded, not that the AI Gateway
