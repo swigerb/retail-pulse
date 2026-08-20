@@ -165,7 +165,7 @@ public sealed class AzureAISearchRetrievalQualityComparisonTests
     {
         string indexName = ("rp-cmp-" + Guid.NewGuid().ToString("N"))[..24];
 
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Knowledge:AzureAISearch:Endpoint"] = AzureAISearchLiveTestConfig.ResolveEndpoint(),

@@ -262,7 +262,7 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
         }
 
         var results = new List<SearchResult>(topK);
-        await foreach (Azure.Search.Documents.Models.SearchResult<SearchDocument> hit in raw.GetResultsAsync().ConfigureAwait(false))
+        await foreach (SearchResult<SearchDocument> hit in raw.GetResultsAsync().ConfigureAwait(false))
         {
             SearchDocument doc = hit.Document;
             double score = ResolveScore(hit);
@@ -319,7 +319,7 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
         }
 
         var docs = new Dictionary<string, DocumentAggregate>(StringComparer.OrdinalIgnoreCase);
-        await foreach (Azure.Search.Documents.Models.SearchResult<SearchDocument> hit in raw.GetResultsAsync().ConfigureAwait(false))
+        await foreach (SearchResult<SearchDocument> hit in raw.GetResultsAsync().ConfigureAwait(false))
         {
             SearchDocument doc = hit.Document;
             if (!doc.TryGetValue(AzureAISearchIndexSchema.DocumentIdField, out object? idValue) || idValue is null)
@@ -386,7 +386,7 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
         }
 
         var chunkIds = new List<string>();
-        await foreach (Azure.Search.Documents.Models.SearchResult<SearchDocument> hit in raw.GetResultsAsync().ConfigureAwait(false))
+        await foreach (SearchResult<SearchDocument> hit in raw.GetResultsAsync().ConfigureAwait(false))
         {
             if (hit.Document.TryGetValue(AzureAISearchIndexSchema.ChunkIdField, out object? id) && id is not null)
             {
@@ -400,13 +400,12 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
             return;
         }
 
-        var deleteActions = chunkIds
+        IndexDocumentsAction<SearchDocument>[] deleteActions = [.. chunkIds
             .Select(id =>
             {
                 var d = new SearchDocument { [AzureAISearchIndexSchema.ChunkIdField] = id };
                 return IndexDocumentsAction.Delete(d);
-            })
-            .ToArray();
+            })];
 
         try
         {
@@ -425,7 +424,7 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
         _logger.LogInformation("Deleted document {DocumentId} ({ChunkCount} chunks) from Azure AI Search", documentId, chunkIds.Count);
     }
 
-    private static double ResolveScore(Azure.Search.Documents.Models.SearchResult<SearchDocument> hit)
+    private static double ResolveScore(SearchResult<SearchDocument> hit)
     {
         // Semantic reranker scores appear on SemanticSearch.RerankerScore when
         // semantic ranking is enabled; otherwise the hybrid RRF Score is used.
@@ -438,10 +437,10 @@ public sealed class AzureAISearchKnowledgeBase : IKnowledgeBase
         value.Replace("'", "''", StringComparison.Ordinal);
 
     private static bool IsTransport(RequestFailedException ex) =>
-        ex.Status == 0 ||
-        ex.Status == 408 ||
-        ex.Status == 429 ||
-        ex.Status >= 500;
+        ex.Status is 0 or
+        408 or
+        429 or
+        >= 500;
 
     /// <summary>
     /// Ensures the target index exists and its schema matches this build.

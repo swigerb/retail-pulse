@@ -50,7 +50,7 @@ public class ApimEmbeddingClientTests
     {
         // Return the response with items in reversed order — the client must
         // reorder by the index field so caller-order is preserved.
-        string body = """
+        string body = /*lang=json,strict*/ """
         {
           "data": [
             { "index": 1, "embedding": [0.1, 0.2, 0.3, 0.4] },
@@ -72,7 +72,7 @@ public class ApimEmbeddingClientTests
     {
         (ApimEmbeddingClient client, CapturingHandler handler, _) = CreateClient(
             respondStatus: HttpStatusCode.ServiceUnavailable,
-            respondJson: "{\"error\":\"backend unreachable\"}");
+            respondJson: /*lang=json,strict*/ "{\"error\":\"backend unreachable\"}");
 
         Func<Task> act = () => client.EmbedAsync("hi", CancellationToken.None);
 

@@ -101,7 +101,7 @@ public static class AzureAISearchServiceCollectionExtensions
                 {
                     NetworkTimeout = TimeSpan.FromMilliseconds(opts.RequestTimeoutMs),
                     MaxRetries = 3,
-                    Mode = Azure.Core.RetryMode.Exponential,
+                    Mode = RetryMode.Exponential,
                 },
             };
             return new SearchIndexClient(new Uri(opts.Endpoint!, UriKind.Absolute), credential, clientOptions);
@@ -117,13 +117,13 @@ public static class AzureAISearchServiceCollectionExtensions
                 {
                     NetworkTimeout = TimeSpan.FromMilliseconds(opts.RequestTimeoutMs),
                     MaxRetries = 3,
-                    Mode = Azure.Core.RetryMode.Exponential,
+                    Mode = RetryMode.Exponential,
                 },
             };
             return new SearchClient(new Uri(opts.Endpoint!, UriKind.Absolute), opts.IndexName, credential, clientOptions);
         });
 
-        services.TryAddSingleton<AzureAISearchKnowledgeBase>(sp => new AzureAISearchKnowledgeBase(
+        services.TryAddSingleton(sp => new AzureAISearchKnowledgeBase(
             sp.GetRequiredService<SearchIndexClient>(),
             sp.GetRequiredService<SearchClient>(),
             sp.GetRequiredService<ApimEmbeddingClient>(),

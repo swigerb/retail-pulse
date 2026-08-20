@@ -32,7 +32,7 @@ public sealed class AzureAISearchLiveConformanceTests
     {
         string indexName = ("rp-" + Guid.NewGuid().ToString("N"))[..24];
 
-        var config = new ConfigurationBuilder()
+        IConfigurationRoot config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Knowledge:AzureAISearch:Endpoint"] = AzureAISearchLiveTestConfig.ResolveEndpoint(),
