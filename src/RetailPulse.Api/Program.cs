@@ -375,6 +375,19 @@ static AgentDefinition ResolveAgent(string sectionKey, PromptConfiguration cfg) 
 static AgentDefinition? TryResolveAgent(string sectionKey, PromptConfiguration cfg) =>
     cfg.Agents.TryGetValue(sectionKey, out AgentDefinition? d) ? d : null;
 
+// ── Per-agent knowledge binding (issue #105) ───────────────────────────
+// Bind the named-source catalog from configuration and resolve every agent's
+// `use_knowledge_base` / `knowledge_base_name` reference at startup. Unknown
+// names fail fast with an actionable message so misconfigurations never
+// surface as silent retrieval misses at request time.
+builder.Services.Configure<KnowledgeSourcesOptions>(
+    builder.Configuration.GetSection(KnowledgeSourcesOptions.SectionName));
+var knowledgeSourcesOptions = new KnowledgeSourcesOptions();
+builder.Configuration.GetSection(KnowledgeSourcesOptions.SectionName).Bind(knowledgeSourcesOptions);
+var knowledgeSourceRegistry =
+    KnowledgeSourceRegistry.Build(knowledgeSourcesOptions, promptConfig.Agents);
+builder.Services.AddSingleton(knowledgeSourceRegistry);
+
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
 string mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]

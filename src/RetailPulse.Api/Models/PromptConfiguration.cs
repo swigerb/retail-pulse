@@ -79,6 +79,25 @@ public class AgentDefinition
     /// </summary>
     public bool Prefetchable { get; set; }
 
+    /// <summary>
+    /// Per-agent RAG knowledge binding toggle (issue #105). Default <c>true</c>
+    /// preserves the pre-#105 behavior of injecting retrieved context for
+    /// every routed specialist. Set to <c>false</c> in prompts.yaml
+    /// (<c>use_knowledge_base: false</c>) for agents that must never issue a
+    /// retrieval — the pipeline short-circuits before touching the knowledge
+    /// provider, so no latency and no token cost accrues.
+    /// </summary>
+    public bool UseKnowledgeBase { get; set; } = true;
+
+    /// <summary>
+    /// Optional logical knowledge source name (issue #105) — resolved at
+    /// startup against <c>Knowledge:Sources:Named</c>. When empty the agent
+    /// uses the entire corpus (unscoped retrieval). An unknown value aborts
+    /// startup with an actionable error. YAML field:
+    /// <c>knowledge_base_name</c>.
+    /// </summary>
+    public string KnowledgeBaseName { get; set; } = string.Empty;
+
     /// <summary>Convenience — resolves the effective display name (falls back to <see cref="Name"/>).</summary>
     public string EffectiveDisplayName => string.IsNullOrWhiteSpace(DisplayName) ? Name : DisplayName;
 
@@ -110,5 +129,7 @@ public class AgentDefinition
         ScorecardWeight = ScorecardWeight,
         Role = Role,
         Prefetchable = Prefetchable,
+        UseKnowledgeBase = UseKnowledgeBase,
+        KnowledgeBaseName = KnowledgeBaseName,
     };
 }

@@ -56,6 +56,18 @@ internal sealed class UnreachableTestKnowledgeBase : IKnowledgeBase
             "Unreachable test provider: search intentionally fails.");
     }
 
+    public Task<IReadOnlyList<SearchResult>> SearchAsync(
+        string query,
+        int topK,
+        IReadOnlyCollection<string>? sources,
+        CancellationToken ct = default)
+    {
+        SearchCallCount++;
+        throw new KnowledgeProviderUnavailableException(
+            TestProviderName,
+            "Unreachable test provider: scoped search intentionally fails.");
+    }
+
     public Task<IReadOnlyList<DocumentInfo>> ListDocumentsAsync(CancellationToken ct = default)
     {
         ListCallCount++;
