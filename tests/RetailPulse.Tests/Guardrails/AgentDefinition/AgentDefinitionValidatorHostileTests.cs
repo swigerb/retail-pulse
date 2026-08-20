@@ -23,7 +23,7 @@ public class AgentDefinitionValidatorHostileTests
         AgentDefinition def = BuildDefinitionWithHostile(hostile);
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig();
-        (AgentDefinitionValidator validator, RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog audit,
+        (AgentDefinitionValidator validator, Api.Guardrails.InMemorySuspiciousRequestLog audit,
             _, _) = ValidatorTestHarness.Build(config);
         PromptConfiguration promptConfig = ValidatorTestHarness.Configure(def);
 
@@ -58,7 +58,7 @@ public class AgentDefinitionValidatorHostileTests
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig(
             failurePolicy: AgentDefinitionFailurePolicy.QuarantineOffender);
-        (AgentDefinitionValidator validator, RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog audit,
+        (AgentDefinitionValidator validator, Api.Guardrails.InMemorySuspiciousRequestLog audit,
             _, TestLogger<AgentDefinitionValidator> logger) = ValidatorTestHarness.Build(config);
         PromptConfiguration promptConfig = ValidatorTestHarness.Configure(benign, offender);
 
@@ -86,10 +86,9 @@ public class AgentDefinitionValidatorHostileTests
         AgentDefinition def = BuildDefinitionWithHostile(hostile);
         var evaluator = new FakeContentSafetyEvaluator
         {
-            Matcher = (text, stage) =>
-            {
-                if (stage != ContentSafetyStage.AgentDefinition) return null;
-                return text.Contains(hostile.Payload, StringComparison.Ordinal)
+            Matcher = (text, stage) => stage != ContentSafetyStage.AgentDefinition
+                    ? null
+                    : text.Contains(hostile.Payload, StringComparison.Ordinal)
                     ? new ContentSafetyResult(
                         ContentSafetyDecision.Blocked,
                         [],
@@ -97,12 +96,11 @@ public class AgentDefinitionValidatorHostileTests
                         PromptShieldIndirectInjectionDetected: false,
                         Latency: TimeSpan.FromMilliseconds(1),
                         CorrelationId: "cs-block-1")
-                    : null;
-            },
+                    : null,
         };
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig();
-        (AgentDefinitionValidator validator, RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog audit,
+        (AgentDefinitionValidator validator, Api.Guardrails.InMemorySuspiciousRequestLog audit,
             _, _) = ValidatorTestHarness.Build(config, evaluator);
         PromptConfiguration promptConfig = ValidatorTestHarness.Configure(def);
 
@@ -125,13 +123,10 @@ public class AgentDefinitionValidatorHostileTests
     {
         // UpdateMetrics is deliberately not in AgentToolRegistry today, so it's
         // rejected by the policy layer (tool-not-allowed).
-        AgentDefinition def = ValidatorTestHarness.MakeAgent("general", d =>
-        {
-            d.Tools = ["CreateChart", "UpdateMetrics"];
-        });
+        AgentDefinition def = ValidatorTestHarness.MakeAgent("general", d => d.Tools = ["CreateChart", "UpdateMetrics"]);
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig();
-        (AgentDefinitionValidator validator, RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog audit,
+        (AgentDefinitionValidator validator, Api.Guardrails.InMemorySuspiciousRequestLog audit,
             _, _) = ValidatorTestHarness.Build(config);
         PromptConfiguration promptConfig = ValidatorTestHarness.Configure(def);
 
@@ -152,10 +147,7 @@ public class AgentDefinitionValidatorHostileTests
     [Fact]
     public async Task ToolEscalation_RequestApproval_OnUngrantedAgent_IsRejected()
     {
-        AgentDefinition def = ValidatorTestHarness.MakeAgent("field-sentiment", d =>
-        {
-            d.Tools = ["CreateChart", "RequestApproval"];
-        });
+        AgentDefinition def = ValidatorTestHarness.MakeAgent("field-sentiment", d => d.Tools = ["CreateChart", "RequestApproval"]);
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig();
         (AgentDefinitionValidator validator, _, _, _) = ValidatorTestHarness.Build(config);
@@ -173,13 +165,10 @@ public class AgentDefinitionValidatorHostileTests
     [Fact]
     public async Task ToolEscalation_RequestApproval_OnGrantedAgent_IsAccepted()
     {
-        AgentDefinition def = ValidatorTestHarness.MakeAgent("promo-planning", d =>
-        {
-            d.Tools = ["CreateChart", "RequestApproval"];
-        });
+        AgentDefinition def = ValidatorTestHarness.MakeAgent("promo-planning", d => d.Tools = ["CreateChart", "RequestApproval"]);
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig();
-        (AgentDefinitionValidator validator, RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog audit,
+        (AgentDefinitionValidator validator, Api.Guardrails.InMemorySuspiciousRequestLog audit,
             _, _) = ValidatorTestHarness.Build(config);
         PromptConfiguration promptConfig = ValidatorTestHarness.Configure(def);
 

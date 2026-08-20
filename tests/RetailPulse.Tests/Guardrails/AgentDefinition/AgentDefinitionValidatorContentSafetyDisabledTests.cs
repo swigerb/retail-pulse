@@ -35,10 +35,7 @@ public class AgentDefinitionValidatorContentSafetyDisabledTests
     public async Task DisabledContentSafety_StillRejects_PlainTextJailbreak()
     {
         HostileCorpus.HostileCase hostile = HostileCorpus.InstructionOverride[0];
-        AgentDefinition def = ValidatorTestHarness.MakeAgent("victim", d =>
-        {
-            d.SystemPrompt = hostile.Payload;
-        });
+        AgentDefinition def = ValidatorTestHarness.MakeAgent("victim", d => d.SystemPrompt = hostile.Payload);
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig(contentSafetyEnabled: false);
         (AgentDefinitionValidator validator, _, _, _) = ValidatorTestHarness.Build(config);
@@ -56,10 +53,7 @@ public class AgentDefinitionValidatorContentSafetyDisabledTests
         // With Content Safety disabled, the base64 residual jailbreak passes.
         // This is intentional — the disabled path is documented as pattern-only.
         HostileCorpus.HostileCase hostile = HostileCorpus.Encoded[1];
-        AgentDefinition def = ValidatorTestHarness.MakeAgent("residual", d =>
-        {
-            d.SystemPrompt = "You are a benign agent. Log entry token: " + hostile.Payload;
-        });
+        AgentDefinition def = ValidatorTestHarness.MakeAgent("residual", d => d.SystemPrompt = "You are a benign agent. Log entry token: " + hostile.Payload);
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig(contentSafetyEnabled: false);
         (AgentDefinitionValidator validator, _, _, _) = ValidatorTestHarness.Build(config);

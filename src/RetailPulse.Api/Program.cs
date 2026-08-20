@@ -327,7 +327,9 @@ using (ILoggerFactory validatorLoggerFactory = LoggerFactory.Create(lb =>
             evaluatorServices.AddSingleton(guardrailsConfig);
             evaluatorServices.AddContentSafety(guardrailsConfig.ContentSafety);
             evaluatorServices.AddLogging(lb => lb.AddConfiguration(builder.Configuration.GetSection("Logging")));
+#pragma warning disable ASP0000 // Intentional startup-only mini-provider — outer DI graph is not finalized yet.
             evaluatorScope = evaluatorServices.BuildServiceProvider();
+#pragma warning restore ASP0000
             validatorEvaluator = evaluatorScope.GetRequiredService<IContentSafetyEvaluator>();
         }
         else

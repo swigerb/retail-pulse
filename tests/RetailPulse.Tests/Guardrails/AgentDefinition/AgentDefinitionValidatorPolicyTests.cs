@@ -90,10 +90,7 @@ public class AgentDefinitionValidatorPolicyTests
     [Fact]
     public async Task AllowedTools_WhenPopulated_OverridesRegistry()
     {
-        AgentDefinition def = ValidatorTestHarness.MakeAgent("bespoke", d =>
-        {
-            d.Tools = ["CustomBespokeTool"];
-        });
+        AgentDefinition def = ValidatorTestHarness.MakeAgent("bespoke", d => d.Tools = ["CustomBespokeTool"]);
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig();
         config.AgentDefinition.AllowedTools = ["CustomBespokeTool"];
 

@@ -18,7 +18,7 @@ public class AgentDefinitionPolicyEndpointContractTests
             .GetType("RetailPulse.Api.Endpoints.AgentDefinitionPolicyResponse");
         response.Should().NotBeNull();
 
-        PropertyInfo[] props = response!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        PropertyInfo[] props = response.GetProperties(BindingFlags.Public | BindingFlags.Instance);
         props.Select(p => p.Name).Should().NotContain(
             n => n.Contains("AllowedModels", StringComparison.OrdinalIgnoreCase)
                 || n.Contains("AllowedTools", StringComparison.OrdinalIgnoreCase)

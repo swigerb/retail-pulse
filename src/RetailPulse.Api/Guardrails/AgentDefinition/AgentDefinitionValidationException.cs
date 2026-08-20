@@ -2,7 +2,7 @@ namespace RetailPulse.Api.Guardrails.AgentDefinition;
 
 /// <summary>
 /// Thrown by <c>AgentDefinitionValidator</c> when
-/// <see cref="RetailPulse.Contracts.Guardrails.AgentDefinitionFailurePolicy.RefuseStartup"/>
+/// <see cref="Contracts.Guardrails.AgentDefinitionFailurePolicy.RefuseStartup"/>
 /// is active and one or more definitions failed validation. Mirrors the shape
 /// of <c>UnknownToolReferenceException</c> — a single summary line followed by
 /// one bullet per offender — so the host exits non-zero with a diagnosable

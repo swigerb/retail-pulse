@@ -139,10 +139,7 @@ internal sealed class TestLogger<T> : ILogger<T>
         EventId eventId,
         TState state,
         Exception? exception,
-        Func<TState, Exception?, string> formatter)
-    {
-        Entries.Add((logLevel, formatter(state, exception)));
-    }
+        Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
 
     private sealed class NullScope : IDisposable
     {

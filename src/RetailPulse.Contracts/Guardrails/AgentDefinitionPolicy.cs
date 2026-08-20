@@ -99,7 +99,7 @@ public sealed class PrivilegedToolGrant
 public sealed class TemperatureBounds
 {
     /// <summary>Minimum permitted temperature (inclusive).</summary>
-    public double Min { get; set; } = 0.0;
+    public double Min { get; set; }
 
     /// <summary>Maximum permitted temperature (inclusive).</summary>
     public double Max { get; set; } = 1.0;

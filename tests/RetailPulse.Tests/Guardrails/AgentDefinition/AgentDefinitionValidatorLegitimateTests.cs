@@ -42,7 +42,7 @@ public class AgentDefinitionValidatorLegitimateTests
             failurePolicy: failurePolicy,
             safetyChecksEnabled: safetyChecksEnabled,
             contentSafetyEnabled: contentSafetyEnabled);
-        (AgentDefinitionValidator validator, RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog audit,
+        (AgentDefinitionValidator validator, Api.Guardrails.InMemorySuspiciousRequestLog audit,
             _, _) = ValidatorTestHarness.Build(config);
         PromptConfiguration promptConfig = ValidatorTestHarness.BenignConfig();
         int startingCount = promptConfig.Agents.Count;

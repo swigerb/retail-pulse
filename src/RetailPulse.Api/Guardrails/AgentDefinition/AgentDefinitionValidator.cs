@@ -155,7 +155,7 @@ public sealed class AgentDefinitionValidator
         throw new AgentDefinitionValidationException(allViolations);
     }
 
-    private void ValidateStructural(
+    private static void ValidateStructural(
         string agentKey,
         Models.AgentDefinition def,
         AgentDefinitionPolicy policy,
@@ -223,7 +223,7 @@ public sealed class AgentDefinitionValidator
                 AgentDefinitionDetectionTypes.Structural));
         }
 
-        if (def.ScorecardWeight < 0.0 || def.ScorecardWeight > 1.0)
+        if (def.ScorecardWeight is < 0.0 or > 1.0)
         {
             violations.Add(new AgentDefinitionViolation(
                 agentKey, "ScorecardWeight", "structural.scorecard-weight-out-of-bounds",
@@ -442,6 +442,9 @@ public sealed class AgentDefinitionValidator
 
                     break;
                 }
+
+            default:
+                break;
         }
 
         return 1;

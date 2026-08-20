@@ -1,7 +1,7 @@
 namespace RetailPulse.Api.Guardrails.AgentDefinition;
 
 /// <summary>
-/// Well-known <see cref="RetailPulse.Contracts.Guardrails.SuspiciousRequest.DetectionType"/>
+/// Well-known <see cref="Contracts.Guardrails.SuspiciousRequest.DetectionType"/>
 /// values emitted by the load-time agent-definition validator (issue #99).
 /// Kept separate from the Content Safety detection-type family so the audit
 /// dashboard can distinguish deployment-time definition rejections from
