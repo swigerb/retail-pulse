@@ -109,6 +109,7 @@ public sealed class HorizontalBarRankingRegressionTests
             .TryBuild(response, requestedType: "horizontalBar", out ChartSpec? chart)
             .Should().BeTrue();
 
+        chart.Should().NotBeNull("TryBuild returned true and the chart must be materialised");
         chart.Data[0].Values.Should().HaveCount(3,
             "brands with missing/unparseable growth must be excluded, never charted as zero");
         chart.Data[0].Values.Select(p => p.X)

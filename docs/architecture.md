@@ -104,6 +104,41 @@ any accidental downgrade.
 primitives resolve alongside the existing `AIAgent` / `ChatClientAgent` surface;
 behavioural adoption of the workflow APIs lands in a separate issue.
 
+#### MAF execution model — `MafAgentInvoker` seam
+
+Every agent-style LLM call in Retail Pulse — the 10 specialists routed through
+`AgentExecutionPipeline`, the router's LLM intent classification in
+`RetailOpsRouter`, and the consensus council's per-agent votes plus the
+synthesizer pass in `ConsensusOrchestrator` — flows through a single shared
+adapter, `RetailPulse.Api.Agents.MafAgentInvoker`. That adapter constructs a
+per-invocation MAF `ChatClientAgent`, wraps the caller-supplied `ChatOptions`
+in a `ChatClientAgentRunOptions`, and calls
+`ChatClientAgent.RunAsync(messages, session: null, runOptions, ct)`, returning
+the real MAF `AgentResponse`. Downstream helpers convert to
+`Microsoft.Extensions.AI.ChatResponse` through the documented shallow-copy
+`AgentResponseExtensions.AsChatResponse()`, so the existing chart, tool-span
+and token-cost helpers see the exact same `Messages`/`Usage` references without
+re-materialising the payload.
+
+A key invariant: `MafAgentInvoker` sets
+`ChatClientAgentOptions.UseProvidedChatClientAsIs = true`. The production DI
+container in `Program.cs` already wraps the base `IChatClient` with
+`UseFunctionInvocation(client => client.MaximumIterationsPerRequest = 3)`
+(ADR-006), `UseOpenTelemetry(...)`, and the MCP HTTP retry/circuit-breaker
+stack. Letting MAF add its own `FunctionInvokingChatClient` on top would
+silently override the ADR-006 iteration cap, duplicate OpenTelemetry spans,
+and short-circuit MCP resilience. `UseProvidedChatClientAsIs = true` keeps the
+caller's decorator stack intact end-to-end. The seam is proven by
+`MafPrimitivesCharacterizationTests`: those tests inject a probe `IChatClient`
+that walks the managed stack on every call and asserts a
+`Microsoft.Agents.AI.*` frame is present, so future refactors that quietly
+bypass MAF and go straight to `IChatClient.GetResponseAsync` will fail the
+build.
+
+The structural rationale — why `ChatClientAgent` + `UseProvidedChatClientAsIs`
+is the durable execution model, and why the alternatives were rejected — is
+captured in [`ADR-007: MAF agent primitives for specialist/router/council execution`](./adr/007-maf-agent-primitives.md).
+
 ### Model Context Protocol (MCP) — Tool Access
 
 | Decision | Rationale |
