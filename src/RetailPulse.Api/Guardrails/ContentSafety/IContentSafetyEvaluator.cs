@@ -38,6 +38,13 @@ public enum ContentSafetyStage
 
     /// <summary>A tool result before it enters model context.</summary>
     ToolResult,
+
+    /// <summary>
+    /// Deployment-time agent definition text (system prompt, display name,
+    /// fallback reply, keyword fast paths). Evaluated once at host startup by
+    /// the <c>AgentDefinitionValidator</c> introduced in issue #99.
+    /// </summary>
+    AgentDefinition,
 }
 
 /// <summary>Tenant/principal/source metadata used for audit rows only.</summary>

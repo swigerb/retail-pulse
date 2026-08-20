@@ -291,6 +291,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         ContentSafetyStage.Output => "guardrails.contentsafety.output",
         ContentSafetyStage.RetrievedKnowledge => "guardrails.contentsafety.retrieved_knowledge",
         ContentSafetyStage.ToolResult => "guardrails.contentsafety.tool_result",
+        ContentSafetyStage.AgentDefinition => "guardrails.contentsafety.agent_definition",
         _ => "guardrails.contentsafety",
     };
 
