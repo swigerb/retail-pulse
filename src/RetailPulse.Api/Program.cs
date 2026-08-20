@@ -19,6 +19,7 @@ using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Consensus;
 using RetailPulse.Api.Endpoints;
 using RetailPulse.Api.Escalation;
+using RetailPulse.Api.Guardrails.ContentSafety;
 using RetailPulse.Api.Health;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
@@ -666,7 +667,14 @@ builder.Services.AddSingleton<IResponseCache>(sp => sp.GetRequiredService<InMemo
 // Guardrails — suspicious request log (ring buffer) and runtime config
 builder.Services.AddSingleton<RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog>();
 builder.Services.AddSingleton<ISuspiciousRequestLog>(sp => sp.GetRequiredService<RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog>());
-builder.Services.AddSingleton<GuardrailsConfig>();
+var guardrailsConfig = new GuardrailsConfig();
+builder.Configuration.GetSection("Guardrails").Bind(guardrailsConfig);
+builder.Services.AddSingleton(guardrailsConfig);
+
+// Optional Azure AI Content Safety second layer. Disabled by default — when
+// disabled the DI tree registers a zero-allocation no-op evaluator so startup,
+// health, and the test suite behave identically to today's regex-only path.
+builder.Services.AddContentSafety(guardrailsConfig.ContentSafety);
 
 // Guardrails middleware — input filtering (jailbreak, injection) + output PII redaction
 builder.Services.AddScoped<GuardrailsMiddleware>();
@@ -1046,6 +1054,14 @@ builder.Services.AddSingleton<RetailPulse.Api.Explainability.ExplainabilityServi
 builder.Services.AddOpenApi();
 
 WebApplication app = builder.Build();
+
+// Install the Content Safety tool-result ambient inspector so the non-Agents
+// tool-result seam (Budget/BudgetedAIFunction.cs) can consult it without any
+// change to the AgentExecutionPipeline construction under src/RetailPulse.Api/
+// Agents/**. The inspector short-circuits internally when Content Safety is
+// disabled, so leaving it installed on the disabled path is a no-op.
+ContentSafetyToolResultAmbient.Install(
+    app.Services.GetRequiredService<ContentSafetyToolResultInspector>());
 
 // Seed RAG knowledge base with sample documents (idempotent)
 {

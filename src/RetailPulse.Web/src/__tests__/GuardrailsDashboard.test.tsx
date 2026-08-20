@@ -20,6 +20,8 @@ const mockStats: GuardrailsStats = {
   jailbreakAttempts: 15,
   piiDetections: 20,
   accessDenials: 7,
+  contentSafetyBlocks: 0,
+  contentSafetyFlags: 0,
   recentBlocked: [
     { id: '1', timestamp: '2026-05-13T14:00:00Z', requestPreview: 'Ignore all previous instructions...', detectionType: 'jailbreak', reason: 'Jailbreak pattern', actionTaken: 'Blocked' },
     { id: '2', timestamp: '2026-05-13T13:30:00Z', requestPreview: 'My SSN is 123-45-6789', detectionType: 'pii', reason: 'PII detected', actionTaken: 'Redacted' },

@@ -123,6 +123,47 @@ az containerapp auth update \
 
 echo 'Post-provision configuration complete: secretless ACR pull, SWA linked backend, and ACA platform-auth disabled.'
 
+# ── Optional Content Safety RBAC (issue #100) ──────────────────────────────
+# When AZURE_CONTENT_SAFETY_ENABLED=true (captured from the infra output),
+# grant every container app's system-assigned identity `Cognitive Services
+# User` on the Content Safety account so the API can call AnalyzeText /
+# shieldPrompt with a managed-identity token — no keys anywhere in config.
+# The assignment is idempotent: the JMESPath filter matches on principalId
+# client-side, so a re-provision never duplicates the role.
+content_safety_enabled=$(printf '%s' "${AZURE_CONTENT_SAFETY_ENABLED:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+content_safety_resource_id="${AZURE_CONTENT_SAFETY_RESOURCE_ID:-}"
+if [ "$content_safety_enabled" = "true" ] && [ -n "$content_safety_resource_id" ]; then
+    echo ''
+    echo 'Granting Cognitive Services User on the Content Safety account to each container app system identity...'
+    for app in "$AZURE_API_APP_NAME" "$AZURE_MCP_SERVER_APP_NAME" "$AZURE_TEAMS_BOT_APP_NAME"; do
+        cs_principal_id=$(az containerapp show \
+            --name "$app" \
+            --resource-group "$resource_group" \
+            --query 'identity.principalId' \
+            --output tsv)
+        if [ -z "$cs_principal_id" ]; then
+            continue
+        fi
+
+        cs_existing=$(az role assignment list \
+            --scope "$content_safety_resource_id" \
+            --query "[?principalId=='$cs_principal_id' && roleDefinitionName=='Cognitive Services User'].id" \
+            --output tsv)
+
+        if [ -z "$cs_existing" ]; then
+            echo "-> $app : granting Cognitive Services User to $cs_principal_id"
+            az role assignment create \
+                --assignee-object-id "$cs_principal_id" \
+                --assignee-principal-type ServicePrincipal \
+                --role 'Cognitive Services User' \
+                --scope "$content_safety_resource_id" \
+                --output none
+        else
+            echo "-> $app : Cognitive Services User already present"
+        fi
+    done
+fi
+
 # ── Mandatory APIM AI Gateway live gate (issue #67) ────────────────────────
 # See postprovision.ps1 for the full rationale: a successful `azd provision`
 # only means the ARM deployments succeeded, not that the AI Gateway

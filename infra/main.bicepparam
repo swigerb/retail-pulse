@@ -25,3 +25,8 @@ param openAiDeployment = readEnvironmentVariable('AZURE_OPENAI_DEPLOYMENT', 'gpt
 param apiImageName = readEnvironmentVariable('SERVICE_API_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
 param mcpServerImageName = readEnvironmentVariable('SERVICE_MCPSERVER_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
 param teamsBotImageName = readEnvironmentVariable('SERVICE_TEAMSBOT_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
+
+// Optional Azure AI Content Safety second layer (issue #100). Disabled by
+// default so `azd up` keeps working unchanged. Enable per environment with
+// `azd env set AZURE_CONTENT_SAFETY_ENABLED true`.
+param contentSafetyEnabled = toLower(readEnvironmentVariable('AZURE_CONTENT_SAFETY_ENABLED', 'false')) == 'true'
