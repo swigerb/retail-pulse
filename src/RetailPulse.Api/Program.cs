@@ -1143,8 +1143,61 @@ if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
             sp.GetRequiredService<IPlanStore>(),
             sp.GetRequiredService<ICostTracker>(),
             opts.Value,
-            sp.GetRequiredService<ILogger<PlanOrchestrator>>());
+            sp.GetRequiredService<ILogger<PlanOrchestrator>>(),
+            sp.GetService<PlanReviewCoordinator>(),
+            sp.GetService<IOptions<PlanReviewOptions>>());
     });
+}
+
+// Plan review gate (#94). Off by default. When PlanReview:Enabled = true, wires
+// the coordinator that inserts a human review pause before plan execution,
+// swaps in the plan-aware resume strategy (adopts plan-review rows across
+// restarts instead of orphaning), and registers the clarification service
+// specialists can use for mid-plan round-trips.
+//
+// Registered independently of PlanPersistence.Enabled so an operator can
+// enable review only when plans persist — the coordinator itself refuses to
+// run without the persistence path via the PlanOrchestrator constructor gate.
+builder.Services.Configure<PlanReviewOptions>(
+    builder.Configuration.GetSection(PlanReviewOptions.SectionName));
+PlanReviewOptions planReviewOptsAtRegistration = builder.Configuration
+    .GetSection(PlanReviewOptions.SectionName)
+    .Get<PlanReviewOptions>() ?? new PlanReviewOptions();
+if (planReviewOptsAtRegistration.Enabled)
+{
+    string reviewCheckpointDir = Path.Combine(
+        dataDirectory,
+        string.IsNullOrWhiteSpace(planReviewOptsAtRegistration.CheckpointSubdirectory)
+            ? "plan-reviews"
+            : planReviewOptsAtRegistration.CheckpointSubdirectory);
+    Directory.CreateDirectory(reviewCheckpointDir);
+    // Framework checkpoint store lives on the same durable data directory as
+    // every other SQLite store the API writes. One JSON file per session id.
+    builder.Services.AddSingleton<Microsoft.Agents.AI.Workflows.CheckpointManager>(_ =>
+    {
+        var store = new Microsoft.Agents.AI.Workflows.Checkpointing.FileSystemJsonCheckpointStore(
+            new DirectoryInfo(reviewCheckpointDir));
+        return Microsoft.Agents.AI.Workflows.CheckpointManager.CreateJson(store, customOptions: null);
+    });
+
+    builder.Services.AddScoped<PlanReviewCoordinator>(sp =>
+    {
+        return new PlanReviewCoordinator(
+            sp.GetRequiredService<IApprovalGate>(),
+            sp.GetRequiredService<IOptions<PlanReviewOptions>>(),
+            sp.GetRequiredService<Microsoft.Agents.AI.Workflows.CheckpointManager>(),
+            sp.GetRequiredService<ILogger<PlanReviewCoordinator>>(),
+            sp.GetService<PlanBuilder>(),
+            sp.GetRequiredService<TimeProvider>());
+    });
+
+    builder.Services.AddSingleton<IPlanClarifier, PlanClarifier>();
+
+    // Swap the reconciliation resume strategy for the plan-aware one. Tool rows
+    // still orphan terminally; plan-review / clarification rows are adopted so
+    // the human decision arriving after a restart proceeds normally.
+    builder.Services.RemoveAll<IApprovalResumeStrategy>();
+    builder.Services.AddSingleton<IApprovalResumeStrategy, PlanReviewResumeStrategy>();
 }
 
 // Register ExplainabilityService (singleton for cross-request trace storage)
@@ -1269,6 +1322,12 @@ if (app.Services.GetService<ISessionStore>() is not null)
 if (app.Services.GetService<IPlanStore>() is not null)
 {
     app.MapPlanEndpoints();
+    // Plan review endpoints (#94) — mapped only when the plan store is available
+    // AND PlanReview is enabled. Cross-subject decisions collapse to 404.
+    if (planReviewOptsAtRegistration.Enabled)
+    {
+        app.MapPlanReviewEndpoints();
+    }
 }
 
 // Anonymous mode: map the single unauthenticated bootstrap endpoint that mints short-lived

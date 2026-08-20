@@ -1,6 +1,9 @@
 using System.Text;
+using Microsoft.Extensions.Options;
+using RetailPulse.Api.Approval;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Observability;
 using RetailPulse.Contracts.Persistence;
 using RetailPulse.Contracts.Routing;
@@ -24,6 +27,8 @@ public sealed class PlanOrchestrator
     private readonly ICostTracker _costTracker;
     private readonly PlanPersistenceOptions _options;
     private readonly ILogger<PlanOrchestrator> _logger;
+    private readonly PlanReviewCoordinator? _reviewCoordinator;
+    private readonly PlanReviewOptions? _reviewOptions;
 
     public PlanOrchestrator(
         PlanBuilder builder,
@@ -31,7 +36,9 @@ public sealed class PlanOrchestrator
         IPlanStore planStore,
         ICostTracker costTracker,
         PlanPersistenceOptions options,
-        ILogger<PlanOrchestrator> logger)
+        ILogger<PlanOrchestrator> logger,
+        PlanReviewCoordinator? reviewCoordinator = null,
+        IOptions<PlanReviewOptions>? reviewOptions = null)
     {
         _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         _executor = executor ?? throw new ArgumentNullException(nameof(executor));
@@ -39,6 +46,8 @@ public sealed class PlanOrchestrator
         _costTracker = costTracker ?? throw new ArgumentNullException(nameof(costTracker));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _reviewCoordinator = reviewCoordinator;
+        _reviewOptions = reviewOptions?.Value;
     }
 
     public async Task<PlanOrchestrationResult> RunAsync(
@@ -106,10 +115,60 @@ public sealed class PlanOrchestrator
                 FailureReason: built.UnusableReason);
         }
 
-        // Step 2: materialize step IDs and persist the initial plan.
-        var stepIds = new List<string>(built.Steps.Count);
-        var stepWrites = new List<PlanStepWrite>(built.Steps.Count);
-        for (int i = 0; i < built.Steps.Count; i++)
+        // Step 2: plan review gate (#94). When enabled, present the plan to a
+        // human reviewer before ANY step executes. Approve → execute the
+        // original plan; edit → execute the reviewer's edited plan; reject with
+        // feedback → the coordinator loops with the planner (bounded rounds);
+        // timeout / replan exhausted → terminate the plan without executing.
+        // Every path writes an approval row through the same #91 gate so tool
+        // and plan approvals share one audit trail.
+        //
+        // When disabled (default), this block is a no-op and the executor sees
+        // the original planner output — the pre-#94 hot path is preserved
+        // byte-for-byte.
+        PlanBuildResult effectivePlan = built;
+        PlanReviewOutcome? reviewOutcome = null;
+        if (_reviewOptions is { Enabled: true } && _reviewCoordinator is not null)
+        {
+            reviewOutcome = await RunReviewAsync(planId, input, built, ct).ConfigureAwait(false);
+            if (!reviewOutcome.IsApproved)
+            {
+                // Persist the awaiting/terminal plan record with the reviewer's
+                // decision so /api/plans/{id} shows an honest terminal state.
+                await PersistReviewTerminalAsync(planId, input, built, reviewOutcome, createdAt, ct)
+                    .ConfigureAwait(false);
+
+                return new PlanOrchestrationResult(
+                    PlanId: planId,
+                    Status: PlanStatus.Failed,
+                    Reply: BuildReviewTerminalReply(reviewOutcome),
+                    DurationMs: 0,
+                    InputTokens: built.InputTokens ?? 0,
+                    OutputTokens: built.OutputTokens ?? 0,
+                    TotalTokens: built.TotalTokens ?? 0,
+                    Steps: [],
+                    FailureReason: reviewOutcome.FailureMessage ?? reviewOutcome.TerminalReason);
+            }
+
+            // Approved outcome — swap in the possibly-edited step list before
+            // materializing step IDs. Both approve and edit paths flow through
+            // the same code so the executor never sees the pre-review plan when
+            // the reviewer swapped it out.
+            effectivePlan = built with
+            {
+                Steps = [.. reviewOutcome.FinalSteps.Select(s => new PlannerStep
+                {
+                    SpecialistKey = s.SpecialistKey,
+                    Intent = s.Intent,
+                    Action = s.Action,
+                })],
+            };
+        }
+
+        // Step 3: materialize step IDs and persist the initial plan.
+        var stepIds = new List<string>(effectivePlan.Steps.Count);
+        var stepWrites = new List<PlanStepWrite>(effectivePlan.Steps.Count);
+        for (int i = 0; i < effectivePlan.Steps.Count; i++)
         {
             string stepId = $"{planId}-s{i}";
             stepIds.Add(stepId);
@@ -117,9 +176,9 @@ public sealed class PlanOrchestrator
             {
                 StepId = stepId,
                 StepIndex = i,
-                SpecialistKey = built.Steps[i].SpecialistKey,
-                Intent = built.Steps[i].Intent,
-                Action = built.Steps[i].Action,
+                SpecialistKey = effectivePlan.Steps[i].SpecialistKey,
+                Intent = effectivePlan.Steps[i].Intent,
+                Action = effectivePlan.Steps[i].Action,
                 Status = PlanStepStatus.Pending,
             });
         }
@@ -137,7 +196,7 @@ public sealed class PlanOrchestrator
             CreatedAt = createdAt,
         }, ct).ConfigureAwait(false);
 
-        // Step 3: execute the workflow.
+        // Step 4: execute the (possibly edited) workflow.
         var executionRequest = new PlanExecutionRequest
         {
             PlanId = planId,
@@ -149,7 +208,7 @@ public sealed class PlanOrchestrator
             Request = input.Request.Message,
             History = input.Request.History,
             User = input.Request.User,
-            Plan = built,
+            Plan = effectivePlan,
             StepIds = stepIds,
             SpecialistLookup = input.SpecialistLookup,
         };
@@ -161,12 +220,116 @@ public sealed class PlanOrchestrator
             Status: outcome.Status,
             Reply: BuildFinalReply(outcome),
             DurationMs: outcome.DurationMs,
-            InputTokens: (built.InputTokens ?? 0) + outcome.Steps.Sum(s => s.InputTokens),
-            OutputTokens: (built.OutputTokens ?? 0) + outcome.Steps.Sum(s => s.OutputTokens),
-            TotalTokens: (built.TotalTokens ?? 0) + outcome.Steps.Sum(s => s.TotalTokens),
+            InputTokens: (effectivePlan.InputTokens ?? 0) + outcome.Steps.Sum(s => s.InputTokens),
+            OutputTokens: (effectivePlan.OutputTokens ?? 0) + outcome.Steps.Sum(s => s.OutputTokens),
+            TotalTokens: (effectivePlan.TotalTokens ?? 0) + outcome.Steps.Sum(s => s.TotalTokens),
             Steps: outcome.Steps,
             FailureReason: outcome.FailureReason);
     }
+
+    private async Task<PlanReviewOutcome> RunReviewAsync(
+        string planId,
+        PlanOrchestrationInput input,
+        PlanBuildResult built,
+        CancellationToken ct)
+    {
+        var initialSteps = built.Steps
+            .Select(s => new PlanReviewStepDto
+            {
+                SpecialistKey = s.SpecialistKey,
+                Intent = s.Intent,
+                Action = s.Action,
+            })
+            .ToList();
+
+        var specialistKeys = input.Roster
+            .Select(a => a.Key)
+            .ToList();
+
+        var reviewInput = new PlanReviewCoordinationInput
+        {
+            PlanId = planId,
+            Subject = input.Subject,
+            SessionId = input.Request.SessionId,
+            Request = input.Request.Message,
+            InitialSteps = initialSteps,
+            SpecialistKeys = specialistKeys,
+            Roster = input.Roster,
+            DetectedIntents = input.DetectedIntents,
+        };
+
+        return await _reviewCoordinator!.CoordinateAsync(reviewInput, ct).ConfigureAwait(false);
+    }
+
+    private async Task PersistReviewTerminalAsync(
+        string planId,
+        PlanOrchestrationInput input,
+        PlanBuildResult built,
+        PlanReviewOutcome outcome,
+        DateTimeOffset createdAt,
+        CancellationToken ct)
+    {
+        // Record the plan as AwaitingReview → Failed so audit history preserves
+        // the intended step list and the terminal reason. Steps stay Pending on
+        // disk (they never ran).
+        var stepWrites = new List<PlanStepWrite>(built.Steps.Count);
+        for (int i = 0; i < built.Steps.Count; i++)
+        {
+            stepWrites.Add(new PlanStepWrite
+            {
+                StepId = $"{planId}-s{i}",
+                StepIndex = i,
+                SpecialistKey = built.Steps[i].SpecialistKey,
+                Intent = built.Steps[i].Intent,
+                Action = built.Steps[i].Action,
+                Status = PlanStepStatus.Pending,
+            });
+        }
+
+        await _planStore.CreatePlanAsync(new PlanWrite
+        {
+            PlanId = planId,
+            Subject = input.Subject,
+            SessionId = input.Request.SessionId,
+            TenantId = input.TenantId,
+            Request = input.Request.Message,
+            DetectedIntents = input.DetectedIntents,
+            Status = PlanStatus.AwaitingReview,
+            Steps = stepWrites,
+            CreatedAt = createdAt,
+        }, ct).ConfigureAwait(false);
+
+        await _planStore.UpdatePlanStatusAsync(new PlanStatusUpdate
+        {
+            PlanId = planId,
+            Subject = input.Subject,
+            Status = PlanStatus.Failed,
+            FailureReason = $"{outcome.TerminalReason}: {outcome.FailureMessage}",
+            TotalInputTokens = built.InputTokens,
+            TotalOutputTokens = built.OutputTokens,
+            TotalTokens = built.TotalTokens,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        }, ct).ConfigureAwait(false);
+
+        _logger.LogWarning(
+            "Plan {PlanId} terminated at review: {Terminal} — {Message}",
+            planId, outcome.TerminalReason, outcome.FailureMessage);
+    }
+
+    private static string BuildReviewTerminalReply(PlanReviewOutcome outcome) =>
+        outcome.TerminalReason switch
+        {
+            PlanReviewTerminalReason.ReviewTimedOut =>
+                "The plan was not executed because reviewer approval timed out.",
+            PlanReviewTerminalReason.ReplanExhausted =>
+                "The plan was not executed because the reviewer rejected every revision within the configured limit.",
+            PlanReviewTerminalReason.EditedToEmpty =>
+                "The plan was not executed because the reviewer edited it down to zero steps.",
+            PlanReviewTerminalReason.EditInvalid =>
+                "The plan was not executed because the reviewer's edited step list referenced an unknown specialist.",
+            _ =>
+                "The plan was not executed because the reviewer declined to approve it.",
+        };
 
     private static string BuildFinalReply(PlanExecutionOutcome outcome)
     {
