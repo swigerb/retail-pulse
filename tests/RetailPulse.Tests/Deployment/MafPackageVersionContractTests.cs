@@ -38,8 +38,8 @@ public class MafPackageVersionContractTests
     [InlineData("Microsoft.Extensions.AI")]
     public void DirectoryPackagesProps_PinsPackageAtOrAboveFloor(string packageId)
     {
-        var floor = RequiredFloors.Single(f => f.PackageId == packageId).Floor;
-        var pins = LoadCentralPackagePins();
+        Version floor = RequiredFloors.Single(f => f.PackageId == packageId).Floor;
+        Dictionary<string, Version> pins = LoadCentralPackagePins();
 
         pins.Should().ContainKey(packageId,
             $"Directory.Packages.props must pin {packageId} centrally");
@@ -55,11 +55,11 @@ public class MafPackageVersionContractTests
         // Issue #88 explicitly requires the API project to reference
         // Microsoft.Agents.AI.Workflows so the workflow primitives resolve
         // even before behavioural migration in #89 begins.
-        var csprojPath = Path.Combine(RepoRoot, "src", "RetailPulse.Api", "RetailPulse.Api.csproj");
+        string csprojPath = Path.Combine(RepoRoot, "src", "RetailPulse.Api", "RetailPulse.Api.csproj");
         File.Exists(csprojPath).Should().BeTrue("RetailPulse.Api.csproj must exist");
 
         var project = XDocument.Load(csprojPath);
-        var referencedPackages = project
+        IEnumerable<string> referencedPackages = project
             .Descendants("PackageReference")
             .Select(e => (string?)e.Attribute("Include") ?? string.Empty);
 
