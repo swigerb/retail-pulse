@@ -69,6 +69,45 @@ public sealed class DurableCostTracker : ICostTracker, IDisposable
             CREATE INDEX IF NOT EXISTS idx_cost_agent ON cost_events(agent_id);
             """;
         cmd.ExecuteNonQuery();
+
+        // Additive plan-first attribution (issue #93). SQLite ALTER TABLE ADD
+        // COLUMN is safe for pre-existing databases: existing rows read the
+        // column as NULL, which round-trips correctly through the nullable
+        // UsageEvent.PlanId/PlanStepId fields. Guarded with a pragma probe so
+        // the ALTER is idempotent across restarts of an already-upgraded DB.
+        EnsurePlanAttributionColumns();
+    }
+
+    private void EnsurePlanAttributionColumns()
+    {
+        HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
+        using (SqliteCommand probe = _connection.CreateCommand())
+        {
+            probe.CommandText = "PRAGMA table_info(cost_events)";
+            using SqliteDataReader reader = probe.ExecuteReader();
+            while (reader.Read())
+            {
+                columns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!columns.Contains("plan_id"))
+        {
+            using SqliteCommand alter = _connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE cost_events ADD COLUMN plan_id TEXT NULL";
+            alter.ExecuteNonQuery();
+        }
+
+        if (!columns.Contains("plan_step_id"))
+        {
+            using SqliteCommand alter = _connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE cost_events ADD COLUMN plan_step_id TEXT NULL";
+            alter.ExecuteNonQuery();
+        }
+
+        using SqliteCommand idx = _connection.CreateCommand();
+        idx.CommandText = "CREATE INDEX IF NOT EXISTS idx_cost_plan ON cost_events(plan_id)";
+        idx.ExecuteNonQuery();
     }
 
     public async Task TrackUsageAsync(UsageEvent usage, CancellationToken ct = default)
@@ -79,8 +118,8 @@ public sealed class DurableCostTracker : ICostTracker, IDisposable
             using (SqliteCommand cmd = _connection.CreateCommand())
             {
                 cmd.CommandText = """
-                    INSERT INTO cost_events (agent_id, model, input_tokens, output_tokens, tool_name, timestamp, is_cache_hit)
-                    VALUES (@agent, @model, @in, @out, @tool, @ts, @cache)
+                    INSERT INTO cost_events (agent_id, model, input_tokens, output_tokens, tool_name, timestamp, is_cache_hit, plan_id, plan_step_id)
+                    VALUES (@agent, @model, @in, @out, @tool, @ts, @cache, @plan, @step)
                     """;
                 cmd.Parameters.AddWithValue("@agent", usage.AgentId);
                 cmd.Parameters.AddWithValue("@model", usage.Model);
@@ -89,6 +128,8 @@ public sealed class DurableCostTracker : ICostTracker, IDisposable
                 cmd.Parameters.AddWithValue("@tool", (object?)usage.ToolName ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@ts", usage.Timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
                 cmd.Parameters.AddWithValue("@cache", usage.CacheHit ? 1 : 0);
+                cmd.Parameters.AddWithValue("@plan", (object?)usage.PlanId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@step", (object?)usage.PlanStepId ?? DBNull.Value);
                 cmd.ExecuteNonQuery();
             }
 
@@ -194,7 +235,7 @@ public sealed class DurableCostTracker : ICostTracker, IDisposable
         {
             using SqliteCommand cmd = _connection.CreateCommand();
             cmd.CommandText = """
-                SELECT agent_id, model, input_tokens, output_tokens, tool_name, timestamp, is_cache_hit
+                SELECT agent_id, model, input_tokens, output_tokens, tool_name, timestamp, is_cache_hit, plan_id, plan_step_id
                 FROM cost_events
                 WHERE timestamp >= @cutoff
                 """;
@@ -211,7 +252,9 @@ public sealed class DurableCostTracker : ICostTracker, IDisposable
                     reader.GetInt32(3),
                     reader.IsDBNull(4) ? null : reader.GetString(4),
                     DateTime.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-                    reader.GetInt32(6) != 0));
+                    reader.GetInt32(6) != 0,
+                    PlanId: reader.IsDBNull(7) ? null : reader.GetString(7),
+                    PlanStepId: reader.IsDBNull(8) ? null : reader.GetString(8)));
             }
 
             return results;

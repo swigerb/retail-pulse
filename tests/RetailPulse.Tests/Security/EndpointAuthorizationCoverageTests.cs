@@ -102,6 +102,9 @@ public sealed class EndpointAuthorizationCoverageTests
         app.MapDeadLetterEndpoints();
         app.MapMemoryEndpoints();
         app.MapCacheEndpoints();
+        // Plan endpoints (#93) — mirror Program.cs so the coverage walk sees them
+        // exactly as the app exposes them under Anonymous and Entra deployments.
+        app.MapPlanEndpoints();
 
         // The Anonymous bootstrap endpoint (unauthenticated, AllowAnonymous by design) — mirrors
         // Program.cs so the coverage walk sees the exact same route graph the app exposes.
