@@ -28,7 +28,10 @@ public class ContentSafetyLatencyHarnessTests
 {
     private readonly ITestOutputHelper _output;
 
-    public ContentSafetyLatencyHarnessTests(ITestOutputHelper output) => _output = output;
+    public ContentSafetyLatencyHarnessTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
 
     [Fact]
     public async Task Middleware_LocalFake_P95_UnderSmokeCeiling()
@@ -52,7 +55,7 @@ public class ContentSafetyLatencyHarnessTests
             _ = await mw.CheckInputAsync(new ChatRequest("warmup message", "s"));
         }
 
-        var timings = new double[samples];
+        double[] timings = new double[samples];
         var sw = new Stopwatch();
         for (int i = 0; i < samples; i++)
         {

@@ -139,7 +139,7 @@ public class ContentSafetyAuditFieldsTests
             fake, log, config,
             NullLoggerFactory.Instance.CreateLogger<ContentSafetyToolResultInspector>());
 
-        _ = await inspector.InspectAsync("GetIntel", "{\"x\":1}", "u", CancellationToken.None);
+        _ = await inspector.InspectAsync("GetIntel", /*lang=json,strict*/ "{\"x\":1}", "u", CancellationToken.None);
 
         SuspiciousRequest row = (await log.GetRecentAsync(10)).Should().ContainSingle().Subject;
         row.Category.Should().Be("SelfHarm");

@@ -18,6 +18,7 @@ namespace RetailPulse.Tests.Guardrails.ContentSafety;
 /// source and verify that the four expected span names and their tag set
 /// arrive on the wire.
 /// </summary>
+[Collection("AzureContentSafetyEvaluatorActivity")]
 public class ContentSafetyTelemetryTests
 {
     [Theory]
@@ -44,7 +45,7 @@ public class ContentSafetyTelemetryTests
         Activity? span = recorded.Activities.LastOrDefault(a => a.OperationName == expectedSpanName);
         span.Should().NotBeNull($"the {stage} stage must emit '{expectedSpanName}'");
 
-        IReadOnlyDictionary<string, object?> tags = span!.TagObjects
+        IReadOnlyDictionary<string, object?> tags = span.TagObjects
             .ToDictionary(k => k.Key, v => v.Value);
 
         tags.Should().ContainKey("guardrails.contentsafety.stage");
@@ -92,7 +93,7 @@ public class ContentSafetyTelemetryTests
         var credential = new FakeTokenCredential();
         var tokens = new ContentSafetyTokenProvider(credential);
         var sdk = new ContentSafetyClient(
-            http.BaseAddress!,
+            http.BaseAddress,
             credential,
             new ContentSafetyClientOptions { Transport = new HttpClientTransport(http) });
         var config = new GuardrailsConfig
@@ -100,7 +101,7 @@ public class ContentSafetyTelemetryTests
             ContentSafety = new ContentSafetyConfig
             {
                 Enabled = true,
-                Endpoint = http.BaseAddress!.ToString(),
+                Endpoint = http.BaseAddress.ToString(),
                 PromptShieldsEnabled = true
             }
         };
@@ -112,7 +113,7 @@ public class ContentSafetyTelemetryTests
     /// <summary>Serves both PromptShield and AnalyzeText requests with configurable category output.</summary>
     private sealed class StubOkHandler : HttpMessageHandler
     {
-        public IReadOnlyList<object> AnalyzeTextCategories { get; set; } = Array.Empty<object>();
+        public IReadOnlyList<object> AnalyzeTextCategories { get; set; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -141,15 +142,15 @@ public class ContentSafetyTelemetryTests
     private sealed class SpanRecorder : IDisposable
     {
         private readonly ActivityListener _listener;
-        public List<Activity> Activities { get; } = new();
+        public List<Activity> Activities { get; } = [];
 
         public SpanRecorder()
         {
             _listener = new ActivityListener
             {
                 ShouldListenTo = src => src.Name == "RetailPulse.Agent",
-                Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-                SampleUsingParentId = (ref ActivityCreationOptions<string> _) => ActivitySamplingResult.AllDataAndRecorded,
+                Sample = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
+                SampleUsingParentId = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
                 ActivityStopped = Activities.Add,
             };
             ActivitySource.AddActivityListener(_listener);

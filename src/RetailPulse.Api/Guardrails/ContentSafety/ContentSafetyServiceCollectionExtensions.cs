@@ -23,7 +23,7 @@ public static class ContentSafetyServiceCollectionExtensions
     /// raw HTTP path and, via <see cref="HttpClientTransport"/>, the SDK
     /// <see cref="ContentSafetyClient"/>. Sharing the client puts both failure
     /// classes behind one resilience pipeline so the timeout, circuit breaker,
-    /// and <see cref="Resilience.CircuitBreakerHealthCheck"/> report unified
+    /// and <see cref="CircuitBreakerHealthCheck"/> report unified
     /// state.
     /// </summary>
     public const string HttpClientName = "ContentSafety";

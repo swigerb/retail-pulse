@@ -30,9 +30,7 @@ public class ContentSafetyTokenProviderTests
         var credential = new FakeTokenCredential(token: "abc");
         var provider = new ContentSafetyTokenProvider(credential);
 
-        Task<string>[] tasks = Enumerable.Range(0, 32)
-            .Select(_ => provider.GetBearerAsync(CancellationToken.None).AsTask())
-            .ToArray();
+        Task<string>[] tasks = [.. Enumerable.Range(0, 32).Select(_ => provider.GetBearerAsync(CancellationToken.None).AsTask())];
         string[] results = await Task.WhenAll(tasks);
 
         results.Should().OnlyContain(t => t == "abc");

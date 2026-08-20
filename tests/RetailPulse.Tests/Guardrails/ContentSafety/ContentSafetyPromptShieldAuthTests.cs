@@ -16,6 +16,7 @@ namespace RetailPulse.Tests.Guardrails.ContentSafety;
 /// build if the Authorization header ever disappears from the outgoing
 /// request or the shared <see cref="ContentSafetyTokenProvider"/> is not used.
 /// </summary>
+[Collection("AzureContentSafetyEvaluatorActivity")]
 public class ContentSafetyPromptShieldAuthTests
 {
     [Fact]
@@ -61,7 +62,7 @@ public class ContentSafetyPromptShieldAuthTests
         // round-trip per call. The SDK client (AnalyzeText) uses the same
         // credential too but through its own pipeline, so we assert on the
         // observed HTTP requests rather than credential call count.
-        List<HttpRequestMessage> shieldRequests = handler.Requests
+        var shieldRequests = handler.Requests
             .Where(r => r.RequestUri!.AbsolutePath.EndsWith("text:shieldPrompt", StringComparison.Ordinal))
             .ToList();
         shieldRequests.Should().HaveCount(5);

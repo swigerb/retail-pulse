@@ -15,7 +15,7 @@ namespace RetailPulse.Tests.Guardrails.ContentSafety;
 /// Instead this test is a static assertion against the endpoint file so
 /// any future edit that removes a guardrail call site fails the build.
 /// </summary>
-public class ContentSafetyStreamingParityTests
+public partial class ContentSafetyStreamingParityTests
 {
     [Fact]
     public void BothChatEndpoints_InvokeGuardrailsMiddleware()
@@ -23,16 +23,14 @@ public class ContentSafetyStreamingParityTests
         string path = LocateChatEndpointsFile();
         string source = File.ReadAllText(path);
 
-        MatchCollection postMatches = Regex.Matches(source,
-            @"MapPost\(""(?<route>/api/chat(?:/stream)?)""",
-            RegexOptions.Multiline);
+        MatchCollection postMatches = MapPostRegex().Matches(source);
 
         postMatches.Should().HaveCount(2, "chat and streaming chat are both registered");
-        HashSet<string> routes = postMatches.Select(m => m.Groups["route"].Value).ToHashSet();
-        routes.Should().BeEquivalentTo(new[] { "/api/chat", "/api/chat/stream" });
+        var routes = postMatches.Select(m => m.Groups["route"].Value).ToHashSet();
+        routes.Should().BeEquivalentTo(["/api/chat", "/api/chat/stream"]);
 
-        int checkInputCalls = Regex.Matches(source, @"\.CheckInputAsync\(").Count;
-        int filterOutputCalls = Regex.Matches(source, @"\.FilterOutputAsync\(").Count;
+        int checkInputCalls = CheckInputRegex().Count(source);
+        int filterOutputCalls = FilterOutputRegex().Count(source);
 
         checkInputCalls.Should().BeGreaterThanOrEqualTo(2,
             "each endpoint (chat, stream) must call CheckInputAsync on the shared middleware");
@@ -48,8 +46,17 @@ public class ContentSafetyStreamingParityTests
             dir = dir.Parent;
         }
         dir.Should().NotBeNull("repository root with a 'src' folder must be reachable from test binaries");
-        string path = Path.Combine(dir!.FullName, "src", "RetailPulse.Api", "Endpoints", "ChatEndpoints.cs");
+        string path = Path.Combine(dir.FullName, "src", "RetailPulse.Api", "Endpoints", "ChatEndpoints.cs");
         File.Exists(path).Should().BeTrue($"expected ChatEndpoints.cs at {path}");
         return path;
     }
+
+    [GeneratedRegex(@"MapPost\(""(?<route>/api/chat(?:/stream)?)""", RegexOptions.Multiline)]
+    private static partial Regex MapPostRegex();
+
+    [GeneratedRegex(@"\.CheckInputAsync\(")]
+    private static partial Regex CheckInputRegex();
+
+    [GeneratedRegex(@"\.FilterOutputAsync\(")]
+    private static partial Regex FilterOutputRegex();
 }

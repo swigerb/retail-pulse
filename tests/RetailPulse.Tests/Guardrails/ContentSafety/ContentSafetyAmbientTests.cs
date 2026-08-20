@@ -15,7 +15,11 @@ namespace RetailPulse.Tests.Guardrails.ContentSafety;
 /// </summary>
 public class ContentSafetyAmbientTests : IDisposable
 {
-    public ContentSafetyAmbientTests() => ContentSafetyToolResultAmbient.Reset();
+    public ContentSafetyAmbientTests()
+    {
+        ContentSafetyToolResultAmbient.Reset();
+    }
+
     public void Dispose() => ContentSafetyToolResultAmbient.Reset();
 
     [Fact]
@@ -44,12 +48,12 @@ public class ContentSafetyAmbientTests : IDisposable
     public async Task Install_ConcurrentCallers_ExactlyOneInspectorWins()
     {
         ContentSafetyToolResultInspector[] inspectors =
-            Enumerable.Range(0, 16).Select(_ => MakeInspector()).ToArray();
+            [.. Enumerable.Range(0, 16).Select(_ => MakeInspector())];
 
         int successCount = 0;
         int failureCount = 0;
 
-        Task[] tasks = inspectors.Select(i => Task.Run(() =>
+        Task[] tasks = [.. inspectors.Select(i => Task.Run(() =>
         {
             try
             {
@@ -60,7 +64,7 @@ public class ContentSafetyAmbientTests : IDisposable
             {
                 Interlocked.Increment(ref failureCount);
             }
-        })).ToArray();
+        }))];
 
         await Task.WhenAll(tasks);
 

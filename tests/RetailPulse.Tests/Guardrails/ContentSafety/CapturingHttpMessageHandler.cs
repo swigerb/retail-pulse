@@ -10,7 +10,7 @@ namespace RetailPulse.Tests.Guardrails.ContentSafety;
 /// </summary>
 internal sealed class CapturingHttpMessageHandler : HttpMessageHandler
 {
-    public List<HttpRequestMessage> Requests { get; } = new();
+    public List<HttpRequestMessage> Requests { get; } = [];
     public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? Responder { get; set; }
 
     private int _callCount;
@@ -21,18 +21,16 @@ internal sealed class CapturingHttpMessageHandler : HttpMessageHandler
     {
         Interlocked.Increment(ref _callCount);
         Requests.Add(await CloneAsync(request, cancellationToken).ConfigureAwait(false));
-        if (Responder is null)
-        {
-            return new HttpResponseMessage(HttpStatusCode.OK)
+        return Responder is null
+            ? new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = JsonContent.Create(new
                 {
                     userPromptAnalysis = new { attackDetected = false },
                     documentsAnalysis = Array.Empty<object>()
                 })
-            };
-        }
-        return await Responder(request, cancellationToken).ConfigureAwait(false);
+            }
+            : await Responder(request, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Convenience helper for tests that want to inspect the captured Authorization header.</summary>

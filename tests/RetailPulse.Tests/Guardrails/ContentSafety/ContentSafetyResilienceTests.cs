@@ -28,6 +28,7 @@ namespace RetailPulse.Tests.Guardrails.ContentSafety;
 ///    — the evaluator returns <see cref="ContentSafetyDecision.ServiceUnavailable"/>
 ///    within the configured window and does not stall the middleware.
 /// </summary>
+[Collection("AzureContentSafetyEvaluatorActivity")]
 public class ContentSafetyResilienceTests
 {
     private const int _timeoutMs = 400;
@@ -129,10 +130,7 @@ public class ContentSafetyResilienceTests
         // can count total wire hits.
         services.Configure<HttpClientFactoryOptions>(
             ContentSafetyServiceCollectionExtensions.HttpClientName,
-            options =>
-            {
-                options.HandlerLifetime = TimeSpan.FromHours(1);
-            });
+            options => options.HandlerLifetime = TimeSpan.FromHours(1));
 
         ServiceProvider sp = services.BuildServiceProvider();
         IHttpClientFactory factory = sp.GetRequiredService<IHttpClientFactory>();
@@ -153,7 +151,7 @@ public class ContentSafetyResilienceTests
                 PromptShieldsEnabled = true,
             }
         };
-        var tokens = sp.GetRequiredService<ContentSafetyTokenProvider>();
+        ContentSafetyTokenProvider tokens = sp.GetRequiredService<ContentSafetyTokenProvider>();
         return new AzureContentSafetyEvaluator(
             sdkClient, http, tokens, config,
             NullLoggerFactory.Instance.CreateLogger<AzureContentSafetyEvaluator>());
