@@ -49,6 +49,9 @@ param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Enable the optional Azure AI Content Safety second layer. Disabled by default; no Content Safety account is provisioned when false.')
 param contentSafetyEnabled bool = false
 
+@description('Enable the optional Azure AI Search knowledge provider. Disabled by default; no Search resource is provisioned when false.')
+param aiSearchEnabled bool = false
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -201,6 +204,29 @@ output AZURE_CONTENT_SAFETY_ENABLED bool = contentSafetyEnabled
 output AZURE_CONTENT_SAFETY_ENDPOINT string = contentSafetyEnabled ? contentSafety!.outputs.endpoint : ''
 output AZURE_CONTENT_SAFETY_NAME string = contentSafetyEnabled ? contentSafety!.outputs.name : ''
 output AZURE_CONTENT_SAFETY_RESOURCE_ID string = contentSafetyEnabled ? contentSafety!.outputs.resourceId : ''
+
+// ── Optional Azure AI Search knowledge provider (issue #103) ───────────────
+// Provisioned only when aiSearchEnabled = true so a default `azd up` remains
+// byte-for-byte identical to the InMemory-only baseline. The module disables
+// local auth (no admin/query keys anywhere) and forces every caller through
+// managed identity. The postprovision hook grants each container app's
+// system identity the roles required to auto-create the index and to read
+// and write documents. When disabled, endpoint/name/resource-id outputs are
+// empty so downstream consumers can safely branch on the enabled flag.
+module aiSearch './modules/ai-search.bicep' = if (aiSearchEnabled) {
+  name: 'ai-search'
+  scope: rg
+  params: {
+    location: location
+    resourceToken: resourceToken
+    tags: tags
+  }
+}
+
+output AZURE_AI_SEARCH_ENABLED bool = aiSearchEnabled
+output AZURE_AI_SEARCH_ENDPOINT string = aiSearchEnabled ? aiSearch!.outputs.endpoint : ''
+output AZURE_AI_SEARCH_NAME string = aiSearchEnabled ? aiSearch!.outputs.name : ''
+output AZURE_AI_SEARCH_RESOURCE_ID string = aiSearchEnabled ? aiSearch!.outputs.resourceId : ''
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and
