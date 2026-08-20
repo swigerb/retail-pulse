@@ -101,6 +101,11 @@ public static class GuardrailEndpoints
             SexualThreshold: config.ContentSafety.Thresholds.Sexual,
             ViolenceThreshold: config.ContentSafety.Thresholds.Violence,
             SelfHarmThreshold: config.ContentSafety.Thresholds.SelfHarm),
+        AgentDefinition: new AgentDefinitionPolicyResponse(
+            OnValidationFailure: config.AgentDefinition.OnValidationFailure.ToString(),
+            SafetyChecksEnabled: config.AgentDefinition.SafetyChecksEnabled,
+            TemperatureMin: config.AgentDefinition.TemperatureBounds.Min,
+            TemperatureMax: config.AgentDefinition.TemperatureBounds.Max),
         Status: null);
 }
 
@@ -128,6 +133,7 @@ internal record GuardrailsConfigResponse(
     IReadOnlyList<string> PiiPatterns,
     IReadOnlyList<string> JailbreakPatterns,
     ContentSafetyConfigResponse ContentSafety,
+    AgentDefinitionPolicyResponse AgentDefinition,
     string? Status);
 
 /// <summary>Public projection of Content Safety runtime toggles. Endpoint URL is deliberately absent.</summary>
@@ -143,3 +149,14 @@ internal record ContentSafetyConfigResponse(
     int SexualThreshold,
     int ViolenceThreshold,
     int SelfHarmThreshold);
+
+/// <summary>
+/// Public projection of the agent-definition load-time policy. Only surfaces
+/// operator-facing fields — <c>AllowedModels</c>, <c>AllowedTools</c>, and
+/// <c>PrivilegedTools</c> are deployment configuration and are never returned.
+/// </summary>
+internal record AgentDefinitionPolicyResponse(
+    string OnValidationFailure,
+    bool SafetyChecksEnabled,
+    double TemperatureMin,
+    double TemperatureMax);
