@@ -2,6 +2,9 @@ agents:
   router:
     name: "Retail Ops Router"
     model: "gpt-5.4-mini"
+    key: "router"
+    display_name: "Router"
+    role: "orchestration"
     system_prompt: |
       You are an intent classifier for a retail analytics platform. Your job is to
       classify the user's message into exactly one intent category and return a
@@ -61,6 +64,20 @@ agents:
   demand-forecast:
     name: "Demand Forecast Agent"
     model: "gpt-5.4-mini"
+    key: "demand-forecasting"
+    display_name: "Demand Forecasting"
+    role: "specialist"
+    intents:
+      - "demand/forecasting"
+    keyword_fast_paths:
+      - "demand forecast"
+      - "sell-through"
+      - "velocity forecast"
+    council_participant: true
+    scorecard_dimension: "Demand Momentum"
+    scorecard_weight: 0.25
+    prefetchable: true
+    fallback_reply: "I couldn't generate a forecast response."
     system_prompt: |
       You are a Demand Forecasting specialist for {tenant.company}.
       You analyze historical sales data, identify seasonal patterns, and generate
@@ -151,6 +168,16 @@ agents:
   promo-planning:
     name: "Promotion Planning Agent"
     model: "gpt-5.4-mini"
+    key: "promo-planning"
+    display_name: "Promotion Planning"
+    role: "specialist"
+    intents:
+      - "promotion/trade"
+    keyword_fast_paths:
+      - "promotion"
+      - "trade spend"
+      - "promo effectiveness"
+      - "promotion roi"
     system_prompt: |
       You are a Promotion Planning specialist for {tenant.company}.
       You analyze historical campaign performance, calculate expected lift,
@@ -232,6 +259,17 @@ agents:
   field-sentiment:
     name: "Field Sentiment Agent"
     model: "gpt-5.4-mini"
+    key: "field-sentiment"
+    display_name: "Field Sentiment"
+    role: "specialist"
+    intents:
+      - "sentiment/field"
+    keyword_fast_paths:
+      - "field rep"
+      - "field feedback"
+      - "distributor feedback"
+      - "rep feedback"
+      - "sentiment analysis"
     system_prompt: |
       You are the Field Sentiment specialist for {tenant.company}. You gather and
       synthesize qualitative intelligence from distributors, field sales reps, and
@@ -265,6 +303,20 @@ agents:
   competitive-intel:
     name: "Competitive Intelligence Agent"
     model: "gpt-5.4-mini"
+    key: "competitive-intel"
+    display_name: "Competitive Intelligence"
+    role: "bespoke"
+    intents:
+      - "competitive/market"
+    keyword_fast_paths:
+      - "pricing pressure"
+      - "market share"
+      - "price war"
+      - "competitor analysis"
+      - "competitive landscape"
+    council_participant: true
+    scorecard_dimension: "Competitive Position"
+    scorecard_weight: 0.20
     system_prompt: |
       You are the Competitive Intelligence Agent for {tenant.company}, a specialist
       in monitoring competitor activities (pricing, promotions, market share) and
@@ -318,6 +370,12 @@ agents:
   retail-pulse:
     name: "Retail Pulse Agent"
     model: "gpt-5.4-mini"
+    key: "general"
+    display_name: "General Agent"
+    role: "specialist"
+    intents:
+      - "general/fallback"
+    fallback_reply: "I wasn't able to generate a response."
     system_prompt: |
       You are Retail Pulse, {tenant.company}'s intelligent brand analytics assistant.
       You help brand managers understand depletion trends, sell-through rates,
@@ -536,11 +594,25 @@ agents:
       - AnalyzeShipments
       - GetVariantMix
       - CreateChart
-      - UpdateMetrics
 
   supply-chain:
     name: "Supply Chain Agent"
     model: "gpt-5.4-mini"
+    key: "supply-chain"
+    display_name: "Supply Chain"
+    role: "specialist"
+    intents:
+      - "supply/shipments"
+    keyword_fast_paths:
+      - "shipment status"
+      - "inventory level"
+      - "fulfillment"
+      - "stockout"
+      - "stock out"
+      - "supply chain"
+    council_participant: true
+    scorecard_dimension: "Supply Reliability"
+    scorecard_weight: 0.20
     system_prompt: |
       You are a Supply Chain specialist for {tenant.company}.
       You monitor inventory levels, track supply disruptions, analyze fulfillment
@@ -624,6 +696,8 @@ agents:
   council-synthesis:
     name: "Council Synthesis"
     model: "gpt-5.4-mini"
+    key: "council-synthesis"
+    role: "orchestration"
     system_prompt: |
       You are the Portfolio Health Council synthesizer. Your role is to analyze
       health assessment votes from multiple specialist agents and produce a
@@ -646,6 +720,8 @@ agents:
   council-vote:
     name: "Council Vote Format"
     model: "gpt-5.4-mini"
+    key: "council-vote"
+    role: "orchestration"
     system_prompt: |
       You are providing a structured health assessment vote as part of the
       Portfolio Health Council. Analyze the requested brand/region using your
@@ -676,6 +752,17 @@ agents:
   store-ops:
     name: "Store Operations Agent"
     model: "gpt-5.4-mini"
+    key: "store-ops"
+    display_name: "Store Operations"
+    role: "specialist"
+    intents:
+      - "store/operations"
+    keyword_fast_paths:
+      - "store operations"
+      - "store performance"
+      - "retail ops"
+    scorecard_dimension: "Store Execution"
+    scorecard_weight: 0.20
     system_prompt: |
       You are a Store Operations specialist for {tenant.company}.
       You analyze store performance metrics, foot traffic, conversion rates,
@@ -728,6 +815,15 @@ agents:
   planogram:
     name: "Planogram Optimization Agent"
     model: "gpt-5.4-mini"
+    key: "planogram"
+    display_name: "Planogram Optimization"
+    role: "specialist"
+    intents:
+      - "planogram/optimization"
+    keyword_fast_paths:
+      - "planogram"
+      - "shelf space"
+      - "shelf placement"
     system_prompt: |
       You are a Planogram Optimization specialist for {tenant.company}.
       You analyze shelf layouts, optimize SKU placement using merchandising rules,
@@ -781,6 +877,18 @@ agents:
   margin:
     name: "Margin Analysis Agent"
     model: "gpt-5.4-mini"
+    key: "margin-analysis"
+    display_name: "Margin Analysis"
+    role: "specialist"
+    intents:
+      - "margin/analysis"
+    keyword_fast_paths:
+      - "margin analysis"
+      - "profitability"
+      - "cost structure"
+      - "gross margin"
+    scorecard_dimension: "Margin Health"
+    scorecard_weight: 0.15
     system_prompt: |
       You are a Margin Analysis specialist for {tenant.company}.
       You analyze brand profitability, P&L structures, margin drivers, trends,
@@ -842,6 +950,8 @@ agents:
   scorecard-synthesis:
     name: "Scorecard Synthesis"
     model: "gpt-5.4-mini"
+    key: "scorecard-synthesis"
+    role: "orchestration"
     system_prompt: |
       You are the Portfolio Scorecard synthesizer. Your role is to produce
       executive-quality summaries from multi-dimensional brand assessments.
@@ -858,9 +968,34 @@ agents:
   exec-brief:
     name: "Executive Brief"
     model: "gpt-5.4-mini"
+    key: "exec-brief"
+    role: "orchestration"
     system_prompt: |
       You generate concise executive briefs from portfolio data.
       Focus on: key metrics, notable changes, top risks, and recommended actions.
       Keep briefs under 200 words. Use bullet points for actions.
     temperature: 0.5
+    tools: []
+
+  memory-management:
+    name: "Memory Management Agent"
+    model: "none"
+    key: "memory-management"
+    display_name: "Memory Management"
+    role: "bespoke"
+    intents:
+      - "memory/management"
+    keyword_fast_paths:
+      - "remember that"
+      - "remember this"
+      - "forget"
+      - "clear my"
+      - "clear my history"
+      - "clear my data"
+      - "start fresh"
+      - "reset my context"
+      - "forget what I told you"
+      - "what do you know about me"
+    system_prompt: ""
+    temperature: 0.0
     tools: []

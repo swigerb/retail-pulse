@@ -4,36 +4,23 @@ using Microsoft.Extensions.AI;
 using RetailPulse.Api.Alerts;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Models;
-using RetailPulse.Contracts;
 using RetailPulse.Contracts.Alerts;
 using RetailPulse.Contracts.Routing;
-using ChatRequest = RetailPulse.Contracts.ChatRequest;
-using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Api.Agents.Specialists;
 
 /// <summary>
-/// Competitive Intelligence specialist — monitors competitor activities
-/// (pricing, promotions, market share) and provides strategic recommendations.
-/// Integrates with proactive alert system for real-time threat detection.
-/// Temperature 0.4 balances analytical precision with creative strategy.
+/// Competitive Intelligence specialist — bespoke agent that keeps the standard
+/// execution pipeline (inherited from <see cref="ConfiguredSpecialistAgent"/>)
+/// but layers a real-time SignalR alert publisher on top of every tool result.
+/// The alert-parsing logic is genuinely specialized and stays here rather than
+/// being pushed into configuration.
 /// </summary>
-public class CompetitiveIntelAgent : ISpecialistAgent
+public sealed class CompetitiveIntelAgent : ConfiguredSpecialistAgent
 {
-    private readonly IAgentExecutionPipeline _pipeline;
-    private readonly AgentDefinition _agentDef;
-    public string Model => _agentDef.Model;
-    private readonly IEnumerable<AITool> _tools;
     private readonly IHubContext<TelemetryHub> _hubContext;
     private readonly ILogger<CompetitiveIntelAgent> _logger;
     private readonly SqliteAlertService? _alertService;
-
-    public string Key => "competitive-intel";
-    public string DisplayName => "Competitive Intelligence Agent";
-    public IReadOnlyList<string> SupportedIntents { get; } =
-    [
-        AgentIntent.CompetitiveMarket
-    ];
 
     public CompetitiveIntelAgent(
         IAgentExecutionPipeline pipeline,
@@ -42,31 +29,31 @@ public class CompetitiveIntelAgent : ISpecialistAgent
         IHubContext<TelemetryHub> hubContext,
         ILogger<CompetitiveIntelAgent> logger,
         SqliteAlertService? alertService = null)
+        : base(pipeline, EnsureDefaults(agentDef), tools)
     {
-        _pipeline = pipeline;
-        _agentDef = agentDef;
-        _tools = tools;
         _hubContext = hubContext;
         _logger = logger;
         _alertService = alertService;
     }
 
-    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
+    private static AgentDefinition EnsureDefaults(AgentDefinition def)
     {
-        var context = new AgentExecutionContext
-        {
-            AgentName = _agentDef.Name,
-            SystemPrompt = _agentDef.SystemPrompt,
-            Temperature = (float)_agentDef.Temperature,
-            ModelName = _agentDef.Model,
-            Request = request,
-            Tools = _tools,
-            FallbackReply = "I wasn't able to generate a competitive analysis.",
-            OnToolResult = CheckAndFireAlertsAsync
-        };
+        ArgumentNullException.ThrowIfNull(def);
 
-        return _pipeline.ExecuteAsync(context, ct);
+        def = def.Clone();
+
+        if (string.IsNullOrWhiteSpace(def.Key))
+            def.Key = "competitive-intel";
+        if (def.Intents.Count == 0)
+            def.Intents = [AgentIntent.CompetitiveMarket];
+        if (string.IsNullOrWhiteSpace(def.DisplayName))
+            def.DisplayName = "Competitive Intelligence Agent";
+        if (string.IsNullOrWhiteSpace(def.FallbackReply))
+            def.FallbackReply = "I wasn't able to generate a competitive analysis.";
+        return def;
     }
+
+    protected override Func<string, CancellationToken, Task>? OnToolResult => CheckAndFireAlertsAsync;
 
     /// <summary>
     /// Scans tool results for competitive threats and fires proactive alerts via SignalR.
