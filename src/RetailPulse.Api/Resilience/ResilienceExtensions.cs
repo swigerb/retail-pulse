@@ -105,4 +105,59 @@ public static class ResilienceExtensions
 
         return builder;
     }
+
+    /// <summary>
+    /// Bounded timeout + retry + circuit breaker for the Azure AI Search
+    /// embeddings HTTP client (embeddings must traverse the APIM AI Gateway).
+    /// Mirrors the MCP retry-inside-breaker composition so a transient blip
+    /// retries within the breaker's protection while a sustained outage trips
+    /// the breaker without hammering APIM. Breaker state is surfaced under
+    /// <c>knowledgeCircuitState</c> on <see cref="CircuitBreakerHealthCheck"/>.
+    /// </summary>
+    public static IHttpClientBuilder AddKnowledgeEmbeddingsResilienceHandler(
+        this IHttpClientBuilder builder,
+        int timeoutMs)
+    {
+        int boundedTimeoutMs = Math.Max(500, timeoutMs);
+        builder.AddResilienceHandler("KnowledgeEmbeddingsResilience", pipelineBuilder =>
+        {
+            pipelineBuilder.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
+            {
+                FailureRatio = 0.5,
+                SamplingDuration = TimeSpan.FromSeconds(30),
+                MinimumThroughput = 5,
+                BreakDuration = TimeSpan.FromSeconds(30),
+                OnOpened = args =>
+                {
+                    CircuitBreakerHealthCheck.ReportKnowledgeState(CircuitBreakerState.Open);
+                    return ValueTask.CompletedTask;
+                },
+                OnClosed = args =>
+                {
+                    CircuitBreakerHealthCheck.ReportKnowledgeState(CircuitBreakerState.Closed);
+                    return ValueTask.CompletedTask;
+                },
+                OnHalfOpened = args =>
+                {
+                    CircuitBreakerHealthCheck.ReportKnowledgeState(CircuitBreakerState.HalfOpen);
+                    return ValueTask.CompletedTask;
+                }
+            });
+
+            pipelineBuilder.AddRetry(new HttpRetryStrategyOptions
+            {
+                MaxRetryAttempts = 2,
+                Delay = TimeSpan.FromMilliseconds(500),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+            });
+
+            pipelineBuilder.AddTimeout(new HttpTimeoutStrategyOptions
+            {
+                Timeout = TimeSpan.FromMilliseconds(boundedTimeoutMs),
+            });
+        });
+
+        return builder;
+    }
 }

@@ -156,6 +156,44 @@ if ($contentSafetyEnabled -and $contentSafetyEnabled.Trim().ToLowerInvariant() -
     }
 }
 
+# ── Optional Azure AI Search RBAC (issue #103) ─────────────────────────────
+# When AZURE_AI_SEARCH_ENABLED=true, grant every container app's system-assigned
+# identity the two roles required by the API:
+#   * "Search Service Contributor" — needed once, so the app can auto-create /
+#     inspect the index (Program.cs ensures the index exists at first probe).
+#   * "Search Index Data Contributor" — required for ingest + delete + document
+#     CRUD against the target index.
+# Both assignments are idempotent (JMESPath filter on principalId + role name
+# client-side), so a re-provision never duplicates the role.
+$aiSearchEnabled = [Environment]::GetEnvironmentVariable('AZURE_AI_SEARCH_ENABLED')
+$aiSearchResourceId = [Environment]::GetEnvironmentVariable('AZURE_AI_SEARCH_RESOURCE_ID')
+if ($aiSearchEnabled -and $aiSearchEnabled.Trim().ToLowerInvariant() -eq 'true' -and -not [string]::IsNullOrWhiteSpace($aiSearchResourceId)) {
+    Write-Host ''
+    Write-Host 'Granting Azure AI Search roles to each container app system identity...'
+    foreach ($app in $apps) {
+        $searchPrincipalId = (Invoke-Az `
+            -Arguments @('containerapp', 'show', '--name', $app, '--resource-group', $resourceGroup, '--query', 'identity.principalId', '--output', 'tsv') `
+            -FailureMessage "Failed to read container app '$app' principalId for AI Search role assignment" | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($searchPrincipalId)) { continue }
+
+        foreach ($role in @('Search Service Contributor', 'Search Index Data Contributor')) {
+            $searchExisting = (Invoke-Az `
+                -Arguments @('role', 'assignment', 'list', '--scope', $aiSearchResourceId, '--query', "[?principalId=='$searchPrincipalId' && roleDefinitionName=='$role'].id", '--output', 'tsv') `
+                -FailureMessage "Failed to list AI Search role assignments for '$app'" | Out-String).Trim()
+
+            if ([string]::IsNullOrWhiteSpace($searchExisting)) {
+                Write-Host "-> $app : granting '$role' to $searchPrincipalId"
+                Invoke-Az `
+                    -Arguments @('role', 'assignment', 'create', '--assignee-object-id', $searchPrincipalId, '--assignee-principal-type', 'ServicePrincipal', '--role', $role, '--scope', $aiSearchResourceId, '--output', 'none') `
+                    -FailureMessage "Failed to grant '$role' to '$app' on the AI Search service" | Out-Null
+            }
+            else {
+                Write-Host "-> $app : '$role' already present"
+            }
+        }
+    }
+}
+
 # ── Mandatory APIM AI Gateway live gate (issue #67) ────────────────────────
 # `azd provision` reporting "Succeeded" only means the ARM deployments
 # succeeded — it says nothing about whether the AI Gateway invariants

@@ -33,6 +33,7 @@ using RetailPulse.Api.Observability;
 using RetailPulse.Api.OpenAI;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Rag;
+using RetailPulse.Api.Rag.AzureAISearch;
 using RetailPulse.Api.Resilience;
 using RetailPulse.Api.Scorecard;
 using RetailPulse.Api.Security;
@@ -730,14 +731,24 @@ builder.Services.AddSingleton(sp =>
     // Every process registers the in-memory factory automatically so it is
     // always available as the default primary and as the fallback target for
     // KnowledgeDegradationMode.FallbackToInMemory. Cloud modules (#103/#104)
-    // register their own factories from their opt-in extension methods.
+    // register their own factories from their opt-in extension methods via
+    // the IKnowledgeProviderContribution seam.
     var registry = new KnowledgeProviderRegistry();
     registry.Register(
         KnowledgeProviderMode.InMemory,
         s => s.GetRequiredService<InMemoryKnowledgeBase>());
+    foreach (IKnowledgeProviderContribution contribution in sp.GetServices<IKnowledgeProviderContribution>())
+    {
+        contribution.Register(registry);
+    }
     return registry;
 });
 builder.Services.AddSingleton<KnowledgeProviderSelector>();
+// Optional Azure AI Search provider (issue #103). The extension is a no-op
+// when Knowledge:AzureAISearch:Endpoint is blank, so the default demo path
+// stays byte-for-byte unchanged — nothing about the InMemory-only flow is
+// touched by adding this call.
+builder.Services.AddAzureAISearchKnowledgeProvider(builder.Configuration);
 builder.Services.AddSingleton(sp =>
 {
     KnowledgeProviderSelector selector = sp.GetRequiredService<KnowledgeProviderSelector>();
