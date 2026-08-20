@@ -62,6 +62,55 @@ All chat interactions are recorded in a tamper-evident audit log (`DurableAuditL
 
 ---
 
+## Session Persistence (Issue #90)
+
+Durable server-side conversation history is available as an **opt-in** feature
+behind the `SessionPersistence:Enabled` configuration switch. It follows the
+same storage model as the other durable stores (`SqliteConversationMemory`,
+`SqliteApprovalGate`, `SqliteAlertService`): a SQLite database in the shared
+writable data directory, opened through the centralized `SqliteMount` helper
+with SMB-safe pragmas (`busy_timeout=10000`, `journal_mode=DELETE`,
+`synchronous=FULL`).
+
+Conversation content is more sensitive than the memory facts we already
+store, so the surface is deliberately narrow and every privacy control below
+is a hard gate — none of them can be turned off with a config flag alone.
+
+### Non-negotiable privacy controls
+
+| Control | Where it lives | What it does |
+|---------|---------------|--------------|
+| **Anonymous callers never persist** | `ChatEndpoints` short-circuits writes via `IAnonymousChatPolicy`; `SessionEndpoints` refuse anonymous callers at entry with `403 session_persistence_unavailable`. | Matches the existing cache/memory-disabled rule for `Anonymous` mode. Proved by `AnonymousChatDoesNotPersistTests` using a strict-mock `ISessionStore`. |
+| **Subject-scoped SQL** | Every read/delete WHERE-clause in `SqliteSessionStore` filters on the resolved subject. | A cross-subject read resolves to `null`, which the endpoint layer surfaces as `404`. The endpoint intentionally responds the same way for "unknown id" and "wrong owner" so it cannot be used as a probing oracle. |
+| **Ownership pinned at first write** | `INSERT ... ON CONFLICT(SessionId) DO UPDATE ... WHERE Sessions.Subject = excluded.Subject`, plus a post-upsert ownership check inside the same transaction. | A replayed session id cannot change owners; a turn from a foreign subject is rolled back, not dropped as an orphan. |
+| **Complete deletion** | `DELETE /api/sessions/{id}` removes `SessionTurns` rows before the parent `Sessions` row in a single transaction. | An interrupted purge cannot leave orphans, and the row is really gone — no soft-delete flag. |
+| **PII redaction on write** | `SessionPersistence:RedactPiiOnWrite` (default `true`) routes each turn's `Content` through the shared `PiiRedactor`. | Redaction on write and redaction on display stay in lock-step because both use the same seam the output guardrail uses. |
+| **Config kill-switch** | `SessionPersistence:Enabled=false` means no store singleton, no cleanup service, no DB file, and no `/api/sessions/*` routes. | Restores Wave 1 behaviour bit-for-bit. Verified by `SessionPersistenceServiceExtensionsTests.Disabled_DoesNotRegisterStore_OrCleanupService_OrTouchDisk`. |
+| **Bounded retention** | `SessionCleanupBackgroundService` uses `TimeProvider` to purge sessions inactive for `RetentionTtl` (default 30 days) on a `CleanupInterval` cadence (default 1 hour). | Emits per-sweep row counts at `Information` so retention is observable in production logs. |
+
+### Authorization
+
+`/api/sessions`, `/api/sessions/{id}` (GET and DELETE) all require the
+authenticated `RetailPulse.User` app role (via `RequireAuthorization()`).
+They are not on the anonymous allowlist in
+`AnonymousCapabilityPolicy._allowedRoutes`, so the deny-by-default anonymous
+guard rejects them before the endpoint ever runs; the endpoint additionally
+re-checks anonymity in case the mode ever changes. Rate-limiting policies
+(`relaxed` for reads, `moderate` for delete) follow the existing endpoint
+conventions.
+
+### Storage lifetime
+
+Production ships `Enabled=false` today because the deployed synthetic demo
+runs on ephemeral per-replica storage (`RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`;
+see the deployment note in `docs/architecture.md`). Enabling persistence
+on ephemeral storage would set a durability expectation the substrate
+cannot honour. Once a policy-compatible durable volume is available,
+`SessionPersistence__Enabled=true` on the target environment joins the
+`sessions.db` file to the other durable stores under the same mount.
+
+---
+
 ## Authentication
 
 ### Provider selection (mode contract)
