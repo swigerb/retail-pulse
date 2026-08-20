@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "notes": "Deliberately-wrong expectations used to prove the deterministic scorer flags regressions. Each case pairs a real prompt with an expectation that we KNOW is incorrect; the scorer must produce all_properties_passed=false for every case. If any case here passes, the scorer is broken and the CI gate is unsafe to enable.",
+  "cases": [
+    {
+      "id": "known-bad-01-wrong-chart-type",
+      "category": "known-bad",
+      "prompt": "Create a line chart showing Sierra Gold Tequila depletion trends across all regions",
+      "notes": "The prompt is a line chart. We deliberately expect 'pie'. Scorer must fail chart_type.",
+      "expectations": {
+        "explicit_chart": true,
+        "chart_type": "pie",
+        "routing_mode": "keyword-fast-path",
+        "routing_intent": "demand/forecasting",
+        "expected_llm_call": false,
+        "refusal_expected": false,
+        "requires_clarification": false,
+        "retrieval_expected": true,
+        "retrieval_source": "historical-demand",
+        "memory_command": false
+      }
+    },
+    {
+      "id": "known-bad-02-wrong-explicit-chart",
+      "category": "known-bad",
+      "prompt": "How is Apex Grill performing in the Southwest this quarter?",
+      "notes": "No chart word appears. We deliberately expect explicit_chart=true. Scorer must fail explicit_chart.",
+      "expectations": {
+        "explicit_chart": true,
+        "chart_type": "bar",
+        "routing_mode": "keyword-fast-path",
+        "routing_intent": "general/fallback",
+        "expected_llm_call": false,
+        "refusal_expected": false,
+        "requires_clarification": false,
+        "retrieval_expected": true,
+        "retrieval_source": null,
+        "memory_command": false
+      }
+    },
+    {
+      "id": "known-bad-03-wrong-routing-intent",
+      "category": "known-bad",
+      "prompt": "How is our portfolio performing this quarter?",
+      "notes": "Real routing is council/health via the portfolio regex. We deliberately expect margin/analysis. Scorer must fail routing_intent.",
+      "expectations": {
+        "explicit_chart": false,
+        "chart_type": null,
+        "routing_mode": "keyword-fast-path",
+        "routing_intent": "margin/analysis",
+        "expected_llm_call": false,
+        "refusal_expected": false,
+        "requires_clarification": false,
+        "retrieval_expected": true,
+        "retrieval_source": null,
+        "memory_command": false
+      }
+    },
+    {
+      "id": "known-bad-04-wrong-memory-command",
+      "category": "known-bad",
+      "prompt": "Forget everything about me",
+      "notes": "Real behavior: memory-management fast-path. We deliberately expect memory_command=false. Scorer must fail memory_command.",
+      "expectations": {
+        "explicit_chart": false,
+        "chart_type": null,
+        "routing_mode": "keyword-fast-path",
+        "routing_intent": "memory/management",
+        "expected_llm_call": false,
+        "refusal_expected": false,
+        "requires_clarification": false,
+        "retrieval_expected": false,
+        "retrieval_source": null,
+        "memory_command": false
+      }
+    },
+    {
+      "id": "known-bad-05-wrong-fastpath-declared-llm",
+      "category": "known-bad",
+      "prompt": "How is Apex Grill performing in the Southwest this quarter?",
+      "notes": "Real behavior: keyword fast-path fires, no LLM call. We deliberately declare routing_mode=llm-required so the scorer expects llm_call_made=true. Scorer must fail llm_call_made.",
+      "expectations": {
+        "explicit_chart": false,
+        "chart_type": null,
+        "routing_mode": "llm-required",
+        "routing_intent": null,
+        "expected_llm_call": true,
+        "refusal_expected": false,
+        "requires_clarification": false,
+        "retrieval_expected": true,
+        "retrieval_source": null,
+        "memory_command": false
+      }
+    }
+  ]
+}

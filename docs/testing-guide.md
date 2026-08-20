@@ -544,3 +544,137 @@ Chaos tests validate resilience under failure conditions:
 - Timeout handling (75s → clean error)
 - Concurrent request safety
 - Memory pressure behavior
+
+---
+
+## Answer-Quality Evaluation Harness (Issue #110)
+
+The answer-quality harness lives in `tests/RetailPulse.Tests/Eval/` and grades every
+prompt in a versioned golden dataset against the properties Retail Pulse can be held
+objectively accountable for: routing intent, explicit-chart detection, chart type,
+refusal-adjacent behavior (memory-command detection), and whether the LLM path was
+reached at all. It is deliberately narrow. Model-graded rubric properties (answer
+wording, refusal quality, clarification quality) are reported separately and never
+gate CI on their own.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `Eval/Data/golden-dataset.json` | Curated retail prompts and their deterministic expectations. |
+| `Eval/Data/baseline-v1.json` | Versioned per-case observed values. Diff target for regressions. |
+| `Eval/Data/known-bad-cases.json` | Deliberately incorrect expectations for scorer self-tests. |
+| `Eval/DeterministicEvaluator.cs` | The scorer. Uses the real `RetailOpsRouter` + `ChartRequestDetector`. |
+| `Eval/EvaluationRunner.cs` | Orchestrator that produces `EvaluationReport`. |
+| `Eval/EvaluationHarnessTests.cs` | The CI gate. |
+| `Eval/StabilityTests.cs` | Repeat-run byte-identical determinism check. |
+| `Eval/BaselineTests.cs` | Baseline diff. |
+| `Eval/ScorerSelfTests.cs` | Known-good + known-bad self-tests. |
+| `Eval/DatasetContractTests.cs` | Structural invariants on the dataset. |
+
+### Run the harness
+
+```bash
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
+  --filter "FullyQualifiedName~RetailPulse.Tests.Eval"
+```
+
+The harness writes a full JSON report to
+`tests/RetailPulse.Tests/bin/{Debug,Release}/net10.0/EvalArtifacts/eval-report-offline.json`
+on every run. CI also uploads this file as the `eval-harness-report` artifact.
+
+### Extend the dataset
+
+1. Add a new case to `Eval/Data/golden-dataset.json`. Every case needs a unique id,
+   a category, a fictional prompt consistent with the seeded Apex Retail Group tenant
+   (see `tenant.yaml`), and an `expectations` block with:
+   - `explicit_chart` (bool) + `chart_type` (canonical `ChartSpec.Type` or `null`)
+   - `routing_mode`: `keyword-fast-path` (deterministically graded) or `llm-required`
+     (routing recorded but not graded — the deterministic scorer only gates on the
+     keyword-fast-path cases)
+   - `routing_intent`: an `AgentIntent.*` value when `routing_mode = keyword-fast-path`
+   - `memory_command` (bool)
+   - `refusal_expected`, `requires_clarification`, `retrieval_expected`,
+     `retrieval_source`: recorded for future live evaluation, not graded now
+2. Run the harness. If the case genuinely reflects live behavior, all properties will
+   pass on the first run.
+3. Refresh the baseline (see below) in the same commit as the dataset change.
+4. If the case adds a new category, update the `categories` list in the dataset and the
+   required-categories lists in `DatasetContractTests.cs`.
+
+All new categories must retain the pre-existing coverage guarantees: every one of the
+nine `ChartSpec.Type` values (`line`, `bar`, `groupedBar`, `stackedBar`,
+`horizontalBar`, `pie`, `donut`, `gauge`, `table`) must remain represented; the
+ambiguous, refusal, tenant-unavailable, and adversarial-injection categories must
+remain represented; and every prompt must remain fictional.
+
+### Interpret the report
+
+`eval-report-offline.json` has four top-level sections:
+
+| Section | Contents |
+|---------|----------|
+| `run` | Timestamp, mode (`offline-deterministic`), harness/dataset versions, case counts, CI gate threshold. |
+| `cost` | Prompt tokens (rough estimate), completion tokens (0 offline), USD estimate (0 offline), and the enforced `cap_usd`. |
+| `summary` | Deterministic pass/fail counts, pass rate, and the `gate_status` (`pass`/`fail`). |
+| `category_pass_rate` | Pass rate per golden category (`null` for categories composed entirely of `llm-required` cases). |
+| `cases` | Per-case per-property expected/observed/pass records with notes. |
+| `model_rubric` | Placeholder for future live-eval rubric scores. Always separate from the deterministic gate. |
+
+To triage a failure, open the report artifact and look for `all_properties_passed = false`
+cases. Each property has its own `pass` flag, so you can tell whether the router
+intent, the chart type, or the memory-command detection is what regressed.
+
+### Baseline
+
+`Eval/Data/baseline-v1.json` is the versioned snapshot of the current run. The
+`BaselineTests` suite compares every fresh run's observed values against it and prints
+a per-property diff on mismatch.
+
+**When behavior intentionally changes:**
+
+1. Run the harness locally; the report is written to
+   `tests/RetailPulse.Tests/bin/Debug/net10.0/EvalArtifacts/eval-report-offline.json`.
+2. Copy that file over `tests/RetailPulse.Tests/Eval/Data/baseline-v1.json`.
+3. Commit the code change and the refreshed baseline in the same commit so
+   `git blame` records the shift.
+
+### Stability
+
+`StabilityTests` runs the harness 5–10 times sequentially with a fixed timestamp and
+asserts every serialized report is byte-identical. Because the scoring path uses only
+regex + string compare with no live model call, unchanged code must produce
+bit-for-bit stable output. If this suite ever begins to flake, the harness has drifted
+into model-dependent territory and the deterministic gate must not be re-enabled until
+the source of nondeterminism is fixed.
+
+### Cost
+
+Offline runs consume **zero LLM tokens** and are recorded at `usd_estimated = 0.0`.
+The per-run cap is set to `$5.00` (`EvaluationRunner.CostCapUsd`) and enforced by the
+CI gate; any future live-inference mode must stay under that ceiling.
+
+### CI gate
+
+The workflow step `Answer quality gate (offline deterministic)` in `.github/workflows/ci.yml`
+runs everything under `RetailPulse.Tests.Eval` in Release. The documented pass-rate
+threshold is **100% of deterministically-graded cases** (encoded in
+`EvaluationRunner.CiGateThreshold`). Any deterministic failure — routing drift, chart
+detection regression, memory-command detection regression, or baseline drift — trips
+the gate. The `llm-required` cases in the dataset are not gated deterministically;
+their routing decisions are recorded for the baseline but never used to fail the gate
+on their own.
+
+### Separation of deterministic vs model-graded
+
+The harness is designed so no model-graded score can ever gate CI on its own:
+
+- The scorer only inspects properties the router and chart detector produce
+  deterministically. No `IChatClient` is ever consulted for a graded verdict.
+- The `model_rubric` section of the report is always populated but always separate
+  from `summary`. A future live-eval mode adds numbers there; it never edits
+  `deterministic_pass_rate` or `gate_status`.
+- Cases whose routing depends on the live LLM classifier are marked
+  `routing_mode: llm-required` in the golden. The scorer records their observed
+  routing (from the offline stubbed classifier) for the baseline but does not compare
+  it to any expected value.
