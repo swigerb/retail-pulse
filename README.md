@@ -105,7 +105,34 @@ cd src/RetailPulse.Web && npm ci && cd ../..
 dotnet run --project src/RetailPulse.AppHost
 ```
 
-### 5. Open the React dashboard
+### 5. Enable the pre-commit formatting hook
+
+The repo ships a versioned pre-commit hook under [`.githooks/`](.githooks) that
+runs `dotnet format --verify-no-changes` on staged C# files before every
+commit, so the CI `lint` job is never the first place a formatting failure
+shows up. It is not enabled by `git clone` — run it once per clone:
+
+```powershell
+# Windows
+pwsh scripts/setup-hooks.ps1
+```
+
+```bash
+# Linux / macOS / Git Bash
+./scripts/setup-hooks.sh
+```
+
+Equivalent one-liner:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Bypass a single commit with `git commit --no-verify`. See
+[docs/contributing.md](docs/contributing.md#pre-commit-formatting-hook) for
+the full behaviour, bypass guidance, and line-ending troubleshooting.
+
+### 6. Open the React dashboard
 
 Navigate to [http://localhost:5173](http://localhost:5173) and start asking questions!
 
