@@ -23,6 +23,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
     private readonly AgentDefinition _voteDef;
     private readonly ILogger<ConsensusOrchestrator> _logger;
     private readonly ILoggerFactory? _loggerFactory;
+    private readonly HashSet<string> _councilParticipants;
 
     /// <summary>MAF agent name for lightweight voter runs, so characterization tests can
     /// verify each vote flows through <see cref="MafAgentInvoker"/> (a real
@@ -40,13 +41,14 @@ public class ConsensusOrchestrator : IConsensusCouncil
     /// <summary>Timeout for lightweight voting mode — no tool calls, just LLM reasoning.</summary>
     private static readonly TimeSpan _lightweightVoteTimeout = TimeSpan.FromSeconds(10);
 
-    /// <summary>Agent keys eligible to participate in the council.</summary>
-    private static readonly HashSet<string> _councilParticipants = new(StringComparer.OrdinalIgnoreCase)
-    {
+    /// <summary>Default agent keys eligible for the council — used when the caller does
+    /// not supply a configuration-derived list (unit tests, legacy composition roots).</summary>
+    internal static readonly IReadOnlyList<string> DefaultCouncilParticipants =
+    [
         "demand-forecasting",
         "competitive-intel",
         "supply-chain"
-    };
+    ];
 
     public ConsensusOrchestrator(
         IEnumerable<ISpecialistAgent> specialists,
@@ -54,6 +56,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
         AgentDefinition synthesisDef,
         AgentDefinition voteDef,
         ILogger<ConsensusOrchestrator> logger,
+        IEnumerable<string>? councilParticipants = null,
         ILoggerFactory? loggerFactory = null)
     {
         _specialists = specialists;
@@ -62,6 +65,13 @@ public class ConsensusOrchestrator : IConsensusCouncil
         _voteDef = voteDef;
         _logger = logger;
         _loggerFactory = loggerFactory;
+
+        // Council roster is now data-driven per issue #98. When callers don't supply
+        // a roster (older tests), fall back to the historical set so existing
+        // behaviour parity is preserved.
+        _councilParticipants = new HashSet<string>(
+            councilParticipants ?? DefaultCouncilParticipants,
+            StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<CouncilVerdict> ConveneAsync(string brand, string? region, CancellationToken ct = default)

@@ -20,29 +20,35 @@ public class ScorecardOrchestrator
     private readonly IChatClient _chatClient;
     private readonly AgentDefinition _synthesisDef;
     private readonly ILogger<ScorecardOrchestrator> _logger;
+    private readonly IReadOnlyList<ScorecardDimensionConfig> _scoringDimensionsConfig;
 
     private static readonly TimeSpan _agentTimeout = TimeSpan.FromSeconds(12);
 
-    // Scoring dimensions with weights
-    private static readonly (string Dimension, double Weight, string AgentKey)[] _scoringDimensions =
+    /// <summary>Default dimensions — kept as a fallback so tests and legacy composition
+    /// roots that don't supply a configuration list continue to work.</summary>
+    internal static readonly IReadOnlyList<ScorecardDimensionConfig> DefaultScoringDimensions =
     [
-        ("Demand Momentum", 0.25, "demand-forecasting"),
-        ("Competitive Position", 0.20, "competitive-intel"),
-        ("Supply Reliability", 0.20, "supply-chain"),
-        ("Store Execution", 0.20, "store-ops"),
-        ("Margin Health", 0.15, "margin-analysis")
+        new("Demand Momentum", 0.25, "demand-forecasting"),
+        new("Competitive Position", 0.20, "competitive-intel"),
+        new("Supply Reliability", 0.20, "supply-chain"),
+        new("Store Execution", 0.20, "store-ops"),
+        new("Margin Health", 0.15, "margin-analysis"),
     ];
 
     public ScorecardOrchestrator(
         IEnumerable<ISpecialistAgent> specialists,
         IChatClient chatClient,
         AgentDefinition synthesisDef,
-        ILogger<ScorecardOrchestrator> logger)
+        ILogger<ScorecardOrchestrator> logger,
+        IReadOnlyList<ScorecardDimensionConfig>? scoringDimensions = null)
     {
         _specialists = specialists;
         _chatClient = chatClient;
         _synthesisDef = synthesisDef;
         _logger = logger;
+        _scoringDimensionsConfig = scoringDimensions is { Count: > 0 }
+            ? scoringDimensions
+            : DefaultScoringDimensions;
     }
 
     public record BrandScore(
@@ -107,7 +113,7 @@ public class ScorecardOrchestrator
         var agentLookup = _specialists.ToDictionary(s => s.Key, StringComparer.OrdinalIgnoreCase);
 
         // Evaluate each dimension in parallel
-        IEnumerable<Task<DimensionScore>> dimTasks = _scoringDimensions.Select(async dim =>
+        IEnumerable<Task<DimensionScore>> dimTasks = _scoringDimensionsConfig.Select(async dim =>
         {
             if (!agentLookup.TryGetValue(dim.AgentKey, out ISpecialistAgent? agent))
             {

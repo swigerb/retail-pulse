@@ -1,59 +1,45 @@
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Models;
-using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Routing;
-using ChatRequest = RetailPulse.Contracts.ChatRequest;
-using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Api.Agents.Specialists;
 
 /// <summary>
-/// Promotion Planning specialist — handles promotion/trade queries:
-/// promo history analysis, lift calculations, timing evaluation, ROI estimation,
-/// and campaign approval gating. Uses its own tool set and lower temperature (0.3).
+/// Promotion Planning specialist — thin shim over
+/// <see cref="ConfiguredSpecialistAgent"/> that retains the bespoke approval-gate
+/// hook (<see cref="CheckApprovalAsync"/>) called by the Task Module endpoint.
+/// The LLM path is fully data-driven.
 /// </summary>
-public class PromoPlanningAgent : ISpecialistAgent
+public sealed class PromoPlanningAgent : ConfiguredSpecialistAgent
 {
-    private readonly IAgentExecutionPipeline _pipeline;
-    private readonly AgentDefinition _agentDef;
-    public string Model => _agentDef.Model;
-    private readonly IEnumerable<AITool> _tools;
     private readonly IApprovalGate? _approvalGate;
-
-    public string Key => "promo-planning";
-    public string DisplayName => "Promotion Planning Agent";
-    public IReadOnlyList<string> SupportedIntents { get; } =
-    [
-        AgentIntent.PromotionTrade
-    ];
 
     public PromoPlanningAgent(
         IAgentExecutionPipeline pipeline,
         AgentDefinition agentDef,
         IEnumerable<AITool> tools,
         IApprovalGate? approvalGate = null)
+        : base(pipeline, EnsureDefaults(agentDef), tools)
     {
-        _pipeline = pipeline;
-        _agentDef = agentDef;
-        _tools = tools;
         _approvalGate = approvalGate;
     }
 
-    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
+    private static AgentDefinition EnsureDefaults(AgentDefinition def)
     {
-        var context = new AgentExecutionContext
-        {
-            AgentName = _agentDef.Name,
-            SystemPrompt = _agentDef.SystemPrompt,
-            Temperature = (float)_agentDef.Temperature,
-            ModelName = _agentDef.Model,
-            Request = request,
-            Tools = _tools,
-            FallbackReply = "I wasn't able to generate a promotion analysis."
-        };
+        ArgumentNullException.ThrowIfNull(def);
 
-        return _pipeline.ExecuteAsync(context, ct);
+        def = def.Clone();
+
+        if (string.IsNullOrWhiteSpace(def.Key))
+            def.Key = "promo-planning";
+        if (def.Intents.Count == 0)
+            def.Intents = [AgentIntent.PromotionTrade];
+        if (string.IsNullOrWhiteSpace(def.DisplayName))
+            def.DisplayName = "Promotion Planning Agent";
+        if (string.IsNullOrWhiteSpace(def.FallbackReply))
+            def.FallbackReply = "I wasn't able to generate a promotion analysis.";
+        return def;
     }
 
     /// <summary>

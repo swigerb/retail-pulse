@@ -1,54 +1,36 @@
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Models;
-using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
-using ChatRequest = RetailPulse.Contracts.ChatRequest;
-using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Api.Agents.Specialists;
 
 /// <summary>
-/// Supply Chain specialist — handles inventory levels, supply disruptions,
-/// fulfillment rates, and overall supply health assessments.
-/// Uses its own tool set and lower temperature (0.3) for analytical precision.
+/// Supply Chain specialist — thin shim over <see cref="ConfiguredSpecialistAgent"/>.
 /// </summary>
-public class SupplyChainAgent : ISpecialistAgent
+public sealed class SupplyChainAgent : ConfiguredSpecialistAgent
 {
-    private readonly IAgentExecutionPipeline _pipeline;
-    private readonly AgentDefinition _agentDef;
-    public string Model => _agentDef.Model;
-    private readonly IEnumerable<AITool> _tools;
-
-    public string Key => "supply-chain";
-    public string DisplayName => "Supply Chain Agent";
-    public IReadOnlyList<string> SupportedIntents { get; } =
-    [
-        AgentIntent.SupplyShipments
-    ];
-
     public SupplyChainAgent(
         IAgentExecutionPipeline pipeline,
         AgentDefinition agentDef,
         IEnumerable<AITool> tools)
+        : base(pipeline, EnsureDefaults(agentDef), tools)
     {
-        _pipeline = pipeline;
-        _agentDef = agentDef;
-        _tools = tools;
     }
 
-    public Task<ChatResponse> HandleAsync(ChatRequest request, CancellationToken ct = default)
+    private static AgentDefinition EnsureDefaults(AgentDefinition def)
     {
-        var context = new AgentExecutionContext
-        {
-            AgentName = _agentDef.Name,
-            SystemPrompt = _agentDef.SystemPrompt,
-            Temperature = (float)_agentDef.Temperature,
-            ModelName = _agentDef.Model,
-            Request = request,
-            Tools = _tools,
-            FallbackReply = "I wasn't able to generate a supply chain analysis."
-        };
+        ArgumentNullException.ThrowIfNull(def);
 
-        return _pipeline.ExecuteAsync(context, ct);
+        def = def.Clone();
+
+        if (string.IsNullOrWhiteSpace(def.Key))
+            def.Key = "supply-chain";
+        if (def.Intents.Count == 0)
+            def.Intents = [AgentIntent.SupplyShipments];
+        if (string.IsNullOrWhiteSpace(def.DisplayName))
+            def.DisplayName = "Supply Chain Agent";
+        if (string.IsNullOrWhiteSpace(def.FallbackReply))
+            def.FallbackReply = "I wasn't able to generate a supply chain analysis.";
+        return def;
     }
 }
