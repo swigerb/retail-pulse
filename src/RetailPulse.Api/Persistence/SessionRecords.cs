@@ -13,16 +13,16 @@ public sealed record SessionTurnWrite
     public required string SessionId { get; init; }
 
     /// <summary>
-    /// Resolved via <see cref="RetailPulse.Api.Auth.UserIdentity.Resolve"/>. Anonymous callers
+    /// Resolved via <see cref="Auth.UserIdentity.Resolve"/>. Anonymous callers
     /// never reach the store; the caller is responsible for filtering them out per policy.
     /// </summary>
     public required string Subject { get; init; }
 
     /// <summary>
-    /// Tenant identifier resolved from <see cref="RetailPulse.Contracts.ITenantProvider"/>.
+    /// Tenant identifier resolved from <see cref="ITenantProvider"/>.
     /// Kept nullable so it degrades gracefully when a tenant configuration is not loaded
-    /// (the default constructor of <see cref="RetailPulse.Contracts.TenantConfiguration"/>
-    /// leaves <see cref="RetailPulse.Contracts.TenantConfiguration.Company"/> blank).
+    /// (the default constructor of <see cref="TenantConfiguration"/>
+    /// leaves <see cref="TenantConfiguration.Company"/> blank).
     /// </summary>
     public string? TenantId { get; init; }
 
@@ -49,7 +49,7 @@ public sealed record SessionTurnWrite
 
     /// <summary>
     /// Short, JSON-shaped summary of the pipeline spans (tool call names, counts, total
-    /// duration). The full trace tree lives in <see cref="RetailPulse.Api.Tracing.InMemoryTraceCollector"/>;
+    /// duration). The full trace tree lives in <see cref="Tracing.InMemoryTraceCollector"/>;
     /// this is only enough to recover an at-a-glance view when a session is rehydrated
     /// long after the trace ring buffer has recycled.
     /// </summary>

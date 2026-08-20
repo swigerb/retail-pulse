@@ -1,8 +1,8 @@
 using System.ClientModel;
 using System.Diagnostics;
 using System.Globalization;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Auth;

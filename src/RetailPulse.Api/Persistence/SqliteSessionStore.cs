@@ -9,9 +9,9 @@ namespace RetailPulse.Api.Persistence;
 
 /// <summary>
 /// SQLite-backed implementation of <see cref="ISessionStore"/>. Mirrors the shape of the
-/// other durable stores (<see cref="RetailPulse.Api.Approval.SqliteApprovalGate"/>,
-/// <see cref="RetailPulse.Api.Memory.SqliteConversationMemory"/>,
-/// <see cref="RetailPulse.Api.Alerts.SqliteAlertService"/>): the shared cache connection
+/// other durable stores (<see cref="Approval.SqliteApprovalGate"/>,
+/// <see cref="Memory.SqliteConversationMemory"/>,
+/// <see cref="Alerts.SqliteAlertService"/>): the shared cache connection
 /// string is built once, every operation opens its own connection through
 /// <see cref="SqliteMount"/> so it gets the SMB-safe pragmas
 /// (<c>busy_timeout=10000</c>, <c>journal_mode=DELETE</c>, <c>synchronous=FULL</c>),

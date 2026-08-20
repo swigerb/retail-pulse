@@ -25,7 +25,7 @@ public record SessionDetailDto(
 
 /// <summary>
 /// One persisted chat turn — either a user prompt or an assistant reply. The role names
-/// match the values the chat pipeline already emits into <see cref="RetailPulse.Contracts.ChatHistoryMessage"/>
+/// match the values the chat pipeline already emits into <see cref="ChatHistoryMessage"/>
 /// so a rehydrated session can be posted straight back into <c>/api/chat</c>.
 /// </summary>
 public record SessionTurnDto(

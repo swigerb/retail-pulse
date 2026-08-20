@@ -40,7 +40,7 @@ public sealed class SessionPersistenceOptions
     public TimeSpan CleanupInterval { get; set; } = TimeSpan.FromHours(1);
 
     /// <summary>
-    /// Apply <see cref="RetailPulse.Api.Guardrails.PiiRedactor"/> to turn content before persistence.
+    /// Apply <see cref="Guardrails.PiiRedactor"/> to turn content before persistence.
     /// On by default because rehydratable chat transcripts are a higher-value PII target than the
     /// summarized memory rows the memory store already holds — the redactor is the same shared
     /// seam the output guardrail already uses, so redaction on write and redaction on display
