@@ -61,7 +61,7 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 | **Shipment data** (distribution, fill rates) | `RetailPulseDb` → SQLite `Shipments` table | Same as above. |
 | **Field sentiment** (rep feedback, scores) | `RetailPulseDb` → SQLite `Sentiment` table | Same as above. |
 | **Tenant configuration** (brands, regions, channels) | `tenant.yaml` at repo root → loaded by `FileTenantProvider` | On disk. Single source of truth for the business domain. Changing this file triggers a database re-seed on next restart. |
-| **Conversation history** | Frontend state (`ChatPanel.tsx`) → sent with each request | Browser session only. Not persisted server-side. |
+| **Conversation history** | Frontend state (`ChatPanel.tsx`) → sent with each request; optionally mirrored to the durable server-side session store when `SessionPersistence:Enabled=true` (issue #90). | Browser session only by default. When enabled, sessions and turns for **authenticated** subjects are persisted to `data/sessions.db` via `SqliteSessionStore`, so a browser refresh can rehydrate the last conversation. Anonymous sessions are **never** persisted (see Session Persistence below). |
 | **Telemetry spans** | Frontend state (`Dashboard.tsx`) via SignalR | Browser session only. Resets on "Clear Telemetry" or "+ New Chat". |
 
 > **Key insight:** The analytics dataset lives in a SQLite database (`data/retailpulse.db`), seeded deterministically from `tenant.yaml`. Unlike the earlier in-memory approach, the agent can now **read and write** data via the `UpdateMetrics` MCP tool — enabling real-time scenario modeling, what-if analysis, and live data updates during demos. The database re-seeds automatically when `tenant.yaml` changes (tracked via content hash). To reset to baseline, delete the database file and restart. Swapping to production data sources requires only replacing the MCP Server tool implementations.
@@ -438,6 +438,87 @@ Incoming Request
 | `EntityMention` | 90 days | "Sierra Gold Tequila, Ridgeline Bourbon, Northeast region" |
 
 The `MemoryManagementAgent` handles privacy: "forget everything" wipes all user data (GDPR-ready). Memory DB is at `data/memory.db`.
+
+---
+
+## Durable Session Persistence (Issue #90)
+
+Chat sessions and turns can optionally survive an API restart, so a browser
+refresh rehydrates the last conversation rather than starting from scratch.
+The store follows the same pattern as `SqliteConversationMemory`,
+`SqliteApprovalGate`, and `SqliteAlertService`: SQLite in the shared writable
+data directory, opened through the centralized `SqliteMount` helper
+(`busy_timeout=10000`, `journal_mode=DELETE`, `synchronous=FULL`).
+
+### Pipeline
+
+```
+POST /api/chat (authenticated, non-anonymous, SessionPersistence:Enabled=true)
+  → ChatEndpoints resolves subject via UserIdentity.Resolve
+  → SessionOwnershipRegistry binds sessionId → subject
+  → Router → Agent → Response
+  → SqliteSessionStore.PersistTurnAsync (user turn + assistant turn, one transaction)
+       ├── Upserts Sessions row (subject fixed at first write)
+       └── Appends SessionTurns row (role, content, agent, routing, tokens, chart specs, span summary)
+
+GET  /api/sessions          → list caller's sessions (newest activity first)
+GET  /api/sessions/{id}     → rehydrate one session, capped at MaxTurnsPerRehydrate
+DELETE /api/sessions/{id}   → cascade-delete (turns then session), single transaction
+```
+
+### Configuration (`SessionPersistence` section, defaults)
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `Enabled` | `false` | Master switch. Off = no store singleton, no cleanup service, no DB file, no `/api/sessions/*` routes — Wave 1 behaviour is preserved bit-for-bit. |
+| `RetentionTtl` | `30.00:00:00` (30 days) | Sessions inactive for longer are purged by the background cleanup service. |
+| `CleanupInterval` | `01:00:00` (1 hour) | How often the sweep runs. Driven by `TimeProvider` so tests use a deterministic clock rather than sleeps. |
+| `RedactPiiOnWrite` | `true` | Apply the shared `PiiRedactor` (same seam the output guardrail uses) to turn content before writing. |
+| `MaxTurnsPerRehydrate` | `200` | Hard cap on `GET /api/sessions/{id}` so a single rehydrate cannot materialise unbounded content. Newest turns win. |
+| `MaxSessionsPerList` | `200` | Hard cap on `GET /api/sessions`. |
+
+### Privacy guarantees (see `docs/security.md` for the full contract)
+
+- **Anonymous sessions are NEVER persisted.** The chat endpoint short-circuits
+  writes via `IAnonymousChatPolicy`, and `/api/sessions/*` refuse anonymous
+  callers at entry with `403 session_persistence_unavailable`. Proved by the
+  strict-mock `AnonymousChatDoesNotPersistTests` regression.
+- **Subject-scoped SQL.** Every read/delete WHERE-clause filters on the
+  resolved subject; a cross-subject read resolves to `null`, which the
+  endpoint layer surfaces as `404` (never an oracle, never a silent empty).
+- **Ownership pinned at first write.** The `Sessions` upsert uses
+  `INSERT ... ON CONFLICT DO UPDATE ... WHERE Sessions.Subject = excluded.Subject`,
+  so a replayed session id cannot change owners. A turn write into a
+  foreign-owned session is rolled back rather than dropped as an orphan.
+- **Complete deletion.** `DELETE /api/sessions/{id}` removes the child
+  `SessionTurns` rows before the parent, in a single transaction, so an
+  interrupted purge cannot leave orphans.
+- **Observable retention.** `SessionCleanupBackgroundService` logs the
+  per-sweep `SessionsDeleted` and `TurnsDeleted` counts at `Information` so
+  retention is visible in production logs.
+
+### Schema
+
+```sql
+Sessions       (SessionId PK, Subject NOT NULL COLLATE NOCASE, TenantId, CreatedAt, LastActivityAt)
+SessionTurns   (TurnId PK, SessionId FK, Role, Content, AgentId,
+                RoutingIntent, RoutingAgentKey, RoutingConfidence,
+                InputTokens, OutputTokens, TotalTokens,
+                ChartSpecsJson, SpanSummary, Timestamp)
+```
+
+Indexes cover `(Subject, LastActivityAt DESC)` for the list query,
+`(LastActivityAt)` for the retention sweep, and `(SessionId, Timestamp)` for
+rehydrate ordering.
+
+### Deployment note
+
+Production ships `Enabled=false` today: the deployed synthetic demo runs on
+ephemeral per-replica storage (see `DataDirectoryResolver` and the note
+below), so persistence would only survive within one replica's lifetime.
+Once a policy-compatible durable volume is available, flip
+`SessionPersistence__Enabled=true` in the environment override and the DB
+file joins the other durable stores under the same mount.
 
 ---
 

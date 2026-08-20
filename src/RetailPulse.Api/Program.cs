@@ -26,6 +26,7 @@ using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.OpenAI;
+using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Resilience;
 using RetailPulse.Api.Scorecard;
@@ -601,6 +602,16 @@ builder.Services.AddConversationMemory(memoryDbPath);
 string alertsDbPath = Path.Combine(dataDirectory, "alerts.db");
 builder.Services.AddProactiveAlerts(alertsDbPath);
 
+// Durable session/turn persistence (issue #90). Off by default: when
+// SessionPersistence:Enabled is false the store singleton is not registered and no
+// database file is created — the chat pipeline behaves identically to Wave 1. When
+// on, sessions and turns for AUTHENTICATED subjects survive an API restart, so a
+// browser refresh can rehydrate the last conversation. Anonymous sessions are never
+// written: the chat endpoint skips persistence via IAnonymousChatPolicy, and the
+// session endpoints refuse anonymous callers at entry. See SessionPersistenceOptions.
+string sessionsDbPath = Path.Combine(dataDirectory, "sessions.db");
+builder.Services.AddSessionPersistence(builder.Configuration, sessionsDbPath);
+
 // Distributed tracing — in-memory ring buffer with bounded-channel SignalR push
 builder.Services.AddSingleton<TelemetryPushChannel>();
 builder.Services.AddSingleton(sp =>
@@ -1127,6 +1138,15 @@ app.MapMarginEndpoints();
 app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();
 app.MapCacheEndpoints();
+
+// Durable session endpoints — mapped only when SessionPersistence:Enabled is true so
+// no session surface exists when the feature is off. See MapSessionEndpoints and
+// SessionPersistenceServiceExtensions for the rationale (mirrors the Anonymous/GitHub
+// opt-in endpoint conventions above).
+if (app.Services.GetService<ISessionStore>() is not null)
+{
+    app.MapSessionEndpoints();
+}
 
 // Anonymous mode: map the single unauthenticated bootstrap endpoint that mints short-lived
 // session tokens for a future frontend (Sprint 3). Mapped only when Authentication:Mode=Anonymous
