@@ -86,6 +86,24 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 | **Why GPT-5.4-mini?** | Best balance of reasoning quality, speed, and cost for tool-calling scenarios. Architecture is model-agnostic — swap via `prompts.yaml`. |
 | **Prompt configuration in YAML** | Separates prompt engineering from code. Non-developers can iterate on prompts without touching C#. Supports multiple agent definitions. |
 
+#### MAF & Microsoft.Extensions.AI package versions
+
+Central package management (`Directory.Packages.props`) pins the MAF stack to the
+following floors. A contract test (`MafPackageVersionContractTests`) fails CI on
+any accidental downgrade.
+
+| Package | Version |
+|---------|---------|
+| `Microsoft.Agents.AI` | 1.18.0 |
+| `Microsoft.Agents.AI.Abstractions` | 1.18.0 |
+| `Microsoft.Agents.AI.OpenAI` | 1.18.0 |
+| `Microsoft.Agents.AI.Workflows` | 1.18.0 |
+| `Microsoft.Extensions.AI` | 10.9.0 |
+
+`Microsoft.Agents.AI.Workflows` is referenced by `RetailPulse.Api` so the workflow
+primitives resolve alongside the existing `AIAgent` / `ChatClientAgent` surface;
+behavioural adoption of the workflow APIs lands in a separate issue.
+
 ### Model Context Protocol (MCP) — Tool Access
 
 | Decision | Rationale |

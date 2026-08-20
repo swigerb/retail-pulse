@@ -21,6 +21,7 @@
     <PackageReference Include="Microsoft.Agents.AI" />
     <PackageReference Include="Microsoft.Agents.AI.Abstractions" />
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" />
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
