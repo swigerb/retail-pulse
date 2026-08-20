@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Caching;
 using RetailPulse.Api.Charts;
@@ -25,6 +26,15 @@ public partial class RetailOpsRouter : IAgentRouter
     private readonly ILogger<RetailOpsRouter> _logger;
     private readonly RetailPulseMetrics? _metrics;
     private readonly RouterClassificationCache? _classificationCache;
+    private readonly ILoggerFactory? _loggerFactory;
+
+    /// <summary>
+    /// MAF agent name used when the router classifies intent through
+    /// <see cref="MafAgentInvoker"/>. Kept as a stable, discoverable constant so
+    /// characterization tests can assert the router routes through the shared MAF
+    /// invocation path (not directly through <see cref="IChatClient"/>).
+    /// </summary>
+    internal const string MafAgentName = "RetailOpsRouter.classifier";
 
     /// <summary>
     /// Minimum confidence threshold. Below this, the router falls back to
@@ -112,13 +122,15 @@ public partial class RetailOpsRouter : IAgentRouter
         IEnumerable<ISpecialistAgent> specialists,
         ILogger<RetailOpsRouter> logger,
         RetailPulseMetrics? metrics = null,
-        RouterClassificationCache? classificationCache = null)
+        RouterClassificationCache? classificationCache = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _chatClient = chatClient;
         _routerDef = routerDef;
         _logger = logger;
         _metrics = metrics;
         _classificationCache = classificationCache;
+        _loggerFactory = loggerFactory;
 
         // Build a lookup: intent → specialist (first specialist that claims it wins)
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase);
@@ -381,8 +393,19 @@ public partial class RetailOpsRouter : IAgentRouter
             ResponseFormat = ChatResponseFormat.Json
         };
 
-        Microsoft.Extensions.AI.ChatResponse response = await _chatClient.GetResponseAsync(messages, chatOptions, ct);
-        string responseText = response.Text ?? "";
+        // Route classification through a real MAF ChatClientAgent so the intent-classifier
+        // is a genuine MAF agent primitive, not a bare IChatClient call. UseProvidedChatClientAsIs
+        // (inside MafAgentInvoker) preserves the DI-wired FunctionInvokingChatClient +
+        // OpenTelemetry decorators unchanged — the router carries no tools, so no tool
+        // execution is triggered by wrapping the classifier in an agent primitive.
+        AgentResponse mafResponse = await MafAgentInvoker.RunAsync(
+            _chatClient,
+            MafAgentName,
+            messages,
+            chatOptions,
+            _loggerFactory,
+            ct);
+        string responseText = mafResponse.Text ?? "";
 
         return ParseClassification(responseText, _logger);
     }
