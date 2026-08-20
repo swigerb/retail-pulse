@@ -83,9 +83,10 @@ public sealed class PlanExecutor
             int stepIndex = i;
             PlannerStep planned = execution.Plan.Steps[stepIndex];
             string stepId = execution.StepIds[stepIndex];
+            string executorId = $"plan-{execution.PlanId}-step-{stepIndex}";
 
             executors.Add(new FunctionExecutor<PlanStepMessage>(
-                id: $"plan-{execution.PlanId}-step-{stepIndex}",
+                id: executorId,
                 handlerAsync: async (message, context, stepCt) =>
                 {
                     PlanStepResult result = await RunOneStepAsync(
@@ -109,8 +110,15 @@ public sealed class PlanExecutor
                         User: message.User,
                         AccumulatedResults: [.. message.AccumulatedResults, result]);
 
-                    await context.SendMessageAsync(next, stepId, stepCt).ConfigureAwait(false);
-                }));
+                    // targetId=null broadcasts the message to every connected
+                    // executor via the edge set below. Since we build a strictly
+                    // sequential graph (i -> i+1), this delivers exactly to the
+                    // next step.
+                    await context.SendMessageAsync(next, targetId: null, stepCt).ConfigureAwait(false);
+                },
+                options: null,
+                sentMessageTypes: [typeof(PlanStepMessage)],
+                outputTypes: [typeof(PlanTerminalMessage)]));
         }
 
         WorkflowBuilder builder = new(executors[0]);
