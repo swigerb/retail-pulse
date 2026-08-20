@@ -135,6 +135,13 @@ const TYPE_COLORS: Record<GuardrailDetectionType, { bg: string; color: string; i
   jailbreak: { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', icon: '🚫' },
   pii: { bg: 'rgba(168, 85, 247, 0.15)', color: '#a855f7', icon: '🔐' },
   access: { bg: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', icon: '🔒' },
+  'content-safety-hate': { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', icon: '⚠️' },
+  'content-safety-sexual': { bg: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', icon: '⚠️' },
+  'content-safety-violence': { bg: 'rgba(249, 115, 22, 0.15)', color: '#f97316', icon: '⚠️' },
+  'content-safety-selfharm': { bg: 'rgba(217, 70, 239, 0.15)', color: '#d946ef', icon: '⚠️' },
+  'content-safety-prompt-shield': { bg: 'rgba(20, 184, 166, 0.15)', color: '#14b8a6', icon: '🛡️' },
+  'content-safety-indirect-injection': { bg: 'rgba(14, 165, 233, 0.15)', color: '#0ea5e9', icon: '🎯' },
+  'content-safety-unavailable': { bg: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', icon: '⏱️' },
 };
 
 export function GuardrailsDashboard() {
@@ -214,6 +221,14 @@ export function GuardrailsDashboard() {
           <span className={styles.statValue} style={{ color: '#3b82f6' }}>{stats.accessDenials}</span>
           <span className={styles.statLabel}>Access Denials</span>
         </Card>
+        <Card className={styles.statCard} appearance="subtle">
+          <span className={styles.statValue} style={{ color: '#14b8a6' }}>{stats.contentSafetyBlocks ?? 0}</span>
+          <span className={styles.statLabel}>Content Safety Blocks</span>
+        </Card>
+        <Card className={styles.statCard} appearance="subtle">
+          <span className={styles.statValue} style={{ color: '#0ea5e9' }}>{stats.contentSafetyFlags ?? 0}</span>
+          <span className={styles.statLabel}>Content Safety Flags</span>
+        </Card>
       </div>
 
       {/* Trend Chart */}
@@ -244,13 +259,18 @@ export function GuardrailsDashboard() {
 
       {/* Filter */}
       <div className={styles.filterRow}>
-        {(['all', 'jailbreak', 'pii', 'access'] as const).map(type => (
+        {([
+          'all', 'jailbreak', 'pii', 'access',
+          'content-safety-hate', 'content-safety-sexual', 'content-safety-violence',
+          'content-safety-selfharm', 'content-safety-prompt-shield',
+          'content-safety-indirect-injection', 'content-safety-unavailable',
+        ] as const).map(type => (
           <button
             key={type}
             className={`${styles.filterChip} ${filter === type ? styles.filterChipActive : ''}`}
             onClick={() => setFilter(type)}
           >
-            {type === 'all' ? '🔍 All' : `${TYPE_COLORS[type].icon} ${type.charAt(0).toUpperCase() + type.slice(1)}`}
+            {type === 'all' ? '🔍 All' : `${TYPE_COLORS[type].icon} ${type}`}
           </button>
         ))}
       </div>

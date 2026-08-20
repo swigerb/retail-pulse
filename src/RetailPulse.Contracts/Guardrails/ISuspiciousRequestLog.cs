@@ -24,6 +24,11 @@ public interface ISuspiciousRequestLog
 
 /// <summary>
 /// A single suspicious request event captured by the guardrails pipeline.
+/// The <see cref="Category"/>, <see cref="Severity"/>, and <see cref="Decision"/>
+/// fields are additive and default to <c>null</c> — existing pattern-layer
+/// callers keep their positional constructor and fixtures unchanged, and the
+/// Content Safety layer populates them on every block path so severity is
+/// never buried inside free-text.
 /// </summary>
 public record SuspiciousRequest(
     string Id,
@@ -31,7 +36,10 @@ public record SuspiciousRequest(
     string RequestText,
     string DetectionType,
     string UserContext,
-    string Action);
+    string Action,
+    string? Category = null,
+    int? Severity = null,
+    string? Decision = null);
 
 /// <summary>
 /// Aggregated guardrails activity metrics.
@@ -41,4 +49,6 @@ public record GuardrailsStats(
     int JailbreakAttempts,
     int PiiDetections,
     int AccessDenials,
-    DateTime Since);
+    DateTime Since,
+    int ContentSafetyBlocks = 0,
+    int ContentSafetyFlags = 0);

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using RetailPulse.Api.Guardrails.ContentSafety;
 using RetailPulse.Contracts.Guardrails;
 
 namespace RetailPulse.Api.Guardrails;
@@ -14,6 +15,8 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
     private int _jailbreakCount;
     private int _piiCount;
     private int _accessDenialCount;
+    private int _contentSafetyBlocks;
+    private int _contentSafetyFlags;
     private readonly DateTime _since = DateTime.UtcNow;
 
     public InMemorySuspiciousRequestLog(int maxEntries = 100)
@@ -38,6 +41,22 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
                 Interlocked.Increment(ref _accessDenialCount);
                 break;
             default:
+                if (ContentSafetyDetectionTypes.IsContentSafety(request.DetectionType))
+                {
+                    // A "flagged" action is a non-blocking Content Safety hit that
+                    // must still increment the audit feed; every other content-safety
+                    // action (block, dropped chunk, fail-open pass, fail-closed block)
+                    // counts against the block counter so the dashboard reflects the
+                    // safety-critical decisions.
+                    if (string.Equals(request.Action, ContentSafetyActions.Flagged, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Interlocked.Increment(ref _contentSafetyFlags);
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref _contentSafetyBlocks);
+                    }
+                }
                 break;
         }
 
@@ -59,12 +78,14 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
 
     public Task<GuardrailsStats> GetStatsAsync(CancellationToken ct = default)
     {
-        int total = _jailbreakCount + _piiCount + _accessDenialCount;
+        int total = _jailbreakCount + _piiCount + _accessDenialCount + _contentSafetyBlocks;
         return Task.FromResult(new GuardrailsStats(
             TotalBlocked: total,
             JailbreakAttempts: _jailbreakCount,
             PiiDetections: _piiCount,
             AccessDenials: _accessDenialCount,
-            Since: _since));
+            Since: _since,
+            ContentSafetyBlocks: _contentSafetyBlocks,
+            ContentSafetyFlags: _contentSafetyFlags));
     }
 }

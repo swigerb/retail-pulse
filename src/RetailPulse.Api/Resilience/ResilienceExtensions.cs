@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
+using Polly.Timeout;
 
 namespace RetailPulse.Api.Resilience;
 
@@ -50,6 +51,55 @@ public static class ResilienceExtensions
                 Delay = TimeSpan.FromSeconds(1),
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true
+            });
+        });
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Adds a bounded timeout + circuit breaker to the Content Safety
+    /// <see cref="HttpClient"/>. Mirrors the MCP breaker semantics (5 failures /
+    /// 30 s sampling, 30 s open) so a Content Safety outage cannot cascade back
+    /// into the request loop, and feeds breaker state into
+    /// <see cref="CircuitBreakerHealthCheck"/> under the <c>contentsafety</c>
+    /// key. No retries: the caller applies its fail-open / fail-closed policy on
+    /// the first failure so a slow Content Safety region does not multiply the
+    /// per-call latency budget by 3x.
+    /// </summary>
+    public static IHttpClientBuilder AddContentSafetyResilienceHandler(
+        this IHttpClientBuilder builder,
+        int timeoutMs)
+    {
+        int boundedTimeoutMs = Math.Max(200, timeoutMs);
+        builder.AddResilienceHandler("ContentSafetyResilience", pipelineBuilder =>
+        {
+            pipelineBuilder.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
+            {
+                FailureRatio = 0.5,
+                SamplingDuration = TimeSpan.FromSeconds(30),
+                MinimumThroughput = 5,
+                BreakDuration = TimeSpan.FromSeconds(30),
+                OnOpened = args =>
+                {
+                    CircuitBreakerHealthCheck.ReportContentSafetyState(CircuitBreakerState.Open);
+                    return ValueTask.CompletedTask;
+                },
+                OnClosed = args =>
+                {
+                    CircuitBreakerHealthCheck.ReportContentSafetyState(CircuitBreakerState.Closed);
+                    return ValueTask.CompletedTask;
+                },
+                OnHalfOpened = args =>
+                {
+                    CircuitBreakerHealthCheck.ReportContentSafetyState(CircuitBreakerState.HalfOpen);
+                    return ValueTask.CompletedTask;
+                }
+            });
+
+            pipelineBuilder.AddTimeout(new HttpTimeoutStrategyOptions
+            {
+                Timeout = TimeSpan.FromMilliseconds(boundedTimeoutMs),
             });
         });
 

@@ -22,4 +22,11 @@ public class GuardrailsConfig
 
     /// <summary>Patterns currently loaded for jailbreak detection.</summary>
     public IReadOnlyList<string> JailbreakPatterns { get; set; } = [];
+
+    /// <summary>
+    /// Optional Azure AI Content Safety second layer configuration. Disabled by
+    /// default — when disabled the layer is an in-process no-op and behavior is
+    /// byte-for-byte equal to the pattern-only guardrails.
+    /// </summary>
+    public ContentSafetyConfig ContentSafety { get; set; } = new();
 }

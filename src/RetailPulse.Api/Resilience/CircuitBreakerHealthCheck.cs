@@ -10,6 +10,8 @@ public class CircuitBreakerHealthCheck : IHealthCheck
 {
     private static CircuitBreakerState _state = CircuitBreakerState.Closed;
     private static DateTimeOffset _lastStateChange = DateTimeOffset.UtcNow;
+    private static CircuitBreakerState _contentSafetyState = CircuitBreakerState.Closed;
+    private static DateTimeOffset _contentSafetyLastChange = DateTimeOffset.UtcNow;
 
     public static void ReportState(CircuitBreakerState state)
     {
@@ -20,12 +22,30 @@ public class CircuitBreakerHealthCheck : IHealthCheck
         }
     }
 
+    /// <summary>
+    /// Reports the Content Safety breaker state alongside the MCP breaker so a
+    /// remote safety outage is visible on the same health probe. The state is
+    /// exposed under the <c>contentSafetyCircuitState</c> data key and never
+    /// escalates the overall health check status (fail policy is set at the
+    /// evaluator).
+    /// </summary>
+    public static void ReportContentSafetyState(CircuitBreakerState state)
+    {
+        if (_contentSafetyState != state)
+        {
+            _contentSafetyState = state;
+            _contentSafetyLastChange = DateTimeOffset.UtcNow;
+        }
+    }
+
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct = default)
     {
         var data = new Dictionary<string, object>
         {
             ["circuitState"] = _state.ToString(),
-            ["lastStateChange"] = _lastStateChange.ToString("O")
+            ["lastStateChange"] = _lastStateChange.ToString("O"),
+            ["contentSafetyCircuitState"] = _contentSafetyState.ToString(),
+            ["contentSafetyLastStateChange"] = _contentSafetyLastChange.ToString("O")
         };
 
         HealthCheckResult result = _state switch
