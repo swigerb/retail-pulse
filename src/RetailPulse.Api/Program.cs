@@ -20,6 +20,8 @@ using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Consensus;
 using RetailPulse.Api.Endpoints;
 using RetailPulse.Api.Escalation;
+using RetailPulse.Api.Guardrails;
+using RetailPulse.Api.Guardrails.AgentDefinition;
 using RetailPulse.Api.Guardrails.ContentSafety;
 using RetailPulse.Api.Health;
 using RetailPulse.Api.Hubs;
@@ -282,6 +284,74 @@ foreach ((string sectionKey, AgentDefinition def) in promptConfig.Agents)
     if (!string.Equals(def.Key, "router", StringComparison.OrdinalIgnoreCase))
     {
         promptEngine.Hydrate(def);
+    }
+}
+
+// ── Guardrails: agent-definition safety validator (issue #99) ──────────
+// Bind the guardrails configuration, wire the durable audit sink, and (when
+// enabled) construct the Content Safety evaluator BEFORE any agent is
+// composed. The runtime pipeline later resolves the SAME singleton instances
+// registered here, so startup-time rejections and runtime detections share
+// one audit feed and one runtime config surface. The reorder is safe — none
+// of these registrations depend on prompt/tool composition.
+var guardrailsConfig = new GuardrailsConfig();
+builder.Configuration.GetSection("Guardrails").Bind(guardrailsConfig);
+builder.Services.AddSingleton(guardrailsConfig);
+
+var suspiciousLog = new InMemorySuspiciousRequestLog();
+builder.Services.AddSingleton(suspiciousLog);
+builder.Services.AddSingleton<ISuspiciousRequestLog>(suspiciousLog);
+
+builder.Services.AddContentSafety(guardrailsConfig.ContentSafety);
+
+using (ILoggerFactory validatorLoggerFactory = LoggerFactory.Create(lb =>
+{
+    lb.AddConfiguration(builder.Configuration.GetSection("Logging"));
+    lb.AddSimpleConsole();
+}))
+{
+    ILogger<AgentDefinitionValidator> validatorLogger =
+        validatorLoggerFactory.CreateLogger<AgentDefinitionValidator>();
+
+    IContentSafetyEvaluator validatorEvaluator;
+    ServiceProvider? evaluatorScope = null;
+    try
+    {
+        if (guardrailsConfig.ContentSafety.Enabled && guardrailsConfig.AgentDefinition.SafetyChecksEnabled)
+        {
+            // Content Safety is registered as a singleton with no scoped
+            // dependencies. Building a parallel mini-provider gives us the
+            // evaluator without finalizing the outer DI graph — the runtime
+            // pipeline will construct its own copy against the same config.
+            var evaluatorServices = new ServiceCollection();
+            evaluatorServices.AddSingleton(guardrailsConfig);
+            evaluatorServices.AddContentSafety(guardrailsConfig.ContentSafety);
+            evaluatorServices.AddLogging(lb => lb.AddConfiguration(builder.Configuration.GetSection("Logging")));
+            evaluatorScope = evaluatorServices.BuildServiceProvider();
+            validatorEvaluator = evaluatorScope.GetRequiredService<IContentSafetyEvaluator>();
+        }
+        else
+        {
+            validatorEvaluator = NoOpContentSafetyEvaluator.Instance;
+        }
+
+        AgentToolRegistry validatorToolRegistry = AgentDefinitionValidatorToolCatalog.Build();
+        var validator = new AgentDefinitionValidator(
+            guardrailsConfig,
+            new JailbreakDetector(),
+            validatorEvaluator,
+            suspiciousLog,
+            validatorToolRegistry,
+            validatorLogger);
+
+        _ = validator
+            .ValidateAsync(promptConfig)
+            .GetAwaiter()
+            .GetResult();
+    }
+    finally
+    {
+        evaluatorScope?.Dispose();
     }
 }
 
@@ -659,17 +729,11 @@ builder.Services.AddSingleton<RagContextProvider>();
 builder.Services.AddSingleton<InMemoryResponseCache>();
 builder.Services.AddSingleton<IResponseCache>(sp => sp.GetRequiredService<InMemoryResponseCache>());
 
-// Guardrails — suspicious request log (ring buffer) and runtime config
-builder.Services.AddSingleton<RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog>();
-builder.Services.AddSingleton<ISuspiciousRequestLog>(sp => sp.GetRequiredService<RetailPulse.Api.Guardrails.InMemorySuspiciousRequestLog>());
-var guardrailsConfig = new GuardrailsConfig();
-builder.Configuration.GetSection("Guardrails").Bind(guardrailsConfig);
-builder.Services.AddSingleton(guardrailsConfig);
-
-// Optional Azure AI Content Safety second layer. Disabled by default — when
-// disabled the DI tree registers a zero-allocation no-op evaluator so startup,
-// health, and the test suite behave identically to today's regex-only path.
-builder.Services.AddContentSafety(guardrailsConfig.ContentSafety);
+// Guardrails config binding, the InMemorySuspiciousRequestLog singleton, and
+// the Content Safety evaluator are wired earlier in this file (immediately
+// before the AgentDefinitionValidator call for issue #99) so the load-time
+// validator writes to the SAME audit sink the middleware feeds later.
+// See the "Guardrails: agent-definition safety validator" block above.
 
 // Guardrails middleware — input filtering (jailbreak, injection) + output PII redaction
 builder.Services.AddScoped<GuardrailsMiddleware>();

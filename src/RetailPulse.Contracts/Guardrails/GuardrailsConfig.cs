@@ -29,4 +29,12 @@ public class GuardrailsConfig
     /// byte-for-byte equal to the pattern-only guardrails.
     /// </summary>
     public ContentSafetyConfig ContentSafety { get; set; } = new();
+
+    /// <summary>
+    /// Load-time agent-definition validator (issue #99). Structural + policy
+    /// checks always run at startup; safety checks layer on top of the
+    /// existing <see cref="ContentSafety"/> configuration and can be
+    /// independently disabled via <see cref="AgentDefinitionPolicy.SafetyChecksEnabled"/>.
+    /// </summary>
+    public AgentDefinitionPolicy AgentDefinition { get; set; } = new();
 }
