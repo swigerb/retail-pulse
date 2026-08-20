@@ -1,14 +1,18 @@
 using System.ClientModel;
 using System.Diagnostics;
 using System.Globalization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Auth;
+using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
+using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Prefetch;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Security.Anonymous;
@@ -31,7 +35,7 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null) =>
+        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null, [FromServices] ISessionStore? sessionStore = null, [FromServices] IOptions<SessionPersistenceOptions>? sessionPersistenceOptions = null) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
             ValidationResult validation = ChatRequestValidator.Validate(request);
@@ -64,11 +68,23 @@ public static class ChatEndpoints
                 bool cacheDisabled = anonymousChatPolicy.IsCacheDisabled();
                 bool memoryDisabled = anonymousChatPolicy.IsMemoryDisabled();
 
-                // Bind the session to this anonymous subject BEFORE any telemetry flows to its group.
-                // If the client-supplied id is already owned by a DIFFERENT subject, mint a fresh id
-                // for this turn so this subject's telemetry can never be delivered to another subject's
-                // hub group (the reverse of the JoinSession leak — Finding 6).
-                if (anonymous && sessionOwnership is not null && !sessionOwnership.TryBind(sessionId, userId))
+                // Session persistence is opt-in (issue #90). Anonymous callers are refused by
+                // the session endpoints and never reach the store below, mirroring the
+                // existing cache/memory-disabled rule for the anonymous provider.
+                bool persistenceEnabled = !anonymous
+                    && sessionStore is not null
+                    && (sessionPersistenceOptions?.Value.Enabled ?? false);
+
+                // Bind the session to this subject BEFORE any telemetry, memory, or persistence
+                // write. If the client-supplied id is already owned by a DIFFERENT subject, mint
+                // a fresh id for this turn so this subject's telemetry can never be delivered to
+                // another subject's hub group (Finding 6 — the reverse of the JoinSession leak)
+                // and this subject can never write into another subject's persisted transcript.
+                // Bound for anonymous callers unconditionally (existing Sprint 1 guard) and,
+                // now that authenticated turns can be persisted, whenever persistence is on.
+                if (sessionOwnership is not null
+                    && (anonymous || persistenceEnabled)
+                    && !sessionOwnership.TryBind(sessionId, userId))
                 {
                     sessionId = Guid.NewGuid().ToString("N");
                     sessionOwnership.TryBind(sessionId, userId);
@@ -131,6 +147,39 @@ public static class ChatEndpoints
                             AgentId = cached.AgentId,
                             Tokens = 0
                         }, ct);
+
+                        // Session persistence — cache hits still produced two accountable turns
+                        // for this subject, so they belong on disk just like the LLM-served path
+                        // below. Skipped when the feature is off or the caller is anonymous.
+                        if (persistenceEnabled)
+                        {
+                            SessionPersistenceOptions opts = sessionPersistenceOptions!.Value;
+                            string? tenantId = ResolveTenantId(tenantProvider);
+                            DateTimeOffset persistNow = DateTimeOffset.UtcNow;
+                            await PersistTurnSafeAsync(sessionStore!, new SessionTurnWrite
+                            {
+                                SessionId = sessionId,
+                                Subject = userId,
+                                TenantId = tenantId,
+                                Role = "user",
+                                Content = MaybeRedact(request.Message, opts),
+                                Timestamp = persistNow
+                            }, logger, ct);
+                            await PersistTurnSafeAsync(sessionStore!, new SessionTurnWrite
+                            {
+                                SessionId = sessionId,
+                                Subject = userId,
+                                TenantId = tenantId,
+                                Role = "assistant",
+                                Content = MaybeRedact(cached.Response, opts),
+                                AgentId = cached.AgentId,
+                                InputTokens = 0,
+                                OutputTokens = 0,
+                                TotalTokens = 0,
+                                SpanSummary = "cache.hit",
+                                Timestamp = persistNow
+                            }, logger, ct);
+                        }
 
                         return Results.Ok(new ChatResponse(
                             cached.Response,
@@ -553,6 +602,51 @@ public static class ChatEndpoints
                         DurationMs = response.TotalDurationMs.HasValue ? response.TotalDurationMs.Value : null,
                         Tokens = inputTokens + outputTokens
                     }, ct);
+
+                    // Durable session persistence (issue #90). Turns are only written when
+                    // the feature is enabled AND the caller is not anonymous (checked once
+                    // above via IAnonymousChatPolicy). Content is optionally redacted
+                    // through the same PiiRedactor seam the output guardrail uses so
+                    // redaction on write and on display stay in lock-step.
+                    if (persistenceEnabled)
+                    {
+                        SessionPersistenceOptions opts = sessionPersistenceOptions!.Value;
+                        string? tenantId = ResolveTenantId(tenantProvider);
+                        DateTimeOffset persistNow = DateTimeOffset.UtcNow;
+                        string spanSummary = BuildSpanSummary(response, specialist.Key, response.TotalDurationMs);
+
+                        await PersistTurnSafeAsync(sessionStore!, new SessionTurnWrite
+                        {
+                            SessionId = sessionId,
+                            Subject = userId,
+                            TenantId = tenantId,
+                            Role = "user",
+                            Content = MaybeRedact(request.Message, opts),
+                            RoutingIntent = decision.Intent,
+                            RoutingAgentKey = specialist.Key,
+                            RoutingConfidence = decision.Confidence,
+                            Timestamp = persistNow
+                        }, logger, ct);
+
+                        await PersistTurnSafeAsync(sessionStore!, new SessionTurnWrite
+                        {
+                            SessionId = sessionId,
+                            Subject = userId,
+                            TenantId = tenantId,
+                            Role = "assistant",
+                            Content = MaybeRedact(response.Reply, opts),
+                            AgentId = specialist.Key,
+                            RoutingIntent = decision.Intent,
+                            RoutingAgentKey = specialist.Key,
+                            RoutingConfidence = decision.Confidence,
+                            InputTokens = inputTokens,
+                            OutputTokens = outputTokens,
+                            TotalTokens = inputTokens + outputTokens,
+                            Charts = response.Charts,
+                            SpanSummary = spanSummary,
+                            Timestamp = persistNow
+                        }, logger, ct);
+                    }
                 }
 
                 // ── Guardrails: output PII redaction ─────────────────────────────
@@ -919,6 +1013,86 @@ public static class ChatEndpoints
                 return brand.Name;
         }
         return tenant.Brands.FirstOrDefault()?.Name ?? "Unknown";
+    }
+
+    // ── Session persistence helpers (issue #90) ─────────────────────────────
+
+    /// <summary>
+    /// Resolve a tenant identifier from <see cref="ITenantProvider"/>. Uses
+    /// <see cref="TenantConfiguration.Company"/> because the loaded tenant model does
+    /// not carry a dedicated id today, and Company is the human-recognisable label
+    /// operators expect to see in a rehydrated session. Blanks resolve to <c>null</c>
+    /// so the store column stays honest rather than filled with an empty string.
+    /// </summary>
+    private static string? ResolveTenantId(ITenantProvider tenantProvider)
+    {
+        try
+        {
+            TenantConfiguration tenant = tenantProvider.GetTenant();
+            return string.IsNullOrWhiteSpace(tenant.Company) ? null : tenant.Company;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Apply the shared <see cref="PiiRedactor"/> to a turn's content when
+    /// <see cref="SessionPersistenceOptions.RedactPiiOnWrite"/> is on. Kept as a
+    /// helper here (rather than as a new seam in <c>Guardrails/</c>) so this change
+    /// leaves the guardrail file set untouched — issue #100 owns Guardrails changes.
+    /// </summary>
+    private static string MaybeRedact(string content, SessionPersistenceOptions options) =>
+        options.RedactPiiOnWrite ? PiiRedactor.Redact(content) : content;
+
+    /// <summary>
+    /// Compact, JSON-shaped summary of the assistant response spans (tool call names,
+    /// counts, total duration). Enough to reconstruct an at-a-glance timeline when a
+    /// session is rehydrated long after the in-memory trace ring buffer has recycled.
+    /// </summary>
+    private static string BuildSpanSummary(ChatResponse response, string agentKey, long? totalDurationMs)
+    {
+        List<string> toolCalls = response.Spans?
+            .Where(s => s.Type == "tool_call")
+            .Select(s => s.Name)
+            .ToList() ?? [];
+
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            agent = agentKey,
+            spans = response.Spans?.Count ?? 0,
+            tools = toolCalls,
+            durationMs = totalDurationMs
+        });
+    }
+
+    /// <summary>
+    /// Persist a turn without breaking the chat response if the write fails. Persistence
+    /// is a best-effort side effect of a chat turn — a transient SQLite lock or a
+    /// disk-full condition must never turn a successful assistant reply into a 500. The
+    /// exception is logged so the failure is observable rather than silent.
+    /// </summary>
+    private static async Task PersistTurnSafeAsync(
+        ISessionStore sessionStore,
+        SessionTurnWrite write,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            await sessionStore.PersistTurnAsync(write, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Failed to persist {Role} turn for session {SessionId}; chat response was still delivered.",
+                write.Role, write.SessionId);
+        }
     }
 }
 
