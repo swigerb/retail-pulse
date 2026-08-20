@@ -1,6 +1,32 @@
 # Normalize line endings to LF on checkout
 * text=auto eol=lf
 
+# Explicit LF for shell/text files that must run on Linux/macOS regardless of
+# host OS. `text=auto` already handles this via content detection, but being
+# explicit prevents a broken pre-commit hook (or CI script) if a contributor's
+# editor ever saves one of these with CRLF.
+*.sh          text eol=lf
+*.bash        text eol=lf
+.githooks/*   text eol=lf
+
+# Explicit binary markers so `text=auto` cannot mis-classify these formats and
+# corrupt them on Windows checkout. Covers every binary asset actually
+# committed to the repo today (see docs/, infra/, src/**/wwwroot/).
+*.png         binary
+*.jpg         binary
+*.jpeg        binary
+*.gif         binary
+*.ico         binary
+*.webp        binary
+*.pdf         binary
+*.zip         binary
+*.gz          binary
+*.tgz         binary
+*.woff        binary
+*.woff2       binary
+*.ttf         binary
+*.otf         binary
+
 # Squad: union merge for append-only team state files
 .squad/decisions.md merge=union
 .squad/agents/*/history.md merge=union
