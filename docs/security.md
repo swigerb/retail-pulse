@@ -162,6 +162,93 @@ resource idempotently — a re-provision never duplicates the assignment.
 
 ---
 
+## Agent-definition validation gate (Issue #99)
+
+Agent and tenant configuration is validated at host startup, *before* any
+agent or tool is constructed. The gate lives in
+`RetailPulse.Api.Guardrails.AgentDefinition.AgentDefinitionValidator` and
+runs against the hydrated `PromptConfiguration` while `Program.cs` is still
+wiring services, in the same trust posture as ADR-008: `prompts.yaml` is
+**trusted-at-load-time** deployment input, and this gate exists to catch
+drift, mis-configuration, and a hostile prompt file that slipped in through
+a bad deploy, not to open a new path for untrusted config to reach the
+loader.
+
+### Layered checks
+
+1. **Structural.** Required fields, known tool references, models against
+   the deployment-permitted list, temperature and other numeric bounds, and
+   duplicate agent names.
+2. **Policy.** Agent definitions cannot grant tools outside the deployment
+   allow-list. Privileged write tools — currently `RequestApproval` and any
+   future write tool such as `UpdateMetrics` — require an explicit
+   `Guardrails:AgentDefinition:PrivilegedTools` grant that names the agent
+   keys allowed to hold them. Definitions cannot self-assert them.
+3. **Pattern layer.** Every system prompt and description is first run
+   through `GuardrailPatterns` / `JailbreakDetector` so cheap regex hits
+   short-circuit before we call an external service.
+4. **Content Safety.** Anything that survived the pattern layer is sent
+   through the configured `IContentSafetyEvaluator` on the
+   `AgentDefinition` stage. Prompt-shield jailbreak and indirect-injection
+   verdicts count as rejections. Text already blocked by the pattern layer
+   is *not* forwarded — no double-billing, no leak to the third-party
+   service.
+
+### Failure policies
+
+`Guardrails:AgentDefinition:OnValidationFailure` is `RefuseStartup`
+(default) or `QuarantineOffender`. `RefuseStartup` collects every violation
+across every agent and then throws a single
+`AgentDefinitionValidationException`, so the container refuses to serve
+rather than serve a partially trusted roster. `QuarantineOffender` removes
+the offending agent keys from `PromptConfiguration.Agents`, emits a loud
+`LogWarning` per removed key, and continues startup with the surviving
+roster. Silent acceptance is impossible: every code path either throws or
+quarantines.
+
+### Audit contract
+
+Every rejection writes a `SuspiciousRequest` row through the same
+`ISuspiciousRequestLog` used at runtime, with:
+
+- `UserContext = "startup-validator"` — operators can filter for load-time
+  events distinct from user traffic;
+- `DetectionType` one of `agent-definition-structural`,
+  `agent-definition-policy`, `agent-definition-jailbreak`,
+  `agent-definition-content-safety`, `agent-definition-privileged-grant`,
+  `agent-definition-content-safety-unavailable`;
+- `Action` = `blocked`, `quarantined`, or `failopen-passed`;
+- diagnostics name the agent key, field, and rule id — the raw offending
+  text is **never** written to the audit row or to logs.
+
+Fail-open Content Safety unavailability is treated as an event of its own
+(`agent-definition-content-safety-unavailable` / `failopen-passed`) so
+operators can distinguish "we accepted this definition because the safety
+service was down" from "we accepted this definition because it passed".
+`FailClosed` rejects the definition and emits the same event as an
+`agent-definition-content-safety` block.
+
+### Content-Safety-disabled path — honest limits
+
+With `Guardrails:ContentSafety:Enabled = false` (or with
+`Guardrails:AgentDefinition:SafetyChecksEnabled = false`), structural,
+policy, and pattern checks all still run — the load-time gate never has a
+hard dependency on Azure Content Safety. The disabled path is documented
+as pattern-only: plain-text `ignore previous instructions` still rejects,
+but arbitrary encoded payloads (base64, homoglyph) that need a model to
+decode will pass. Deployments that need the second-pass jailbreak coverage
+must keep Content Safety enabled.
+
+### Public projection
+
+`/api/guardrails/config` exposes only the operator-facing knobs — the
+failure policy, the safety toggle, and the temperature bounds. The
+deployment allow-lists (models, tools) and the privileged-tool grants are
+never surfaced through the API. Enforced by
+`AgentDefinitionPolicyEndpointContractTests`.
+
+---
+
 ## Audit Log
 
 All chat interactions are recorded in a tamper-evident audit log (`DurableAuditLog`):
