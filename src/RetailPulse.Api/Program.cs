@@ -76,6 +76,7 @@ builder.Services.AddHealthChecks()
 
 // Quota configuration (IOptions pattern)
 builder.Services.Configure<KnowledgeOptions>(builder.Configuration.GetSection(KnowledgeOptions.SectionName));
+builder.Services.Configure<KnowledgeProviderOptions>(builder.Configuration.GetSection(KnowledgeProviderOptions.SectionName));
 builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
 // Load tenant configuration
@@ -613,9 +614,38 @@ builder.Services.AddHostedService<TelemetryPushBackgroundService>();
 // ── Pre-demo cache warming (populates MCP response cache on startup) ────
 builder.Services.AddHostedService<RetailPulse.Api.Startup.CacheWarmingService>();
 
-// RAG Knowledge Base — in-memory BM25-based document store (no Azure dependency)
+// ── RAG Knowledge Base ──────────────────────────────────────────────────
+// The in-memory BM25 provider is the DEFAULT and works on a laptop with no
+// cloud dependencies. The provider abstraction lets cloud providers (#103
+// Azure AI Search, #104 Foundry IQ) opt in via configuration without changing
+// call sites. See docs/adr/009-knowledge-provider-abstraction.md.
 builder.Services.AddSingleton<InMemoryKnowledgeBase>();
-builder.Services.AddSingleton<IKnowledgeBase>(sp => sp.GetRequiredService<InMemoryKnowledgeBase>());
+builder.Services.AddSingleton(sp =>
+{
+    // Every process registers the in-memory factory automatically so it is
+    // always available as the default primary and as the fallback target for
+    // KnowledgeDegradationMode.FallbackToInMemory. Cloud modules (#103/#104)
+    // register their own factories from their opt-in extension methods.
+    var registry = new KnowledgeProviderRegistry();
+    registry.Register(
+        KnowledgeProviderMode.InMemory,
+        s => s.GetRequiredService<InMemoryKnowledgeBase>());
+    return registry;
+});
+builder.Services.AddSingleton<KnowledgeProviderSelector>();
+builder.Services.AddSingleton(sp =>
+{
+    KnowledgeProviderSelector selector = sp.GetRequiredService<KnowledgeProviderSelector>();
+    IKnowledgeBase primary = selector.CreatePrimary(sp);
+    InMemoryKnowledgeBase fallback = sp.GetRequiredService<InMemoryKnowledgeBase>();
+    KnowledgeDegradationMode degradation = selector.ResolveDegradation();
+    return new DegradingKnowledgeBase(
+        primary,
+        fallback,
+        degradation,
+        sp.GetRequiredService<ILogger<DegradingKnowledgeBase>>());
+});
+builder.Services.AddSingleton<IKnowledgeBase>(sp => sp.GetRequiredService<DegradingKnowledgeBase>());
 builder.Services.AddSingleton<RagContextProvider>();
 
 // Response cache — in-memory with TTL expiration and LRU eviction
@@ -1008,9 +1038,29 @@ WebApplication app = builder.Build();
 
 // Seed RAG knowledge base with sample documents (idempotent)
 {
-    InMemoryKnowledgeBase kb = app.Services.GetRequiredService<InMemoryKnowledgeBase>();
+    // Run the startup probe for the configured provider. FailLoud lets a
+    // cloud outage propagate and abort startup; FallbackToInMemory swaps to
+    // the always-available in-memory instance and logs a prominent warning.
+    // The probe is a no-op for the InMemory default.
+    DegradingKnowledgeBase kb = app.Services.GetRequiredService<DegradingKnowledgeBase>();
+    await kb.ProbeAsync();
+
+    // Seed the sample corpus into the in-memory instance whenever it is the
+    // provider that will actually serve requests — either as the configured
+    // primary or because degradation swapped it in. Cloud providers manage
+    // their own corpora and are not seeded from process start.
     ILogger seedLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("KnowledgeBaseSeeder");
-    await KnowledgeBaseSeeder.SeedAsync(kb, seedLogger);
+    if (kb.ActiveProviderName == InMemoryKnowledgeBase.ProviderName)
+    {
+        InMemoryKnowledgeBase inMemory = app.Services.GetRequiredService<InMemoryKnowledgeBase>();
+        await KnowledgeBaseSeeder.SeedAsync(inMemory, seedLogger);
+    }
+    else
+    {
+        seedLogger.LogInformation(
+            "Knowledge provider '{Provider}' is active — skipping in-memory sample corpus seeding.",
+            kb.ActiveProviderName);
+    }
 }
 
 // Select CORS policy based on environment

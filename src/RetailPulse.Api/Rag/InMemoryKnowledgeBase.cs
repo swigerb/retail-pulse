@@ -12,6 +12,9 @@ namespace RetailPulse.Api.Rag;
 /// </summary>
 public sealed class InMemoryKnowledgeBase : IKnowledgeBase
 {
+    /// <summary>Stable name reported in <see cref="GetCapabilities"/>.</summary>
+    public const string ProviderName = "InMemory";
+
     // BM25 parameters (standard values)
     private const double _k1 = 1.2;
     private const double _b = 0.75;
@@ -193,6 +196,29 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
 
     public int DocumentCount => _documents.Count;
     public int ChunkCount => _chunks.Count;
+
+    /// <inheritdoc />
+    public KnowledgeBaseCapabilities GetCapabilities() => new(
+        ProviderName: ProviderName,
+        Relevance: KnowledgeRelevanceKind.Lexical,
+        Persistent: false,
+        RequiresCloud: false,
+        Quotas: new KnowledgeQuotas(
+            MaxDocuments: _options.MaxDocuments,
+            MaxChunks: _options.MaxChunks,
+            MaxDocumentSizeBytes: _options.MaxDocumentSizeBytes),
+        ScoreSemantics:
+            "BM25 lexical score, normalized 0-1 within a single query response. " +
+            "Scores are provider-local and not comparable across providers.");
+
+    /// <inheritdoc />
+    public Task ProbeAsync(CancellationToken ct = default)
+    {
+        // In-memory provider has no external dependency — it is always reachable
+        // once the process is running. We honour cancellation for API parity.
+        ct.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    }
 
     private static string[] Tokenize(string text) =>
         [.. text.ToLowerInvariant()
