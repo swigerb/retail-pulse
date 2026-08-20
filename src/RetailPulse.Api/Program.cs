@@ -1018,12 +1018,20 @@ if (scorecardSynthesisDef is not null)
     });
 }
 
-// Register the plan-first orchestrator (issue #93). Only wired when the planner
-// definition is present AND the plan store is registered (PlanPersistence:Enabled),
-// so the chat endpoint's `is not null` check on IPlanStore already gates the whole
-// plan-first path. Uses the router's IChatClient keyed instance so the planner
-// benefits from the router's decorator stack (function invocation cap, OTel).
-if (plannerDef is not null)
+// Register the plan-first orchestrator (issue #93). Wired only when BOTH the
+// planner AgentDefinition is present in prompts.yaml AND PlanPersistence is
+// enabled (which is what causes AddPlanPersistence to register IPlanStore and
+// the cleanup hosted service above). Gating on plannerDef alone leaves the
+// executor/orchestrator factories asking for a missing IPlanStore at request
+// time — that turns default /api/chat into a 500 whenever a tenant ships a
+// planner definition but leaves PlanPersistence off, which is our default.
+// The plan-first path in ChatEndpoints stays completely inert when either
+// gate is closed: PlanOrchestrator is not registered, [FromServices] resolves
+// null, and the endpoint drops through to the single-specialist path.
+PlanPersistenceOptions planPersistenceOptsAtRegistration = builder.Configuration
+    .GetSection(PlanPersistenceOptions.SectionName)
+    .Get<PlanPersistenceOptions>() ?? new PlanPersistenceOptions();
+if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
 {
     builder.Services.AddScoped(sp =>
     {

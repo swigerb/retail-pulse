@@ -501,8 +501,20 @@ public static class ChatEndpoints
                                 ParentSpanId = chatActivity?.SpanId.ToString(),
                             }, ct);
 
+                        // Output guardrail parity — the single-specialist path filters the
+                        // reply through the shared PII/content-safety seam BEFORE returning
+                        // (see FilterOutputAsync call below). The plan-first reply is a
+                        // composed transcript of specialist outputs, each of which arrived
+                        // through the specialist pipeline without an output-guardrail pass,
+                        // so it needs the same filter here or plan responses would leak
+                        // PII the single-specialist path scrubs. This invokes the existing
+                        // GuardrailsMiddleware seam only — no Guardrails implementation or
+                        // configuration change (that surface belongs to issue #99).
+                        string filteredPlanReply =
+                            await guardrails.FilterOutputAsync(planResult.Reply, userId, ct);
+
                         var planChatResponse = new ChatResponse(
-                            planResult.Reply,
+                            filteredPlanReply,
                             sessionId,
                             [],
                             null,
@@ -515,9 +527,41 @@ public static class ChatEndpoints
                                 decision.Confidence,
                                 planResult.DurationMs));
 
+                        // Audit / export / session-turn parity — a plan turn is still an
+                        // accountable interaction from this subject: it produced a user
+                        // question and an assistant reply, burned tokens, and (if
+                        // persistence is on) belongs on disk exactly like a single-
+                        // specialist turn. Skipping these on the plan branch left the
+                        // audit log, session preview, and rehydrated conversation blind
+                        // to every multi-domain answer. Per-step cost UsageEvents are
+                        // already recorded by PlanExecutor and PlanOrchestrator, so we
+                        // do not track cost again here to avoid double-charging.
+                        await RecordChatTurnParityAsync(
+                            new ChatTurnParityContext(
+                                Request: request,
+                                SessionId: sessionId,
+                                UserId: userId,
+                                AgentKey: "planner",
+                                Intent: decision.Intent ?? "plan",
+                                Confidence: decision.Confidence,
+                                Action: $"chat.plan.{decision.Intent}",
+                                Reply: filteredPlanReply,
+                                InputTokens: planResult.InputTokens,
+                                OutputTokens: planResult.OutputTokens,
+                                DurationMs: planResult.DurationMs,
+                                SpanSummary: BuildPlanSpanSummary(planResult),
+                                PersistenceEnabled: persistenceEnabled),
+                            auditLog,
+                            conversationExporter,
+                            sessionStore,
+                            sessionPersistenceOptions,
+                            tenantProvider,
+                            logger,
+                            ct);
+
                         if (!memoryDisabled)
                         {
-                            await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, planResult.Reply, ct);
+                            await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, filteredPlanReply, ct);
                         }
 
                         return Results.Ok(planChatResponse);
@@ -1127,6 +1171,140 @@ public static class ChatEndpoints
             tools = toolCalls,
             durationMs = totalDurationMs
         });
+    }
+
+    /// <summary>
+    /// Plan-first counterpart of <see cref="BuildSpanSummary"/>: emits the same
+    /// JSON shape so the session rehydration UI does not need to special-case a
+    /// planner turn. Tool names on the plan branch are the specialist keys the
+    /// planner sequenced — that is the honest "tools" equivalent, and it lets an
+    /// operator see at a glance which specialists ran without loading the plan
+    /// store.
+    /// </summary>
+    internal static string BuildPlanSpanSummary(PlanOrchestrationResult planResult)
+    {
+        string[] specialists = [.. planResult.Steps
+            .Select(s => s.SpecialistKey)
+            .Where(k => !string.IsNullOrWhiteSpace(k))];
+
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            agent = "planner",
+            planId = planResult.PlanId,
+            status = planResult.Status,
+            steps = planResult.Steps.Count,
+            tools = specialists,
+            durationMs = planResult.DurationMs
+        });
+    }
+
+    /// <summary>
+    /// Immutable envelope for the plan-first parity write path. Mirrors the fields
+    /// the single-specialist branch reads when it logs an audit entry, tracks the
+    /// user + assistant messages in <see cref="ConversationExporter"/>, and (when
+    /// persistence is on) appends a user and assistant turn to
+    /// <see cref="ISessionStore"/>. Kept as a record so the plan branch does not
+    /// silently drop a field the single-specialist branch relies on.
+    /// </summary>
+    internal sealed record ChatTurnParityContext(
+        ChatRequest Request,
+        string SessionId,
+        string UserId,
+        string AgentKey,
+        string Intent,
+        double Confidence,
+        string Action,
+        string Reply,
+        int InputTokens,
+        int OutputTokens,
+        long DurationMs,
+        string SpanSummary,
+        bool PersistenceEnabled);
+
+    /// <summary>
+    /// Record the audit / export / session-store side effects of a chat turn.
+    /// Extracted so the plan-first branch and any future non-specialist branch
+    /// can invoke exactly the same trio the single-specialist path uses — audit
+    /// entry, user+assistant exporter messages, user+assistant session-turn
+    /// writes (persistence-gated) — without drifting. The single-specialist
+    /// branch keeps its inline block because it also captures agent-specific
+    /// tool-call names and per-specialist span capture, which do not exist on
+    /// the plan branch.
+    /// </summary>
+    internal static async Task RecordChatTurnParityAsync(
+        ChatTurnParityContext ctx,
+        IAuditLog auditLog,
+        ConversationExporter conversationExporter,
+        ISessionStore? sessionStore,
+        IOptions<SessionPersistenceOptions>? sessionPersistenceOptions,
+        ITenantProvider tenantProvider,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        int totalTokens = ctx.InputTokens + ctx.OutputTokens;
+        var duration = TimeSpan.FromMilliseconds(ctx.DurationMs);
+
+        await auditLog.LogAsync(new AuditEntry(
+            CreateAuditEntryId(),
+            DateTime.UtcNow, ctx.UserId, ctx.AgentKey,
+            ctx.Action,
+            ctx.Request.Message[..Math.Min(200, ctx.Request.Message.Length)],
+            ctx.Reply[..Math.Min(200, ctx.Reply.Length)],
+            totalTokens,
+            duration), ct);
+
+        await conversationExporter.TrackMessageAsync(ctx.SessionId, new TrackedMessage
+        {
+            Role = "user",
+            Content = ctx.Request.Message
+        }, ct);
+
+        await conversationExporter.TrackMessageAsync(ctx.SessionId, new TrackedMessage
+        {
+            Role = "assistant",
+            Content = ctx.Reply,
+            AgentId = ctx.AgentKey,
+            DurationMs = ctx.DurationMs,
+            Tokens = totalTokens
+        }, ct);
+
+        if (ctx.PersistenceEnabled && sessionStore is not null && sessionPersistenceOptions is not null)
+        {
+            SessionPersistenceOptions opts = sessionPersistenceOptions.Value;
+            string? tenantId = ResolveTenantId(tenantProvider);
+            DateTimeOffset persistNow = DateTimeOffset.UtcNow;
+
+            await PersistTurnSafeAsync(sessionStore, new SessionTurnWrite
+            {
+                SessionId = ctx.SessionId,
+                Subject = ctx.UserId,
+                TenantId = tenantId,
+                Role = "user",
+                Content = MaybeRedact(ctx.Request.Message, opts),
+                RoutingIntent = ctx.Intent,
+                RoutingAgentKey = ctx.AgentKey,
+                RoutingConfidence = ctx.Confidence,
+                Timestamp = persistNow
+            }, logger, ct);
+
+            await PersistTurnSafeAsync(sessionStore, new SessionTurnWrite
+            {
+                SessionId = ctx.SessionId,
+                Subject = ctx.UserId,
+                TenantId = tenantId,
+                Role = "assistant",
+                Content = MaybeRedact(ctx.Reply, opts),
+                AgentId = ctx.AgentKey,
+                RoutingIntent = ctx.Intent,
+                RoutingAgentKey = ctx.AgentKey,
+                RoutingConfidence = ctx.Confidence,
+                InputTokens = ctx.InputTokens,
+                OutputTokens = ctx.OutputTokens,
+                TotalTokens = totalTokens,
+                SpanSummary = ctx.SpanSummary,
+                Timestamp = persistNow
+            }, logger, ct);
+        }
     }
 
     /// <summary>
