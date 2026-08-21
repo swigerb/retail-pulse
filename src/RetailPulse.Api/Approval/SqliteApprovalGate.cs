@@ -175,16 +175,14 @@ public sealed class SqliteApprovalGate : IApprovalGate
         // Create the plan-review helper indexes AFTER any additive column
         // migration completes so older databases that predate the Kind/PlanId
         // columns still gain the same indexes on next boot.
-        await using (SqliteCommand idx = conn.CreateCommand())
-        {
-            idx.CommandText = """
+        await using SqliteCommand idx = conn.CreateCommand();
+        idx.CommandText = """
                 CREATE INDEX IF NOT EXISTS IX_ApprovalRequests_PlanId_Decision
                     ON ApprovalRequests (PlanId, Decision);
                 CREATE INDEX IF NOT EXISTS IX_ApprovalRequests_UserId_Kind_Decision
                     ON ApprovalRequests (UserId, Kind, Decision);
                 """;
-            await idx.ExecuteNonQueryAsync();
-        }
+        await idx.ExecuteNonQueryAsync();
     }
 
     private static async Task<HashSet<string>> ReadColumnsAsync(SqliteConnection conn)

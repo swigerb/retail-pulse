@@ -26,7 +26,11 @@ public interface IPlanReviewReplanner
 public sealed class PlanBuilderReplanner : IPlanReviewReplanner
 {
     private readonly PlanBuilder _builder;
-    public PlanBuilderReplanner(PlanBuilder builder) => _builder = builder;
+    public PlanBuilderReplanner(PlanBuilder builder)
+    {
+        _builder = builder;
+    }
+
     public Task<PlanBuildResult> ReplanAsync(
         string revisedRequest,
         IReadOnlyList<Contracts.Routing.ISpecialistAgent> roster,
@@ -436,7 +440,7 @@ public sealed class PlanReviewCoordinator
     {
         try
         {
-            var sessionId = SessionIdFor(planId, round);
+            string sessionId = SessionIdFor(planId, round);
             JsonElement element = JsonSerializer.SerializeToElement(proposal, _jsonOptions);
             // The default CheckpointManager exposes CreateCheckpointAsync via
             // its ICheckpointStore<JsonElement>. We rely on GetLatestCheckpointAsync
@@ -472,7 +476,7 @@ public sealed class PlanReviewCoordinator
     private static string BuildImpactLabel(IReadOnlyList<PlanReviewStepDto> steps)
     {
         if (steps.Count == 0) return "No steps planned.";
-        var top = steps.Take(3).Select(s => s.SpecialistKey);
+        IEnumerable<string> top = steps.Take(3).Select(s => s.SpecialistKey);
         string more = steps.Count > 3 ? $" (+{steps.Count - 3} more)" : "";
         return "Specialists: " + string.Join(", ", top) + more;
     }

@@ -174,8 +174,8 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
             coord,
             Options.Create(options));
 
-        (ISpecialistAgent s1, var s1Invocations) = MakeRecordingSpecialist("scorecard", "score");
-        (ISpecialistAgent s2, var s2Invocations) = MakeRecordingSpecialist("demand-forecasting", "demand");
+        (ISpecialistAgent s1, ConcurrentQueue<SpecialistInvocation>? s1Invocations) = MakeRecordingSpecialist("scorecard", "score");
+        (ISpecialistAgent s2, ConcurrentQueue<SpecialistInvocation>? s2Invocations) = MakeRecordingSpecialist("demand-forecasting", "demand");
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
         {
             ["scorecard"] = s1,
@@ -252,8 +252,8 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
             coord,
             Options.Create(options));
 
-        (ISpecialistAgent s1, var s1Invocations) = MakeRecordingSpecialist("scorecard", "score");
-        (ISpecialistAgent s2, var s2Invocations) = MakeRecordingSpecialist("demand-forecasting", "demand");
+        (ISpecialistAgent s1, ConcurrentQueue<SpecialistInvocation>? s1Invocations) = MakeRecordingSpecialist("scorecard", "score");
+        (ISpecialistAgent s2, ConcurrentQueue<SpecialistInvocation>? s2Invocations) = MakeRecordingSpecialist("demand-forecasting", "demand");
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
         {
             ["scorecard"] = s1,
@@ -309,8 +309,8 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
             reviewCoordinator: null,
             reviewOptions: null);
 
-        (ISpecialistAgent s1, var s1Invocations) = MakeRecordingSpecialist("scorecard", "score");
-        (ISpecialistAgent s2, var s2Invocations) = MakeRecordingSpecialist("demand-forecasting", "demand");
+        (ISpecialistAgent s1, ConcurrentQueue<SpecialistInvocation>? s1Invocations) = MakeRecordingSpecialist("scorecard", "score");
+        (ISpecialistAgent s2, ConcurrentQueue<SpecialistInvocation>? s2Invocations) = MakeRecordingSpecialist("demand-forecasting", "demand");
         var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
         {
             ["scorecard"] = s1,

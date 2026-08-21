@@ -260,6 +260,106 @@ Get resolved approval history (last 50).
 
 ---
 
+## Plan Review (issue #94)
+
+> **Feature flag:** endpoints are only mapped when `PlanReview:Enabled = true`
+> AND `PlanPersistence:Enabled = true`. When either is off these routes 404 and
+> the chat pipeline runs the pre-#94 plan-first path — no observable difference.
+
+Plan review reuses the same durable `SqliteApprovalGate` storage the tool
+`ApprovalTool` uses, discriminated by a new `Kind` column. Plan rows have
+`Kind = "plan_review"` and clarification rows have `Kind = "clarification"`;
+every decision appears in the shared `/api/approvals/history` audit trail.
+
+### Relationship to #91 (approval hardening)
+
+#91 introduced `IApprovalResumeStrategy` as the single reconciliation seam. #94
+extends that seam without adding a second polling loop: on restart the same
+`ApprovalReconciliationBackgroundService` walks every Pending row exactly once
+and asks the strategy per-row. `PlanReviewResumeStrategy` returns:
+
+* `OrphanTerminal` for `Kind = "tool"` rows — byte-identical to the Wave 1
+  `OrphanUnresumableStrategy`.
+* `Resume` for `Kind = "plan_review"` and `Kind = "clarification"` rows — the
+  gate re-owns them to the current process. The durable approval row remains the
+  source of truth for the decision; a `Microsoft.Agents.AI.Workflows`
+  `CheckpointManager` (JSON store rooted at `{data-dir}/plan-reviews`) captures
+  workflow state as an operational replay aid.
+
+### GET /api/plans/{planId}/reviews
+
+List open plan reviews owned by the caller.
+
+**Auth:** authenticated caller only. Anonymous callers receive `403`. Cross-
+subject / unknown plans collapse to `404` (probe resistant — mirrors
+`/api/plans/{planId}`).
+
+**Response (200):**
+
+```json
+[
+  {
+    "requestId": "...",
+    "planId": "...",
+    "round": 0,
+    "subject": "user-oid",
+    "action": "Review plan proposal (2 step(s)).",
+    "impact": "Specialists: scorecard, demand-forecasting",
+    "urgency": "medium",
+    "reasoning": "Initial plan proposal awaiting reviewer decision.",
+    "createdAt": "2026-...",
+    "expiresAt": "2026-...",
+    "status": "pending",
+    "payload": "{ \"planId\": ... }"
+  }
+]
+```
+
+### POST /api/plans/{planId}/reviews/{requestId}/decision
+
+Approve, reject-with-feedback, or edit-then-approve the proposal.
+
+**Request body:**
+
+```json
+{ "kind": "approve" }
+{ "kind": "reject", "feedback": "narrow the scope to Q4" }
+{ "kind": "edit", "editedSteps": [ { "specialistKey": "scorecard", "intent": "scorecard", "action": "..." } ] }
+```
+
+* `approve` — executes the original plan.
+* `edit` — validated against the live specialist roster; the edited plan is what
+  the executor actually runs. Edit-to-empty terminates the plan as `Failed` with
+  reason `PlanReviewEditedToEmpty`; unknown specialists terminate with
+  `PlanReviewEditInvalid`.
+* `reject` — coordinator invokes the planner with the feedback appended and
+  presents the revised plan for another review round, bounded by
+  `PlanReview:MaxReplanRounds` (default 2). Exhausting the cap terminates with
+  `PlanReviewReplanExhausted`.
+
+**Errors:** `400` for missing feedback/editedSteps, `403` for anonymous callers,
+`404` for cross-subject / unknown plan or review, and the same terminal-reason
+propagation the gate uses for late race losers (see #91 for the winner-return
+contract — the same rule applies here).
+
+### POST /api/plans/{planId}/clarifications/{requestId}/answer
+
+Answer a mid-plan clarification question raised by a specialist through
+`IPlanClarifier`.
+
+```json
+{ "answer": "Northeast region only" }
+```
+
+### Timeout & terminal outcomes
+
+Every review round has an authoritative timeout persisted on the approval row
+(`PlanReview:DefaultReviewTimeout`, default 30 minutes). When exceeded the row
+transitions to `TimedOut` and the plan terminates with reason
+`PlanReviewTimedOut` — never an indefinite hang.
+
+---
+
 ## Demand Forecasting
 
 ### Demand forecasting is an MCP-tool-driven capability, not a REST endpoint

@@ -1173,23 +1173,20 @@ if (planReviewOptsAtRegistration.Enabled)
     Directory.CreateDirectory(reviewCheckpointDir);
     // Framework checkpoint store lives on the same durable data directory as
     // every other SQLite store the API writes. One JSON file per session id.
-    builder.Services.AddSingleton<Microsoft.Agents.AI.Workflows.CheckpointManager>(_ =>
+    builder.Services.AddSingleton(_ =>
     {
         var store = new Microsoft.Agents.AI.Workflows.Checkpointing.FileSystemJsonCheckpointStore(
             new DirectoryInfo(reviewCheckpointDir));
         return Microsoft.Agents.AI.Workflows.CheckpointManager.CreateJson(store, customOptions: null);
     });
 
-    builder.Services.AddScoped<PlanReviewCoordinator>(sp =>
-    {
-        return new PlanReviewCoordinator(
+    builder.Services.AddScoped(sp => new PlanReviewCoordinator(
             sp.GetRequiredService<IApprovalGate>(),
             sp.GetRequiredService<IOptions<PlanReviewOptions>>(),
             sp.GetRequiredService<Microsoft.Agents.AI.Workflows.CheckpointManager>(),
             sp.GetRequiredService<ILogger<PlanReviewCoordinator>>(),
             sp.GetService<IPlanReviewReplanner>(),
-            sp.GetRequiredService<TimeProvider>());
-    });
+            sp.GetRequiredService<TimeProvider>()));
 
     // Default replanner delegates to the tenant PlanBuilder — only registered
     // when a planner definition exists. If it is absent the coordinator

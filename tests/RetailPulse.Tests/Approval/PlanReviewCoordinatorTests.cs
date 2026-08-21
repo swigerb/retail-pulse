@@ -321,7 +321,7 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
             PlanReviewCoordinator coord = CreateCoordinator(firstGate, options, TimeProvider.System);
 
             PlanReviewCoordinationInput input = SampleInput();
-            var coordTask = coord.CoordinateAsync(input, CancellationToken.None);
+            Task<PlanReviewOutcome> coordTask = coord.CoordinateAsync(input, CancellationToken.None);
             ApprovalRequest row = await WaitForPending(firstGate, input.Subject);
             requestId = row.RequestId;
 
@@ -388,7 +388,7 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
 
         // Approve → history includes plan_review + Approved
         PlanReviewCoordinationInput a = SampleInput();
-        var aTask = coord.CoordinateAsync(a, CancellationToken.None);
+        Task<PlanReviewOutcome> aTask = coord.CoordinateAsync(a, CancellationToken.None);
         ApprovalRequest aRow = await WaitForPending(gate, a.Subject);
         await Approve(gate, aRow.RequestId);
         _ = await aTask;
@@ -521,7 +521,11 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
     {
         private readonly IReadOnlyList<PlanReviewStepDto> _steps;
         public int Calls { get; private set; }
-        public StubReplanner(IReadOnlyList<PlanReviewStepDto> steps) => _steps = steps;
+        public StubReplanner(IReadOnlyList<PlanReviewStepDto> steps)
+        {
+            _steps = steps;
+        }
+
         public Task<Api.Agents.Planning.PlanBuildResult> ReplanAsync(
             string revisedRequest,
             IReadOnlyList<ISpecialistAgent> roster,
