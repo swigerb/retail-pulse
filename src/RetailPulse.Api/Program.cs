@@ -35,6 +35,7 @@ using RetailPulse.Api.OpenAI;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Rag.AzureAISearch;
+using RetailPulse.Api.Rag.FoundryIQ;
 using RetailPulse.Api.Resilience;
 using RetailPulse.Api.Scorecard;
 using RetailPulse.Api.Security;
@@ -775,6 +776,11 @@ builder.Services.AddSingleton<KnowledgeProviderSelector>();
 // stays byte-for-byte unchanged — nothing about the InMemory-only flow is
 // touched by adding this call.
 builder.Services.AddAzureAISearchKnowledgeProvider(builder.Configuration);
+// Optional Foundry IQ (file_search) provider (issue #104). The extension is
+// a no-op when Knowledge:FoundryIQ:ProjectEndpoint is blank (or no vector
+// store selector is set), so the default demo path stays byte-for-byte
+// unchanged. See docs/adr/013-foundry-iq-knowledge-provider.md.
+builder.Services.AddFoundryIQKnowledgeProvider(builder.Configuration);
 builder.Services.AddSingleton(sp =>
 {
     KnowledgeProviderSelector selector = sp.GetRequiredService<KnowledgeProviderSelector>();
