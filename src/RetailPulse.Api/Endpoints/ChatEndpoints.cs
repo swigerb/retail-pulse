@@ -622,7 +622,8 @@ public static class ChatEndpoints
                             decision.Confidence,
                             planResult.DurationMs,
                             ExecutionPath: hybridDecision.Path,
-                            ExecutionPathForced: hybridDecision.Forced));
+                            ExecutionPathForced: hybridDecision.Forced),
+                        PlanId: planResult.PlanId);
 
                     // Audit / export / session-turn parity — a plan turn is still an
                     // accountable interaction from this subject: it produced a user

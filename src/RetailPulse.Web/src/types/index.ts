@@ -76,6 +76,12 @@ export interface ChatResponse {
   totalDurationMs?: number;
   tokenUsage?: TokenUsage;
   memoryContext?: MemoryContext;
+  /**
+   * Populated when the router picked the plan-first path (#93). Lets the UI
+   * open the plan surface for the returned reply without a separate lookup.
+   * Always omitted on fast-path replies.
+   */
+  planId?: string;
 }
 
 export interface TokenUsage {
@@ -804,3 +810,187 @@ export interface ExplanationData {
   dataSources: Array<{ name: string; url?: string }>;
   generatedAt: string;
 }
+
+// --- Plan types (issue #96) --------------------------------------------------
+// Mirrors backend contracts in RetailPulse.Contracts.Persistence.PlanDtos and
+// RetailPulse.Contracts.Approval.PlanReview. Every terminal/lifecycle string is
+// kept as a discriminated union so the reducer, UI, and tests share one source
+// of truth. New backend states are additive — the union widens rather than
+// silently accepting `string`.
+
+export type PlanStatus =
+  | 'draft'
+  | 'awaiting_review'
+  | 'awaiting_clarification'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'unusable';
+
+export type PlanStepStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'timed_out'
+  | 'skipped'
+  | 'unusable';
+
+/** One persisted plan step. Mirrors backend `PlanStepRecordDto`. */
+export interface PlanStep {
+  stepId: string;
+  planId: string;
+  stepIndex: number;
+  specialistKey: string;
+  intent: string;
+  action: string;
+  status: PlanStepStatus;
+  result?: string | null;
+  error?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  durationMs?: number | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  /** Per-step charts persisted by the executor (issue #96). Optional; older plans have none. */
+  charts?: ChartSpec[] | null;
+}
+
+/** Full plan detail with ordered steps. Mirrors backend `PlanDetailDto`. */
+export interface PlanDetail {
+  planId: string;
+  sessionId?: string | null;
+  tenantId?: string | null;
+  request: string;
+  status: PlanStatus;
+  detectedIntents: string[];
+  failureReason?: string | null;
+  totalInputTokens?: number | null;
+  totalOutputTokens?: number | null;
+  totalTokens?: number | null;
+  totalDurationMs?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  steps: PlanStep[];
+}
+
+/** List-item form of a plan. Mirrors backend `PlanSummaryDto`. */
+export interface PlanSummary {
+  planId: string;
+  sessionId?: string | null;
+  tenantId?: string | null;
+  request: string;
+  status: PlanStatus;
+  stepCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Step shape carried in a plan review proposal. */
+export interface PlanReviewStep {
+  specialistKey: string;
+  intent: string;
+  action: string;
+}
+
+/** Discriminator for a plan review decision. */
+export type PlanReviewDecisionKind = 'approve' | 'reject' | 'edit';
+
+/** Body sent to POST /api/plans/{planId}/reviews/{requestId}/decision. */
+export interface PlanReviewDecisionRequest {
+  kind: PlanReviewDecisionKind;
+  comment?: string;
+  feedback?: string;
+  editedSteps?: PlanReviewStep[];
+}
+
+/** Response envelope from POST plan-review decision. */
+export interface PlanReviewDecisionResponse {
+  requestId: string;
+  planId: string;
+  decision: string;
+  kind: PlanReviewDecisionKind;
+  comment?: string | null;
+  respondedAt: string;
+  terminalReason?: string | null;
+  round: number;
+}
+
+/** Shape returned by GET /api/plans/{planId}/reviews — one open review. */
+export interface PlanReviewOpen {
+  requestId: string;
+  planId: string;
+  round: number;
+  subject?: string;
+  action?: string;
+  impact?: string;
+  urgency?: string;
+  reasoning?: string;
+  createdAt: string;
+  expiresAt?: string;
+  status?: string;
+  /** Serialized `PlanReviewProposal` JSON returned by the backend. */
+  payload?: string | null;
+}
+
+/** Deserialized review proposal (from `PlanReviewOpen.payload`). */
+export interface PlanReviewProposal {
+  planId: string;
+  roundNumber: number;
+  request: string;
+  steps: PlanReviewStep[];
+  revisionReason?: string | null;
+}
+
+/** Deserialized clarification prompt (from an approval payload). */
+export interface PlanClarificationPrompt {
+  planId: string;
+  stepIndex: number;
+  specialistKey: string;
+  question: string;
+}
+
+/** Payload broadcast when the reviewer's decision resolves. */
+export interface PlanReviewResolvedEvent {
+  requestId: string;
+  planId: string;
+  decision: string;
+  kind: PlanReviewDecisionKind;
+  comment?: string | null;
+  respondedAt: string;
+  terminalReason?: string | null;
+  round: number;
+}
+
+/** Payload broadcast when a rejected plan is replanned for another round. */
+export interface PlanReviewNextRoundEvent {
+  planId: string;
+  requestId: string;
+  round: number;
+}
+
+/** Payload broadcast when the plan reaches a terminal reply. */
+export interface PlanFinalResponseEvent {
+  planId: string;
+  subject?: string;
+  reply: string;
+  terminalReason?: string | null;
+}
+
+/** 202 Accepted body returned by POST /api/chat when a plan suspends for review. */
+export interface PlanSuspendedResponse {
+  planId: string;
+  status: PlanStatus;
+  reviewRequestId?: string | null;
+  round?: number | null;
+  sessionId: string;
+  message?: string;
+}
+
+/** Union returned by the enhanced `sendMessage` service. */
+export type SendMessageResult =
+  | { kind: 'complete'; response: ChatResponse }
+  | { kind: 'suspended'; suspended: PlanSuspendedResponse };

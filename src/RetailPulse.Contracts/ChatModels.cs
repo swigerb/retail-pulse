@@ -40,7 +40,14 @@ public record ChatResponse(
     List<ChartSpec>? Charts = null,
     long? TotalDurationMs = null,
     TokenUsage? TokenUsage = null,
-    RoutingInfo? Routing = null
+    RoutingInfo? Routing = null,
+    /// <summary>
+    /// Populated on the plan-first branch (#93/#96) so the client can drive the
+    /// plan surface (steps, review, history) without a follow-up lookup.
+    /// Always null on the fast/single-shot path so no plan chrome leaks into
+    /// those replies.
+    /// </summary>
+    string? PlanId = null
 );
 
 /// <summary>
