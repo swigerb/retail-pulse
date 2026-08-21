@@ -1,4 +1,5 @@
 import type {
+  ChartSpec,
   PlanClarificationPrompt,
   PlanDetail,
   PlanReviewProposal,
@@ -65,6 +66,14 @@ export interface ActivePlanState {
   /** Terminal reply text once the plan settles. */
   finalReply?: string;
   terminalReason?: string | null;
+  /**
+   * Aggregate charts attached to the plan's terminal response (issue #141).
+   * Populated on both plan paths: the immediate path forwards
+   * `ChatResponse.charts`, and the review-resume path forwards the
+   * `plan_final_response` event's `charts` payload. Rendered by `PlanView`
+   * near `finalReply` so specialist charts survive the plan boundary.
+   */
+  finalCharts?: ChartSpec[] | null;
 
   /** Set true when the SignalR connection drops mid-plan. */
   connectionLost?: boolean;
@@ -143,7 +152,14 @@ export type PlanAction =
   | { type: 'CLARIFICATION_SUBMITTING'; planId: string; requestId: string }
   | { type: 'CLARIFICATION_SUBMIT_FAILED'; planId: string; requestId: string }
   | { type: 'CLARIFICATION_RESOLVED'; planId: string; requestId: string }
-  | { type: 'PLAN_FINAL'; planId: string; reply: string; terminalReason?: string | null }
+  | {
+      type: 'PLAN_FINAL';
+      planId: string;
+      reply: string;
+      terminalReason?: string | null;
+      /** Aggregate charts attached to the terminal reply. */
+      charts?: ChartSpec[] | null;
+    }
   | { type: 'CONNECTION_STATUS'; connected: boolean }
   | {
       // Reconciled delta after a hub reconnect (issue #92): merges any
@@ -215,6 +231,7 @@ function detailToActive(detail: PlanDetail, base: ActivePlanState | null): Activ
     clarification: base?.clarification,
     finalReply: base?.finalReply,
     terminalReason: base?.terminalReason,
+    finalCharts: base?.finalCharts,
     connectionLost: base?.connectionLost,
     hydrateError: undefined,
   };
@@ -467,6 +484,12 @@ export function planReducer(state: PlanAppState, action: PlanAction): PlanAppSta
             : state.active.status === 'failed' || state.active.status === 'cancelled' || state.active.status === 'unusable'
               ? state.active.status
               : 'completed';
+      // Freshest wins: an explicit chart array on the terminal event overwrites
+      // any prior charts. `undefined` (event carried no chart field at all)
+      // preserves what the reducer already has so a broadcast without charts
+      // never clears a prior attach.
+      const nextFinalCharts =
+        action.charts === undefined ? state.active.finalCharts : action.charts;
       return {
         ...state,
         active: {
@@ -474,6 +497,7 @@ export function planReducer(state: PlanAppState, action: PlanAction): PlanAppSta
           status,
           finalReply: action.reply,
           terminalReason: action.terminalReason ?? null,
+          finalCharts: nextFinalCharts,
           finishedAt: finished,
           review: state.active.review
             ? { ...state.active.review, decisionInFlight: undefined }

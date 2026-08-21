@@ -45,16 +45,31 @@ namespace RetailPulse.Api.Approval;
 ///     conversation-export, and session-turn writes fire; the final response
 ///     is persisted onto the plan record's <c>FailureReason</c> column
 ///     (which now doubles as <c>FinalReply</c> for review-driven turns) and
-///     broadcast over the SignalR hub as <c>plan_final_response</c>. Plan
-///     status transitions to <c>Completed</c> / <c>Failed</c>.</item>
+///     broadcast over the SignalR hub as <c>plan_final_response</c> to the
+///     <b>owning session's group only</b> (never <c>Clients.All</c>) — see
+///     <see cref="SendToOwningSessionAsync"/>. Plan status transitions to
+///     <c>Completed</c> / <c>Failed</c>.</item>
 ///   <item>Reject with cap remaining → the replanner produces a revised step
 ///     list, a new plan-review row + checkpoint open for round N+1, and a
-///     <c>plan_review_next_round</c> hub event fires so the reviewer UI can
-///     surface the new request id.</item>
+///     <c>plan_review_next_round</c> hub event fires against the owning
+///     session group so the reviewer UI can surface the new request id
+///     without leaking to any other connected client.</item>
 ///   <item>Terminal without execution → plan status transitions to
 ///     <c>Failed</c> with the terminal reason; the failure reply is persisted
-///     and broadcast.</item>
+///     and broadcast to the owning session group.</item>
 /// </list>
+///
+/// <para>
+/// <b>Broadcast scoping (#141).</b> Every SignalR event this service emits
+/// carries subject-identifying content (<c>subject</c>, <c>reply</c>,
+/// <c>charts</c>) and MUST be delivered only to the plan's owning session
+/// group. Missing / whitespace session identity fails closed: the broadcast
+/// is suppressed with a warning, never falling back to
+/// <c>Clients.All</c>. The client-side <see cref="TelemetryHub.JoinSession"/>
+/// binding — gated by <see cref="ISessionOwnershipRegistry"/> — is the sole
+/// route by which a connection joins the group, so this delivery contract
+/// composes with the existing hostile-rejoin protection (#92).
+/// </para>
 ///
 /// <para>
 /// The completion service is idempotent: if the plan is already Completed or
@@ -186,7 +201,7 @@ public sealed class PlanReviewCompletionService
             case PlanReviewContinuationKind.Terminal:
                 await FinaliseAsFailedAsync(planStore, plan, state.Subject,
                     $"{continuation.TerminalReason}: {continuation.FailureMessage}", sp, ct);
-                await BroadcastFinalAsync(sp, plan.PlanId, state.Subject,
+                await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, state.SessionId,
                     BuildTerminalReply(continuation.TerminalReason), continuation.TerminalReason);
                 return PlanReviewCompletionResult.TerminatedWithoutExecution(
                     continuation.TerminalReason,
@@ -206,7 +221,7 @@ public sealed class PlanReviewCompletionService
                         string msg = replanned?.UnusableReason ?? "planner unavailable";
                         await FinaliseAsFailedAsync(planStore, plan, state.Subject,
                             $"{PlanReviewTerminalReason.ReplanExhausted}: {msg}", sp, ct);
-                        await BroadcastFinalAsync(sp, plan.PlanId, state.Subject,
+                        await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, state.SessionId,
                             BuildTerminalReply(PlanReviewTerminalReason.ReplanExhausted),
                             PlanReviewTerminalReason.ReplanExhausted);
                         return PlanReviewCompletionResult.TerminatedWithoutExecution(
@@ -243,15 +258,18 @@ public sealed class PlanReviewCompletionService
 
                     // Broadcast that a new review round is waiting.
                     IHubContext<TelemetryHub>? hub = sp.GetService<IHubContext<TelemetryHub>>();
-                    if (hub is not null)
-                    {
-                        await hub.Clients.All.SendAsync("plan_review_next_round", new
+                    // Session-scoped delivery (#141): the next-round event
+                    // reveals the plan id and reviewer request id of another
+                    // subject's in-flight plan and MUST NOT reach other
+                    // clients. Route it through the owning session's group;
+                    // fail closed on missing identity.
+                    await SendToOwningSessionAsync(
+                        hub, state.SessionId, "plan_review_next_round", new
                         {
                             planId = state.PlanId,
                             requestId = nextHandle.RequestId,
                             round = nextHandle.RoundNumber,
                         }, ct);
-                    }
 
                     return PlanReviewCompletionResult.SuspendedForNextRound(
                         nextHandle.RequestId, nextHandle.RoundNumber);
@@ -289,22 +307,35 @@ public sealed class PlanReviewCompletionService
             await FinaliseAsFailedAsync(planStore, plan, state.Subject,
                 $"{clarification.TerminalReason}: reviewer did not provide a usable answer.",
                 sp, ct);
-            await BroadcastFinalAsync(sp, plan.PlanId, state.Subject,
+            await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, state.SessionId,
                 BuildTerminalReply(clarification.TerminalReason), clarification.TerminalReason);
             return PlanReviewCompletionResult.TerminatedWithoutExecution(
                 clarification.TerminalReason, "no usable clarification answer");
         }
 
         // Substitute the answer as the paused step's Result, then execute the
-        // remaining steps starting from PausedAtStepIndex + 1.
+        // remaining steps AFTER the paused step.
+        //
+        // Index-rebase note (#141): the executor stores <c>state.Steps</c>
+        // rebased to start at the pause — see PlanExecutor.SuspendForClarificationAsync
+        // which writes <c>execution.Plan.Steps.Skip(stepIndex)</c>. Element 0
+        // of <c>state.Steps</c> IS the paused (CLARIFY) step; elements 1..N
+        // are the post-pause specialists that still need to run.
+        //
+        // The previous implementation indexed <c>state.Steps</c> with
+        // <c>state.PausedAtStepIndex</c> — the ORIGINAL plan index — so on any
+        // plan that paused past index 0 it (a) recorded the wrong step as the
+        // "answer" transcript and (b) skipped the first post-pause specialist
+        // entirely. Rebase against element 0 instead, and take the true
+        // remaining as <c>Skip(1)</c>. The persisted
+        // <see cref="PlanReviewCompletedStep.StepIndex"/> keeps the original
+        // index so downstream numbering is unchanged.
         int pauseIndex = state.PausedAtStepIndex ?? 0;
         List<PlanReviewCompletedStep> priorCompleted =
             [.. state.CompletedSteps ?? []];
 
-        // The paused step itself becomes an "answer" step with the answer as
-        // its transcript so the accumulated context reads coherently.
-        PlanReviewStepDto paused = pauseIndex < state.Steps.Count
-            ? state.Steps[pauseIndex]
+        PlanReviewStepDto paused = state.Steps.Count > 0
+            ? state.Steps[0]
             : new PlanReviewStepDto
             {
                 SpecialistKey = "clarification",
@@ -325,7 +356,7 @@ public sealed class PlanReviewCompletionService
         });
 
         IReadOnlyList<PlanReviewStepDto> remaining =
-            [.. state.Steps.Skip(pauseIndex + 1)];
+            [.. state.Steps.Skip(1)];
         return await ExecuteApprovedPlanAsync(
             sp, planStore, plan, state,
             remaining,
@@ -463,7 +494,8 @@ public sealed class PlanReviewCompletionService
         // Chat-turn parity — mirror the trio the single-specialist branch fires.
         await ApplyChatTurnParityAsync(sp, plan, state, filtered, outcome, ct);
 
-        await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, filtered, terminalReason, planCharts);
+        await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, state.SessionId,
+            filtered, terminalReason, planCharts);
 
         return PlanReviewCompletionResult.Executed(filtered, outcome, planCharts);
     }
@@ -687,28 +719,68 @@ public sealed class PlanReviewCompletionService
         }
     }
 
-    private static async Task BroadcastFinalAsync(
-        IServiceProvider sp, string planId, string subject, string reply, string terminalReason,
+    private async Task BroadcastFinalAsync(
+        IServiceProvider sp, string planId, string subject, string? sessionId,
+        string reply, string terminalReason,
         IReadOnlyList<ChartSpec>? charts = null)
     {
         IHubContext<TelemetryHub>? hub = sp.GetService<IHubContext<TelemetryHub>>();
-        if (hub is null) return;
-        await hub.Clients.All.SendAsync("plan_final_response", new
+        // Session-scoped delivery (#141): the plan_final_response payload
+        // carries subject-identifying content — subject id, the full reply
+        // text, and any specialist chart data — so it MUST be delivered to
+        // the owning session's group only. See <see cref="SendToOwningSessionAsync"/>
+        // for the fail-closed semantics on missing session identity.
+        //
+        // Charts flattened in specialist order — matches the
+        // ChatResponse.Charts contract on the fast path so the client
+        // renders identical charts regardless of whether the plan was
+        // executed immediately or resumed via the review surface. Null
+        // or empty means the specialists produced no charts on this
+        // turn. Non-terminal (early replan / clarification) broadcasts
+        // don't reach this method — those go via plan_review_next_round
+        // instead.
+        await SendToOwningSessionAsync(
+            hub, sessionId, "plan_final_response", new
+            {
+                planId,
+                subject,
+                reply,
+                terminalReason,
+                charts = charts is { Count: > 0 } ? charts : null,
+            });
+    }
+
+    /// <summary>
+    /// Session-scoped SignalR delivery for plan-path events (#141). Sends the
+    /// payload to <c>Clients.Group(sessionId)</c> — the same group the
+    /// <see cref="TelemetryHub.JoinSession"/> ownership gate populates — so
+    /// only the plan's owning subject receives it. A null/whitespace
+    /// <paramref name="sessionId"/> fails closed: the send is suppressed with
+    /// a warning and the caller MUST NOT fall back to <c>Clients.All</c> or
+    /// any other broadcast surface. That matches the existing session-scoped
+    /// telemetry model (see <c>ISessionOwnershipRegistry</c>, issue #92) and
+    /// contains any regression that lets a plan record land without a
+    /// session id.
+    /// </summary>
+    private async Task SendToOwningSessionAsync(
+        IHubContext<TelemetryHub>? hub,
+        string? sessionId,
+        string method,
+        object payload,
+        CancellationToken ct = default)
+    {
+        if (hub is null)
         {
-            planId,
-            subject,
-            reply,
-            terminalReason,
-            // Charts flattened in specialist order — matches the
-            // ChatResponse.Charts contract on the fast path so the client
-            // renders identical charts regardless of whether the plan was
-            // executed immediately or resumed via the review surface. Null
-            // or empty means the specialists produced no charts on this
-            // turn. Non-terminal (early replan / clarification) broadcasts
-            // don't reach this method — those go via
-            // plan_review_next_round instead.
-            charts = charts is { Count: > 0 } ? charts : null,
-        });
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            _logger.LogWarning(
+                "Plan-path SignalR event {Method} suppressed: session identity is missing on the resolved plan; refusing to broadcast to Clients.All to avoid cross-session leak.",
+                method);
+            return;
+        }
+        await hub.Clients.Group(sessionId).SendAsync(method, payload, ct);
     }
 }
 

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { Badge, Button, ProgressBar, Text, makeStyles } from '@fluentui/react-components';
 import { Dismiss20Regular } from '@fluentui/react-icons';
 import type { ActivePlanState } from '../../state/planReducer';
@@ -7,6 +7,11 @@ import { PLAN_STATUS_META, formatElapsed, progressCounts } from './statusMeta';
 import { PlanStepRow } from './PlanStepRow';
 import { PlanReviewCard } from './PlanReviewCard';
 import { PlanClarificationCard } from './PlanClarificationCard';
+import { ErrorBoundary } from '../ErrorBoundary';
+
+// Lazy-load the chart renderer to keep the plan surface from pulling Recharts
+// into the initial bundle. Matches how ChatPanel and PlanStepRow load it.
+const ChartRenderer = lazy(() => import('../ChartRenderer'));
 
 /**
  * Top-level plan surface (issue #96). Renders a summary strip (progress,
@@ -301,6 +306,21 @@ export function PlanView({
               Terminal reason: {active.terminalReason}
             </Text>
           )}
+        </div>
+      )}
+
+      {active.finalCharts && active.finalCharts.length > 0 && (
+        <div
+          className={styles.section}
+          data-testid="plan-final-charts"
+          data-chart-count={active.finalCharts.length}
+        >
+          <span className={styles.sectionLabel}>Charts</span>
+          <ErrorBoundary fallback={<div>Chart failed to render.</div>}>
+            <Suspense fallback={<div>Loading charts…</div>}>
+              <ChartRenderer charts={active.finalCharts} />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       )}
     </div>
