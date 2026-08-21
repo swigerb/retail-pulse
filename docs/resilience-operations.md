@@ -87,6 +87,34 @@ authenticated and anonymous callers (previously anonymous-only). A hostile
 client that reconnects and attempts to rejoin another subject's session group is
 refused with a `HubException`.
 
+### Frontend behavior on top of these contracts
+
+The SPA layers a small set of user-visible affordances on top of the backend
+contracts above so a long-running plan or a dropped channel never presents as
+a silent spinner. All of these live under `src/RetailPulse.Web/src` and are
+covered by Vitest units in `src/__tests__` (see the plan below).
+
+| UI concern | Module | Notes |
+|------------|--------|-------|
+| Reconnect schedule | `services/reconnectBackoff.ts` | Capped exponential-ish schedule (`1s → 30s` cap, 8 attempts). Returning `null` from the SignalR `IRetryPolicy` triggers `onclose` and the terminal `disconnected` state. |
+| Connection status | `services/telemetryHub.ts`, `hooks/useConnectionStatus.ts` | Exposes `connecting / connected / reconnecting / disconnected` plus a `stalled` flag (Connected but no `heartbeat` in `2 × ApplicationHeartbeatInterval`). |
+| Visible indicator | `components/ConnectionStatusIndicator.tsx` | Rendered inline in the chat composer next to Send so a dropped hub is visible where the user actually types. |
+| Timeout dialog | `components/TimeoutDialog.tsx` | Replaces the pre-#92 hung spinner when `sendMessage` throws `ChatRequestTimeoutError`; offers Retry (replay the same prompt) or Abandon (clear the in-flight state). |
+| User cancel | `services/executionControlApi.ts`, `components/ChatPanel.tsx` | The Send button flips to Cancel while a run is in flight. Cancel aborts the local fetch AND posts `/api/chat/{sessionId}/cancel`; when a `planId` is known the plan-owning UI can call `cancelPlan(planId)` from the same module. |
+| Reconcile after reconnect | `services/planReconciler.ts`, `services/executionControlApi.ts#reconcilePlan` | Deterministic merge by `stepIndex` with terminal-state monotonicity. Overlap collapses to a single entry; gaps are preserved so streaming can fill them in. |
+
+**Cross-session rejoin safety.** `joinPendingSessions()` in `telemetryHub.ts`
+only re-invokes `JoinSession` for sessionIds this client previously joined via
+`joinTelemetrySession()`. Server payloads never influence that set, so a
+hostile server message cannot trick the client into rejoining a foreign
+group. The hub also enforces subject ownership on every join and rejoin.
+
+**Deferred APIM verification.** Local Vitest units cover the schedule, ceiling,
+terminal transition, dedupe/overlap/no-gaps, and the timeout / cancel UX.
+They do not exercise a real intermediary idle timeout. The multi-minute idle
+survival criterion in the issue must be verified end-to-end through APIM
+against a deployed environment and the result recorded in the PR.
+
 ---
 
 ## Circuit Breaker

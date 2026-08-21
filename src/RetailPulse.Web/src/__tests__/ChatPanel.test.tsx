@@ -12,11 +12,23 @@ const isErrorReplyMock = vi.fn((reply: string) => reply.startsWith('⏳'));
 vi.mock('../services/api', () => ({
   sendMessage: (...args: unknown[]) => sendMessageMock(...args),
   isErrorReply: (reply: string) => isErrorReplyMock(reply),
+  isChatRequestTimeoutError: () => false,
 }));
 
 vi.mock('../services/telemetryHub', () => ({
   joinTelemetrySession: vi.fn(),
   onProgress: vi.fn(() => () => {}),
+  onHubConnectionStatus: (listener: (s: string) => void) => {
+    listener('connected');
+    return () => {};
+  },
+  onHubHeartbeat: () => () => {},
+  getHubConnectionStatus: () => 'connected',
+  getLastHubHeartbeatAt: () => null,
+}));
+
+vi.mock('../services/executionControlApi', () => ({
+  cancelChatSession: vi.fn().mockResolvedValue('cancelled'),
 }));
 
 // activeAuthMode drives whether the execution-path selector is rendered.
