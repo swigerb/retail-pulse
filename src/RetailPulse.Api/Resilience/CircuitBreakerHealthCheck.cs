@@ -14,6 +14,8 @@ public class CircuitBreakerHealthCheck : IHealthCheck
     private static DateTimeOffset _contentSafetyLastChange = DateTimeOffset.UtcNow;
     private static CircuitBreakerState _knowledgeState = CircuitBreakerState.Closed;
     private static DateTimeOffset _knowledgeLastChange = DateTimeOffset.UtcNow;
+    private static CircuitBreakerState _foundryIqState = CircuitBreakerState.Closed;
+    private static DateTimeOffset _foundryIqLastChange = DateTimeOffset.UtcNow;
 
     public static void ReportState(CircuitBreakerState state)
     {
@@ -56,6 +58,21 @@ public class CircuitBreakerHealthCheck : IHealthCheck
         }
     }
 
+    /// <summary>
+    /// Reports the Foundry IQ (file_search) retrieval breaker state on the
+    /// same health probe. Exposed under <c>foundryIqCircuitState</c>. State
+    /// never escalates the overall health check status — the degradation
+    /// policy at the knowledge base decides fail-loud vs fallback.
+    /// </summary>
+    public static void ReportFoundryIqState(CircuitBreakerState state)
+    {
+        if (_foundryIqState != state)
+        {
+            _foundryIqState = state;
+            _foundryIqLastChange = DateTimeOffset.UtcNow;
+        }
+    }
+
     public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct = default)
     {
         var data = new Dictionary<string, object>
@@ -65,7 +82,9 @@ public class CircuitBreakerHealthCheck : IHealthCheck
             ["contentSafetyCircuitState"] = _contentSafetyState.ToString(),
             ["contentSafetyLastStateChange"] = _contentSafetyLastChange.ToString("O"),
             ["knowledgeCircuitState"] = _knowledgeState.ToString(),
-            ["knowledgeLastStateChange"] = _knowledgeLastChange.ToString("O")
+            ["knowledgeLastStateChange"] = _knowledgeLastChange.ToString("O"),
+            ["foundryIqCircuitState"] = _foundryIqState.ToString(),
+            ["foundryIqLastStateChange"] = _foundryIqLastChange.ToString("O")
         };
 
         HealthCheckResult result = _state switch

@@ -755,14 +755,22 @@ silently returns an empty result.
 |---|---|---|---|---|
 | `InMemory` (default) | ❌ (volatile, seeded at startup) | ❌ | Lexical BM25 | Laptop demo, tests, default `azd up` |
 | `AzureAISearch` | ✅ | ✅ (Search + APIM embeddings) | Hybrid vector + BM25, optional semantic reranker | Real semantic retrieval over a substantial corpus |
-| `FoundryIQ` | reserved (#104) | ✅ | reserved | Foundry-managed corpora — not shipped yet |
+| `FoundryIQ` | ✅ (read-only, corpus owned outside Retail Pulse) | ✅ (Foundry file_search + managed identity) | Semantic file_search score in `[0..1]`, not comparable across providers | Grounding on a Foundry-managed vector store that another team curates |
 
 **Optional-default guarantee.** With no configuration a clean `dotnet
 run --project src/RetailPulse.AppHost` uses `InMemory`, boots without
 any cloud resource, and passes the full test suite. Selecting
-`AzureAISearch` without setting
-`Knowledge:AzureAISearch:Endpoint` fails startup with a clear message
+`AzureAISearch` (or `FoundryIQ`) without setting the corresponding
+`Knowledge:AzureAISearch:Endpoint` / `Knowledge:FoundryIQ:ProjectEndpoint`
+fails startup with a clear message
 from `KnowledgeProviderRegistry` — never a silent degradation.
+
+**Honest capability signalling.** `KnowledgeBaseCapabilities` carries a
+`SupportsMutation` flag. Read-only providers (Foundry IQ today) throw
+`NotSupportedException` on ingest/delete rather than pretending the
+call succeeded; the shared conformance suite gates its mutation tests
+on the flag and adds a dedicated `NotSupportedException` assertion so
+the contract is verifiable, not documentation-only.
 
 **Consistent chunking.** Every provider chunks with the same
 `DocumentChunker`, so chunk boundaries stay portable across providers.
@@ -772,9 +780,11 @@ across providers. Consumers rank within a single provider's result set
 only; the contract exposes `KnowledgeBaseCapabilities.ScoreSemantics`
 for UI copy.
 
-See ADR-009 (seam) and ADR-012 (Azure AI Search implementation) for
-the full design. Reindex and lifecycle procedure lives in
-`docs/rag/azure-ai-search-index.md`.
+See ADR-009 (seam), ADR-012 (Azure AI Search implementation), and
+ADR-013 (Foundry IQ implementation) for the full design. Reindex and
+lifecycle procedure lives in `docs/rag/azure-ai-search-index.md`;
+Foundry IQ operator setup and cost-attribution gap lives in
+`docs/rag/foundry-iq-provider.md`.
 
 ---
 
