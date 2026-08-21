@@ -1,8 +1,17 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { makeStyles, Card, Text, Button, Spinner } from '@fluentui/react-components';
-import type { GuardrailsStats, GuardrailDetectionType, BlockedRequest } from '../../types';
-import { fetchGuardrailsStats } from '../../services/guardrailsApi';
+import { makeStyles, Card, Text, Button, Spinner, tokens } from '@fluentui/react-components';
+import type { GuardrailsStats, GuardrailDetectionType, BlockedRequest, ContentSafetyConfigData } from '../../types';
+import { fetchGuardrailsStats, fetchGuardrailsLog, fetchGuardrailsConfig } from '../../services/guardrailsApi';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import {
+  aggregateByCategory,
+  aggregateByFamily,
+  aggregateBySeverity,
+  classifyBlockFamily,
+  describeCategory,
+  describeSeverity,
+} from '../../utils/safetyDisplay';
+import { ContentSafetyStatusBadge } from './ContentSafetyStatusBadge';
 
 const useStyles = makeStyles({
   container: {
@@ -16,7 +25,7 @@ const useStyles = makeStyles({
   title: {
     fontSize: '22px',
     fontWeight: '700',
-    color: 'var(--color-text, #e2e8f0)',
+    color: tokens.colorNeutralForeground1,
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
@@ -28,9 +37,9 @@ const useStyles = makeStyles({
   },
   statCard: {
     padding: '16px',
-    borderRadius: '12px',
-    backgroundColor: 'var(--color-surface, #1e293b)',
-    border: '1px solid var(--color-border, #334155)',
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
     display: 'flex',
     flexDirection: 'column',
     gap: '4px',
@@ -39,10 +48,11 @@ const useStyles = makeStyles({
     fontSize: '28px',
     fontWeight: '700',
     fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+    color: tokens.colorNeutralForeground1,
   },
   statLabel: {
     fontSize: '12px',
-    color: 'var(--color-text-muted, #94a3b8)',
+    color: tokens.colorNeutralForeground3,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
   },
@@ -53,22 +63,29 @@ const useStyles = makeStyles({
   },
   filterChip: {
     padding: '6px 14px',
-    borderRadius: '20px',
+    borderRadius: tokens.borderRadiusCircular,
     fontSize: '12px',
     fontWeight: '500',
     cursor: 'pointer',
-    border: '1px solid var(--color-border, #334155)',
-    backgroundColor: 'var(--color-surface, #1e293b)',
-    color: 'var(--color-text-muted, #94a3b8)',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground2,
     transition: 'all 0.2s ease',
     ':hover': {
-      backgroundColor: 'var(--color-surface-hover, #334155)',
+      backgroundColor: tokens.colorNeutralBackground3,
+    },
+    ':focus-visible': {
+      outline: `2px solid ${tokens.colorStrokeFocus2}`,
+      outlineOffset: '2px',
     },
   },
   filterChipActive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderColor: 'rgba(245, 158, 11, 0.4)' as unknown as undefined,
-    color: '#f59e0b',
+    backgroundColor: tokens.colorBrandBackground2,
+    borderTopColor: tokens.colorBrandStroke1,
+    borderRightColor: tokens.colorBrandStroke1,
+    borderBottomColor: tokens.colorBrandStroke1,
+    borderLeftColor: tokens.colorBrandStroke1,
+    color: tokens.colorBrandForeground1,
   },
   list: {
     display: 'flex',
@@ -81,9 +98,9 @@ const useStyles = makeStyles({
     gap: '12px',
     alignItems: 'center',
     padding: '10px 14px',
-    borderRadius: '8px',
-    backgroundColor: 'var(--color-surface, #1e293b)',
-    border: '1px solid var(--color-border, #334155)',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
     fontSize: '13px',
     '@media (max-width: 640px)': {
       gridTemplateColumns: '1fr',
@@ -91,12 +108,12 @@ const useStyles = makeStyles({
     },
   },
   timestamp: {
-    color: 'var(--color-text-muted, #94a3b8)',
+    color: tokens.colorNeutralForeground3,
     fontSize: '12px',
     fontFamily: "'Courier New', monospace",
   },
   preview: {
-    color: 'var(--color-text, #e2e8f0)',
+    color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -106,43 +123,68 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '4px',
     padding: '2px 8px',
-    borderRadius: '12px',
+    borderRadius: tokens.borderRadiusCircular,
     fontSize: '11px',
     fontWeight: '600',
     textTransform: 'uppercase',
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   chartSection: {
-    borderRadius: '12px',
+    borderRadius: tokens.borderRadiusLarge,
     padding: '16px',
-    backgroundColor: 'var(--color-surface, #1e293b)',
-    border: '1px solid var(--color-border, #334155)',
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   chartTitle: {
     fontSize: '14px',
     fontWeight: '600',
-    color: 'var(--color-text, #e2e8f0)',
+    color: tokens.colorNeutralForeground1,
     marginBottom: '12px',
   },
   emptyState: {
     textAlign: 'center',
     padding: '40px 20px',
-    color: 'var(--color-text-muted, #94a3b8)',
+    color: tokens.colorNeutralForeground3,
     fontSize: '14px',
   },
 });
 
-const TYPE_COLORS: Record<GuardrailDetectionType, { bg: string; color: string; icon: string }> = {
-  jailbreak: { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', icon: '🚫' },
-  pii: { bg: 'rgba(168, 85, 247, 0.15)', color: '#a855f7', icon: '🔐' },
-  access: { bg: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', icon: '🔒' },
-  'content-safety-hate': { bg: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', icon: '⚠️' },
-  'content-safety-sexual': { bg: 'rgba(236, 72, 153, 0.15)', color: '#ec4899', icon: '⚠️' },
-  'content-safety-violence': { bg: 'rgba(249, 115, 22, 0.15)', color: '#f97316', icon: '⚠️' },
-  'content-safety-selfharm': { bg: 'rgba(217, 70, 239, 0.15)', color: '#d946ef', icon: '⚠️' },
-  'content-safety-prompt-shield': { bg: 'rgba(20, 184, 166, 0.15)', color: '#14b8a6', icon: '🛡️' },
-  'content-safety-indirect-injection': { bg: 'rgba(14, 165, 233, 0.15)', color: '#0ea5e9', icon: '🎯' },
-  'content-safety-unavailable': { bg: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', icon: '⏱️' },
+const TYPE_ICONS: Record<GuardrailDetectionType, string> = {
+  jailbreak: '🚫',
+  pii: '🔐',
+  access: '🔒',
+  'content-safety-hate': '⚠️',
+  'content-safety-sexual': '⚠️',
+  'content-safety-violence': '⚠️',
+  'content-safety-selfharm': '⚠️',
+  'content-safety-prompt-shield': '🛡️',
+  'content-safety-indirect-injection': '🎯',
+  'content-safety-unavailable': '⏱️',
 };
+
+/** Plain-language labels used in the filter chip row. */
+const TYPE_LABELS: Record<GuardrailDetectionType, string> = {
+  jailbreak: 'Jailbreak',
+  pii: 'PII',
+  access: 'Access',
+  'content-safety-hate': 'Hate',
+  'content-safety-sexual': 'Sexual',
+  'content-safety-violence': 'Violence',
+  'content-safety-selfharm': 'Self-harm',
+  'content-safety-prompt-shield': 'Prompt shield',
+  'content-safety-indirect-injection': 'Indirect injection',
+  'content-safety-unavailable': 'Unavailable',
+};
+
+/** Bar-chart accents. Uses semantic Fluent tokens so they follow tenant theme. */
+function familyStrokes() {
+  return {
+    pattern: tokens.colorBrandBackground,
+    model: tokens.colorPaletteRedBackground3,
+  };
+}
 
 export function GuardrailsDashboard() {
   const styles = useStyles();
@@ -150,12 +192,28 @@ export function GuardrailsDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<GuardrailDetectionType | 'all'>('all');
+  const [logEntries, setLogEntries] = useState<BlockedRequest[]>([]);
+  const [contentSafetyEnabled, setContentSafetyEnabled] = useState<boolean | null>(null);
+  const [contentSafety, setContentSafety] = useState<ContentSafetyConfigData | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchGuardrailsStats()
-      .then(data => { if (!cancelled) { setStats(data); setError(null); } })
+    Promise.all([
+      fetchGuardrailsStats(),
+      fetchGuardrailsLog(50).catch(() => [] as BlockedRequest[]),
+      fetchGuardrailsConfig().catch(() => null),
+    ])
+      .then(([statsData, log, config]) => {
+        if (cancelled) return;
+        setStats(statsData);
+        // When the log endpoint returns entries, use those over any inline
+        // `recentBlocked` array so category/severity/decision are populated.
+        setLogEntries(log.length > 0 ? log : statsData.recentBlocked ?? []);
+        setContentSafety(config?.contentSafety ?? null);
+        setContentSafetyEnabled(config?.contentSafety?.enabled ?? null);
+        setError(null);
+      })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -163,18 +221,50 @@ export function GuardrailsDashboard() {
 
   const handleRefresh = useCallback(() => {
     setLoading(true);
-    fetchGuardrailsStats()
-      .then(data => { setStats(data); setError(null); })
+    Promise.all([
+      fetchGuardrailsStats(),
+      fetchGuardrailsLog(50).catch(() => [] as BlockedRequest[]),
+      fetchGuardrailsConfig().catch(() => null),
+    ])
+      .then(([statsData, log, config]) => {
+        setStats(statsData);
+        setLogEntries(log.length > 0 ? log : statsData.recentBlocked ?? []);
+        setContentSafety(config?.contentSafety ?? null);
+        setContentSafetyEnabled(config?.contentSafety?.enabled ?? null);
+        setError(null);
+      })
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load'))
       .finally(() => setLoading(false));
   }, []);
 
+  const familyAggregate = useMemo(() => aggregateByFamily(logEntries), [logEntries]);
+  const categoryAggregate = useMemo(() => aggregateByCategory(logEntries), [logEntries]);
+  const severityAggregate = useMemo(() => aggregateBySeverity(logEntries), [logEntries]);
+
+  const familyChartData = useMemo(
+    () => [
+      { label: 'Pattern', count: familyAggregate.pattern },
+      { label: 'Model', count: familyAggregate.model },
+    ],
+    [familyAggregate.pattern, familyAggregate.model],
+  );
+
+  const categoryChartData = useMemo(
+    () => categoryAggregate.map(a => ({ label: a.label, count: a.count })),
+    [categoryAggregate],
+  );
+
+  const severityChartData = useMemo(
+    () => severityAggregate.map(a => ({ label: a.label, count: a.count })),
+    [severityAggregate],
+  );
+
   const filteredRequests = useMemo(() => {
     if (!stats) return [];
-    const list = stats.recentBlocked.slice(0, 50);
+    const list = logEntries.slice(0, 50);
     if (filter === 'all') return list;
     return list.filter(r => r.detectionType === filter);
-  }, [stats, filter]);
+  }, [stats, logEntries, filter]);
 
   if (loading) {
     return (
@@ -198,37 +288,104 @@ export function GuardrailsDashboard() {
 
   return (
     <div className={styles.container} data-testid="guardrails-dashboard">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <span className={styles.title}>🛡️ Guardrails Security</span>
-        <Button appearance="subtle" onClick={handleRefresh}>Refresh</Button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {contentSafetyEnabled !== null && (
+            <ContentSafetyStatusBadge
+              enabled={contentSafetyEnabled}
+              failPolicy={contentSafety?.failPolicy}
+              detail={
+                contentSafetyEnabled
+                  ? undefined
+                  : 'Pattern guardrails remain active.'
+              }
+            />
+          )}
+          <Button appearance="subtle" onClick={handleRefresh}>Refresh</Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
       <div className={styles.statsGrid}>
         <Card className={styles.statCard} appearance="subtle">
-          <span className={styles.statValue} style={{ color: '#f59e0b' }}>{stats.totalBlocked}</span>
+          <span className={styles.statValue}>{stats.totalBlocked}</span>
           <span className={styles.statLabel}>Total Blocked</span>
         </Card>
+        <Card className={styles.statCard} appearance="subtle" data-testid="stat-pattern-total">
+          <span className={styles.statValue}>
+            {stats.jailbreakAttempts + stats.piiDetections + stats.accessDenials}
+          </span>
+          <span className={styles.statLabel}>Pattern-based Blocks</span>
+        </Card>
+        <Card className={styles.statCard} appearance="subtle" data-testid="stat-model-total">
+          <span className={styles.statValue}>
+            {(stats.contentSafetyBlocks ?? 0) + (stats.contentSafetyFlags ?? 0)}
+          </span>
+          <span className={styles.statLabel}>Model-based Blocks</span>
+        </Card>
         <Card className={styles.statCard} appearance="subtle">
-          <span className={styles.statValue} style={{ color: '#ef4444' }}>{stats.jailbreakAttempts}</span>
+          <span className={styles.statValue}>{stats.jailbreakAttempts}</span>
           <span className={styles.statLabel}>Jailbreak Attempts</span>
         </Card>
         <Card className={styles.statCard} appearance="subtle">
-          <span className={styles.statValue} style={{ color: '#a855f7' }}>{stats.piiDetections}</span>
+          <span className={styles.statValue}>{stats.piiDetections}</span>
           <span className={styles.statLabel}>PII Detections</span>
         </Card>
         <Card className={styles.statCard} appearance="subtle">
-          <span className={styles.statValue} style={{ color: '#3b82f6' }}>{stats.accessDenials}</span>
+          <span className={styles.statValue}>{stats.accessDenials}</span>
           <span className={styles.statLabel}>Access Denials</span>
         </Card>
         <Card className={styles.statCard} appearance="subtle">
-          <span className={styles.statValue} style={{ color: '#14b8a6' }}>{stats.contentSafetyBlocks ?? 0}</span>
+          <span className={styles.statValue}>{stats.contentSafetyBlocks ?? 0}</span>
           <span className={styles.statLabel}>Content Safety Blocks</span>
         </Card>
         <Card className={styles.statCard} appearance="subtle">
-          <span className={styles.statValue} style={{ color: '#0ea5e9' }}>{stats.contentSafetyFlags ?? 0}</span>
+          <span className={styles.statValue}>{stats.contentSafetyFlags ?? 0}</span>
           <span className={styles.statLabel}>Content Safety Flags</span>
         </Card>
+      </div>
+
+      {/* Pattern vs Model breakdown */}
+      <div className={styles.chartSection} data-testid="chart-family-split">
+        <div className={styles.chartTitle}>Pattern-based vs Model-based blocks</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={familyChartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke={tokens.colorNeutralStroke2} />
+            <XAxis dataKey="label" tick={{ fill: tokens.colorNeutralForeground2, fontSize: 11 }} />
+            <YAxis allowDecimals={false} tick={{ fill: tokens.colorNeutralForeground2, fontSize: 11 }} />
+            <Tooltip />
+            <Bar dataKey="count" fill={familyStrokes().pattern} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Category distribution */}
+      <div className={styles.chartSection} data-testid="chart-category-distribution">
+        <div className={styles.chartTitle}>Model-based blocks by category</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={categoryChartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke={tokens.colorNeutralStroke2} />
+            <XAxis dataKey="label" tick={{ fill: tokens.colorNeutralForeground2, fontSize: 11 }} />
+            <YAxis allowDecimals={false} tick={{ fill: tokens.colorNeutralForeground2, fontSize: 11 }} />
+            <Tooltip />
+            <Bar dataKey="count" fill={familyStrokes().model} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Severity distribution */}
+      <div className={styles.chartSection} data-testid="chart-severity-distribution">
+        <div className={styles.chartTitle}>Model-based blocks by severity</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={severityChartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke={tokens.colorNeutralStroke2} />
+            <XAxis dataKey="label" tick={{ fill: tokens.colorNeutralForeground2, fontSize: 11 }} />
+            <YAxis allowDecimals={false} tick={{ fill: tokens.colorNeutralForeground2, fontSize: 11 }} />
+            <Tooltip />
+            <Bar dataKey="count" fill={familyStrokes().model} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
 
       {/* Trend Chart */}
@@ -237,21 +394,25 @@ export function GuardrailsDashboard() {
           <div className={styles.chartTitle}>Blocks Per Hour (Last 24h)</div>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={stats.blocksPerHour}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <CartesianGrid strokeDasharray="3 3" stroke={tokens.colorNeutralStroke2} />
               <XAxis
                 dataKey="hour"
-                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tick={{ fill: tokens.colorNeutralForeground2, fontSize: 11 }}
                 tickFormatter={(v: string) => {
                   const d = new Date(v);
                   return isNaN(d.getTime()) ? String(v) : `${d.getHours()}:00`;
                 }}
               />
-              <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
+              <YAxis tick={{ fill: tokens.colorNeutralForeground2, fontSize: 11 }} allowDecimals={false} />
               <Tooltip
-                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                labelStyle={{ color: '#e2e8f0' }}
+                contentStyle={{
+                  backgroundColor: tokens.colorNeutralBackground2,
+                  border: `1px solid ${tokens.colorNeutralStroke2}`,
+                  borderRadius: '8px',
+                }}
+                labelStyle={{ color: tokens.colorNeutralForeground1 }}
               />
-              <Bar dataKey="count" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="count" fill={tokens.colorBrandBackground} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -269,8 +430,9 @@ export function GuardrailsDashboard() {
             key={type}
             className={`${styles.filterChip} ${filter === type ? styles.filterChipActive : ''}`}
             onClick={() => setFilter(type)}
+            data-testid={`filter-chip-${type}`}
           >
-            {type === 'all' ? '🔍 All' : `${TYPE_COLORS[type].icon} ${type}`}
+            {type === 'all' ? '🔍 All' : `${TYPE_ICONS[type]} ${TYPE_LABELS[type]}`}
           </button>
         ))}
       </div>
@@ -280,26 +442,38 @@ export function GuardrailsDashboard() {
         {filteredRequests.length === 0 ? (
           <div className={styles.emptyState}>No blocked requests found for this filter.</div>
         ) : (
-          filteredRequests.map((req: BlockedRequest) => (
-            <div key={req.id} className={styles.entry}>
-              <span className={styles.timestamp}>
-                {new Date(req.timestamp).toLocaleString()}
-              </span>
-              <span className={styles.preview} title={req.requestPreview}>
-                {req.requestPreview}
-              </span>
-              <span
-                className={styles.typeBadge}
-                style={{
-                  backgroundColor: TYPE_COLORS[req.detectionType].bg,
-                  color: TYPE_COLORS[req.detectionType].color,
-                }}
+          filteredRequests.map((req: BlockedRequest) => {
+            const family = classifyBlockFamily(req.detectionType);
+            const categoryLabel = describeCategory(req.category, req.detectionType);
+            const severityLabel = describeSeverity(req.severity);
+            return (
+              <div
+                key={req.id}
+                className={styles.entry}
+                data-testid="guardrails-log-entry"
+                data-safety-family={family}
               >
-                {TYPE_COLORS[req.detectionType].icon} {req.detectionType}
-              </span>
-              <span className={styles.timestamp}>{req.actionTaken}</span>
-            </div>
-          ))
+                <span className={styles.timestamp}>
+                  {new Date(req.timestamp).toLocaleString()}
+                </span>
+                <span className={styles.preview} title={req.requestPreview}>
+                  {req.requestPreview}
+                </span>
+                <span
+                  className={styles.typeBadge}
+                  data-testid="log-entry-type"
+                  data-safety-family={family}
+                >
+                  {TYPE_ICONS[req.detectionType] ?? '⚠️'}{' '}
+                  {family === 'model' ? 'Model' : family === 'pattern' ? 'Pattern' : 'Other'}
+                  {' · '}
+                  {categoryLabel ?? TYPE_LABELS[req.detectionType] ?? req.detectionType}
+                  {severityLabel ? ` · ${severityLabel}` : ''}
+                </span>
+                <span className={styles.timestamp}>{req.actionTaken}</span>
+              </div>
+            );
+          })
         )}
       </div>
     </div>
