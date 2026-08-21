@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# .githooks/pre-push - Retail Pulse whole-solution formatting gate
+#
+# Purpose:
+#   Runs the CI `lint` job's exact command (dotnet format on the full
+#   RetailPulse.slnx) locally, before the push leaves your machine. Together
+#   with the fast staged-file .githooks/pre-commit hook this closes the gap
+#   the commit-time hook alone could not:
+#
+#   pre-commit  -> fast (~6-8s), staged .cs files only, catches most drift.
+#   pre-push    -> slower (~30-40s), whole solution, matches CI exactly.
+#
+#   Whole-solution analysis surfaces diagnostics that a `--include`-scoped
+#   run does not - notably import-ordering / analyzer style issues that
+#   depend on the compilation - and it still fires when a commit only
+#   touches non-C# files but earlier commits in the push range include C#
+#   drift. CI remains the authority; this hook makes the CI signal reach
+#   you before your teammates see it.
+#
+# What it runs:
+#   dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic
+#
+#   Identical to `.github/workflows/ci.yml` -> `Lint (dotnet format)`. If
+#   this hook passes without --no-verify, that CI job will pass on the same
+#   commits. If it does not, CI is still authoritative.
+#
+# When it skips:
+#   - The push range touches no C# / build-graph inputs (docs-only, infra
+#     text, workflow YAML that does not change compilation). CI still runs
+#     its own full check on every push.
+#   - `dotnet` is not on PATH. CI still enforces.
+#   - The user passed `git push --no-verify`.
+#
+# Bypass:
+#   git push --no-verify
+#
+#   Legitimate reasons: same as pre-commit (emergency hotfix, WIP private
+#   branch, local SDK diverges from CI). See docs/contributing.md.
+#
+# Shell:
+#   Bash. Git for Windows runs hooks under its bundled bash even when
+#   `git push` is invoked from PowerShell or cmd, so a single script covers
+#   Windows, Linux, and macOS.
+
+set -eo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+ZERO_SHA='0000000000000000000000000000000000000000'
+
+# Whitelist of path suffixes / exact names that participate in the
+# dotnet-format compilation graph. Anything else in the push range cannot
+# change the formatter's verdict, so we can skip the ~30s full-solution
+# analysis for docs- or workflow-only pushes.
+path_touches_dotnet() {
+    case "$1" in
+        *.cs|*.csproj|*.props|*.targets|*.slnx|*.sln|*.editorconfig|.editorconfig|global.json|Directory.Build.props|Directory.Packages.props|Directory.Build.targets)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# `git push` writes one line per ref being pushed on stdin:
+#     <local_ref> <local_sha> <remote_ref> <remote_sha>
+# We inspect each range and short-circuit as soon as any C# / build-graph
+# file appears.
+touches_dotnet=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "${local_ref:-}" ] || continue
+
+    # Ref deletion: nothing to lint.
+    if [ "$local_sha" = "$ZERO_SHA" ]; then
+        continue
+    fi
+
+    if [ "$remote_sha" = "$ZERO_SHA" ]; then
+        # New branch on the remote. Diffing against every remote ref is
+        # expensive and brittle; a first push is a legitimate moment to
+        # run the full check.
+        touches_dotnet=1
+        break
+    fi
+
+    range_files=$(git log --format= --name-only "${remote_sha}..${local_sha}" 2>/dev/null | sort -u || true)
+    [ -n "$range_files" ] || continue
+
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        if path_touches_dotnet "$path"; then
+            touches_dotnet=1
+            break
+        fi
+    done <<< "$range_files"
+
+    [ "$touches_dotnet" -eq 1 ] && break
+done
+
+if [ "$touches_dotnet" -eq 0 ]; then
+    echo "pre-push: no C#/build-graph files in the push range; skipping dotnet format check." >&2
+    exit 0
+fi
+
+if ! command -v dotnet >/dev/null 2>&1; then
+    echo "pre-push: 'dotnet' not on PATH; skipping full-solution format check (CI will still enforce)." >&2
+    exit 0
+fi
+
+echo "pre-push: running whole-solution dotnet format (matches CI lint job; ~30-40s)..." >&2
+echo "pre-push:   dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic" >&2
+
+if dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic; then
+    echo "pre-push: dotnet format passed." >&2
+    exit 0
+fi
+
+cat >&2 <<'MSG'
+
+pre-push: dotnet format --verify-no-changes reported violations above.
+
+  This is the same command CI runs. Fix locally and re-push:
+      dotnet format RetailPulse.slnx
+      git add -A && git commit --amend --no-edit    # or a new commit
+      git push
+
+  Bypass (only when you know why - see docs/contributing.md):
+      git push --no-verify
+
+CI runs the full-solution formatter on every push and remains the authority.
+MSG
+exit 1
