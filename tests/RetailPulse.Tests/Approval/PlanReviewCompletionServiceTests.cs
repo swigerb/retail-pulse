@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,7 +38,7 @@ namespace RetailPulse.Tests.Approval;
 ///   <item><c>PlanReviewCompletionService.ResolveAsync</c> — the resume driver.</item>
 /// </list>
 /// Every test uses a real <see cref="SqliteApprovalGate"/> and a real
-/// <see cref="Microsoft.Agents.AI.Workflows.Checkpointing.FileSystemJsonCheckpointStore"/>
+/// <see cref="FileSystemJsonCheckpointStore"/>
 /// so the persistence + framework-checkpoint surfaces are exercised end-to-end.
 /// </summary>
 public sealed class PlanReviewCompletionServiceTests : IDisposable
@@ -116,7 +117,7 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
 
         PlanDetailDto? plan = await plans2.GetPlanAsync("user-1", suspend.PlanId, default);
         plan.Should().NotBeNull();
-        plan!.Status.Should().Be(PlanStatus.Completed);
+        plan.Status.Should().Be(PlanStatus.Completed);
         plan.FailureReason.Should().StartWith("PlanReviewFinalReply::",
             "the resumed final reply is persisted onto the plan record so a later GET returns it.");
 
@@ -164,7 +165,7 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
 
         PlanDetailDto? plan = await plans.GetPlanAsync("user-1", suspend.PlanId, default);
         plan.Should().NotBeNull();
-        plan!.Status.Should().Be(PlanStatus.Completed);
+        plan.Status.Should().Be(PlanStatus.Completed);
 
         await sp.DisposeAsync();
     }
@@ -174,8 +175,8 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
     [Fact]
     public async Task Disabled_review_returns_terminal_result_and_writes_no_approval_row()
     {
-        (ServiceProvider sp, PlanOrchestrator orch, InMemoryPlanStore plans,
-            SqliteApprovalGate gate, ConcurrentQueue<string> _) = BuildHost(reviewEnabled: false);
+        (ServiceProvider sp, PlanOrchestrator orch, _,
+            SqliteApprovalGate gate, _) = BuildHost(reviewEnabled: false);
 
         PlanOrchestrationResult r = await orch.RunAsync(SampleInput(), default);
         r.IsSuspended.Should().BeFalse();
@@ -183,6 +184,89 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
         (await gate.GetPendingAsync("user-1")).Should().BeEmpty();
         (await gate.GetHistoryAsync(50)).Should().BeEmpty(
             "disabled review never touches the approval gate.");
+
+        await sp.DisposeAsync();
+    }
+
+    // ── Mid-execution replan surface ([[REPLAN]] marker) ────────────────
+
+    [Fact]
+    public async Task Replan_marker_suspends_plan_for_a_new_review_round()
+    {
+        (ServiceProvider sp, PlanOrchestrator orch, InMemoryPlanStore plans,
+            SqliteApprovalGate gate, ConcurrentQueue<string> _) =
+            BuildHost(plannerJson: PlannerJsonWithReplan());
+
+        PlanOrchestrationResult suspend = await orch.RunAsync(SampleInput(), default);
+        suspend.IsSuspended.Should().BeTrue();
+
+        // Reviewer approves the initial plan so execution starts and hits [[REPLAN]].
+        ApprovalRequest firstReview = (await gate.GetPendingAsync("user-1"))
+            .Single(r => r.Context.PlanId == suspend.PlanId
+                      && r.Context.Kind == ApprovalKind.PlanReview);
+        await gate.RespondAsync(firstReview.RequestId, ApprovalDecision.Approved,
+            "go", JsonSerializer.Serialize(new PlanReviewResponsePayload
+            {
+                Kind = PlanReviewKinds.Approve,
+            }, _json));
+
+        PlanReviewCompletionService completion = sp.GetRequiredService<PlanReviewCompletionService>();
+        PlanReviewCompletionResult resume = await completion.ResolveAsync(suspend.PlanId, "user-1");
+        resume.Kind.Should().Be(PlanReviewCompletionKind.SuspendedForNextRound,
+            "the executor reached the [[REPLAN]] step, opened a NEW plan-review row in the " +
+            "same durable table, and the completion service reports the suspension via a " +
+            "SuspendedForNextRound outcome so the endpoint layer can broadcast the next-round id.");
+        resume.NextRequestId.Should().NotBeNullOrWhiteSpace();
+
+        // A second plan-review row now exists for the same plan — that's the
+        // reachable mid-execution revision surface.
+        IReadOnlyList<ApprovalRequest> pending = await gate.GetPendingAsync("user-1");
+        pending.Any(r => r.Context.PlanId == suspend.PlanId
+                      && r.Context.Kind == ApprovalKind.PlanReview
+                      && r.Context.Reasoning.Contains("Mid-execution", StringComparison.Ordinal))
+            .Should().BeTrue("the [[REPLAN]] marker must open a NEW plan-review row.");
+
+        await sp.DisposeAsync();
+    }
+
+    private static string PlannerJsonWithReplan() => /*lang=json,strict*/ @"{ ""steps"": [
+        { ""specialist_key"": ""scorecard"", ""intent"": ""scorecard"", ""action"": ""[[REPLAN]] scope too broad"" }
+    ] }";
+
+    // ── PII filtering + audit preservation ──────────────────────────────
+
+    [Fact]
+    public async Task Resumed_final_response_is_filtered_and_recorded_in_audit_log()
+    {
+        (ServiceProvider sp, PlanOrchestrator orch, InMemoryPlanStore plans,
+            SqliteApprovalGate gate, ConcurrentQueue<string> _) =
+            BuildHost(reviewEnabled: true,
+                pii: true,   // Explicitly enable PII redaction on the guardrails config.
+                specialistReply: "call me at 555-123-4567 anytime");
+
+        PlanOrchestrationResult suspend = await orch.RunAsync(SampleInput(), default);
+
+        ApprovalRequest row = (await gate.GetPendingAsync("user-1"))
+            .Single(r => r.Context.PlanId == suspend.PlanId);
+        await gate.RespondAsync(row.RequestId, ApprovalDecision.Approved, "go",
+            JsonSerializer.Serialize(new PlanReviewResponsePayload
+            {
+                Kind = PlanReviewKinds.Approve,
+            }, _json));
+
+        PlanReviewCompletionService completion = sp.GetRequiredService<PlanReviewCompletionService>();
+        PlanReviewCompletionResult resume = await completion.ResolveAsync(suspend.PlanId, "user-1");
+        resume.Kind.Should().Be(PlanReviewCompletionKind.Executed);
+        resume.Reply.Should().NotContain("555-123-4567",
+            "PII must be redacted from the final reply on the resumed path.");
+        resume.Reply.Should().Contain("REDACTED");
+
+        // Audit log recorded the resumed turn — a plan turn is still an
+        // accountable interaction.
+        IAuditLog audit = sp.GetRequiredService<IAuditLog>();
+        IReadOnlyList<AuditEntry> entries = await audit.QueryAsync(new AuditQuery());
+        entries.Any(e => e.Action.Contains("plan.review.resolve", StringComparison.OrdinalIgnoreCase))
+            .Should().BeTrue("resumed plan turns must land in the audit log.");
 
         await sp.DisposeAsync();
     }
@@ -196,7 +280,9 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
             string? plannerJson = null,
             bool reuseDbPath = false,
             bool reuseCheckpointDir = false,
-            IReadOnlyList<(string Subject, PlanWrite Plan)>? seedPlans = null)
+            IReadOnlyList<(string Subject, PlanWrite Plan)>? seedPlans = null,
+            bool pii = false,
+            string? specialistReply = null)
     {
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
@@ -208,14 +294,13 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
         services.AddSingleton(gate);
         services.AddSingleton<IApprovalGate>(sp => sp.GetRequiredService<SqliteApprovalGate>());
 
-        services.AddSingleton<
-            Microsoft.Agents.AI.Workflows.Checkpointing.ICheckpointStore<JsonElement>>(_ =>
-                new Microsoft.Agents.AI.Workflows.Checkpointing.FileSystemJsonCheckpointStore(
+        services.AddSingleton<ICheckpointStore<JsonElement>>(_ =>
+                new FileSystemJsonCheckpointStore(
                     new DirectoryInfo(_checkpointDir)));
         services.AddSingleton(sp =>
         {
-            var store = sp.GetRequiredService<
-                Microsoft.Agents.AI.Workflows.Checkpointing.ICheckpointStore<JsonElement>>();
+            ICheckpointStore<JsonElement> store =
+                sp.GetRequiredService<ICheckpointStore<JsonElement>>();
             return Microsoft.Agents.AI.Workflows.CheckpointManager.CreateJson(store, customOptions: null);
         });
         services.AddSingleton<PlanReviewCheckpointService>();
@@ -244,7 +329,8 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
 
         // Specialists
         var invocations = new ConcurrentQueue<string>();
-        ISpecialistAgent scorecard = MakeSpecialist("scorecard", invocations, "score-reply");
+        ISpecialistAgent scorecard = MakeSpecialist("scorecard", invocations,
+            specialistReply ?? "score-reply");
         ISpecialistAgent demand = MakeSpecialist("demand-forecasting", invocations, "demand-reply");
         services.AddSingleton(scorecard);
         services.AddSingleton(demand);
@@ -298,8 +384,8 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
         // tests).
         services.AddSingleton(new GuardrailsConfig
         {
-            PiiDetectionEnabled = false,
-            AutoRedactPii = false,
+            PiiDetectionEnabled = pii,
+            AutoRedactPii = pii,
             ContentSafety = new ContentSafetyConfig { Enabled = false },
         });
         services.AddSingleton<ISuspiciousRequestLog, InMemorySuspiciousRequestLog>();
@@ -380,12 +466,12 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
         private readonly Dictionary<string, Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>> _bySub = new(StringComparer.Ordinal);
         public Task CreatePlanAsync(PlanWrite plan, CancellationToken ct = default)
         {
-            if (!_bySub.TryGetValue(plan.Subject, out var bucket))
+            if (!_bySub.TryGetValue(plan.Subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket))
             {
                 bucket = new(StringComparer.Ordinal);
                 _bySub[plan.Subject] = bucket;
             }
-            bucket[plan.PlanId] = (plan, null, new Dictionary<string, PlanStepUpdate>());
+            bucket[plan.PlanId] = (plan, null, []);
             return Task.CompletedTask;
         }
         public void RestoreCreate(string subject, PlanWrite plan) => CreatePlanAsync(plan).Wait();
@@ -393,8 +479,8 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
             [.. _bySub.SelectMany(kv => kv.Value.Values.Select(v => (kv.Key, v.Create)))];
         public Task UpdatePlanStatusAsync(PlanStatusUpdate update, CancellationToken ct = default)
         {
-            if (_bySub.TryGetValue(update.Subject, out var bucket)
-                && bucket.TryGetValue(update.PlanId, out var row))
+            if (_bySub.TryGetValue(update.Subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)
+                && bucket.TryGetValue(update.PlanId, out (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps) row))
             {
                 bucket[update.PlanId] = (row.Create, update, row.Steps);
             }
@@ -402,8 +488,8 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
         }
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)
         {
-            if (_bySub.TryGetValue(update.Subject, out var bucket)
-                && bucket.TryGetValue(update.PlanId, out var row))
+            if (_bySub.TryGetValue(update.Subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)
+                && bucket.TryGetValue(update.PlanId, out (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps) row))
             {
                 row.Steps[update.StepId] = update;
             }
@@ -413,9 +499,12 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
             => Task.FromResult<IReadOnlyList<PlanSummaryDto>>([]);
         public Task<PlanDetailDto?> GetPlanAsync(string subject, string planId, CancellationToken ct = default)
         {
-            if (!_bySub.TryGetValue(subject, out var bucket)
-                || !bucket.TryGetValue(planId, out var row))
+            if (!_bySub.TryGetValue(subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)
+                || !bucket.TryGetValue(planId, out (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps) row))
+            {
                 return Task.FromResult<PlanDetailDto?>(null);
+            }
+
             string status = row.Status?.Status ?? row.Create.Status;
             string? failureReason = row.Status?.FailureReason;
             return Task.FromResult<PlanDetailDto?>(new PlanDetailDto(

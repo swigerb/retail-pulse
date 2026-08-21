@@ -582,7 +582,7 @@ public sealed class PlanReviewCompletionService
             ITenantProvider tenantProvider = sp.GetRequiredService<ITenantProvider>();
 
             int totalTokens = outcome.Steps.Sum(s => s.TotalTokens);
-            TimeSpan duration = TimeSpan.FromMilliseconds(outcome.DurationMs);
+            var duration = TimeSpan.FromMilliseconds(outcome.DurationMs);
 
             await auditLog.LogAsync(new AuditEntry(
                 Guid.NewGuid().ToString("N"),

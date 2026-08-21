@@ -246,16 +246,14 @@ public sealed class PlanReviewCoordinator
                     IReadOnlyList<PlanReviewStepDto> edited =
                         payload.EditedSteps ?? input.CurrentSteps;
                     string? invalid = ValidateEditedSteps(edited, input.SpecialistKeys);
-                    if (invalid is not null)
-                    {
-                        return PlanReviewContinuation.Terminal(
+                    return invalid is not null
+                        ? PlanReviewContinuation.Terminal(
                             invalid,
                             invalid == PlanReviewTerminalReason.EditedToEmpty
                                 ? "Reviewer dropped every step."
                                 : "Reviewer edit referenced an unknown specialist or missing action.",
-                            input.RoundNumber);
-                    }
-                    return PlanReviewContinuation.Approved(
+                            input.RoundNumber)
+                        : PlanReviewContinuation.Approved(
                         edited,
                         PlanReviewTerminalReason.ReviewerEdited,
                         input.RoundNumber);

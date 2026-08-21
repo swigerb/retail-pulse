@@ -56,7 +56,7 @@ public sealed class PlanReviewRestartRecoveryService : IHostedService
                 if (string.IsNullOrWhiteSpace(r.Context.PlanId))
                     continue;
 
-                (string PlanId, string Subject) key = (r.Context.PlanId!, r.Context.UserId);
+                (string PlanId, string Subject) key = (r.Context.PlanId, r.Context.UserId);
                 if (candidates.TryGetValue(key, out ApprovalRequest? existing))
                 {
                     if ((r.RespondedAt ?? r.CreatedAt) > (existing.RespondedAt ?? existing.CreatedAt))

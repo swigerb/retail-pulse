@@ -760,7 +760,7 @@ public sealed record PlanExecutionOutcome(
     /// treat the outcome as terminal — the resume path continues from the
     /// paused step after the reviewer answers.
     /// </summary>
-    public Approval.PlanClarificationHandle? ClarificationHandle { get; init; }
+    public PlanClarificationHandle? ClarificationHandle { get; init; }
 
     /// <summary>
     /// Set when the executor paused a plan for a mid-execution replan
@@ -768,7 +768,7 @@ public sealed record PlanExecutionOutcome(
     /// <c>PlanStatus.AwaitingReview</c> and a new plan-review round is
     /// waiting for the reviewer.
     /// </summary>
-    public Approval.PlanReviewRoundHandle? ReviewHandle { get; init; }
+    public PlanReviewRoundHandle? ReviewHandle { get; init; }
 }
 
 /// <summary>Per-step transcript captured during workflow execution.</summary>

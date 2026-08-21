@@ -72,7 +72,7 @@ public sealed class PlanReviewCheckpointService
         JsonElement value = JsonSerializer.SerializeToElement(state, _jsonOptions);
         string sessionId = SessionIdFor(state.PlanId);
         CheckpointInfo info = await _store
-            .CreateCheckpointAsync(sessionId, value, parent: null!)
+            .CreateCheckpointAsync(sessionId, value, parent: null)
             .ConfigureAwait(false);
 
         _logger.LogInformation(

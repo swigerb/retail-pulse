@@ -41,7 +41,7 @@ public sealed class PlanReviewTimeoutBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        TimeSpan tick = TimeSpan.FromSeconds(15);
+        var tick = TimeSpan.FromSeconds(15);
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -101,7 +101,7 @@ public sealed class PlanReviewTimeoutBackgroundService : BackgroundService
 
                 if (!string.IsNullOrWhiteSpace(row.Context.PlanId))
                 {
-                    await completion.ResolveAsync(row.Context.PlanId!, subject, ct);
+                    await completion.ResolveAsync(row.Context.PlanId, subject, ct);
                 }
             }
         }

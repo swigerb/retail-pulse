@@ -1,5 +1,7 @@
+using System.Text.Json;
 using System.Threading.RateLimiting;
 using Asp.Versioning;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -105,7 +107,7 @@ builder.Services.AddOpenTelemetry()
 
 // SignalR for real-time telemetry
 builder.Services.AddSignalR()
-    .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
+    .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
 
 // Session-ownership registry — binds a chat sessionId to its owning subject so the hubs can refuse
 // a caller that tries to join another subject's session group (Finding 6). Consulted only for
@@ -1179,13 +1181,13 @@ if (planReviewOptsAtRegistration.Enabled)
     // needed because our PlanReviewCheckpointService calls
     // ICheckpointStore.CreateCheckpointAsync (real write path) and
     // CheckpointManager.GetLatestCheckpointAsync (read helper).
-    builder.Services.AddSingleton<Microsoft.Agents.AI.Workflows.Checkpointing.ICheckpointStore<System.Text.Json.JsonElement>>(_ =>
-        new Microsoft.Agents.AI.Workflows.Checkpointing.FileSystemJsonCheckpointStore(
+    builder.Services.AddSingleton<ICheckpointStore<JsonElement>>(_ =>
+        new FileSystemJsonCheckpointStore(
             new DirectoryInfo(reviewCheckpointDir)));
     builder.Services.AddSingleton(sp =>
     {
-        var store = sp.GetRequiredService<
-            Microsoft.Agents.AI.Workflows.Checkpointing.ICheckpointStore<System.Text.Json.JsonElement>>();
+        ICheckpointStore<JsonElement> store = sp.GetRequiredService<
+            ICheckpointStore<JsonElement>>();
         return Microsoft.Agents.AI.Workflows.CheckpointManager.CreateJson(store, customOptions: null);
     });
     builder.Services.AddSingleton<PlanReviewCheckpointService>();

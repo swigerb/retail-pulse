@@ -138,7 +138,7 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
     {
         FileSystemJsonCheckpointStore store =
             new(new DirectoryInfo(_checkpointDir));
-        CheckpointManager manager = CheckpointManager.CreateJson(store, customOptions: null);
+        var manager = CheckpointManager.CreateJson(store, customOptions: null);
         return new PlanReviewCheckpointService(store, manager, NullLogger<PlanReviewCheckpointService>.Instance);
     }
 
@@ -220,11 +220,11 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
         // Real framework checkpoint written for this plan.
         PlanReviewCheckpointState? loaded = await checkpoints.LoadLatestAsync(result.PlanId, CancellationToken.None);
         loaded.Should().NotBeNull();
-        loaded!.Kind.Should().Be(PlanCheckpointKind.Review);
+        loaded.Kind.Should().Be(PlanCheckpointKind.Review);
         loaded.PlanId.Should().Be(result.PlanId);
         loaded.RoundNumber.Should().Be(0);
         loaded.Steps.Should().HaveCount(2);
-        loaded.SpecialistKeys.Should().BeEquivalentTo(new[] { "scorecard", "demand-forecasting" });
+        loaded.SpecialistKeys.Should().BeEquivalentTo(["scorecard", "demand-forecasting"]);
     }
 
     // ── Reject-with-cap → no specialist invocation, terminal Failed row ─
@@ -337,16 +337,5 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
 
         store.Creates.Single().Status.Should().Be(PlanStatus.Running,
             "disabled path skips AwaitingReview entirely.");
-    }
-
-    private static async Task<ApprovalRequest> WaitForPending(SqliteApprovalGate gate, string subject)
-    {
-        for (int i = 0; i < 400; i++)
-        {
-            IReadOnlyList<ApprovalRequest> pending = await gate.GetPendingAsync(subject);
-            if (pending.Count > 0) return pending[^1];
-            await Task.Delay(10);
-        }
-        throw new InvalidOperationException("Timed out waiting for pending row.");
     }
 }

@@ -64,7 +64,7 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
     {
         FileSystemJsonCheckpointStore store =
             new(new DirectoryInfo(_checkpointDir));
-        CheckpointManager manager = CheckpointManager.CreateJson(store, customOptions: null);
+        var manager = CheckpointManager.CreateJson(store, customOptions: null);
         return new PlanReviewCheckpointService(store, manager, Mock.Of<ILogger<PlanReviewCheckpointService>>());
     }
 
