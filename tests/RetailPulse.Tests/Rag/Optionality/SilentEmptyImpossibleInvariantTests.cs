@@ -10,7 +10,7 @@ namespace RetailPulse.Tests.Rag.Optionality;
 
 /// <summary>
 /// Property-style invariant for issue #107: the platform NEVER returns a
-/// silent empty result set from <see cref="DegradingKnowledgeBase.SearchAsync(string, int, System.Threading.CancellationToken)"/>
+/// silent empty result set from <see cref="DegradingKnowledgeBase.SearchAsync(string, int, CancellationToken)"/>
 /// as a consequence of a provider outage - because a silent empty would
 /// produce a confident ungrounded answer.
 ///
@@ -121,8 +121,8 @@ public sealed class SilentEmptyImpossibleInvariantTests
         // An empty result from a healthy provider IS legitimate - the corpus
         // really has nothing for the query. The decorator must pass it through
         // unchanged (not attempt a fallback and not conflate it with an outage).
-        var primary = CreateInMemoryFallback();
-        var fallback = CreateInMemoryFallback();
+        InMemoryKnowledgeBase primary = CreateInMemoryFallback();
+        InMemoryKnowledgeBase fallback = CreateInMemoryFallback();
         await fallback.IngestDocumentAsync(
             "Never-Reached Doc",
             "Content only reachable via the fallback bucket.",
@@ -138,7 +138,7 @@ public sealed class SilentEmptyImpossibleInvariantTests
     }
 
     /// <summary>
-    /// Passes <see cref="IKnowledgeBase.ProbeAsync(System.Threading.CancellationToken)"/>
+    /// Passes <see cref="IKnowledgeBase.ProbeAsync(CancellationToken)"/>
     /// but throws <see cref="KnowledgeProviderUnavailableException"/> on the
     /// data plane. Used to exercise the query-time fallback branch that isn't
     /// reachable from <see cref="UnreachableTestKnowledgeBase"/> (whose probe

@@ -7,10 +7,10 @@ using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Guardrails.ContentSafety;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Rag.FoundryIQ;
-using RetailPulse.Tests.Guardrails.ContentSafety;
-using RetailPulse.Tests.Rag.FoundryIQ;
 using RetailPulse.Contracts.Guardrails;
 using RetailPulse.Contracts.Rag;
+using RetailPulse.Tests.Guardrails.ContentSafety;
+using RetailPulse.Tests.Rag.FoundryIQ;
 
 namespace RetailPulse.Tests.Rag.Security;
 

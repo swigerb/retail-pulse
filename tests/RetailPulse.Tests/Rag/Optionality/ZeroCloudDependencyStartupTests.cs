@@ -1,8 +1,8 @@
+using Azure.AI.Agents.Persistent;
+using Azure.AI.ContentSafety;
 using Azure.Core;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
-using Azure.AI.ContentSafety;
-using Azure.AI.Agents.Persistent;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

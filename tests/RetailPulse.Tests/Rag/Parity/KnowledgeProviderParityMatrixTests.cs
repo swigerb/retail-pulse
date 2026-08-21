@@ -5,8 +5,8 @@ using Microsoft.Extensions.Options;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Rag.FoundryIQ;
-using RetailPulse.Tests.Rag.FoundryIQ;
 using RetailPulse.Contracts.Rag;
+using RetailPulse.Tests.Rag.FoundryIQ;
 
 namespace RetailPulse.Tests.Rag.Parity;
 
