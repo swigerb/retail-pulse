@@ -496,9 +496,16 @@ public sealed class PlanExecutor
 
         EmitStepSpan(execution, stepIndex, stepId, planned, status, stepStart, sw, input, output);
 
+        // Forward the specialist's Charts verbatim (see PlanStepResult.Charts):
+        // the plan-first path must not silently drop specialist charts.
         return new PlanStepResult(
             stepIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
-            status, response?.Reply ?? "", error, input, output, total, sw.ElapsedMilliseconds);
+            status, response?.Reply ?? "", error, input, output, total, sw.ElapsedMilliseconds)
+        {
+            Charts = response?.Charts is { Count: > 0 } charts
+                ? [.. charts]
+                : null,
+        };
     }
 
     private void EmitPlanSpan(
@@ -784,7 +791,20 @@ public sealed record PlanStepResult(
     int InputTokens,
     int OutputTokens,
     int TotalTokens,
-    long DurationMs);
+    long DurationMs)
+{
+    /// <summary>
+    /// Charts emitted by the specialist for this step, forwarded verbatim so
+    /// the plan path preserves the fast-path invariant that a
+    /// <see cref="ChartSpec"/> produced by a specialist reaches the
+    /// client. Prior to this addition the plan orchestrator dropped charts
+    /// silently — every specialist chart on a plan turn was lost — so the
+    /// "all 9 chart types from both paths" acceptance gate in #97 was
+    /// unenforceable. Kept as an init-only optional so existing positional
+    /// <c>new PlanStepResult(...)</c> constructions in tests keep compiling.
+    /// </summary>
+    public IReadOnlyList<ChartSpec>? Charts { get; init; }
+}
 
 /// <summary>Message carried between step executors on the workflow bus.</summary>
 public sealed record PlanStepMessage(

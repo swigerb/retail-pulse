@@ -61,4 +61,34 @@ public class LoadTestRunner
             (scenarioStats.Ok.Request.Count + scenarioStats.Fail.Request.Count) * 100;
         successRate.Should().BeGreaterThan(99.9, "Health check success rate must exceed 99.9%");
     }
+
+    /// <summary>
+    /// Wave 2 QA sweep (#97) SLA guard for the plan-first path. Plans are
+    /// strictly more expensive than the fast path (planner + executor +
+    /// synthesis) so the p95 budget is doubled while success-rate remains at
+    /// the same 95% floor. The scenario is deterministic (fixed multi-domain
+    /// prompt + <c>forceExecutionPath=plan</c>) so a repeat run establishes
+    /// a comparable baseline across releases.
+    /// </summary>
+    [Fact(Skip = "Load tests require a running API instance — run via run-load-tests.ps1")]
+    public void PlanPathChatEndpoint_MeetsLatencySla()
+    {
+        ScenarioProps scenario = PlanPathChatEndpointScenario.Create();
+
+        NodeStats stats = NBomberRunner
+            .RegisterScenarios(scenario)
+            .WithReportFolder("./load-test-reports")
+            .Run();
+
+        ScenarioStats scenarioStats = stats.ScenarioStats[0];
+
+        // p95 < 10 seconds for the plan path — twice the fast-path budget to
+        // account for planner + executor + synthesis.
+        scenarioStats.Ok.Latency.Percent95.Should().BeLessThan(10_000,
+            "Plan-path chat endpoint p95 latency must be under 10 seconds.");
+
+        double successRate = (double)scenarioStats.Ok.Request.Count /
+            (scenarioStats.Ok.Request.Count + scenarioStats.Fail.Request.Count) * 100;
+        successRate.Should().BeGreaterThan(95, "Plan-path chat endpoint success rate must exceed 95%.");
+    }
 }

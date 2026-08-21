@@ -17,10 +17,14 @@ using Microsoft.Extensions.Options;
 using Moq;
 using RetailPulse.Api.Approval;
 using RetailPulse.Api.Endpoints;
+using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Hubs;
+using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Security.Anonymous;
+using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
+using RetailPulse.Contracts.Guardrails;
 using RetailPulse.Contracts.Persistence;
 
 namespace RetailPulse.Tests.Endpoints;
@@ -204,6 +208,21 @@ public sealed class PlanReviewEndpointsAuthorizationTests
             builder.Services.AddSingleton(gate);
             builder.Services.AddSingleton<IApprovalGate>(_ => gate);
 
+            // GuardrailsMiddleware is required by the plan-review decision
+            // endpoint's edit-injection scan. Register a permissive-input
+            // config so approve/reject cases (no edit) traverse the endpoint
+            // unchanged; edit-injection tests supply their own host with a
+            // hostile-input config.
+            builder.Services.AddSingleton(new GuardrailsConfig
+            {
+                JailbreakDetectionEnabled = false,
+                PiiDetectionEnabled = false,
+                ContentSafety = new ContentSafetyConfig { Enabled = false },
+            });
+            builder.Services.AddSingleton<ISuspiciousRequestLog, InMemorySuspiciousRequestLog>();
+            builder.Services.AddSingleton<ITenantProvider>(new StubTenantProvider());
+            builder.Services.AddSingleton<GuardrailsMiddleware>();
+
             var plans = new InMemoryPlanStore();
             // Both Alice and Bob "own" a plan with the seeded id from their
             // own perspective so we can test cross-subject rejection at the
@@ -335,5 +354,14 @@ public sealed class PlanReviewEndpointsAuthorizationTests
 
         public Task<PlanCleanupResult> PurgeExpiredAsync(DateTimeOffset olderThan, CancellationToken ct = default)
             => Task.FromResult(new PlanCleanupResult(0, 0));
+    }
+
+    private sealed class StubTenantProvider : ITenantProvider
+    {
+        public TenantConfiguration GetTenant() => new()
+        {
+            Company = "Contoso",
+            Industry = "test",
+        };
     }
 }

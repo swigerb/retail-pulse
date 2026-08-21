@@ -401,6 +401,16 @@ public sealed record PlanOrchestrationResult(
     public int? ReviewRoundNumber { get; init; }
 
     /// <summary>
+    /// Charts collected across every completed plan step, preserving specialist
+    /// order. Non-empty only when at least one specialist emitted a chart; the
+    /// endpoint returns this list on the plan-first branch so ADR-006's "9 chart
+    /// types render on both paths" acceptance stays enforced when a plan is the
+    /// caller's execution path.
+    /// </summary>
+    public IReadOnlyList<ChartSpec> Charts =>
+        [.. Steps.SelectMany(s => s.Charts ?? [])];
+
+    /// <summary>
     /// True when the caller should return HTTP 202 with a pending payload
     /// instead of the standard 200 chat response.
     /// </summary>
