@@ -30,7 +30,7 @@ public sealed class HubHeartbeatBackgroundServiceTests
         (Mock<IHubContext<TelemetryHub>> telemetry, Mock<IClientProxy> telemetryProxy) = NewHub<TelemetryHub>();
         (Mock<IHubContext<StreamingHub>> streaming, Mock<IClientProxy> streamingProxy) = NewHub<StreamingHub>();
 
-        var options = Options.Create(new RealtimeResilienceOptions
+        IOptions<RealtimeResilienceOptions> options = Options.Create(new RealtimeResilienceOptions
         {
             KeepAliveInterval = TimeSpan.FromSeconds(15),
             ClientTimeoutInterval = TimeSpan.FromSeconds(30),
@@ -61,10 +61,10 @@ public sealed class HubHeartbeatBackgroundServiceTests
     [Fact]
     public async Task ExecuteAsync_EmitsAtConfiguredInterval()
     {
-        (Mock<IHubContext<TelemetryHub>> telemetry, Mock<IClientProxy> telemetryProxy) = NewHub<TelemetryHub>();
-        (Mock<IHubContext<StreamingHub>> streaming, Mock<IClientProxy> streamingProxy) = NewHub<StreamingHub>();
+        (Mock<IHubContext<TelemetryHub>> telemetry, _) = NewHub<TelemetryHub>();
+        (Mock<IHubContext<StreamingHub>> streaming, _) = NewHub<StreamingHub>();
 
-        var options = Options.Create(new RealtimeResilienceOptions
+        IOptions<RealtimeResilienceOptions> options = Options.Create(new RealtimeResilienceOptions
         {
             ApplicationHeartbeatInterval = TimeSpan.FromMilliseconds(40),
             ApplicationHeartbeatEnabled = true,
@@ -97,7 +97,7 @@ public sealed class HubHeartbeatBackgroundServiceTests
         (Mock<IHubContext<TelemetryHub>> telemetry, Mock<IClientProxy> telemetryProxy) = NewHub<TelemetryHub>();
         (Mock<IHubContext<StreamingHub>> streaming, Mock<IClientProxy> streamingProxy) = NewHub<StreamingHub>();
 
-        var options = Options.Create(new RealtimeResilienceOptions
+        IOptions<RealtimeResilienceOptions> options = Options.Create(new RealtimeResilienceOptions
         {
             ApplicationHeartbeatInterval = TimeSpan.FromMilliseconds(20),
             ApplicationHeartbeatEnabled = false,

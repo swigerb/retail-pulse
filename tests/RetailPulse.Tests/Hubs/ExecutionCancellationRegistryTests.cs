@@ -91,7 +91,7 @@ public sealed class ExecutionCancellationRegistryTests
         int loopIterations = 0;
         bool observedCancellation = false;
 
-        Task toolTask = Task.Run(async () =>
+        var toolTask = Task.Run(async () =>
         {
             try
             {

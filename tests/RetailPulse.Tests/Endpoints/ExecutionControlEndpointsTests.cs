@@ -54,7 +54,7 @@ public sealed class ExecutionControlEndpointsTests
         int toolIterations = 0;
         bool toolCancelled = false;
 
-        Task toolTask = Task.Run(async () =>
+        var toolTask = Task.Run(async () =>
         {
             try
             {
@@ -276,20 +276,12 @@ public sealed class ExecutionControlEndpointsTests
     {
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
-            List<Claim> claims;
-            if (cfg.AsAnonymousProvider)
-            {
-                claims =
-                [
+            List<Claim> claims = cfg.AsAnonymousProvider
+                ? [
                     new Claim(AnonymousCapabilityPolicy.ProviderClaimType, AnonymousCapabilityPolicy.ProviderName),
                     new Claim("sub", cfg.Subject),
-                ];
-            }
-            else
-            {
-                claims = [new Claim("oid", cfg.Subject)];
-            }
-
+                ]
+                : [new Claim("oid", cfg.Subject)];
             var identity = new ClaimsIdentity(claims, "Test");
             var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), "Test");
             return Task.FromResult(AuthenticateResult.Success(ticket));
