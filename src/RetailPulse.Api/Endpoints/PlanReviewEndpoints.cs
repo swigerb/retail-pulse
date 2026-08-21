@@ -4,8 +4,10 @@ using Microsoft.AspNetCore.SignalR;
 using RetailPulse.Api.Approval;
 using RetailPulse.Api.Auth;
 using RetailPulse.Api.Hubs;
+using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Security.Anonymous;
+using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 
 namespace RetailPulse.Api.Endpoints;
@@ -71,6 +73,7 @@ public static class PlanReviewEndpoints
             IHubContext<TelemetryHub> hubContext,
             HttpContext http,
             [FromServices] PlanReviewCompletionService? completion,
+            [FromServices] GuardrailsMiddleware guardrails,
             CancellationToken ct) =>
         {
             if (RefuseAnonymous(http, out IResult? refusal))
@@ -113,6 +116,40 @@ public static class PlanReviewEndpoints
                 = ClassifyDecision(body);
             if (invalid is not null)
                 return Results.BadRequest(new { error = invalid });
+
+            // Guardrail-scan reviewer edits (#97): every edited step's Action is
+            // user-supplied free-form text that reaches a specialist verbatim
+            // during resume. The initial /api/chat call runs the raw prompt
+            // through GuardrailsMiddleware.CheckInputAsync, but the edit path
+            // did not — a reviewer could inject a jailbreak/prompt-override
+            // instruction through the edit field and bypass the input
+            // guardrails entirely. Run each action through the same input
+            // gate; on block, refuse the decision without ever calling
+            // RespondAsync so no approval row transitions to "modified" from
+            // a blocked edit.
+            if (editedSteps is { Count: > 0 })
+            {
+                foreach (PlanReviewStepDto step in editedSteps)
+                {
+                    string action = step.Action ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(action)) continue;
+                    var probe = new ChatRequest(
+                        Message: action,
+                        SessionId: row.Context.SessionId,
+                        User: new UserContext(subject, subject, string.Empty));
+                    GuardrailResult guardrailResult = await guardrails.CheckInputAsync(probe, ct);
+                    if (guardrailResult.IsBlocked)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            error = "Edited step action was blocked by input guardrails.",
+                            code = "plan_review_edit_blocked",
+                            specialistKey = step.SpecialistKey,
+                            refusal = guardrailResult.RefusalMessage,
+                        });
+                    }
+                }
+            }
 
             var payload = new PlanReviewResponsePayload
             {
