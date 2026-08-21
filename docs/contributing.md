@@ -5,18 +5,53 @@ the repo. The [README](../README.md#quick-start) covers the runtime
 prerequisites (.NET 10 SDK, Node.js 20+, OpenAI credentials); this doc covers
 the developer ergonomics that keep pull requests healthy.
 
-## Pre-commit formatting hook
+## Pre-commit and pre-push formatting hooks
 
-Retail Pulse ships a versioned pre-commit hook under [`.githooks/`](../.githooks)
-that runs the same `dotnet format --verify-no-changes` check the CI `lint` job
-enforces (see [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)). The
-CI job remains the authority; the hook is an early warning that catches
-mechanical problems locally so a review round-trip is not spent on them.
+Retail Pulse ships two versioned Git hooks under
+[`.githooks/`](../.githooks). Together they mirror what the CI `lint` job
+enforces (see [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) so a
+review round-trip is not spent on mechanical formatting problems. The CI
+`Lint (dotnet format)` job remains the authority; the hooks are the early
+warning.
+
+| Hook | Scope | Typical runtime | Purpose |
+|------|-------|-----------------|---------|
+| `pre-commit` | staged `.cs` files (`dotnet format --include ...`) | ~6-8s | Fast per-commit gate; catches most drift at the point of edit. |
+| `pre-push`   | whole solution (`dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic`) | ~30-40s | Same command CI runs; catches whole-solution diagnostics (import ordering, cross-file analyzer warnings) before the push leaves your machine. |
+
+Timings above were measured on a warm developer workstation against the
+current solution; first invocations are slower while the analyzer cache
+warms.
+
+### Why two hooks
+
+`dotnet format --include <staged files>` scopes the analysis to the files
+staged for that commit. This is deliberately fast but structurally
+incomplete versus the CI job, which passes no `--include` and analyses the
+whole compilation. Two classes of diagnostic slip through a staged-only
+run:
+
+1. **Whole-solution style analyzers** (e.g. import ordering, some
+   `IDE00xx` diagnostics) inspect the full compilation. Their verdict on
+   any one file can depend on symbols defined in another. A `--include`
+   run may skip the diagnostic on files it does not touch.
+2. **Commits that stage no `.cs` files** (docs-only, workflow YAML,
+   configuration text) short-circuit the pre-commit hook, but CI still
+   runs the full-solution formatter on the pushed content. Any latent
+   drift already on your branch survives to CI.
+
+The pre-push hook runs the exact CI command against the push range and
+closes both gaps in one place: it fires at most once per push regardless
+of how many commits the push contains, and it fires whether or not the
+individual commits touched `.cs` files, as long as any commit in the push
+range touches C#, `.csproj`, `.props`, `.targets`, `.editorconfig`,
+`RetailPulse.slnx`, `global.json`, or `Directory.*.props`. Pushes that
+touch none of those (docs-only) skip the check.
 
 ### One-time setup after cloning
 
 Hooks are not enabled by `git clone`. Run **one** of the following once per
-clone:
+clone to install both the pre-commit and pre-push hooks:
 
 ```powershell
 # Windows / PowerShell
@@ -41,7 +76,9 @@ git config --get core.hooksPath
 # expected output: .githooks
 ```
 
-### What the hook does
+### What each hook does
+
+#### `pre-commit`
 
 On every `git commit` it:
 
@@ -57,10 +94,45 @@ diagnostics are printed. If no `.cs` files are staged (docs, infra text,
 config), the hook exits cleanly without invoking the formatter. If `dotnet` is
 not on PATH the hook skips with a warning; CI still enforces.
 
+#### `pre-push`
+
+On every `git push` it:
+
+1. Walks the ranges being pushed (one per ref). Ref deletions and pushes
+   whose commits touch no C# / build-graph files skip the check.
+2. First-time pushes of a new branch always run the check — a new branch
+   is a legitimate moment to verify the full solution.
+3. Runs `dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic` — byte-for-byte the CI command.
+
+If the formatter finds violations, the push is blocked and the diagnostics
+are printed. If `dotnet` is not on PATH the hook skips with a warning; CI
+still enforces.
+
+### What the hooks guarantee
+
+If the applicable hook set completes without error and you do not pass
+`--no-verify`, the CI `Lint (dotnet format)` job will pass on the same
+commits. The pre-push hook is what makes that guarantee true in every
+case, because it runs the exact CI command against the whole solution;
+the pre-commit hook is a fast partial gate on top of it.
+
+The guarantee has three explicit boundaries. Documenting them here rather
+than implying a stronger promise:
+
+- **Bypass**: `git commit --no-verify` and `git push --no-verify` skip
+  the hooks by design. CI will still enforce.
+- **SDK drift**: your local `dotnet` SDK may resolve a different analyzer
+  version than CI's `setup-dotnet`. When that happens the two verdicts can
+  disagree; CI is authoritative.
+- **PATH**: if `dotnet` is not on PATH when a hook runs, the hook exits 0
+  with a warning rather than blocking the workflow, because a working
+  install cannot be assumed. CI still enforces.
+
 ### Bypass
 
 ```bash
 git commit --no-verify
+git push   --no-verify
 ```
 
 Legitimate reasons to bypass:
@@ -109,5 +181,6 @@ Then `git add` and commit again.
 |---------|-----|
 | Hook did not run | `git config --get core.hooksPath` — must print `.githooks`. Re-run the setup script. |
 | Hook runs but is slow on huge commits | Scoping is already applied; the first invocation warms the analyzer cache. Subsequent commits reuse it. Bypass with `--no-verify` for genuinely oversized commits. |
+| Pre-push takes ~30-40s | Expected — it runs the same whole-solution formatter CI runs. Bypass with `git push --no-verify` for genuinely emergency pushes; CI still enforces. |
 | `dotnet` not on PATH | Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or bypass with `--no-verify`; CI enforces on push. |
 | Formatter flags `ENDOFLINE` after a normalization pass | The working tree has real unstaged edits with CRLF. Convert to LF (see above) and re-stage. |
