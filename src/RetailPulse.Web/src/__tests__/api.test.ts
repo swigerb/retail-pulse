@@ -71,6 +71,95 @@ describe('api.sendMessage', () => {
     }));
   });
 
+  it('omits forceExecutionPath from the body when not provided (issue #95 Auto default)', async () => {
+    let captured: RequestInit | undefined;
+    globalThis.fetch = vi.fn().mockImplementation(
+      (_input: unknown, init?: RequestInit) => {
+        captured = init;
+        return Promise.resolve(
+          new Response(JSON.stringify({ reply: 'ok', sessionId: 's', spans: [] }), { status: 200 })
+        );
+      }
+    ) as unknown as typeof fetch;
+
+    await sendMessage({ message: 'hi', sessionId: 's' });
+
+    // Auto (the default) never sends the field so the payload is
+    // byte-identical to pre-#95 requests. This preserves today's fast-path
+    // UX for the common case.
+    expect(captured?.body).toBe(JSON.stringify({ message: 'hi', sessionId: 's' }));
+    expect((captured?.body as string) ?? '').not.toContain('forceExecutionPath');
+  });
+
+  it.each([
+    ['fast' as const],
+    ['plan' as const],
+  ])('serializes forceExecutionPath=%s when the caller forces the path', async (path) => {
+    let captured: RequestInit | undefined;
+    globalThis.fetch = vi.fn().mockImplementation(
+      (_input: unknown, init?: RequestInit) => {
+        captured = init;
+        return Promise.resolve(
+          new Response(JSON.stringify({ reply: 'ok', sessionId: 's', spans: [] }), { status: 200 })
+        );
+      }
+    ) as unknown as typeof fetch;
+
+    await sendMessage({ message: 'hi', sessionId: 's', forceExecutionPath: path });
+
+    expect(captured?.body).toBe(
+      JSON.stringify({ message: 'hi', sessionId: 's', forceExecutionPath: path }),
+    );
+  });
+
+  it('parses executionPath + executionPathForced on the routing payload (issue #95)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: 'ok',
+          sessionId: 's',
+          spans: [],
+          routing: {
+            agentKey: 'demand-forecasting',
+            agentName: 'Demand Agent',
+            intent: 'demand/forecasting',
+            confidence: 0.91,
+            executionPath: 'plan',
+            executionPathForced: true,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const result = await sendMessage({ message: 'hi' });
+
+    expect(result.routing?.executionPath).toBe('plan');
+    expect(result.routing?.executionPathForced).toBe(true);
+  });
+
+  it('rejects a routing payload with an unknown executionPath value', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: 'ok',
+          sessionId: 's',
+          spans: [],
+          routing: {
+            agentKey: 'x',
+            agentName: 'x',
+            intent: 'demand/x',
+            confidence: 0.9,
+            executionPath: 'nope',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    ) as unknown as typeof fetch;
+
+    await expect(sendMessage({ message: 'hi' })).rejects.toThrow(/malformed/i);
+  });
+
   it('uses the configured direct ACA origin for long-running chat', async () => {
     vi.stubEnv('VITE_API_ORIGIN', 'https://api.example.test');
     globalThis.fetch = vi.fn().mockResolvedValue(

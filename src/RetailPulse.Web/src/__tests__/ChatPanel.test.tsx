@@ -19,6 +19,13 @@ vi.mock('../services/telemetryHub', () => ({
   onProgress: vi.fn(() => () => {}),
 }));
 
+// activeAuthMode drives whether the execution-path selector is rendered.
+// Default to `entra` (privileged mode) so the selector is present; the
+// anonymous-mode test overrides the value via vi.doMock before importing.
+vi.mock('../auth/activeProvider', () => ({
+  activeAuthMode: 'entra',
+}));
+
 // ChartRenderer is lazy-loaded; mock so Suspense resolves synchronously and
 // no Recharts work runs in the test env.
 vi.mock('../components/ChartRenderer', () => ({
@@ -90,9 +97,89 @@ describe('ChatPanel', () => {
     const [request] = sendMessageMock.mock.calls[0];
     expect(request).toMatchObject({ message: 'How are sales?' });
     expect(typeof request.sessionId).toBe('string');
+    // Auto is the default — the field must not appear on the wire so the
+    // fast-path UX is byte-identical for the common case.
+    expect(request).not.toHaveProperty('forceExecutionPath');
 
     // Assistant reply renders once the promise resolves.
     expect(await screen.findByText(/Sales were up 12% in Q1\./)).toBeInTheDocument();
+  });
+
+  it('exposes an Execution path selector defaulting to Auto', () => {
+    renderPanel();
+
+    const select = screen.getByTestId('execution-path-select') as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    expect(select).toHaveAccessibleName('Execution path');
+    expect(select.value).toBe('auto');
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['auto', 'fast', 'plan']);
+  });
+
+  it('includes forceExecutionPath when the user picks Fast', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({
+      reply: 'fast reply',
+      sessionId: 'sess-fast',
+      spans: [],
+      totalDurationMs: 10,
+    });
+
+    renderPanel();
+
+    await user.selectOptions(screen.getByTestId('execution-path-select'), 'fast');
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'quick check');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    expect(sendMessageMock.mock.calls[0][0]).toMatchObject({
+      message: 'quick check',
+      forceExecutionPath: 'fast',
+    });
+  });
+
+  it('includes forceExecutionPath when the user picks Plan', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({
+      reply: 'plan reply',
+      sessionId: 'sess-plan',
+      spans: [],
+      totalDurationMs: 10,
+    });
+
+    renderPanel();
+
+    await user.selectOptions(screen.getByTestId('execution-path-select'), 'plan');
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'compare regions');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    expect(sendMessageMock.mock.calls[0][0]).toMatchObject({
+      message: 'compare regions',
+      forceExecutionPath: 'plan',
+    });
+  });
+
+  it('drops back to Auto (omits the field) after switching Plan → Auto', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({
+      reply: 'ok',
+      sessionId: 'sess-toggle',
+      spans: [],
+      totalDurationMs: 10,
+    });
+
+    renderPanel();
+
+    const select = screen.getByTestId('execution-path-select');
+    await user.selectOptions(select, 'plan');
+    await user.selectOptions(select, 'auto');
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'default now');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    const [request] = sendMessageMock.mock.calls[0];
+    expect(request).toMatchObject({ message: 'default now' });
+    expect(request).not.toHaveProperty('forceExecutionPath');
   });
 
   it('keeps the Prompt ideas library control available before and after a message is sent', async () => {

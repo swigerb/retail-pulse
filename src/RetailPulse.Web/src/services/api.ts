@@ -26,12 +26,34 @@ async function parseErrorBody(res: Response): Promise<string> {
 function isRoutingInfo(value: unknown): value is RoutingInfo {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
-  return (
-    typeof v.agentKey === 'string' &&
-    typeof v.agentName === 'string' &&
-    typeof v.intent === 'string' &&
-    typeof v.confidence === 'number'
-  );
+  if (
+    typeof v.agentKey !== 'string' ||
+    typeof v.agentName !== 'string' ||
+    typeof v.intent !== 'string' ||
+    typeof v.confidence !== 'number'
+  ) {
+    return false;
+  }
+  // Hybrid execution fields (issue #95). Optional, but reject wrong-typed
+  // values instead of silently coercing — the UI relies on the type to
+  // decide when to render the path badge / forced indicator.
+  if (v.executionPath !== undefined && v.executionPath !== null) {
+    if (
+      v.executionPath !== 'fast' &&
+      v.executionPath !== 'plan' &&
+      v.executionPath !== 'council'
+    ) {
+      return false;
+    }
+  }
+  if (
+    v.executionPathForced !== undefined &&
+    v.executionPathForced !== null &&
+    typeof v.executionPathForced !== 'boolean'
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function isChatResponse(value: unknown): value is ChatResponse {
