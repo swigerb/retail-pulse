@@ -27,7 +27,7 @@ import { BlockedRequestMessage, WithheldOutputMessage } from './guardrails';
 import { detectSafetyRefusal } from '../utils/safetyDisplay';
 import type { SafetyBlockDisplayModel } from '../types';
 import { PromptLibrary } from './PromptLibrary';
-import { PROMPT_CATEGORIES } from '../constants/prompts';
+import { PROMPT_CATEGORIES, type PromptCategory } from '../constants/prompts';
 import { sanitizeMessage } from '../utils';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
@@ -51,6 +51,14 @@ interface ChatPanelProps {
   onResponseReceived?: (response: { totalDurationMs?: number; tokenUsage?: TokenUsage; routing?: RoutingInfo }) => void;
   approvals?: ApprovalRequest[];
   onApprovalResolved?: (id: string, decision: ApprovalDecision) => void;
+  /**
+   * Categories rendered in the welcome-state chip grid and the persistent
+   * Prompt Library popover. Defaults to the built-in `PROMPT_CATEGORIES`
+   * so the welcome state paints synchronously on the very first render,
+   * matching the pre-#108 baseline. Dashboard swaps in the active
+   * content pack's categories once `/api/pack/starting-tasks` resolves.
+   */
+  promptCategories?: ReadonlyArray<PromptCategory>;
 }
 
 const SPAN_ICONS: Record<string, string> = {
@@ -383,7 +391,12 @@ const useChatStyles = makeStyles({
   },
 });
 
-export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }: ChatPanelProps) {
+export function ChatPanel({
+  onResponseReceived,
+  approvals,
+  onApprovalResolved,
+  promptCategories = PROMPT_CATEGORIES,
+}: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -535,8 +548,8 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const visiblePrompts = selectedCategory
-    ? PROMPT_CATEGORIES.filter(c => c.id === selectedCategory)
-    : PROMPT_CATEGORIES;
+    ? promptCategories.filter(c => c.id === selectedCategory)
+    : promptCategories;
 
   return (
     <div className={styles.panel}>
@@ -561,7 +574,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
                 >
                   🏪 All
                 </button>
-                {PROMPT_CATEGORIES.map((cat) => (
+                {promptCategories.map((cat) => (
                   <button
                     key={cat.id}
                     className={`${styles.categoryChip} ${selectedCategory === cat.id ? styles.categoryChipActive : ''}`}
@@ -703,7 +716,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           Ask about retail performance
         </label>
         <PromptLibrary
-          categories={PROMPT_CATEGORIES}
+          categories={promptCategories}
           onSelect={handleSuggestedClick}
           disabled={loading}
         />
