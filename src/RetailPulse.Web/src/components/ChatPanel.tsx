@@ -30,6 +30,8 @@ import type { SafetyBlockDisplayModel } from '../types';
 import { PromptLibrary } from './PromptLibrary';
 import { PROMPT_CATEGORIES } from '../constants/prompts';
 import { sanitizeMessage } from '../utils';
+import { PlanView } from './plan';
+import type { PlanController } from '../state/usePlanController';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
 
@@ -46,12 +48,28 @@ interface ChatMessage {
   isStreaming?: boolean;
   cacheInfo?: CacheInfo;
   blocked?: { reason: string; suggestion?: string; display?: SafetyBlockDisplayModel };
+  /**
+   * When set, this message is a plan-first response — render the PlanView
+   * with matching planId in place of the plain reply. Fast-path (single-shot)
+   * responses NEVER carry planId, so their bubble stays exactly as today
+   * with no plan chrome.
+   */
+  planId?: string;
 }
 
 interface ChatPanelProps {
   onResponseReceived?: (response: { totalDurationMs?: number; tokenUsage?: TokenUsage; routing?: RoutingInfo }) => void;
   approvals?: ApprovalRequest[];
   onApprovalResolved?: (id: string, decision: ApprovalDecision) => void;
+  /**
+   * Optional plan controller supplied by the Dashboard. When provided,
+   * plan-first responses render the interactive PlanView inline instead of
+   * the plain markdown reply. Omitting it leaves the panel in the legacy
+   * "chat only" mode used by tests that mount ChatPanel in isolation.
+   */
+  planController?: PlanController;
+  /** Live SignalR connection status for the plan view banner. */
+  planConnected?: boolean;
 }
 
 const SPAN_ICONS: Record<string, string> = {
@@ -425,7 +443,7 @@ const useChatStyles = makeStyles({
   },
 });
 
-export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }: ChatPanelProps) {
+export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, planController, planConnected }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -522,7 +540,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
         // common case is byte-identical to the pre-#95 shape.
         const forceExecutionPath: ForceableExecutionPath | undefined =
           supportsExecutionPathOverride && forcePath !== 'auto' ? forcePath : undefined;
-        const response = await sendMessage(
+        const result = await sendMessage(
           {
             message: trimmed,
             sessionId,
@@ -532,6 +550,32 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           options,
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
+
+        // Plan review gate suspended the plan for reviewer input (#94/#96).
+        // We surface the plan bubble immediately so the user can see the
+        // proposed steps and drive the review. The reducer hydrates the
+        // real plan detail (steps, statuses) from GET /api/plans/{id}.
+        if (result.kind === 'suspended') {
+          const suspended = result.suspended;
+          if (planController) {
+            void planController.startPlan({
+              planId: suspended.planId,
+              sessionId: suspended.sessionId,
+              request: trimmed,
+            });
+          }
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'assistant' as const,
+              content: suspended.message ?? 'Plan awaiting review.',
+              planId: suspended.planId,
+            },
+          ]);
+          return;
+        }
+
+        const response = result.response;
         // When the backend returns a 200 OK but the reply is actually an
         // error (rate-limit, timeout), suppress routing/telemetry metadata
         // so users don't see misleading "Agent X — 78% confidence" badges.
@@ -545,6 +589,34 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
         // user sees a plain-language explanation without any internal
         // detection detail leaking through.
         const safetyDisplay = detectSafetyRefusal(response.reply);
+        // Plan-first (unsuspended) 200 responses carry
+        // routing.executionPath === 'plan'. Render the PlanView bubble
+        // instead of the raw markdown so step statuses, per-step charts,
+        // and the final aggregate reply all live in one surface.
+        const isPlanResponse =
+          response.routing?.executionPath === 'plan' && response.planId != null;
+        if (isPlanResponse && response.planId) {
+          const planId = response.planId;
+          if (planController) {
+            void planController.startPlan({
+              planId,
+              sessionId: response.sessionId,
+              request: trimmed,
+            });
+          }
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'assistant' as const,
+              content: response.reply,
+              routing: response.routing,
+              totalDurationMs: response.totalDurationMs,
+              tokenUsage: response.tokenUsage,
+              planId,
+            },
+          ]);
+          return;
+        }
         setMessages(prev => [
           ...prev,
           safetyDisplay
@@ -575,7 +647,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
         }
       }
     },
-    [sessionId, forcePath, supportsExecutionPathOverride],
+    [sessionId, forcePath, supportsExecutionPathOverride, planController],
   );
 
   const handleSend = useCallback(async () => {
@@ -654,6 +726,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           <div
             key={`msg-${msg.role}-${i}`}
             className={`${styles.message} ${msg.role === 'user' ? styles.messageUser : styles.messageAssistant}`}
+            style={msg.planId ? { maxWidth: '95%' } : undefined}
           >
             <Avatar
               size={36}
@@ -663,6 +736,17 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
               style={msg.role === 'assistant' ? ASSISTANT_AVATAR_STYLE : undefined}
             />
             <div className={styles.messageContent}>
+              {msg.role === 'assistant' && msg.planId && planController?.active?.planId === msg.planId ? (
+                <PlanView
+                  active={planController.active}
+                  connected={planConnected ?? true}
+                  onApprove={comment => { void planController.approve(comment); }}
+                  onReject={feedback => { void planController.reject(feedback); }}
+                  onEdit={editedSteps => { void planController.edit(editedSteps); }}
+                  onClarify={answer => { void planController.clarify(answer); }}
+                  onClose={() => planController.close()}
+                />
+              ) : (
               <Card
                 className={`${styles.messageCard} ${msg.role === 'user' ? styles.userCard : styles.assistantCard}`}
                 appearance="subtle"
@@ -697,10 +781,21 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
                   <div>{msg.content}</div>
                 )}
               </Card>
+              )}
+              {msg.role === 'assistant' && msg.planId && planController && planController.active?.planId !== msg.planId && (
+                <Button
+                  appearance="subtle"
+                  onClick={() => { void planController.openHistoryPlan(msg.planId!); }}
+                  data-testid="plan-reopen-button"
+                  aria-label={`Reopen plan ${msg.planId}`}
+                >
+                  Reopen plan
+                </Button>
+              )}
               {msg.role === 'assistant' && msg.cacheInfo?.cached && (
                 <CacheIndicator cacheInfo={msg.cacheInfo} />
               )}
-              {msg.role === 'assistant' && msg.routing && (
+              {msg.role === 'assistant' && msg.routing && !msg.planId && (
                 <AgentRoutingIndicator routing={msg.routing} />
               )}
               {msg.role === 'assistant' && msg.memoryContext && msg.memoryContext.entries.length > 0 && (
@@ -709,10 +804,10 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
               {msg.approval && (
                 <ApprovalCard approval={msg.approval} onResolved={onApprovalResolved} />
               )}
-              {msg.spans && msg.spans.length > 0 && (
+              {msg.spans && msg.spans.length > 0 && !msg.planId && (
                 <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} tokenUsage={msg.tokenUsage} />
               )}
-              {msg.charts && msg.charts.length > 0 && (
+              {msg.charts && msg.charts.length > 0 && !msg.planId && (
                 <ErrorBoundary fallback={<div className={styles.loadingContainer}>Chart failed to load.</div>}>
                   <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
                     <ChartRenderer charts={msg.charts} />

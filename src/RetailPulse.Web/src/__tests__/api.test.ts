@@ -29,9 +29,11 @@ describe('api.sendMessage', () => {
 
     const result = await sendMessage({ message: 'hi' });
 
-    expect(result.reply).toBe('hello');
-    expect(result.sessionId).toBe('s-1');
-    expect(result.totalDurationMs).toBe(1234);
+    expect(result.kind).toBe('complete');
+    if (result.kind !== 'complete') throw new Error('expected complete');
+    expect(result.response.reply).toBe('hello');
+    expect(result.response.sessionId).toBe('s-1');
+    expect(result.response.totalDurationMs).toBe(1234);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/chat',
       expect.objectContaining({
@@ -134,8 +136,45 @@ describe('api.sendMessage', () => {
 
     const result = await sendMessage({ message: 'hi' });
 
-    expect(result.routing?.executionPath).toBe('plan');
-    expect(result.routing?.executionPathForced).toBe(true);
+    if (result.kind !== 'complete') throw new Error('expected complete');
+    expect(result.response.routing?.executionPath).toBe('plan');
+    expect(result.response.routing?.executionPathForced).toBe(true);
+  });
+
+  it('returns a suspended envelope when the plan review gate returns 202 (issue #96)', async () => {
+    const payload = {
+      planId: 'plan-42',
+      status: 'awaiting_review',
+      reviewRequestId: 'req-1',
+      round: 0,
+      sessionId: 's-99',
+      message: 'Plan awaiting reviewer input.',
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    const result = await sendMessage({ message: 'multi-domain question' });
+
+    expect(result.kind).toBe('suspended');
+    if (result.kind !== 'suspended') throw new Error('expected suspended');
+    expect(result.suspended.planId).toBe('plan-42');
+    expect(result.suspended.status).toBe('awaiting_review');
+    expect(result.suspended.reviewRequestId).toBe('req-1');
+  });
+
+  it('throws when a 202 response body is malformed', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ planId: 'x' }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(sendMessage({ message: 'hi' })).rejects.toThrow(/malformed/i);
   });
 
   it('rejects a routing payload with an unknown executionPath value', async () => {
