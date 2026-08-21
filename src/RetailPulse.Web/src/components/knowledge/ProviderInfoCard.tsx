@@ -58,12 +58,12 @@ const useStyles = makeStyles({
     color: 'var(--color-text, #ffffff)',
   },
   badgeDurable: {
-    borderColor: 'var(--color-accent-success, #22c55e)',
+    border: '1px solid var(--color-accent-success, #22c55e)',
     color: 'var(--color-accent-success, #22c55e)',
     backgroundColor: 'rgba(34,197,94,0.10)',
   },
   badgeVolatile: {
-    borderColor: 'var(--color-accent-warning, #f59e0b)',
+    border: '1px solid var(--color-accent-warning, #f59e0b)',
     color: 'var(--color-accent-warning, #f59e0b)',
     backgroundColor: 'rgba(245,158,11,0.12)',
   },

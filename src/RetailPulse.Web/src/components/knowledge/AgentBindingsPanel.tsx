@@ -88,12 +88,12 @@ const useStyles = makeStyles({
   },
   statusEnabled: {
     color: 'var(--color-accent-success, #22c55e)',
-    borderColor: 'var(--color-accent-success, #22c55e)',
+    border: '1px solid var(--color-accent-success, #22c55e)',
     backgroundColor: 'rgba(34,197,94,0.08)',
   },
   statusDisabled: {
     color: 'var(--color-text-muted, #94a3b8)',
-    borderColor: 'var(--color-border, rgba(255,255,255,0.2))',
+    border: '1px solid var(--color-border, rgba(255,255,255,0.2))',
     backgroundColor: 'var(--color-surface-alt, rgba(255,255,255,0.04))',
   },
   empty: {
