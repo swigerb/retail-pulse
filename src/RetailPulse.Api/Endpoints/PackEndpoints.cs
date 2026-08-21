@@ -49,7 +49,20 @@ public static class PackEndpoints
                 Id: c.Id,
                 Label: c.Label,
                 Emoji: c.Emoji,
-                Prompts: c.Prompts))];
+                Order: c.Order,
+                // The legacy Prompts list is retained for clients that have
+                // not yet moved to the structured Tasks projection.
+                Prompts: c.Prompts,
+                Tasks: [.. c.Tasks.Select(t => new PackStartingTaskItem(
+                    Name: t.Name,
+                    Prompt: t.Prompt,
+                    Order: t.Order,
+                    Capability: t.Capability is null
+                        ? null
+                        : new PackStartingTaskCapabilityResponse(
+                            Kind: t.Capability.Kind,
+                            ChartType: t.Capability.ChartType,
+                            PlanPath: t.Capability.PlanPath)))]))];
 
             return Results.Ok(new PackStartingTasksResponse(
                 PackKey: pack.Name,
@@ -90,4 +103,17 @@ public sealed record PackStartingTaskResponse(
     string Id,
     string Label,
     string Emoji,
-    IReadOnlyList<string> Prompts);
+    int? Order,
+    IReadOnlyList<string> Prompts,
+    IReadOnlyList<PackStartingTaskItem> Tasks);
+
+public sealed record PackStartingTaskItem(
+    string Name,
+    string Prompt,
+    int? Order,
+    PackStartingTaskCapabilityResponse? Capability);
+
+public sealed record PackStartingTaskCapabilityResponse(
+    string Kind,
+    string? ChartType,
+    string? PlanPath);

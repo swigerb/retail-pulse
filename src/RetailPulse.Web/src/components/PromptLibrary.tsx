@@ -8,7 +8,7 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { Lightbulb24Regular } from '@fluentui/react-icons';
-import type { PromptCategory } from '../constants/prompts';
+import type { PromptCategory, StartingTask } from '../constants/prompts';
 
 interface PromptLibraryProps {
   categories: ReadonlyArray<PromptCategory>;
@@ -128,12 +128,26 @@ const useStyles = makeStyles({
       cursor: 'not-allowed',
     },
   },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '28px 16px',
+    textAlign: 'center',
+    color: 'var(--color-text-muted)',
+    fontSize: '13px',
+    lineHeight: '1.5',
+  },
 });
 
 /**
  * Always-available, discoverable prompt library rendered as a popover next to
- * the composer. Reuses the shared PROMPT_CATEGORIES source and the caller's safe
- * send behavior so a selected prompt is dispatched exactly like a welcome chip.
+ * the composer. Consumes `PromptCategory`s from either the built-in defaults
+ * or the active content pack (issue #109) and the caller's safe send behavior
+ * so a selected task's submitted prompt is dispatched exactly like a welcome
+ * chip. Each button displays `task.name` and submits `task.prompt`, so short
+ * scannable labels can invoke fully-formed questions.
  */
 export function PromptLibrary({ categories, onSelect, disabled }: PromptLibraryProps) {
   const styles = useStyles();
@@ -145,11 +159,16 @@ export function PromptLibrary({ categories, onSelect, disabled }: PromptLibraryP
     : categories;
 
   const handlePromptClick = useCallback(
-    (prompt: string) => {
-      onSelect(prompt);
+    (task: StartingTask) => {
+      onSelect(task.prompt);
       setOpen(false);
     },
     [onSelect],
+  );
+
+  const totalVisibleTasks = visibleCategories.reduce(
+    (n, c) => n + c.tasks.length,
+    0,
   );
 
   return (
@@ -182,53 +201,72 @@ export function PromptLibrary({ categories, onSelect, disabled }: PromptLibraryP
               Browse a category and pick a prompt to send.
             </Text>
           </div>
-          <div className={styles.categoryChips} role="group" aria-label="Prompt categories" data-testid="prompt-library-categories">
-            <button
-              type="button"
-              className={`${styles.categoryChip} ${selectedCategory === null ? styles.categoryChipActive : ''}`}
-              aria-pressed={selectedCategory === null}
-              data-testid="prompt-library-category-all"
-              onClick={() => setSelectedCategory(null)}
-            >
-              🏪 All
-            </button>
-            {categories.map((cat) => (
+          {categories.length > 0 && (
+            <div className={styles.categoryChips} role="group" aria-label="Prompt categories" data-testid="prompt-library-categories">
               <button
-                key={cat.id}
                 type="button"
-                className={`${styles.categoryChip} ${selectedCategory === cat.id ? styles.categoryChipActive : ''}`}
-                aria-pressed={selectedCategory === cat.id}
-                data-testid={`prompt-library-category-${cat.id}`}
-                onClick={() => setSelectedCategory(cat.id)}
+                className={`${styles.categoryChip} ${selectedCategory === null ? styles.categoryChipActive : ''}`}
+                aria-pressed={selectedCategory === null}
+                data-testid="prompt-library-category-all"
+                onClick={() => setSelectedCategory(null)}
               >
-                {cat.emoji} {cat.label}
+                🏪 All
               </button>
-            ))}
-          </div>
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  className={`${styles.categoryChip} ${selectedCategory === cat.id ? styles.categoryChipActive : ''}`}
+                  aria-pressed={selectedCategory === cat.id}
+                  data-testid={`prompt-library-category-${cat.id}`}
+                  onClick={() => setSelectedCategory(cat.id)}
+                >
+                  {cat.emoji} {cat.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className={styles.promptList} data-testid="prompt-library-list">
-            {visibleCategories.map((cat) => (
-              <div key={cat.id} className={styles.promptGroup} data-testid={`prompt-library-group-${cat.id}`}>
-                {!selectedCategory && (
-                  <Text className={styles.groupLabel}>
-                    {cat.emoji} {cat.label}
-                  </Text>
-                )}
-                {cat.prompts.map((prompt, i) => (
-                  <button
-                    key={`${cat.id}-${i}`}
-                    type="button"
-                    className={styles.promptButton}
-                    data-testid="prompt-library-item"
-                    data-prompt-category={cat.id}
-                    data-prompt-index={i}
-                    onClick={() => handlePromptClick(prompt)}
-                    disabled={disabled}
-                  >
-                    {prompt}
-                  </button>
-                ))}
+            {totalVisibleTasks === 0 ? (
+              <div
+                className={styles.emptyState}
+                role="status"
+                data-testid="prompt-library-empty"
+              >
+                <span aria-hidden="true">✨</span>
+                <Text>No starting tasks are defined for the active scenario.</Text>
+                <Text>Ask a question directly in the composer to get started.</Text>
               </div>
-            ))}
+            ) : (
+              visibleCategories.map((cat) => (
+                <div key={cat.id} className={styles.promptGroup} data-testid={`prompt-library-group-${cat.id}`}>
+                  {!selectedCategory && (
+                    <Text className={styles.groupLabel}>
+                      {cat.emoji} {cat.label}
+                    </Text>
+                  )}
+                  {cat.tasks.map((task, i) => (
+                    <button
+                      key={`${cat.id}-${i}`}
+                      type="button"
+                      className={styles.promptButton}
+                      data-testid="prompt-library-item"
+                      data-prompt-category={cat.id}
+                      data-prompt-index={i}
+                      data-prompt-text={task.prompt}
+                      data-capability-kind={task.capability?.kind ?? ''}
+                      data-capability-chart-type={task.capability?.chartType ?? ''}
+                      data-capability-plan-path={task.capability?.planPath ?? ''}
+                      aria-label={task.name}
+                      onClick={() => handlePromptClick(task)}
+                      disabled={disabled}
+                    >
+                      {task.name}
+                    </button>
+                  ))}
+                </div>
+              ))
+            )}
           </div>
         </div>
       </PopoverSurface>

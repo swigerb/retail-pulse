@@ -196,4 +196,140 @@ describe('packApi.fetchStartingTasks', () => {
 
     await expect(fetchStartingTasks()).rejects.toThrow(/500/);
   });
+
+  it('parses the issue #109 tasks[] shape and preserves display name + submitted prompt + capability', async () => {
+    const payload = {
+      packKey: 'halcyon-pet-supply',
+      categories: [
+        {
+          id: 'nutrition',
+          label: 'Nutrition',
+          emoji: '🥣',
+          order: 1,
+          tasks: [
+            {
+              name: 'Auto-ship depletion trend',
+              prompt: 'How is Meadowbowl Nutrition auto-ship depletion trending in the Sunbelt this quarter?',
+              order: 1,
+              capability: { kind: 'prose' },
+            },
+            {
+              name: 'Grain-inclusive vs grain-free share',
+              prompt: 'Compare grain-inclusive vs grain-free share for Riverstone Feline across all regions',
+              order: 2,
+              capability: { kind: 'chart', chartType: 'bar' },
+            },
+            {
+              name: 'Life-stage forecast',
+              prompt: 'Show a life-stage transition forecast for puppy → adult across the Great Lakes',
+              order: 3,
+              capability: { kind: 'plan', planPath: 'multi-step-forecast' },
+            },
+          ],
+        },
+      ],
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(payload)) as unknown as typeof fetch;
+
+    const tasks = await fetchStartingTasks();
+    expect(tasks.categories).toHaveLength(1);
+
+    const cat = tasks.categories[0];
+    expect(cat.order).toBe(1);
+    expect(cat.tasks).toHaveLength(3);
+    expect(cat.tasks[0].name).toBe('Auto-ship depletion trend');
+    expect(cat.tasks[0].prompt).toContain('Meadowbowl Nutrition');
+    expect(cat.tasks[0].capability).toEqual({ kind: 'prose' });
+    expect(cat.tasks[1].capability).toEqual({ kind: 'chart', chartType: 'bar' });
+    expect(cat.tasks[2].capability).toEqual({ kind: 'plan', planPath: 'multi-step-forecast' });
+
+    // Derived `prompts` array preserves submitted-prompt order for the
+    // legacy shape consumers.
+    expect(cat.prompts).toEqual(cat.tasks.map((t) => t.prompt));
+  });
+
+  it('sorts categories and tasks by their explicit `order` regardless of source-array position', async () => {
+    const payload = {
+      packKey: 'ordering',
+      categories: [
+        {
+          id: 'second-in-yaml',
+          label: 'Second in YAML',
+          emoji: 'b',
+          order: 1,
+          tasks: [
+            { name: 'Late task', prompt: 'p-late', order: 5 },
+            { name: 'Early task', prompt: 'p-early', order: 1 },
+          ],
+        },
+        {
+          id: 'first-in-yaml',
+          label: 'First in YAML',
+          emoji: 'a',
+          order: 10,
+          tasks: [{ name: 'Solo', prompt: 'p-solo' }],
+        },
+      ],
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(payload)) as unknown as typeof fetch;
+
+    const tasks = await fetchStartingTasks();
+    expect(tasks.categories.map((c) => c.id)).toEqual(['second-in-yaml', 'first-in-yaml']);
+    expect(tasks.categories[0].tasks.map((t) => t.name)).toEqual(['Early task', 'Late task']);
+  });
+
+  it('prefers structured tasks[] over legacy prompts[] when both are present', async () => {
+    const payload = {
+      packKey: 'both',
+      categories: [
+        {
+          id: 'mixed',
+          label: 'Mixed',
+          emoji: 'm',
+          tasks: [{ name: 'From tasks', prompt: 'submitted-tasks-prompt' }],
+          prompts: ['legacy-prompt-should-be-ignored'],
+        },
+      ],
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(payload)) as unknown as typeof fetch;
+
+    const tasks = await fetchStartingTasks();
+    expect(tasks.categories[0].tasks).toHaveLength(1);
+    expect(tasks.categories[0].tasks[0].name).toBe('From tasks');
+    expect(tasks.categories[0].tasks[0].prompt).toBe('submitted-tasks-prompt');
+    expect(tasks.categories[0].prompts).toEqual(['submitted-tasks-prompt']);
+  });
+
+  it('drops malformed tasks (missing name or prompt) and unknown capability kinds', async () => {
+    const payload = {
+      packKey: 'broken',
+      categories: [
+        {
+          id: 'mostly-fine',
+          label: 'Mostly Fine',
+          emoji: 'x',
+          tasks: [
+            { name: 'Good', prompt: 'good-prompt', capability: { kind: 'chart', chartType: 'line' } },
+            { name: '', prompt: 'no-name' },
+            { name: 'No prompt', prompt: '' },
+            { name: 'Unknown kind', prompt: 'weird', capability: { kind: 'sorcery' } },
+          ],
+        },
+      ],
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(payload)) as unknown as typeof fetch;
+
+    const tasks = await fetchStartingTasks();
+    expect(tasks.categories[0].tasks).toHaveLength(2);
+    expect(tasks.categories[0].tasks[0].name).toBe('Good');
+    expect(tasks.categories[0].tasks[0].capability).toEqual({ kind: 'chart', chartType: 'line' });
+    // The 'Unknown kind' task survives because name+prompt are valid, but its
+    // capability is dropped (defensive normalization at the JSON boundary).
+    expect(tasks.categories[0].tasks[1].name).toBe('Unknown kind');
+    expect(tasks.categories[0].tasks[1].capability).toBeUndefined();
+  });
 });

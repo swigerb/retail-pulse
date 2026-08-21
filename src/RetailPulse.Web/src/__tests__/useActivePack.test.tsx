@@ -112,4 +112,48 @@ describe('useActivePack', () => {
     expect(result.current.pack?.key).toBe('halcyon-pet-supply');
     expect(result.current.categories).toBe(PROMPT_CATEGORIES);
   });
+
+  it('propagates structured tasks (name + prompt + capability) from the pack projection to the ready state', async () => {
+    const payload = {
+      packKey: 'halcyon-pet-supply',
+      categories: [
+        {
+          id: 'planning',
+          label: 'Planning',
+          emoji: 'map',
+          order: 1,
+          tasks: [
+            {
+              name: 'Multi-step forecast',
+              prompt: 'Build a multi-step demand forecast for auto-ship kibble',
+              order: 1,
+              capability: { kind: 'plan', planPath: 'multi-step-forecast' },
+            },
+            {
+              name: 'Adjacency chart',
+              prompt: 'Compare planogram adjacency lift across the Sunbelt',
+              order: 2,
+              capability: { kind: 'chart', chartType: 'bar' },
+            },
+          ],
+        },
+      ],
+    };
+
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/pack')) return Promise.resolve(jsonResponse(packPayload()));
+      if (url.endsWith('/api/pack/starting-tasks')) return Promise.resolve(jsonResponse(payload));
+      return Promise.resolve(new Response(null, { status: 404 }));
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useActivePack());
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const cats = result.current.categories;
+    expect(cats.map((c) => c.id)).toEqual(['planning']);
+    expect(cats[0].tasks.map((t) => t.name)).toEqual(['Multi-step forecast', 'Adjacency chart']);
+    expect(cats[0].tasks[0].capability).toEqual({ kind: 'plan', planPath: 'multi-step-forecast' });
+    expect(cats[0].tasks[1].capability).toEqual({ kind: 'chart', chartType: 'bar' });
+  });
 });
