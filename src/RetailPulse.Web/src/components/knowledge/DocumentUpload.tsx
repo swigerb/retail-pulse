@@ -1,7 +1,9 @@
 import { useState, useCallback, useRef } from 'react';
 import { makeStyles, Button } from '@fluentui/react-components';
 import { KB_COLORS } from '../../constants/agentRouting';
-import { uploadDocument } from '../../services/knowledgeApi';
+import { uploadDocument, KnowledgeUploadError } from '../../services/knowledgeApi';
+import type { SafetyBlockDisplayModel } from '../../types';
+import { KnowledgeIngestionBlock } from '../guardrails/KnowledgeIngestionBlock';
 
 interface DocumentUploadProps {
   onUploadComplete: () => void;
@@ -114,7 +116,11 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
   const [title, setTitle] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadResult, setUploadResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [uploadResult, setUploadResult] = useState<{
+    success: boolean;
+    error?: string;
+    safetyDisplay?: SafetyBlockDisplayModel;
+  } | null>(null);
 
   const handleFileSelect = useCallback((file: File) => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -159,7 +165,11 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
       }, 3000);
     } catch (e) {
       clearInterval(progressInterval);
-      setUploadResult({ success: false, error: e instanceof Error ? e.message : 'Upload failed' });
+      if (e instanceof KnowledgeUploadError) {
+        setUploadResult({ success: false, safetyDisplay: e.display });
+      } else {
+        setUploadResult({ success: false, error: e instanceof Error ? e.message : 'Upload failed' });
+      }
     } finally {
       setUploading(false);
     }
@@ -237,6 +247,15 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
       {uploadResult?.success && (
         <div className={styles.success} data-testid="upload-success">
           ✅ Document indexed successfully
+        </div>
+      )}
+
+      {uploadResult?.safetyDisplay && (
+        <div data-testid="upload-safety-block" style={{ marginTop: '12px' }}>
+          <KnowledgeIngestionBlock
+            documentTitle={title || selectedFile?.name}
+            display={uploadResult.safetyDisplay}
+          />
         </div>
       )}
 

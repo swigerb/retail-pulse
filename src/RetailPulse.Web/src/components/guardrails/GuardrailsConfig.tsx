@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { makeStyles, Button, Text, Spinner, Switch } from '@fluentui/react-components';
+import { makeStyles, Button, Text, Spinner, Switch, tokens } from '@fluentui/react-components';
 import type { GuardrailsConfigData } from '../../types';
 import { fetchGuardrailsConfig, updateGuardrailsConfig, resetGuardrailsConfig } from '../../services/guardrailsApi';
+import { ContentSafetyStatusBadge } from './ContentSafetyStatusBadge';
 
 const useStyles = makeStyles({
   container: {
@@ -74,6 +75,39 @@ const useStyles = makeStyles({
     padding: '8px 14px',
     borderRadius: '8px',
   },
+  contentSafetyBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '12px 16px',
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  contentSafetyBannerText: {
+    fontSize: '13px',
+    color: tokens.colorNeutralForeground2,
+  },
+  readOnlyRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '6px 0',
+    fontSize: '13px',
+    color: tokens.colorNeutralForeground2,
+  },
+  readOnlyValue: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '2px 8px',
+    borderRadius: tokens.borderRadiusCircular,
+    fontSize: '11px',
+    fontWeight: 600,
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
 });
 
 export function GuardrailsConfig() {
@@ -144,6 +178,62 @@ export function GuardrailsConfig() {
   return (
     <div className={styles.container} data-testid="guardrails-config">
       <span className={styles.title}>⚙️ Guardrails Configuration</span>
+
+      {config.contentSafety && (
+        <div className={styles.section} data-testid="content-safety-runtime-panel">
+          <span className={styles.sectionTitle}>🛡️ Content Safety (model-based)</span>
+          <div className={styles.contentSafetyBanner}>
+            <ContentSafetyStatusBadge
+              enabled={config.contentSafety.enabled}
+              failPolicy={config.contentSafety.failPolicy}
+              detail={
+                config.contentSafety.enabled
+                  ? undefined
+                  : 'Only pattern-based guardrails are running for this deployment.'
+              }
+            />
+            <span className={styles.contentSafetyBannerText}>
+              {config.contentSafety.enabled
+                ? 'Model-based classification is active. Runtime settings are managed by the deployment.'
+                : 'Model-based classification is off. Pattern-based guardrails still apply.'}
+            </span>
+          </div>
+          {config.contentSafety.enabled && (
+            <div>
+              <div className={styles.readOnlyRow}>
+                <span>Input checks</span>
+                <span className={styles.readOnlyValue} data-testid="cs-check-input">
+                  {config.contentSafety.checkInput ? 'On' : 'Off'}
+                </span>
+              </div>
+              <div className={styles.readOnlyRow}>
+                <span>Output checks</span>
+                <span className={styles.readOnlyValue} data-testid="cs-check-output">
+                  {config.contentSafety.checkOutput ? 'On' : 'Off'}
+                </span>
+              </div>
+              <div className={styles.readOnlyRow}>
+                <span>Retrieved knowledge checks</span>
+                <span className={styles.readOnlyValue} data-testid="cs-check-retrieved-knowledge">
+                  {config.contentSafety.checkRetrievedKnowledge ? 'On' : 'Off'}
+                </span>
+              </div>
+              <div className={styles.readOnlyRow}>
+                <span>Tool-result checks</span>
+                <span className={styles.readOnlyValue} data-testid="cs-check-tool-results">
+                  {config.contentSafety.checkToolResults ? 'On' : 'Off'}
+                </span>
+              </div>
+              <div className={styles.readOnlyRow}>
+                <span>Prompt shields</span>
+                <span className={styles.readOnlyValue} data-testid="cs-prompt-shields">
+                  {config.contentSafety.promptShieldsEnabled ? 'On' : 'Off'}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className={styles.section}>
         <span className={styles.sectionTitle}>Protection Toggles</span>
