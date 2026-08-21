@@ -14,6 +14,26 @@ namespace RetailPulse.Api.Escalation;
 /// L1: Single specialist (fast path, 8s timeout).
 /// L2: Multi-specialist fan-out (parallel, 15s timeout).
 /// L3: Flags for human review with context.
+///
+/// <para>
+/// <b>Relationship to hybrid execution (issue #95).</b> The L2 multi-specialist
+/// fan-out predated the plan-first path and was the earlier response to "one
+/// specialist is not enough". Issue #95's hybrid execution decider
+/// (<see cref="RetailPulse.Api.Agents.Routing.HybridExecutionDecider"/>) is now
+/// the canonical multi-specialist admission signal for <c>/api/chat</c>:
+/// multi-domain / low-confidence / advisory prompts admit into
+/// <see cref="RetailPulse.Api.Agents.Planning.PlanOrchestrator"/>, which owns
+/// planning, execution, review, persistence, and cost attribution. The chat
+/// pipeline does NOT call this orchestrator, so there is no duplicated fan-out
+/// on the primary chat path.
+/// </para>
+/// <para>
+/// This class stays wired to its own <c>POST /api/escalate</c> endpoint for
+/// callers that opt in to the older L1→L2→L3 shape explicitly; removing it
+/// without an integration compatibility pass would silently drop that
+/// endpoint's contract. It is deprecated-in-place: no new features land here,
+/// and new callers should prefer the plan path.
+/// </para>
 /// </summary>
 public class EscalationOrchestrator
 {

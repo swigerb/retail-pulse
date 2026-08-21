@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Planning;
+using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Auth;
 using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Hubs;
@@ -211,6 +212,7 @@ public static class ChatEndpoints
 
                 // Router classification with tracing
                 RoutingDecision decision;
+                HybridExecutionResult hybridDecision;
                 {
                     DateTimeOffset classifyStart = DateTimeOffset.UtcNow;
                     using Activity? classifyActivity = AgentTelemetry.StartRouterClassify(request.Message);
@@ -226,6 +228,38 @@ public static class ChatEndpoints
                     classifyActivity?.SetTag("router.intent", decision.Intent);
                     classifyActivity?.SetTag("router.confidence", decision.Confidence);
 
+                    // ── Hybrid execution decision (issue #95) ───────────────────
+                    // Purely functional; runs before council / plan-first
+                    // interception so the chosen path is one authoritative
+                    // signal for both telemetry and the branch that follows.
+                    PlanPersistenceOptions hybridOpts =
+                        planPersistenceOptions?.Value ?? new PlanPersistenceOptions();
+                    string? forcedRequest = string.IsNullOrWhiteSpace(request.ForceExecutionPath)
+                        ? null
+                        : request.ForceExecutionPath;
+                    if (forcedRequest is not null && anonymous)
+                    {
+                        // Anonymous callers may not force a path — preserve the
+                        // default safety posture. Log so an operator can see the
+                        // ignored override rather than debugging a silent no-op.
+                        logger.LogInformation(
+                            "Ignoring ForceExecutionPath '{Path}' for anonymous session {SessionId} — default policy applies",
+                            forcedRequest, sessionId);
+                        forcedRequest = null;
+                    }
+                    hybridDecision = HybridExecutionDecider.Decide(
+                        decision,
+                        request.Message,
+                        new HybridExecutionContext(
+                            AnonymousCaller: anonymous,
+                            PlannerAvailable: planOrchestrator is not null,
+                            ForcedPath: forcedRequest),
+                        hybridOpts);
+
+                    classifyActivity?.SetTag("agent.routing.path", hybridDecision.Path);
+                    classifyActivity?.SetTag("agent.routing.path_forced", hybridDecision.Forced);
+                    classifyActivity?.SetTag("agent.routing.decision_reason", hybridDecision.Reason);
+
                     traceCollector.CaptureSpan(new TraceSpan(
                         SpanId: Guid.NewGuid().ToString("N")[..16],
                         TraceId: traceId,
@@ -238,7 +272,10 @@ public static class ChatEndpoints
                         {
                             ["span.type"] = "routing",
                             ["router.intent"] = decision.Intent,
-                            ["router.confidence"] = decision.Confidence.ToString("F2", CultureInfo.InvariantCulture)
+                            ["router.confidence"] = decision.Confidence.ToString("F2", CultureInfo.InvariantCulture),
+                            ["agent.routing.path"] = hybridDecision.Path,
+                            ["agent.routing.path_forced"] = hybridDecision.Forced ? "true" : "false",
+                            ["agent.routing.decision_reason"] = hybridDecision.Reason,
                         }));
                 }
 
@@ -327,7 +364,9 @@ public static class ChatEndpoints
                     specialist.DisplayName,
                     decision.Intent,
                     decision.Confidence,
-                    routingDurationMs);
+                    routingDurationMs,
+                    ExecutionPath: hybridDecision.Path,
+                    ExecutionPathForced: hybridDecision.Forced);
 
                 // Emit trace_started with routing metadata for frontend telemetry panel
                 traceCollector.EmitTraceStarted(traceId, traceStartTime, decision.Intent, specialist.DisplayName, specialist.Model);
@@ -440,9 +479,11 @@ public static class ChatEndpoints
                     timestamp = DateTimeOffset.UtcNow
                 }, ct);
 
-                // Council interception: if the router classified as council/health, convene the council
-                if (decision.DetectedIntents?.Any(i => string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true
-                    || string.Equals(decision.Intent, "council/health", StringComparison.OrdinalIgnoreCase))
+                // Council interception: fires exactly when the hybrid gate
+                // resolved the request to the council path. Dedicated trigger
+                // — unchanged from before issue #95 — so behavior on portfolio-
+                // health prompts is preserved.
+                if (string.Equals(hybridDecision.Path, ExecutionPath.Council, StringComparison.Ordinal))
                 {
                     if (council is not null)
                     {
@@ -503,25 +544,15 @@ public static class ChatEndpoints
                     }
                 }
 
-                // Plan-first interception (issue #93): when the router flags multi-domain
-                // intent AND the caller is a real (non-anonymous) subject AND the plan
-                // orchestrator is registered, hand the whole request to the workflow-
-                // backed plan path. It opens one budget scope for the entire plan,
-                // persists steps as it runs, and either returns a composed reply or
-                // fails fast with an honest terminal state (nothing hangs). The
-                // single-specialist path below is skipped entirely.
+                // Plan-first interception (issue #93). Admission is now
+                // authoritatively controlled by the hybrid execution decider
+                // (issue #95): multi-domain, low-confidence, advisory-cue, and
+                // forced-plan requests all resolve to ExecutionPath.Plan and
+                // land here. The decider is where the "one coherent story"
+                // lives; this branch is the plan path's execution seam.
+                if (planOrchestrator is not null
+                    && string.Equals(hybridDecision.Path, ExecutionPath.Plan, StringComparison.Ordinal))
                 {
-                    PlanPersistenceOptions planOpts =
-                        planPersistenceOptions?.Value ?? new PlanPersistenceOptions();
-                    int planThreshold = Math.Max(1, planOpts.MinDetectedIntentsForPlan);
-                    bool multiDomain = decision.DetectedIntents is { Count: > 0 } &&
-                        decision.DetectedIntents.Count >= planThreshold;
-                    bool councilIntent = decision.DetectedIntents?.Any(i =>
-                        string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true
-                        || string.Equals(decision.Intent, "council/health", StringComparison.OrdinalIgnoreCase);
-
-                    if (planOrchestrator is not null && !anonymous && multiDomain && !councilIntent)
-                    {
                         List<ISpecialistAgent> roster = [.. specialists];
                         var specialistLookup =
                             roster.ToDictionary(s => s.Key, s => s, StringComparer.OrdinalIgnoreCase);
@@ -589,7 +620,9 @@ public static class ChatEndpoints
                                 "Plan Orchestrator",
                                 decision.Intent ?? "plan",
                                 decision.Confidence,
-                                planResult.DurationMs));
+                                planResult.DurationMs,
+                                ExecutionPath: hybridDecision.Path,
+                                ExecutionPathForced: hybridDecision.Forced));
 
                         // Audit / export / session-turn parity — a plan turn is still an
                         // accountable interaction from this subject: it produced a user
@@ -629,7 +662,6 @@ public static class ChatEndpoints
                         }
 
                         return Results.Ok(planChatResponse);
-                    }
                 }
 
                 // Agent execution with tracing
