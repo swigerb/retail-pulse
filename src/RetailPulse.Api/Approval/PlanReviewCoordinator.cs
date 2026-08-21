@@ -8,6 +8,33 @@ using RetailPulse.Contracts.Approval;
 namespace RetailPulse.Api.Approval;
 
 /// <summary>
+/// Seam the coordinator uses to obtain a revised plan after a reject-with-
+/// feedback outcome. The production implementation wraps
+/// <see cref="PlanBuilder.BuildAsync"/>; tests can substitute a stub without
+/// standing up a full <see cref="Microsoft.Extensions.AI.IChatClient"/>.
+/// </summary>
+public interface IPlanReviewReplanner
+{
+    Task<PlanBuildResult> ReplanAsync(
+        string revisedRequest,
+        IReadOnlyList<Contracts.Routing.ISpecialistAgent> roster,
+        IReadOnlyList<string> detectedIntents,
+        CancellationToken ct);
+}
+
+/// <summary>Default replanner — delegates to the tenant planner via <see cref="PlanBuilder"/>.</summary>
+public sealed class PlanBuilderReplanner : IPlanReviewReplanner
+{
+    private readonly PlanBuilder _builder;
+    public PlanBuilderReplanner(PlanBuilder builder) => _builder = builder;
+    public Task<PlanBuildResult> ReplanAsync(
+        string revisedRequest,
+        IReadOnlyList<Contracts.Routing.ISpecialistAgent> roster,
+        IReadOnlyList<string> detectedIntents,
+        CancellationToken ct) => _builder.BuildAsync(revisedRequest, roster, detectedIntents, ct);
+}
+
+/// <summary>
 /// Runs the durable plan review gate (#94). Owns the single resume mechanism the
 /// design review pinned: a Microsoft.Agents.AI.Workflows checkpoint captured by
 /// <see cref="CheckpointManager"/> during the review pause, integrated through
@@ -48,7 +75,7 @@ namespace RetailPulse.Api.Approval;
 public sealed class PlanReviewCoordinator
 {
     private readonly IApprovalGate _gate;
-    private readonly PlanBuilder? _planner;
+    private readonly IPlanReviewReplanner? _replanner;
     private readonly PlanReviewOptions _options;
     private readonly CheckpointManager _checkpointManager;
     private readonly ILogger<PlanReviewCoordinator> _logger;
@@ -65,14 +92,14 @@ public sealed class PlanReviewCoordinator
         IOptions<PlanReviewOptions> options,
         CheckpointManager checkpointManager,
         ILogger<PlanReviewCoordinator> logger,
-        PlanBuilder? planner = null,
+        IPlanReviewReplanner? replanner = null,
         TimeProvider? timeProvider = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _checkpointManager = checkpointManager ?? throw new ArgumentNullException(nameof(checkpointManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _planner = planner;
+        _replanner = replanner;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -193,7 +220,7 @@ public sealed class PlanReviewCoordinator
                         rounds);
                 }
 
-                if (_planner is null || input.Roster is null)
+                if (_replanner is null || input.Roster is null)
                 {
                     _logger.LogWarning(
                         "Plan {PlanId} reject-with-feedback cannot replan — planner or roster missing.",
@@ -211,7 +238,7 @@ public sealed class PlanReviewCoordinator
                 PlanBuildResult replanned;
                 try
                 {
-                    replanned = await _planner.BuildAsync(
+                    replanned = await _replanner.ReplanAsync(
                         revisedRequest,
                         input.Roster,
                         input.DetectedIntents,

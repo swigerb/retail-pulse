@@ -147,7 +147,7 @@ public sealed class PlanOrchestrator
                     OutputTokens: built.OutputTokens ?? 0,
                     TotalTokens: built.TotalTokens ?? 0,
                     Steps: [],
-                    FailureReason: reviewOutcome.FailureMessage ?? reviewOutcome.TerminalReason);
+                    FailureReason: $"{reviewOutcome.TerminalReason}: {reviewOutcome.FailureMessage ?? reviewOutcome.TerminalReason}");
             }
 
             // Approved outcome — swap in the possibly-edited step list before

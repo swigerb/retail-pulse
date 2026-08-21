@@ -1187,9 +1187,18 @@ if (planReviewOptsAtRegistration.Enabled)
             sp.GetRequiredService<IOptions<PlanReviewOptions>>(),
             sp.GetRequiredService<Microsoft.Agents.AI.Workflows.CheckpointManager>(),
             sp.GetRequiredService<ILogger<PlanReviewCoordinator>>(),
-            sp.GetService<PlanBuilder>(),
+            sp.GetService<IPlanReviewReplanner>(),
             sp.GetRequiredService<TimeProvider>());
     });
+
+    // Default replanner delegates to the tenant PlanBuilder — only registered
+    // when a planner definition exists. If it is absent the coordinator
+    // terminates reject-with-feedback deterministically with ReplanExhausted;
+    // never a silent no-op.
+    if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
+    {
+        builder.Services.AddScoped<IPlanReviewReplanner, PlanBuilderReplanner>();
+    }
 
     builder.Services.AddSingleton<IPlanClarifier, PlanClarifier>();
 
