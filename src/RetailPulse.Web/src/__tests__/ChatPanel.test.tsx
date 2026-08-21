@@ -267,10 +267,13 @@ describe('ChatPanel', () => {
 
     // Resolve the request and confirm the loading UI tears down.
     resolveSend?.({
-      reply: 'Hello back!',
-      sessionId: 'sess-x',
-      spans: [],
-      totalDurationMs: 50,
+      kind: 'complete',
+      response: {
+        reply: 'Hello back!',
+        sessionId: 'sess-x',
+        spans: [],
+        totalDurationMs: 50,
+      },
     });
 
     await waitFor(() => {

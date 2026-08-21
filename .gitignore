@@ -58,3 +58,6 @@ appsettings.*.local.json
 # Azure Developer CLI
 .azure/
 .squad/.cache/
+
+# Local CI log dumps
+ci-*.log
