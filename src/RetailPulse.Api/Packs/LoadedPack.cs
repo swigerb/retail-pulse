@@ -25,6 +25,15 @@ public sealed class LoadedPack
     public PromptConfiguration Agents { get; }
     public IReadOnlyList<PackKnowledgeDocument> KnowledgeDocuments { get; }
     public IReadOnlyList<PackStartingTaskCategory> StartingTasks { get; }
+    /// <summary>
+    /// The pack's machine-readable scenario seed manifest (issue #108).
+    /// Owns every scenario-varying seed input consumed by the MCP
+    /// server. The default pack ships a byte-verbatim port of the
+    /// pre-#108 hardcoded constants; other shipped packs ship
+    /// entirely-fictional alternatives that produce a materially
+    /// different SQLite dataset when the active pack is switched.
+    /// </summary>
+    public SeedManifest Seed { get; }
 
     public LoadedPack(
         string name,
@@ -33,7 +42,8 @@ public sealed class LoadedPack
         TenantConfiguration tenant,
         PromptConfiguration agents,
         IReadOnlyList<PackKnowledgeDocument> knowledgeDocuments,
-        IReadOnlyList<PackStartingTaskCategory> startingTasks)
+        IReadOnlyList<PackStartingTaskCategory> startingTasks,
+        SeedManifest? seed = null)
     {
         Name = name;
         RootPath = rootPath;
@@ -42,5 +52,6 @@ public sealed class LoadedPack
         Agents = agents;
         KnowledgeDocuments = knowledgeDocuments;
         StartingTasks = startingTasks;
+        Seed = seed ?? new SeedManifest();
     }
 }

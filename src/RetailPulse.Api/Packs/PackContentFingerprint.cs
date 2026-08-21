@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using RetailPulse.Contracts;
 
 namespace RetailPulse.Api.Packs;
 
@@ -23,7 +24,13 @@ public static class PackContentFingerprint
     /// logic that consumes the fingerprint changes so hosts with a stale
     /// stored fingerprint always re-run seeding after an upgrade.
     /// </summary>
-    public const string Version = "v1";
+    /// <remarks>
+    /// v2 folds the pack's <c>seed/scenario.yaml</c> (and any other files
+    /// under the pack's <c>seed/</c> directory) into the fingerprint so
+    /// editing scenario data alone triggers a reseed. Upgrades from v1
+    /// stores always miss a v2 lookup and re-seed on first boot.
+    /// </remarks>
+    public const string Version = "v2";
 
     /// <summary>
     /// Compute a stable fingerprint for the pack. The fingerprint mixes
@@ -50,6 +57,29 @@ public static class PackContentFingerprint
             .OrderBy(d => d.Source, StringComparer.OrdinalIgnoreCase))
         {
             sb.Append("kn:").Append(doc.Source).Append('=').Append(ComputeContentHash(doc.Content)).Append('\n');
+        }
+
+        // Every file under seed/ (scenario.yaml today, additional
+        // manifests later) contributes to the fingerprint so a change to
+        // scenario data alone rehashes even when pack.yaml is untouched.
+        // Files are visited in deterministic (relative-path) order so
+        // Windows and Linux checkouts produce the same digest.
+        string seedDir = Path.Combine(pack.RootPath, "seed");
+        if (Directory.Exists(seedDir))
+        {
+            List<string> seedFiles =
+            [
+                .. Directory
+                    .EnumerateFiles(seedDir, "*", SearchOption.AllDirectories)
+                    .OrderBy(p => p, StringComparer.Ordinal),
+            ];
+            foreach (string file in seedFiles)
+            {
+                string relative = Path.GetRelativePath(seedDir, file).Replace('\\', '/');
+                sb.Append("seed:").Append(relative).Append('=')
+                    .Append(HashHex(NormalizeLineEndings(File.ReadAllText(file))))
+                    .Append('\n');
+            }
         }
 
         return Version + ":" + HashHex(sb.ToString());

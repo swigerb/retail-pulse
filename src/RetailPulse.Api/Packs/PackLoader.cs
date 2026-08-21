@@ -26,18 +26,20 @@ namespace RetailPulse.Api.Packs;
 ///   agents.yaml            (required — same shape as legacy prompts.yaml)
 ///   starting-tasks.yaml    (optional — curated prompt categories)
 ///   knowledge/*.md         (optional — grounding corpus)
-///   seed/                  (optional — reserved for future explicit seed overrides)
+///   seed/scenario.yaml     (required — MCP scenario seed manifest, issue #108)
 /// </code>
 /// <para>
-/// The loader deliberately does NOT run the #99 agent-definition safety
-/// validator itself — that stays in one place at the composition root
-/// where it has the Content Safety evaluator, jailbreak detector, and
-/// audit sink. Callers pass a resolved <see cref="AgentDefinitionValidator"/>
-/// to <see cref="LoadAsync"/> to fold its findings into the same
-/// aggregate report; the safety validator's own quarantine / block
-/// policy is preserved by re-throwing its
-/// <see cref="AgentDefinitionValidationException"/> unchanged when the
-/// deployment policy is Block.
+/// The loader is the single caller of the #99 agent-definition safety
+/// validator on the pack-load path — issue #108 aggregates its findings
+/// with structural issues instead of letting the validator throw its
+/// own <see cref="AgentDefinitionValidationException"/> ahead of the
+/// pack's own report. Under <c>QuarantineOffender</c> the validator
+/// still mutates the roster in place; under <c>RefuseStartup</c> its
+/// violations are captured, converted to
+/// <see cref="PackValidationIssue"/> rows, and thrown together with
+/// every other discoverable problem in a single
+/// <see cref="PackValidationException"/> so operators see the entire
+/// fix list at once.
 /// </para>
 /// </remarks>
 public sealed partial class PackLoader
@@ -148,37 +150,14 @@ public sealed partial class PackLoader
         }
 
         var issues = new List<PackValidationIssue>();
-
-        (PackDocument? doc, PackMetadata metadata, TenantConfiguration tenant) =
-            LoadPackDocument(packName, packRoot, issues);
-
-        PromptConfiguration agents = LoadAgents(packName, packRoot, issues);
-        IReadOnlyList<PackStartingTaskCategory> startingTasks =
-            LoadStartingTasks(packName, packRoot, issues);
-        IReadOnlyList<PackKnowledgeDocument> knowledgeDocs =
-            LoadKnowledgeDocuments(packName, packRoot, issues);
-
-        ValidateAgentRoster(packName, agents, issues);
+        LoadedPack pack = LoadInternal(packName, packRoot, issues);
 
         if (issues.Count > 0)
         {
             throw new PackValidationException(packName, issues);
         }
 
-        // At this point doc is non-null: LoadPackDocument only leaves it
-        // null when it also added at least one issue, and the throw
-        // above would have fired. The assertion is documentation.
-        _ = doc ?? throw new InvalidOperationException(
-            "PackLoader invariant violated: pack document is null despite empty issue list.");
-
-        return new LoadedPack(
-            packName,
-            packRoot,
-            metadata,
-            tenant,
-            agents,
-            knowledgeDocs,
-            startingTasks);
+        return pack;
     }
 
     /// <summary>
@@ -189,34 +168,108 @@ public sealed partial class PackLoader
     /// validator's own failure policy is preserved: under
     /// <c>QuarantineOffender</c> the loader returns the pack with the
     /// offending agent removed from <see cref="LoadedPack.Agents"/>;
-    /// under <c>BlockDeployment</c> the underlying
-    /// <see cref="AgentDefinitionValidationException"/> flows through
-    /// unchanged so the composition root sees the same failure it does
-    /// today for a pre-pack <c>prompts.yaml</c>.
+    /// under <c>RefuseStartup</c> the safety violations become
+    /// <c>pack.agents.safety.&lt;ruleId&gt;</c> issues and are thrown
+    /// alongside every structural issue in a single
+    /// <see cref="PackValidationException"/>.
     /// </summary>
     public async Task<LoadedPack> LoadAsync(
         string packName,
         AgentDefinitionValidator? safetyValidator,
         CancellationToken cancellationToken = default)
     {
-        LoadedPack pack = Load(packName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(packName);
 
-        if (safetyValidator is null)
+        string packRoot = Path.Combine(_packsRoot, packName);
+        if (!Directory.Exists(packRoot))
         {
-            return pack;
+            IReadOnlyList<string> available = DiscoverPacks();
+            string availableSummary = available.Count == 0
+                ? "<none>"
+                : string.Join(", ", available);
+            throw new PackValidationException(packName,
+            [
+                new PackValidationIssue(
+                    packName,
+                    "<pack>",
+                    $"Pack directory '{packRoot}' not found. Available packs under '{_packsRoot}': {availableSummary}.",
+                    "pack.missing"),
+            ]);
         }
 
-        // Reuse the existing validator verbatim so its Content Safety,
-        // jailbreak, tool-catalog, and audit paths run in a single
-        // place. Under Quarantine the validator mutates the passed
-        // PromptConfiguration by removing offenders — that is exactly
-        // the behaviour the composition root gets today, so pack
-        // callers inherit the same semantics.
-        _ = await safetyValidator
-            .ValidateAsync(pack.Agents, cancellationToken)
-            .ConfigureAwait(false);
+        var issues = new List<PackValidationIssue>();
+        LoadedPack pack = LoadInternal(packName, packRoot, issues);
+
+        // Run the #99 safety validator against every structurally-
+        // parseable agent — even when non-agent sections (e.g., seed or
+        // pack.yaml) already have issues — so the caller receives a
+        // single aggregate diagnostic. Under RefuseStartup the validator
+        // throws its own aggregate exception; we catch it here and
+        // translate each violation into a pack-scoped issue so the pack
+        // is the single reporting surface. Under QuarantineOffender the
+        // validator returns normally after removing offenders from the
+        // roster — no throw to translate, and the caller sees the same
+        // Quarantine semantics it does today.
+        if (safetyValidator is not null && pack.Agents.Agents.Count > 0)
+        {
+            try
+            {
+                _ = await safetyValidator
+                    .ValidateAsync(pack.Agents, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (AgentDefinitionValidationException ex)
+            {
+                foreach (AgentDefinitionViolation v in ex.Violations)
+                {
+                    issues.Add(new PackValidationIssue(
+                        packName,
+                        $"agents.yaml#{v.AgentKey}",
+                        $"[{v.Field}] {v.Message}",
+                        $"pack.agents.safety.{v.RuleId}"));
+                }
+            }
+        }
+
+        if (issues.Count > 0)
+        {
+            throw new PackValidationException(packName, issues);
+        }
 
         return pack;
+    }
+
+    /// <summary>
+    /// Structural load shared by <see cref="Load(string)"/> and
+    /// <see cref="LoadAsync"/>. Every discoverable structural issue is
+    /// appended to <paramref name="issues"/>; the returned pack is
+    /// always non-null so callers can still hand it to downstream code
+    /// (agent safety validator) for aggregate reporting even when
+    /// non-agent sections already reported problems.
+    /// </summary>
+    private LoadedPack LoadInternal(string packName, string packRoot, List<PackValidationIssue> issues)
+    {
+        (PackDocument? _, PackMetadata metadata, TenantConfiguration tenant) =
+            LoadPackDocument(packName, packRoot, issues);
+
+        PromptConfiguration agents = LoadAgents(packName, packRoot, issues);
+        IReadOnlyList<PackStartingTaskCategory> startingTasks =
+            LoadStartingTasks(packName, packRoot, issues);
+        IReadOnlyList<PackKnowledgeDocument> knowledgeDocs =
+            LoadKnowledgeDocuments(packName, packRoot, issues);
+        SeedManifest seed = LoadSeedManifest(packName, packRoot, issues);
+
+        ValidateAgentRoster(packName, agents, issues);
+
+        return new LoadedPack(
+            packName,
+            packRoot,
+            metadata,
+            tenant,
+            agents,
+            knowledgeDocs,
+            startingTasks,
+            seed);
     }
 
     private static (PackDocument? Document, PackMetadata Metadata, TenantConfiguration Tenant) LoadPackDocument(
@@ -548,6 +601,53 @@ public sealed partial class PackLoader
     {
         Match match = FirstHeadingRegex().Match(markdown);
         return match.Success ? match.Groups["title"].Value.Trim() : null;
+    }
+
+    /// <summary>
+    /// Load and validate the pack's scenario seed manifest at
+    /// <c>seed/scenario.yaml</c>. Every discoverable seed issue —
+    /// missing file, YAML parse error, missing required section — is
+    /// appended to <paramref name="issues"/> so seed problems arrive at
+    /// the caller in the same aggregate as agents.yaml and pack.yaml
+    /// problems.
+    /// </summary>
+    private static SeedManifest LoadSeedManifest(
+        string packName,
+        string packRoot,
+        List<PackValidationIssue> issues)
+    {
+        string seedDir = Path.Combine(packRoot, "seed");
+        string scenarioPath = Path.Combine(seedDir, SeedManifestLoader.ScenarioFileName);
+        string section = $"seed/{SeedManifestLoader.ScenarioFileName}";
+
+        if (!File.Exists(scenarioPath))
+        {
+            issues.Add(new PackValidationIssue(
+                packName,
+                section,
+                $"Required section '{section}' is missing. Every pack must ship a machine-readable scenario seed manifest for MCP seeding.",
+                "pack.section-missing"));
+            return new SeedManifest();
+        }
+
+        try
+        {
+            return SeedManifestLoader.LoadFromDirectory(seedDir);
+        }
+        catch (SeedManifestLoadException ex)
+        {
+            string subSection = string.IsNullOrEmpty(ex.Section)
+                ? section
+                : $"{section}#{ex.Section}";
+            string code = ex.Category switch
+            {
+                SeedManifestIssueCategory.ParseError => "pack.parse-error",
+                SeedManifestIssueCategory.SectionMissing => "pack.section-missing",
+                _ => "pack.section-missing",
+            };
+            issues.Add(new PackValidationIssue(packName, subSection, ex.Message, code));
+            return new SeedManifest();
+        }
     }
 
     private static void ValidateAgentRoster(

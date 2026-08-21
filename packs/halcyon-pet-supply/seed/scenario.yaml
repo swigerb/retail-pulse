@@ -1,0 +1,222 @@
+# Halcyon Pet Supply Co. scenario seed manifest — issue #108.
+#
+# Every competitor name, promo type, seasonality label, disruption
+# description, store archetype, and margin driver below is invented
+# fictional Halcyon-universe content. No third-party analysis, no
+# competitive comparison, no external material. This file is the sole
+# machine-readable source of scenario-varying seed data for this pack;
+# any change here rehashes the pack fingerprint and forces a reseed.
+
+version: 1
+
+seasonality:
+  factors:
+    Companion Food:
+      - month: 1
+        multiplier: 1.05
+        event: New Year Nutrition Reset
+        description: Households refresh feeding plans after holiday travel; premium-tier trial rises
+      - month: 4
+        multiplier: 1.12
+        event: Adoption Fair Prep
+        description: Spring adoption events drive first-90-day starter bundle purchases
+      - month: 7
+        multiplier: 0.94
+        event: Vacation Boarding Dip
+        description: In-home food volume softens as households board or travel with pets
+      - month: 10
+        multiplier: 1.10
+        event: Fall Wellness Season
+        description: Post-summer coat and weight resets lift premium formula demand
+      - month: 12
+        multiplier: 1.18
+        event: Gifting & Companion Comfort
+        description: Seasonal comfort baskets and gifting bundles create a December peak
+    Enrichment:
+      - month: 2
+        multiplier: 1.20
+        event: Indoor Winter Enrichment
+        description: Extended indoor hours drive chew and puzzle-toy purchases
+      - month: 6
+        multiplier: 1.25
+        event: Long-Chew Summer
+        description: Outdoor patio and yard time lifts long-lasting-chew SKUs
+      - month: 11
+        multiplier: 0.92
+        event: Holiday Attention Shift
+        description: Households favor gifting food and wellness over enrichment SKUs
+    Wellness:
+      - month: 3
+        multiplier: 1.15
+        event: Vet Wellness Month
+        description: Halcyon Vet Wellness Month partner event lifts joint and calming demand
+      - month: 9
+        multiplier: 1.22
+        event: Autumn Joint & Calming Push
+        description: Cooler weather and cognitive-support education campaigns drive senior wellness
+      - month: 12
+        multiplier: 1.08
+        event: Holiday Calming Support
+        description: Fireworks-adjacent and travel-anxiety education lifts calming supplement demand
+    Small Animal:
+      - month: 4
+        multiplier: 1.14
+        event: Spring Small-Animal Setup
+        description: Rabbit and guinea-pig starter kit season drives bulk-hay purchases
+      - month: 8
+        multiplier: 1.10
+        event: Back-to-School Habitat Refresh
+        description: Households refresh classroom-adjacent small-animal habitats
+      - month: 12
+        multiplier: 0.95
+        event: Holiday Household Lull
+        description: Household focus shifts to gifting and reduces small-animal restock cadence
+    In-Store Service:
+      - month: 5
+        multiplier: 1.30
+        event: Shed Season Peak
+        description: De-shed and full-groom demand peaks as coats blow out for summer
+      - month: 11
+        multiplier: 1.18
+        event: Holiday Groom Rush
+        description: Pre-holiday photo-ready grooming pushes appointment volume above trend
+      - month: 1
+        multiplier: 0.82
+        event: Post-Holiday Slowdown
+        description: Household spending pullback and cold weather reduce discretionary grooming
+
+competitive:
+  competitorsByCategory:
+    Companion Food:
+      - Riverkin Naturals
+      - Clovermeadow Kitchens
+      - Sagepoint Recipes
+      - Amberfen Companion Foods
+    Enrichment:
+      - Bramblebark Chews
+      - Foxglen Puzzle Works
+      - Rockrun Enrichment Co.
+    Wellness:
+      - Verdaline Companion Care
+      - Northlantern Wellness
+      - Elderbrook Botanicals
+    Small Animal:
+      - Hearthwarren Habitats
+      - Willowmarsh Small Animal
+      - Junipercote Habitat Co.
+    In-Store Service:
+      - Petal & Paw Grooming
+      - Mossgate Grooming Studio
+      - Thistlebright Bath House
+  pricingSources: [field_visit_log, curated_intake, distributor_bulletin]
+  shareSources: [halcyon_panel, adoption_partner_estimate, internal_estimate]
+  activityTypes: [subscription_offer, adoption_partnership, groom_capacity_change, formula_relaunch]
+  impactLevels: [pack_leader, watchlist, monitor]
+  activityTemplates:
+    - type: subscription_offer
+      description: "{0} launched an Auto-Ship trial credit for {2} households in {3}"
+      recommendation: MATCH — Layer a two-cycle Auto-Ship Bonus on Halcyon starter bundles
+    - type: subscription_offer
+      description: "{0} bundled a wellness sample into {2} shipments in {3}"
+      recommendation: DIFFERENTIATE — Emphasize Halcyon Vet Wellness Month sample cadence
+    - type: adoption_partnership
+      description: "{0} announced a co-branded {2} adoption weekend across {3}"
+      recommendation: PREEMPT — Secure Halcyon Adoption Fair Prep dates before competitor booking closes
+    - type: adoption_partnership
+      description: "{0} discontinued shelter partner rebates for {2} in {3}"
+      recommendation: IGNORE — Halcyon adoption-partner mix already anchored on cooperative rebates
+    - type: groom_capacity_change
+      description: "{0} added a mobile grooming rig covering {2} stops in {3}"
+      recommendation: MATCH — Add Saturday Grooming Bar slots at flagship neighborhoods
+    - type: groom_capacity_change
+      description: "{0} paused walk-in grooming in {2} territory across {3}"
+      recommendation: PREEMPT — Publish Halcyon walk-in availability at high-density stores
+    - type: formula_relaunch
+      description: "{0} reformulated its {2} line with a senior-support claim in {3}"
+      recommendation: DIFFERENTIATE — Restate Halcyon Wellness formulation heritage and vet-review process
+    - type: formula_relaunch
+      description: "{0} rebranded its value-tier {2} formula in {3}"
+      recommendation: IGNORE — Value-tier positioning outside Halcyon premium band
+
+promos:
+  types:
+    - name: Auto-Ship Bonus
+      liftBase: 12.0
+      liftRange: 20.0
+      coefBase: 18.0
+      coefRange: 6.0
+      code: auto-ship-bonus
+      displayName: Auto-Ship Bonus
+      description: Bonus credit applied to a household's next two Auto-Ship Subscription shipments
+    - name: Adoption Starter Bundle
+      liftBase: 18.0
+      liftRange: 28.0
+      coefBase: 24.0
+      coefRange: 9.0
+      code: adoption-starter-bundle
+      displayName: Adoption Starter Bundle
+      description: Curated first-90-day starter kit tied to a Halcyon adoption-partner event
+    - name: Vet Wellness Sample
+      liftBase: 5.0
+      liftRange: 11.0
+      coefBase: 7.0
+      coefRange: 4.0
+      code: vet-wellness-sample
+      displayName: Vet Wellness Sample
+      description: Free wellness sample paired with a store or Auto-Ship purchase
+    - name: Groom Bar Loyalty Credit
+      liftBase: 8.0
+      liftRange: 14.0
+      coefBase: 12.0
+      coefRange: 5.0
+      code: groom-bar-loyalty-credit
+      displayName: Groom Bar Loyalty Credit
+      description: Grooming-service credit unlocked after a qualifying food or wellness purchase
+    - name: Small Animal Habitat Bundle
+      liftBase: 10.0
+      liftRange: 18.0
+      coefBase: 15.0
+      coefRange: 6.0
+      code: small-animal-habitat-bundle
+      displayName: Small Animal Habitat Bundle
+      description: Habitat starter bundle combining food, bedding, and enrichment SKUs
+  successRatings: [Companion-Loved, Well-Received, Steady, Watch, Fell Short]
+
+supply:
+  disruptionTypes: [chill_chain, adoption_partner, kibble_line, groom_capacity]
+  disruptionSeverities: [critical, elevated, watch]
+  disruptionDescriptions:
+    chill_chain:
+      - Refrigerated last-mile carrier reduced capacity on Great Lakes lanes
+      - Cold-storage handoff at Sunbelt distributor hub delayed by equipment reset
+      - Insulated packaging vendor short-shipped Mountain Corridor outbound orders
+    adoption_partner:
+      - Adoption partner shelter paused intake, deferring co-branded starter kit demand
+      - Adoption Fair Prep cadence slipped after partner event date change
+      - Regional shelter merged operations, temporarily consolidating adoption windows
+    kibble_line:
+      - Meadowbowl Nutrition kibble extruder maintenance window ran long
+      - Grain-Inclusive formula batch quality hold delayed release
+      - Senior Stage recipe transition slowed line changeovers at contract manufacturer
+    groom_capacity:
+      - Groomer scheduling gap opened at Pacific Metro flagship after staff transfer
+      - Salon HVAC repair reduced same-day Grooming Bar capacity at two locations
+      - Mobile Grooming Bar van in preventive maintenance for one weekend cycle
+
+stores:
+  types:
+    - Neighborhood Flagship
+    - Community Anchor
+    - Curbside Compact
+    - Adoption Partner Storefront
+    - Grooming Bar Studio
+
+margin:
+  driverCategories:
+    - Ingredient Sourcing
+    - Store Labor
+    - Auto-Ship Fulfillment
+    - Adoption Partnership Programs
+    - Groom Bar Consumables
+    - Facility Overhead
+  trendLabels: [improving, softening, holding, seasonal]

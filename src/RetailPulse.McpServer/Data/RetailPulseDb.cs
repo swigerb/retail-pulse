@@ -14,7 +14,26 @@ public class RetailPulseDb
 {
     private readonly string _connectionString;
     private readonly TenantConfiguration _tenant;
+    private readonly SeedManifest _seed;
     private readonly string _seedIdentityPath;
+    private readonly string _seedDirectoryPath;
+
+    // Manifest-derived arrays cached once so seeding loops don't
+    // re-project the manifest lists on every row.
+    private readonly string[] _promoTypeNames;
+    private readonly string[] _successRatings;
+    private readonly string[] _pricingSources;
+    private readonly string[] _shareSources;
+    private readonly string[] _activityTypes;
+    private readonly string[] _impactLevels;
+    private readonly IReadOnlyList<ActivityTemplate> _activityTemplates;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _competitorsByCategory;
+    private readonly string[] _disruptionTypes;
+    private readonly string[] _disruptionSeverities;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _disruptionDescriptions;
+    private readonly string[] _storeTypes;
+    private readonly string[] _marginDriverCategories;
+    private readonly string[] _marginTrendLabels;
 
     /// <summary>
     /// Build a data store. The <paramref name="seedIdentityPath"/> is the
@@ -22,12 +41,37 @@ public class RetailPulseDb
     /// changes the store re-seeds; when it doesn't, the store preserves
     /// caller-driven mutations across restarts. In the pack-based world
     /// (issue #108) this is the active pack's <c>pack.yaml</c>; in
-    /// legacy tests it can still be a bare <c>tenant.yaml</c>.
+    /// legacy tests it can still be a bare <c>tenant.yaml</c>. The
+    /// <paramref name="seedDirectoryPath"/> (issue #108) is hashed
+    /// alongside <paramref name="seedIdentityPath"/> so a scenario
+    /// edit alone forces reseed.
     /// </summary>
-    public RetailPulseDb(ITenantProvider tenantProvider, string dbPath, string seedIdentityPath)
+    public RetailPulseDb(
+        ITenantProvider tenantProvider,
+        SeedManifest seed,
+        string dbPath,
+        string seedIdentityPath,
+        string seedDirectoryPath = "")
     {
         _tenant = tenantProvider.GetTenant();
+        _seed = seed ?? throw new ArgumentNullException(nameof(seed));
         _seedIdentityPath = seedIdentityPath;
+        _seedDirectoryPath = seedDirectoryPath ?? "";
+
+        _promoTypeNames = [.. _seed.Promos.Types.Select(t => t.Name)];
+        _successRatings = [.. _seed.Promos.SuccessRatings];
+        _pricingSources = [.. _seed.Competitive.PricingSources];
+        _shareSources = [.. _seed.Competitive.ShareSources];
+        _activityTypes = [.. _seed.Competitive.ActivityTypes];
+        _impactLevels = [.. _seed.Competitive.ImpactLevels];
+        _activityTemplates = _seed.Competitive.ActivityTemplates;
+        _competitorsByCategory = _seed.Competitive.CompetitorsByCategory;
+        _disruptionTypes = [.. _seed.Supply.DisruptionTypes];
+        _disruptionSeverities = [.. _seed.Supply.DisruptionSeverities];
+        _disruptionDescriptions = _seed.Supply.DisruptionDescriptions;
+        _storeTypes = [.. _seed.Stores.Types];
+        _marginDriverCategories = [.. _seed.Margin.DriverCategories];
+        _marginTrendLabels = [.. _seed.Margin.TrendLabels];
 
         string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
@@ -42,6 +86,45 @@ public class RetailPulseDb
 
         InitializeSchema();
         SeedIfNeeded();
+    }
+
+    /// <summary>
+    /// Backwards-compatible constructor used by tests that still hand
+    /// the seeder a bare tenant.yaml path. Locates the default pack's
+    /// <c>seed/scenario.yaml</c> by walking up from
+    /// <paramref name="seedIdentityPath"/> so the seeder always receives
+    /// a real manifest — production callers must use the primary
+    /// constructor and supply the active pack's manifest directly.
+    /// </summary>
+    public RetailPulseDb(ITenantProvider tenantProvider, string dbPath, string seedIdentityPath)
+        : this(
+            tenantProvider,
+            LocateDefaultSeed(seedIdentityPath, out string discoveredSeedDir),
+            dbPath,
+            seedIdentityPath,
+            discoveredSeedDir)
+    {
+    }
+
+    private static SeedManifest LocateDefaultSeed(string seedIdentityPath, out string seedDir)
+    {
+        // Walk up from the tenant.yaml (or pack.yaml) path looking for
+        // packs/default/seed/scenario.yaml so tests that construct the
+        // seeder without an explicit manifest still hit real pack data.
+        DirectoryInfo? dir = new(Path.GetDirectoryName(Path.GetFullPath(seedIdentityPath)) ?? ".");
+        for (int depth = 0; depth < 8 && dir is not null; depth++, dir = dir.Parent)
+        {
+            string candidate = Path.Combine(dir.FullName, "packs", "default", "seed");
+            if (File.Exists(Path.Combine(candidate, SeedManifestLoader.ScenarioFileName)))
+            {
+                seedDir = candidate;
+                return SeedManifestLoader.LoadFromDirectory(candidate);
+            }
+        }
+        throw new InvalidOperationException(
+            "RetailPulseDb was constructed without a SeedManifest and could not locate " +
+            "packs/default/seed/scenario.yaml relative to '" + seedIdentityPath + "'. " +
+            "Update the call site to supply a SeedManifest explicitly.");
     }
 
     // ── Schema ───────────────────────────────────────────────────────────
@@ -373,15 +456,63 @@ public class RetailPulseDb
 
     // Bump this version whenever the schema or seeding logic changes
     // to force a re-seed even if tenant.yaml hasn't changed.
-    private const int SchemaVersion = 7;
+    // Issue #108: v8 folds the pack's seed/scenario.yaml manifest into
+    // the fingerprint so a scenario edit alone forces reseed. Upgrades
+    // from v7 stores always miss a v8 hash lookup and re-seed on first
+    // boot.
+    private const int SchemaVersion = 8;
 
     private string ComputeTenantHash()
     {
-        if (!File.Exists(_seedIdentityPath))
-            return "no-file";
+        // Mix the schema version, the seed identity file (pack.yaml in
+        // the pack world, tenant.yaml in the legacy path), and every
+        // file under the pack's seed/ directory. This way switching
+        // Packs:Active, editing pack.yaml, or editing scenario.yaml
+        // alone all rehash and force reseed; an untouched pack stays
+        // idempotent so caller-driven mutations survive restart.
+        using SHA256 sha = SHA256.Create();
+        using var stream = new MemoryStream();
 
-        byte[] bytes = File.ReadAllBytes(_seedIdentityPath);
-        byte[] hash = SHA256.HashData(bytes);
+        void WriteHeader(string label)
+        {
+            byte[] header = Encoding.UTF8.GetBytes(label + "\n");
+            stream.Write(header, 0, header.Length);
+        }
+
+        WriteHeader($"schemaVersion=v{SchemaVersion}");
+
+        if (File.Exists(_seedIdentityPath))
+        {
+            WriteHeader($"identity={Path.GetFileName(_seedIdentityPath)}");
+            byte[] bytes = File.ReadAllBytes(_seedIdentityPath);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.WriteByte((byte)'\n');
+        }
+        else
+        {
+            WriteHeader("identity=missing");
+        }
+
+        if (!string.IsNullOrEmpty(_seedDirectoryPath) && Directory.Exists(_seedDirectoryPath))
+        {
+            List<string> seedFiles =
+            [
+                .. Directory
+                    .EnumerateFiles(_seedDirectoryPath, "*", SearchOption.AllDirectories)
+                    .OrderBy(p => p, StringComparer.Ordinal),
+            ];
+            foreach (string file in seedFiles)
+            {
+                string relative = Path.GetRelativePath(_seedDirectoryPath, file).Replace('\\', '/');
+                WriteHeader($"seed:{relative}");
+                byte[] bytes = File.ReadAllBytes(file);
+                stream.Write(bytes, 0, bytes.Length);
+                stream.WriteByte((byte)'\n');
+            }
+        }
+
+        stream.Position = 0;
+        byte[] hash = sha.ComputeHash(stream);
         return $"v{SchemaVersion}:{Convert.ToHexStringLower(hash)}";
     }
 
@@ -950,77 +1081,29 @@ public class RetailPulseDb
         } * (brand.PriceSegment == "Premium" ? 0.8 : 1.0);
     }
 
-    private static double GetCategorySeasonalMultiplier(string category, int month)
+    /// <summary>
+    /// Look up a per-(category, month) seasonal multiplier from the
+    /// pack's scenario seed manifest. Returns 1.0 when the pack does
+    /// not define a factor for that combination — matches the pre-#108
+    /// switch-expression default.
+    /// </summary>
+    private double GetCategorySeasonalMultiplier(string category, int month)
     {
-        return category switch
+        if (!_seed.Seasonality.Factors.TryGetValue(category, out IReadOnlyList<SeasonalMonthFactor>? months))
         {
-            "Spirits" => month switch
+            return 1.0;
+        }
+        foreach (SeasonalMonthFactor factor in months)
+        {
+            if (factor.Month == month)
             {
-                11 => 1.30,
-                12 => 1.40,       // Holidays
-                6 => 1.10,
-                7 => 1.15,          // Summer entertaining
-                1 => 0.85,
-                2 => 0.90,          // Post-holiday dip
-                _ => 1.0
-            },
-            "Grocery" => month switch
-            {
-                8 => 1.20,
-                9 => 1.25,          // Back-to-school
-                11 => 1.25,
-                12 => 1.30,        // Holidays
-                1 => 0.90,
-                2 => 0.92,          // Post-holiday
-                _ => 1.0
-            },
-            "Quick-Serve Restaurant" => month switch
-            {
-                6 => 1.15,
-                7 => 1.20,
-                8 => 1.18, // Summer
-                1 => 0.88,
-                2 => 0.90,             // Winter dip
-                12 => 0.95,                        // Holiday competition
-                _ => 1.0
-            },
-            "Home Improvement" => month switch
-            {
-                3 => 1.20,
-                4 => 1.30,
-                5 => 1.35, // Spring projects
-                9 => 1.20,                          // Fall prep
-                1 => 0.80,
-                2 => 0.82,              // Winter low
-                12 => 0.85,                         // Winter
-                _ => 1.0
-            },
-            "Office Supply" => month switch
-            {
-                8 => 1.25,
-                9 => 1.20,          // Back-to-school
-                1 => 1.15,                       // New year office setup
-                6 => 0.90,
-                7 => 0.88,           // Summer lull
-                _ => 1.0
-            },
-            "Furniture" => month switch
-            {
-                3 => 1.15,
-                4 => 1.10,          // Spring refresh
-                8 => 1.20,
-                9 => 1.15,          // Back-to-school / dorm
-                11 => 1.25,
-                12 => 1.10,        // Holiday gifting
-                1 => 0.80,
-                2 => 0.85,          // Post-holiday
-                _ => 1.0
-            },
-            _ => 1.0
-        };
+                return factor.Multiplier;
+            }
+        }
+        return 1.0;
     }
 
-    private static void SeedSeasonalFactors(SqliteConnection conn)
+    private void SeedSeasonalFactors(SqliteConnection conn)
     {
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -1034,67 +1117,23 @@ public class RetailPulseDb
         SqliteParameter pEvent = cmd.Parameters.Add("@event", SqliteType.Text);
         SqliteParameter pDesc = cmd.Parameters.Add("@desc", SqliteType.Text);
 
-        var factors = new (string Category, int Month, double Mult, string? Event, string Desc)[]
+        // Order category iteration by manifest insertion order and, within
+        // each category, by month ascending. The manifest's underlying
+        // Dictionary preserves insertion order in .NET, so the SeasonalFactors
+        // table rows land in a deterministic order across runs — this is what
+        // the DefaultPackSeed_MatchesLegacyOracle equivalence test asserts.
+        foreach (KeyValuePair<string, IReadOnlyList<SeasonalMonthFactor>> pair in _seed.Seasonality.Factors)
         {
-            // Spirits
-            ("Spirits", 1, 0.85, "Post-Holiday Dip", "Consumer spending contracts after holiday season; spirits purchases decline sharply in January"),
-            ("Spirits", 2, 0.90, "Post-Holiday Recovery", "Gradual recovery from January dip; Valentine's Day provides modest lift"),
-            ("Spirits", 6, 1.10, "Summer Entertaining", "Outdoor entertaining season begins; cocktail culture drives spirits demand"),
-            ("Spirits", 7, 1.15, "Peak Summer", "July 4th celebrations and peak summer entertaining drive spirits sales"),
-            ("Spirits", 11, 1.30, "Thanksgiving", "Thanksgiving gatherings and early holiday gifting boost spirits significantly"),
-            ("Spirits", 12, 1.40, "Holiday Season", "Christmas, New Year's Eve, and holiday gifting create peak spirits demand"),
-
-            // Grocery
-            ("Grocery", 1, 0.90, "Post-Holiday Reset", "Consumers shift to healthier eating; reduced spending after holidays"),
-            ("Grocery", 2, 0.92, "Winter Lull", "Continued lower traffic; Super Bowl provides one-week spike only"),
-            ("Grocery", 8, 1.20, "Back-to-School", "Families stock up on school lunches, snacks, and meal prep essentials"),
-            ("Grocery", 9, 1.25, "Peak Back-to-School", "Full school routines drive consistent grocery spending; fall meal planning"),
-            ("Grocery", 11, 1.25, "Thanksgiving Prep", "Largest cooking holiday drives massive grocery volume across all categories"),
-            ("Grocery", 12, 1.30, "Holiday Entertaining", "Holiday parties, baking, and family gatherings sustain elevated demand"),
-
-            // Quick-Serve Restaurant
-            ("Quick-Serve Restaurant", 1, 0.88, "Winter Dip", "Cold weather and post-holiday budget tightening reduce QSR traffic"),
-            ("Quick-Serve Restaurant", 2, 0.90, "Continued Winter", "Lingering winter weather suppresses foot traffic; budget recovery continues"),
-            ("Quick-Serve Restaurant", 6, 1.15, "Summer Start", "School's out, families eat out more; summer travel begins"),
-            ("Quick-Serve Restaurant", 7, 1.20, "Peak Summer", "Peak travel and outdoor activity season; highest QSR traffic"),
-            ("Quick-Serve Restaurant", 8, 1.18, "Late Summer", "Continued summer momentum; back-to-school transitions begin"),
-            ("Quick-Serve Restaurant", 12, 0.95, "Holiday Competition", "Holiday home cooking and sit-down restaurants compete for dining occasions"),
-
-            // Home Improvement
-            ("Home Improvement", 1, 0.80, "Winter Low", "Shortest days, coldest weather; outdoor projects impossible in most regions"),
-            ("Home Improvement", 2, 0.82, "Late Winter", "Planning begins but execution still limited by weather"),
-            ("Home Improvement", 3, 1.20, "Spring Awakening", "Spring project planning converts to purchases; garden prep begins"),
-            ("Home Improvement", 4, 1.30, "Peak Spring", "Prime project season — landscaping, painting, deck building in full swing"),
-            ("Home Improvement", 5, 1.35, "Spring Peak", "Highest demand period; Memorial Day weekend sales event drives volume"),
-            ("Home Improvement", 9, 1.20, "Fall Prep", "Winterization projects, fall landscaping, and pre-holiday home improvements"),
-            ("Home Improvement", 12, 0.85, "Winter Decline", "Outdoor projects cease; holiday focus shifts spending to gifts"),
-
-            // Office Supply
-            ("Office Supply", 1, 1.15, "New Year Setup", "New year office reorganization and budget spending drives demand"),
-            ("Office Supply", 6, 0.90, "Summer Lull", "School's out, offices at reduced capacity; lowest demand period"),
-            ("Office Supply", 7, 0.88, "Deep Summer", "Continued summer slowdown; vacation season reduces office supply needs"),
-            ("Office Supply", 8, 1.25, "Back-to-School Peak", "Massive back-to-school demand for supplies, technology, and furniture"),
-            ("Office Supply", 9, 1.20, "School Continuation", "Ongoing school-year supply needs; corporate Q3 budget refresh"),
-
-            // Furniture
-            ("Furniture", 1, 0.80, "Post-Holiday Low", "Consumer spending exhausted from holidays; lowest furniture demand"),
-            ("Furniture", 2, 0.85, "Winter Slow", "Presidents' Day sales provide brief lift but overall demand remains low"),
-            ("Furniture", 3, 1.15, "Spring Refresh", "Spring cleaning and home refresh drive new furniture purchases"),
-            ("Furniture", 4, 1.10, "Spring Continuation", "Moving season begins; apartment leases turn over"),
-            ("Furniture", 8, 1.20, "Back-to-School / Dorm", "College dorm furnishing and apartment setup for new school year"),
-            ("Furniture", 9, 1.15, "Fall Nesting", "Fall nesting instinct; consumers invest in home comfort as weather cools"),
-            ("Furniture", 11, 1.25, "Holiday Gifting", "Black Friday and holiday furniture sales; largest promotional period"),
-            ("Furniture", 12, 1.10, "Holiday Sales", "Continued holiday sales momentum; gift card redemption begins"),
-        };
-
-        foreach ((string? cat, int month, double mult, string? evt, string? desc) in factors)
-        {
-            pCat.Value = cat;
-            pMonth.Value = month;
-            pMult.Value = mult;
-            pEvent.Value = evt ?? (object)DBNull.Value;
-            pDesc.Value = desc;
-            cmd.ExecuteNonQuery();
+            string category = pair.Key;
+            foreach (SeasonalMonthFactor factor in pair.Value.OrderBy(f => f.Month))
+            {
+                pCat.Value = category;
+                pMonth.Value = factor.Month;
+                pMult.Value = factor.Multiplier;
+                pEvent.Value = string.IsNullOrWhiteSpace(factor.Event) ? DBNull.Value : factor.Event;
+                pDesc.Value = factor.Description ?? "";
+                cmd.ExecuteNonQuery();
+            }
         }
     }
 
@@ -1874,9 +1913,10 @@ public class RetailPulseDb
     }
 
     // ── Promo Seeding ────────────────────────────────────────────────────
-
-    private static readonly string[] PromoTypes = ["BOGO", "Discount", "Display", "Digital", "Bundle"];
-    private static readonly string[] SuccessRatings = ["Excellent", "Good", "Average", "Below Average", "Poor"];
+    // Promo type names, success rating labels, and per-type lift/coef
+    // coefficients originate in the pack's seed/scenario.yaml — see
+    // _promoTypeNames, _successRatings, and the _seed.Promos.Types
+    // lookup below.
 
     private void SeedPromoHistory(SqliteConnection conn)
     {
@@ -1910,7 +1950,8 @@ public class RetailPulseDb
 
                 for (int c = 0; c < 5; c++)
                 {
-                    string promoType = PromoTypes[rng.Next(PromoTypes.Length)];
+                    PromoTypeConfig promoTypeConfig = _seed.Promos.Types[rng.Next(_seed.Promos.Types.Count)];
+                    string promoType = promoTypeConfig.Name;
                     DateOnly campaignStart = baseDate.AddDays(rng.Next(0, 300));
                     int durationDays = rng.Next(7, 45);
                     DateOnly campaignEnd = campaignStart.AddDays(durationDays);
@@ -1918,15 +1959,7 @@ public class RetailPulseDb
                     double spend = Math.Round(5000 + (rng.NextDouble() * 195000), 2);
                     double baselineVolume = Math.Round(1000 + (rng.NextDouble() * 9000), 0);
 
-                    double baseLift = promoType switch
-                    {
-                        "BOGO" => 15.0 + (rng.NextDouble() * 25.0),
-                        "Discount" => 8.0 + (rng.NextDouble() * 18.0),
-                        "Display" => 5.0 + (rng.NextDouble() * 12.0),
-                        "Digital" => 3.0 + (rng.NextDouble() * 10.0),
-                        "Bundle" => 10.0 + (rng.NextDouble() * 20.0),
-                        _ => 5.0 + (rng.NextDouble() * 10.0)
-                    };
+                    double baseLift = promoTypeConfig.LiftBase + (rng.NextDouble() * promoTypeConfig.LiftRange);
 
                     double liftPercent = Math.Round(baseLift, 1);
                     double actualVolume = Math.Round(baselineVolume * (1.0 + (liftPercent / 100.0)), 0);
@@ -1941,6 +1974,10 @@ public class RetailPulseDb
                         > -30 => 3,
                         _ => 4
                     };
+                    // Clamp to the number of success ratings the pack ships. The
+                    // legacy behaviour used 5 ratings; a pack that ships fewer
+                    // pins the index at the last available label.
+                    if (ratingIndex >= _successRatings.Length) ratingIndex = _successRatings.Length - 1;
 
                     pBrand.Value = brand.Name;
                     pRegion.Value = region;
@@ -1953,7 +1990,7 @@ public class RetailPulseDb
                     pActual.Value = actualVolume;
                     pLift.Value = liftPercent;
                     pRoi.Value = roi;
-                    pRating.Value = SuccessRatings[ratingIndex];
+                    pRating.Value = _successRatings[ratingIndex];
                     cmd.ExecuteNonQuery();
                 }
             }
@@ -1982,17 +2019,10 @@ public class RetailPulseDb
             int catSeed = GetStableHash($"lift|{category}");
             var rng = new Random(catSeed);
 
-            foreach (string promoType in PromoTypes)
+            foreach (PromoTypeConfig promoTypeConfig in _seed.Promos.Types)
             {
-                double avgLift = promoType switch
-                {
-                    "BOGO" => 22.0 + (rng.NextDouble() * 8.0),
-                    "Discount" => 14.0 + (rng.NextDouble() * 6.0),
-                    "Display" => 8.0 + (rng.NextDouble() * 5.0),
-                    "Digital" => 5.0 + (rng.NextDouble() * 4.0),
-                    "Bundle" => 16.0 + (rng.NextDouble() * 6.0),
-                    _ => 10.0
-                };
+                double avgLift = promoTypeConfig.CoefBase + (rng.NextDouble() * promoTypeConfig.CoefRange);
+                string promoType = promoTypeConfig.Name;
 
                 double stdDev = Math.Round(avgLift * (0.15 + (rng.NextDouble() * 0.25)), 2);
 
@@ -2008,21 +2038,11 @@ public class RetailPulseDb
     }
 
     // ── Competitive Intelligence Seeding ─────────────────────────────────
-
-    private static readonly Dictionary<string, string[]> CompetitorsByCategory = new()
-    {
-        ["Spirits"] = ["Jack Daniel's", "Maker's Mark", "Patrón", "Grey Goose", "Tito's"],
-        ["Grocery"] = ["Kroger", "Whole Foods", "Trader Joe's", "Aldi", "Safeway"],
-        ["Quick-Serve Restaurant"] = ["McDonald's", "Chick-fil-A", "Chipotle", "Taco Bell", "Wendy's"],
-        ["Home Improvement"] = ["Home Depot", "Lowe's", "Menards", "Ace Hardware", "True Value"],
-        ["Office Supply"] = ["Staples", "Office Depot", "Amazon Business", "Costco Business"],
-        ["Furniture"] = ["IKEA", "Wayfair", "Ashley Furniture", "Rooms To Go", "Pottery Barn"]
-    };
-
-    private static readonly string[] PricingSources = ["web_scrape", "field_report", "syndicated"];
-    private static readonly string[] ShareSources = ["Nielsen", "IRI", "internal_estimate", "syndicated"];
-    private static readonly string[] ActivityTypes = ["price_drop", "new_product", "promo_launch", "distribution_change"];
-    private static readonly string[] ImpactLevels = ["high", "medium", "low"];
+    // Competitor rosters, pricing/share sources, activity types, impact
+    // levels, and activity templates all originate in the pack's
+    // seed/scenario.yaml — see the _competitorsByCategory /
+    // _pricingSources / _shareSources / _impactLevels /
+    // _activityTemplates fields at the top of this class.
 
     private void SeedCompetitorPricing(SqliteConnection conn)
     {
@@ -2046,7 +2066,8 @@ public class RetailPulseDb
 
         foreach (BrandConfig brand in _tenant.Brands)
         {
-            string[] competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B", "Generic Competitor C"]);
+            IReadOnlyList<string> competitors = LookupCompetitors(
+                brand.Category, ["Generic Competitor A", "Generic Competitor B", "Generic Competitor C"]);
             double basePrice = brand.PriceSegment == "Premium" ? 45.0 : 25.0;
 
             foreach (string? competitor in competitors)
@@ -2082,7 +2103,7 @@ public class RetailPulseDb
                         pPrevPrice.Value = Math.Round(previousPrice, 2);
                         pPctChange.Value = pctChange;
                         pDate.Value = date.ToString("yyyy-MM-dd");
-                        pSource.Value = PricingSources[rng.Next(PricingSources.Length)];
+                        pSource.Value = _pricingSources[rng.Next(_pricingSources.Length)];
                         cmd.ExecuteNonQuery();
 
                         competitorBase = priceVariation;
@@ -2114,7 +2135,8 @@ public class RetailPulseDb
 
         foreach (BrandConfig brand in _tenant.Brands)
         {
-            string[] competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
+            IReadOnlyList<string> competitors = LookupCompetitors(
+                brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
             var allPlayers = new List<string> { brand.Name };
             allPlayers.AddRange(competitors);
 
@@ -2126,15 +2148,15 @@ public class RetailPulseDb
                 // Allocate base shares — our brand gets 15-35%, competitors split the rest
                 double ourBaseShare = 15.0 + (rng.NextDouble() * 20.0);
                 double remainingShare = 100.0 - ourBaseShare;
-                double[] competitorShares = new double[competitors.Length];
+                double[] competitorShares = new double[competitors.Count];
                 double totalComp = 0;
-                for (int c = 0; c < competitors.Length; c++)
+                for (int c = 0; c < competitors.Count; c++)
                 {
                     competitorShares[c] = 5 + (rng.NextDouble() * 25);
                     totalComp += competitorShares[c];
                 }
                 // Normalize competitor shares
-                for (int c = 0; c < competitors.Length; c++)
+                for (int c = 0; c < competitors.Count; c++)
                     competitorShares[c] = competitorShares[c] / totalComp * remainingShare;
 
                 double prevOurShare = ourBaseShare;
@@ -2154,13 +2176,13 @@ public class RetailPulseDb
                     pShare.Value = currentShare;
                     pPrevShare.Value = Math.Round(prevOurShare, 1);
                     pChange.Value = changePoints;
-                    pSource.Value = ShareSources[rng.Next(ShareSources.Length)];
+                    pSource.Value = _shareSources[rng.Next(_shareSources.Length)];
                     cmd.ExecuteNonQuery();
 
                     prevOurShare = currentShare;
 
                     // Competitors
-                    for (int c = 0; c < competitors.Length; c++)
+                    for (int c = 0; c < competitors.Count; c++)
                     {
                         double compDrift = (rng.NextDouble() - 0.52) * 3.0;
                         double compShare = Math.Round(Math.Max(3, Math.Min(45, prevCompShares[c] + compDrift)), 1);
@@ -2173,7 +2195,7 @@ public class RetailPulseDb
                         pShare.Value = compShare;
                         pPrevShare.Value = Math.Round(prevCompShares[c], 1);
                         pChange.Value = compChange;
-                        pSource.Value = ShareSources[rng.Next(ShareSources.Length)];
+                        pSource.Value = _shareSources[rng.Next(_shareSources.Length)];
                         cmd.ExecuteNonQuery();
 
                         prevCompShares[c] = compShare;
@@ -2201,43 +2223,34 @@ public class RetailPulseDb
         SqliteParameter pRecommendation = cmd.Parameters.Add("@recommendation", SqliteType.Text);
 
         var baseDate = new DateOnly(2025, 8, 1);
-        var activityTemplates = new (string type, string descTemplate, string recTemplate)[]
-        {
-            ("price_drop", "{0} dropped prices by {1}% on {2} products in {3}", "MATCH — Consider matching price within 2 weeks to avoid share loss"),
-            ("price_drop", "{0} launched aggressive pricing on premium {2} line in {3}", "DIFFERENTIATE — Emphasize quality/heritage vs price competition"),
-            ("new_product", "{0} launched new {2} product line targeting {3} market", "PREEMPT — Accelerate our own product pipeline to maintain innovation lead"),
-            ("new_product", "{0} introduced value-tier {2} option in {3}", "IGNORE — Different segment, minimal overlap with our premium positioning"),
-            ("promo_launch", "{0} started BOGO promotion on {2} in {3}", "MATCH — Launch counter-promotion within the same window"),
-            ("promo_launch", "{0} launched loyalty program for {2} in {3}", "DIFFERENTIATE — Focus on product quality rather than loyalty discounts"),
-            ("distribution_change", "{0} expanded {2} distribution to 200+ new stores in {3}", "PREEMPT — Secure additional shelf space before competitor gains foothold"),
-            ("distribution_change", "{0} partnered with major retailer for exclusive {2} placement in {3}", "MATCH — Negotiate similar exclusive deals with competing retailers"),
-        };
+        IReadOnlyList<ActivityTemplate> activityTemplates = _activityTemplates;
 
         int seed = GetStableHash("competitive_activity_seed");
         var rng = new Random(seed);
 
         foreach (BrandConfig brand in _tenant.Brands)
         {
-            string[] competitors = CompetitorsByCategory.GetValueOrDefault(brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
+            IReadOnlyList<string> competitors = LookupCompetitors(
+                brand.Category, ["Generic Competitor A", "Generic Competitor B"]);
 
             // 3-5 activities per category
             int activityCount = 3 + rng.Next(3);
             for (int i = 0; i < activityCount; i++)
             {
-                string competitor = competitors[rng.Next(competitors.Length)];
-                (string? type, string? descTemplate, string? recTemplate) = activityTemplates[rng.Next(activityTemplates.Length)];
+                string competitor = competitors[rng.Next(competitors.Count)];
+                ActivityTemplate template = activityTemplates[rng.Next(activityTemplates.Count)];
                 string region = _tenant.Regions[rng.Next(_tenant.Regions.Count)];
                 int priceDrop = 8 + rng.Next(20);
                 DateOnly date = baseDate.AddDays(rng.Next(300));
 
                 pCompetitor.Value = competitor;
-                pType.Value = type;
+                pType.Value = template.Type;
                 pCategory.Value = brand.Category;
                 pRegion.Value = region;
-                pDesc.Value = string.Format(descTemplate, competitor, priceDrop, brand.Category, region);
-                pImpact.Value = ImpactLevels[rng.Next(ImpactLevels.Length)];
+                pDesc.Value = string.Format(template.Description, competitor, priceDrop, brand.Category, region);
+                pImpact.Value = _impactLevels[rng.Next(_impactLevels.Length)];
                 pDate.Value = date.ToString("yyyy-MM-dd");
-                pRecommendation.Value = recTemplate;
+                pRecommendation.Value = template.Recommendation;
                 cmd.ExecuteNonQuery();
             }
         }
@@ -2317,7 +2330,7 @@ public class RetailPulseDb
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
         if (string.IsNullOrWhiteSpace(promoType))
-            return new { error = "Parameter 'promoType' is required.", available_types = PromoTypes };
+            return new { error = "Parameter 'promoType' is required.", available_types = _promoTypeNames };
 
         BrandConfig? brandConfig = _tenant.Brands.FirstOrDefault(b =>
             b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
@@ -2596,17 +2609,26 @@ public class RetailPulseDb
         };
     }
 
-    public static object GetPromoTypes() => new
+    /// <summary>
+    /// Enumerate the pack-scoped promo type catalogue served by
+    /// <c>GET /api/promo/types</c>. Every field is sourced from the
+    /// active pack's <c>seed/scenario.yaml</c> so a pack switch
+    /// changes the vocabulary the endpoint reports.
+    /// </summary>
+    public object GetPromoTypes() => new
     {
-        promo_types = new[]
+        promo_types = _seed.Promos.Types.Select(t => new
         {
-            new { code = "bogo", name = "Buy One Get One", description = "BOGO promotions offering free or discounted additional units" },
-            new { code = "discount", name = "Discount", description = "Price-off promotions, typically 10-30% off regular price" },
-            new { code = "display", name = "Display", description = "In-store display and end-cap placement promotions" },
-            new { code = "digital", name = "Digital", description = "Digital/online promotions including social media and email campaigns" },
-            new { code = "bundle", name = "Bundle", description = "Product bundling promotions combining related items at a discount" }
-        }
+            code = string.IsNullOrWhiteSpace(t.Code)
+                ? SlugFromName(t.Name)
+                : t.Code,
+            name = string.IsNullOrWhiteSpace(t.DisplayName) ? t.Name : t.DisplayName,
+            description = t.Description ?? "",
+        }).ToArray()
     };
+
+    private static string SlugFromName(string name) =>
+        (name ?? "").ToLowerInvariant().Replace(' ', '-');
 
     // ── Competitive Intelligence Queries ─────────────────────────────────
 
@@ -3055,10 +3077,21 @@ public class RetailPulseDb
     }
 
     // ── Supply Chain Seeding ─────────────────────────────────────────────
-
+    // Disruption types, severities, and per-type descriptions all
+    // originate in the pack's seed/scenario.yaml (issue #108); see
+    // _disruptionTypes / _disruptionSeverities / _disruptionDescriptions
+    // at the top of this class. InventoryStatuses is a schema-level
+    // vocabulary (mirrored in ORDER BY expressions) and stays static.
     private static readonly string[] InventoryStatuses = ["healthy", "low", "critical", "out_of_stock"];
-    private static readonly string[] DisruptionTypes = ["logistics", "supplier", "weather", "demand_surge"];
-    private static readonly string[] DisruptionSeverities = ["high", "medium", "low"];
+
+    /// <summary>
+    /// Look up the competitor roster for a brand category from the pack
+    /// manifest. Returns the supplied <paramref name="fallback"/> when
+    /// the pack does not name competitors for the category — matches
+    /// the pre-#108 behaviour of <c>Dictionary.GetValueOrDefault</c>.
+    /// </summary>
+    private IReadOnlyList<string> LookupCompetitors(string category, IReadOnlyList<string> fallback) =>
+        _competitorsByCategory.TryGetValue(category, out IReadOnlyList<string>? found) ? found : fallback;
 
     private void SeedInventoryLevels(SqliteConnection conn)
     {
@@ -3169,37 +3202,15 @@ public class RetailPulseDb
         var masterRng = new Random(GetStableHash("disruptions_master"));
         var today = new DateOnly(2026, 5, 13);
 
-        // Generate 18 active disruptions spread across brands/regions
-        var disruptionDescriptions = new Dictionary<string, string[]>
-        {
-            ["logistics"] = [
-                "Port congestion causing 3-5 day delays on inbound shipments",
-                "Carrier capacity shortage affecting last-mile delivery",
-                "Distribution center labor shortage impacting order processing",
-                "Cross-dock facility equipment failure reducing throughput",
-                "Freight rate surge due to seasonal demand spike",
-                "Interstate route closure forcing alternate shipping lanes",
-                "Rail network delays affecting bulk shipments"
-            ],
-            ["supplier"] = [
-                "Key raw material supplier facing production issues",
-                "Supplier quality audit triggered product hold",
-                "Packaging supplier lead time extended by 2 weeks",
-                "Secondary supplier contract renegotiation in progress",
-                "Supplier facility upgrade causing temporary capacity reduction"
-            ],
-            ["weather"] = [
-                "Severe storms disrupting Southeast distribution routes",
-                "Winter weather advisories delaying Midwest deliveries",
-                "Hurricane season preparation affecting coastal warehousing",
-                "Heat wave impacting cold chain logistics"
-            ],
-            ["demand_surge"] = [
-                "Unexpected viral social media driving 3x demand spike",
-                "Competitor stockout redirecting demand to our brands",
-                "Regional event driving above-forecast consumption"
-            ]
-        };
+        // Generate 18 active disruptions spread across brands/regions.
+        // Type and severity vocabulary come from the pack manifest, indexed
+        // by the same probability bands the pre-#108 code used so a pack
+        // that ships 4 types + 3 severities preserves the historic
+        // 40/25/20/15 type mix and 20/50/30 severity mix. Descriptions
+        // for each type are also manifest-owned.
+        IReadOnlyList<string> disruptionTypeVocab = _disruptionTypes;
+        IReadOnlyList<string> disruptionSeverityVocab = _disruptionSeverities;
+        IReadOnlyDictionary<string, IReadOnlyList<string>> disruptionDescriptions = _disruptionDescriptions;
 
         var brandList = _tenant.Brands.ToList();
         var regionList = _tenant.Regions.ToList();
@@ -3211,24 +3222,31 @@ public class RetailPulseDb
 
             // Type distribution: logistics 40%, supplier 25%, weather 20%, demand_surge 15%
             double typeRoll = masterRng.NextDouble();
-            string disruptionType = typeRoll < 0.40 ? "logistics"
-                : typeRoll < 0.65 ? "supplier"
-                : typeRoll < 0.85 ? "weather"
-                : "demand_surge";
+            int typeIdx = typeRoll < 0.40 ? 0
+                : typeRoll < 0.65 ? 1
+                : typeRoll < 0.85 ? 2
+                : 3;
+            if (typeIdx >= disruptionTypeVocab.Count) typeIdx = disruptionTypeVocab.Count - 1;
+            string disruptionType = disruptionTypeVocab[typeIdx];
 
             // Severity distribution: high 20%, medium 50%, low 30%
             double sevRoll = masterRng.NextDouble();
-            string severity = sevRoll < 0.20 ? "high" : sevRoll < 0.70 ? "medium" : "low";
+            int sevIdx = sevRoll < 0.20 ? 0 : sevRoll < 0.70 ? 1 : 2;
+            if (sevIdx >= disruptionSeverityVocab.Count) sevIdx = disruptionSeverityVocab.Count - 1;
+            string severity = disruptionSeverityVocab[sevIdx];
 
-            string[] descriptions = disruptionDescriptions[disruptionType];
-            string desc = descriptions[masterRng.Next(descriptions.Length)];
+            IReadOnlyList<string> descriptions = disruptionDescriptions.TryGetValue(
+                disruptionType, out IReadOnlyList<string>? typed) ? typed : [];
+            string desc = descriptions.Count > 0
+                ? descriptions[masterRng.Next(descriptions.Count)]
+                : "Supply disruption details unavailable";
 
             int startDaysAgo = masterRng.Next(1, 21);
-            int resolutionDaysOut = severity == "high" ? masterRng.Next(7, 21) : masterRng.Next(2, 10);
-            int impactedSkus = severity switch
+            int resolutionDaysOut = sevIdx == 0 ? masterRng.Next(7, 21) : masterRng.Next(2, 10);
+            int impactedSkus = sevIdx switch
             {
-                "high" => masterRng.Next(15, 50),
-                "medium" => masterRng.Next(5, 20),
+                0 => masterRng.Next(15, 50),
+                1 => masterRng.Next(5, 20),
                 _ => masterRng.Next(1, 8)
             };
 
@@ -3319,7 +3337,7 @@ public class RetailPulseDb
         SqliteParameter pFootTraffic = cmd.Parameters.Add("@footTraffic", SqliteType.Integer);
         SqliteParameter pConversionRate = cmd.Parameters.Add("@conversionRate", SqliteType.Real);
 
-        string[] storeTypes = ["Flagship", "Mall", "Strip Center", "Downtown", "Outlet"];
+        string[] storeTypes = _storeTypes;
         int storeCounter = 0;
 
         foreach (string region in _tenant.Regions)
@@ -3504,8 +3522,8 @@ public class RetailPulseDb
         SqliteParameter pImpact = cmd.Parameters.Add("@impact", SqliteType.Real);
         SqliteParameter pTrend = cmd.Parameters.Add("@trend", SqliteType.Text);
 
-        string[] categories = ["Raw Materials", "Labor", "Logistics", "Marketing", "Packaging", "Overhead"];
-        string[] trends = ["increasing", "decreasing", "stable", "volatile"];
+        string[] categories = _marginDriverCategories;
+        string[] trends = _marginTrendLabels;
 
         foreach (BrandConfig brand in _tenant.Brands)
         {

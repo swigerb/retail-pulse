@@ -1,0 +1,293 @@
+# Content pack seed manifest — issue #108
+#
+# This file is the machine-readable declarative source of every scenario-
+# varying seed input used by the MCP server. Prior to issue #108 the default
+# dataset was baked into RetailPulseDb.cs; that data now lives here so a pack
+# switch changes both the tenant identity *and* the SQLite fact table
+# contents. The values below are byte-verbatim ports of the historic
+# defaults, verified by the DefaultPackSeed_MatchesLegacyOracle equivalence
+# test in RetailPulse.Tests/Packs.
+#
+# Editing any value in this file changes the pack fingerprint and forces a
+# reseed on next MCP boot. Do not remove sections without also updating
+# SeedManifestLoader validation.
+
+version: 1
+
+seasonality:
+  factors:
+    Spirits:
+      - month: 1
+        multiplier: 0.85
+        event: Post-Holiday Dip
+        description: Consumer spending contracts after holiday season; spirits purchases decline sharply in January
+      - month: 2
+        multiplier: 0.90
+        event: Post-Holiday Recovery
+        description: Gradual recovery from January dip; Valentine's Day provides modest lift
+      - month: 6
+        multiplier: 1.10
+        event: Summer Entertaining
+        description: Outdoor entertaining season begins; cocktail culture drives spirits demand
+      - month: 7
+        multiplier: 1.15
+        event: Peak Summer
+        description: July 4th celebrations and peak summer entertaining drive spirits sales
+      - month: 11
+        multiplier: 1.30
+        event: Thanksgiving
+        description: Thanksgiving gatherings and early holiday gifting boost spirits significantly
+      - month: 12
+        multiplier: 1.40
+        event: Holiday Season
+        description: Christmas, New Year's Eve, and holiday gifting create peak spirits demand
+    Grocery:
+      - month: 1
+        multiplier: 0.90
+        event: Post-Holiday Reset
+        description: Consumers shift to healthier eating; reduced spending after holidays
+      - month: 2
+        multiplier: 0.92
+        event: Winter Lull
+        description: Continued lower traffic; Super Bowl provides one-week spike only
+      - month: 8
+        multiplier: 1.20
+        event: Back-to-School
+        description: Families stock up on school lunches, snacks, and meal prep essentials
+      - month: 9
+        multiplier: 1.25
+        event: Peak Back-to-School
+        description: Full school routines drive consistent grocery spending; fall meal planning
+      - month: 11
+        multiplier: 1.25
+        event: Thanksgiving Prep
+        description: Largest cooking holiday drives massive grocery volume across all categories
+      - month: 12
+        multiplier: 1.30
+        event: Holiday Entertaining
+        description: Holiday parties, baking, and family gatherings sustain elevated demand
+    Quick-Serve Restaurant:
+      - month: 1
+        multiplier: 0.88
+        event: Winter Dip
+        description: Cold weather and post-holiday budget tightening reduce QSR traffic
+      - month: 2
+        multiplier: 0.90
+        event: Continued Winter
+        description: Lingering winter weather suppresses foot traffic; budget recovery continues
+      - month: 6
+        multiplier: 1.15
+        event: Summer Start
+        description: School's out, families eat out more; summer travel begins
+      - month: 7
+        multiplier: 1.20
+        event: Peak Summer
+        description: Peak travel and outdoor activity season; highest QSR traffic
+      - month: 8
+        multiplier: 1.18
+        event: Late Summer
+        description: Continued summer momentum; back-to-school transitions begin
+      - month: 12
+        multiplier: 0.95
+        event: Holiday Competition
+        description: Holiday home cooking and sit-down restaurants compete for dining occasions
+    Home Improvement:
+      - month: 1
+        multiplier: 0.80
+        event: Winter Low
+        description: Shortest days, coldest weather; outdoor projects impossible in most regions
+      - month: 2
+        multiplier: 0.82
+        event: Late Winter
+        description: Planning begins but execution still limited by weather
+      - month: 3
+        multiplier: 1.20
+        event: Spring Awakening
+        description: Spring project planning converts to purchases; garden prep begins
+      - month: 4
+        multiplier: 1.30
+        event: Peak Spring
+        description: Prime project season — landscaping, painting, deck building in full swing
+      - month: 5
+        multiplier: 1.35
+        event: Spring Peak
+        description: Highest demand period; Memorial Day weekend sales event drives volume
+      - month: 9
+        multiplier: 1.20
+        event: Fall Prep
+        description: Winterization projects, fall landscaping, and pre-holiday home improvements
+      - month: 12
+        multiplier: 0.85
+        event: Winter Decline
+        description: Outdoor projects cease; holiday focus shifts spending to gifts
+    Office Supply:
+      - month: 1
+        multiplier: 1.15
+        event: New Year Setup
+        description: New year office reorganization and budget spending drives demand
+      - month: 6
+        multiplier: 0.90
+        event: Summer Lull
+        description: School's out, offices at reduced capacity; lowest demand period
+      - month: 7
+        multiplier: 0.88
+        event: Deep Summer
+        description: Continued summer slowdown; vacation season reduces office supply needs
+      - month: 8
+        multiplier: 1.25
+        event: Back-to-School Peak
+        description: Massive back-to-school demand for supplies, technology, and furniture
+      - month: 9
+        multiplier: 1.20
+        event: School Continuation
+        description: Ongoing school-year supply needs; corporate Q3 budget refresh
+    Furniture:
+      - month: 1
+        multiplier: 0.80
+        event: Post-Holiday Low
+        description: Consumer spending exhausted from holidays; lowest furniture demand
+      - month: 2
+        multiplier: 0.85
+        event: Winter Slow
+        description: Presidents' Day sales provide brief lift but overall demand remains low
+      - month: 3
+        multiplier: 1.15
+        event: Spring Refresh
+        description: Spring cleaning and home refresh drive new furniture purchases
+      - month: 4
+        multiplier: 1.10
+        event: Spring Continuation
+        description: Moving season begins; apartment leases turn over
+      - month: 8
+        multiplier: 1.20
+        event: Back-to-School / Dorm
+        description: College dorm furnishing and apartment setup for new school year
+      - month: 9
+        multiplier: 1.15
+        event: Fall Nesting
+        description: Fall nesting instinct; consumers invest in home comfort as weather cools
+      - month: 11
+        multiplier: 1.25
+        event: Holiday Gifting
+        description: Black Friday and holiday furniture sales; largest promotional period
+      - month: 12
+        multiplier: 1.10
+        event: Holiday Sales
+        description: Continued holiday sales momentum; gift card redemption begins
+
+competitive:
+  competitorsByCategory:
+    Spirits: ["Jack Daniel's", "Maker's Mark", "Patrón", "Grey Goose", "Tito's"]
+    Grocery: ["Kroger", "Whole Foods", "Trader Joe's", "Aldi", "Safeway"]
+    Quick-Serve Restaurant: ["McDonald's", "Chick-fil-A", "Chipotle", "Taco Bell", "Wendy's"]
+    Home Improvement: ["Home Depot", "Lowe's", "Menards", "Ace Hardware", "True Value"]
+    Office Supply: ["Staples", "Office Depot", "Amazon Business", "Costco Business"]
+    Furniture: ["IKEA", "Wayfair", "Ashley Furniture", "Rooms To Go", "Pottery Barn"]
+  pricingSources: [web_scrape, field_report, syndicated]
+  shareSources: [Nielsen, IRI, internal_estimate, syndicated]
+  activityTypes: [price_drop, new_product, promo_launch, distribution_change]
+  impactLevels: [high, medium, low]
+  activityTemplates:
+    - type: price_drop
+      description: "{0} dropped prices by {1}% on {2} products in {3}"
+      recommendation: MATCH — Consider matching price within 2 weeks to avoid share loss
+    - type: price_drop
+      description: "{0} launched aggressive pricing on premium {2} line in {3}"
+      recommendation: DIFFERENTIATE — Emphasize quality/heritage vs price competition
+    - type: new_product
+      description: "{0} launched new {2} product line targeting {3} market"
+      recommendation: PREEMPT — Accelerate our own product pipeline to maintain innovation lead
+    - type: new_product
+      description: "{0} introduced value-tier {2} option in {3}"
+      recommendation: IGNORE — Different segment, minimal overlap with our premium positioning
+    - type: promo_launch
+      description: "{0} started BOGO promotion on {2} in {3}"
+      recommendation: MATCH — Launch counter-promotion within the same window
+    - type: promo_launch
+      description: "{0} launched loyalty program for {2} in {3}"
+      recommendation: DIFFERENTIATE — Focus on product quality rather than loyalty discounts
+    - type: distribution_change
+      description: "{0} expanded {2} distribution to 200+ new stores in {3}"
+      recommendation: PREEMPT — Secure additional shelf space before competitor gains foothold
+    - type: distribution_change
+      description: "{0} partnered with major retailer for exclusive {2} placement in {3}"
+      recommendation: MATCH — Negotiate similar exclusive deals with competing retailers
+
+promos:
+  types:
+    - name: BOGO
+      liftBase: 15.0
+      liftRange: 25.0
+      coefBase: 22.0
+      coefRange: 8.0
+      code: bogo
+      displayName: Buy One Get One
+      description: BOGO promotions offering free or discounted additional units
+    - name: Discount
+      liftBase: 8.0
+      liftRange: 18.0
+      coefBase: 14.0
+      coefRange: 6.0
+      code: discount
+      displayName: Discount
+      description: Price-off promotions, typically 10-30% off regular price
+    - name: Display
+      liftBase: 5.0
+      liftRange: 12.0
+      coefBase: 8.0
+      coefRange: 5.0
+      code: display
+      displayName: Display
+      description: In-store display and end-cap placement promotions
+    - name: Digital
+      liftBase: 3.0
+      liftRange: 10.0
+      coefBase: 5.0
+      coefRange: 4.0
+      code: digital
+      displayName: Digital
+      description: Digital/online promotions including social media and email campaigns
+    - name: Bundle
+      liftBase: 10.0
+      liftRange: 20.0
+      coefBase: 16.0
+      coefRange: 6.0
+      code: bundle
+      displayName: Bundle
+      description: Product bundling promotions combining related items at a discount
+  successRatings: [Excellent, Good, Average, Below Average, Poor]
+
+supply:
+  disruptionTypes: [logistics, supplier, weather, demand_surge]
+  disruptionSeverities: [high, medium, low]
+  disruptionDescriptions:
+    logistics:
+      - Port congestion causing 3-5 day delays on inbound shipments
+      - Carrier capacity shortage affecting last-mile delivery
+      - Distribution center labor shortage impacting order processing
+      - Cross-dock facility equipment failure reducing throughput
+      - Freight rate surge due to seasonal demand spike
+      - Interstate route closure forcing alternate shipping lanes
+      - Rail network delays affecting bulk shipments
+    supplier:
+      - Key raw material supplier facing production issues
+      - Supplier quality audit triggered product hold
+      - Packaging supplier lead time extended by 2 weeks
+      - Secondary supplier contract renegotiation in progress
+      - Supplier facility upgrade causing temporary capacity reduction
+    weather:
+      - Severe storms disrupting Southeast distribution routes
+      - Winter weather advisories delaying Midwest deliveries
+      - Hurricane season preparation affecting coastal warehousing
+      - Heat wave impacting cold chain logistics
+    demand_surge:
+      - Unexpected viral social media driving 3x demand spike
+      - Competitor stockout redirecting demand to our brands
+      - Regional event driving above-forecast consumption
+
+stores:
+  types: [Flagship, Mall, Strip Center, Downtown, Outlet]
+
+margin:
+  driverCategories: [Raw Materials, Labor, Logistics, Marketing, Packaging, Overhead]
+  trendLabels: [increasing, decreasing, stable, volatile]

@@ -180,6 +180,7 @@ public sealed class PackLoaderTests : IDisposable
 
         File.WriteAllText(Path.Combine(packDir, "pack.yaml"), MinimalValidPackYaml("tinypack"));
         File.WriteAllText(Path.Combine(packDir, "agents.yaml"), MinimalValidAgentsYaml());
+        PlantMinimalSeed(packDir);
 
         var loader = PackLoader.ForDirectory(root);
         LoadedPack pack = loader.Load("tinypack");
@@ -190,6 +191,8 @@ public sealed class PackLoaderTests : IDisposable
         pack.Agents.Agents.Should().ContainKey("solo");
         pack.StartingTasks.Should().BeEmpty();
         pack.KnowledgeDocuments.Should().BeEmpty();
+        pack.Seed.Should().NotBeNull();
+        pack.Seed.Stores.Types.Should().ContainSingle().Which.Should().Be("Flagship");
     }
 
     [Fact]
@@ -331,6 +334,7 @@ public sealed class PackLoaderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(packDir, "knowledge"));
         File.WriteAllText(Path.Combine(packDir, "pack.yaml"), MinimalValidPackYaml("emptycorpus"));
         File.WriteAllText(Path.Combine(packDir, "agents.yaml"), MinimalValidAgentsYaml());
+        PlantMinimalSeed(packDir);
 
         var loader = PackLoader.ForDirectory(root);
         LoadedPack pack = loader.Load("emptycorpus");
@@ -374,4 +378,54 @@ public sealed class PackLoaderTests : IDisposable
             temperature: 0.3
             tools: []
         """;
+
+    // Every pack must ship seed/scenario.yaml (#108). Enough content to
+    // satisfy the required top-level sections; test packs otherwise
+    // exercise loader plumbing rather than seeded data.
+    internal static string MinimalValidSeedYaml() => """
+        seasonality:
+          factors:
+            General:
+              - month: 1
+                multiplier: 1.00
+        promos:
+          types:
+            - name: "Discount"
+              liftBase: 0.10
+              liftRange: 0.10
+              coefBase: 0.10
+              coefRange: 0.10
+          successRatings: ["good"]
+        competitive:
+          competitorsByCategory:
+            General: ["CompeteCo"]
+          pricingSources: ["field_scan"]
+          shareSources: ["survey"]
+          activityTypes: ["price_move"]
+          impactLevels: ["low"]
+          activityTemplates:
+            - type: price_move
+              description: "{0} adjusted pricing on {2} in {3}"
+              recommendation: "OBSERVE — Placeholder recommendation for tests"
+        supply:
+          disruptionTypes: ["logistics", "supplier", "weather", "demand_surge"]
+          disruptionSeverities: ["high", "medium", "low"]
+          disruptionDescriptions:
+            logistics: ["Placeholder logistics disruption"]
+            supplier: ["Placeholder supplier disruption"]
+            weather: ["Placeholder weather disruption"]
+            demand_surge: ["Placeholder demand-surge disruption"]
+        stores:
+          types: ["Flagship"]
+        margin:
+          driverCategories: ["Raw Materials"]
+          trendLabels: ["stable"]
+        """;
+
+    internal static void PlantMinimalSeed(string packDir)
+    {
+        string seedDir = Path.Combine(packDir, "seed");
+        Directory.CreateDirectory(seedDir);
+        File.WriteAllText(Path.Combine(seedDir, "scenario.yaml"), MinimalValidSeedYaml());
+    }
 }
