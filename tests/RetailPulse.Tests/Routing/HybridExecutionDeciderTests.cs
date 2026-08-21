@@ -306,10 +306,7 @@ public sealed class HybridExecutionDeciderTests
     }
 
     [Fact]
-    public void IsCouncilIntent_returns_false_for_non_council_decision()
-    {
-        HybridExecutionDecider.IsCouncilIntent(SingleHighConfidence()).Should().BeFalse();
-    }
+    public void IsCouncilIntent_returns_false_for_non_council_decision() => HybridExecutionDecider.IsCouncilIntent(SingleHighConfidence()).Should().BeFalse();
 
     // ── Ordering — override outranks council when planner is available ─
 

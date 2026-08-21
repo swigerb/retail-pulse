@@ -100,7 +100,7 @@ internal static class HybridFastPathBaselineRunner
                 Framework = RuntimeInformation.FrameworkDescription,
                 OsPlatform = ResolveOsPlatform(),
                 ProcessArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
-                ProcessorCount = System.Environment.ProcessorCount,
+                ProcessorCount = Environment.ProcessorCount,
                 Configuration = ResolveBuildConfiguration(),
             },
             Method = new MethodDescriptor
@@ -121,7 +121,7 @@ internal static class HybridFastPathBaselineRunner
 
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         string json = JsonSerializer.Serialize(artifact, s_jsonOptions);
-        File.WriteAllText(outputPath, json + System.Environment.NewLine);
+        File.WriteAllText(outputPath, json + Environment.NewLine);
 
         Console.WriteLine("[baseline] Wrote " + outputPath);
         Console.WriteLine($"[baseline] samples={SampleCount}  p50={artifact.Results.P50} ns  p95={artifact.Results.P95} ns  commit={artifact.CommitSha}");
@@ -186,14 +186,12 @@ internal static class HybridFastPathBaselineRunner
             : "unknown";
     }
 
-    private static string ResolveBuildConfiguration()
-    {
+    private static string ResolveBuildConfiguration() =>
 #if DEBUG
-        return "Debug";
+        "Debug";
 #else
-        return "Release";
+        "Release";
 #endif
-    }
 
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {

@@ -19,10 +19,10 @@ namespace RetailPulse.Api.Escalation;
 /// <b>Relationship to hybrid execution (issue #95).</b> The L2 multi-specialist
 /// fan-out predated the plan-first path and was the earlier response to "one
 /// specialist is not enough". Issue #95's hybrid execution decider
-/// (<see cref="RetailPulse.Api.Agents.Routing.HybridExecutionDecider"/>) is now
+/// (<see cref="Agents.Routing.HybridExecutionDecider"/>) is now
 /// the canonical multi-specialist admission signal for <c>/api/chat</c>:
 /// multi-domain / low-confidence / advisory prompts admit into
-/// <see cref="RetailPulse.Api.Agents.Planning.PlanOrchestrator"/>, which owns
+/// <see cref="Agents.Planning.PlanOrchestrator"/>, which owns
 /// planning, execution, review, persistence, and cost attribution. The chat
 /// pipeline does NOT call this orchestrator, so there is no duplicated fan-out
 /// on the primary chat path.
