@@ -151,6 +151,33 @@ public static class PlanReviewEndpoints
                 }
             }
 
+            // Guardrail-scan reviewer rejection feedback (#136): non-empty
+            // Feedback flows through PlanReviewCompletionService ->
+            // PlanReviewCoordinator.ReplanAsync -> PlanBuilder as part of the
+            // revised planner prompt. That's another reviewer-authored user-
+            // text ingress that must share the same GuardrailsMiddleware seam
+            // as /api/chat and the edit path — otherwise a hostile reviewer
+            // could smuggle a jailbreak/prompt-override into the replanner
+            // via the feedback field. On block, refuse the decision without
+            // ever calling RespondAsync so the approval row stays Pending.
+            if (!string.IsNullOrWhiteSpace(feedback))
+            {
+                var feedbackProbe = new ChatRequest(
+                    Message: feedback,
+                    SessionId: row.Context.SessionId,
+                    User: new UserContext(subject, subject, string.Empty));
+                GuardrailResult feedbackGuardrail = await guardrails.CheckInputAsync(feedbackProbe, ct);
+                if (feedbackGuardrail.IsBlocked)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = "Rejection feedback was blocked by input guardrails.",
+                        code = "plan_review_feedback_blocked",
+                        refusal = feedbackGuardrail.RefusalMessage,
+                    });
+                }
+            }
+
             var payload = new PlanReviewResponsePayload
             {
                 Kind = kind,
@@ -208,6 +235,7 @@ public static class PlanReviewEndpoints
             IPlanStore planStore,
             HttpContext http,
             [FromServices] PlanReviewCompletionService? completion,
+            [FromServices] GuardrailsMiddleware guardrails,
             CancellationToken ct) =>
         {
             if (RefuseAnonymous(http, out IResult? refusal))
@@ -226,6 +254,31 @@ public static class PlanReviewEndpoints
                 !string.Equals(row.Context.Kind, ApprovalKind.Clarification, StringComparison.Ordinal))
             {
                 return Results.NotFound(new { error = "Clarification not found." });
+            }
+
+            // Guardrail-scan the clarification answer (#136): the reviewer's
+            // Answer is substituted as the paused step's transcript and then
+            // flows verbatim into the AccumulatedResults of every downstream
+            // specialist call during resume. That is user-authored text
+            // reaching an agent, so it MUST share the same
+            // GuardrailsMiddleware.CheckInputAsync seam as /api/chat, the
+            // edit path, and the reject-feedback path. On block, refuse the
+            // answer without ever calling RespondAsync so the clarification
+            // row stays Pending — no specialist or completion call runs
+            // against a blocked answer.
+            var answerProbe = new ChatRequest(
+                Message: body.Answer,
+                SessionId: row.Context.SessionId,
+                User: new UserContext(subject, subject, string.Empty));
+            GuardrailResult answerGuardrail = await guardrails.CheckInputAsync(answerProbe, ct);
+            if (answerGuardrail.IsBlocked)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "Clarification answer was blocked by input guardrails.",
+                    code = "plan_clarification_answer_blocked",
+                    refusal = answerGuardrail.RefusalMessage,
+                });
             }
 
             var answer = new PlanClarificationAnswer { Answer = body.Answer };

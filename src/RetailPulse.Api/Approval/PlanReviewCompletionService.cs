@@ -434,15 +434,38 @@ public sealed class PlanReviewCompletionService
         GuardrailsMiddleware guardrails = sp.GetRequiredService<GuardrailsMiddleware>();
         string filtered = await guardrails.FilterOutputAsync(composed, state.Subject, ct);
 
+        // Chart propagation on the resume path (#137): specialists on an
+        // approved / edited / clarification-resumed plan emit ChartSpecs
+        // exactly the same way they do on the fast path and on the
+        // immediate plan-first branch. Prior to this change, the resume
+        // path composed the final reply text but silently dropped every
+        // chart the executor produced — the SignalR broadcast delivered
+        // <c>reply</c> only, so ADR-006's "9 chart types render on both
+        // paths" invariant broke as soon as a plan needed reviewer
+        // approval. We flatten Charts in specialist order (mirroring
+        // <see cref="PlanOrchestrationResult.Charts"/>) so a plan resumed
+        // by the reviewer surface delivers the same chart list a plan
+        // that never needed review would.
+        //
+        // On the clarification-resume path, <paramref name="resumeCompletedSteps"/>
+        // carries the pre-suspend transcript. Those steps' charts must survive
+        // the pause too, so they're flattened ahead of the post-resume outcome
+        // steps to preserve specialist order.
+        IReadOnlyList<ChartSpec> planCharts =
+        [
+            .. (resumeCompletedSteps ?? []).SelectMany(s => s.Charts ?? []),
+            .. outcome.Steps.SelectMany(s => s.Charts ?? []),
+        ];
+
         await FinaliseAsCompletedAsync(planStore, plan.PlanId, state.Subject,
             filtered, terminalReason, outcome, ct);
 
         // Chat-turn parity — mirror the trio the single-specialist branch fires.
         await ApplyChatTurnParityAsync(sp, plan, state, filtered, outcome, ct);
 
-        await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, filtered, terminalReason);
+        await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, filtered, terminalReason, planCharts);
 
-        return PlanReviewCompletionResult.Executed(filtered, outcome);
+        return PlanReviewCompletionResult.Executed(filtered, outcome, planCharts);
     }
 
     private static string ComposeFinalReply(
@@ -665,7 +688,8 @@ public sealed class PlanReviewCompletionService
     }
 
     private static async Task BroadcastFinalAsync(
-        IServiceProvider sp, string planId, string subject, string reply, string terminalReason)
+        IServiceProvider sp, string planId, string subject, string reply, string terminalReason,
+        IReadOnlyList<ChartSpec>? charts = null)
     {
         IHubContext<TelemetryHub>? hub = sp.GetService<IHubContext<TelemetryHub>>();
         if (hub is null) return;
@@ -675,6 +699,15 @@ public sealed class PlanReviewCompletionService
             subject,
             reply,
             terminalReason,
+            // Charts flattened in specialist order — matches the
+            // ChatResponse.Charts contract on the fast path so the client
+            // renders identical charts regardless of whether the plan was
+            // executed immediately or resumed via the review surface. Null
+            // or empty means the specialists produced no charts on this
+            // turn. Non-terminal (early replan / clarification) broadcasts
+            // don't reach this method — those go via
+            // plan_review_next_round instead.
+            charts = charts is { Count: > 0 } ? charts : null,
         });
     }
 }
@@ -692,12 +725,25 @@ public sealed record PlanReviewCompletionResult
     public string? ClarificationCheckpointId { get; init; }
     public PlanExecutionOutcome? ExecutionOutcome { get; init; }
 
-    public static PlanReviewCompletionResult Executed(string reply, PlanExecutionOutcome outcome) => new()
-    {
-        Kind = PlanReviewCompletionKind.Executed,
-        Reply = reply,
-        ExecutionOutcome = outcome,
-    };
+    /// <summary>
+    /// Charts collected from every executed step on the resume path,
+    /// flattened in specialist order. Only populated on the
+    /// <see cref="PlanReviewCompletionKind.Executed"/> branch. Empty when
+    /// no specialist emitted a chart; never <see langword="null"/> so
+    /// callers can iterate unconditionally.
+    /// </summary>
+    public IReadOnlyList<ChartSpec> Charts { get; init; } = [];
+
+    public static PlanReviewCompletionResult Executed(
+        string reply,
+        PlanExecutionOutcome outcome,
+        IReadOnlyList<ChartSpec>? charts = null) => new()
+        {
+            Kind = PlanReviewCompletionKind.Executed,
+            Reply = reply,
+            ExecutionOutcome = outcome,
+            Charts = charts ?? [],
+        };
 
     public static PlanReviewCompletionResult SuspendedForNextRound(string requestId, int round) => new()
     {
