@@ -260,6 +260,167 @@ Get resolved approval history (last 50).
 
 ---
 
+## Plan Review (issue #94)
+
+> **Feature flag:** endpoints are only mapped when `PlanReview:Enabled = true`
+> AND `PlanPersistence:Enabled = true`. When either is off these routes 404 and
+> the chat pipeline runs the pre-#94 plan-first path — no observable difference.
+
+Plan review reuses the same durable `SqliteApprovalGate` storage the tool
+`ApprovalTool` uses, discriminated by a new `Kind` column. Plan rows have
+`Kind = "plan_review"` and clarification rows have `Kind = "clarification"`;
+every decision appears in the shared `/api/approvals/history` audit trail.
+
+### Non-blocking suspend/resume — how `/api/chat` interacts
+
+When plan review is enabled and the router flags a request as multi-domain,
+`POST /api/chat` NO LONGER blocks the request thread on the reviewer decision.
+Instead:
+
+1. The orchestrator runs the planner, persists the plan as
+   `awaiting_review`, and calls
+   `PlanReviewCoordinator.OpenRoundAsync`, which:
+   - Writes a genuine `Microsoft.Agents.AI.Workflows.Checkpointing.ICheckpointStore<JsonElement>`
+     checkpoint via `CreateCheckpointAsync(sessionId, ...)` — the framework's
+     public JSON checkpoint API, not a marker written next to it.
+   - Opens a Pending approval row of kind `plan_review`.
+2. `/api/chat` returns **HTTP 202 Accepted** with `planId`, `reviewRequestId`,
+   `round`, and `sessionId`. Clients subscribe to the SignalR
+   `plan_final_response` event or poll `GET /api/plans/{planId}`.
+3. When the reviewer records a decision via
+   `POST /api/plans/{planId}/reviews/{requestId}/decision`, the endpoint kicks
+   off `PlanReviewCompletionService.ResolveAsync`. That service:
+   - Reads the latest framework checkpoint + the approval row.
+   - On approve / edit → executes the effective plan through `PlanExecutor`,
+     runs `GuardrailsMiddleware.FilterOutputAsync` for PII redaction, writes
+     audit / session-turn / export parity, and broadcasts the filtered final
+     response on the SignalR hub.
+   - On reject with cap remaining → invokes the planner, saves a new
+     checkpoint, and opens the next review round (round N+1). The client
+     receives a `plan_review_next_round` event with the new request id.
+   - On terminal-without-execution (timeout, replan exhausted, edit invalid)
+     → transitions the plan to `Failed` with the specific terminal reason.
+4. If the API restarts between steps 2 and 3, the
+   `PlanReviewRestartRecoveryService` scans the plan store for
+   `awaiting_review` / `awaiting_clarification` rows on boot, and re-drives
+   `ResolveAsync` for any whose approval row is already terminal — so a
+   decision that arrived while the API was down still delivers the final
+   response on next boot.
+5. Review timeouts are enforced by a
+   `PlanReviewTimeoutBackgroundService` sweep (uses the injected
+   `TimeProvider`) — no request thread is blocked on the review deadline.
+
+The pre-#94 hot path is preserved byte-for-byte when
+`PlanReview:Enabled = false`: `RunAsync` executes the plan inline and
+`/api/chat` returns the standard `200 OK` `ChatResponse` envelope.
+
+### Mid-plan clarification (`[[CLARIFY]] <question>`) and replan (`[[REPLAN]] <feedback>`)
+
+The `PlanExecutor` inspects each step's `action` field for two markers:
+
+- `[[CLARIFY]] <question>` — opens a clarification row + framework
+  checkpoint capturing the paused plan state, then halts. When the reviewer
+  answers via `POST /api/plans/{planId}/clarifications/{requestId}/answer`,
+  the completion service resumes: the answer becomes the paused step's
+  result and downstream steps continue.
+- `[[REPLAN]] <feedback>` — the reachable mid-execution revision surface.
+  Opens a NEW `plan_review` row for the remaining steps with the feedback
+  as revision-reason and halts. The reviewer's next decision drives the
+  same suspend/resume cycle.
+
+Both markers share the identical durable persistence path with plan review,
+so a restart in the middle of either flow is invisible to the reviewer.
+
+### Relationship to #91 (approval hardening)
+
+#91 introduced `IApprovalResumeStrategy` as the single reconciliation seam. #94
+extends that seam without adding a second polling loop: on restart the same
+`ApprovalReconciliationBackgroundService` walks every Pending row exactly once
+and asks the strategy per-row. `PlanReviewResumeStrategy` returns:
+
+* `OrphanTerminal` for `Kind = "tool"` rows — byte-identical to the Wave 1
+  `OrphanUnresumableStrategy`.
+* `Resume` for `Kind = "plan_review"` and `Kind = "clarification"` rows — the
+  gate re-owns them to the current process. The durable approval row remains the
+  source of truth for the decision, and the framework
+  `ICheckpointStore<JsonElement>` (JSON store rooted at
+  `{data-dir}/plan-reviews`) holds the paused execution envelope the
+  completion service reads to rebuild the effective plan on resume.
+
+### GET /api/plans/{planId}/reviews
+
+List open plan reviews owned by the caller.
+
+**Auth:** authenticated caller only. Anonymous callers receive `403`. Cross-
+subject / unknown plans collapse to `404` (probe resistant — mirrors
+`/api/plans/{planId}`).
+
+**Response (200):**
+
+```json
+[
+  {
+    "requestId": "...",
+    "planId": "...",
+    "round": 0,
+    "subject": "user-oid",
+    "action": "Review plan proposal (2 step(s)).",
+    "impact": "Specialists: scorecard, demand-forecasting",
+    "urgency": "medium",
+    "reasoning": "Initial plan proposal awaiting reviewer decision.",
+    "createdAt": "2026-...",
+    "expiresAt": "2026-...",
+    "status": "pending",
+    "payload": "{ \"planId\": ... }"
+  }
+]
+```
+
+### POST /api/plans/{planId}/reviews/{requestId}/decision
+
+Approve, reject-with-feedback, or edit-then-approve the proposal.
+
+**Request body:**
+
+```json
+{ "kind": "approve" }
+{ "kind": "reject", "feedback": "narrow the scope to Q4" }
+{ "kind": "edit", "editedSteps": [ { "specialistKey": "scorecard", "intent": "scorecard", "action": "..." } ] }
+```
+
+* `approve` — executes the original plan.
+* `edit` — validated against the live specialist roster; the edited plan is what
+  the executor actually runs. Edit-to-empty terminates the plan as `Failed` with
+  reason `PlanReviewEditedToEmpty`; unknown specialists terminate with
+  `PlanReviewEditInvalid`.
+* `reject` — coordinator invokes the planner with the feedback appended and
+  presents the revised plan for another review round, bounded by
+  `PlanReview:MaxReplanRounds` (default 2). Exhausting the cap terminates with
+  `PlanReviewReplanExhausted`.
+
+**Errors:** `400` for missing feedback/editedSteps, `403` for anonymous callers,
+`404` for cross-subject / unknown plan or review, and the same terminal-reason
+propagation the gate uses for late race losers (see #91 for the winner-return
+contract — the same rule applies here).
+
+### POST /api/plans/{planId}/clarifications/{requestId}/answer
+
+Answer a mid-plan clarification question raised by a specialist through
+`IPlanClarifier`.
+
+```json
+{ "answer": "Northeast region only" }
+```
+
+### Timeout & terminal outcomes
+
+Every review round has an authoritative timeout persisted on the approval row
+(`PlanReview:DefaultReviewTimeout`, default 30 minutes). When exceeded the row
+transitions to `TimedOut` and the plan terminates with reason
+`PlanReviewTimedOut` — never an indefinite hang.
+
+---
+
 ## Demand Forecasting
 
 ### Demand forecasting is an MCP-tool-driven capability, not a REST endpoint

@@ -1,6 +1,9 @@
 using System.Text;
+using Microsoft.Extensions.Options;
+using RetailPulse.Api.Approval;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Observability;
 using RetailPulse.Contracts.Persistence;
 using RetailPulse.Contracts.Routing;
@@ -24,6 +27,8 @@ public sealed class PlanOrchestrator
     private readonly ICostTracker _costTracker;
     private readonly PlanPersistenceOptions _options;
     private readonly ILogger<PlanOrchestrator> _logger;
+    private readonly PlanReviewCoordinator? _reviewCoordinator;
+    private readonly PlanReviewOptions? _reviewOptions;
 
     public PlanOrchestrator(
         PlanBuilder builder,
@@ -31,7 +36,9 @@ public sealed class PlanOrchestrator
         IPlanStore planStore,
         ICostTracker costTracker,
         PlanPersistenceOptions options,
-        ILogger<PlanOrchestrator> logger)
+        ILogger<PlanOrchestrator> logger,
+        PlanReviewCoordinator? reviewCoordinator = null,
+        IOptions<PlanReviewOptions>? reviewOptions = null)
     {
         _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         _executor = executor ?? throw new ArgumentNullException(nameof(executor));
@@ -39,6 +46,8 @@ public sealed class PlanOrchestrator
         _costTracker = costTracker ?? throw new ArgumentNullException(nameof(costTracker));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _reviewCoordinator = reviewCoordinator;
+        _reviewOptions = reviewOptions?.Value;
     }
 
     public async Task<PlanOrchestrationResult> RunAsync(
@@ -106,10 +115,38 @@ public sealed class PlanOrchestrator
                 FailureReason: built.UnusableReason);
         }
 
-        // Step 2: materialize step IDs and persist the initial plan.
-        var stepIds = new List<string>(built.Steps.Count);
-        var stepWrites = new List<PlanStepWrite>(built.Steps.Count);
-        for (int i = 0; i < built.Steps.Count; i++)
+        // Step 2: plan review gate (#94). When enabled, this is the
+        // non-blocking suspend point: persist the plan as AwaitingReview,
+        // write a real framework checkpoint, open the approval row, and
+        // return a Suspended result. The caller (/api/chat) hands the client
+        // a 202 with the review request id; PlanReviewCompletionService drives
+        // execution when the reviewer decides. No thread is blocked on the
+        // review timeout — the timeout is enforced by the sweep service, and
+        // process restart is invisible to the resume path because the
+        // checkpoint + approval row are durable.
+        //
+        // When disabled (default), this block is a no-op and the executor
+        // sees the original planner output — the pre-#94 hot path is preserved
+        // byte-for-byte.
+        PlanBuildResult effectivePlan = built;
+        if (_reviewOptions is { Enabled: true } && _reviewCoordinator is not null)
+        {
+            PlanReviewRoundHandle handle = await SuspendForReviewAsync(planId, input, built, createdAt, ct)
+                .ConfigureAwait(false);
+            return PlanOrchestrationResult.Suspended(
+                planId,
+                PlanStatus.AwaitingReview,
+                handle.RequestId,
+                handle.RoundNumber,
+                built.InputTokens ?? 0,
+                built.OutputTokens ?? 0,
+                built.TotalTokens ?? 0);
+        }
+
+        // Step 3: materialize step IDs and persist the initial plan.
+        var stepIds = new List<string>(effectivePlan.Steps.Count);
+        var stepWrites = new List<PlanStepWrite>(effectivePlan.Steps.Count);
+        for (int i = 0; i < effectivePlan.Steps.Count; i++)
         {
             string stepId = $"{planId}-s{i}";
             stepIds.Add(stepId);
@@ -117,9 +154,9 @@ public sealed class PlanOrchestrator
             {
                 StepId = stepId,
                 StepIndex = i,
-                SpecialistKey = built.Steps[i].SpecialistKey,
-                Intent = built.Steps[i].Intent,
-                Action = built.Steps[i].Action,
+                SpecialistKey = effectivePlan.Steps[i].SpecialistKey,
+                Intent = effectivePlan.Steps[i].Intent,
+                Action = effectivePlan.Steps[i].Action,
                 Status = PlanStepStatus.Pending,
             });
         }
@@ -137,7 +174,7 @@ public sealed class PlanOrchestrator
             CreatedAt = createdAt,
         }, ct).ConfigureAwait(false);
 
-        // Step 3: execute the workflow.
+        // Step 4: execute the (possibly edited) workflow.
         var executionRequest = new PlanExecutionRequest
         {
             PlanId = planId,
@@ -149,7 +186,7 @@ public sealed class PlanOrchestrator
             Request = input.Request.Message,
             History = input.Request.History,
             User = input.Request.User,
-            Plan = built,
+            Plan = effectivePlan,
             StepIds = stepIds,
             SpecialistLookup = input.SpecialistLookup,
         };
@@ -161,11 +198,87 @@ public sealed class PlanOrchestrator
             Status: outcome.Status,
             Reply: BuildFinalReply(outcome),
             DurationMs: outcome.DurationMs,
-            InputTokens: (built.InputTokens ?? 0) + outcome.Steps.Sum(s => s.InputTokens),
-            OutputTokens: (built.OutputTokens ?? 0) + outcome.Steps.Sum(s => s.OutputTokens),
-            TotalTokens: (built.TotalTokens ?? 0) + outcome.Steps.Sum(s => s.TotalTokens),
+            InputTokens: (effectivePlan.InputTokens ?? 0) + outcome.Steps.Sum(s => s.InputTokens),
+            OutputTokens: (effectivePlan.OutputTokens ?? 0) + outcome.Steps.Sum(s => s.OutputTokens),
+            TotalTokens: (effectivePlan.TotalTokens ?? 0) + outcome.Steps.Sum(s => s.TotalTokens),
             Steps: outcome.Steps,
             FailureReason: outcome.FailureReason);
+    }
+
+    /// <summary>
+    /// Persist the plan record as AwaitingReview, write a real framework
+    /// checkpoint, open the plan-review approval row, and return the
+    /// resulting handle. No thread is blocked — the completion service
+    /// drives execution when the reviewer decides.
+    /// </summary>
+    private async Task<PlanReviewRoundHandle> SuspendForReviewAsync(
+        string planId,
+        PlanOrchestrationInput input,
+        PlanBuildResult built,
+        DateTimeOffset createdAt,
+        CancellationToken ct)
+    {
+        // Record the plan record BEFORE the checkpoint / approval row so the
+        // resume path (which queries the plan store by planId) always finds a
+        // row that matches the checkpoint. Steps stay Pending until the
+        // reviewer approves (or edits) and the executor resumes.
+        var stepWrites = new List<PlanStepWrite>(built.Steps.Count);
+        for (int i = 0; i < built.Steps.Count; i++)
+        {
+            stepWrites.Add(new PlanStepWrite
+            {
+                StepId = $"{planId}-s{i}",
+                StepIndex = i,
+                SpecialistKey = built.Steps[i].SpecialistKey,
+                Intent = built.Steps[i].Intent,
+                Action = built.Steps[i].Action,
+                Status = PlanStepStatus.Pending,
+            });
+        }
+
+        await _planStore.CreatePlanAsync(new PlanWrite
+        {
+            PlanId = planId,
+            Subject = input.Subject,
+            SessionId = input.Request.SessionId,
+            TenantId = input.TenantId,
+            Request = input.Request.Message,
+            DetectedIntents = input.DetectedIntents,
+            Status = PlanStatus.AwaitingReview,
+            Steps = stepWrites,
+            CreatedAt = createdAt,
+        }, ct).ConfigureAwait(false);
+
+        IReadOnlyList<PlanReviewStepDto> initialSteps =
+        [
+            .. built.Steps.Select(s => new PlanReviewStepDto
+            {
+                SpecialistKey = s.SpecialistKey,
+                Intent = s.Intent,
+                Action = s.Action,
+            }),
+        ];
+
+        IReadOnlyCollection<string> specialistKeys =
+            [.. input.Roster.Select(a => a.Key)];
+
+        var open = new PlanReviewOpenInput
+        {
+            PlanId = planId,
+            Subject = input.Subject,
+            SessionId = input.Request.SessionId,
+            TenantId = input.TenantId,
+            Request = input.Request.Message,
+            CurrentSteps = initialSteps,
+            SpecialistKeys = specialistKeys,
+            DetectedIntents = input.DetectedIntents,
+            RoundNumber = 0,
+            TraceId = input.TraceId,
+            ParentSpanId = input.ParentSpanId,
+            PrincipalKey = input.PrincipalKey,
+        };
+
+        return await _reviewCoordinator!.OpenRoundAsync(open, ct).ConfigureAwait(false);
     }
 
     private static string BuildFinalReply(PlanExecutionOutcome outcome)
@@ -261,7 +374,12 @@ public sealed record PlanOrchestrationInput
     public string? ParentSpanId { get; init; }
 }
 
-/// <summary>Terminal result returned to the chat endpoint.</summary>
+/// <summary>
+/// Result returned to the chat endpoint. Either terminal (Completed / Failed
+/// / Cancelled / Unusable) or suspended (AwaitingReview / AwaitingClarification).
+/// The endpoint returns 202 for the suspended shape, 200 for the terminal
+/// shape — see <see cref="Endpoints.ChatEndpoints"/>.
+/// </summary>
 public sealed record PlanOrchestrationResult(
     string PlanId,
     string Status,
@@ -271,4 +389,43 @@ public sealed record PlanOrchestrationResult(
     int OutputTokens,
     int TotalTokens,
     IReadOnlyList<PlanStepResult> Steps,
-    string? FailureReason);
+    string? FailureReason)
+{
+    /// <summary>
+    /// Set when the plan is waiting for reviewer input. Non-null implies
+    /// <see cref="Status"/> is <c>PlanStatus.AwaitingReview</c>.
+    /// </summary>
+    public string? ReviewRequestId { get; init; }
+
+    /// <summary>Round number for the pending review row (0 = initial plan).</summary>
+    public int? ReviewRoundNumber { get; init; }
+
+    /// <summary>
+    /// True when the caller should return HTTP 202 with a pending payload
+    /// instead of the standard 200 chat response.
+    /// </summary>
+    public bool IsSuspended => Status is PlanStatus.AwaitingReview
+        or PlanStatus.AwaitingClarification;
+
+    public static PlanOrchestrationResult Suspended(
+        string planId,
+        string status,
+        string requestId,
+        int roundNumber,
+        int inputTokens,
+        int outputTokens,
+        int totalTokens) => new(
+            PlanId: planId,
+            Status: status,
+            Reply: "",
+            DurationMs: 0,
+            InputTokens: inputTokens,
+            OutputTokens: outputTokens,
+            TotalTokens: totalTokens,
+            Steps: [],
+            FailureReason: null)
+        {
+            ReviewRequestId = requestId,
+            ReviewRoundNumber = roundNumber,
+        };
+}

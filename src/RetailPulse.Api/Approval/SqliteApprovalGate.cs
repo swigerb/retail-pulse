@@ -118,7 +118,12 @@ public sealed class SqliteApprovalGate : IApprovalGate
                     Comment          TEXT,
                     CreatedAt        TEXT NOT NULL,
                     ExpiresAt        TEXT NOT NULL,
-                    RespondedAt      TEXT
+                    RespondedAt      TEXT,
+                    Kind             TEXT NOT NULL DEFAULT 'tool',
+                    PlanId           TEXT,
+                    RoundNumber      INTEGER NOT NULL DEFAULT 0,
+                    Payload          TEXT,
+                    ResponsePayload  TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS IX_ApprovalRequests_UserId_Decision
@@ -129,6 +134,12 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
                 CREATE INDEX IF NOT EXISTS IX_ApprovalRequests_Decision_Instance
                     ON ApprovalRequests (Decision, AgentInstanceId);
+
+                CREATE INDEX IF NOT EXISTS IX_ApprovalRequests_PlanId_Decision
+                    ON ApprovalRequests (PlanId, Decision);
+
+                CREATE INDEX IF NOT EXISTS IX_ApprovalRequests_UserId_Kind_Decision
+                    ON ApprovalRequests (UserId, Kind, Decision);
                 """;
             await cmd.ExecuteNonQueryAsync();
         }
@@ -146,6 +157,11 @@ public sealed class SqliteApprovalGate : IApprovalGate
             ("HeartbeatAt",     "ALTER TABLE ApprovalRequests ADD COLUMN HeartbeatAt TEXT"),
             ("TimeoutSeconds",  "ALTER TABLE ApprovalRequests ADD COLUMN TimeoutSeconds INTEGER NOT NULL DEFAULT 300"),
             ("TerminalReason",  "ALTER TABLE ApprovalRequests ADD COLUMN TerminalReason TEXT"),
+            ("Kind",            "ALTER TABLE ApprovalRequests ADD COLUMN Kind TEXT NOT NULL DEFAULT 'tool'"),
+            ("PlanId",          "ALTER TABLE ApprovalRequests ADD COLUMN PlanId TEXT"),
+            ("RoundNumber",     "ALTER TABLE ApprovalRequests ADD COLUMN RoundNumber INTEGER NOT NULL DEFAULT 0"),
+            ("Payload",         "ALTER TABLE ApprovalRequests ADD COLUMN Payload TEXT"),
+            ("ResponsePayload", "ALTER TABLE ApprovalRequests ADD COLUMN ResponsePayload TEXT"),
         ];
         foreach ((string name, string ddl) in additions)
         {
@@ -155,6 +171,18 @@ public sealed class SqliteApprovalGate : IApprovalGate
             alter.CommandText = ddl;
             await alter.ExecuteNonQueryAsync();
         }
+
+        // Create the plan-review helper indexes AFTER any additive column
+        // migration completes so older databases that predate the Kind/PlanId
+        // columns still gain the same indexes on next boot.
+        await using SqliteCommand idx = conn.CreateCommand();
+        idx.CommandText = """
+                CREATE INDEX IF NOT EXISTS IX_ApprovalRequests_PlanId_Decision
+                    ON ApprovalRequests (PlanId, Decision);
+                CREATE INDEX IF NOT EXISTS IX_ApprovalRequests_UserId_Kind_Decision
+                    ON ApprovalRequests (UserId, Kind, Decision);
+                """;
+        await idx.ExecuteNonQueryAsync();
     }
 
     private static async Task<HashSet<string>> ReadColumnsAsync(SqliteConnection conn)
@@ -183,11 +211,13 @@ public sealed class SqliteApprovalGate : IApprovalGate
             INSERT INTO ApprovalRequests (
                 RequestId, AgentId, UserId, Action, Impact, Urgency, Reasoning,
                 SessionId, ConversationId, AgentInstanceId, HeartbeatAt, TimeoutSeconds,
-                Decision, CreatedAt, ExpiresAt)
+                Decision, CreatedAt, ExpiresAt,
+                Kind, PlanId, RoundNumber, Payload)
             VALUES (
                 @id, @agentId, @userId, @action, @impact, @urgency, @reasoning,
                 @sessionId, @conversationId, @instanceId, @heartbeatAt, @timeoutSeconds,
-                'Pending', @createdAt, @expiresAt)
+                'Pending', @createdAt, @expiresAt,
+                @kind, @planId, @roundNumber, @payload)
             """;
         cmd.Parameters.AddWithValue("@id", requestId);
         cmd.Parameters.AddWithValue("@agentId", context.AgentId);
@@ -203,11 +233,22 @@ public sealed class SqliteApprovalGate : IApprovalGate
         cmd.Parameters.AddWithValue("@timeoutSeconds", (long)_defaultTimeout.TotalSeconds);
         cmd.Parameters.AddWithValue("@createdAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
         cmd.Parameters.AddWithValue("@expiresAt", expiresAt.ToString(_iso8601, CultureInfo.InvariantCulture));
+        // Kind defaults to the tool tag so any pre-#94 producer (ApprovalTool)
+        // that still builds ApprovalContext without setting Kind lands with the
+        // exact same value the schema default would have used — no behavior
+        // change for tool approvals.
+        cmd.Parameters.AddWithValue(
+            "@kind",
+            string.IsNullOrWhiteSpace(context.Kind) ? ApprovalKind.Tool : context.Kind);
+        cmd.Parameters.AddWithValue("@planId", (object?)context.PlanId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@roundNumber", context.RoundNumber);
+        cmd.Parameters.AddWithValue("@payload", (object?)context.Payload ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
 
         _logger.LogInformation(
-            "Approval request {RequestId} created for agent {AgentId}, user {UserId}, urgency {Urgency}, instance {InstanceId}, timeout {TimeoutSeconds}s",
-            requestId, context.AgentId, context.UserId, context.Urgency, InstanceId, (long)_defaultTimeout.TotalSeconds);
+            "Approval request {RequestId} created (kind={Kind}, planId={PlanId}, round={Round}) for agent {AgentId}, user {UserId}, urgency {Urgency}, instance {InstanceId}, timeout {TimeoutSeconds}s",
+            requestId, context.Kind, context.PlanId, context.RoundNumber,
+            context.AgentId, context.UserId, context.Urgency, InstanceId, (long)_defaultTimeout.TotalSeconds);
 
         return new ApprovalRequest(requestId, context, now, expiresAt);
     }
@@ -224,7 +265,8 @@ public sealed class SqliteApprovalGate : IApprovalGate
             row.Decision,
             row.Comment,
             row.RespondedAt,
-            row.TerminalReason);
+            row.TerminalReason,
+            row.ResponsePayload);
     }
 
     public async Task<ApprovalResult> WaitForApprovalAsync(string requestId, TimeSpan? timeout = null, CancellationToken ct = default)
@@ -246,7 +288,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
 
             if (row.Decision != ApprovalDecision.Pending)
             {
-                return new ApprovalResult(row.RequestId, row.Decision, row.Comment, row.RespondedAt, row.TerminalReason);
+                return new ApprovalResult(row.RequestId, row.Decision, row.Comment, row.RespondedAt, row.TerminalReason, row.ResponsePayload);
             }
 
             // Heartbeat the row so operators can observe that this waiter is alive.
@@ -263,6 +305,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
                     ApprovalDecision.TimedOut,
                     ReasonTimeout,
                     comment: "Approval timed out — no response received.",
+                    responsePayload: null,
                     ct);
             }
 
@@ -274,7 +317,12 @@ public sealed class SqliteApprovalGate : IApprovalGate
         throw new OperationCanceledException(ct);
     }
 
-    public async Task<ApprovalResult> RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default)
+    public async Task<ApprovalResult> RespondAsync(
+        string requestId,
+        ApprovalDecision decision,
+        string? comment = null,
+        string? responsePayload = null,
+        CancellationToken ct = default)
     {
         string reason = decision switch
         {
@@ -287,7 +335,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
             _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Cannot record Pending as a terminal decision.")
         };
 
-        (bool won, ApprovalRequest? current) = await TryConditionalTransitionAsync(requestId, decision, reason, comment, ct);
+        (bool won, ApprovalRequest? current) = await TryConditionalTransitionAsync(requestId, decision, reason, comment, responsePayload, ct);
         if (current is null)
         {
             _logger.LogWarning("Approval {RequestId} was not updated — the request does not exist.", requestId);
@@ -316,7 +364,8 @@ public sealed class SqliteApprovalGate : IApprovalGate
             current.Decision,
             current.Comment,
             current.RespondedAt,
-            current.TerminalReason);
+            current.TerminalReason,
+            current.ResponsePayload);
     }
 
     /// <summary>
@@ -359,6 +408,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
                         ApprovalDecision.Orphaned,
                         ReasonOrphanedOnRestart,
                         comment: "Approval closed by restart reconciliation — no in-process waiter survived.",
+                        responsePayload: null,
                         ct);
                     if (won)
                     {
@@ -423,12 +473,13 @@ public sealed class SqliteApprovalGate : IApprovalGate
         ApprovalDecision decision,
         string reason,
         string? comment,
+        string? responsePayload,
         CancellationToken ct)
     {
-        (bool _, ApprovalRequest? current) = await TryConditionalTransitionAsync(requestId, decision, reason, comment, ct);
+        (bool _, ApprovalRequest? current) = await TryConditionalTransitionAsync(requestId, decision, reason, comment, responsePayload, ct);
         return current is null
             ? throw new KeyNotFoundException($"Approval request '{requestId}' not found.")
-            : new ApprovalResult(current.RequestId, current.Decision, current.Comment, current.RespondedAt, current.TerminalReason);
+            : new ApprovalResult(current.RequestId, current.Decision, current.Comment, current.RespondedAt, current.TerminalReason, current.ResponsePayload);
     }
 
     private async Task<(bool won, ApprovalRequest? current)> TryConditionalTransitionAsync(
@@ -436,6 +487,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
         ApprovalDecision decision,
         string reason,
         string? comment,
+        string? responsePayload,
         CancellationToken ct)
     {
         DateTimeOffset now = _timeProvider.GetUtcNow();
@@ -450,7 +502,8 @@ public sealed class SqliteApprovalGate : IApprovalGate
                 SET Decision = @decision,
                     TerminalReason = @reason,
                     Comment = @comment,
-                    RespondedAt = @respondedAt
+                    RespondedAt = @respondedAt,
+                    ResponsePayload = @responsePayload
                 WHERE RequestId = @id AND Decision = 'Pending'
                 """;
             update.Parameters.AddWithValue("@id", requestId);
@@ -458,6 +511,7 @@ public sealed class SqliteApprovalGate : IApprovalGate
             update.Parameters.AddWithValue("@reason", reason);
             update.Parameters.AddWithValue("@comment", (object?)comment ?? DBNull.Value);
             update.Parameters.AddWithValue("@respondedAt", now.ToString(_iso8601, CultureInfo.InvariantCulture));
+            update.Parameters.AddWithValue("@responsePayload", (object?)responsePayload ?? DBNull.Value);
             affected = await update.ExecuteNonQueryAsync(ct);
         }
 
@@ -546,6 +600,11 @@ public sealed class SqliteApprovalGate : IApprovalGate
         string requestId = reader.GetString(reader.GetOrdinal("RequestId"));
         string? sessionId = TryGetString(reader, "SessionId");
         string? conversationId = TryGetString(reader, "ConversationId");
+        string kind = TryGetString(reader, "Kind") ?? ApprovalKind.Tool;
+        string? planId = TryGetString(reader, "PlanId");
+        int roundNumber = TryGetInt(reader, "RoundNumber") ?? 0;
+        string? payload = TryGetString(reader, "Payload");
+        string? responsePayload = TryGetString(reader, "ResponsePayload");
         var context = new ApprovalContext(
             AgentId: reader.GetString(reader.GetOrdinal("AgentId")),
             UserId: reader.GetString(reader.GetOrdinal("UserId")),
@@ -554,7 +613,11 @@ public sealed class SqliteApprovalGate : IApprovalGate
             Urgency: reader.IsDBNull(reader.GetOrdinal("Urgency")) ? "medium" : reader.GetString(reader.GetOrdinal("Urgency")),
             Reasoning: reader.IsDBNull(reader.GetOrdinal("Reasoning")) ? "" : reader.GetString(reader.GetOrdinal("Reasoning")),
             SessionId: sessionId,
-            ConversationId: conversationId
+            ConversationId: conversationId,
+            Kind: kind,
+            PlanId: planId,
+            RoundNumber: roundNumber,
+            Payload: payload
         );
 
         string decisionStr = reader.GetString(reader.GetOrdinal("Decision"));
@@ -568,7 +631,8 @@ public sealed class SqliteApprovalGate : IApprovalGate
             : DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal("RespondedAt")), CultureInfo.InvariantCulture);
         string? terminalReason = TryGetString(reader, "TerminalReason");
 
-        return new ApprovalRequest(requestId, context, createdAt, expiresAt, decision, comment, respondedAt, terminalReason);
+        return new ApprovalRequest(
+            requestId, context, createdAt, expiresAt, decision, comment, respondedAt, terminalReason, responsePayload);
     }
 
     private static string? TryGetString(SqliteDataReader reader, string columnName)
@@ -577,5 +641,13 @@ public sealed class SqliteApprovalGate : IApprovalGate
         try { ordinal = reader.GetOrdinal(columnName); }
         catch (IndexOutOfRangeException) { return null; }
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    private static int? TryGetInt(SqliteDataReader reader, string columnName)
+    {
+        int ordinal;
+        try { ordinal = reader.GetOrdinal(columnName); }
+        catch (IndexOutOfRangeException) { return null; }
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
     }
 }

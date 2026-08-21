@@ -44,8 +44,22 @@ public interface IApprovalGate
     /// report the returned <see cref="ApprovalResult"/>, not the caller-requested
     /// decision, so exactly one user-visible outcome is observable end-to-end.
     /// </para>
+    ///
+    /// <para>
+    /// Plan review (#94) reuses this same storage and code path so plan and
+    /// tool approvals share one audit trail. Callers pass an optional
+    /// <paramref name="responsePayload"/> to persist edited plan JSON,
+    /// rejection feedback, or a clarification answer alongside the decision;
+    /// the payload is opaque to the gate and read back through
+    /// <see cref="ApprovalResult.ResponsePayload"/>.
+    /// </para>
     /// </summary>
-    Task<ApprovalResult> RespondAsync(string requestId, ApprovalDecision decision, string? comment = null, CancellationToken ct = default);
+    Task<ApprovalResult> RespondAsync(
+        string requestId,
+        ApprovalDecision decision,
+        string? comment = null,
+        string? responsePayload = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Lists all pending approval requests for a given user.
@@ -72,7 +86,25 @@ public record ApprovalContext(
     // producers may leave both null; Wave 2 populates them so the resume strategy can
     // rehydrate a checkpointed execution instead of orphaning on restart.
     string? SessionId = null,
-    string? ConversationId = null
+    string? ConversationId = null,
+    // Category tag persisted verbatim so plan review (#94) rows can be distinguished
+    // from single-tool ApprovalTool rows without changing the base contract. Defaults
+    // to <see cref="ApprovalKind.Tool"/> so every existing producer keeps its exact
+    // stored shape and existing history/pending queries continue to observe the
+    // same rows they always did.
+    string Kind = ApprovalKind.Tool,
+    // Optional correlation back to a plan (#93/#94). Populated for plan review and
+    // clarification rows so the endpoint layer can list decisions per plan and the
+    // resume strategy can look up the workflow checkpoint for the same plan id.
+    string? PlanId = null,
+    // Zero-based replan round for plan review rows. Every reject-with-feedback
+    // increments the round; the coordinator enforces a bounded cap so replan can
+    // never loop forever.
+    int RoundNumber = 0,
+    // Opaque JSON payload the coordinator/endpoint stores alongside the request
+    // (e.g. the plan proposal or clarification question). Never inspected by the
+    // gate itself.
+    string? Payload = null
 );
 
 /// <summary>
@@ -90,7 +122,11 @@ public record ApprovalRequest(
     // "HumanRejected", "HumanModified", "Timeout", "OrphanedOnRestart"). Null while
     // the request is still <see cref="ApprovalDecision.Pending"/>. Additive with a
     // default so existing constructors continue to compile.
-    string? TerminalReason = null
+    string? TerminalReason = null,
+    // Opaque JSON payload written by the human responder (e.g. the edited plan or
+    // the clarification answer). Additive; existing callers ignore it. See
+    // <see cref="ApprovalResult.ResponsePayload"/>.
+    string? ResponsePayload = null
 );
 
 /// <summary>
@@ -104,7 +140,11 @@ public record ApprovalResult(
     // Distinguishable terminal reason (see <see cref="ApprovalRequest.TerminalReason"/>).
     // Additive with a default so the existing surface remains binary-compatible for
     // callers that only care about <see cref="Decision"/>.
-    string? TerminalReason = null
+    string? TerminalReason = null,
+    // Opaque JSON payload written by the human responder. Additive default so
+    // existing tool-approval callers stay identical. Plan review (#94) reads this
+    // to obtain edited plans, rejection feedback, and clarification answers.
+    string? ResponsePayload = null
 );
 
 public enum ApprovalDecision
@@ -118,4 +158,23 @@ public enum ApprovalDecision
     // survive a restart and could not be resumed from a checkpoint. See
     // <see cref="IApprovalResumeStrategy"/> for how Wave 2 replaces this default.
     Orphaned
+}
+
+/// <summary>
+/// Category tag stored on every approval row so plan review (#94), plan
+/// clarification (#94), and the pre-existing single-tool ApprovalTool path can
+/// share one durable table without cross-contaminating their surfaces. The gate
+/// itself does not interpret these values; the coordinator and endpoint layers
+/// route on them.
+/// </summary>
+public static class ApprovalKind
+{
+    /// <summary>Default — a single-tool ApprovalTool request (#91 behavior).</summary>
+    public const string Tool = "tool";
+
+    /// <summary>Plan-level review before execution (#94).</summary>
+    public const string PlanReview = "plan_review";
+
+    /// <summary>Mid-plan clarification round-trip (#94).</summary>
+    public const string Clarification = "clarification";
 }
