@@ -424,6 +424,23 @@ export interface BlockedRequest {
   detectionType: GuardrailDetectionType;
   reason: string;
   actionTaken: string;
+  /**
+   * Content-safety category (Hate/Sexual/Violence/SelfHarm) when the block
+   * originated from the model-based Content Safety layer. Populated by the
+   * backend `SuspiciousRequest.Category` field — see
+   * `RetailPulse.Contracts.Guardrails.SuspiciousRequest`.
+   */
+  category?: string;
+  /**
+   * Severity on the Content Safety 0/2/4/6 axis when a category hit is present.
+   * Never a raw threshold value — this is the hit severity only.
+   */
+  severity?: number;
+  /**
+   * Decision label — one of `Blocked`, `Flagged`, `ServiceUnavailable`. Used by
+   * the dashboard to split the pattern-family and model-family aggregates.
+   */
+  decision?: string;
 }
 
 export interface GuardrailsStats {
@@ -466,6 +483,72 @@ export interface ContentSafetyConfigData {
 }
 
 export type PiiRedactionType = 'email' | 'phone' | 'ssn' | 'address' | 'name' | 'credit_card' | 'unknown';
+
+// --- Safety block display types (issue #101) -----------------------------
+//
+// The frontend deliberately whitelists the fields it renders when it explains
+// a safety decision to the user. Internal rule details (regex patterns,
+// threshold values, analyzer names, rule IDs) are NEVER carried in a
+// `SafetyBlockDisplayModel` so the display layer cannot leak them by mistake.
+
+/** Well-known content-safety category names emitted by the backend. */
+export type SafetyCategoryName = 'Hate' | 'Sexual' | 'Violence' | 'SelfHarm';
+
+/**
+ * Terminal Content Safety decision label. Mirrors
+ * `RetailPulse.Api.Guardrails.ContentSafety.ContentSafetyDecision`.
+ */
+export type SafetyDecisionKind = 'Blocked' | 'Flagged' | 'ServiceUnavailable' | 'Passed';
+
+/**
+ * Pipeline stage where the safety block occurred. Matches the backend
+ * `ContentSafetyStage` enum plus the frontend-only `plan-step` and
+ * `ingestion` stages that describe how the block is surfaced to the user.
+ */
+export type SafetyBlockStage =
+  | 'input'
+  | 'output'
+  | 'plan-step'
+  | 'ingestion'
+  | 'retrieved-knowledge'
+  | 'tool-result';
+
+/**
+ * Family a safety block belongs to. `pattern` = local regex/substring
+ * guardrails; `model` = Content Safety / Prompt Shields; `unknown` = a
+ * detection type the frontend does not classify yet (rendered generically).
+ */
+export type SafetyBlockFamily = 'pattern' | 'model' | 'unknown';
+
+/**
+ * Whitelisted display model used by every safety-related component. The
+ * fields on this shape are the ONLY things the UI is allowed to render for a
+ * safety decision — no raw pattern, threshold, rule ID, or provider payload
+ * may ever be added here.
+ */
+export interface SafetyBlockDisplayModel {
+  stage: SafetyBlockStage;
+  family: SafetyBlockFamily;
+  /** Plain-language reason shown as the primary line. */
+  reason: string;
+  /** Optional plain-language rephrasing suggestion (never a rule detail). */
+  suggestion?: string;
+  /** Plain-language category label, e.g. "Hateful content". */
+  categoryLabel?: string;
+  /** Original category name for testids / analytics — never a rule name. */
+  categoryName?: SafetyCategoryName;
+  /** Plain-language severity descriptor, e.g. "high". */
+  severityLabel?: 'low' | 'medium' | 'high' | 'severe';
+  /** Original decision label — Blocked / Flagged / ServiceUnavailable. */
+  decision?: SafetyDecisionKind;
+  /**
+   * When true, the block came from the model-based Content Safety layer.
+   * Used by the dashboard to split pattern vs model aggregates.
+   */
+  modelBased: boolean;
+  /** Deployment fail policy hint for service-unavailable renders. */
+  failClosed?: boolean;
+}
 
 // --- Collaborative Adaptive Cards types (Sprint 3.3) ---
 
