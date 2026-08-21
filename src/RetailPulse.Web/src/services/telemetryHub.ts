@@ -17,6 +17,73 @@ export interface ProgressEvent {
   timestamp: string;
 }
 
+// ── Multi-listener hub event dispatch (issue #96) ──────────────────────────
+// SignalR's `.on()` supports multiple handlers, but existing callers rely on
+// `off()`+`on()` to avoid duplicates on re-renders. Rather than reshape those
+// call sites, we register one managed dispatcher per event and let new
+// consumers subscribe against our own listener set. Unsubscribe is safe to
+// call after connection teardown.
+type HubEventHandler = (payload: unknown) => void;
+const eventListeners = new Map<string, Set<HubEventHandler>>();
+const managedEvents = new Set<string>();
+
+function attachManagedHandler(event: string): void {
+  if (managedEvents.has(event)) {
+    // Already tracked; only attach the dispatcher if a connection has
+    // materialised since the last register.
+    if (connection) {
+      connection.off(event);
+      connection.on(event, (payload: unknown) => dispatchManaged(event, payload));
+    }
+    return;
+  }
+  managedEvents.add(event);
+  if (connection) {
+    connection.on(event, (payload: unknown) => dispatchManaged(event, payload));
+  }
+}
+
+function dispatchManaged(event: string, payload: unknown): void {
+  const listeners = eventListeners.get(event);
+  if (!listeners) return;
+  for (const handler of listeners) {
+    try {
+      handler(payload);
+    } catch (err) {
+      if (import.meta.env.DEV) console.error(`Hub handler for ${event} threw:`, err);
+    }
+  }
+}
+
+export function subscribeHubEvent(
+  event: string,
+  handler: HubEventHandler,
+): () => void {
+  let listeners = eventListeners.get(event);
+  if (!listeners) {
+    listeners = new Set();
+    eventListeners.set(event, listeners);
+  }
+  listeners.add(handler);
+  attachManagedHandler(event);
+  return () => {
+    const set = eventListeners.get(event);
+    if (!set) return;
+    set.delete(handler);
+    if (set.size === 0) {
+      eventListeners.delete(event);
+    }
+  };
+}
+
+function reattachManagedHandlers(): void {
+  if (!connection) return;
+  for (const event of managedEvents) {
+    connection.off(event);
+    connection.on(event, (payload: unknown) => dispatchManaged(event, payload));
+  }
+}
+
 export function connectTelemetryHub(
   onSpan: (span: AgentSpan) => void,
   onConnected?: () => void,
@@ -27,6 +94,7 @@ export function connectTelemetryHub(
     // Re-register callbacks for the new React render cycle
     connection.off('SpanReceived');
     connection.on('SpanReceived', (span: AgentSpan) => onSpan(span));
+    reattachManagedHandlers();
     if (connection.state === signalR.HubConnectionState.Connected) {
       onConnected?.();
     }
@@ -50,6 +118,8 @@ export function connectTelemetryHub(
   connection.on('progress', (data: ProgressEvent) => {
     progressListeners.forEach(listener => listener(data));
   });
+
+  reattachManagedHandlers();
 
   connection.on('Connected', (msg: string) => {
     if (import.meta.env.DEV) {
@@ -135,4 +205,3 @@ export async function disconnectTelemetryHub(): Promise<void> {
   connection = null;
   joinedSessions.clear();
 }
-

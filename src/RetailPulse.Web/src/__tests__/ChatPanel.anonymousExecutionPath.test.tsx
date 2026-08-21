@@ -53,10 +53,13 @@ describe('ChatPanel — anonymous mode execution-path guardrail', () => {
 
   it('never sends forceExecutionPath for anonymous sessions', async () => {
     sendMessageMock.mockResolvedValue({
-      reply: 'ok',
-      sessionId: 'sess-anon',
-      spans: [],
-      totalDurationMs: 10,
+      kind: 'complete',
+      response: {
+        reply: 'ok',
+        sessionId: 'sess-anon',
+        spans: [],
+        totalDurationMs: 10,
+      },
     });
 
     const user = userEvent.setup();

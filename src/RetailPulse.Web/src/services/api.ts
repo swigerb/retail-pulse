@@ -1,4 +1,11 @@
-import type { ChatRequest, ChatResponse, RoutingInfo } from '../types';
+import type {
+  ChatRequest,
+  ChatResponse,
+  RoutingInfo,
+  PlanStatus,
+  PlanSuspendedResponse,
+  SendMessageResult,
+} from '../types';
 import { resolveApiUrl } from '../config/apiOrigin';
 
 async function parseErrorBody(res: Response): Promise<string> {
@@ -73,6 +80,32 @@ function isChatResponse(value: unknown): value is ChatResponse {
   return true;
 }
 
+const KNOWN_PLAN_STATUSES: readonly PlanStatus[] = [
+  'draft',
+  'awaiting_review',
+  'awaiting_clarification',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+  'unusable',
+];
+
+function isPlanSuspendedResponse(value: unknown): value is PlanSuspendedResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.planId !== 'string' || typeof v.sessionId !== 'string') return false;
+  if (typeof v.status !== 'string') return false;
+  if (!(KNOWN_PLAN_STATUSES as readonly string[]).includes(v.status)) return false;
+  if (v.reviewRequestId !== undefined && v.reviewRequestId !== null && typeof v.reviewRequestId !== 'string') {
+    return false;
+  }
+  if (v.round !== undefined && v.round !== null && typeof v.round !== 'number') {
+    return false;
+  }
+  return true;
+}
+
 export interface SendMessageOptions {
   signal?: AbortSignal;
   /**
@@ -125,7 +158,7 @@ function withTimeout(
 export async function sendMessage(
   request: ChatRequest,
   options: SendMessageOptions = {},
-): Promise<ChatResponse> {
+): Promise<SendMessageResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const { signal, didTimeOut, cleanup } = withTimeout(options.signal, timeoutMs);
 
@@ -160,10 +193,18 @@ export async function sendMessage(
   }
 
   const data: unknown = await res.json();
+  // The plan review gate (#94) returns 202 Accepted with a suspended-plan
+  // envelope instead of a ChatResponse when the plan is awaiting the
+  // reviewer's decision or a mid-plan clarification answer. Detect and
+  // surface it as a distinct union arm so callers can render the review UI
+  // without swallowing it as a malformed 200 response.
+  if (res.status === 202 && isPlanSuspendedResponse(data)) {
+    return { kind: 'suspended', suspended: data };
+  }
   if (!isChatResponse(data)) {
     throw new Error('API error: malformed response payload');
   }
-  return data;
+  return { kind: 'complete', response: data };
 }
 
 /**
