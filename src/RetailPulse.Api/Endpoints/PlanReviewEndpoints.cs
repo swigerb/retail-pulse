@@ -74,6 +74,7 @@ public static class PlanReviewEndpoints
             HttpContext http,
             [FromServices] PlanReviewCompletionService? completion,
             [FromServices] GuardrailsMiddleware guardrails,
+            [FromServices] ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             if (RefuseAnonymous(http, out IResult? refusal))
@@ -206,7 +207,26 @@ public static class PlanReviewEndpoints
                 round = row.Context.RoundNumber,
             };
 
-            await hubContext.Clients.All.SendAsync("plan_review_resolved", responseDto, ct);
+            // Session-scoped delivery (#141): the plan_review_resolved event
+            // carries the plan id, reviewer comment, and terminal reason for a
+            // subject-owned plan, so it MUST reach only the owning session's
+            // group — never Clients.All. Missing / whitespace session id
+            // fails closed (suppress + log) so a regression that lets a plan
+            // review land without a session id cannot silently widen delivery.
+            // Aligns with the plan_final_response and plan_review_next_round
+            // paths in PlanReviewCompletionService.
+            string? reviewSessionId = row.Context.SessionId;
+            if (string.IsNullOrWhiteSpace(reviewSessionId))
+            {
+                loggerFactory.CreateLogger("PlanReviewEndpoints").LogWarning(
+                    "plan_review_resolved suppressed for plan {PlanId} request {RequestId}: session identity missing; refusing to broadcast to Clients.All.",
+                    planId, requestId);
+            }
+            else
+            {
+                await hubContext.Clients.Group(reviewSessionId).SendAsync(
+                    "plan_review_resolved", responseDto, ct);
+            }
 
             // Drive the plan through the resume path so the reviewer's
             // decision produces a real final response (execute the effective
