@@ -2,11 +2,18 @@ import { useState, useEffect, useCallback } from 'react';
 import { makeStyles, Button, Badge } from '@fluentui/react-components';
 import { Delete16Regular, Search16Regular } from '@fluentui/react-icons';
 import { KB_COLORS } from '../../constants/agentRouting';
-import type { KBDocument, KBSearchResult } from '../../types';
-import { fetchDocuments, deleteDocument, searchKnowledgeBase } from '../../services/knowledgeApi';
+import type { KBDocument, KBSearchResult, KnowledgeProviderSnapshot } from '../../types';
+import {
+  fetchDocuments,
+  deleteDocument,
+  searchKnowledgeBase,
+  fetchKnowledgeProviderSnapshot,
+} from '../../services/knowledgeApi';
 import DocumentUpload from './DocumentUpload';
 import SearchResults from './SearchResults';
 import KnowledgeStats from './KnowledgeStats';
+import ProviderInfoCard from './ProviderInfoCard';
+import AgentBindingsPanel from './AgentBindingsPanel';
 
 const useStyles = makeStyles({
   container: {
@@ -141,6 +148,19 @@ const useStyles = makeStyles({
     fontSize: '13px',
     marginBottom: '12px',
   },
+  providerRow: {
+    marginBottom: '20px',
+  },
+  disabledState: {
+    padding: '32px',
+    borderRadius: '12px',
+    textAlign: 'center',
+    color: 'var(--color-text-muted, #94a3b8)',
+    fontSize: '13px',
+    lineHeight: '1.6',
+    backgroundColor: 'var(--color-surface, rgba(255,255,255,0.03))',
+    border: '1px dashed var(--color-border, rgba(255,255,255,0.15))',
+  },
 });
 
 const SOURCE_ICONS: Record<string, string> = {
@@ -156,6 +176,8 @@ export default function KnowledgeBasePanel() {
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<KnowledgeProviderSnapshot | null>(null);
+  const [snapshotLoaded, setSnapshotLoaded] = useState(false);
 
   const loadDocuments = useCallback(async () => {
     setLoading(true);
@@ -170,7 +192,22 @@ export default function KnowledgeBasePanel() {
     }
   }, []);
 
+  const loadSnapshot = useCallback(async () => {
+    try {
+      const snap = await fetchKnowledgeProviderSnapshot();
+      setSnapshot(snap);
+    } catch {
+      // A snapshot fetch failure never blocks the panel — the document list,
+      // search, and stats still render. The provider info card is simply
+      // omitted until a subsequent request succeeds.
+      setSnapshot(null);
+    } finally {
+      setSnapshotLoaded(true);
+    }
+  }, []);
+
   useEffect(() => { loadDocuments(); }, [loadDocuments]);
+  useEffect(() => { loadSnapshot(); }, [loadSnapshot]);
 
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) {
@@ -192,14 +229,22 @@ export default function KnowledgeBasePanel() {
     try {
       await deleteDocument(id);
       setDocuments(prev => prev.filter(d => d.id !== id));
+      // Refresh the provider snapshot so quota usage stays in sync after a
+      // successful delete without a full page reload.
+      loadSnapshot();
     } catch {
       setError('Failed to delete document');
     }
-  }, []);
+  }, [loadSnapshot]);
 
   const handleUploadComplete = useCallback(() => {
     loadDocuments();
-  }, [loadDocuments]);
+    loadSnapshot();
+  }, [loadDocuments, loadSnapshot]);
+
+  const allBindingsDisabled = snapshot !== null
+    && snapshot.bindings.length > 0
+    && snapshot.bindings.every(b => !b.enabled);
 
   return (
     <div className={styles.container} data-testid="knowledge-base-panel">
@@ -211,6 +256,25 @@ export default function KnowledgeBasePanel() {
       </div>
 
       {error && <div className={styles.error} data-testid="kb-error">⚠️ {error}</div>}
+
+      {snapshot && (
+        <div className={styles.providerRow}>
+          <ProviderInfoCard
+            provider={snapshot.provider}
+            degradation={snapshot.degradation}
+            quotas={snapshot.quotas}
+            usage={snapshot.usage}
+          />
+        </div>
+      )}
+
+      {snapshotLoaded && allBindingsDisabled && (
+        <div className={styles.disabledState} data-testid="kb-disabled">
+          🚫 Knowledge retrieval is disabled for every configured agent. No
+          documents will be returned during chat until at least one agent has
+          <code> use_knowledge_base: true</code>.
+        </div>
+      )}
 
       <div className={styles.searchBar}>
         <input
@@ -234,13 +298,21 @@ export default function KnowledgeBasePanel() {
 
       {searchResults !== null && (
         <div style={{ marginBottom: '20px' }}>
-          <SearchResults results={searchResults} query={searchQuery} />
+          <SearchResults
+            results={searchResults}
+            query={searchQuery}
+            relevanceKind={snapshot?.provider.relevance}
+            scoreSemantics={snapshot?.provider.scoreSemantics}
+          />
         </div>
       )}
 
       <div className={styles.sections}>
         <div className={styles.mainSection}>
-          <DocumentUpload onUploadComplete={handleUploadComplete} />
+          <DocumentUpload
+            onUploadComplete={handleUploadComplete}
+            provider={snapshot?.provider ?? null}
+          />
 
           <div>
             <div className={styles.sectionTitle}>
@@ -287,6 +359,12 @@ export default function KnowledgeBasePanel() {
         </div>
 
         <div className={styles.sidebar}>
+          {snapshot && (
+            <AgentBindingsPanel
+              bindings={snapshot.bindings}
+              sources={snapshot.sources}
+            />
+          )}
           <KnowledgeStats />
         </div>
       </div>

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Planning;
+using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Auth;
 using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Hubs;
@@ -211,6 +212,7 @@ public static class ChatEndpoints
 
                 // Router classification with tracing
                 RoutingDecision decision;
+                HybridExecutionResult hybridDecision;
                 {
                     DateTimeOffset classifyStart = DateTimeOffset.UtcNow;
                     using Activity? classifyActivity = AgentTelemetry.StartRouterClassify(request.Message);
@@ -226,6 +228,38 @@ public static class ChatEndpoints
                     classifyActivity?.SetTag("router.intent", decision.Intent);
                     classifyActivity?.SetTag("router.confidence", decision.Confidence);
 
+                    // ── Hybrid execution decision (issue #95) ───────────────────
+                    // Purely functional; runs before council / plan-first
+                    // interception so the chosen path is one authoritative
+                    // signal for both telemetry and the branch that follows.
+                    PlanPersistenceOptions hybridOpts =
+                        planPersistenceOptions?.Value ?? new PlanPersistenceOptions();
+                    string? forcedRequest = string.IsNullOrWhiteSpace(request.ForceExecutionPath)
+                        ? null
+                        : request.ForceExecutionPath;
+                    if (forcedRequest is not null && anonymous)
+                    {
+                        // Anonymous callers may not force a path — preserve the
+                        // default safety posture. Log so an operator can see the
+                        // ignored override rather than debugging a silent no-op.
+                        logger.LogInformation(
+                            "Ignoring ForceExecutionPath '{Path}' for anonymous session {SessionId} — default policy applies",
+                            forcedRequest, sessionId);
+                        forcedRequest = null;
+                    }
+                    hybridDecision = HybridExecutionDecider.Decide(
+                        decision,
+                        request.Message,
+                        new HybridExecutionContext(
+                            AnonymousCaller: anonymous,
+                            PlannerAvailable: planOrchestrator is not null,
+                            ForcedPath: forcedRequest),
+                        hybridOpts);
+
+                    classifyActivity?.SetTag("agent.routing.path", hybridDecision.Path);
+                    classifyActivity?.SetTag("agent.routing.path_forced", hybridDecision.Forced);
+                    classifyActivity?.SetTag("agent.routing.decision_reason", hybridDecision.Reason);
+
                     traceCollector.CaptureSpan(new TraceSpan(
                         SpanId: Guid.NewGuid().ToString("N")[..16],
                         TraceId: traceId,
@@ -238,7 +272,10 @@ public static class ChatEndpoints
                         {
                             ["span.type"] = "routing",
                             ["router.intent"] = decision.Intent,
-                            ["router.confidence"] = decision.Confidence.ToString("F2", CultureInfo.InvariantCulture)
+                            ["router.confidence"] = decision.Confidence.ToString("F2", CultureInfo.InvariantCulture),
+                            ["agent.routing.path"] = hybridDecision.Path,
+                            ["agent.routing.path_forced"] = hybridDecision.Forced ? "true" : "false",
+                            ["agent.routing.decision_reason"] = hybridDecision.Reason,
                         }));
                 }
 
@@ -327,7 +364,9 @@ public static class ChatEndpoints
                     specialist.DisplayName,
                     decision.Intent,
                     decision.Confidence,
-                    routingDurationMs);
+                    routingDurationMs,
+                    ExecutionPath: hybridDecision.Path,
+                    ExecutionPathForced: hybridDecision.Forced);
 
                 // Emit trace_started with routing metadata for frontend telemetry panel
                 traceCollector.EmitTraceStarted(traceId, traceStartTime, decision.Intent, specialist.DisplayName, specialist.Model);
@@ -440,9 +479,11 @@ public static class ChatEndpoints
                     timestamp = DateTimeOffset.UtcNow
                 }, ct);
 
-                // Council interception: if the router classified as council/health, convene the council
-                if (decision.DetectedIntents?.Any(i => string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true
-                    || string.Equals(decision.Intent, "council/health", StringComparison.OrdinalIgnoreCase))
+                // Council interception: fires exactly when the hybrid gate
+                // resolved the request to the council path. Dedicated trigger
+                // — unchanged from before issue #95 — so behavior on portfolio-
+                // health prompts is preserved.
+                if (string.Equals(hybridDecision.Path, ExecutionPath.Council, StringComparison.Ordinal))
                 {
                     if (council is not null)
                     {
@@ -503,133 +544,133 @@ public static class ChatEndpoints
                     }
                 }
 
-                // Plan-first interception (issue #93): when the router flags multi-domain
-                // intent AND the caller is a real (non-anonymous) subject AND the plan
-                // orchestrator is registered, hand the whole request to the workflow-
-                // backed plan path. It opens one budget scope for the entire plan,
-                // persists steps as it runs, and either returns a composed reply or
-                // fails fast with an honest terminal state (nothing hangs). The
-                // single-specialist path below is skipped entirely.
+                // Plan-first interception (issue #93). Admission is now
+                // authoritatively controlled by the hybrid execution decider
+                // (issue #95): multi-domain, low-confidence, advisory-cue, and
+                // forced-plan requests all resolve to ExecutionPath.Plan and
+                // land here. The decider is where the "one coherent story"
+                // lives; this branch is the plan path's execution seam.
+                if (planOrchestrator is not null
+                    && string.Equals(hybridDecision.Path, ExecutionPath.Plan, StringComparison.Ordinal))
                 {
-                    PlanPersistenceOptions planOpts =
-                        planPersistenceOptions?.Value ?? new PlanPersistenceOptions();
-                    int planThreshold = Math.Max(1, planOpts.MinDetectedIntentsForPlan);
-                    bool multiDomain = decision.DetectedIntents is { Count: > 0 } &&
-                        decision.DetectedIntents.Count >= planThreshold;
-                    bool councilIntent = decision.DetectedIntents?.Any(i =>
-                        string.Equals(i, "council/health", StringComparison.OrdinalIgnoreCase)) == true
-                        || string.Equals(decision.Intent, "council/health", StringComparison.OrdinalIgnoreCase);
+                    List<ISpecialistAgent> roster = [.. specialists];
+                    var specialistLookup =
+                        roster.ToDictionary(s => s.Key, s => s, StringComparer.OrdinalIgnoreCase);
+                    string tenantId = tenantProvider.GetTenant()?.Company ?? string.Empty;
 
-                    if (planOrchestrator is not null && !anonymous && multiDomain && !councilIntent)
+                    PlanOrchestrationResult planResult =
+                        await planOrchestrator.RunAsync(new PlanOrchestrationInput
+                        {
+                            Request = enrichedRequest with { SessionId = sessionId },
+                            Subject = userId,
+                            PrincipalKey = userId,
+                            TenantId = tenantId,
+                            Roster = roster,
+                            SpecialistLookup = specialistLookup,
+                            DetectedIntents = decision.DetectedIntents ?? [],
+                            TraceId = traceId,
+                            ParentSpanId = chatActivity?.SpanId.ToString(),
+                        }, ct);
+
+                    // Plan review (#94) may suspend the plan for reviewer
+                    // input. The endpoint MUST NOT block on the review
+                    // timeout: instead, return 202 Accepted with the plan
+                    // and review request identifiers so the client (a) knows
+                    // its request was accepted and (b) can poll or subscribe
+                    // for the final response. When review is disabled or the
+                    // plan completed without suspension, the shape below
+                    // still returns 200 with the existing ChatResponse
+                    // envelope — no behavior change on that path.
+                    if (planResult.IsSuspended)
                     {
-                        List<ISpecialistAgent> roster = [.. specialists];
-                        var specialistLookup =
-                            roster.ToDictionary(s => s.Key, s => s, StringComparer.OrdinalIgnoreCase);
-                        string tenantId = tenantProvider.GetTenant()?.Company ?? string.Empty;
-
-                        PlanOrchestrationResult planResult =
-                            await planOrchestrator.RunAsync(new PlanOrchestrationInput
+                        return Results.Accepted(
+                            uri: $"/api/plans/{planResult.PlanId}",
+                            value: new
                             {
-                                Request = enrichedRequest with { SessionId = sessionId },
-                                Subject = userId,
-                                PrincipalKey = userId,
-                                TenantId = tenantId,
-                                Roster = roster,
-                                SpecialistLookup = specialistLookup,
-                                DetectedIntents = decision.DetectedIntents ?? [],
-                                TraceId = traceId,
-                                ParentSpanId = chatActivity?.SpanId.ToString(),
-                            }, ct);
-
-                        // Plan review (#94) may suspend the plan for reviewer
-                        // input. The endpoint MUST NOT block on the review
-                        // timeout: instead, return 202 Accepted with the plan
-                        // and review request identifiers so the client (a) knows
-                        // its request was accepted and (b) can poll or subscribe
-                        // for the final response. When review is disabled or the
-                        // plan completed without suspension, the shape below
-                        // still returns 200 with the existing ChatResponse
-                        // envelope — no behavior change on that path.
-                        if (planResult.IsSuspended)
-                        {
-                            return Results.Accepted(
-                                uri: $"/api/plans/{planResult.PlanId}",
-                                value: new
-                                {
-                                    planId = planResult.PlanId,
-                                    status = planResult.Status,
-                                    reviewRequestId = planResult.ReviewRequestId,
-                                    round = planResult.ReviewRoundNumber,
-                                    sessionId,
-                                    message = "Plan is awaiting reviewer input. Subscribe to the telemetry hub for 'plan_final_response' or poll GET /api/plans/{planId}.",
-                                });
-                        }
-
-                        // Output guardrail parity — the single-specialist path filters the
-                        // reply through the shared PII/content-safety seam BEFORE returning
-                        // (see FilterOutputAsync call below). The plan-first reply is a
-                        // composed transcript of specialist outputs, each of which arrived
-                        // through the specialist pipeline without an output-guardrail pass,
-                        // so it needs the same filter here or plan responses would leak
-                        // PII the single-specialist path scrubs. This invokes the existing
-                        // GuardrailsMiddleware seam only — no Guardrails implementation or
-                        // configuration change (that surface belongs to issue #99).
-                        string filteredPlanReply =
-                            await guardrails.FilterOutputAsync(planResult.Reply, userId, ct);
-
-                        var planChatResponse = new ChatResponse(
-                            filteredPlanReply,
-                            sessionId,
-                            [],
-                            null,
-                            planResult.DurationMs,
-                            new TokenUsage(planResult.InputTokens, planResult.OutputTokens, planResult.TotalTokens),
-                            new RoutingInfo(
-                                "planner",
-                                "Plan Orchestrator",
-                                decision.Intent ?? "plan",
-                                decision.Confidence,
-                                planResult.DurationMs));
-
-                        // Audit / export / session-turn parity — a plan turn is still an
-                        // accountable interaction from this subject: it produced a user
-                        // question and an assistant reply, burned tokens, and (if
-                        // persistence is on) belongs on disk exactly like a single-
-                        // specialist turn. Skipping these on the plan branch left the
-                        // audit log, session preview, and rehydrated conversation blind
-                        // to every multi-domain answer. Per-step cost UsageEvents are
-                        // already recorded by PlanExecutor and PlanOrchestrator, so we
-                        // do not track cost again here to avoid double-charging.
-                        await RecordChatTurnParityAsync(
-                            new ChatTurnParityContext(
-                                Request: request,
-                                SessionId: sessionId,
-                                UserId: userId,
-                                AgentKey: "planner",
-                                Intent: decision.Intent ?? "plan",
-                                Confidence: decision.Confidence,
-                                Action: $"chat.plan.{decision.Intent}",
-                                Reply: filteredPlanReply,
-                                InputTokens: planResult.InputTokens,
-                                OutputTokens: planResult.OutputTokens,
-                                DurationMs: planResult.DurationMs,
-                                SpanSummary: BuildPlanSpanSummary(planResult),
-                                PersistenceEnabled: persistenceEnabled),
-                            auditLog,
-                            conversationExporter,
-                            sessionStore,
-                            sessionPersistenceOptions,
-                            tenantProvider,
-                            logger,
-                            ct);
-
-                        if (!memoryDisabled)
-                        {
-                            await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, filteredPlanReply, ct);
-                        }
-
-                        return Results.Ok(planChatResponse);
+                                planId = planResult.PlanId,
+                                status = planResult.Status,
+                                reviewRequestId = planResult.ReviewRequestId,
+                                round = planResult.ReviewRoundNumber,
+                                sessionId,
+                                message = "Plan is awaiting reviewer input. Subscribe to the telemetry hub for 'plan_final_response' or poll GET /api/plans/{planId}.",
+                            });
                     }
+
+                    // Output guardrail parity — the single-specialist path filters the
+                    // reply through the shared PII/content-safety seam BEFORE returning
+                    // (see FilterOutputAsync call below). The plan-first reply is a
+                    // composed transcript of specialist outputs, each of which arrived
+                    // through the specialist pipeline without an output-guardrail pass,
+                    // so it needs the same filter here or plan responses would leak
+                    // PII the single-specialist path scrubs. This invokes the existing
+                    // GuardrailsMiddleware seam only — no Guardrails implementation or
+                    // configuration change (that surface belongs to issue #99).
+                    string filteredPlanReply =
+                        await guardrails.FilterOutputAsync(planResult.Reply, userId, ct);
+
+                    // Charts propagate from every specialist step verbatim — see
+                    // PlanStepResult.Charts and PlanOrchestrationResult.Charts.
+                    // Without this the plan path silently dropped all charts,
+                    // breaking the "9 chart types render on both paths" gate.
+                    List<ChartSpec>? planCharts = planResult.Charts is { Count: > 0 }
+                        ? [.. planResult.Charts]
+                        : null;
+
+                    var planChatResponse = new ChatResponse(
+                        filteredPlanReply,
+                        sessionId,
+                        [],
+                        planCharts,
+                        planResult.DurationMs,
+                        new TokenUsage(planResult.InputTokens, planResult.OutputTokens, planResult.TotalTokens),
+                        new RoutingInfo(
+                            "planner",
+                            "Plan Orchestrator",
+                            decision.Intent ?? "plan",
+                            decision.Confidence,
+                            planResult.DurationMs,
+                            ExecutionPath: hybridDecision.Path,
+                            ExecutionPathForced: hybridDecision.Forced),
+                        PlanId: planResult.PlanId);
+
+                    // Audit / export / session-turn parity — a plan turn is still an
+                    // accountable interaction from this subject: it produced a user
+                    // question and an assistant reply, burned tokens, and (if
+                    // persistence is on) belongs on disk exactly like a single-
+                    // specialist turn. Skipping these on the plan branch left the
+                    // audit log, session preview, and rehydrated conversation blind
+                    // to every multi-domain answer. Per-step cost UsageEvents are
+                    // already recorded by PlanExecutor and PlanOrchestrator, so we
+                    // do not track cost again here to avoid double-charging.
+                    await RecordChatTurnParityAsync(
+                        new ChatTurnParityContext(
+                            Request: request,
+                            SessionId: sessionId,
+                            UserId: userId,
+                            AgentKey: "planner",
+                            Intent: decision.Intent ?? "plan",
+                            Confidence: decision.Confidence,
+                            Action: $"chat.plan.{decision.Intent}",
+                            Reply: filteredPlanReply,
+                            InputTokens: planResult.InputTokens,
+                            OutputTokens: planResult.OutputTokens,
+                            DurationMs: planResult.DurationMs,
+                            SpanSummary: BuildPlanSpanSummary(planResult),
+                            PersistenceEnabled: persistenceEnabled),
+                        auditLog,
+                        conversationExporter,
+                        sessionStore,
+                        sessionPersistenceOptions,
+                        tenantProvider,
+                        logger,
+                        ct);
+
+                    if (!memoryDisabled)
+                    {
+                        await memoryMiddleware.ExtractAndStoreAsync(userId, enrichedRequest.Message, filteredPlanReply, ct);
+                    }
+
+                    return Results.Ok(planChatResponse);
                 }
 
                 // Agent execution with tracing

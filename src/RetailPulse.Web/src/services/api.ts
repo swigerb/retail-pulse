@@ -1,4 +1,11 @@
-import type { ChatRequest, ChatResponse, RoutingInfo } from '../types';
+import type {
+  ChatRequest,
+  ChatResponse,
+  RoutingInfo,
+  PlanStatus,
+  PlanSuspendedResponse,
+  SendMessageResult,
+} from '../types';
 import { resolveApiUrl } from '../config/apiOrigin';
 
 async function parseErrorBody(res: Response): Promise<string> {
@@ -26,12 +33,34 @@ async function parseErrorBody(res: Response): Promise<string> {
 function isRoutingInfo(value: unknown): value is RoutingInfo {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
-  return (
-    typeof v.agentKey === 'string' &&
-    typeof v.agentName === 'string' &&
-    typeof v.intent === 'string' &&
-    typeof v.confidence === 'number'
-  );
+  if (
+    typeof v.agentKey !== 'string' ||
+    typeof v.agentName !== 'string' ||
+    typeof v.intent !== 'string' ||
+    typeof v.confidence !== 'number'
+  ) {
+    return false;
+  }
+  // Hybrid execution fields (issue #95). Optional, but reject wrong-typed
+  // values instead of silently coercing — the UI relies on the type to
+  // decide when to render the path badge / forced indicator.
+  if (v.executionPath !== undefined && v.executionPath !== null) {
+    if (
+      v.executionPath !== 'fast' &&
+      v.executionPath !== 'plan' &&
+      v.executionPath !== 'council'
+    ) {
+      return false;
+    }
+  }
+  if (
+    v.executionPathForced !== undefined &&
+    v.executionPathForced !== null &&
+    typeof v.executionPathForced !== 'boolean'
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function isChatResponse(value: unknown): value is ChatResponse {
@@ -46,6 +75,32 @@ function isChatResponse(value: unknown): value is ChatResponse {
   }
   // routing is optional but must be valid when present
   if (v.routing !== undefined && v.routing !== null && !isRoutingInfo(v.routing)) {
+    return false;
+  }
+  return true;
+}
+
+const KNOWN_PLAN_STATUSES: readonly PlanStatus[] = [
+  'draft',
+  'awaiting_review',
+  'awaiting_clarification',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+  'unusable',
+];
+
+function isPlanSuspendedResponse(value: unknown): value is PlanSuspendedResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.planId !== 'string' || typeof v.sessionId !== 'string') return false;
+  if (typeof v.status !== 'string') return false;
+  if (!(KNOWN_PLAN_STATUSES as readonly string[]).includes(v.status)) return false;
+  if (v.reviewRequestId !== undefined && v.reviewRequestId !== null && typeof v.reviewRequestId !== 'string') {
+    return false;
+  }
+  if (v.round !== undefined && v.round !== null && typeof v.round !== 'number') {
     return false;
   }
   return true;
@@ -103,7 +158,7 @@ function withTimeout(
 export async function sendMessage(
   request: ChatRequest,
   options: SendMessageOptions = {},
-): Promise<ChatResponse> {
+): Promise<SendMessageResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const { signal, didTimeOut, cleanup } = withTimeout(options.signal, timeoutMs);
 
@@ -138,10 +193,18 @@ export async function sendMessage(
   }
 
   const data: unknown = await res.json();
+  // The plan review gate (#94) returns 202 Accepted with a suspended-plan
+  // envelope instead of a ChatResponse when the plan is awaiting the
+  // reviewer's decision or a mid-plan clarification answer. Detect and
+  // surface it as a distinct union arm so callers can render the review UI
+  // without swallowing it as a malformed 200 response.
+  if (res.status === 202 && isPlanSuspendedResponse(data)) {
+    return { kind: 'suspended', suspended: data };
+  }
   if (!isChatResponse(data)) {
     throw new Error('API error: malformed response payload');
   }
-  return data;
+  return { kind: 'complete', response: data };
 }
 
 /**

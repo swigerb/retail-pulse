@@ -13,7 +13,8 @@ public record ChatRequest(
     string Message,
     string? SessionId = null,
     UserContext? User = null,
-    List<ChatHistoryMessage>? History = null
+    List<ChatHistoryMessage>? History = null,
+    string? ForceExecutionPath = null
 );
 
 /// <summary>
@@ -24,7 +25,9 @@ public record RoutingInfo(
     string AgentName,
     string? Intent,
     double? Confidence,
-    long? DurationMs
+    long? DurationMs,
+    string? ExecutionPath = null,
+    bool? ExecutionPathForced = null
 );
 
 /// <summary>
@@ -37,7 +40,14 @@ public record ChatResponse(
     List<ChartSpec>? Charts = null,
     long? TotalDurationMs = null,
     TokenUsage? TokenUsage = null,
-    RoutingInfo? Routing = null
+    RoutingInfo? Routing = null,
+    /// <summary>
+    /// Populated on the plan-first branch (#93/#96) so the client can drive the
+    /// plan surface (steps, review, history) without a follow-up lookup.
+    /// Always null on the fast/single-shot path so no plan chrome leaks into
+    /// those replies.
+    /// </summary>
+    string? PlanId = null
 );
 
 /// <summary>

@@ -19,6 +19,33 @@ const mockCaps: { value: ProviderCapabilities; mode: 'entra' | 'github' | 'anony
 const connectTelemetryHub = vi.fn((..._args: unknown[]) => ({ on: vi.fn(), off: vi.fn() }));
 vi.mock('../services/telemetryHub', () => ({
   connectTelemetryHub: (...args: unknown[]) => connectTelemetryHub(...args),
+  subscribeHubEvent: vi.fn(() => () => {}),
+  joinTelemetrySession: vi.fn(() => Promise.resolve()),
+  onProgress: vi.fn(() => () => {}),
+}));
+
+vi.mock('../services/planApi', () => ({
+  fetchPlans: vi.fn(() => Promise.resolve([])),
+  fetchPlanDetail: vi.fn(() => Promise.resolve(null)),
+  fetchPlanReviews: vi.fn(() => Promise.resolve([])),
+  decidePlanReview: vi.fn(() => Promise.resolve({})),
+  answerPlanClarification: vi.fn(() => Promise.resolve()),
+  deletePlan: vi.fn(() => Promise.resolve(false)),
+  parseReviewProposal: vi.fn(() => null),
+  parseClarificationPrompt: vi.fn(() => null),
+}));
+
+// The plan history panel is stubbed like other drawer panels.
+vi.mock('../components/plan', () => ({
+  PlanHistoryPanel: () => null,
+  PlanView: () => null,
+  PlanStepRow: () => null,
+  PlanReviewCard: () => null,
+  PlanClarificationCard: () => null,
+  PLAN_STATUS_META: {},
+  PLAN_STEP_STATUS_META: {},
+  formatElapsed: () => '0s',
+  progressCounts: () => ({ total: 0, completed: 0, running: 0, failed: 0, pending: 0, percent: 0 }),
 }));
 
 vi.mock('../auth/activeProvider', () => ({

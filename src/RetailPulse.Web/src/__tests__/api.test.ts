@@ -29,9 +29,11 @@ describe('api.sendMessage', () => {
 
     const result = await sendMessage({ message: 'hi' });
 
-    expect(result.reply).toBe('hello');
-    expect(result.sessionId).toBe('s-1');
-    expect(result.totalDurationMs).toBe(1234);
+    expect(result.kind).toBe('complete');
+    if (result.kind !== 'complete') throw new Error('expected complete');
+    expect(result.response.reply).toBe('hello');
+    expect(result.response.sessionId).toBe('s-1');
+    expect(result.response.totalDurationMs).toBe(1234);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/chat',
       expect.objectContaining({
@@ -69,6 +71,132 @@ describe('api.sendMessage', () => {
         { role: 'assistant', content: 'previous answer' },
       ],
     }));
+  });
+
+  it('omits forceExecutionPath from the body when not provided (issue #95 Auto default)', async () => {
+    let captured: RequestInit | undefined;
+    globalThis.fetch = vi.fn().mockImplementation(
+      (_input: unknown, init?: RequestInit) => {
+        captured = init;
+        return Promise.resolve(
+          new Response(JSON.stringify({ reply: 'ok', sessionId: 's', spans: [] }), { status: 200 })
+        );
+      }
+    ) as unknown as typeof fetch;
+
+    await sendMessage({ message: 'hi', sessionId: 's' });
+
+    // Auto (the default) never sends the field so the payload is
+    // byte-identical to pre-#95 requests. This preserves today's fast-path
+    // UX for the common case.
+    expect(captured?.body).toBe(JSON.stringify({ message: 'hi', sessionId: 's' }));
+    expect((captured?.body as string) ?? '').not.toContain('forceExecutionPath');
+  });
+
+  it.each([
+    ['fast' as const],
+    ['plan' as const],
+  ])('serializes forceExecutionPath=%s when the caller forces the path', async (path) => {
+    let captured: RequestInit | undefined;
+    globalThis.fetch = vi.fn().mockImplementation(
+      (_input: unknown, init?: RequestInit) => {
+        captured = init;
+        return Promise.resolve(
+          new Response(JSON.stringify({ reply: 'ok', sessionId: 's', spans: [] }), { status: 200 })
+        );
+      }
+    ) as unknown as typeof fetch;
+
+    await sendMessage({ message: 'hi', sessionId: 's', forceExecutionPath: path });
+
+    expect(captured?.body).toBe(
+      JSON.stringify({ message: 'hi', sessionId: 's', forceExecutionPath: path }),
+    );
+  });
+
+  it('parses executionPath + executionPathForced on the routing payload (issue #95)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: 'ok',
+          sessionId: 's',
+          spans: [],
+          routing: {
+            agentKey: 'demand-forecasting',
+            agentName: 'Demand Agent',
+            intent: 'demand/forecasting',
+            confidence: 0.91,
+            executionPath: 'plan',
+            executionPathForced: true,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    ) as unknown as typeof fetch;
+
+    const result = await sendMessage({ message: 'hi' });
+
+    if (result.kind !== 'complete') throw new Error('expected complete');
+    expect(result.response.routing?.executionPath).toBe('plan');
+    expect(result.response.routing?.executionPathForced).toBe(true);
+  });
+
+  it('returns a suspended envelope when the plan review gate returns 202 (issue #96)', async () => {
+    const payload = {
+      planId: 'plan-42',
+      status: 'awaiting_review',
+      reviewRequestId: 'req-1',
+      round: 0,
+      sessionId: 's-99',
+      message: 'Plan awaiting reviewer input.',
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    const result = await sendMessage({ message: 'multi-domain question' });
+
+    expect(result.kind).toBe('suspended');
+    if (result.kind !== 'suspended') throw new Error('expected suspended');
+    expect(result.suspended.planId).toBe('plan-42');
+    expect(result.suspended.status).toBe('awaiting_review');
+    expect(result.suspended.reviewRequestId).toBe('req-1');
+  });
+
+  it('throws when a 202 response body is malformed', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ planId: 'x' }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(sendMessage({ message: 'hi' })).rejects.toThrow(/malformed/i);
+  });
+
+  it('rejects a routing payload with an unknown executionPath value', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: 'ok',
+          sessionId: 's',
+          spans: [],
+          routing: {
+            agentKey: 'x',
+            agentName: 'x',
+            intent: 'demand/x',
+            confidence: 0.9,
+            executionPath: 'nope',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    ) as unknown as typeof fetch;
+
+    await expect(sendMessage({ message: 'hi' })).rejects.toThrow(/malformed/i);
   });
 
   it('uses the configured direct ACA origin for long-running chat', async () => {

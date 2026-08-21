@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { makeStyles, Badge } from '@fluentui/react-components';
 import { KB_COLORS } from '../../constants/agentRouting';
-import type { KBSearchResult } from '../../types';
+import type { KBSearchResult, KnowledgeRelevanceKind } from '../../types';
 
 interface SearchResultsProps {
   results: KBSearchResult[];
   query: string;
+  relevanceKind?: KnowledgeRelevanceKind;
+  scoreSemantics?: string;
 }
 
 const useStyles = makeStyles({
@@ -20,11 +22,18 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '10px',
     marginBottom: '12px',
+    flexWrap: 'wrap',
   },
   title: {
     fontSize: '14px',
     fontWeight: '600',
     color: '#06b6d4' as const,
+  },
+  relevanceNote: {
+    flexBasis: '100%',
+    fontSize: '11px',
+    color: 'var(--color-text-muted, #94a3b8)',
+    lineHeight: '1.5',
   },
   resultList: {
     display: 'flex',
@@ -89,14 +98,35 @@ function getScoreColor(score: number): string {
   return KB_COLORS.relevanceLow;
 }
 
-function ResultCard({ result }: { result: KBSearchResult }) {
+function getRelevanceLabel(kind: KnowledgeRelevanceKind | undefined): string {
+  switch (kind) {
+    case 'Semantic': return 'similarity';
+    case 'Hybrid': return 'hybrid score';
+    case 'Lexical': return 'BM25 score';
+    default: return 'score';
+  }
+}
+
+function getScoreBand(score: number): 'high' | 'medium' | 'low' {
+  if (score >= 0.8) return 'high';
+  if (score >= 0.5) return 'medium';
+  return 'low';
+}
+
+function ResultCard({ result, relevanceKind }: {
+  result: KBSearchResult;
+  relevanceKind?: KnowledgeRelevanceKind;
+}) {
   const styles = useStyles();
   const [expanded, setExpanded] = useState(false);
+  const label = getRelevanceLabel(relevanceKind);
+  const band = getScoreBand(result.score);
 
   return (
     <div
       className={styles.resultCard}
       data-testid="search-result"
+      data-relevance-band={band}
       onClick={() => setExpanded(prev => !prev)}
       role="button"
       tabIndex={0}
@@ -111,8 +141,9 @@ function ResultCard({ result }: { result: KBSearchResult }) {
             color: getScoreColor(result.score),
             fontSize: '10px',
           }}
+          aria-label={`Relevance band: ${band}, ${(result.score * 100).toFixed(0)}% ${label}`}
         >
-          {(result.score * 100).toFixed(0)}% match
+          {(result.score * 100).toFixed(0)}% {label}
         </Badge>
       </div>
       <div className={styles.resultPreview}>{result.chunk}</div>
@@ -128,8 +159,11 @@ function ResultCard({ result }: { result: KBSearchResult }) {
   );
 }
 
-export default function SearchResults({ results, query }: SearchResultsProps) {
+export default function SearchResults({ results, query, relevanceKind, scoreSemantics }: SearchResultsProps) {
   const styles = useStyles();
+  const relevanceHeading = relevanceKind
+    ? `${relevanceKind} relevance`
+    : 'Relevance';
 
   return (
     <div className={styles.wrapper} data-testid="search-results">
@@ -138,6 +172,18 @@ export default function SearchResults({ results, query }: SearchResultsProps) {
         <Badge appearance="filled" style={{ background: 'rgba(6,182,212,0.15)', color: '#67e8f9' }}>
           {results.length} {results.length === 1 ? 'result' : 'results'}
         </Badge>
+        <Badge
+          appearance="outline"
+          data-testid="search-relevance-kind"
+          aria-label={`Relevance semantics: ${relevanceHeading}`}
+        >
+          {relevanceHeading}
+        </Badge>
+        {scoreSemantics && (
+          <div className={styles.relevanceNote} data-testid="search-score-semantics">
+            {scoreSemantics}
+          </div>
+        )}
       </div>
 
       {results.length === 0 ? (
@@ -150,7 +196,11 @@ export default function SearchResults({ results, query }: SearchResultsProps) {
       ) : (
         <div className={styles.resultList}>
           {results.map((r, idx) => (
-            <ResultCard key={`${r.documentId}-${r.chunkIndex}-${idx}`} result={r} />
+            <ResultCard
+              key={`${r.documentId}-${r.chunkIndex}-${idx}`}
+              result={r}
+              relevanceKind={relevanceKind}
+            />
           ))}
         </div>
       )}

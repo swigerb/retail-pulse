@@ -1,6 +1,7 @@
 using FluentAssertions;
 using RetailPulse.Api.Validation;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Routing;
 
 namespace RetailPulse.Tests.Security;
 
@@ -124,6 +125,73 @@ public class ChatRequestValidatorTests
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainKey("sessionId");
+    }
+
+    // ── ForceExecutionPath (issue #95 hybrid execution) ───────────────
+
+    [Fact]
+    public void NullForceExecutionPath_IsValid()
+    {
+        var request = new ChatRequest("Hello", "session1");
+
+        ValidationResult result = ChatRequestValidator.Validate(request);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("fast")]
+    [InlineData("Fast")]
+    [InlineData("FAST")]
+    [InlineData("plan")]
+    [InlineData("PLAN")]
+    public void ForceExecutionPath_AllowsFastOrPlan_CaseInsensitive(string forcePath)
+    {
+        var request = new ChatRequest("Hello", "session1", ForceExecutionPath: forcePath);
+
+        ValidationResult result = ChatRequestValidator.Validate(request);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("council")]
+    [InlineData("bypass")]
+    [InlineData("l3")]
+    public void ForceExecutionPath_RejectsUnknownOrCouncilValues(string forcePath)
+    {
+        var request = new ChatRequest("Hello", "session1", ForceExecutionPath: forcePath);
+
+        ValidationResult result = ChatRequestValidator.Validate(request);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainKey("forceExecutionPath");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ForceExecutionPath_RejectsWhitespaceOrEmpty(string forcePath)
+    {
+        var request = new ChatRequest("Hello", "session1", ForceExecutionPath: forcePath);
+
+        ValidationResult result = ChatRequestValidator.Validate(request);
+
+        result.IsValid.Should().BeFalse(
+            "an empty or whitespace-only ForceExecutionPath is a client bug and must not silently pass through");
+        result.Errors.Should().ContainKey("forceExecutionPath");
+    }
+
+    [Fact]
+    public void ForceExecutionPath_ErrorMessageMentionsFastAndPlan()
+    {
+        var request = new ChatRequest("Hello", "session1", ForceExecutionPath: "council");
+
+        ValidationResult result = ChatRequestValidator.Validate(request);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors["forceExecutionPath"].Should().Contain(e => e.Contains(ExecutionPath.Fast));
+        result.Errors["forceExecutionPath"].Should().Contain(e => e.Contains(ExecutionPath.Plan));
     }
 
     [Theory]

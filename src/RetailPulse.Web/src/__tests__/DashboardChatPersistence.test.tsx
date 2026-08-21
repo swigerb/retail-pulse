@@ -43,6 +43,21 @@ vi.mock('../services/telemetryHub', () => ({
   connectTelemetryHub: (...args: unknown[]) => connectTelemetryHubMock(...args),
   joinTelemetrySession: (...args: unknown[]) => joinTelemetrySessionMock(...args),
   onProgress: vi.fn(() => () => {}),
+  subscribeHubEvent: vi.fn(() => () => {}),
+}));
+
+// planApi is used by the plan controller wired into the Dashboard (issue #96).
+// Return empty history / no plan detail so the plan surface stays inert unless a
+// test explicitly opens it.
+vi.mock('../services/planApi', () => ({
+  fetchPlans: vi.fn(() => Promise.resolve([])),
+  fetchPlanDetail: vi.fn(() => Promise.resolve(null)),
+  fetchPlanReviews: vi.fn(() => Promise.resolve([])),
+  decidePlanReview: vi.fn(() => Promise.resolve({})),
+  answerPlanClarification: vi.fn(() => Promise.resolve()),
+  deletePlan: vi.fn(() => Promise.resolve(false)),
+  parseReviewProposal: vi.fn(() => null),
+  parseClarificationPrompt: vi.fn(() => null),
 }));
 
 // ChartRenderer is lazy-loaded inside ChatPanel; mock so Suspense resolves
@@ -142,7 +157,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const CHART_REPLY = {
+const CHART_RESPONSE = {
   reply: 'Q1 depletion rose 12% across all regions.',
   sessionId: 'sess-ignored',
   spans: [],
@@ -155,12 +170,13 @@ const CHART_REPLY = {
     },
   ],
 };
+const CHART_REPLY = { kind: 'complete' as const, response: CHART_RESPONSE };
 
 async function seedConversation(user: ReturnType<typeof userEvent.setup>, prompt = 'How did Q1 depletion trend?') {
   const input = screen.getByPlaceholderText(/Ask about retail performance/i);
   await user.type(input, prompt);
   await user.click(screen.getByRole('button', { name: /Send message/i }));
-  await screen.findByText(CHART_REPLY.reply);
+  await screen.findByText(CHART_RESPONSE.reply);
   await waitFor(() => expect(screen.getByTestId('chart-renderer-mock')).toBeInTheDocument());
 }
 
@@ -214,7 +230,7 @@ describe('Dashboard — chat persists across navigation (issue #46)', () => {
     await user.click(screen.getByRole('button', { name: /Back to Chat/i }));
 
     // Conversation is intact — same DOM nodes, never refetched or rejoined.
-    expect(screen.getByText(CHART_REPLY.reply)).toBeInTheDocument();
+    expect(screen.getByText(CHART_RESPONSE.reply)).toBeInTheDocument();
     expect(screen.getByText(/How did Q1 depletion trend\?/i)).toBeInTheDocument();
     expect(screen.getByTestId('chart-renderer-mock')).toBeInTheDocument();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
@@ -245,7 +261,7 @@ describe('Dashboard — chat persists across navigation (issue #46)', () => {
 
     // Returning shows the completed answer + chart — no replay, no lost result.
     await user.click(screen.getByRole('button', { name: /Back to Chat/i }));
-    expect(await screen.findByText(CHART_REPLY.reply)).toBeInTheDocument();
+    expect(await screen.findByText(CHART_RESPONSE.reply)).toBeInTheDocument();
     expect(screen.getByTestId('chart-renderer-mock')).toBeInTheDocument();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
@@ -271,12 +287,12 @@ describe('Dashboard — chat persists across navigation (issue #46)', () => {
     // Chat is untouched: still visible, still holding its message + chart.
     const host = screen.getByTestId('chat-host');
     expect(host).not.toHaveAttribute('aria-hidden');
-    expect(screen.getByText(CHART_REPLY.reply)).toBeInTheDocument();
+    expect(screen.getByText(CHART_RESPONSE.reply)).toBeInTheDocument();
     expect(screen.getByTestId('chart-renderer-mock')).toBeInTheDocument();
 
     // Close the overlay — returns to the same chat.
     await user.click(screen.getByRole('button', { name: /Close telemetry panel/i }));
-    expect(screen.getByText(CHART_REPLY.reply)).toBeInTheDocument();
+    expect(screen.getByText(CHART_RESPONSE.reply)).toBeInTheDocument();
     expect(screen.getByTestId('chart-renderer-mock')).toBeInTheDocument();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
@@ -295,7 +311,7 @@ describe('Dashboard — New Chat is the only reset (issue #46)', () => {
 
     // Fresh chat: welcome prompts return, prior message + chart are gone.
     expect(await screen.findByText(/Welcome to Retail Pulse/i)).toBeInTheDocument();
-    expect(screen.queryByText(CHART_REPLY.reply)).not.toBeInTheDocument();
+    expect(screen.queryByText(CHART_RESPONSE.reply)).not.toBeInTheDocument();
     expect(screen.queryByTestId('chart-renderer-mock')).not.toBeInTheDocument();
 
     // A brand-new session id was joined (ChatPanel remounted via chatKey).

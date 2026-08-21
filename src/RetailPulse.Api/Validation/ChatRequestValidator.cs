@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Routing;
 
 namespace RetailPulse.Api.Validation;
 
@@ -79,6 +80,19 @@ public static partial class ChatRequestValidator
             {
                 errors["history.aggregate"] = [$"Combined history content must not exceed {MaxAggregateHistoryChars} characters. Received: {aggregate}."];
             }
+        }
+
+        // Force-execution-path override (issue #95). Optional. Only user-forceable
+        // values are accepted; council is a router-controlled destination and is
+        // never a valid override. Unknown values fail closed with a 400 so a
+        // silent typo can never quietly re-route through the fast path.
+        if (request.ForceExecutionPath is not null
+            && !ExecutionPath.IsForceable(request.ForceExecutionPath))
+        {
+            errors["forceExecutionPath"] =
+            [
+                $"Field 'forceExecutionPath' must be '{ExecutionPath.Fast}' or '{ExecutionPath.Plan}' when specified."
+            ];
         }
 
         return new ValidationResult(errors.Count == 0, errors);

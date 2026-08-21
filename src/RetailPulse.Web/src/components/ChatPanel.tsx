@@ -12,10 +12,11 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
-import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo } from '../types';
+import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo, ForceableExecutionPath } from '../types';
 import type { SendMessageOptions } from '../services/api';
 import { sendMessage, isErrorReply } from '../services/api';
 import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
+import { activeAuthMode } from '../auth/activeProvider';
 import { BrandLogo } from './BrandLogo';
 import { AgentRoutingIndicator } from './AgentRoutingIndicator';
 import { MemoryIndicator } from './MemoryIndicator';
@@ -29,6 +30,8 @@ import type { SafetyBlockDisplayModel } from '../types';
 import { PromptLibrary } from './PromptLibrary';
 import { PROMPT_CATEGORIES, type PromptCategory } from '../constants/prompts';
 import { sanitizeMessage } from '../utils';
+import { PlanView } from './plan';
+import type { PlanController } from '../state/usePlanController';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
 
@@ -45,6 +48,13 @@ interface ChatMessage {
   isStreaming?: boolean;
   cacheInfo?: CacheInfo;
   blocked?: { reason: string; suggestion?: string; display?: SafetyBlockDisplayModel };
+  /**
+   * When set, this message is a plan-first response — render the PlanView
+   * with matching planId in place of the plain reply. Fast-path (single-shot)
+   * responses NEVER carry planId, so their bubble stays exactly as today
+   * with no plan chrome.
+   */
+  planId?: string;
 }
 
 interface ChatPanelProps {
@@ -59,6 +69,15 @@ interface ChatPanelProps {
    * content pack's categories once `/api/pack/starting-tasks` resolves.
    */
   promptCategories?: ReadonlyArray<PromptCategory>;
+  /**
+   * Optional plan controller supplied by the Dashboard. When provided,
+   * plan-first responses render the interactive PlanView inline instead of
+   * the plain markdown reply. Omitting it leaves the panel in the legacy
+   * "chat only" mode used by tests that mount ChatPanel in isolation.
+   */
+  planController?: PlanController;
+  /** Live SignalR connection status for the plan view banner. */
+  planConnected?: boolean;
 }
 
 const SPAN_ICONS: Record<string, string> = {
@@ -378,6 +397,47 @@ const useChatStyles = makeStyles({
       padding: '12px 16px',
     },
   },
+  executionPathSelect: {
+    flexShrink: '0',
+    height: '32px',
+    padding: '0 26px 0 10px',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-surface)',
+    color: 'var(--color-text-muted)',
+    fontSize: '12px',
+    fontWeight: '500',
+    cursor: 'pointer',
+    appearance: 'none',
+    backgroundImage:
+      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%239aa0a6' d='M0 0l5 6 5-6z'/></svg>\")",
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 10px center',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      background: 'var(--color-surface-hover)',
+      border: '1px solid var(--brand-accent-soft-hover)',
+      color: 'var(--brand-accent-light)',
+      backgroundImage:
+        "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%239aa0a6' d='M0 0l5 6 5-6z'/></svg>\")",
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: 'right 10px center',
+    },
+    ':focus-visible': {
+      outline: '2px solid var(--brand-accent)',
+      outlineOffset: '1px',
+    },
+    ':disabled': {
+      opacity: '0.5',
+      cursor: 'not-allowed',
+    },
+  },
+  executionPathForced: {
+    color: 'var(--brand-accent)',
+    border: '1px solid var(--brand-accent-border)',
+    background: 'var(--brand-accent-soft)',
+    fontWeight: '600',
+  },
   loadingContainer: {
     display: 'flex',
     alignItems: 'center',
@@ -396,6 +456,8 @@ export function ChatPanel({
   approvals,
   onApprovalResolved,
   promptCategories = PROMPT_CATEGORIES,
+  planController,
+  planConnected,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -403,6 +465,14 @@ export function ChatPanel({
   const [loadingText, setLoadingText] = useState<string>('Thinking...');
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [sessionId] = useState<string>(() => crypto.randomUUID().replace(/-/g, ''));
+  // "auto" is the default — omit the field so the backend chooses. Only
+  // `fast` / `plan` are ever sent to the server; council keeps its own
+  // dedicated trigger and is not a valid override server-side.
+  const [forcePath, setForcePath] = useState<'auto' | ForceableExecutionPath>('auto');
+  // Anonymous sessions cannot force a path (backend ignores the field for
+  // anonymous users). Hide the selector so we don't present a misleading
+  // control that the server would silently drop.
+  const supportsExecutionPathOverride = activeAuthMode !== 'anonymous';
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
 
@@ -479,11 +549,48 @@ export function ChatPanel({
           .map(m => ({ role: m.role, content: m.content }));
 
         const options: SendMessageOptions = { signal: controller.signal };
-        const response = await sendMessage(
-          { message: trimmed, sessionId, history },
+        // Only include `forceExecutionPath` when the user has explicitly
+        // picked a path AND the current auth mode supports the override.
+        // Auto (the default) omits the field so the request payload for the
+        // common case is byte-identical to the pre-#95 shape.
+        const forceExecutionPath: ForceableExecutionPath | undefined =
+          supportsExecutionPathOverride && forcePath !== 'auto' ? forcePath : undefined;
+        const result = await sendMessage(
+          {
+            message: trimmed,
+            sessionId,
+            history,
+            ...(forceExecutionPath ? { forceExecutionPath } : {}),
+          },
           options,
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
+
+        // Plan review gate suspended the plan for reviewer input (#94/#96).
+        // We surface the plan bubble immediately so the user can see the
+        // proposed steps and drive the review. The reducer hydrates the
+        // real plan detail (steps, statuses) from GET /api/plans/{id}.
+        if (result.kind === 'suspended') {
+          const suspended = result.suspended;
+          if (planController) {
+            void planController.startPlan({
+              planId: suspended.planId,
+              sessionId: suspended.sessionId,
+              request: trimmed,
+            });
+          }
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'assistant' as const,
+              content: suspended.message ?? 'Plan awaiting review.',
+              planId: suspended.planId,
+            },
+          ]);
+          return;
+        }
+
+        const response = result.response;
         // When the backend returns a 200 OK but the reply is actually an
         // error (rate-limit, timeout), suppress routing/telemetry metadata
         // so users don't see misleading "Agent X — 78% confidence" badges.
@@ -497,6 +604,34 @@ export function ChatPanel({
         // user sees a plain-language explanation without any internal
         // detection detail leaking through.
         const safetyDisplay = detectSafetyRefusal(response.reply);
+        // Plan-first (unsuspended) 200 responses carry
+        // routing.executionPath === 'plan'. Render the PlanView bubble
+        // instead of the raw markdown so step statuses, per-step charts,
+        // and the final aggregate reply all live in one surface.
+        const isPlanResponse =
+          response.routing?.executionPath === 'plan' && response.planId != null;
+        if (isPlanResponse && response.planId) {
+          const planId = response.planId;
+          if (planController) {
+            void planController.startPlan({
+              planId,
+              sessionId: response.sessionId,
+              request: trimmed,
+            });
+          }
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'assistant' as const,
+              content: response.reply,
+              routing: response.routing,
+              totalDurationMs: response.totalDurationMs,
+              tokenUsage: response.tokenUsage,
+              planId,
+            },
+          ]);
+          return;
+        }
         setMessages(prev => [
           ...prev,
           safetyDisplay
@@ -527,7 +662,7 @@ export function ChatPanel({
         }
       }
     },
-    [sessionId],
+    [sessionId, forcePath, supportsExecutionPathOverride, planController],
   );
 
   const handleSend = useCallback(async () => {
@@ -606,6 +741,7 @@ export function ChatPanel({
           <div
             key={`msg-${msg.role}-${i}`}
             className={`${styles.message} ${msg.role === 'user' ? styles.messageUser : styles.messageAssistant}`}
+            style={msg.planId ? { maxWidth: '95%' } : undefined}
           >
             <Avatar
               size={36}
@@ -615,6 +751,17 @@ export function ChatPanel({
               style={msg.role === 'assistant' ? ASSISTANT_AVATAR_STYLE : undefined}
             />
             <div className={styles.messageContent}>
+              {msg.role === 'assistant' && msg.planId && planController?.active?.planId === msg.planId ? (
+                <PlanView
+                  active={planController.active}
+                  connected={planConnected ?? true}
+                  onApprove={comment => { void planController.approve(comment); }}
+                  onReject={feedback => { void planController.reject(feedback); }}
+                  onEdit={editedSteps => { void planController.edit(editedSteps); }}
+                  onClarify={answer => { void planController.clarify(answer); }}
+                  onClose={() => planController.close()}
+                />
+              ) : (
               <Card
                 className={`${styles.messageCard} ${msg.role === 'user' ? styles.userCard : styles.assistantCard}`}
                 appearance="subtle"
@@ -649,10 +796,21 @@ export function ChatPanel({
                   <div>{msg.content}</div>
                 )}
               </Card>
+              )}
+              {msg.role === 'assistant' && msg.planId && planController && planController.active?.planId !== msg.planId && (
+                <Button
+                  appearance="subtle"
+                  onClick={() => { void planController.openHistoryPlan(msg.planId!); }}
+                  data-testid="plan-reopen-button"
+                  aria-label={`Reopen plan ${msg.planId}`}
+                >
+                  Reopen plan
+                </Button>
+              )}
               {msg.role === 'assistant' && msg.cacheInfo?.cached && (
                 <CacheIndicator cacheInfo={msg.cacheInfo} />
               )}
-              {msg.role === 'assistant' && msg.routing && (
+              {msg.role === 'assistant' && msg.routing && !msg.planId && (
                 <AgentRoutingIndicator routing={msg.routing} />
               )}
               {msg.role === 'assistant' && msg.memoryContext && msg.memoryContext.entries.length > 0 && (
@@ -661,10 +819,10 @@ export function ChatPanel({
               {msg.approval && (
                 <ApprovalCard approval={msg.approval} onResolved={onApprovalResolved} />
               )}
-              {msg.spans && msg.spans.length > 0 && (
+              {msg.spans && msg.spans.length > 0 && !msg.planId && (
                 <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} tokenUsage={msg.tokenUsage} />
               )}
-              {msg.charts && msg.charts.length > 0 && (
+              {msg.charts && msg.charts.length > 0 && !msg.planId && (
                 <ErrorBoundary fallback={<div className={styles.loadingContainer}>Chart failed to load.</div>}>
                   <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
                     <ChartRenderer charts={msg.charts} />
@@ -720,6 +878,33 @@ export function ChatPanel({
           onSelect={handleSuggestedClick}
           disabled={loading}
         />
+        {supportsExecutionPathOverride && (
+          <>
+            <label htmlFor="execution-path-select" className="visually-hidden">
+              Execution path
+            </label>
+            <select
+              id="execution-path-select"
+              className={`${styles.executionPathSelect} ${forcePath !== 'auto' ? styles.executionPathForced : ''}`}
+              value={forcePath}
+              onChange={(e) => setForcePath(e.target.value as 'auto' | ForceableExecutionPath)}
+              disabled={loading}
+              aria-label="Execution path"
+              title={
+                forcePath === 'auto'
+                  ? 'Execution path: Auto — the router picks fast or plan for you.'
+                  : forcePath === 'fast'
+                    ? 'Execution path: Fast (forced) — single specialist, single shot.'
+                    : 'Execution path: Plan (forced) — plan-first workflow with review when required.'
+              }
+              data-testid="execution-path-select"
+            >
+              <option value="auto">Auto</option>
+              <option value="fast">Fast</option>
+              <option value="plan">Plan</option>
+            </select>
+          </>
+        )}
         <Input
           id="chat-input"
           value={input}
