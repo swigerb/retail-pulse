@@ -8,6 +8,7 @@ using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Planning;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Auth;
+using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
@@ -37,7 +38,7 @@ public static class ChatEndpoints
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
-        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null, [FromServices] ISessionStore? sessionStore = null, [FromServices] IOptions<SessionPersistenceOptions>? sessionPersistenceOptions = null, [FromServices] PlanOrchestrator? planOrchestrator = null, [FromServices] IOptions<PlanPersistenceOptions>? planPersistenceOptions = null) =>
+        app.MapPost("/api/chat", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, InMemoryTraceCollector traceCollector, GuardrailsMiddleware guardrails, IResponseCache responseCache, ICostTracker costTracker, IAuditLog auditLog, ConversationExporter conversationExporter, ITenantProvider tenantProvider, RagContextProvider ragProvider, MemoryExtractionChannel memoryChannel, IHubContext<TelemetryHub> hubContext, ILogger<Program> logger, CancellationToken clientCt, IAnonymousChatPolicy? anonymousChatPolicy = null, ISessionOwnershipRegistry? sessionOwnership = null, IConsensusCouncil? council = null, [FromServices] ISessionStore? sessionStore = null, [FromServices] IOptions<SessionPersistenceOptions>? sessionPersistenceOptions = null, [FromServices] PlanOrchestrator? planOrchestrator = null, [FromServices] IOptions<PlanPersistenceOptions>? planPersistenceOptions = null, [FromServices] IOptions<ChatTimeoutOptions>? chatTimeoutOptions = null, [FromServices] IExecutionCancellationRegistry? cancellationRegistry = null) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
             ValidationResult validation = ChatRequestValidator.Validate(request);
@@ -49,12 +50,13 @@ public static class ChatEndpoints
             // Add Sunset header for legacy unversioned route
             httpContext.Response.Headers.Append("Sunset", "Sat, 31 Dec 2025 23:59:59 GMT");
 
-            // Per-request timeout: caps the whole pipeline (router classify + agent execute
-            // + tool calls) so a hung AI Gateway call cannot leave the UI spinning forever.
-            // 90s accommodates MaxIterations=3 × ~20-30s per iteration. Typical requests
-            // complete in 15-40s; this ceiling catches only pathological cases.
+            // Per-request timeout — configurable, separate ceilings for the single-shot
+            // fast path and the long-running plan path (issue #92). Preserves the pre-#92
+            // 90s default for the fast path; the plan ceiling is applied later, only when
+            // the hybrid execution decider (issue #95) selects the plan path.
+            ChatTimeoutOptions timeouts = chatTimeoutOptions?.Value ?? new ChatTimeoutOptions();
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
-            requestCts.CancelAfter(TimeSpan.FromSeconds(90));
+            requestCts.CancelAfter(timeouts.SingleShot);
             CancellationToken ct = requestCts.Token;
 
             try
@@ -84,8 +86,13 @@ public static class ChatEndpoints
                 // and this subject can never write into another subject's persisted transcript.
                 // Bound for anonymous callers unconditionally (existing Sprint 1 guard) and,
                 // now that authenticated turns can be persisted, whenever persistence is on.
+                // Bind the sessionId to this subject BEFORE the hub can join. Enforced
+                // unconditionally now (issue #92) — the same registry is consulted by the
+                // hubs for authenticated and anonymous callers alike, so a client-supplied
+                // id owned by a different subject would refuse the hub join later. If a
+                // conflict is detected here we mint a fresh id up-front so telemetry has
+                // one coherent id from turn to hub-join.
                 if (sessionOwnership is not null
-                    && (anonymous || persistenceEnabled)
                     && !sessionOwnership.TryBind(sessionId, userId))
                 {
                     sessionId = Guid.NewGuid().ToString("N");
@@ -100,6 +107,13 @@ public static class ChatEndpoints
                         ? new UserContext(userId, httpContext.User?.Identity?.Name ?? "Anonymous", string.Empty)
                         : request.User with { ObjectId = userId }
                 };
+
+                // Register the in-flight run for user-initiated cancellation (issue #92).
+                // Scope = "chat" keyed on the sessionId; the cancel endpoint validates the
+                // caller owns this scope before cancelling. The disposable is released on
+                // request completion so a finished run cannot be re-cancelled.
+                using IDisposable? cancellationHandle = cancellationRegistry?.Register(
+                    ExecutionCancellationRegistry.ChatScope, sessionId, userId, requestCts);
 
                 // ── Guardrails: input check ──────────────────────────────────────
                 GuardrailResult guardrailResult = await guardrails.CheckInputAsync(request, ct);
@@ -553,6 +567,17 @@ public static class ChatEndpoints
                 if (planOrchestrator is not null
                     && string.Equals(hybridDecision.Path, ExecutionPath.Plan, StringComparison.Ordinal))
                 {
+                    // Plan-path ceiling (issue #92): the single-shot 90s wall is not
+                    // honest for a multi-step plan run through the plan orchestrator.
+                    // Replace the request timer with the plan ceiling before entering
+                    // orchestration. CancelAfter overwrites the pending timer; the
+                    // linked clientCt still triggers immediate cancellation on user
+                    // abort, so this only lengthens the timeout, never the abort.
+                    if (timeouts.Plan > timeouts.SingleShot)
+                    {
+                        requestCts.CancelAfter(timeouts.Plan);
+                    }
+
                     List<ISpecialistAgent> roster = [.. specialists];
                     var specialistLookup =
                         roster.ToDictionary(s => s.Key, s => s, StringComparer.OrdinalIgnoreCase);
@@ -955,7 +980,7 @@ public static class ChatEndpoints
         .RequireRateLimiting("strict");
 
         // Streaming chat endpoint — SSE/SignalR progressive token delivery
-        app.MapPost("/api/chat/stream", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, StreamingProgressFeature streamingProgressFeature, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt) =>
+        app.MapPost("/api/chat/stream", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, StreamingProgressFeature streamingProgressFeature, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt, [FromServices] IOptions<ChatTimeoutOptions>? chatTimeoutOptions = null, [FromServices] IExecutionCancellationRegistry? cancellationRegistry = null, [FromServices] ISessionOwnershipRegistry? sessionOwnership = null) =>
         {
             // Input validation — fail fast before expensive LLM pipeline
             ValidationResult validation = ChatRequestValidator.Validate(request);
@@ -967,9 +992,10 @@ public static class ChatEndpoints
             // Add Sunset header for legacy unversioned route
             httpContext.Response.Headers.Append("Sunset", "Sat, 31 Dec 2025 23:59:59 GMT");
 
-            // Per-request timeout (see /api/chat for rationale).
+            // Per-request timeout — configurable single-shot ceiling (issue #92).
+            ChatTimeoutOptions timeouts = chatTimeoutOptions?.Value ?? new ChatTimeoutOptions();
             using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(clientCt);
-            requestCts.CancelAfter(TimeSpan.FromSeconds(90));
+            requestCts.CancelAfter(timeouts.SingleShot);
             CancellationToken ct = requestCts.Token;
 
             try
@@ -982,6 +1008,21 @@ public static class ChatEndpoints
                         ? new UserContext(userId, httpContext.User?.Identity?.Name ?? "Anonymous", string.Empty)
                         : request.User with { ObjectId = userId }
                 };
+
+                // Same ownership binding as /api/chat so a streaming session's hub
+                // rejoin cannot land on another subject's group (issue #92).
+                if (sessionOwnership is not null
+                    && !sessionOwnership.TryBind(sessionId, userId))
+                {
+                    sessionId = Guid.NewGuid().ToString("N");
+                    sessionOwnership.TryBind(sessionId, userId);
+                }
+
+                // Register for user-initiated cancellation. Streaming endpoint uses
+                // the same "chat" scope so a single cancel targets whichever surface
+                // the client is currently using.
+                using IDisposable? cancellationHandle = cancellationRegistry?.Register(
+                    ExecutionCancellationRegistry.ChatScope, sessionId, userId, requestCts);
 
                 // Guardrails input check
                 GuardrailResult guardrailResult = await guardrails.CheckInputAsync(request, ct);

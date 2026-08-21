@@ -131,6 +131,11 @@ builder.Services.AddSignalR(hub =>
 builder.Services.Configure<ChatTimeoutOptions>(
     builder.Configuration.GetSection(ChatTimeoutOptions.SectionName));
 
+// User-initiated cancellation registry (issue #92) — subject-scoped map from
+// (scope, key) to the request/plan CTS so /api/chat/{sessionId}/cancel and
+// /api/plans/{planId}/cancel can end an in-flight run they own.
+builder.Services.AddSingleton<IExecutionCancellationRegistry, ExecutionCancellationRegistry>();
+
 // Application-level hub heartbeat emitter (issue #92) — periodically emits an
 // observable heartbeat event on the telemetry and streaming hubs so the frontend
 // can render a stalled/connected signal and tests can assert cadence.
@@ -1187,7 +1192,8 @@ if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
             opts.Value,
             sp.GetRequiredService<ILogger<PlanExecutor>>(),
             sp.GetService<PlanClarifier>(),
-            sp.GetService<PlanReviewCoordinator>());
+            sp.GetService<PlanReviewCoordinator>(),
+            sp.GetService<IExecutionCancellationRegistry>());
     });
     builder.Services.AddScoped(sp =>
     {
@@ -1387,6 +1393,12 @@ app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();
 app.MapCacheEndpoints();
 
+// User-initiated execution control (issue #92): cancel endpoints for the
+// in-flight fast-path / streaming request and for the plan orchestrator.
+// Registered unconditionally because the cancellation registry is always
+// present; a cancel with no matching in-flight run resolves to 404.
+app.MapExecutionControlEndpoints();
+
 // Durable session endpoints — mapped only when SessionPersistence:Enabled is true so
 // no session surface exists when the feature is off. See MapSessionEndpoints and
 // SessionPersistenceServiceExtensions for the rationale (mirrors the Anonymous/GitHub
@@ -1402,6 +1414,9 @@ if (app.Services.GetService<ISessionStore>() is not null)
 if (app.Services.GetService<IPlanStore>() is not null)
 {
     app.MapPlanEndpoints();
+    // Reconciliation surface (issue #92) — mapped only when plan persistence is
+    // enabled so no reconciliation endpoint exists when the durable store is off.
+    app.MapPlanReconciliationEndpoint();
     // Plan review endpoints (#94) — mapped only when the plan store is available
     // AND PlanReview is enabled. Cross-subject decisions collapse to 404.
     if (planReviewOptsAtRegistration.Enabled)

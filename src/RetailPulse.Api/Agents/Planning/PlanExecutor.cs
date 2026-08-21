@@ -5,6 +5,7 @@ using Microsoft.Agents.AI.Workflows;
 using RetailPulse.Api.Approval;
 using RetailPulse.Api.Budget;
 using RetailPulse.Api.Charts;
+using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts;
@@ -48,6 +49,7 @@ public sealed class PlanExecutor
     private readonly ILogger<PlanExecutor> _logger;
     private readonly PlanClarifier? _clarifier;
     private readonly PlanReviewCoordinator? _reviewCoordinator;
+    private readonly IExecutionCancellationRegistry? _cancellationRegistry;
 
     public PlanExecutor(
         IPlanStore planStore,
@@ -56,7 +58,8 @@ public sealed class PlanExecutor
         PlanPersistenceOptions options,
         ILogger<PlanExecutor> logger,
         PlanClarifier? clarifier = null,
-        PlanReviewCoordinator? reviewCoordinator = null)
+        PlanReviewCoordinator? reviewCoordinator = null,
+        IExecutionCancellationRegistry? cancellationRegistry = null)
     {
         _planStore = planStore ?? throw new ArgumentNullException(nameof(planStore));
         _costTracker = costTracker ?? throw new ArgumentNullException(nameof(costTracker));
@@ -65,6 +68,7 @@ public sealed class PlanExecutor
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clarifier = clarifier;
         _reviewCoordinator = reviewCoordinator;
+        _cancellationRegistry = cancellationRegistry;
     }
 
     /// <summary>
@@ -207,6 +211,17 @@ public sealed class PlanExecutor
         using var planCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         if (_options.PlanTimeout > TimeSpan.Zero)
             planCts.CancelAfter(_options.PlanTimeout);
+
+        // Register the plan CTS for user-initiated cancellation (issue #92).
+        // Scope = "plan" keyed on the plan id so POST /api/plans/{planId}/cancel
+        // can end an in-flight plan run — including any tool invocation the
+        // running specialist is blocked in, because every specialist and tool
+        // call receives planCts.Token via the workflow.
+        using IDisposable? planCancelHandle = _cancellationRegistry?.Register(
+            ExecutionCancellationRegistry.PlanScope,
+            execution.PlanId,
+            execution.Subject,
+            planCts);
 
         string terminalStatus = PlanStatus.Completed;
         string? failureReason = null;
