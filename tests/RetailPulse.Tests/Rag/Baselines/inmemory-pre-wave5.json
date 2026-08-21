@@ -1,0 +1,96 @@
+{
+  "fixtureVersion": "1.0.0-pre-wave5",
+  "baselineOrigin": "commit c4481de (parent of #102) - see class remarks",
+  "queries": [
+    {
+      "query": "category management",
+      "hits": [
+        {
+          "title": "Category Management Playbook",
+          "source": "playbook.md",
+          "chunkIndex": 0,
+          "score": 1
+        },
+        {
+          "title": "Planogram Compliance Standard",
+          "source": "compliance.md",
+          "chunkIndex": 0,
+          "score": 0.183
+        },
+        {
+          "title": "Supplier Terms Standards",
+          "source": "standards.md",
+          "chunkIndex": 0,
+          "score": 0.183
+        },
+        {
+          "title": "Assortment Optimization Notes",
+          "source": "notes.md",
+          "chunkIndex": 0,
+          "score": 0.18
+        }
+      ]
+    },
+    {
+      "query": "holiday displays",
+      "hits": [
+        {
+          "title": "Holiday Planning Guide",
+          "source": "guide.md",
+          "chunkIndex": 0,
+          "score": 1
+        }
+      ]
+    },
+    {
+      "query": "supplier delivery penalties",
+      "hits": [
+        {
+          "title": "Supplier Terms Standards",
+          "source": "standards.md",
+          "chunkIndex": 0,
+          "score": 1
+        }
+      ]
+    },
+    {
+      "query": "planogram compliance audit",
+      "hits": [
+        {
+          "title": "Planogram Compliance Standard",
+          "source": "compliance.md",
+          "chunkIndex": 0,
+          "score": 1
+        }
+      ]
+    },
+    {
+      "query": "assortment velocity",
+      "hits": [
+        {
+          "title": "Assortment Optimization Notes",
+          "source": "notes.md",
+          "chunkIndex": 0,
+          "score": 1
+        },
+        {
+          "title": "Category Management Playbook",
+          "source": "playbook.md",
+          "chunkIndex": 0,
+          "score": 0.3327
+        }
+      ]
+    },
+    {
+      "query": "shelf space efficiency slow movers",
+      "hits": [
+        {
+          "title": "Assortment Optimization Notes",
+          "source": "notes.md",
+          "chunkIndex": 0,
+          "score": 1
+        }
+      ]
+    }
+  ]
+}

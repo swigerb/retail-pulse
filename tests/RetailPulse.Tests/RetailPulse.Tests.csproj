@@ -29,4 +29,13 @@
     <ProjectReference Include="..\..\src\RetailPulse.TeamsBot\RetailPulse.TeamsBot.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Pre-Wave-5 InMemory BM25 baseline artifact (issue #107). Loaded by
+         PreWave5InMemoryBaselineTests to prove default-configuration output
+         is byte-for-byte unchanged. -->
+    <Content Include="Rag\Baselines\inmemory-pre-wave5.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
