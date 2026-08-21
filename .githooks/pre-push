@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# .githooks/pre-push - Retail Pulse whole-solution formatting gate
+#
+# Purpose:
+#   Runs the CI `lint` job's exact command (dotnet format on the full
+#   RetailPulse.slnx) locally, before the push leaves your machine. Together
+#   with the fast staged-file .githooks/pre-commit hook this closes the gap
+#   the commit-time hook alone could not:
+#
+#   pre-commit  -> fast (~6-8s), staged .cs files only, catches most drift.
+#   pre-push    -> slower (~30-40s), whole solution, matches CI exactly.
+#
+#   Whole-solution analysis surfaces diagnostics that a `--include`-scoped
+#   run does not - notably import-ordering / analyzer style issues that
+#   depend on the compilation - and it still fires when a commit only
+#   touches non-C# files but earlier commits in the push range include C#
+#   drift. CI remains the authority; this hook makes the CI signal reach
+#   you before your teammates see it.
+#
+# What it runs:
+#   dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic
+#
+#   Identical to `.github/workflows/ci.yml` -> `Lint (dotnet format)`. If
+#   this hook passes without --no-verify, that CI job will pass on the same
+#   commits. If it does not, CI is still authoritative.
+#
+# Tree identity (advisory, not a block):
+#   `dotnet format` operates on the working tree - the files on disk in this
+#   clone. CI, by contrast, operates on the pushed commit tree fetched into a
+#   fresh clone. In the normal case (`git push` of the currently checked-out
+#   branch after committing, with a clean working tree) those two trees are
+#   byte-identical and the guarantee above holds. Two ways they can diverge
+#   without the hook noticing:
+#     - the pushed ref's tip differs from your checked-out HEAD (for example
+#       `git push origin some-other-branch` or `git push --all`);
+#     - the working tree has uncommitted or untracked build-graph files
+#       (.cs / .csproj / .props / .targets / .slnx / .sln / .editorconfig /
+#       RetailPulse.slnx / global.json / Directory.*.props).
+#   The hook detects both cases and, when either holds, prints an advisory
+#   note on success ("CI is authoritative for the pushed commit tree").
+#   It does NOT block the push: doing so would break `git push --all` and
+#   dirty-tree pushes with only unrelated edits, and CI is already the
+#   final authority on the pushed tree. See docs/contributing.md ->
+#   "What the hooks guarantee" for the boundary wording.
+#
+# When it skips:
+#   - The push range touches no C# / build-graph inputs (docs-only, infra
+#     text, workflow YAML that does not change compilation). CI still runs
+#     its own full check on every push.
+#   - `dotnet` is not on PATH. CI still enforces.
+#   - The user passed `git push --no-verify`.
+#
+# Bypass:
+#   git push --no-verify
+#
+#   Legitimate reasons: same as pre-commit (emergency hotfix, WIP private
+#   branch, local SDK diverges from CI). See docs/contributing.md.
+#
+# Shell:
+#   Bash. Git for Windows runs hooks under its bundled bash even when
+#   `git push` is invoked from PowerShell or cmd, so a single script covers
+#   Windows, Linux, and macOS.
+
+set -eo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+ZERO_SHA='0000000000000000000000000000000000000000'
+HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || printf '')
+
+# Whitelist of path suffixes / exact names that participate in the
+# dotnet-format compilation graph. Anything else in the push range cannot
+# change the formatter's verdict, so we can skip the ~30s full-solution
+# analysis for docs- or workflow-only pushes.
+path_touches_dotnet() {
+    case "$1" in
+        *.cs|*.csproj|*.props|*.targets|*.slnx|*.sln|*.editorconfig|.editorconfig|global.json|Directory.Build.props|Directory.Packages.props|Directory.Build.targets)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# Reads NUL-delimited paths from stdin. Returns 0 if any of those paths
+# matches path_touches_dotnet, 1 otherwise. Used for working-tree identity
+# checks; keeps the mismatch detection cheap and portable.
+any_dotnet_path_on_stdin() {
+    local path
+    while IFS= read -r -d '' path; do
+        [ -n "$path" ] || continue
+        if path_touches_dotnet "$path"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# `git push` writes one line per ref being pushed on stdin:
+#     <local_ref> <local_sha> <remote_ref> <remote_sha>
+# We inspect each range and short-circuit as soon as any C# / build-graph
+# file appears.
+touches_dotnet=0
+non_head_push=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "${local_ref:-}" ] || continue
+
+    # Ref deletion: nothing to lint.
+    if [ "$local_sha" = "$ZERO_SHA" ]; then
+        continue
+    fi
+
+    # Tree identity: note the first pushed ref whose tip is not the
+    # checked-out HEAD. The formatter still runs against the working tree,
+    # but the closing message will flag that the analysed tree is not the
+    # pushed tree so the reader knows CI is authoritative for this push.
+    if [ -n "$HEAD_SHA" ] && [ "$local_sha" != "$HEAD_SHA" ] && [ -z "$non_head_push" ]; then
+        non_head_push="${local_ref} -> ${local_sha}"
+    fi
+
+    if [ "$remote_sha" = "$ZERO_SHA" ]; then
+        # New branch on the remote. Diffing against every remote ref is
+        # expensive and brittle; a first push is a legitimate moment to
+        # run the full check.
+        touches_dotnet=1
+        continue
+    fi
+
+    range_files=$(git log --format= --name-only "${remote_sha}..${local_sha}" 2>/dev/null | sort -u || true)
+    [ -n "$range_files" ] || continue
+
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        if path_touches_dotnet "$path"; then
+            touches_dotnet=1
+            break
+        fi
+    done <<< "$range_files"
+done
+
+if [ "$touches_dotnet" -eq 0 ]; then
+    echo "pre-push: no C#/build-graph files in the push range; skipping dotnet format check." >&2
+    exit 0
+fi
+
+if ! command -v dotnet >/dev/null 2>&1; then
+    echo "pre-push: 'dotnet' not on PATH; skipping full-solution format check (CI will still enforce)." >&2
+    exit 0
+fi
+
+# Working-tree identity vs the pushed commit tree: the formatter is about to
+# analyse the working tree. CI will analyse the pushed commit tree. Note any
+# build-graph divergence so the closing message can be honest about scope.
+dirty_reasons=()
+if any_dotnet_path_on_stdin < <(git diff --name-only -z --diff-filter=ACMR 2>/dev/null); then
+    dirty_reasons+=("unstaged working-tree edits")
+fi
+if any_dotnet_path_on_stdin < <(git diff --cached --name-only -z --diff-filter=ACMR 2>/dev/null); then
+    dirty_reasons+=("staged-but-uncommitted edits")
+fi
+if any_dotnet_path_on_stdin < <(git ls-files --others --exclude-standard -z 2>/dev/null); then
+    dirty_reasons+=("untracked new files")
+fi
+
+identity_note=""
+if [ -n "$non_head_push" ]; then
+    identity_note="pushing ${non_head_push}, which differs from checked-out HEAD (${HEAD_SHA})"
+fi
+if [ ${#dirty_reasons[@]} -gt 0 ]; then
+    joined=$(printf '%s, ' "${dirty_reasons[@]}")
+    joined=${joined%, }
+    if [ -n "$identity_note" ]; then
+        identity_note="${identity_note}; working tree also has ${joined} to build-graph files"
+    else
+        identity_note="working tree has ${joined} to build-graph files"
+    fi
+fi
+
+if [ -n "$identity_note" ]; then
+    echo "pre-push: NOTE: analysed tree is not identical to the pushed commit tree." >&2
+    echo "pre-push:   reason: ${identity_note}" >&2
+    echo "pre-push:   the formatter run below is an early-warning check; CI is authoritative for the pushed tree." >&2
+fi
+
+echo "pre-push: running whole-solution dotnet format (matches CI lint job; ~30-40s)..." >&2
+echo "pre-push:   dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic" >&2
+
+if dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic; then
+    if [ -n "$identity_note" ]; then
+        echo "pre-push: dotnet format passed on the working tree (advisory only; see NOTE above)." >&2
+    else
+        echo "pre-push: dotnet format passed; working tree matches the pushed commit tree." >&2
+    fi
+    exit 0
+fi
+
+cat >&2 <<'MSG'
+
+pre-push: dotnet format --verify-no-changes reported violations above.
+
+  This is the same command CI runs. Fix locally and re-push:
+      dotnet format RetailPulse.slnx
+      git add -A && git commit --amend --no-edit    # or a new commit
+      git push
+
+  Bypass (only when you know why - see docs/contributing.md):
+      git push --no-verify
+
+CI runs the full-solution formatter on every push and remains the authority.
+MSG
+exit 1
