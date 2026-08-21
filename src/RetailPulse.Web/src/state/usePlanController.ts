@@ -471,15 +471,23 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
       kind: 'approve',
     });
     try {
-      await decidePlanReview(active.planId, requestId, {
+      // Persisted-winner integrity (#144 follow-up): consume the response
+      // body's `kind` — which the endpoint derives from the durable
+      // ApprovalResult.Decision — instead of hard-coding the requested
+      // kind. On a concurrent race the row can settle to a different
+      // outcome than we asked for; using the response's kind eliminates
+      // any event/local order drift with the SignalR `plan_review_resolved`
+      // broadcast which advertises the same persisted-winner value.
+      const response = await decidePlanReview(active.planId, requestId, {
         kind: 'approve',
         comment: comment && comment.length > 0 ? comment : undefined,
       });
       dispatch({
         type: 'REVIEW_RESOLVED',
         planId: active.planId,
-        requestId,
-        kind: 'approve',
+        requestId: response.requestId,
+        kind: response.kind,
+        terminalReason: response.terminalReason,
       });
     } catch {
       dispatch({
@@ -501,15 +509,18 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
       kind: 'reject',
     });
     try {
-      await decidePlanReview(active.planId, requestId, {
+      // See `approve` above — consume the response's persisted kind rather
+      // than hard-coding the requested one.
+      const response = await decidePlanReview(active.planId, requestId, {
         kind: 'reject',
         feedback,
       });
       dispatch({
         type: 'REVIEW_RESOLVED',
         planId: active.planId,
-        requestId,
-        kind: 'reject',
+        requestId: response.requestId,
+        kind: response.kind,
+        terminalReason: response.terminalReason,
       });
     } catch {
       dispatch({
@@ -531,15 +542,18 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
       kind: 'edit',
     });
     try {
-      await decidePlanReview(active.planId, requestId, {
+      // See `approve` above — consume the response's persisted kind rather
+      // than hard-coding the requested one.
+      const response = await decidePlanReview(active.planId, requestId, {
         kind: 'edit',
         editedSteps,
       });
       dispatch({
         type: 'REVIEW_RESOLVED',
         planId: active.planId,
-        requestId,
-        kind: 'edit',
+        requestId: response.requestId,
+        kind: response.kind,
+        terminalReason: response.terminalReason,
       });
     } catch {
       dispatch({

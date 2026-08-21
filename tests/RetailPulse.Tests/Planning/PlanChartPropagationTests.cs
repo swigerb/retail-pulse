@@ -187,6 +187,7 @@ public sealed class PlanChartPropagationTests
         public Task UpdatePlanStatusAsync(PlanStatusUpdate update, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> TryTransitionStatusAsync(string planId, string subject, string fromStatus, string toStatus, CancellationToken ct = default) => Task.FromResult(true);
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default) => Task.CompletedTask;
+        public Task ReplacePlanStepsFromIndexAsync(string planId, string subject, int fromStepIndex, IReadOnlyList<PlanStepWrite> steps, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(string subject, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<PlanSummaryDto>>([]);
         public Task<PlanDetailDto?> GetPlanAsync(string subject, string planId, CancellationToken ct = default) => Task.FromResult<PlanDetailDto?>(null);
         public Task<bool> DeletePlanAsync(string subject, string planId, CancellationToken ct = default) => Task.FromResult(false);

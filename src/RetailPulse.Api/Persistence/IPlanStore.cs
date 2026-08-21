@@ -65,6 +65,31 @@ public interface IPlanStore
     /// </summary>
     Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default);
 
+    /// <summary>
+    /// Atomically synchronize the persisted step rows for a plan from a given
+    /// starting <see cref="StepIndex"/> onward. Deletes any existing
+    /// <c>PlanSteps</c> rows with <c>StepIndex &gt;= fromStepIndex</c> and
+    /// inserts the supplied <paramref name="steps"/> — both operations in a
+    /// single transaction so a concurrent reader never sees a torn view. Rows
+    /// with <c>StepIndex &lt; fromStepIndex</c> are preserved verbatim so the
+    /// cumulative transcript across a clarification-resume (paused prefix +
+    /// downstream tail) stays intact.
+    /// <para>
+    /// Introduced (#144 follow-up) so the plan-review resume path can persist
+    /// its round-specific step rows BEFORE <see cref="UpdateStepAsync"/> runs;
+    /// the executor's per-step UPDATE only touches existing rows, so a resume
+    /// that emitted new <c>{planId}-r{round}-s{n}</c> ids without inserting
+    /// them first would silently no-op every step transition and hydrate as a
+    /// zero-step plan.
+    /// </para>
+    /// </summary>
+    Task ReplacePlanStepsFromIndexAsync(
+        string planId,
+        string subject,
+        int fromStepIndex,
+        IReadOnlyList<PlanStepWrite> steps,
+        CancellationToken ct = default);
+
     /// <summary>List this subject's plans, newest activity first. Enforces the caller filter at SQL.</summary>
     Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(
         string subject, CancellationToken ct = default);

@@ -69,12 +69,53 @@ public sealed class PlanReviewRestartRecoveryService : IHostedService
             }
 
             int resolved = 0;
+            int recoveredFromRunning = 0;
             foreach ((string planId, string subject) in candidates.Keys)
             {
                 PlanDetailDto? plan = await planStore.GetPlanAsync(subject, planId, cancellationToken);
                 if (plan is null) continue;
-                if (plan.Status is not (PlanStatus.AwaitingReview or PlanStatus.AwaitingClarification))
+                // Ordinary awaiting-* recovery: the plan was suspended by a
+                // prior instance and the reviewer's response is durably
+                // recorded; drive the completion service to run the resume.
+                bool isAwaiting = plan.Status is
+                    PlanStatus.AwaitingReview or PlanStatus.AwaitingClarification;
+
+                // Stranded-Running recovery (#144 follow-up): a prior instance
+                // atomically claimed AwaitingReview → Running (or
+                // AwaitingClarification → Running) and then crashed / was
+                // killed / cancelled BEFORE the executor finished. The
+                // completion service now transitions Running → Failed
+                // in-process when the executor throws or is cancelled, but a
+                // hard process exit skips that catch. Restart recovery must
+                // finish the job: transition the row to Failed so the
+                // paired terminal approval never orphans the plan record.
+                bool isStrandedRunning = plan.Status == PlanStatus.Running;
+
+                if (!isAwaiting && !isStrandedRunning)
                     continue;
+
+                if (isStrandedRunning)
+                {
+                    bool transitioned = await planStore.TryTransitionStatusAsync(
+                        planId, subject,
+                        PlanStatus.Running, PlanStatus.Failed, cancellationToken);
+                    if (transitioned)
+                    {
+                        await planStore.UpdatePlanStatusAsync(new PlanStatusUpdate
+                        {
+                            PlanId = planId,
+                            Subject = subject,
+                            Status = PlanStatus.Failed,
+                            FailureReason = "plan-resume interrupted by process exit while Running",
+                            UpdatedAt = DateTimeOffset.UtcNow,
+                        }, cancellationToken);
+                    }
+                    _logger.LogWarning(
+                        "Plan {PlanId} was stranded in Running with a terminal approval; marked Failed on restart recovery.",
+                        planId);
+                    recoveredFromRunning++;
+                    continue;
+                }
 
                 PlanReviewCompletionResult result = await completion.ResolveAsync(planId, subject, cancellationToken);
                 _logger.LogInformation(
@@ -84,8 +125,8 @@ public sealed class PlanReviewRestartRecoveryService : IHostedService
             }
 
             _logger.LogInformation(
-                "PlanReviewRestartRecoveryService completed: {Count} plan(s) resumed.",
-                resolved);
+                "PlanReviewRestartRecoveryService completed: {Resumed} plan(s) resumed, {Stranded} stranded-Running plan(s) marked Failed.",
+                resolved, recoveredFromRunning);
         }
         catch (OperationCanceledException)
         {

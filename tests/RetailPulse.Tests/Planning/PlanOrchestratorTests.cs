@@ -35,6 +35,8 @@ public sealed class PlanOrchestratorTests
             => Task.FromResult(true);
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)
         { StepUpdates.Enqueue(update); return Task.CompletedTask; }
+        public Task ReplacePlanStepsFromIndexAsync(string planId, string subject, int fromStepIndex, IReadOnlyList<PlanStepWrite> steps, CancellationToken ct = default)
+            => Task.CompletedTask;
         public Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(string subject, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<PlanSummaryDto>>([]);
         public Task<PlanDetailDto?> GetPlanAsync(string subject, string planId, CancellationToken ct = default)

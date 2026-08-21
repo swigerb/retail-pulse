@@ -976,6 +976,15 @@ export interface PlanReviewDecisionResponse {
   respondedAt: string;
   terminalReason?: string | null;
   round: number;
+  /**
+   * Reviewer feedback surfaced by the persisted-winner path (#144 follow-up).
+   * Present only when the persisted `ApprovalResult.ResponsePayload` parsed
+   * cleanly. When the row's payload is missing or malformed, feedback is
+   * omitted (`null` / undefined) rather than falling back to the losing
+   * caller's request body — the backend refuses to advertise text a losing
+   * caller submitted.
+   */
+  feedback?: string | null;
 }
 
 /** Shape returned by GET /api/plans/{planId}/reviews — one open review. */

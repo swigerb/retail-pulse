@@ -511,7 +511,28 @@ public sealed class PlanReviewCompletionService
             });
         }
 
-        // Persist the resolved (edited/approved) plan onto the same row.
+        // Persist step rows atomically BEFORE the executor runs (#144
+        // follow-up): the executor's per-step UPDATE (see
+        // <see cref="IPlanStore.UpdateStepAsync"/>) only touches existing
+        // rows keyed by <c>StepId</c>. Prior to this write the plan row
+        // carried at most the ORIGINAL <c>{planId}-s{n}</c> ids from
+        // <see cref="PlanOrchestrator.SuspendForReviewAsync"/>, so every
+        // round-scoped <c>{planId}-r{r}-s{n}</c> step transition silently
+        // no-op'd and the plan rehydrated as a zero-step ghost. The
+        // conditional-plus-transactional replacement in
+        // <see cref="IPlanStore.ReplacePlanStepsFromIndexAsync"/> preserves
+        // rows for prior clarification-completed steps (index &lt; offset)
+        // while replacing the round tail atomically so a concurrent reader
+        // never sees a torn view. If the caller already claimed the plan
+        // row to Running (Approved / NeedsReplan / answered-clarification
+        // branches), the ownership-guarded UPDATE below is a no-op status
+        // rewrite; when it did not claim, we still normalise the row here
+        // so the executor's own status writes land against a coherent
+        // baseline.
+        await planStore.ReplacePlanStepsFromIndexAsync(
+            plan.PlanId, state.Subject, offset, stepWrites, ct);
+
+        // Persist the resolved (edited/approved) plan status onto the same row.
         await planStore.UpdatePlanStatusAsync(new PlanStatusUpdate
         {
             PlanId = plan.PlanId,
@@ -554,12 +575,73 @@ public sealed class PlanReviewCompletionService
         };
 
         PlanExecutor executor = sp.GetRequiredService<PlanExecutor>();
-        PlanExecutionOutcome outcome = await executor.ExecuteAsync(executionRequest, ct);
+        PlanExecutionOutcome outcome;
+        try
+        {
+            outcome = await executor.ExecuteAsync(executionRequest, ct);
+        }
+        catch (Exception ex) when (ex is not null)
+        {
+            // Recoverable execution claim (#144 follow-up): once we've
+            // atomically claimed the plan row to Running, a subsequent
+            // exception or cancellation from the executor MUST land the
+            // plan in an honest terminal state — otherwise the plan is
+            // stranded in Running forever, the reviewer sees an in-flight
+            // spinner that never resolves, and restart recovery (which
+            // currently skips Running rows) never picks it up. We
+            // transition Running → Failed with a stable failure reason so
+            // the durable row matches the terminal approval, then re-throw
+            // so the caller (KickoffCompletion / restart recovery driver)
+            // can log at the appropriate site. Any Failed rewrite here is
+            // best-effort and never propagates its own exception.
+            string failureReason = ex is OperationCanceledException
+                ? "plan-resume cancelled after execution claim"
+                : $"plan-resume threw during execution: {ex.GetType().Name}";
+            try
+            {
+                await planStore.TryTransitionStatusAsync(
+                    plan.PlanId, state.Subject,
+                    PlanStatus.Running, PlanStatus.Failed, CancellationToken.None);
+                await planStore.UpdatePlanStatusAsync(new PlanStatusUpdate
+                {
+                    PlanId = plan.PlanId,
+                    Subject = state.Subject,
+                    Status = PlanStatus.Failed,
+                    FailureReason = failureReason,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                }, CancellationToken.None);
+            }
+            catch (Exception recoveryEx)
+            {
+                _logger.LogError(recoveryEx,
+                    "Plan {PlanId} recoverable-Failed transition itself failed after execution exception; row remains as-is.",
+                    plan.PlanId);
+            }
+            _logger.LogError(ex,
+                "Plan {PlanId} resume execution failed after claim; marked Failed with reason '{Reason}'.",
+                plan.PlanId, failureReason);
+            throw;
+        }
 
         // If the executor asks to pause for clarification / replan, hand off.
         if (outcome.Status == PlanStatus.AwaitingClarification
             && outcome.ClarificationHandle is { } clarHandle)
         {
+            // Subsequent-clarification user visibility (#144 follow-up): the
+            // resumed plan paused for another clarification, but the
+            // frontend's `usePlanController` only opens the
+            // `PlanClarificationCard` when it receives an
+            // `approval_requested` event scoped to this session. The initial
+            // approval broadcast happens from the ApprovalTool; a mid-resume
+            // clarification opens the row inside the executor with no hub
+            // notification of its own. We fire the same event shape the
+            // frontend already understands, scoped to the persisted session
+            // group (fail-closed on missing session id), only after the
+            // executor's finally block has committed AwaitingClarification
+            // — so the reviewer never sees an approval before its
+            // awaiting-* status is durable.
+            await SendClarificationOpenedAsync(
+                sp, plan.PlanId, state.Subject, state.SessionId, clarHandle);
             return PlanReviewCompletionResult.SuspendedForClarification(
                 clarHandle.RequestId, clarHandle.CheckpointId);
         }
@@ -885,6 +967,74 @@ public sealed class PlanReviewCompletionService
                 reply,
                 terminalReason,
                 charts = charts is { Count: > 0 } ? charts : null,
+            });
+    }
+
+    /// <summary>
+    /// Fire the existing <c>approval_requested</c> hub event scoped to the
+    /// owning session group so <c>usePlanController</c> can render
+    /// <c>PlanClarificationCard</c> for a subsequent clarification that opens
+    /// on a resumed plan. The plan status is already durable at this call
+    /// site — the executor's finally block committed
+    /// <see cref="PlanStatus.AwaitingClarification"/> before returning — so
+    /// a listener that resolves the clarification immediately still finds a
+    /// coherent awaiting-* row. Session-scoped: fails closed on missing
+    /// session identity so a plan that lost its session id never fans out to
+    /// <see cref="IHubClients.All"/>.
+    /// </summary>
+    private async Task SendClarificationOpenedAsync(
+        IServiceProvider sp,
+        string planId,
+        string subject,
+        string? sessionId,
+        PlanClarificationHandle handle)
+    {
+        IHubContext<TelemetryHub>? hub = sp.GetService<IHubContext<TelemetryHub>>();
+
+        // Look up the just-opened clarification row so the broadcast carries
+        // the same PlanClarificationPrompt payload the initial ApprovalTool
+        // event already delivers. `usePlanController.parseClarificationPrompt`
+        // decodes this JSON to render the prompt in `PlanClarificationCard`.
+        // Falling back to a minimal payload (planId only) still lets the
+        // frontend open the card and fetch the row detail out-of-band, so a
+        // gate lookup failure never blocks user visibility.
+        string? payload = null;
+        try
+        {
+            IApprovalGate? gate = sp.GetService<IApprovalGate>();
+            if (gate is not null)
+            {
+                IReadOnlyList<ApprovalRequest> pending = await gate.GetPendingAsync(subject, CancellationToken.None);
+                ApprovalRequest? row = pending.FirstOrDefault(r =>
+                    string.Equals(r.RequestId, handle.RequestId, StringComparison.Ordinal));
+                payload = row?.Context.Payload;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "approval_requested clarification broadcast could not read payload for plan {PlanId} request {RequestId}; frontend will render a minimal prompt.",
+                planId, handle.RequestId);
+        }
+
+        // Mirror the shape usePlanController.ts already parses from
+        // ApprovalTool: `context.planId`, `context.kind`, `context.payload`
+        // + top-level `id`. The frontend dispatches
+        // CLARIFICATION_REQUESTED off `context.kind === 'clarification'`.
+        await SendToOwningSessionAsync(
+            hub, sessionId, "approval_requested", new
+            {
+                id = handle.RequestId,
+                planId,
+                kind = "clarification",
+                context = new
+                {
+                    planId,
+                    userId = subject,
+                    kind = "clarification",
+                    roundNumber = 0,
+                    payload,
+                },
             });
     }
 

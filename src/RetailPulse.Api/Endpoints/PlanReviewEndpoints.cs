@@ -204,8 +204,19 @@ public static class PlanReviewEndpoints
             // persisted <see cref="ApprovalResult.ResponsePayload"/> keeps
             // the HTTP body, the SignalR broadcast, and the durable row
             // reporting exactly one user-visible decision end-to-end.
-            (string persistedKind, string? persistedFeedback) =
-                ExtractWinner(result, kind, feedback);
+            //
+            // Fail-safe integrity (#144 follow-up): NEVER fall back to the
+            // requesting caller's `kind` or `feedback` on payload
+            // missing/malformed, because on a lost race those describe an
+            // outcome the durable row does not record. `Kind` is derived from
+            // <see cref="ApprovalResult.Decision"/>, which is the row's
+            // authoritative outcome; `Feedback` is only surfaced when the
+            // persisted payload parses cleanly. When the payload is
+            // missing/malformed we omit feedback entirely and skip the
+            // resolution broadcast so a losing caller cannot leak its own
+            // requested feedback text.
+            (string persistedKind, string? persistedFeedback, bool payloadParsed) =
+                ExtractWinner(result);
             var responseDto = new
             {
                 requestId = result.RequestId,
@@ -227,17 +238,52 @@ public static class PlanReviewEndpoints
             // review land without a session id cannot silently widen delivery.
             // Aligns with the plan_final_response and plan_review_next_round
             // paths in PlanReviewCompletionService.
+            //
+            // Fail-safe integrity (#144 follow-up): when the persisted payload
+            // was missing or malformed we cannot produce a coherent
+            // kind+feedback pair for this broadcast, so we skip the resolution
+            // broadcast entirely. The row is already durably terminal and the
+            // completion kickoff below still runs, so the plan surface
+            // ultimately settles through `plan_final_response` — no user-
+            // visible outcome is lost.
+            //
+            // Decision durability (#144 follow-up): the completion kickoff
+            // runs regardless of hub-send outcome or request cancellation.
+            // We use `CancellationToken.None` on the SendAsync so a client
+            // disconnect on `ct` cannot strand the row terminal without ever
+            // driving the resume path, and any hub-send exception is logged
+            // and swallowed (the row is already terminal). Notification is
+            // never a gate on execution.
+            ILogger endpointLogger = loggerFactory.CreateLogger("PlanReviewEndpoints");
             string? reviewSessionId = row.Context.SessionId;
-            if (string.IsNullOrWhiteSpace(reviewSessionId))
+            if (!payloadParsed)
             {
-                loggerFactory.CreateLogger("PlanReviewEndpoints").LogWarning(
+                endpointLogger.LogWarning(
+                    "plan_review_resolved suppressed for plan {PlanId} request {RequestId}: persisted response payload was missing or malformed; skipping broadcast to avoid advertising a losing caller's feedback.",
+                    planId, requestId);
+            }
+            else if (string.IsNullOrWhiteSpace(reviewSessionId))
+            {
+                endpointLogger.LogWarning(
                     "plan_review_resolved suppressed for plan {PlanId} request {RequestId}: session identity missing; refusing to broadcast to Clients.All.",
                     planId, requestId);
             }
             else
             {
-                await hubContext.Clients.Group(reviewSessionId).SendAsync(
-                    "plan_review_resolved", responseDto, ct);
+                try
+                {
+                    await hubContext.Clients.Group(reviewSessionId).SendAsync(
+                        "plan_review_resolved", responseDto, CancellationToken.None);
+                }
+                catch (Exception hubEx)
+                {
+                    // Notification failure never gates the durable decision. Log
+                    // (including OperationCanceledException) and let completion
+                    // kickoff proceed so the plan settles.
+                    endpointLogger.LogWarning(hubEx,
+                        "plan_review_resolved SignalR send failed for plan {PlanId} request {RequestId}; decision remains durable and completion will still be driven.",
+                        planId, requestId);
+                }
             }
 
             // Drive the plan through the resume path so the reviewer's
@@ -245,7 +291,10 @@ public static class PlanReviewEndpoints
             // plan, filter, persist, broadcast). ResolveAsync is idempotent
             // and short-circuits when the plan is already terminal, and its
             // TryTransitionStatusAsync guard collapses two concurrent
-            // KickoffCompletion calls to a single execution.
+            // KickoffCompletion calls to a single execution. This dispatch
+            // is independent of the request cancellation token so a client
+            // disconnect never leaves the durable row terminal without an
+            // executed final response.
             if (completion is not null)
             {
                 _ = KickoffCompletionAsync(completion, planId, subject);
@@ -394,38 +443,83 @@ public static class PlanReviewEndpoints
 
     /// <summary>
     /// Resolve the winning decision's <c>kind</c> and reviewer feedback from
-    /// the persisted <see cref="ApprovalResult.ResponsePayload"/> so a losing
-    /// concurrent caller does not advertise a decision the row does not
-    /// record. Falls back to the caller-requested <paramref name="requestedKind"/>
-    /// and <paramref name="requestedFeedback"/> when the persisted payload is
-    /// missing or unparseable (e.g., a legacy or reconciler-terminated row
-    /// that never carried a plan-review payload); the caller-requested
-    /// values still describe SOMETHING coherent for that edge case, and the
-    /// gate itself already returned the correct <see cref="ApprovalResult"/>
-    /// so a caller-vs-winner drift is bounded.
+    /// the persisted <see cref="ApprovalResult"/> so a losing concurrent
+    /// caller does not advertise a decision the row does not record.
+    /// <para>
+    /// Integrity contract:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description><c>Kind</c> is derived from
+    ///     <see cref="ApprovalResult.Decision"/> (Approved/Rejected/Modified/
+    ///     TimedOut/Orphaned). This is the durable row's authoritative outcome
+    ///     — never the losing caller's requested kind. Timed-out and orphaned
+    ///     rows normalize to <see cref="PlanReviewKinds.Reject"/> so the
+    ///     resume path treats them as a terminal reject.</description></item>
+    ///   <item><description>When <see cref="ApprovalResult.ResponsePayload"/>
+    ///     is present and parses cleanly, <c>Feedback</c> is taken from the
+    ///     persisted payload (the winner's actual text). If the persisted
+    ///     payload carries a valid <c>Kind</c>, we use that too so the
+    ///     approve/reject/edit granularity matches the persisted winner.</description></item>
+    ///   <item><description>When the payload is missing or malformed we
+    ///     omit feedback entirely (<c>null</c>) and return
+    ///     <c>PayloadParsed = false</c>. The caller MUST skip any user-
+    ///     visible resolution broadcast in that state so a losing caller
+    ///     cannot smuggle its own feedback string into the SignalR event.
+    ///     The decision itself remains durably recorded on the row.</description></item>
+    /// </list>
     /// </summary>
-    internal static (string Kind, string? Feedback) ExtractWinner(
-        ApprovalResult result, string requestedKind, string? requestedFeedback)
+    internal static (string Kind, string? Feedback, bool PayloadParsed) ExtractWinner(
+        ApprovalResult result)
     {
+        string derivedKind = KindFromDecision(result.Decision);
+
         if (string.IsNullOrWhiteSpace(result.ResponsePayload))
         {
-            return (requestedKind, requestedFeedback);
+            return (derivedKind, null, false);
         }
+
+        PlanReviewResponsePayload? persisted;
         try
         {
-            PlanReviewResponsePayload? persisted =
-                JsonSerializer.Deserialize<PlanReviewResponsePayload>(result.ResponsePayload, _jsonOptions);
-            if (persisted is null || string.IsNullOrWhiteSpace(persisted.Kind))
-            {
-                return (requestedKind, requestedFeedback);
-            }
-            return (persisted.Kind.Trim().ToLowerInvariant(), persisted.Feedback);
+            persisted = JsonSerializer.Deserialize<PlanReviewResponsePayload>(
+                result.ResponsePayload, _jsonOptions);
         }
         catch (JsonException)
         {
-            return (requestedKind, requestedFeedback);
+            return (derivedKind, null, false);
         }
+
+        if (persisted is null)
+        {
+            return (derivedKind, null, false);
+        }
+
+        // Prefer the persisted payload's kind when it is well-formed and
+        // consistent with the row's Decision family; otherwise fall back to
+        // the decision-derived kind. Feedback comes from the persisted
+        // payload only — this is the durable winner's actual text.
+        string payloadKind = string.IsNullOrWhiteSpace(persisted.Kind)
+            ? derivedKind
+            : persisted.Kind.Trim().ToLowerInvariant();
+
+        return (payloadKind, persisted.Feedback, true);
     }
+
+    private static string KindFromDecision(ApprovalDecision decision) => decision switch
+    {
+        ApprovalDecision.Approved => PlanReviewKinds.Approve,
+        ApprovalDecision.Modified => PlanReviewKinds.Edit,
+        ApprovalDecision.Rejected => PlanReviewKinds.Reject,
+        ApprovalDecision.TimedOut => PlanReviewKinds.Reject,
+        ApprovalDecision.Orphaned => PlanReviewKinds.Reject,
+        ApprovalDecision.Pending => PlanReviewKinds.Reject,
+        // Timed-out and orphaned rows are terminal-reject on the plan-review
+        // surface (see PlanReviewCoordinator's derivation). Pending never
+        // reaches ExtractWinner because RespondAsync only returns a settled
+        // result, but if a caller ever passes one, treat it as reject so no
+        // approve-shaped broadcast can slip through.
+        _ => PlanReviewKinds.Reject,
+    };
 
     private static async Task<ApprovalRequest?> FindRowAsync(
         IApprovalGate gate, string subject, string requestId, CancellationToken ct)

@@ -286,6 +286,77 @@ public sealed class SqlitePlanStore : IPlanStore
         }
     }
 
+    public async Task ReplacePlanStepsFromIndexAsync(
+        string planId,
+        string subject,
+        int fromStepIndex,
+        IReadOnlyList<PlanStepWrite> steps,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(planId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subject);
+        ArgumentNullException.ThrowIfNull(steps);
+        if (fromStepIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(fromStepIndex), fromStepIndex, "fromStepIndex must be non-negative.");
+
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+
+        // Ownership gate — the parent plan must belong to this subject.
+        // Doing this as a separate SELECT keeps the DELETE/INSERT clean and
+        // preserves the "cross-subject probe = 404" contract sessions use.
+        await using (SqliteCommand ownership = conn.CreateCommand())
+        {
+            ownership.Transaction = tx;
+            ownership.CommandText = "SELECT COUNT(*) FROM Plans WHERE PlanId = @pid AND Subject = @subject";
+            ownership.Parameters.AddWithValue("@pid", planId);
+            ownership.Parameters.AddWithValue("@subject", subject);
+            object? count = await ownership.ExecuteScalarAsync(ct);
+            if (Convert.ToInt64(count, CultureInfo.InvariantCulture) == 0L)
+            {
+                _logger.LogWarning(
+                    "ReplacePlanStepsFromIndexAsync rejected — no plan {PlanId} owned by subject {Subject}",
+                    planId, subject);
+                await tx.RollbackAsync(ct);
+                return;
+            }
+        }
+
+        await using (SqliteCommand deleteTail = conn.CreateCommand())
+        {
+            deleteTail.Transaction = tx;
+            deleteTail.CommandText =
+                "DELETE FROM PlanSteps WHERE PlanId = @pid AND StepIndex >= @from";
+            deleteTail.Parameters.AddWithValue("@pid", planId);
+            deleteTail.Parameters.AddWithValue("@from", fromStepIndex);
+            await deleteTail.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (PlanStepWrite step in steps)
+        {
+            await using SqliteCommand insertStep = conn.CreateCommand();
+            insertStep.Transaction = tx;
+            insertStep.CommandText = """
+                INSERT INTO PlanSteps (StepId, PlanId, StepIndex, SpecialistKey, Intent, Action, Status)
+                VALUES (@sid, @pid, @idx, @key, @intent, @action, @status)
+                """;
+            insertStep.Parameters.AddWithValue("@sid", step.StepId);
+            insertStep.Parameters.AddWithValue("@pid", planId);
+            insertStep.Parameters.AddWithValue("@idx", step.StepIndex);
+            insertStep.Parameters.AddWithValue("@key", step.SpecialistKey);
+            insertStep.Parameters.AddWithValue("@intent", step.Intent);
+            insertStep.Parameters.AddWithValue("@action", step.Action);
+            insertStep.Parameters.AddWithValue("@status", step.Status);
+            await insertStep.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+
+        _logger.LogDebug(
+            "Replaced plan {PlanId} steps from index {From} with {Count} new step rows (subject {Subject})",
+            planId, fromStepIndex, steps.Count, subject);
+    }
+
     // ── Reads ────────────────────────────────────────────────────────────
 
     public async Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(

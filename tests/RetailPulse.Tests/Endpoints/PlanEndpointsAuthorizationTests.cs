@@ -266,6 +266,7 @@ public sealed class PlanEndpointsAuthorizationTests
             => Task.FromResult(true);
 
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default) => Task.CompletedTask;
+        public Task ReplacePlanStepsFromIndexAsync(string planId, string subject, int fromStepIndex, IReadOnlyList<PlanStepWrite> steps, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(string subject, CancellationToken ct = default)
             => _byOwner.TryGetValue(subject, out Dictionary<string, PlanRow>? bucket)

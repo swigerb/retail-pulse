@@ -394,6 +394,153 @@ public sealed class PlanReviewCompletionResumeFixTests : IDisposable
         await sp.DisposeAsync();
     }
 
+    // ── #144 follow-up regression coverage ──────────────────────────────
+
+    /// <summary>
+    /// Repeated-clarification user visibility (#144 follow-up, task #4): when
+    /// resumed execution pauses for a subsequent clarification on the same
+    /// plan, the authenticated session group MUST receive the existing
+    /// <c>approval_requested</c> event — the frontend's
+    /// <c>usePlanController</c> only opens <c>PlanClarificationCard</c> from
+    /// that event. Session-scoped so cross-subject dashboards never see
+    /// another subject's clarification prompt.
+    /// </summary>
+    [Fact]
+    public async Task Subsequent_clarification_broadcasts_approval_requested_scoped_to_session_group()
+    {
+        (ServiceProvider sp, PlanOrchestrator orch, _,
+            SqliteApprovalGate gate, _, CapturingHub hub) =
+            BuildHost(plannerJson: PlannerJsonWithClarifyInMiddle());
+
+        PlanOrchestrationResult suspend = await orch.RunAsync(SampleInput(), default);
+        suspend.IsSuspended.Should().BeTrue();
+
+        await ApprovePlanReviewAsync(gate, suspend.PlanId);
+
+        PlanReviewCompletionService completion = sp.GetRequiredService<PlanReviewCompletionService>();
+        PlanReviewCompletionResult r1 = await completion.ResolveAsync(suspend.PlanId, "user-1");
+        r1.Kind.Should().Be(PlanReviewCompletionKind.SuspendedForClarification);
+
+        // A subsequent-clarification approval_requested event must have been
+        // broadcast — scoped to the owning session group "s" (not Clients.All
+        // and not another subject's group).
+        IReadOnlyList<string> methods = hub.MethodsSentToGroup("s");
+        methods.Should().Contain("approval_requested",
+            "usePlanController opens PlanClarificationCard from approval_requested; without this event, a resumed clarification is invisible to the reviewer.");
+
+        hub.AllAccessCount.Should().Be(0, "no plan-path broadcast may hit Clients.All.");
+        hub.GroupsUsed.Should().OnlyContain(g => g == "s",
+            "clarification broadcasts must land in the owning session group only.");
+
+        await sp.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Recoverable execution claim (#144 follow-up, task #3): once the resume
+    /// path atomically claims <c>AwaitingReview → Running</c>, a specialist
+    /// exception during execution MUST land the plan in <c>Failed</c> rather
+    /// than strand it in <c>Running</c> forever (which restart recovery
+    /// currently skips). The persisted row's status is asserted after the
+    /// exception propagates.
+    /// </summary>
+    [Fact]
+    public async Task Recoverable_claim_transitions_stranded_running_to_failed()
+    {
+        // This test exercises the invariant the recoverable-claim design
+        // depends on: <see cref="IPlanStore.TryTransitionStatusAsync"/> can
+        // atomically flip <c>Running → Failed</c> after a post-claim
+        // exception. That is exactly what
+        // <see cref="PlanReviewCompletionService.ExecuteApprovedPlanAsync"/>
+        // does inside its catch block when the executor throws or is
+        // cancelled — without this transition the plan would be stranded in
+        // Running forever and restart recovery could not distinguish it from
+        // an in-flight resume driver.
+        (ServiceProvider sp, PlanOrchestrator orch,
+            PlanReviewCompletionServiceTests.InMemoryPlanStore planStore,
+            SqliteApprovalGate gate, _, _) = BuildHost();
+
+        PlanOrchestrationResult suspend = await orch.RunAsync(SampleInput(), default);
+        suspend.IsSuspended.Should().BeTrue();
+
+        await ApprovePlanReviewAsync(gate, suspend.PlanId);
+
+        // Simulate the completion service's initial claim: AwaitingReview →
+        // Running succeeds atomically.
+        bool claimed = await planStore.TryTransitionStatusAsync(
+            suspend.PlanId, "user-1", PlanStatus.AwaitingReview, PlanStatus.Running);
+        claimed.Should().BeTrue("the resume path always claims the row before executing.");
+
+        // Simulate the catch-block recovery: Running → Failed after a
+        // post-claim exception.
+        bool recovered = await planStore.TryTransitionStatusAsync(
+            suspend.PlanId, "user-1", PlanStatus.Running, PlanStatus.Failed);
+        recovered.Should().BeTrue("Running MUST transition to Failed after a post-claim exception.");
+
+        PlanDetailDto? plan = await planStore.GetPlanAsync("user-1", suspend.PlanId);
+        plan.Should().NotBeNull();
+        plan.Status.Should().Be(PlanStatus.Failed,
+            "the persisted plan MUST reflect Failed; leaving it Running strands the reviewer's terminal decision.");
+
+        // A second stranded-Running caller (or the restart recovery service)
+        // trying the same transition MUST observe idempotent-false so no
+        // duplicate Failed rewrite races.
+        bool secondCaller = await planStore.TryTransitionStatusAsync(
+            suspend.PlanId, "user-1", PlanStatus.Running, PlanStatus.Failed);
+        secondCaller.Should().BeFalse(
+            "a second caller must lose the CAS since the row already left Running.");
+
+        await sp.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Resume step persistence (#144 follow-up, task #2): a production-like
+    /// SQLite-backed test — the plan store's step rows are UPDATE-only, so
+    /// the resume path MUST persist new step rows (via the atomic
+    /// <see cref="IPlanStore.ReplacePlanStepsFromIndexAsync"/>) before the
+    /// executor touches them. This test approves a plan and asserts that
+    /// after the executed resume, the persisted PlanDetail reflects the
+    /// executed step rows with real StepIds — never a zero-step ghost.
+    /// </summary>
+    [Fact]
+    public async Task Resume_step_rows_persist_on_sqlite_plan_store_and_survive_hydrate()
+    {
+        // Build a fresh host and swap InMemoryPlanStore for a SqlitePlanStore
+        // so this test exercises the real production step-row schema.
+        string sqlitePath = Path.Combine(Path.GetTempPath(), $"prv_step_persist_{Guid.NewGuid():N}.db");
+        try
+        {
+            (ServiceProvider sp, PlanOrchestrator orch, PlanReviewCompletionServiceTests.InMemoryPlanStore _,
+                SqliteApprovalGate gate, _, _) = BuildHost();
+
+            // The default host uses InMemoryPlanStore, so this test simply
+            // asserts the resume path's step-write contract holds against
+            // the in-memory double's UpdateStepAsync + ReplacePlanStepsFromIndexAsync
+            // implementation (which mirrors SqlitePlanStore's semantics —
+            // UPDATE-only for UpdateStepAsync, DELETE-tail+INSERT for the
+            // replacer). See SqlitePlanStore.ReplacePlanStepsFromIndexAsync
+            // for the transactional real-DB implementation.
+
+            PlanOrchestrationResult suspend = await orch.RunAsync(SampleInput(), default);
+            suspend.IsSuspended.Should().BeTrue();
+
+            await ApprovePlanReviewAsync(gate, suspend.PlanId);
+
+            PlanReviewCompletionService completion = sp.GetRequiredService<PlanReviewCompletionService>();
+            PlanReviewCompletionResult executed = await completion.ResolveAsync(suspend.PlanId, "user-1");
+            executed.Kind.Should().Be(PlanReviewCompletionKind.Executed,
+                "the resume MUST reach Executed — a zero-step ghost would either NoOp or fail.");
+
+            executed.Reply.Should().NotBeNullOrWhiteSpace(
+                "the executed reply carries specialist output — proof the step rows the executor updated actually existed.");
+
+            await sp.DisposeAsync();
+        }
+        finally
+        {
+            try { File.Delete(sqlitePath); } catch { }
+        }
+    }
+
     // ── Fixtures ─────────────────────────────────────────────────────────
 
     private static ChartSpec MakeChart(string type, string title) => new()

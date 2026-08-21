@@ -308,6 +308,7 @@ public sealed class ExecutionControlEndpointsTests
         public Task<bool> TryTransitionStatusAsync(string planId, string subject, string fromStatus, string toStatus, CancellationToken ct = default)
             => Task.FromResult(true);
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default) => Task.CompletedTask;
+        public Task ReplacePlanStepsFromIndexAsync(string planId, string subject, int fromStepIndex, IReadOnlyList<PlanStepWrite> steps, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(string subject, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<PlanSummaryDto>>([]);

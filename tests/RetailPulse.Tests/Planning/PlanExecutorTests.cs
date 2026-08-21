@@ -58,6 +58,19 @@ public sealed class PlanExecutorTests
             return Task.CompletedTask;
         }
 
+        public ConcurrentQueue<(int FromIndex, IReadOnlyList<PlanStepWrite> Steps)> Replacements { get; } = new();
+
+        public Task ReplacePlanStepsFromIndexAsync(
+            string planId,
+            string subject,
+            int fromStepIndex,
+            IReadOnlyList<PlanStepWrite> steps,
+            CancellationToken ct = default)
+        {
+            Replacements.Enqueue((fromStepIndex, steps));
+            return Task.CompletedTask;
+        }
+
         public Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(string subject, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<PlanSummaryDto>>([]);
 

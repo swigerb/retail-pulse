@@ -530,6 +530,43 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
             }
             return Task.CompletedTask;
         }
+
+        public Task ReplacePlanStepsFromIndexAsync(
+            string planId,
+            string subject,
+            int fromStepIndex,
+            IReadOnlyList<PlanStepWrite> steps,
+            CancellationToken ct = default)
+        {
+            lock (_sync)
+            {
+                if (_bySub.TryGetValue(subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)
+                    && bucket.TryGetValue(planId, out (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps) row))
+                {
+                    // Drop any existing step rows at or above the cutoff so the
+                    // new ones fully define the tail. Prior clarification-
+                    // completed rows (StepIndex < fromStepIndex) stay verbatim.
+                    // In-memory step storage keys by StepId; without persisted
+                    // StepIndex, we approximate by matching new step ids that
+                    // would otherwise collide, then insert seed rows so
+                    // subsequent UpdateStepAsync calls land against a real
+                    // key. Production callers rely on the atomic delete-tail /
+                    // insert-new pair inside SqlitePlanStore.
+                    foreach (PlanStepWrite w in steps)
+                    {
+                        row.Steps[w.StepId] = new PlanStepUpdate
+                        {
+                            StepId = w.StepId,
+                            PlanId = planId,
+                            Subject = subject,
+                            Status = w.Status,
+                        };
+                    }
+                }
+            }
+            return Task.CompletedTask;
+        }
+
         public Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(string subject, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<PlanSummaryDto>>([]);
         public Task<PlanDetailDto?> GetPlanAsync(string subject, string planId, CancellationToken ct = default)
