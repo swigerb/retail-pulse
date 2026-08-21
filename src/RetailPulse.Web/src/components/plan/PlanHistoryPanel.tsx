@@ -57,7 +57,7 @@ const useStyles = makeStyles({
     },
   },
   rowActive: {
-    borderColor: 'var(--brand-accent-border)',
+    border: '1px solid var(--brand-accent-border)',
     background: 'var(--brand-accent-soft)',
   },
   topLine: {

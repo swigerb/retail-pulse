@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
-import {
-  ActivePlanState,
-  PlanAction,
-  PlanAppState,
-  initialPlanState,
-  isPlanRunning,
-  planReducer,
-} from './planReducer';
+import type { ActivePlanState, PlanAppState } from './planReducer';
+import { initialPlanState, isPlanRunning, planReducer } from './planReducer';
 import type {
   PlanClarificationPrompt,
   PlanFinalResponseEvent,

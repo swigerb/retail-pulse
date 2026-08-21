@@ -1,5 +1,5 @@
 import { useState, lazy, Suspense } from 'react';
-import { Badge, Button, Spinner, Text, makeStyles } from '@fluentui/react-components';
+import { Badge, Spinner, Text, makeStyles } from '@fluentui/react-components';
 import { ChevronRight16Regular } from '@fluentui/react-icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';

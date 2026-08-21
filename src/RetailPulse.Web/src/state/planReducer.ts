@@ -179,10 +179,10 @@ export function isStepTerminal(status: PlanStepStatus | undefined | null): boole
 
 function detailToActive(detail: PlanDetail, base: ActivePlanState | null): ActivePlanState {
   const startedAt =
-    base?.startedAt ?? new Date(detail.createdAt).getTime() || Date.now();
+    base?.startedAt ?? ((new Date(detail.createdAt).getTime() || Date.now()));
   const finishedAt = isPlanRunning(detail.status)
     ? base?.finishedAt
-    : new Date(detail.updatedAt).getTime() || Date.now();
+    : (new Date(detail.updatedAt).getTime() || Date.now());
   return {
     planId: detail.planId,
     sessionId: detail.sessionId,
