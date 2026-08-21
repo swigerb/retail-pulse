@@ -30,6 +30,8 @@ import { featureFlags } from '../config/featureFlags';
 import { capabilities, activeAuthMode, getActiveProvider } from '../auth/activeProvider';
 import { AnonymousSessionBanner } from '../auth/gates/AnonymousAuthGate';
 import type { AnonymousSessionProvider } from '../auth/providers/anonymousProvider';
+import { useActivePack } from '../hooks/useActivePack';
+import type { PackTheme } from '../types/pack';
 
 const DRAWER_WIDTH_PX = 560;
 const DRAWER_BREAKPOINT_PX = 768;
@@ -83,6 +85,21 @@ const useStyles = makeStyles({
       display: 'none',
     },
   },
+  headerTenant: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '4px 10px',
+    borderRadius: '999px',
+    fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+    fontSize: '12px',
+    color: 'var(--brand-accent-light)',
+    background: 'var(--brand-accent-soft)',
+    border: '1px solid var(--brand-accent-border)',
+    '@media (max-width: 600px)': {
+      display: 'none',
+    },
+  },
   headerActions: {
     display: 'flex',
     alignItems: 'center',
@@ -121,6 +138,28 @@ const MAX_RETAINED_SPANS = 500;
 const MAX_ALERTS = 100;
 const MAX_TRACES = 50;
 
+// CSS custom properties overridden from the active pack's theme block.
+// We intentionally stop at the two primary brand tokens; App.css already
+// derives every semantic accent shade (accent-soft, border, hover, ...)
+// from the base accent color, so overriding the base is enough to swap
+// tenant colors coherently without hand-rolling every derived shade.
+const THEME_CUSTOM_PROPERTIES = ['--brand-primary', '--brand-accent', '--brand-font-family'] as const;
+
+function applyPackTheme(theme: PackTheme | null): (() => void) | undefined {
+  if (!theme || typeof document === 'undefined') return undefined;
+  const root = document.documentElement;
+  const previous: Array<[string, string]> = THEME_CUSTOM_PROPERTIES.map((prop) => [prop, root.style.getPropertyValue(prop)]);
+  if (theme.primaryColor) root.style.setProperty('--brand-primary', theme.primaryColor);
+  if (theme.accentColor) root.style.setProperty('--brand-accent', theme.accentColor);
+  if (theme.fontFamily) root.style.setProperty('--brand-font-family', theme.fontFamily);
+  return () => {
+    for (const [prop, value] of previous) {
+      if (value) root.style.setProperty(prop, value);
+      else root.style.removeProperty(prop);
+    }
+  };
+}
+
 export function Dashboard() {
   const [telemetryOpen, setTelemetryOpen] = useState(false);
   const [chatKey, setChatKey] = useState(0);
@@ -140,6 +179,18 @@ export function Dashboard() {
   const [explanationOpen, setExplanationOpen] = useState(false);
   const [explanationData, setExplanationData] = useState<ExplanationData | null>(null);
   const styles = useStyles();
+
+  // Active content pack. `useActivePack` starts with the built-in prompt
+  // categories so the welcome-state chip grid renders on the first paint,
+  // then swaps in the pack-supplied categories, tenant, and theme once
+  // the /api/pack + /api/pack/starting-tasks fan-out resolves.
+  const activePack = useActivePack();
+  const packTheme = activePack.pack?.tenant.theme ?? null;
+  useEffect(() => applyPackTheme(packTheme), [
+    packTheme?.primaryColor,
+    packTheme?.accentColor,
+    packTheme?.fontFamily,
+  ]);
 
   // Plan controller (issue #96). Shared between ChatPanel (renders the plan
   // surface for a plan-first response) and the Plan History panel in the
@@ -494,6 +545,16 @@ export function Dashboard() {
         <div className={styles.headerBrand}>
           <BrandLogo size={36} />
           <span className={styles.headerTagline}>Brand Intelligence Platform</span>
+          {activePack.pack && (
+            <span
+              className={styles.headerTenant}
+              data-testid="pack-tenant-label"
+              title={activePack.pack.tenant.description}
+            >
+              {activePack.pack.tenant.company}
+              {activePack.pack.tenant.industry ? ` · ${activePack.pack.tenant.industry}` : ''}
+            </span>
+          )}
         </div>
         <div className={`${styles.headerActions} ${telemetryOpen ? styles.headerActionsOpen : ''}`}>
           {capabilities.approvals && (
@@ -646,6 +707,7 @@ export function Dashboard() {
               onResponseReceived={handleResponseReceived}
               approvals={pendingApprovals}
               onApprovalResolved={handleApprovalResolved}
+              promptCategories={activePack.categories}
               planController={planController}
               planConnected={connected}
             />
