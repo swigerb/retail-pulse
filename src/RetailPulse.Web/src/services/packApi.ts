@@ -1,4 +1,4 @@
-import type { PromptCategory } from '../constants/prompts';
+import type { PromptCategory, StartingTask, StartingTaskCapability } from '../constants/prompts';
 import { resolveApiUrl } from '../config/apiOrigin';
 import type {
   PackBrand,
@@ -114,9 +114,76 @@ function normalizeCategory(raw: unknown): PromptCategory | null {
   const id = readString(raw, 'id');
   const label = readString(raw, 'label');
   const emoji = readString(raw, 'emoji');
-  const prompts = readStringArray(raw, 'prompts');
-  if (!id || !label || prompts.length === 0) return null;
-  return { id, label, emoji, prompts: [...prompts] };
+  const orderRaw = raw.order;
+  const order = typeof orderRaw === 'number' && Number.isFinite(orderRaw) ? orderRaw : undefined;
+  const tasks = normalizeTasks(raw.tasks);
+  const legacyPrompts = readStringArray(raw, 'prompts');
+
+  // Prefer structured tasks (issue #109). When absent, synthesize tasks from
+  // the legacy `prompts` list so packs authored before #109 keep rendering.
+  const effectiveTasks: StartingTask[] = tasks.length > 0
+    ? tasks
+    : legacyPrompts
+        .filter((p) => p.trim().length > 0)
+        .map((p) => ({ name: p, prompt: p }));
+
+  if (!id || !label || effectiveTasks.length === 0) return null;
+
+  // Deterministic per-task ordering when explicit `order` values are present;
+  // ties break on source-array position.
+  const orderedTasks = effectiveTasks
+    .map((task, idx) => ({ task, idx }))
+    .sort((a, b) => {
+      const oa = a.task.order ?? Number.POSITIVE_INFINITY;
+      const ob = b.task.order ?? Number.POSITIVE_INFINITY;
+      if (oa !== ob) return oa - ob;
+      return a.idx - b.idx;
+    })
+    .map((x) => x.task);
+
+  return {
+    id,
+    label,
+    emoji,
+    order,
+    tasks: orderedTasks,
+    prompts: orderedTasks.map((t) => t.prompt),
+  };
+}
+
+function normalizeCapability(raw: unknown): StartingTaskCapability | undefined {
+  if (!isObject(raw)) return undefined;
+  const kind = readString(raw, 'kind');
+  if (kind !== 'prose' && kind !== 'chart' && kind !== 'plan') return undefined;
+  const chartType = readString(raw, 'chartType');
+  const planPath = readString(raw, 'planPath');
+  const cap: StartingTaskCapability = { kind };
+  if (chartType) return { ...cap, chartType };
+  if (planPath) return { ...cap, planPath };
+  return cap;
+}
+
+function normalizeTask(raw: unknown): StartingTask | null {
+  if (!isObject(raw)) return null;
+  const name = readString(raw, 'name');
+  const prompt = readString(raw, 'prompt');
+  if (!name || !prompt) return null;
+  const orderRaw = raw.order;
+  const order = typeof orderRaw === 'number' && Number.isFinite(orderRaw) ? orderRaw : undefined;
+  const capability = normalizeCapability(raw.capability);
+  return capability
+    ? { name, prompt, order, capability }
+    : { name, prompt, order };
+}
+
+function normalizeTasks(raw: unknown): StartingTask[] {
+  if (!Array.isArray(raw)) return [];
+  const out: StartingTask[] = [];
+  for (const item of raw) {
+    const task = normalizeTask(item);
+    if (task) out.push(task);
+  }
+  return out;
 }
 
 function normalizeStartingTasks(raw: unknown): PackStartingTasks {
@@ -130,7 +197,20 @@ function normalizeStartingTasks(raw: unknown): PackStartingTasks {
       if (cat) categories.push(cat);
     }
   }
-  return { packKey, categories };
+
+  // Deterministic per-category ordering. Categories without an explicit
+  // `order` value keep their source position (relative to each other) so a
+  // pack author who does not specify ordering still sees stable output.
+  const orderedCategories = categories
+    .map((cat, idx) => ({ cat, idx }))
+    .sort((a, b) => {
+      const oa = a.cat.order ?? Number.POSITIVE_INFINITY;
+      const ob = b.cat.order ?? Number.POSITIVE_INFINITY;
+      if (oa !== ob) return oa - ob;
+      return a.idx - b.idx;
+    })
+    .map((x) => x.cat);
+  return { packKey, categories: orderedCategories };
 }
 
 export async function fetchActivePack(signal?: AbortSignal): Promise<PackInfo> {

@@ -480,7 +480,7 @@ public sealed partial class PackLoader
         }
 
         var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var categories = new List<PackStartingTaskCategory>();
+        var withOrder = new List<(int SourceIndex, PackStartingTaskCategory Category)>();
         for (int i = 0; i < doc.Categories.Count; i++)
         {
             PackStartingTaskCategory cat = doc.Categories[i];
@@ -506,17 +506,161 @@ public sealed partial class PackLoader
                     $"starting-tasks category '{cat.Id}' is missing 'label'.",
                     "pack.starting-tasks.label-missing"));
             }
-            if (cat.Prompts is null || cat.Prompts.Count == 0)
-            {
-                issues.Add(new PackValidationIssue(packName, label,
-                    $"starting-tasks category '{cat.Id}' has no prompts.",
-                    "pack.starting-tasks.prompts-empty"));
-            }
 
-            categories.Add(cat);
+            PackStartingTaskCategory normalized = NormalizeCategoryTasks(packName, label, cat, issues);
+            withOrder.Add((i, normalized));
         }
 
-        return categories;
+        // Issue #109 — explicit ordering. Category-level `order:` places a
+        // category at the requested position; ties break on source-array
+        // index so an author who leaves the field off entirely still gets
+        // deterministic behavior.
+        return [.. withOrder
+            .OrderBy(x => x.Category.Order ?? int.MaxValue)
+            .ThenBy(x => x.SourceIndex)
+            .Select(x => x.Category)];
+    }
+
+    private static PackStartingTaskCategory NormalizeCategoryTasks(
+        string packName,
+        string label,
+        PackStartingTaskCategory cat,
+        List<PackValidationIssue> issues)
+    {
+        List<PackStartingTask> declaredTasks = cat.Tasks ?? [];
+        List<string> legacyPrompts = cat.Prompts ?? [];
+
+        if (declaredTasks.Count == 0 && legacyPrompts.Count == 0)
+        {
+            issues.Add(new PackValidationIssue(packName, label,
+                $"starting-tasks category '{cat.Id}' has no tasks. Declare 'tasks:' (preferred) or the legacy 'prompts:' list.",
+                "pack.starting-tasks.tasks-empty"));
+            return cat;
+        }
+
+        var effective = new List<PackStartingTask>();
+        if (declaredTasks.Count > 0)
+        {
+            // Structured tasks are the source of truth when declared — they
+            // carry strictly more information (display name + capability)
+            // than the legacy prompt-string list.
+            for (int t = 0; t < declaredTasks.Count; t++)
+            {
+                PackStartingTask task = declaredTasks[t];
+                string taskLabel = $"{label}.tasks[{t}]";
+
+                if (string.IsNullOrWhiteSpace(task.Prompt))
+                {
+                    issues.Add(new PackValidationIssue(packName, taskLabel,
+                        $"starting-tasks category '{cat.Id}' task[{t}] is missing 'prompt'.",
+                        "pack.starting-tasks.task-prompt-missing"));
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(task.Name))
+                {
+                    issues.Add(new PackValidationIssue(packName, taskLabel,
+                        $"starting-tasks category '{cat.Id}' task[{t}] is missing 'name'.",
+                        "pack.starting-tasks.task-name-missing"));
+                    continue;
+                }
+
+                if (task.Capability is not null)
+                {
+                    ValidateCapability(packName, taskLabel, cat.Id, t, task.Capability, issues);
+                }
+
+                effective.Add(task);
+            }
+        }
+        else
+        {
+            // Legacy shape: each prompt string becomes a task where the
+            // display name equals the submitted prompt. Preserves pre-#109
+            // behavior verbatim for packs that have not been re-authored.
+            for (int p = 0; p < legacyPrompts.Count; p++)
+            {
+                string prompt = legacyPrompts[p];
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    issues.Add(new PackValidationIssue(packName, $"{label}.prompts[{p}]",
+                        $"starting-tasks category '{cat.Id}' prompt[{p}] is empty.",
+                        "pack.starting-tasks.legacy-prompt-empty"));
+                    continue;
+                }
+                effective.Add(new PackStartingTask { Name = prompt, Prompt = prompt });
+            }
+        }
+
+        if (effective.Count == 0)
+        {
+            issues.Add(new PackValidationIssue(packName, label,
+                $"starting-tasks category '{cat.Id}' has no valid tasks after normalization.",
+                "pack.starting-tasks.tasks-empty"));
+        }
+
+        List<PackStartingTask> sorted = [.. effective
+            .Select((task, idx) => (task, idx))
+            .OrderBy(x => x.task.Order ?? int.MaxValue)
+            .ThenBy(x => x.idx)
+            .Select(x => x.task)];
+
+        return new PackStartingTaskCategory
+        {
+            Id = cat.Id,
+            Label = cat.Label,
+            Emoji = cat.Emoji,
+            Order = cat.Order,
+            Tasks = sorted,
+            // The derived Prompts list keeps the legacy shape available so
+            // clients still on the old contract keep working; the ordered
+            // Tasks list is the primary surface.
+            Prompts = [.. sorted.Select(t => t.Prompt)],
+        };
+    }
+
+    private static readonly HashSet<string> _validCapabilityKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "prose",
+        "chart",
+        "plan",
+    };
+
+    private static void ValidateCapability(
+        string packName,
+        string taskLabel,
+        string categoryId,
+        int taskIndex,
+        PackStartingTaskCapability capability,
+        List<PackValidationIssue> issues)
+    {
+        if (string.IsNullOrWhiteSpace(capability.Kind))
+        {
+            issues.Add(new PackValidationIssue(packName, taskLabel,
+                $"starting-tasks category '{categoryId}' task[{taskIndex}] capability is missing 'kind'.",
+                "pack.starting-tasks.capability-kind-missing"));
+            return;
+        }
+        if (!_validCapabilityKinds.Contains(capability.Kind))
+        {
+            issues.Add(new PackValidationIssue(packName, taskLabel,
+                $"starting-tasks category '{categoryId}' task[{taskIndex}] capability kind '{capability.Kind}' is not one of prose|chart|plan.",
+                "pack.starting-tasks.capability-kind-unknown"));
+            return;
+        }
+        if (capability.Kind.Equals("chart", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(capability.ChartType))
+        {
+            issues.Add(new PackValidationIssue(packName, taskLabel,
+                $"starting-tasks category '{categoryId}' task[{taskIndex}] capability kind='chart' requires a 'chartType'.",
+                "pack.starting-tasks.capability-chart-type-missing"));
+        }
+        if (capability.Kind.Equals("plan", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(capability.PlanPath))
+        {
+            issues.Add(new PackValidationIssue(packName, taskLabel,
+                $"starting-tasks category '{categoryId}' task[{taskIndex}] capability kind='plan' requires a 'planPath'.",
+                "pack.starting-tasks.capability-plan-path-missing"));
+        }
     }
 
     private static IReadOnlyList<PackKnowledgeDocument> LoadKnowledgeDocuments(

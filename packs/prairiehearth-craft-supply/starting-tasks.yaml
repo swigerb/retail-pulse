@@ -1,41 +1,81 @@
-# Curated starting prompts for Prairiehearth Craft Supply.
+# Curated starting tasks for Prairiehearth Craft Supply.
+#
+# Fictional pack. Short display `name` values pair with fully-formed
+# `prompt` strings, with explicit ordering per scenario so the panel
+# leads with the highest-impact task in every category.
+
 categories:
   - id: fibre-pipeline
     label: "Fibre Pipeline"
     emoji: "🧶"
-    prompts:
-      - "Show cooperative-supplier shipment health for Wovenwheel Fibre in the Prairie Belt"
-      - "Where are Loomshire warp-stock dye lots at risk this month?"
-      - "Summarize supply disruptions across the fibre category in Foothills stores"
+    order: 1
+    tasks:
+      - name: "Wovenwheel shipment health"
+        prompt: "Show cooperative-supplier shipment health for Wovenwheel Fibre in the Prairie Belt"
+        capability: { kind: chart, chartType: line }
+      - name: "Loomshire dye-lot risk"
+        prompt: "Where are Loomshire warp-stock dye lots at risk this month?"
+        capability: { kind: prose }
+      - name: "Foothills supply disruption scan"
+        prompt: "Summarize supply disruptions across the fibre category in Foothills stores"
+        capability: { kind: prose }
 
   - id: workshop-programming
     label: "Workshop Programming"
     emoji: "🎨"
-    prompts:
-      - "Forecast autumn fibre workshop enrollment in Lakes & Rivers"
-      - "Compare winter paper journaling class attach for Pinemark kits across regions"
-      - "Identify demand risks for spring plein-air paint series in Coastal Cottages"
+    order: 2
+    tasks:
+      - name: "Autumn fibre enrollment forecast"
+        prompt: "Forecast autumn fibre workshop enrollment in Lakes & Rivers"
+        capability: { kind: plan, planPath: enrollment-forecast }
+      - name: "Winter journaling attach"
+        prompt: "Compare winter paper journaling class attach for Pinemark kits across regions"
+        capability: { kind: chart, chartType: bar }
+      - name: "Spring plein-air demand risk"
+        prompt: "Identify demand risks for spring plein-air paint series in Coastal Cottages"
+        capability: { kind: prose }
 
   - id: kit-assortment
     label: "Kit Assortment"
     emoji: "🪚"
-    prompts:
-      - "Rebalance beginner endcap adjacency to the workshop-signup counter"
-      - "Show the Ridgeline Woodcraft project-bay rotation for the Foothills"
-      - "How should we lay out Marketstead beading given the summer festival calendar?"
+    order: 3
+    tasks:
+      - name: "Beginner endcap adjacency"
+        prompt: "Rebalance beginner endcap adjacency to the workshop-signup counter"
+        capability: { kind: plan, planPath: planogram-adjacency }
+      - name: "Ridgeline project-bay rotation"
+        prompt: "Show the Ridgeline Woodcraft project-bay rotation for the Foothills"
+        capability: { kind: prose }
+      - name: "Marketstead beading layout"
+        prompt: "How should we lay out Marketstead beading given the summer festival calendar?"
+        capability: { kind: prose }
 
   - id: community-signals
     label: "Community Signals"
     emoji: "🫱🏽‍🫲🏼"
-    prompts:
-      - "Summarize maker-circle sentiment for kit accessibility this quarter"
-      - "What are regional guilds saying about workshop pricing in the Prairie Belt?"
-      - "Which community event booths are outperforming their region's baseline?"
+    order: 4
+    tasks:
+      - name: "Maker-circle sentiment"
+        prompt: "Summarize maker-circle sentiment for kit accessibility this quarter"
+        capability: { kind: prose }
+      - name: "Guild pricing feedback"
+        prompt: "What are regional guilds saying about workshop pricing in the Prairie Belt?"
+        capability: { kind: prose }
+      - name: "Event booth outperformers"
+        prompt: "Which community event booths are outperforming their region's baseline?"
+        capability: { kind: chart, chartType: bar }
 
   - id: maker-margin
     label: "Maker Margin"
     emoji: "📐"
-    prompts:
-      - "Show margin drivers for Auroralight Paint kits"
-      - "What is the workshop-seat contribution trend for advanced joinery?"
-      - "Detect margin risks across the paper category in Foothills"
+    order: 5
+    tasks:
+      - name: "Auroralight margin drivers"
+        prompt: "Show margin drivers for Auroralight Paint kits"
+        capability: { kind: chart, chartType: horizontalBar }
+      - name: "Advanced joinery seat contribution"
+        prompt: "What is the workshop-seat contribution trend for advanced joinery?"
+        capability: { kind: chart, chartType: line }
+      - name: "Paper category margin risks"
+        prompt: "Detect margin risks across the paper category in Foothills"
+        capability: { kind: prose }

@@ -1,41 +1,85 @@
-# Curated starting prompts for Halcyon Pet Supply.
+# Curated starting tasks for Halcyon Pet Supply.
+#
+# Fictional pack. Short display `name` values pair with fully-formed
+# `prompt` strings so a demo can click a concise button and get a rich,
+# specific submitted question. Explicit category and task ordering keeps
+# the panel deterministic regardless of authoring order.
+
 categories:
   - id: nutrition
     label: "Nutrition Planning"
     emoji: "🥣"
-    prompts:
-      - "How is Meadowbowl Nutrition auto-ship depletion trending in the Sunbelt this quarter?"
-      - "Compare grain-inclusive vs grain-free share for Riverstone Feline across all regions"
-      - "Show a life-stage transition forecast for puppy → adult across the Great Lakes"
+    order: 1
+    tasks:
+      - name: "Auto-ship depletion trend"
+        prompt: "How is Meadowbowl Nutrition auto-ship depletion trending in the Sunbelt this quarter?"
+        order: 1
+        capability: { kind: prose }
+      - name: "Grain-inclusive vs grain-free share"
+        prompt: "Compare grain-inclusive vs grain-free share for Riverstone Feline across all regions"
+        order: 2
+        capability: { kind: chart, chartType: bar }
+      - name: "Life-stage transition forecast"
+        prompt: "Show a life-stage transition forecast for puppy → adult across the Great Lakes"
+        order: 3
+        capability: { kind: plan, planPath: multi-step-forecast }
 
   - id: adoption
     label: "Adoption Partnerships"
     emoji: "🐾"
-    prompts:
-      - "Summarize shelter-partner sentiment for adoption events in Mountain Corridor"
-      - "What is the foster-network feedback on starter-kit follow-through in Pacific Metro?"
-      - "Which regions are seeing a drop in adoption-day traffic quality?"
+    order: 2
+    tasks:
+      - name: "Shelter partner sentiment"
+        prompt: "Summarize shelter-partner sentiment for adoption events in Mountain Corridor"
+        capability: { kind: prose }
+      - name: "Foster starter-kit feedback"
+        prompt: "What is the foster-network feedback on starter-kit follow-through in Pacific Metro?"
+        capability: { kind: prose }
+      - name: "Adoption-day traffic risks"
+        prompt: "Which regions are seeing a drop in adoption-day traffic quality?"
+        capability: { kind: prose }
 
   - id: grooming
     label: "Grooming Bar"
     emoji: "🛁"
-    prompts:
-      - "Show grooming appointment utilization for neighborhood stores in the Sunbelt"
-      - "Where are we losing de-shed slot bookings the most this month?"
-      - "Predict this week's stockout risk for grooming shampoo in the Great Lakes"
+    order: 3
+    tasks:
+      - name: "Grooming appointment utilization"
+        prompt: "Show grooming appointment utilization for neighborhood stores in the Sunbelt"
+        capability: { kind: chart, chartType: bar }
+      - name: "De-shed slot booking loss"
+        prompt: "Where are we losing de-shed slot bookings the most this month?"
+        capability: { kind: prose }
+      - name: "Shampoo stockout risk"
+        prompt: "Predict this week's stockout risk for grooming shampoo in the Great Lakes"
+        capability: { kind: plan, planPath: stockout-risk }
 
   - id: wellness-margin
     label: "Wellness Margin"
     emoji: "💚"
-    prompts:
-      - "Show margin drivers for Nimbus Pet Wellness across the portfolio"
-      - "What is the joint-care bundle margin trend over the last four quarters?"
-      - "Detect any margin risks in the wellness category this quarter"
+    order: 4
+    tasks:
+      - name: "Nimbus margin drivers"
+        prompt: "Show margin drivers for Nimbus Pet Wellness across the portfolio"
+        capability: { kind: chart, chartType: horizontalBar }
+      - name: "Joint-care bundle trend"
+        prompt: "What is the joint-care bundle margin trend over the last four quarters?"
+        capability: { kind: chart, chartType: line }
+      - name: "Wellness margin risk scan"
+        prompt: "Detect any margin risks in the wellness category this quarter"
+        capability: { kind: prose }
 
   - id: storefront
     label: "Storefront Planogram"
     emoji: "🏬"
-    prompts:
-      - "Optimize the wellness bay adjacency to the grooming waiting area"
-      - "Show the enrichment endcap rotation for Timberpaw Chews in the Sunbelt"
-      - "How should we lay out small-animal SKUs given Skylark's variant mix?"
+    order: 5
+    tasks:
+      - name: "Wellness bay adjacency"
+        prompt: "Optimize the wellness bay adjacency to the grooming waiting area"
+        capability: { kind: plan, planPath: planogram-adjacency }
+      - name: "Timberpaw endcap rotation"
+        prompt: "Show the enrichment endcap rotation for Timberpaw Chews in the Sunbelt"
+        capability: { kind: prose }
+      - name: "Skylark small-animal layout"
+        prompt: "How should we lay out small-animal SKUs given Skylark's variant mix?"
+        capability: { kind: prose }

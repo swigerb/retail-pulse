@@ -1,67 +1,133 @@
-# Curated starting prompts for the default (Apex Retail Group) pack.
+# Curated starting tasks for the default (Apex Retail Group) pack.
+#
 # Every category and prompt matches the frontend PROMPT_CATEGORIES in
-# src/RetailPulse.Web/src/constants/prompts.ts so a downstream endpoint
-# that projects these into the PromptLibrary preserves the current
-# welcome-state and library behaviour exactly.
+# src/RetailPulse.Web/src/constants/prompts.ts so the endpoint projection
+# preserves the current welcome-state and library behaviour exactly. On
+# the default pack `name` is intentionally set equal to `prompt` so the
+# prompt-acceptance sweep (which matches on the verbatim prompt text)
+# continues to pass without modification.
+#
+# Fictional packs (halcyon-pet-supply, prairiehearth-craft-supply)
+# demonstrate short, scannable `name` labels that submit a fully-formed
+# `prompt` string — the design pattern issue #109 unlocks.
 
 categories:
   - id: general
     label: "General Retail"
     emoji: "📊"
-    prompts:
-      - "Compare depletion trends across all regions for this quarter"
-      - "Which brands are growing fastest year-over-year across the portfolio?"
-      - "Show me field sentiment for our top 3 brands in the Southeast"
+    order: 1
+    tasks:
+      - name: "Compare depletion trends across all regions for this quarter"
+        prompt: "Compare depletion trends across all regions for this quarter"
+        capability: { kind: prose }
+      - name: "Which brands are growing fastest year-over-year across the portfolio?"
+        prompt: "Which brands are growing fastest year-over-year across the portfolio?"
+        capability: { kind: prose }
+      - name: "Show me field sentiment for our top 3 brands in the Southeast"
+        prompt: "Show me field sentiment for our top 3 brands in the Southeast"
+        capability: { kind: prose }
 
   - id: grocery
     label: "Grocery"
     emoji: "🛒"
-    prompts:
-      - "How are FreshMart depletions trending in the Northeast this quarter?"
-      - "Compare Harvest Table vs FreshMart sell-through rates by region"
-      - "What is the field sentiment for Harvest Table Meal Kits in the Midwest?"
+    order: 2
+    tasks:
+      - name: "How are FreshMart depletions trending in the Northeast this quarter?"
+        prompt: "How are FreshMart depletions trending in the Northeast this quarter?"
+        capability: { kind: prose }
+      - name: "Compare Harvest Table vs FreshMart sell-through rates by region"
+        prompt: "Compare Harvest Table vs FreshMart sell-through rates by region"
+        capability: { kind: prose }
+      - name: "What is the field sentiment for Harvest Table Meal Kits in the Midwest?"
+        prompt: "What is the field sentiment for Harvest Table Meal Kits in the Midwest?"
+        capability: { kind: prose }
 
   - id: qsr
     label: "Quick-Serve Restaurants"
     emoji: "🍔"
-    prompts:
-      - "How is Apex Grill performing in the Southwest this quarter?"
-      - "Compare Coastline Tacos vs Apex Grill depletions across all regions"
-      - "What is the field sentiment for Coastline Tacos in the West Coast?"
+    order: 3
+    tasks:
+      - name: "How is Apex Grill performing in the Southwest this quarter?"
+        prompt: "How is Apex Grill performing in the Southwest this quarter?"
+        capability: { kind: prose }
+      - name: "Compare Coastline Tacos vs Apex Grill depletions across all regions"
+        prompt: "Compare Coastline Tacos vs Apex Grill depletions across all regions"
+        capability: { kind: chart, chartType: groupedBar }
+      - name: "What is the field sentiment for Coastline Tacos in the West Coast?"
+        prompt: "What is the field sentiment for Coastline Tacos in the West Coast?"
+        capability: { kind: prose }
 
   - id: home-improvement
     label: "Home Improvement"
     emoji: "🏠"
-    prompts:
-      - "Show me Pinnacle Hardware depletion stats in the Midwest for Q1"
-      - "How is Summit Outdoor performing in the Southeast vs West Coast?"
-      - "What is the field sentiment for Pinnacle Hardware Power Tools in the Southwest?"
+    order: 4
+    tasks:
+      - name: "Show me Pinnacle Hardware depletion stats in the Midwest for Q1"
+        prompt: "Show me Pinnacle Hardware depletion stats in the Midwest for Q1"
+        capability: { kind: prose }
+      - name: "How is Summit Outdoor performing in the Southeast vs West Coast?"
+        prompt: "How is Summit Outdoor performing in the Southeast vs West Coast?"
+        capability: { kind: prose }
+      - name: "What is the field sentiment for Pinnacle Hardware Power Tools in the Southwest?"
+        prompt: "What is the field sentiment for Pinnacle Hardware Power Tools in the Southwest?"
+        capability: { kind: prose }
 
   - id: office-supply
     label: "Office Supply"
     emoji: "📎"
-    prompts:
-      - "How are ClearDesk depletions trending in the Northeast this quarter?"
-      - "Compare ClearDesk Technology vs Paper Products sell-through by region"
-      - "What is the field sentiment for ClearDesk in the Southeast?"
+    order: 5
+    tasks:
+      - name: "How are ClearDesk depletions trending in the Northeast this quarter?"
+        prompt: "How are ClearDesk depletions trending in the Northeast this quarter?"
+        capability: { kind: prose }
+      - name: "Compare ClearDesk Technology vs Paper Products sell-through by region"
+        prompt: "Compare ClearDesk Technology vs Paper Products sell-through by region"
+        capability: { kind: prose }
+      - name: "What is the field sentiment for ClearDesk in the Southeast?"
+        prompt: "What is the field sentiment for ClearDesk in the Southeast?"
+        capability: { kind: prose }
 
   - id: furniture
     label: "Furniture"
     emoji: "🛋️"
-    prompts:
-      - "Show me Urban Living depletion trends across all regions this quarter"
-      - "Compare Foundry Home vs Urban Living performance in the West Coast"
-      - "What is the field sentiment for Urban Living in the Pacific Northwest?"
+    order: 6
+    tasks:
+      - name: "Show me Urban Living depletion trends across all regions this quarter"
+        prompt: "Show me Urban Living depletion trends across all regions this quarter"
+        capability: { kind: prose }
+      - name: "Compare Foundry Home vs Urban Living performance in the West Coast"
+        prompt: "Compare Foundry Home vs Urban Living performance in the West Coast"
+        capability: { kind: prose }
+      - name: "What is the field sentiment for Urban Living in the Pacific Northwest?"
+        prompt: "What is the field sentiment for Urban Living in the Pacific Northwest?"
+        capability: { kind: prose }
 
   - id: charts
     label: "Charts"
     emoji: "📈"
-    prompts:
-      - "Create a line chart showing Sierra Gold Tequila depletion trends across all regions"
-      - "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast"
-      - "Create a pie chart showing market share breakdown for our grocery brands nationally"
-      - "Show a grouped bar chart comparing FreshMart and Harvest Table across all regions"
-      - "Create a donut chart of Apex Grill variant mix in the Southwest"
-      - "Show a horizontal bar chart ranking all brands by depletion growth rate"
-      - "Create a table showing depletion stats for all home improvement brands by region"
-      - "Show a gauge chart for Pinnacle Hardware inventory health in the Midwest"
+    order: 7
+    tasks:
+      - name: "Create a line chart showing Sierra Gold Tequila depletion trends across all regions"
+        prompt: "Create a line chart showing Sierra Gold Tequila depletion trends across all regions"
+        capability: { kind: chart, chartType: line }
+      - name: "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast"
+        prompt: "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast"
+        capability: { kind: chart, chartType: bar }
+      - name: "Create a pie chart showing market share breakdown for our grocery brands nationally"
+        prompt: "Create a pie chart showing market share breakdown for our grocery brands nationally"
+        capability: { kind: chart, chartType: pie }
+      - name: "Show a grouped bar chart comparing FreshMart and Harvest Table across all regions"
+        prompt: "Show a grouped bar chart comparing FreshMart and Harvest Table across all regions"
+        capability: { kind: chart, chartType: groupedBar }
+      - name: "Create a donut chart of Apex Grill variant mix in the Southwest"
+        prompt: "Create a donut chart of Apex Grill variant mix in the Southwest"
+        capability: { kind: chart, chartType: donut }
+      - name: "Show a horizontal bar chart ranking all brands by depletion growth rate"
+        prompt: "Show a horizontal bar chart ranking all brands by depletion growth rate"
+        capability: { kind: chart, chartType: horizontalBar }
+      - name: "Create a table showing depletion stats for all home improvement brands by region"
+        prompt: "Create a table showing depletion stats for all home improvement brands by region"
+        capability: { kind: chart, chartType: table }
+      - name: "Show a gauge chart for Pinnacle Hardware inventory health in the Midwest"
+        prompt: "Show a gauge chart for Pinnacle Hardware inventory health in the Midwest"
+        capability: { kind: chart, chartType: gauge }

@@ -481,3 +481,103 @@ describe('ChatPanel', () => {
     expect(await screen.findByText(/awaiting reviewer input/i)).toBeInTheDocument();
   });
 });
+
+describe('ChatPanel — issue #109 pack-sourced starting tasks', () => {
+  it('renders the empty state when the active pack has no starting tasks', () => {
+    render(
+      <FluentProvider theme={teamsDarkTheme}>
+        <ChatPanel promptCategories={[]} />
+      </FluentProvider>,
+    );
+
+    expect(screen.getByTestId('welcome-prompt-empty')).toBeInTheDocument();
+    // Category chip row is suppressed so an "All" chip doesn't linger.
+    expect(screen.queryByRole('button', { name: /🏪 All/i })).not.toBeInTheDocument();
+  });
+
+  it('renders the task display name on the button but submits the full prompt text', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({
+      kind: 'complete',
+      response: { reply: 'ok', sessionId: 'sess-name', spans: [], totalDurationMs: 10 },
+    });
+
+    render(
+      <FluentProvider theme={teamsDarkTheme}>
+        <ChatPanel
+          promptCategories={[
+            {
+              id: 'pack',
+              label: 'Pack',
+              emoji: '🎁',
+              tasks: [
+                {
+                  name: 'Depletion trend',
+                  prompt: 'How is Meadowbowl Nutrition auto-ship depletion trending in the Sunbelt this quarter?',
+                  capability: { kind: 'chart', chartType: 'line' },
+                },
+              ],
+              prompts: [
+                'How is Meadowbowl Nutrition auto-ship depletion trending in the Sunbelt this quarter?',
+              ],
+            },
+          ]}
+        />
+      </FluentProvider>,
+    );
+
+    const btn = screen.getByRole('button', { name: 'Depletion trend' });
+    expect(btn.textContent).toContain('Depletion trend');
+    expect(btn.textContent).not.toContain('Meadowbowl');
+    expect(btn.getAttribute('data-capability-kind')).toBe('chart');
+    expect(btn.getAttribute('data-capability-chart-type')).toBe('line');
+
+    await user.click(btn);
+
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    expect(sendMessageMock.mock.calls[0][0]).toMatchObject({
+      message: 'How is Meadowbowl Nutrition auto-ship depletion trending in the Sunbelt this quarter?',
+    });
+  });
+
+  it('re-renders welcome chips when the active pack projection swaps in a new categories list', () => {
+    const initial = [
+      {
+        id: 'pack-a',
+        label: 'Pack A',
+        emoji: '🅰️',
+        tasks: [{ name: 'A-task', prompt: 'a-prompt' }],
+        prompts: ['a-prompt'],
+      },
+    ];
+    const swapped = [
+      {
+        id: 'pack-b',
+        label: 'Pack B',
+        emoji: '🅱️',
+        tasks: [{ name: 'B-task', prompt: 'b-prompt' }],
+        prompts: ['b-prompt'],
+      },
+    ];
+
+    const { rerender } = render(
+      <FluentProvider theme={teamsDarkTheme}>
+        <ChatPanel promptCategories={initial} />
+      </FluentProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: /🅰️ Pack A/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'A-task' })).toBeInTheDocument();
+
+    rerender(
+      <FluentProvider theme={teamsDarkTheme}>
+        <ChatPanel promptCategories={swapped} />
+      </FluentProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: /🅰️ Pack A/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'A-task' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /🅱️ Pack B/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'B-task' })).toBeInTheDocument();
+  });
+});
