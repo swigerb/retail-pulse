@@ -134,7 +134,11 @@ function reattachManagedHandlers(): void {
  * state.
  */
 class ExponentialReconnectPolicy implements signalR.IRetryPolicy {
-  constructor(private readonly options: ReconnectBackoffOptions) {}
+  private readonly options: ReconnectBackoffOptions;
+
+  constructor(options: ReconnectBackoffOptions) {
+    this.options = options;
+  }
 
   nextRetryDelayInMilliseconds(retryContext: signalR.RetryContext): number | null {
     return computeReconnectDelayMs(retryContext.previousRetryCount, this.options);
