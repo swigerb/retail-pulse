@@ -68,7 +68,6 @@ function makeConnection(): PlanControllerConnection & {
       bucket.add(handler);
       return () => bucket?.delete(handler);
     },
-    onReconnected: () => () => {},
     emit: (event, payload) => {
       const bucket = handlers.get(event);
       if (!bucket) return;
