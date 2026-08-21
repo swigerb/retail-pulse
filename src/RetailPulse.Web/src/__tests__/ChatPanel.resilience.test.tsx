@@ -9,14 +9,22 @@ const isErrorReplyMock = vi.fn((reply: string) => reply.startsWith('⏳'));
 const cancelChatSessionMock = vi.fn().mockResolvedValue('cancelled');
 const cancelPlanMock = vi.fn().mockResolvedValue('cancelled');
 
-class ChatRequestTimeoutError extends Error {
-  readonly name = 'ChatRequestTimeoutError';
-  readonly timeoutMs: number;
-  constructor(timeoutMs: number) {
-    super('Request timed out');
-    this.timeoutMs = timeoutMs;
+// `vi.mock` factories are hoisted above module-level `class` declarations, so
+// a plain top-level class would be in its temporal dead zone when the
+// `../services/api` factory below evaluates the `ChatRequestTimeoutError`
+// shorthand. `vi.hoisted` runs alongside the hoisted mocks, guaranteeing the
+// class binding exists before the factory runs.
+const { ChatRequestTimeoutError } = vi.hoisted(() => {
+  class ChatRequestTimeoutError extends Error {
+    readonly name = 'ChatRequestTimeoutError';
+    readonly timeoutMs: number;
+    constructor(timeoutMs: number) {
+      super('Request timed out');
+      this.timeoutMs = timeoutMs;
+    }
   }
-}
+  return { ChatRequestTimeoutError };
+});
 
 vi.mock('../services/api', () => ({
   sendMessage: (...args: unknown[]) => sendMessageMock(...args),

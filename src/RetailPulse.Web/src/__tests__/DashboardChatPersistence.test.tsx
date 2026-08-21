@@ -44,6 +44,16 @@ vi.mock('../services/telemetryHub', () => ({
   joinTelemetrySession: (...args: unknown[]) => joinTelemetrySessionMock(...args),
   onProgress: vi.fn(() => () => {}),
   subscribeHubEvent: vi.fn(() => () => {}),
+  // ChatPanel's ConnectionStatusIndicator (issue #92) calls useConnectionStatus,
+  // which pulls these hub-status/heartbeat exports. Stub them so navigation
+  // tests can render the real ChatPanel without needing a live SignalR stack.
+  onHubConnectionStatus: (listener: (s: string) => void) => {
+    listener('connected');
+    return () => {};
+  },
+  onHubHeartbeat: () => () => {},
+  getHubConnectionStatus: () => 'connected',
+  getLastHubHeartbeatAt: () => null,
 }));
 
 // planApi is used by the plan controller wired into the Dashboard (issue #96).

@@ -28,13 +28,21 @@ interface StubConnection {
   __emit: (event: string, payload?: unknown) => void;
 }
 
-const HubConnectionState = {
-  Disconnected: 0,
-  Connecting: 1,
-  Connected: 2,
-  Reconnecting: 3,
-  Disconnecting: 4,
-} as const;
+// `vi.mock('@microsoft/signalr', ...)` is hoisted above this module-level
+// `const`, so referencing `HubConnectionState` directly on the factory's
+// returned object (below) would hit its temporal dead zone when
+// telemetryHub.ts imports @microsoft/signalr during the hoisted `import`
+// on line ~124. `vi.hoisted` runs alongside the hoisted mocks so the
+// binding exists before the factory evaluates.
+const { HubConnectionState } = vi.hoisted(() => ({
+  HubConnectionState: {
+    Disconnected: 0,
+    Connecting: 1,
+    Connected: 2,
+    Reconnecting: 3,
+    Disconnecting: 4,
+  } as const,
+}));
 
 function createStubConnection(): StubConnection {
   let resolveStart!: () => void;
