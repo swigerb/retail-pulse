@@ -106,9 +106,36 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing.AddSource("RetailPulse.Agent").AddSource("RetailPulse.Alerts"))
     .WithMetrics(metrics => metrics.AddMeter(RetailPulseMetrics.MeterName));
 
+// Real-time channel resilience (issue #92) — configurable keep-alive / client-timeout
+// / handshake and an observable application-level heartbeat. Defaults target 15s
+// keepalive with the SignalR-recommended 2x client-timeout so short-lived intermediary
+// idle drops (APIM/ACA ingress/proxies) do not sever an idle connection during a long
+// plan pause. Bound before AddSignalR so the timers reflect the resolved config.
+builder.Services.Configure<RealtimeResilienceOptions>(
+    builder.Configuration.GetSection(RealtimeResilienceOptions.SectionName));
+RealtimeResilienceOptions realtimeOptsAtRegistration = builder.Configuration
+    .GetSection(RealtimeResilienceOptions.SectionName)
+    .Get<RealtimeResilienceOptions>() ?? new RealtimeResilienceOptions();
+
 // SignalR for real-time telemetry
-builder.Services.AddSignalR()
+builder.Services.AddSignalR(hub =>
+    {
+        hub.KeepAliveInterval = realtimeOptsAtRegistration.KeepAliveInterval;
+        hub.ClientTimeoutInterval = realtimeOptsAtRegistration.ClientTimeoutInterval;
+        hub.HandshakeTimeout = realtimeOptsAtRegistration.HandshakeTimeout;
+    })
     .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
+
+// Chat-request timeout ceilings (issue #92) — separate single-shot vs plan values so
+// long-running plan runs don't force us to widen the single-shot ceiling globally.
+builder.Services.Configure<ChatTimeoutOptions>(
+    builder.Configuration.GetSection(ChatTimeoutOptions.SectionName));
+
+// Application-level hub heartbeat emitter (issue #92) — periodically emits an
+// observable heartbeat event on the telemetry and streaming hubs so the frontend
+// can render a stalled/connected signal and tests can assert cadence.
+builder.Services.AddSingleton<HubHeartbeatBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<HubHeartbeatBackgroundService>());
 
 // Session-ownership registry — binds a chat sessionId to its owning subject so the hubs can refuse
 // a caller that tries to join another subject's session group (Finding 6). Consulted only for
