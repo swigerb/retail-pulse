@@ -2,11 +2,13 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Agents.AI.Workflows;
+using RetailPulse.Api.Approval;
 using RetailPulse.Api.Budget;
 using RetailPulse.Api.Charts;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Observability;
 using RetailPulse.Contracts.Persistence;
 using RetailPulse.Contracts.Routing;
@@ -44,20 +46,43 @@ public sealed class PlanExecutor
     private readonly ITraceCollector _traceCollector;
     private readonly PlanPersistenceOptions _options;
     private readonly ILogger<PlanExecutor> _logger;
+    private readonly PlanClarifier? _clarifier;
+    private readonly PlanReviewCoordinator? _reviewCoordinator;
 
     public PlanExecutor(
         IPlanStore planStore,
         ICostTracker costTracker,
         ITraceCollector traceCollector,
         PlanPersistenceOptions options,
-        ILogger<PlanExecutor> logger)
+        ILogger<PlanExecutor> logger,
+        PlanClarifier? clarifier = null,
+        PlanReviewCoordinator? reviewCoordinator = null)
     {
         _planStore = planStore ?? throw new ArgumentNullException(nameof(planStore));
         _costTracker = costTracker ?? throw new ArgumentNullException(nameof(costTracker));
         _traceCollector = traceCollector ?? throw new ArgumentNullException(nameof(traceCollector));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clarifier = clarifier;
+        _reviewCoordinator = reviewCoordinator;
     }
+
+    /// <summary>
+    /// Action-prefix marker a step can use to request a mid-plan clarification.
+    /// Format: <c>[[CLARIFY]] &lt;question&gt; -- rest of action</c>. The executor
+    /// opens a clarification row + framework checkpoint capturing the paused
+    /// plan and halts. The completion service resumes when the reviewer answers.
+    /// </summary>
+    public const string ClarifyMarker = "[[CLARIFY]]";
+
+    /// <summary>
+    /// Action-prefix marker a step can use to force a mid-execution replan.
+    /// Format: <c>[[REPLAN]] &lt;feedback&gt; -- rest of action</c>. The executor
+    /// opens a new plan-review round with the accumulated context as
+    /// revision-reason and halts. The completion service picks up when the
+    /// reviewer decides on the revised plan.
+    /// </summary>
+    public const string ReplanMarker = "[[REPLAN]]";
 
     /// <summary>
     /// Execute an already-validated plan against the caller-supplied specialist
@@ -75,6 +100,31 @@ public sealed class PlanExecutor
         var planSw = Stopwatch.StartNew();
         DateTimeOffset planStart = DateTimeOffset.UtcNow;
 
+        // Suspension sink — set by RunOneStepAsync when it detects a
+        // clarification / replan marker on a step's action.
+        var suspension = new PlanExecutorSuspensionSink();
+
+        // Zero-step short circuit — this happens on a clarification resume
+        // where every step has already run (or the paused step was the last
+        // one). Skip the workflow and finalise immediately as Completed.
+        if (execution.Plan.Steps.Count == 0)
+        {
+            planSw.Stop();
+            await _planStore.UpdatePlanStatusAsync(new PlanStatusUpdate
+            {
+                PlanId = execution.PlanId,
+                Subject = execution.Subject,
+                Status = PlanStatus.Completed,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None).ConfigureAwait(false);
+            return new PlanExecutionOutcome(
+                PlanId: execution.PlanId,
+                Status: PlanStatus.Completed,
+                FailureReason: null,
+                Steps: [],
+                DurationMs: planSw.ElapsedMilliseconds);
+        }
+
         // Build a workflow. Sequential linear graph: each executor takes the
         // accumulated context, invokes the specialist, appends its result, and
         // either forwards to the next step or yields the final output.
@@ -91,7 +141,7 @@ public sealed class PlanExecutor
                 handlerAsync: async (message, context, stepCt) =>
                 {
                     PlanStepResult result = await RunOneStepAsync(
-                        execution, planned, stepIndex, stepId, message, stepCt).ConfigureAwait(false);
+                        execution, planned, stepIndex, stepId, message, suspension, stepCt).ConfigureAwait(false);
                     stepResults.Add(result);
 
                     bool shouldContinue = string.Equals(result.Status, PlanStepStatus.Completed, StringComparison.Ordinal);
@@ -215,6 +265,20 @@ public sealed class PlanExecutor
                     failureReason ??= last.Error ?? $"step {last.StepIndex} ended in {last.Status}";
             }
 
+            // Suspension overrides the derived terminal status: the plan is
+            // NOT terminal — it is waiting for reviewer input via the durable
+            // approval row + framework checkpoint the suspension helper wrote.
+            if (suspension.ClarificationHandle is not null)
+            {
+                terminalStatus = PlanStatus.AwaitingClarification;
+                failureReason = null;
+            }
+            else if (suspension.ReviewHandle is not null)
+            {
+                terminalStatus = PlanStatus.AwaitingReview;
+                failureReason = null;
+            }
+
             // Any steps we haven't yet observed must have been skipped by the workflow halt.
             for (int i = stepResults.Count; i < execution.Plan.Steps.Count; i++)
             {
@@ -256,7 +320,11 @@ public sealed class PlanExecutor
             Status: terminalStatus,
             FailureReason: failureReason,
             Steps: stepResults,
-            DurationMs: planSw.ElapsedMilliseconds);
+            DurationMs: planSw.ElapsedMilliseconds)
+        {
+            ClarificationHandle = suspension.ClarificationHandle,
+            ReviewHandle = suspension.ReviewHandle,
+        };
     }
 
     private async Task<PlanStepResult> RunOneStepAsync(
@@ -265,10 +333,31 @@ public sealed class PlanExecutor
         int stepIndex,
         string stepId,
         PlanStepMessage message,
+        PlanExecutorSuspensionSink suspension,
         CancellationToken workflowCt)
     {
         DateTimeOffset stepStart = DateTimeOffset.UtcNow;
         var sw = Stopwatch.StartNew();
+
+        // Mid-plan clarification / replan signals — detected from a marker
+        // prefix on the step's action so specialists don't need a new
+        // interface. Both suspend the plan through the same durable
+        // Approval/Checkpoint pair the plan-review gate uses.
+        if (planned.Action.TrimStart().StartsWith(ClarifyMarker, StringComparison.Ordinal)
+            && _clarifier is not null)
+        {
+            return await SuspendForClarificationAsync(
+                execution, planned, stepIndex, stepId, message, suspension, sw, stepStart)
+                .ConfigureAwait(false);
+        }
+
+        if (planned.Action.TrimStart().StartsWith(ReplanMarker, StringComparison.Ordinal)
+            && _reviewCoordinator is not null)
+        {
+            return await SuspendForMidPlanReviewAsync(
+                execution, planned, stepIndex, stepId, message, suspension, sw, stepStart)
+                .ConfigureAwait(false);
+        }
 
         // Look up the specialist afresh at execution time so the roster the
         // planner saw and the roster we dispatch through are the same one.
@@ -476,6 +565,167 @@ public sealed class PlanExecutor
             EstimatedCostUsd: 0m,
             Tags: tags));
     }
+
+    // ── Suspension helpers ───────────────────────────────────────────────
+
+    private async Task<PlanStepResult> SuspendForClarificationAsync(
+        PlanExecutionRequest execution,
+        PlannerStep planned,
+        int stepIndex,
+        string stepId,
+        PlanStepMessage message,
+        PlanExecutorSuspensionSink suspension,
+        Stopwatch sw,
+        DateTimeOffset stepStart)
+    {
+        string question = ExtractQuestion(planned.Action, ClarifyMarker);
+
+        IReadOnlyList<PlanReviewStepDto> remaining =
+        [
+            .. execution.Plan.Steps.Skip(stepIndex).Select(s => new PlanReviewStepDto
+            {
+                SpecialistKey = s.SpecialistKey,
+                Intent = s.Intent,
+                Action = s.Action,
+            }),
+        ];
+
+        IReadOnlyList<PlanReviewCompletedStep> completed =
+        [
+            .. message.AccumulatedResults.Select(r => new PlanReviewCompletedStep
+            {
+                StepIndex = r.StepIndex,
+                SpecialistKey = r.SpecialistKey,
+                Intent = r.Intent,
+                Action = r.Action,
+                Result = r.Result,
+                InputTokens = r.InputTokens,
+                OutputTokens = r.OutputTokens,
+                TotalTokens = r.TotalTokens,
+                DurationMs = r.DurationMs,
+            }),
+        ];
+
+        PlanClarificationHandle handle = await _clarifier!.OpenAsync(new PlanClarificationOpenInput
+        {
+            PlanId = execution.PlanId,
+            Subject = execution.Subject,
+            SessionId = execution.SessionId,
+            Request = execution.Request,
+            SpecialistKey = planned.SpecialistKey,
+            Question = question,
+            PausedAtStepIndex = stepIndex,
+            RemainingSteps = remaining,
+            SpecialistKeys = [.. execution.SpecialistLookup.Keys],
+            CompletedSteps = completed,
+            TraceId = execution.TraceId,
+            ParentSpanId = execution.ParentSpanId,
+            PrincipalKey = execution.PrincipalKey,
+        }, CancellationToken.None).ConfigureAwait(false);
+
+        suspension.ClarificationHandle = handle;
+
+        sw.Stop();
+        await _planStore.UpdateStepAsync(new PlanStepUpdate
+        {
+            StepId = stepId,
+            PlanId = execution.PlanId,
+            Subject = execution.Subject,
+            Status = PlanStepStatus.Pending,
+            StartedAt = stepStart,
+        }, CancellationToken.None).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Plan {PlanId} step {StepIndex} suspended for clarification (requestId={RequestId}).",
+            execution.PlanId, stepIndex, handle.RequestId);
+
+        // Return a non-Completed status so the workflow halts here — the
+        // executor closure sees the status and yields terminal.
+        return new PlanStepResult(
+            stepIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
+            PlanStepStatus.Pending, "", null, 0, 0, 0, sw.ElapsedMilliseconds);
+    }
+
+    private async Task<PlanStepResult> SuspendForMidPlanReviewAsync(
+        PlanExecutionRequest execution,
+        PlannerStep planned,
+        int stepIndex,
+        string stepId,
+        PlanStepMessage message,
+        PlanExecutorSuspensionSink suspension,
+        Stopwatch sw,
+        DateTimeOffset stepStart)
+    {
+        string feedback = ExtractQuestion(planned.Action, ReplanMarker);
+
+        IReadOnlyList<PlanReviewStepDto> remaining =
+        [
+            .. execution.Plan.Steps.Skip(stepIndex + 1).Select(s => new PlanReviewStepDto
+            {
+                SpecialistKey = s.SpecialistKey,
+                Intent = s.Intent,
+                Action = s.Action,
+            }),
+        ];
+
+        PlanReviewRoundHandle handle = await _reviewCoordinator!.OpenRoundAsync(new PlanReviewOpenInput
+        {
+            PlanId = execution.PlanId,
+            Subject = execution.Subject,
+            SessionId = execution.SessionId,
+            Request = execution.Request,
+            CurrentSteps = remaining,
+            SpecialistKeys = [.. execution.SpecialistLookup.Keys],
+            DetectedIntents = [],
+            RoundNumber = 0,
+            RevisionReason = "Mid-execution revision requested: " + feedback,
+            TraceId = execution.TraceId,
+            ParentSpanId = execution.ParentSpanId,
+            PrincipalKey = execution.PrincipalKey,
+        }, CancellationToken.None).ConfigureAwait(false);
+
+        suspension.ReviewHandle = handle;
+
+        sw.Stop();
+        _logger.LogInformation(
+            "Plan {PlanId} step {StepIndex} suspended for mid-execution review (requestId={RequestId}).",
+            execution.PlanId, stepIndex, handle.RequestId);
+
+        await _planStore.UpdateStepAsync(new PlanStepUpdate
+        {
+            StepId = stepId,
+            PlanId = execution.PlanId,
+            Subject = execution.Subject,
+            Status = PlanStepStatus.Pending,
+            StartedAt = stepStart,
+        }, CancellationToken.None).ConfigureAwait(false);
+
+        return new PlanStepResult(
+            stepIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
+            PlanStepStatus.Pending, "", null, 0, 0, 0, sw.ElapsedMilliseconds);
+    }
+
+    private static string ExtractQuestion(string action, string marker)
+    {
+        string trimmed = action.TrimStart();
+        if (!trimmed.StartsWith(marker, StringComparison.Ordinal))
+            return action;
+        string rest = trimmed[marker.Length..].TrimStart();
+        return string.IsNullOrWhiteSpace(rest) ? "(no question)" : rest;
+    }
+}
+
+/// <summary>
+/// Mutable sink populated by <see cref="PlanExecutor.RunOneStepAsync"/> when
+/// it detects a clarification / mid-plan replan marker. The presence of a
+/// non-null handle here shifts the final <see cref="PlanExecutionOutcome"/>
+/// away from a terminal status and toward one of the awaiting-* statuses,
+/// which the completion service picks up as a suspension.
+/// </summary>
+internal sealed class PlanExecutorSuspensionSink
+{
+    public PlanClarificationHandle? ClarificationHandle { get; set; }
+    public PlanReviewRoundHandle? ReviewHandle { get; set; }
 }
 
 /// <summary>Input envelope for <see cref="PlanExecutor.ExecuteAsync"/>.</summary>
@@ -501,7 +751,25 @@ public sealed record PlanExecutionOutcome(
     string Status,
     string? FailureReason,
     IReadOnlyList<PlanStepResult> Steps,
-    long DurationMs);
+    long DurationMs)
+{
+    /// <summary>
+    /// Set when the executor paused a plan for a mid-plan clarification
+    /// ([[CLARIFY]] step marker). Non-null implies <see cref="Status"/> is
+    /// <c>PlanStatus.AwaitingClarification</c> and the caller must NOT
+    /// treat the outcome as terminal — the resume path continues from the
+    /// paused step after the reviewer answers.
+    /// </summary>
+    public Approval.PlanClarificationHandle? ClarificationHandle { get; init; }
+
+    /// <summary>
+    /// Set when the executor paused a plan for a mid-execution replan
+    /// ([[REPLAN]] step marker). Non-null implies <see cref="Status"/> is
+    /// <c>PlanStatus.AwaitingReview</c> and a new plan-review round is
+    /// waiting for the reviewer.
+    /// </summary>
+    public Approval.PlanReviewRoundHandle? ReviewHandle { get; init; }
+}
 
 /// <summary>Per-step transcript captured during workflow execution.</summary>
 public sealed record PlanStepResult(

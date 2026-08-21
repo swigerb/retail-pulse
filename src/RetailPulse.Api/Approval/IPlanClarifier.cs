@@ -27,6 +27,11 @@ public interface IPlanClarifier
     /// <see cref="PlanClarificationResult.IsAnswered"/> is false only for
     /// timeouts, orphaned rows, or unusable answers, and the caller records that
     /// terminal state without hanging.
+    ///
+    /// <para>Retained for coordinator-level tests. Production callers use
+    /// <see cref="PlanClarifier.OpenAsync"/> (non-blocking) + endpoint /
+    /// completion-service resume to avoid holding a request thread on the
+    /// clarification timeout.</para>
     /// </summary>
     Task<PlanClarificationResult> AskAsync(
         PlanClarificationPrompt prompt,

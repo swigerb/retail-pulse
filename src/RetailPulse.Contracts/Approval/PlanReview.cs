@@ -94,6 +94,71 @@ public sealed record PlanClarificationAnswer
 }
 
 /// <summary>
+/// Durable snapshot the plan review coordinator writes into the
+/// Microsoft.Agents.AI.Workflows checkpoint store at every suspension point.
+/// Captures everything a fresh process needs to resume execution when the
+/// human decision arrives — the proposed step list for this round, the
+/// caller identity, the request text, the roster keys the planner saw, and
+/// the current round number. Serialized as JSON so
+/// <c>ICheckpointStore&lt;JsonElement&gt;.CreateCheckpointAsync</c> can persist
+/// it verbatim.
+/// </summary>
+public sealed record PlanReviewCheckpointState
+{
+    /// <summary>Discriminator: <c>review</c> or <c>clarification</c>.</summary>
+    public required string Kind { get; init; }
+    public required string PlanId { get; init; }
+    public required string Subject { get; init; }
+    public string? SessionId { get; init; }
+    public string? TenantId { get; init; }
+    public required string Request { get; init; }
+    public required int RoundNumber { get; init; }
+    public required IReadOnlyList<PlanReviewStepDto> Steps { get; init; }
+    public required IReadOnlyList<string> SpecialistKeys { get; init; }
+    public IReadOnlyList<string> DetectedIntents { get; init; } = [];
+    public string? TraceId { get; init; }
+    public string? ParentSpanId { get; init; }
+    public string? PrincipalKey { get; init; }
+    public required string ApprovalRequestId { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public string? RevisionReason { get; init; }
+
+    // Clarification-only fields, null on plain plan-review checkpoints.
+    public int? PausedAtStepIndex { get; init; }
+    public IReadOnlyList<PlanReviewCompletedStep>? CompletedSteps { get; init; }
+}
+
+/// <summary>
+/// Snapshot of a plan step that already ran (Completed / Failed / Skipped)
+/// before the plan suspended for clarification. Persisted inside
+/// <see cref="PlanReviewCheckpointState.CompletedSteps"/> so the resume path
+/// can rebuild the accumulated context without re-running earlier specialists.
+/// </summary>
+public sealed record PlanReviewCompletedStep
+{
+    public required int StepIndex { get; init; }
+    public required string SpecialistKey { get; init; }
+    public required string Intent { get; init; }
+    public required string Action { get; init; }
+    public required string Result { get; init; }
+    public int InputTokens { get; init; }
+    public int OutputTokens { get; init; }
+    public int TotalTokens { get; init; }
+    public long DurationMs { get; init; }
+}
+
+/// <summary>
+/// Kinds recorded on <see cref="PlanReviewCheckpointState.Kind"/> so the
+/// resume path can dispatch to the right handler without re-reading the
+/// approval row.
+/// </summary>
+public static class PlanCheckpointKind
+{
+    public const string Review = "review";
+    public const string Clarification = "clarification";
+}
+
+/// <summary>
 /// Terminal reason strings written into
 /// <see cref="ApprovalResult.TerminalReason"/> and mirrored into the plan store's
 /// <c>FailureReason</c> column so the endpoint layer can render a specific

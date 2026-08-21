@@ -1,5 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -15,10 +17,13 @@ namespace RetailPulse.Tests.Approval;
 public sealed class PlanClarifierTests : IDisposable
 {
     private readonly string _dbPath;
+    private readonly string _checkpointDir;
 
     public PlanClarifierTests()
     {
         _dbPath = Path.Combine(Path.GetTempPath(), $"plan_clarify_{Guid.NewGuid():N}.db");
+        _checkpointDir = Path.Combine(Path.GetTempPath(), $"plan_clarify_ckpt_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_checkpointDir);
     }
 
     public void Dispose()
@@ -26,6 +31,7 @@ public sealed class PlanClarifierTests : IDisposable
         try { File.Delete(_dbPath); } catch { }
         try { File.Delete(_dbPath + "-wal"); } catch { }
         try { File.Delete(_dbPath + "-shm"); } catch { }
+        try { Directory.Delete(_checkpointDir, recursive: true); } catch { }
     }
 
     private static readonly JsonSerializerOptions _json = new()
@@ -38,8 +44,16 @@ public sealed class PlanClarifierTests : IDisposable
         new(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>(),
             TimeSpan.FromSeconds(30), TimeProvider.System);
 
+    private PlanReviewCheckpointService CreateCheckpointService()
+    {
+        FileSystemJsonCheckpointStore store =
+            new(new DirectoryInfo(_checkpointDir));
+        CheckpointManager manager = CheckpointManager.CreateJson(store, customOptions: null);
+        return new PlanReviewCheckpointService(store, manager, Mock.Of<ILogger<PlanReviewCheckpointService>>());
+    }
+
     private PlanClarifier CreateClarifier(SqliteApprovalGate gate, PlanReviewOptions options) =>
-        new(gate, Options.Create(options), Mock.Of<ILogger<PlanClarifier>>());
+        new(gate, Options.Create(options), CreateCheckpointService(), Mock.Of<ILogger<PlanClarifier>>());
 
     [Fact]
     public async Task Clarification_round_trip_returns_reviewer_answer()

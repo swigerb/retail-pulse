@@ -60,10 +60,13 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
         new(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>(),
             defaultTimeout ?? TimeSpan.FromSeconds(30), TimeProvider.System);
 
-    private CheckpointManager CreateCheckpointManager() =>
-        CheckpointManager.CreateJson(
-            new FileSystemJsonCheckpointStore(new DirectoryInfo(_checkpointDir)),
-            customOptions: null);
+    private PlanReviewCheckpointService CreateCheckpointService()
+    {
+        FileSystemJsonCheckpointStore store =
+            new(new DirectoryInfo(_checkpointDir));
+        CheckpointManager manager = CheckpointManager.CreateJson(store, customOptions: null);
+        return new PlanReviewCheckpointService(store, manager, Mock.Of<ILogger<PlanReviewCheckpointService>>());
+    }
 
     private PlanReviewCoordinator CreateCoordinator(
         SqliteApprovalGate gate,
@@ -73,7 +76,7 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
         new(
             gate,
             Options.Create(options),
-            CreateCheckpointManager(),
+            CreateCheckpointService(),
             Mock.Of<ILogger<PlanReviewCoordinator>>(),
             replanner: replanner,
             timeProvider: clock);

@@ -14,6 +14,9 @@ public static class PlanStatus
     /// <summary>Planner returned a plan awaiting explicit human review (#94 hook).</summary>
     public const string AwaitingReview = "awaiting_review";
 
+    /// <summary>Plan execution paused mid-step for a clarification / mid-plan replan (#94).</summary>
+    public const string AwaitingClarification = "awaiting_clarification";
+
     /// <summary>At least one step is executing; the plan has not reached a terminal state.</summary>
     public const string Running = "running";
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using RetailPulse.Api.Approval;
 using RetailPulse.Api.Auth;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Persistence;
@@ -69,6 +70,7 @@ public static class PlanReviewEndpoints
             IPlanStore planStore,
             IHubContext<TelemetryHub> hubContext,
             HttpContext http,
+            [FromServices] PlanReviewCompletionService? completion,
             CancellationToken ct) =>
         {
             if (RefuseAnonymous(http, out IResult? refusal))
@@ -100,8 +102,10 @@ public static class PlanReviewEndpoints
                 !string.Equals(row.Context.PlanId, planId, StringComparison.Ordinal) ||
                 !string.Equals(row.Context.Kind, ApprovalKind.PlanReview, StringComparison.Ordinal))
             {
-                // Cross-subject probe or wrong plan — return 404 shape so the
-                // endpoint cannot be used to enumerate someone else's plans.
+                // Cross-subject probe, wrong plan, or wrong kind — return 404
+                // so the endpoint cannot be used to probe another subject's
+                // plans. Row is left untouched: we never invoke RespondAsync
+                // on a row the caller does not own.
                 return Results.NotFound(new { error = "Plan review not found." });
             }
 
@@ -139,6 +143,16 @@ public static class PlanReviewEndpoints
             };
 
             await hubContext.Clients.All.SendAsync("plan_review_resolved", responseDto, ct);
+
+            // Drive the plan through the resume path so the reviewer's
+            // decision produces a real final response (execute the effective
+            // plan, filter, persist, broadcast). ResolveAsync is idempotent
+            // and short-circuits when the plan is already terminal.
+            if (completion is not null)
+            {
+                _ = KickoffCompletionAsync(completion, planId, subject);
+            }
+
             return Results.Ok(responseDto);
         })
         .WithName("DecidePlanReview")
@@ -156,6 +170,7 @@ public static class PlanReviewEndpoints
             IApprovalGate gate,
             IPlanStore planStore,
             HttpContext http,
+            [FromServices] PlanReviewCompletionService? completion,
             CancellationToken ct) =>
         {
             if (RefuseAnonymous(http, out IResult? refusal))
@@ -185,6 +200,11 @@ public static class PlanReviewEndpoints
                 responsePayload: payloadJson,
                 ct: ct);
 
+            if (completion is not null)
+            {
+                _ = KickoffCompletionAsync(completion, planId, subject);
+            }
+
             return Results.Ok(new
             {
                 requestId = result.RequestId,
@@ -203,6 +223,26 @@ public static class PlanReviewEndpoints
         .RequireRateLimiting("moderate");
 
         return app;
+    }
+
+    /// <summary>
+    /// Fire-and-forget resume driver used from the decision / answer endpoints.
+    /// Swallowed exceptions are logged inside the completion service — a
+    /// failure MUST NOT surface as a 5xx to the reviewer because the
+    /// authoritative row is already terminal at this point.
+    /// </summary>
+    private static async Task KickoffCompletionAsync(
+        PlanReviewCompletionService completion, string planId, string subject)
+    {
+        try
+        {
+            await completion.ResolveAsync(planId, subject);
+        }
+        catch
+        {
+            // Errors are captured by the completion service's own logger; the
+            // restart recovery service will pick up the plan on next boot.
+        }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────

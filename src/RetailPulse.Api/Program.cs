@@ -1131,7 +1131,9 @@ if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
             sp.GetRequiredService<ICostTracker>(),
             sp.GetRequiredService<ITraceCollector>(),
             opts.Value,
-            sp.GetRequiredService<ILogger<PlanExecutor>>());
+            sp.GetRequiredService<ILogger<PlanExecutor>>(),
+            sp.GetService<PlanClarifier>(),
+            sp.GetService<PlanReviewCoordinator>());
     });
     builder.Services.AddScoped(sp =>
     {
@@ -1173,17 +1175,25 @@ if (planReviewOptsAtRegistration.Enabled)
     Directory.CreateDirectory(reviewCheckpointDir);
     // Framework checkpoint store lives on the same durable data directory as
     // every other SQLite store the API writes. One JSON file per session id.
-    builder.Services.AddSingleton(_ =>
+    // Register the store itself + the CheckpointManager wrapper — both are
+    // needed because our PlanReviewCheckpointService calls
+    // ICheckpointStore.CreateCheckpointAsync (real write path) and
+    // CheckpointManager.GetLatestCheckpointAsync (read helper).
+    builder.Services.AddSingleton<Microsoft.Agents.AI.Workflows.Checkpointing.ICheckpointStore<System.Text.Json.JsonElement>>(_ =>
+        new Microsoft.Agents.AI.Workflows.Checkpointing.FileSystemJsonCheckpointStore(
+            new DirectoryInfo(reviewCheckpointDir)));
+    builder.Services.AddSingleton(sp =>
     {
-        var store = new Microsoft.Agents.AI.Workflows.Checkpointing.FileSystemJsonCheckpointStore(
-            new DirectoryInfo(reviewCheckpointDir));
+        var store = sp.GetRequiredService<
+            Microsoft.Agents.AI.Workflows.Checkpointing.ICheckpointStore<System.Text.Json.JsonElement>>();
         return Microsoft.Agents.AI.Workflows.CheckpointManager.CreateJson(store, customOptions: null);
     });
+    builder.Services.AddSingleton<PlanReviewCheckpointService>();
 
     builder.Services.AddScoped(sp => new PlanReviewCoordinator(
             sp.GetRequiredService<IApprovalGate>(),
             sp.GetRequiredService<IOptions<PlanReviewOptions>>(),
-            sp.GetRequiredService<Microsoft.Agents.AI.Workflows.CheckpointManager>(),
+            sp.GetRequiredService<PlanReviewCheckpointService>(),
             sp.GetRequiredService<ILogger<PlanReviewCoordinator>>(),
             sp.GetService<IPlanReviewReplanner>(),
             sp.GetRequiredService<TimeProvider>()));
@@ -1197,13 +1207,23 @@ if (planReviewOptsAtRegistration.Enabled)
         builder.Services.AddScoped<IPlanReviewReplanner, PlanBuilderReplanner>();
     }
 
-    builder.Services.AddSingleton<IPlanClarifier, PlanClarifier>();
+    // Register the concrete first so the completion service can inject the
+    // real class (it needs OpenAsync/InterpretAnswer which live on the
+    // implementation, not the interface). The interface points at the same
+    // singleton.
+    builder.Services.AddSingleton<PlanClarifier>();
+    builder.Services.AddSingleton<IPlanClarifier>(sp => sp.GetRequiredService<PlanClarifier>());
 
     // Swap the reconciliation resume strategy for the plan-aware one. Tool rows
     // still orphan terminally; plan-review / clarification rows are adopted so
     // the human decision arriving after a restart proceeds normally.
     builder.Services.RemoveAll<IApprovalResumeStrategy>();
     builder.Services.AddSingleton<IApprovalResumeStrategy, PlanReviewResumeStrategy>();
+
+    // Wave 2: durable completion service + restart recovery + timeout sweep.
+    builder.Services.AddSingleton<PlanReviewCompletionService>();
+    builder.Services.AddHostedService<PlanReviewRestartRecoveryService>();
+    builder.Services.AddHostedService<PlanReviewTimeoutBackgroundService>();
 }
 
 // Register ExplainabilityService (singleton for cross-request trace storage)

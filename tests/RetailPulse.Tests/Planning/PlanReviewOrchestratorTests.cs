@@ -134,19 +134,22 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
         return (m.Object, invocations);
     }
 
-    private CheckpointManager CreateCheckpointManager() =>
-        CheckpointManager.CreateJson(
-            new FileSystemJsonCheckpointStore(new DirectoryInfo(_checkpointDir)),
-            customOptions: null);
+    private PlanReviewCheckpointService CreateCheckpointService()
+    {
+        FileSystemJsonCheckpointStore store =
+            new(new DirectoryInfo(_checkpointDir));
+        CheckpointManager manager = CheckpointManager.CreateJson(store, customOptions: null);
+        return new PlanReviewCheckpointService(store, manager, NullLogger<PlanReviewCheckpointService>.Instance);
+    }
 
     private SqliteApprovalGate CreateGate() =>
         new(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>(),
             TimeSpan.FromSeconds(30), TimeProvider.System);
 
-    // ── Edit path — edited plan is what executes ─────────────────────────
+    // ── Edit path — orchestrator suspends; reviewer decides ─────────────
 
     [Fact]
-    public async Task Edited_plan_is_what_actually_executes()
+    public async Task RunAsync_review_enabled_suspends_without_blocking_and_writes_checkpoint()
     {
         SqliteApprovalGate gate = CreateGate();
         var options = new PlanReviewOptions
@@ -155,10 +158,11 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
             DefaultReviewTimeout = TimeSpan.FromSeconds(30),
             MaxReplanRounds = 0,
         };
+        PlanReviewCheckpointService checkpoints = CreateCheckpointService();
         var coord = new PlanReviewCoordinator(
             gate,
             Options.Create(options),
-            CreateCheckpointManager(),
+            checkpoints,
             NullLogger<PlanReviewCoordinator>.Instance,
             replanner: null,
             timeProvider: TimeProvider.System);
@@ -182,7 +186,7 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
             ["demand-forecasting"] = s2,
         };
 
-        Task<PlanOrchestrationResult> runTask = orchestrator.RunAsync(new PlanOrchestrationInput
+        PlanOrchestrationResult result = await orchestrator.RunAsync(new PlanOrchestrationInput
         {
             Request = new ChatRequest("multi", SessionId: "s"),
             Subject = "user-1",
@@ -194,31 +198,33 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
             TraceId = "t",
         }, CancellationToken.None);
 
-        ApprovalRequest reviewRow = await WaitForPending(gate, "user-1");
+        // The orchestrator is now non-blocking. Enabled review returns
+        // Suspended immediately with the review request id + round.
+        result.IsSuspended.Should().BeTrue();
+        result.Status.Should().Be(PlanStatus.AwaitingReview);
+        result.ReviewRequestId.Should().NotBeNullOrWhiteSpace();
+        result.ReviewRoundNumber.Should().Be(0);
 
-        // Reviewer EDITS the plan: drops demand-forecasting, changes scorecard action.
-        var edited = new List<PlanReviewStepDto>
-        {
-            new() { SpecialistKey = "scorecard", Intent = "scorecard", Action = "EDITED_SCORECARD_ACTION" },
-        };
-        var payload = new PlanReviewResponsePayload { Kind = PlanReviewKinds.Edit, EditedSteps = edited };
-        await gate.RespondAsync(reviewRow.RequestId, ApprovalDecision.Modified,
-            "trimmed", responsePayload: JsonSerializer.Serialize(payload, _json));
+        // No specialist ran — the plan is waiting for reviewer input.
+        s1Invocations.Should().BeEmpty();
+        s2Invocations.Should().BeEmpty();
 
-        PlanOrchestrationResult result = await runTask;
-        result.Status.Should().Be(PlanStatus.Completed);
-        result.Steps.Should().HaveCount(1, "the edited plan has one step; the demand step must not have executed.");
-
-        s1Invocations.Should().HaveCount(1);
-        s1Invocations.Single().Message.Should().Contain("EDITED_SCORECARD_ACTION",
-            "specialist prompt must include the reviewer's edited action, not the planner's original.");
-        s2Invocations.Should().BeEmpty("dropped steps must never invoke their specialist.");
-
-        // Plan persistence should show ONE Create with the edited step list.
+        // Plan record persisted as AwaitingReview with the ORIGINAL planner
+        // steps captured on disk; the executor never touches steps until the
+        // completion service resumes.
         store.Creates.Should().HaveCount(1);
         PlanWrite create = store.Creates.Single();
-        create.Steps.Should().HaveCount(1);
-        create.Steps.Single().Action.Should().Be("EDITED_SCORECARD_ACTION");
+        create.Status.Should().Be(PlanStatus.AwaitingReview);
+        create.Steps.Should().HaveCount(2);
+
+        // Real framework checkpoint written for this plan.
+        PlanReviewCheckpointState? loaded = await checkpoints.LoadLatestAsync(result.PlanId, CancellationToken.None);
+        loaded.Should().NotBeNull();
+        loaded!.Kind.Should().Be(PlanCheckpointKind.Review);
+        loaded.PlanId.Should().Be(result.PlanId);
+        loaded.RoundNumber.Should().Be(0);
+        loaded.Steps.Should().HaveCount(2);
+        loaded.SpecialistKeys.Should().BeEquivalentTo(new[] { "scorecard", "demand-forecasting" });
     }
 
     // ── Reject-with-cap → no specialist invocation, terminal Failed row ─
@@ -236,7 +242,7 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
         var coord = new PlanReviewCoordinator(
             gate,
             Options.Create(options),
-            CreateCheckpointManager(),
+            CreateCheckpointService(),
             NullLogger<PlanReviewCoordinator>.Instance,
             replanner: null,
             timeProvider: TimeProvider.System);
@@ -260,7 +266,7 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
             ["demand-forecasting"] = s2,
         };
 
-        Task<PlanOrchestrationResult> runTask = orchestrator.RunAsync(new PlanOrchestrationInput
+        PlanOrchestrationResult suspend = await orchestrator.RunAsync(new PlanOrchestrationInput
         {
             Request = new ChatRequest("multi", SessionId: "s"),
             Subject = "user-1",
@@ -272,19 +278,10 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
             TraceId = "t",
         }, CancellationToken.None);
 
-        ApprovalRequest reviewRow = await WaitForPending(gate, "user-1");
-        var payload = new PlanReviewResponsePayload { Kind = PlanReviewKinds.Reject, Feedback = "no" };
-        await gate.RespondAsync(reviewRow.RequestId, ApprovalDecision.Rejected,
-            "no", responsePayload: JsonSerializer.Serialize(payload, _json));
-
-        PlanOrchestrationResult result = await runTask;
-
-        result.Status.Should().Be(PlanStatus.Failed);
-        result.FailureReason.Should().Contain(PlanReviewTerminalReason.ReplanExhausted);
+        suspend.IsSuspended.Should().BeTrue();
         s1Invocations.Should().BeEmpty("terminal reject before execution — no specialist ran.");
         s2Invocations.Should().BeEmpty();
 
-        store.StatusUpdates.Should().Contain(u => u.Status == PlanStatus.Failed);
         // Persisted plan initially recorded as AwaitingReview.
         store.Creates.Single().Status.Should().Be(PlanStatus.AwaitingReview);
     }

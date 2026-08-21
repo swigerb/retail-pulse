@@ -41,39 +41,33 @@ public sealed class PlanBuilderReplanner : IPlanReviewReplanner
 /// <summary>
 /// Runs the durable plan review gate (#94). Owns the single resume mechanism the
 /// design review pinned: a Microsoft.Agents.AI.Workflows checkpoint captured by
-/// <see cref="CheckpointManager"/> during the review pause, integrated through
+/// <see cref="ICheckpointStore{TStoreObject}"/> during the review pause, integrated through
 /// the #91 <see cref="IApprovalGate"/> so plan and tool approvals share one
 /// audit trail and one restart posture.
 ///
 /// <para>
-/// Flow per plan:
+/// The coordinator exposes two shapes:
 /// </para>
-/// <list type="number">
-///   <item>Serialize the current proposal (round N) into an
-///     <see cref="ApprovalContext.Payload"/> and open a durable approval row
-///     with <see cref="ApprovalKind.PlanReview"/> and <see cref="ApprovalContext.RoundNumber"/> = N.</item>
-///   <item>Persist a workflow checkpoint via <see cref="CheckpointManager"/> using
-///     session id = <c>planId</c>. The checkpoint captures the workflow's paused
-///     state; the durable source of truth for the reviewer decision is the
-///     approval row.</item>
-///   <item>Block on <see cref="IApprovalGate.WaitForApprovalAsync"/> with the
-///     configured review timeout. A restart during this wait leaves the row
-///     Pending; reconciliation adopts it via
-///     <see cref="PlanReviewResumeStrategy"/> and the new-instance endpoint
-///     receives the decision and resumes execution directly.</item>
-///   <item>Interpret the decision:
-///     <list type="bullet">
-///       <item><c>Approve</c> → return the current steps as the final plan.</item>
-///       <item><c>Edit</c> → validate the edited steps against the live roster
-///         and return them as the final plan.</item>
-///       <item><c>Reject</c> with feedback → if round N &lt; MaxReplanRounds,
-///         invoke the planner with the feedback appended and loop to step 1
-///         with N+1. Otherwise terminate with
-///         <see cref="PlanReviewTerminalReason.ReplanExhausted"/>.</item>
-///       <item><c>Timeout</c> → terminate with
-///         <see cref="PlanReviewTerminalReason.ReviewTimedOut"/>.</item>
-///     </list>
-///   </item>
+/// <list type="bullet">
+///   <item><see cref="OpenRoundAsync"/> — non-blocking primitive. Opens the
+///     approval row and writes a real framework checkpoint at the same time,
+///     then returns immediately. This is the production path: no thread
+///     is blocked while the reviewer thinks, and a process restart between
+///     open and decide is invisible to the resume path because the durable
+///     approval row + checkpoint together are enough to continue.</item>
+///   <item><see cref="EvaluateDecisionAsync"/> — non-blocking primitive.
+///     Consumes a persisted <see cref="ApprovalResult"/> and returns either
+///     an approved outcome (with the effective step list), a terminal
+///     failure, or a request to replan and re-open the next round. Called
+///     by <see cref="PlanReviewCompletionService"/> after the decision
+///     endpoint records the reviewer response, and by the boot-time
+///     recovery service for decisions that arrived while the API was down.</item>
+///   <item><see cref="CoordinateAsync"/> — the pre-existing looping wrapper.
+///     Kept because coordinator-level tests exercise the review loop with an
+///     immediate-response gate; it now delegates to the non-blocking
+///     primitives so the production semantics (real checkpoint written,
+///     replan cap enforced, reject/approve/edit shape) are the same in both
+///     paths.</item>
 /// </list>
 /// </summary>
 public sealed class PlanReviewCoordinator
@@ -81,7 +75,7 @@ public sealed class PlanReviewCoordinator
     private readonly IApprovalGate _gate;
     private readonly IPlanReviewReplanner? _replanner;
     private readonly PlanReviewOptions _options;
-    private readonly CheckpointManager _checkpointManager;
+    private readonly PlanReviewCheckpointService _checkpoints;
     private readonly ILogger<PlanReviewCoordinator> _logger;
     private readonly TimeProvider _timeProvider;
 
@@ -94,23 +88,241 @@ public sealed class PlanReviewCoordinator
     public PlanReviewCoordinator(
         IApprovalGate gate,
         IOptions<PlanReviewOptions> options,
-        CheckpointManager checkpointManager,
+        PlanReviewCheckpointService checkpoints,
         ILogger<PlanReviewCoordinator> logger,
         IPlanReviewReplanner? replanner = null,
         TimeProvider? timeProvider = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-        _checkpointManager = checkpointManager ?? throw new ArgumentNullException(nameof(checkpointManager));
+        _checkpoints = checkpoints ?? throw new ArgumentNullException(nameof(checkpoints));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _replanner = replanner;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    /// <summary>Configured maximum replan rounds — exposed so the completion service can enforce the same cap.</summary>
+    public int MaxReplanRounds => _options.MaxReplanRounds;
+
+    /// <summary>Configured review round timeout — exposed so the sweep and completion services agree on the same deadline.</summary>
+    public TimeSpan DefaultReviewTimeout => _options.DefaultReviewTimeout;
+
+    // ── Non-blocking primitives ────────────────────────────────────────────
+
+    /// <summary>
+    /// Open one review round: persist a real Microsoft.Agents.AI.Workflows
+    /// checkpoint capturing everything needed to resume in a new host, then
+    /// open the durable approval row that carries the reviewer decision. The
+    /// caller receives the request id + checkpoint id and immediately returns
+    /// — no thread is blocked while the reviewer decides.
+    ///
+    /// <para>
+    /// Ordering is deliberate: the checkpoint is written BEFORE the approval
+    /// row so a crash between the two leaves the checkpoint orphaned (safe),
+    /// but a decision endpoint never sees an approval row that does not have
+    /// a checkpoint behind it. The resume path treats a missing checkpoint as
+    /// a hard fault instead of guessing.
+    /// </para>
+    /// </summary>
+    public async Task<PlanReviewRoundHandle> OpenRoundAsync(
+        PlanReviewOpenInput input, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentException.ThrowIfNullOrWhiteSpace(input.PlanId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(input.Subject);
+        ArgumentNullException.ThrowIfNull(input.CurrentSteps);
+        ArgumentNullException.ThrowIfNull(input.SpecialistKeys);
+
+        var proposal = new PlanReviewProposal
+        {
+            PlanId = input.PlanId,
+            RoundNumber = input.RoundNumber,
+            Request = input.Request,
+            Steps = input.CurrentSteps,
+            RevisionReason = input.RevisionReason,
+        };
+
+        // Framework checkpoint first — genuine ICheckpointStore.CreateCheckpointAsync
+        // call, not a JSON marker written next to it. If this throws the row
+        // is never opened and the caller receives the error verbatim.
+        var checkpointState = new PlanReviewCheckpointState
+        {
+            Kind = PlanCheckpointKind.Review,
+            PlanId = input.PlanId,
+            Subject = input.Subject,
+            SessionId = input.SessionId,
+            TenantId = input.TenantId,
+            Request = input.Request,
+            RoundNumber = input.RoundNumber,
+            Steps = input.CurrentSteps,
+            SpecialistKeys = [.. input.SpecialistKeys],
+            DetectedIntents = input.DetectedIntents,
+            TraceId = input.TraceId,
+            ParentSpanId = input.ParentSpanId,
+            PrincipalKey = input.PrincipalKey,
+            ApprovalRequestId = string.Empty,
+            CreatedAt = _timeProvider.GetUtcNow(),
+            RevisionReason = input.RevisionReason,
+        };
+
+        CheckpointInfo checkpoint = await _checkpoints.SaveAsync(checkpointState, ct).ConfigureAwait(false);
+
+        var context = new ApprovalContext(
+            AgentId: "plan-review",
+            UserId: input.Subject,
+            Action: BuildActionLabel(input.RoundNumber, input.CurrentSteps.Count),
+            Impact: BuildImpactLabel(input.CurrentSteps),
+            Urgency: "medium",
+            Reasoning: input.RevisionReason ?? "Initial plan proposal awaiting reviewer decision.",
+            SessionId: input.SessionId,
+            ConversationId: null,
+            Kind: ApprovalKind.PlanReview,
+            PlanId: input.PlanId,
+            RoundNumber: input.RoundNumber,
+            Payload: JsonSerializer.Serialize(proposal, _jsonOptions));
+
+        ApprovalRequest request = await _gate.RequestApprovalAsync(context, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Plan {PlanId} review round {Round} opened (requestId={RequestId}, subject={Subject}, checkpoint={CheckpointId}).",
+            input.PlanId, input.RoundNumber, request.RequestId, input.Subject, checkpoint.CheckpointId);
+
+        return new PlanReviewRoundHandle(
+            RequestId: request.RequestId,
+            CheckpointId: checkpoint.CheckpointId,
+            RoundNumber: input.RoundNumber,
+            CreatedAt: request.CreatedAt,
+            ExpiresAt: request.ExpiresAt);
+    }
+
+    /// <summary>
+    /// Non-blocking decision interpreter. Consumes a persisted
+    /// <see cref="ApprovalResult"/> for a round and returns:
+    /// <list type="bullet">
+    ///   <item><c>Approved(steps)</c> — reviewer approved (possibly with edits) and
+    ///     the effective plan is ready to execute.</item>
+    ///   <item><c>Terminal(reason, msg)</c> — final decision that does NOT execute
+    ///     (timeout, replan exhausted, edit invalid, edited to empty).</item>
+    ///   <item><c>NeedsReplan(feedback)</c> — reviewer rejected and the cap has
+    ///     not been reached. The caller invokes the replanner and calls
+    ///     <see cref="OpenRoundAsync"/> for round N+1.</item>
+    /// </list>
+    /// </summary>
+    public PlanReviewContinuation EvaluateDecision(
+        PlanReviewEvaluationInput input,
+        ApprovalResult result)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(result);
+
+        if (result.Decision == ApprovalDecision.TimedOut)
+        {
+            return PlanReviewContinuation.Terminal(
+                PlanReviewTerminalReason.ReviewTimedOut,
+                "Review timed out — no reviewer decision received.",
+                input.RoundNumber);
+        }
+
+        if (result.Decision == ApprovalDecision.Orphaned)
+        {
+            return PlanReviewContinuation.Terminal(
+                PlanReviewTerminalReason.ReviewTimedOut,
+                "Review orphaned by reconciliation before adoption completed.",
+                input.RoundNumber);
+        }
+
+        PlanReviewResponsePayload payload = ParseResponsePayload(result.ResponsePayload, result.Decision);
+
+        switch (payload.Kind)
+        {
+            case PlanReviewKinds.Approve:
+                return PlanReviewContinuation.Approved(
+                    input.CurrentSteps,
+                    PlanReviewTerminalReason.ReviewerApproved,
+                    input.RoundNumber);
+
+            case PlanReviewKinds.Edit:
+                {
+                    IReadOnlyList<PlanReviewStepDto> edited =
+                        payload.EditedSteps ?? input.CurrentSteps;
+                    string? invalid = ValidateEditedSteps(edited, input.SpecialistKeys);
+                    if (invalid is not null)
+                    {
+                        return PlanReviewContinuation.Terminal(
+                            invalid,
+                            invalid == PlanReviewTerminalReason.EditedToEmpty
+                                ? "Reviewer dropped every step."
+                                : "Reviewer edit referenced an unknown specialist or missing action.",
+                            input.RoundNumber);
+                    }
+                    return PlanReviewContinuation.Approved(
+                        edited,
+                        PlanReviewTerminalReason.ReviewerEdited,
+                        input.RoundNumber);
+                }
+
+            case PlanReviewKinds.Reject:
+                if (input.RoundNumber >= _options.MaxReplanRounds)
+                {
+                    return PlanReviewContinuation.Terminal(
+                        PlanReviewTerminalReason.ReplanExhausted,
+                        $"Replan budget exhausted after round {input.RoundNumber + 1}.",
+                        input.RoundNumber);
+                }
+                return PlanReviewContinuation.NeedsReplan(payload.Feedback, input.RoundNumber);
+
+            default:
+                _logger.LogWarning(
+                    "Plan {PlanId} received unknown response kind '{Kind}' at round {Round}; treating as reject.",
+                    input.PlanId, payload.Kind, input.RoundNumber);
+                if (input.RoundNumber >= _options.MaxReplanRounds)
+                {
+                    return PlanReviewContinuation.Terminal(
+                        PlanReviewTerminalReason.ReplanExhausted,
+                        "Reviewer response was unrecognizable and replan budget is exhausted.",
+                        input.RoundNumber);
+                }
+                return PlanReviewContinuation.NeedsReplan(payload.Feedback, input.RoundNumber);
+        }
+    }
+
+    /// <summary>
+    /// Convenience wrapper the completion service uses: invokes the
+    /// replanner with the feedback appended to the original request. Returns
+    /// null when no replanner is registered so the caller can terminate with
+    /// <see cref="PlanReviewTerminalReason.ReplanExhausted"/> instead of
+    /// silently continuing.
+    /// </summary>
+    public async Task<PlanBuildResult?> ReplanAsync(
+        string originalRequest,
+        string? feedback,
+        IReadOnlyList<Contracts.Routing.ISpecialistAgent>? roster,
+        IReadOnlyList<string> detectedIntents,
+        CancellationToken ct)
+    {
+        if (_replanner is null || roster is null || roster.Count == 0)
+        {
+            _logger.LogWarning(
+                "Replan requested but planner/roster missing — coordinator cannot revise the plan.");
+            return null;
+        }
+
+        string revised = BuildRevisedRequest(originalRequest, feedback ?? string.Empty);
+        return await _replanner.ReplanAsync(revised, roster, detectedIntents, ct).ConfigureAwait(false);
+    }
+
+    // ── Existing loop wrapper (kept for coordinator-level tests) ──────────
+
     /// <summary>
     /// Drive the review loop for a plan. Returns a terminal outcome describing
     /// whether the plan is approved to execute (with the possibly-edited steps),
     /// or terminated with a reason the caller records into the plan store.
+    /// This method BLOCKS on <see cref="IApprovalGate.WaitForApprovalAsync"/>
+    /// — it is retained for coordinator-level tests that respond immediately
+    /// on a background task. The production suspend/resume path uses
+    /// <see cref="OpenRoundAsync"/> + <see cref="EvaluateDecision"/> through
+    /// <see cref="PlanReviewCompletionService"/> and never blocks a thread on
+    /// the review timeout.
     /// </summary>
     public async Task<PlanReviewOutcome> CoordinateAsync(
         PlanReviewCoordinationInput input,
@@ -129,163 +341,88 @@ public sealed class PlanReviewCoordinator
 
         while (round <= _options.MaxReplanRounds)
         {
-            var proposal = new PlanReviewProposal
+            PlanReviewRoundHandle handle = await OpenRoundAsync(new PlanReviewOpenInput
             {
                 PlanId = input.PlanId,
-                RoundNumber = round,
+                Subject = input.Subject,
+                SessionId = input.SessionId,
                 Request = input.Request,
-                Steps = currentSteps,
+                CurrentSteps = currentSteps,
+                SpecialistKeys = input.SpecialistKeys,
+                DetectedIntents = input.DetectedIntents,
+                RoundNumber = round,
                 RevisionReason = revisionReason,
-            };
+                TenantId = input.TenantId,
+                TraceId = input.TraceId,
+                ParentSpanId = input.ParentSpanId,
+                PrincipalKey = input.PrincipalKey,
+            }, ct).ConfigureAwait(false);
 
-            // Persist a checkpoint of the paused workflow so restart can inspect
-            // the same state a resume-in-process would see. The durable approval
-            // row remains the source of truth for the decision.
-            CheckpointInfo? checkpoint = await TryWriteCheckpointAsync(input.PlanId, round, proposal, ct);
-
-            var context = new ApprovalContext(
-                AgentId: "plan-review",
-                UserId: input.Subject,
-                Action: BuildActionLabel(round, currentSteps.Count),
-                Impact: BuildImpactLabel(currentSteps),
-                Urgency: "medium",
-                Reasoning: revisionReason ?? "Initial plan proposal awaiting reviewer decision.",
-                SessionId: input.SessionId,
-                ConversationId: null,
-                Kind: ApprovalKind.PlanReview,
-                PlanId: input.PlanId,
-                RoundNumber: round,
-                Payload: JsonSerializer.Serialize(proposal, _jsonOptions));
-
-            ApprovalRequest request = await _gate.RequestApprovalAsync(context, ct);
-            rounds.Add(new PlanReviewRoundRecord(round, request.RequestId, checkpoint?.CheckpointId));
-
-            _logger.LogInformation(
-                "Plan {PlanId} review round {Round} pending (requestId={RequestId}, subject={Subject}, checkpoint={CheckpointId}).",
-                input.PlanId, round, request.RequestId, input.Subject, checkpoint?.CheckpointId);
+            rounds.Add(new PlanReviewRoundRecord(round, handle.RequestId, handle.CheckpointId));
 
             ApprovalResult result;
             try
             {
-                result = await _gate.WaitForApprovalAsync(request.RequestId, _options.DefaultReviewTimeout, ct);
+                result = await _gate.WaitForApprovalAsync(handle.RequestId, _options.DefaultReviewTimeout, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw;
             }
 
-            if (result.Decision == ApprovalDecision.TimedOut)
+            PlanReviewContinuation continuation = EvaluateDecision(new PlanReviewEvaluationInput
             {
-                _logger.LogWarning(
-                    "Plan {PlanId} review round {Round} timed out (requestId={RequestId}, subject={Subject}).",
-                    input.PlanId, round, request.RequestId, input.Subject);
-                return PlanReviewOutcome.Terminated(
-                    PlanReviewTerminalReason.ReviewTimedOut,
-                    "Review timed out — no reviewer decision received.",
+                PlanId = input.PlanId,
+                RoundNumber = round,
+                CurrentSteps = currentSteps,
+                SpecialistKeys = input.SpecialistKeys,
+            }, result);
+
+            if (continuation.Kind == PlanReviewContinuationKind.Approved)
+            {
+                return PlanReviewOutcome.Approved(
+                    continuation.ApprovedSteps ?? [],
+                    continuation.TerminalReason,
                     round,
                     rounds);
             }
 
-            if (result.Decision == ApprovalDecision.Orphaned)
+            if (continuation.Kind == PlanReviewContinuationKind.Terminal)
             {
                 return PlanReviewOutcome.Terminated(
-                    PlanReviewTerminalReason.ReviewTimedOut,
-                    "Review orphaned by reconciliation before adoption completed.",
+                    continuation.TerminalReason,
+                    continuation.FailureMessage ?? continuation.TerminalReason,
                     round,
                     rounds);
             }
 
-            PlanReviewResponsePayload responsePayload = ParseResponsePayload(result.ResponsePayload, result.Decision);
-            PlanReviewOutcome? terminal = HandleDecision(
-                input,
-                currentSteps,
-                responsePayload,
-                result,
-                round,
-                rounds);
+            // NeedsReplan — invoke the replanner via the shared helper, then loop.
+            PlanBuildResult? replanned = await ReplanAsync(
+                input.Request,
+                continuation.RejectionFeedback,
+                input.Roster,
+                input.DetectedIntents,
+                ct).ConfigureAwait(false);
 
-            if (terminal is { } outcome && outcome.IsTerminalWithoutFurtherRounds())
+            if (replanned is null || replanned.IsUnusable)
             {
-                return outcome;
+                return PlanReviewOutcome.Terminated(
+                    PlanReviewTerminalReason.ReplanExhausted,
+                    "Replan produced no usable plan: " + (replanned?.UnusableReason ?? "planner unavailable"),
+                    round,
+                    rounds);
             }
 
-            // Reject-with-feedback path: replan if budget remains.
-            if (responsePayload.Kind == PlanReviewKinds.Reject)
+            currentSteps = [.. replanned.Steps.Select(s => new PlanReviewStepDto
             {
-                if (round >= _options.MaxReplanRounds)
-                {
-                    _logger.LogWarning(
-                        "Plan {PlanId} exhausted replan budget after round {Round} (max={Max}).",
-                        input.PlanId, round, _options.MaxReplanRounds);
-                    return PlanReviewOutcome.Terminated(
-                        PlanReviewTerminalReason.ReplanExhausted,
-                        $"Replan budget exhausted after round {round + 1}.",
-                        round,
-                        rounds);
-                }
-
-                if (_replanner is null || input.Roster is null)
-                {
-                    _logger.LogWarning(
-                        "Plan {PlanId} reject-with-feedback cannot replan — planner or roster missing.",
-                        input.PlanId);
-                    return PlanReviewOutcome.Terminated(
-                        PlanReviewTerminalReason.ReplanExhausted,
-                        "Replan requested but no planner is registered for this coordinator.",
-                        round,
-                        rounds);
-                }
-
-                string feedback = responsePayload.Feedback ?? "";
-                string revisedRequest = BuildRevisedRequest(input.Request, feedback);
-
-                PlanBuildResult replanned;
-                try
-                {
-                    replanned = await _replanner.ReplanAsync(
-                        revisedRequest,
-                        input.Roster,
-                        input.DetectedIntents,
-                        ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Plan {PlanId} replan failed at round {Round}.", input.PlanId, round);
-                    return PlanReviewOutcome.Terminated(
-                        PlanReviewTerminalReason.ReplanExhausted,
-                        "Replan invocation failed: " + ex.Message,
-                        round,
-                        rounds);
-                }
-
-                if (replanned.IsUnusable)
-                {
-                    return PlanReviewOutcome.Terminated(
-                        PlanReviewTerminalReason.ReplanExhausted,
-                        "Replan produced no usable plan: " + (replanned.UnusableReason ?? "unknown"),
-                        round,
-                        rounds);
-                }
-
-                currentSteps = [.. replanned.Steps.Select(s => new PlanReviewStepDto
-                {
-                    SpecialistKey = s.SpecialistKey,
-                    Intent = s.Intent,
-                    Action = s.Action,
-                })];
-                revisionReason = string.IsNullOrWhiteSpace(feedback)
-                    ? "Reviewer rejected the previous plan."
-                    : "Reviewer feedback: " + feedback;
-                round++;
-                continue;
-            }
-
-            // Approve / Edit path — terminal with the decided steps.
-            return terminal!;
+                SpecialistKey = s.SpecialistKey,
+                Intent = s.Intent,
+                Action = s.Action,
+            })];
+            revisionReason = string.IsNullOrWhiteSpace(continuation.RejectionFeedback)
+                ? "Reviewer rejected the previous plan."
+                : "Reviewer feedback: " + continuation.RejectionFeedback;
+            round++;
         }
 
         // Loop exit — replan cap reached without a terminal decision. Return a
@@ -327,76 +464,6 @@ public sealed class PlanReviewCoordinator
         return null;
     }
 
-    private PlanReviewOutcome? HandleDecision(
-        PlanReviewCoordinationInput input,
-        IReadOnlyList<PlanReviewStepDto> currentSteps,
-        PlanReviewResponsePayload responsePayload,
-        ApprovalResult result,
-        int round,
-        List<PlanReviewRoundRecord> rounds)
-    {
-        switch (responsePayload.Kind)
-        {
-            case PlanReviewKinds.Approve:
-                _logger.LogInformation(
-                    "Plan {PlanId} approved at round {Round} (requestId={RequestId}).",
-                    input.PlanId, round, result.RequestId);
-                return PlanReviewOutcome.Approved(
-                    currentSteps,
-                    PlanReviewTerminalReason.ReviewerApproved,
-                    round,
-                    rounds);
-
-            case PlanReviewKinds.Edit:
-                {
-                    IReadOnlyList<PlanReviewStepDto> edited =
-                        responsePayload.EditedSteps ?? currentSteps;
-                    string? invalid = ValidateEditedSteps(edited, input.SpecialistKeys);
-                    if (invalid is not null)
-                    {
-                        _logger.LogWarning(
-                            "Plan {PlanId} edit rejected at round {Round}: {Reason}.",
-                            input.PlanId, round, invalid);
-                        return PlanReviewOutcome.Terminated(
-                            invalid,
-                            invalid == PlanReviewTerminalReason.EditedToEmpty
-                                ? "Reviewer dropped every step."
-                                : "Reviewer edit referenced an unknown specialist or missing action.",
-                            round,
-                            rounds);
-                    }
-
-                    _logger.LogInformation(
-                        "Plan {PlanId} approved with edits at round {Round} (steps={Steps}).",
-                        input.PlanId, round, edited.Count);
-                    return PlanReviewOutcome.Approved(
-                        edited,
-                        PlanReviewTerminalReason.ReviewerEdited,
-                        round,
-                        rounds);
-                }
-
-            case PlanReviewKinds.Reject:
-                // Signal a rejection (non-terminal until the replan cap is hit;
-                // the coordinator handles that transition itself).
-                return PlanReviewOutcome.Rejected(
-                    responsePayload.Feedback,
-                    PlanReviewTerminalReason.ReviewerRejected,
-                    round,
-                    rounds);
-
-            default:
-                _logger.LogWarning(
-                    "Plan {PlanId} received unknown response kind '{Kind}' at round {Round}; treating as reject.",
-                    input.PlanId, responsePayload.Kind, round);
-                return PlanReviewOutcome.Rejected(
-                    responsePayload.Feedback,
-                    PlanReviewTerminalReason.ReviewerRejected,
-                    round,
-                    rounds);
-        }
-    }
-
     private PlanReviewResponsePayload ParseResponsePayload(string? persistedPayload, ApprovalDecision decision)
     {
         // Derive from ApprovalDecision when no payload was persisted so a
@@ -431,42 +498,6 @@ public sealed class PlanReviewCoordinator
             return new PlanReviewResponsePayload { Kind = PlanReviewKinds.Reject };
         }
     }
-
-    private async Task<CheckpointInfo?> TryWriteCheckpointAsync(
-        string planId,
-        int round,
-        PlanReviewProposal proposal,
-        CancellationToken ct)
-    {
-        try
-        {
-            string sessionId = SessionIdFor(planId, round);
-            JsonElement element = JsonSerializer.SerializeToElement(proposal, _jsonOptions);
-            // The default CheckpointManager exposes CreateCheckpointAsync via
-            // its ICheckpointStore<JsonElement>. We rely on GetLatestCheckpointAsync
-            // to expose the persisted metadata for the review row; older versions
-            // simply return null so the coordinator still functions without it.
-            _ = element;
-            CheckpointInfo? latest = await _checkpointManager
-                .GetLatestCheckpointAsync(sessionId, ct)
-                .ConfigureAwait(false);
-            return latest;
-        }
-        catch (Exception ex)
-        {
-            // Checkpoint persistence is an operational aid — never fail the
-            // review because the framework's checkpoint store was momentarily
-            // unavailable. The durable approval row still carries the
-            // authoritative state.
-            _logger.LogWarning(
-                ex,
-                "Plan {PlanId} round {Round} checkpoint write skipped (non-fatal).",
-                planId, round);
-            return null;
-        }
-    }
-
-    private static string SessionIdFor(string planId, int round) => $"plan-review::{planId}::r{round}";
 
     private static string BuildActionLabel(int round, int stepCount) =>
         round == 0
@@ -506,6 +537,114 @@ public sealed record PlanReviewCoordinationInput
     public IReadOnlyList<Contracts.Routing.ISpecialistAgent>? Roster { get; init; }
 
     public IReadOnlyList<string> DetectedIntents { get; init; } = [];
+
+    // Optional metadata forwarded into the checkpoint so a fresh process can
+    // reconstruct the execution envelope on resume without re-reading DI.
+    public string? TenantId { get; init; }
+    public string? TraceId { get; init; }
+    public string? ParentSpanId { get; init; }
+    public string? PrincipalKey { get; init; }
+}
+
+/// <summary>
+/// Input for <see cref="PlanReviewCoordinator.OpenRoundAsync"/>. Non-blocking
+/// suspend point: opens the durable approval row and writes a real framework
+/// checkpoint capturing every field a fresh process needs to resume.
+/// </summary>
+public sealed record PlanReviewOpenInput
+{
+    public required string PlanId { get; init; }
+    public required string Subject { get; init; }
+    public string? SessionId { get; init; }
+    public required string Request { get; init; }
+    public required IReadOnlyList<PlanReviewStepDto> CurrentSteps { get; init; }
+    public required IReadOnlyCollection<string> SpecialistKeys { get; init; }
+    public IReadOnlyList<string> DetectedIntents { get; init; } = [];
+    public required int RoundNumber { get; init; }
+    public string? RevisionReason { get; init; }
+    public string? TenantId { get; init; }
+    public string? TraceId { get; init; }
+    public string? ParentSpanId { get; init; }
+    public string? PrincipalKey { get; init; }
+}
+
+/// <summary>
+/// Input for <see cref="PlanReviewCoordinator.EvaluateDecision"/>. Pure
+/// synchronous accessor — no side effects.
+/// </summary>
+public sealed record PlanReviewEvaluationInput
+{
+    public required string PlanId { get; init; }
+    public required int RoundNumber { get; init; }
+    public required IReadOnlyList<PlanReviewStepDto> CurrentSteps { get; init; }
+    public required IReadOnlyCollection<string> SpecialistKeys { get; init; }
+}
+
+/// <summary>
+/// Handle returned from <see cref="PlanReviewCoordinator.OpenRoundAsync"/>.
+/// Every field is durable: the request id points at the approval row on disk,
+/// the checkpoint id points at the framework-issued checkpoint JSON on disk.
+/// </summary>
+public sealed record PlanReviewRoundHandle(
+    string RequestId,
+    string CheckpointId,
+    int RoundNumber,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt);
+
+/// <summary>Kind discriminator for <see cref="PlanReviewContinuation"/>.</summary>
+public enum PlanReviewContinuationKind
+{
+    /// <summary>Reviewer approved — <see cref="PlanReviewContinuation.ApprovedSteps"/> is set.</summary>
+    Approved,
+    /// <summary>Terminal without execution (timeout, replan exhausted, edit invalid, etc.).</summary>
+    Terminal,
+    /// <summary>Reviewer rejected with feedback and the replan cap has not been reached.</summary>
+    NeedsReplan,
+}
+
+/// <summary>
+/// Result of <see cref="PlanReviewCoordinator.EvaluateDecision"/>. Immutable
+/// value the completion service acts on: approve → execute; terminal →
+/// finalize plan as failed; replan → invoke planner and open round N+1.
+/// </summary>
+public sealed record PlanReviewContinuation
+{
+    public required PlanReviewContinuationKind Kind { get; init; }
+    public required int RoundNumber { get; init; }
+    public string TerminalReason { get; init; } = "";
+    public string? FailureMessage { get; init; }
+    public IReadOnlyList<PlanReviewStepDto>? ApprovedSteps { get; init; }
+    public string? RejectionFeedback { get; init; }
+
+    public static PlanReviewContinuation Approved(
+        IReadOnlyList<PlanReviewStepDto> steps, string terminalReason, int round) =>
+        new()
+        {
+            Kind = PlanReviewContinuationKind.Approved,
+            RoundNumber = round,
+            ApprovedSteps = steps,
+            TerminalReason = terminalReason,
+        };
+
+    public static PlanReviewContinuation Terminal(
+        string terminalReason, string failureMessage, int round) =>
+        new()
+        {
+            Kind = PlanReviewContinuationKind.Terminal,
+            RoundNumber = round,
+            TerminalReason = terminalReason,
+            FailureMessage = failureMessage,
+        };
+
+    public static PlanReviewContinuation NeedsReplan(string? feedback, int round) =>
+        new()
+        {
+            Kind = PlanReviewContinuationKind.NeedsReplan,
+            RoundNumber = round,
+            RejectionFeedback = feedback,
+            TerminalReason = PlanReviewTerminalReason.ReviewerRejected,
+        };
 }
 
 /// <summary>Round-level audit record surfaced back to the caller and history endpoint.</summary>
@@ -568,12 +707,4 @@ public sealed record PlanReviewOutcome
             RejectionFeedback = feedback,
         };
 
-    /// <summary>
-    /// True for approve/edit outcomes and for terminals the loop treats as final
-    /// (timeout, exhausted). Rejection outcomes are intentionally NOT terminal
-    /// here because the coordinator's replan branch takes over.
-    /// </summary>
-    internal bool IsTerminalWithoutFurtherRounds() =>
-        IsApproved || (
-            TerminalReason != PlanReviewTerminalReason.ReviewerRejected);
 }

@@ -115,54 +115,32 @@ public sealed class PlanOrchestrator
                 FailureReason: built.UnusableReason);
         }
 
-        // Step 2: plan review gate (#94). When enabled, present the plan to a
-        // human reviewer before ANY step executes. Approve → execute the
-        // original plan; edit → execute the reviewer's edited plan; reject with
-        // feedback → the coordinator loops with the planner (bounded rounds);
-        // timeout / replan exhausted → terminate the plan without executing.
-        // Every path writes an approval row through the same #91 gate so tool
-        // and plan approvals share one audit trail.
+        // Step 2: plan review gate (#94). When enabled, this is the
+        // non-blocking suspend point: persist the plan as AwaitingReview,
+        // write a real framework checkpoint, open the approval row, and
+        // return a Suspended result. The caller (/api/chat) hands the client
+        // a 202 with the review request id; PlanReviewCompletionService drives
+        // execution when the reviewer decides. No thread is blocked on the
+        // review timeout — the timeout is enforced by the sweep service, and
+        // process restart is invisible to the resume path because the
+        // checkpoint + approval row are durable.
         //
-        // When disabled (default), this block is a no-op and the executor sees
-        // the original planner output — the pre-#94 hot path is preserved
+        // When disabled (default), this block is a no-op and the executor
+        // sees the original planner output — the pre-#94 hot path is preserved
         // byte-for-byte.
         PlanBuildResult effectivePlan = built;
-        PlanReviewOutcome? reviewOutcome = null;
         if (_reviewOptions is { Enabled: true } && _reviewCoordinator is not null)
         {
-            reviewOutcome = await RunReviewAsync(planId, input, built, ct).ConfigureAwait(false);
-            if (!reviewOutcome.IsApproved)
-            {
-                // Persist the awaiting/terminal plan record with the reviewer's
-                // decision so /api/plans/{id} shows an honest terminal state.
-                await PersistReviewTerminalAsync(planId, input, built, reviewOutcome, createdAt, ct)
-                    .ConfigureAwait(false);
-
-                return new PlanOrchestrationResult(
-                    PlanId: planId,
-                    Status: PlanStatus.Failed,
-                    Reply: BuildReviewTerminalReply(reviewOutcome),
-                    DurationMs: 0,
-                    InputTokens: built.InputTokens ?? 0,
-                    OutputTokens: built.OutputTokens ?? 0,
-                    TotalTokens: built.TotalTokens ?? 0,
-                    Steps: [],
-                    FailureReason: $"{reviewOutcome.TerminalReason}: {reviewOutcome.FailureMessage ?? reviewOutcome.TerminalReason}");
-            }
-
-            // Approved outcome — swap in the possibly-edited step list before
-            // materializing step IDs. Both approve and edit paths flow through
-            // the same code so the executor never sees the pre-review plan when
-            // the reviewer swapped it out.
-            effectivePlan = built with
-            {
-                Steps = [.. reviewOutcome.FinalSteps.Select(s => new PlannerStep
-                {
-                    SpecialistKey = s.SpecialistKey,
-                    Intent = s.Intent,
-                    Action = s.Action,
-                })],
-            };
+            PlanReviewRoundHandle handle = await SuspendForReviewAsync(planId, input, built, createdAt, ct)
+                .ConfigureAwait(false);
+            return PlanOrchestrationResult.Suspended(
+                planId,
+                PlanStatus.AwaitingReview,
+                handle.RequestId,
+                handle.RoundNumber,
+                built.InputTokens ?? 0,
+                built.OutputTokens ?? 0,
+                built.TotalTokens ?? 0);
         }
 
         // Step 3: materialize step IDs and persist the initial plan.
@@ -227,51 +205,23 @@ public sealed class PlanOrchestrator
             FailureReason: outcome.FailureReason);
     }
 
-    private async Task<PlanReviewOutcome> RunReviewAsync(
+    /// <summary>
+    /// Persist the plan record as AwaitingReview, write a real framework
+    /// checkpoint, open the plan-review approval row, and return the
+    /// resulting handle. No thread is blocked — the completion service
+    /// drives execution when the reviewer decides.
+    /// </summary>
+    private async Task<PlanReviewRoundHandle> SuspendForReviewAsync(
         string planId,
         PlanOrchestrationInput input,
         PlanBuildResult built,
-        CancellationToken ct)
-    {
-        var initialSteps = built.Steps
-            .Select(s => new PlanReviewStepDto
-            {
-                SpecialistKey = s.SpecialistKey,
-                Intent = s.Intent,
-                Action = s.Action,
-            })
-            .ToList();
-
-        var specialistKeys = input.Roster
-            .Select(a => a.Key)
-            .ToList();
-
-        var reviewInput = new PlanReviewCoordinationInput
-        {
-            PlanId = planId,
-            Subject = input.Subject,
-            SessionId = input.Request.SessionId,
-            Request = input.Request.Message,
-            InitialSteps = initialSteps,
-            SpecialistKeys = specialistKeys,
-            Roster = input.Roster,
-            DetectedIntents = input.DetectedIntents,
-        };
-
-        return await _reviewCoordinator!.CoordinateAsync(reviewInput, ct).ConfigureAwait(false);
-    }
-
-    private async Task PersistReviewTerminalAsync(
-        string planId,
-        PlanOrchestrationInput input,
-        PlanBuildResult built,
-        PlanReviewOutcome outcome,
         DateTimeOffset createdAt,
         CancellationToken ct)
     {
-        // Record the plan as AwaitingReview → Failed so audit history preserves
-        // the intended step list and the terminal reason. Steps stay Pending on
-        // disk (they never ran).
+        // Record the plan record BEFORE the checkpoint / approval row so the
+        // resume path (which queries the plan store by planId) always finds a
+        // row that matches the checkpoint. Steps stay Pending until the
+        // reviewer approves (or edits) and the executor resumes.
         var stepWrites = new List<PlanStepWrite>(built.Steps.Count);
         for (int i = 0; i < built.Steps.Count; i++)
         {
@@ -299,37 +249,37 @@ public sealed class PlanOrchestrator
             CreatedAt = createdAt,
         }, ct).ConfigureAwait(false);
 
-        await _planStore.UpdatePlanStatusAsync(new PlanStatusUpdate
+        IReadOnlyList<PlanReviewStepDto> initialSteps =
+        [
+            .. built.Steps.Select(s => new PlanReviewStepDto
+            {
+                SpecialistKey = s.SpecialistKey,
+                Intent = s.Intent,
+                Action = s.Action,
+            }),
+        ];
+
+        IReadOnlyCollection<string> specialistKeys =
+            [.. input.Roster.Select(a => a.Key)];
+
+        var open = new PlanReviewOpenInput
         {
             PlanId = planId,
             Subject = input.Subject,
-            Status = PlanStatus.Failed,
-            FailureReason = $"{outcome.TerminalReason}: {outcome.FailureMessage}",
-            TotalInputTokens = built.InputTokens,
-            TotalOutputTokens = built.OutputTokens,
-            TotalTokens = built.TotalTokens,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        }, ct).ConfigureAwait(false);
-
-        _logger.LogWarning(
-            "Plan {PlanId} terminated at review: {Terminal} — {Message}",
-            planId, outcome.TerminalReason, outcome.FailureMessage);
-    }
-
-    private static string BuildReviewTerminalReply(PlanReviewOutcome outcome) =>
-        outcome.TerminalReason switch
-        {
-            PlanReviewTerminalReason.ReviewTimedOut =>
-                "The plan was not executed because reviewer approval timed out.",
-            PlanReviewTerminalReason.ReplanExhausted =>
-                "The plan was not executed because the reviewer rejected every revision within the configured limit.",
-            PlanReviewTerminalReason.EditedToEmpty =>
-                "The plan was not executed because the reviewer edited it down to zero steps.",
-            PlanReviewTerminalReason.EditInvalid =>
-                "The plan was not executed because the reviewer's edited step list referenced an unknown specialist.",
-            _ =>
-                "The plan was not executed because the reviewer declined to approve it.",
+            SessionId = input.Request.SessionId,
+            TenantId = input.TenantId,
+            Request = input.Request.Message,
+            CurrentSteps = initialSteps,
+            SpecialistKeys = specialistKeys,
+            DetectedIntents = input.DetectedIntents,
+            RoundNumber = 0,
+            TraceId = input.TraceId,
+            ParentSpanId = input.ParentSpanId,
+            PrincipalKey = input.PrincipalKey,
         };
+
+        return await _reviewCoordinator!.OpenRoundAsync(open, ct).ConfigureAwait(false);
+    }
 
     private static string BuildFinalReply(PlanExecutionOutcome outcome)
     {
@@ -424,7 +374,12 @@ public sealed record PlanOrchestrationInput
     public string? ParentSpanId { get; init; }
 }
 
-/// <summary>Terminal result returned to the chat endpoint.</summary>
+/// <summary>
+/// Result returned to the chat endpoint. Either terminal (Completed / Failed
+/// / Cancelled / Unusable) or suspended (AwaitingReview / AwaitingClarification).
+/// The endpoint returns 202 for the suspended shape, 200 for the terminal
+/// shape — see <see cref="Endpoints.ChatEndpoints"/>.
+/// </summary>
 public sealed record PlanOrchestrationResult(
     string PlanId,
     string Status,
@@ -434,4 +389,43 @@ public sealed record PlanOrchestrationResult(
     int OutputTokens,
     int TotalTokens,
     IReadOnlyList<PlanStepResult> Steps,
-    string? FailureReason);
+    string? FailureReason)
+{
+    /// <summary>
+    /// Set when the plan is waiting for reviewer input. Non-null implies
+    /// <see cref="Status"/> is <c>PlanStatus.AwaitingReview</c>.
+    /// </summary>
+    public string? ReviewRequestId { get; init; }
+
+    /// <summary>Round number for the pending review row (0 = initial plan).</summary>
+    public int? ReviewRoundNumber { get; init; }
+
+    /// <summary>
+    /// True when the caller should return HTTP 202 with a pending payload
+    /// instead of the standard 200 chat response.
+    /// </summary>
+    public bool IsSuspended => Status is PlanStatus.AwaitingReview
+        or PlanStatus.AwaitingClarification;
+
+    public static PlanOrchestrationResult Suspended(
+        string planId,
+        string status,
+        string requestId,
+        int roundNumber,
+        int inputTokens,
+        int outputTokens,
+        int totalTokens) => new(
+            PlanId: planId,
+            Status: status,
+            Reply: "",
+            DurationMs: 0,
+            InputTokens: inputTokens,
+            OutputTokens: outputTokens,
+            TotalTokens: totalTokens,
+            Steps: [],
+            FailureReason: null)
+        {
+            ReviewRequestId = requestId,
+            ReviewRoundNumber = roundNumber,
+        };
+}
