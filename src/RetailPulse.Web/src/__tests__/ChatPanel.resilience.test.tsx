@@ -152,10 +152,18 @@ describe('ChatPanel resilience surface (issue #92)', () => {
     sendMessageMock
       .mockRejectedValueOnce(new ChatRequestTimeoutError(90_000))
       .mockResolvedValueOnce({
-        reply: 'second try works',
-        sessionId: 'sess-retry',
-        spans: [],
-        totalDurationMs: 10,
+        // Must match the actual `SendMessageResult` union returned by
+        // `sendMessage` — the fast path is `{ kind: 'complete', response }`.
+        // Returning a bare `ChatResponse` here would leave `result.response`
+        // undefined in ChatPanel and blow up with
+        // "Cannot read properties of undefined (reading 'reply')".
+        kind: 'complete',
+        response: {
+          reply: 'second try works',
+          sessionId: 'sess-retry',
+          spans: [],
+          totalDurationMs: 10,
+        },
       });
 
     renderPanel();

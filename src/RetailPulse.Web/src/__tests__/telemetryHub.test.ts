@@ -90,6 +90,13 @@ function createStubConnection(): StubConnection {
     },
     async stop() {
       conn.state = HubConnectionState.Disconnected;
+      // If a test never explicitly resolved __start, reject the pending
+      // start now so the `connection.start().then(...).catch(...)` chain
+      // inside connectTelemetryHub settles. Otherwise
+      // disconnectTelemetryHub awaits a promise that never resolves and
+      // hangs the afterEach hook until vitest's 10s hook timeout fires,
+      // which is then reported against the next test's beforeEach.
+      rejectStart(new Error('stub connection stopped before start settled'));
     },
     async invoke(name, ...args) {
       invokeCalls.push([name, ...args]);
@@ -152,8 +159,23 @@ describe('telemetryHub status + reconnect wiring (issue #92)', () => {
   });
 
   afterEach(async () => {
-    await disconnectTelemetryHub();
-    __resetTelemetryHubForTests();
+    // Deterministic cleanup: any test that called connectTelemetryHub but
+    // never resolved the stub's start promise would leave the chained
+    // module-level startPromise pending. disconnectTelemetryHub awaits
+    // that startPromise before calling stop(), so a pending stub start
+    // would hang the hook until the 10s hook timeout fires and get
+    // reported against the NEXT test's beforeEach. Resolving the pending
+    // start here settles the chain synchronously in the microtask queue.
+    currentStub?.__start.resolve();
+    try {
+      await disconnectTelemetryHub();
+    } finally {
+      __resetTelemetryHubForTests();
+      // Guarantee real timers regardless of whether any test in this
+      // file (now or later) turned on fake timers and threw before
+      // restoring them. Cheap when timers are already real.
+      vi.useRealTimers();
+    }
   });
 
   it('emits connecting → connected transitions to subscribers', async () => {
@@ -172,8 +194,13 @@ describe('telemetryHub status + reconnect wiring (issue #92)', () => {
     expect(getHubConnectionStatus()).toBe('connected');
   });
 
-  it('installs an IRetryPolicy backed by the default backoff schedule', () => {
+  it('installs an IRetryPolicy backed by the default backoff schedule', async () => {
     connectTelemetryHub(() => {});
+    // Match the lifecycle used by every other test in this file so the
+    // module-level startPromise chained inside connectTelemetryHub
+    // settles and afterEach can tear down cleanly.
+    currentStub!.__start.resolve();
+    await waitForStart();
     expect(currentStub?.__retryPolicy).toBeDefined();
 
     const policy = currentStub!.__retryPolicy!;
