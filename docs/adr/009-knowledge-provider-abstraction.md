@@ -180,7 +180,6 @@ add their own concrete instantiation of the same base class.
 ### Explicitly out of scope
 
 - No Azure AI Search implementation (#103).
-- No Foundry IQ implementation (#104).
 - No per-agent knowledge binding (#105).
 - No changes to BM25 semantics, ranking, or the InMemory quotas.
 - No changes under `src/RetailPulse.Api/Agents/` (concurrent migration).

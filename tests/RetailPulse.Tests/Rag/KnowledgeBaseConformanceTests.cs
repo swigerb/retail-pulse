@@ -76,6 +76,13 @@ public abstract class KnowledgeBaseConformanceTests
     public async Task Ingest_ReturnsNonEmptyDocumentId()
     {
         IKnowledgeBase kb = await CreateProviderAsync();
+        if (!kb.GetCapabilities().SupportsMutation)
+        {
+            // Read-only providers (Foundry IQ) surface unsupported ingest
+            // through a first-class capability flag + targeted conformance
+            // suite. Skip the shared mutation-based assertion honestly.
+            return;
+        }
 
         string id = await kb.IngestDocumentAsync(
             title: "Conformance Doc",
@@ -90,6 +97,10 @@ public abstract class KnowledgeBaseConformanceTests
     public async Task Ingest_ThenSearch_FindsRelevantContent()
     {
         IKnowledgeBase kb = await CreateProviderAsync();
+        if (!kb.GetCapabilities().SupportsMutation)
+        {
+            return;
+        }
         await kb.IngestDocumentAsync(
             title: "Holiday Planning",
             content:
@@ -112,6 +123,10 @@ public abstract class KnowledgeBaseConformanceTests
     public async Task ListDocuments_ReflectsIngestedDocuments()
     {
         IKnowledgeBase kb = await CreateProviderAsync();
+        if (!kb.GetCapabilities().SupportsMutation)
+        {
+            return;
+        }
         await kb.IngestDocumentAsync("Alpha", "Content about alpha topic in retail.", "src");
         await kb.IngestDocumentAsync("Beta", "Content about beta topic in retail.", "src");
 
@@ -128,6 +143,10 @@ public abstract class KnowledgeBaseConformanceTests
     public async Task DeleteDocument_RemovesFromListAndSearch()
     {
         IKnowledgeBase kb = await CreateProviderAsync();
+        if (!kb.GetCapabilities().SupportsMutation)
+        {
+            return;
+        }
         string aId = await kb.IngestDocumentAsync(
             "Deletable",
             "Uniqueterm-xyzzy content that is only in this document about retail merchandising.",
@@ -156,6 +175,13 @@ public abstract class KnowledgeBaseConformanceTests
         // scope — the in-scope document must be returned and the out-of-scope
         // document must NOT appear even if it shares vocabulary.
         IKnowledgeBase kb = await CreateProviderAsync();
+        if (!kb.GetCapabilities().SupportsMutation)
+        {
+            // Read-only providers cannot self-populate the fixture. Coverage
+            // for scoped search on those providers lives in the provider's
+            // dedicated conformance suite against a pre-seeded corpus.
+            return;
+        }
         await kb.IngestDocumentAsync(
             title: "Planogram Reference",
             content: "Uniqueterm-planogram shelf-set anchors keep the top velocity SKUs in the eye-level bay.",
@@ -185,6 +211,10 @@ public abstract class KnowledgeBaseConformanceTests
         // can share one code path for the enabled-unscoped and enabled-scoped
         // agent bindings.
         IKnowledgeBase kb = await CreateProviderAsync();
+        if (!kb.GetCapabilities().SupportsMutation)
+        {
+            return;
+        }
         await kb.IngestDocumentAsync("Doc A", "Uniqueterm-alpha retail merchandising anchor content.", "a.md");
         await kb.IngestDocumentAsync("Doc B", "Uniqueterm-beta retail merchandising execution content.", "b.md");
 
@@ -194,5 +224,28 @@ public abstract class KnowledgeBaseConformanceTests
         empty.Select(r => r.DocumentId).OrderBy(id => id).Should().BeEquivalentTo(
             unscoped.Select(r => r.DocumentId).OrderBy(id => id),
             "an empty sources collection must be treated as unscoped by every provider");
+    }
+
+    /// <summary>
+    /// First-class capability signal: providers that declare
+    /// <see cref="KnowledgeBaseCapabilities.SupportsMutation"/> = false MUST
+    /// throw <see cref="NotSupportedException"/> from the mutation entry
+    /// points. Never a silent success against a different corpus, never a
+    /// mismatched <see cref="KnowledgeProviderUnavailableException"/>.
+    /// </summary>
+    [Fact]
+    public async Task Mutation_ReadOnlyProvider_ThrowsNotSupportedException()
+    {
+        IKnowledgeBase kb = await CreateProviderAsync();
+        if (kb.GetCapabilities().SupportsMutation)
+        {
+            return;
+        }
+
+        Func<Task> ingest = () => kb.IngestDocumentAsync("t", "content", "src");
+        Func<Task> delete = () => kb.DeleteDocumentAsync("nonexistent");
+
+        await ingest.Should().ThrowAsync<NotSupportedException>();
+        await delete.Should().ThrowAsync<NotSupportedException>();
     }
 }
