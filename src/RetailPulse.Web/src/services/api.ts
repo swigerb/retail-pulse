@@ -120,6 +120,24 @@ export interface SendMessageOptions {
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 /**
+ * Thrown when the frontend request timer trips before the server responds.
+ * Distinct from a generic network error so the UI can raise a dedicated
+ * retry-or-abandon dialog (issue #92) instead of showing a stuck spinner.
+ */
+export class ChatRequestTimeoutError extends Error {
+  readonly name = 'ChatRequestTimeoutError';
+  readonly timeoutMs: number;
+  constructor(timeoutMs: number) {
+    super(`Request timed out after ${Math.round(timeoutMs / 1000)}s. The server may be busy — please try again.`);
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+export function isChatRequestTimeoutError(err: unknown): err is ChatRequestTimeoutError {
+  return err instanceof ChatRequestTimeoutError;
+}
+
+/**
  * Combines an optional caller signal with a timeout signal. Returns the
  * combined AbortSignal, a flag we can read to detect a timeout-driven abort,
  * and a cleanup callback that clears the timer.
@@ -175,9 +193,7 @@ export async function sendMessage(
     });
   } catch (err) {
     if (didTimeOut()) {
-      throw new Error(
-        `Request timed out after ${Math.round(timeoutMs / 1000)}s. The server may be busy — please try again.`,
-      );
+      throw new ChatRequestTimeoutError(timeoutMs);
     }
     throw err;
   } finally {

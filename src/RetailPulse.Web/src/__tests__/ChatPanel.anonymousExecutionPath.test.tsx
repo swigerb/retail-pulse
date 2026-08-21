@@ -11,11 +11,24 @@ const sendMessageMock = vi.fn();
 vi.mock('../services/api', () => ({
   sendMessage: (...args: unknown[]) => sendMessageMock(...args),
   isErrorReply: (reply: string) => reply.startsWith('⏳'),
+  isChatRequestTimeoutError: () => false,
 }));
 
 vi.mock('../services/telemetryHub', () => ({
   joinTelemetrySession: vi.fn(),
   onProgress: vi.fn(() => () => {}),
+  onHubConnectionStatus: (listener: (s: string) => void) => {
+    listener('connected');
+    return () => {};
+  },
+  onHubHeartbeat: () => () => {},
+  getHubConnectionStatus: () => 'connected',
+  getLastHubHeartbeatAt: () => null,
+}));
+
+vi.mock('../services/executionControlApi', () => ({
+  cancelChatSession: vi.fn().mockResolvedValue('cancelled'),
+  cancelPlan: vi.fn().mockResolvedValue('cancelled'),
 }));
 
 vi.mock('../auth/activeProvider', () => ({

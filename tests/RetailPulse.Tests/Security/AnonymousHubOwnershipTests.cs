@@ -3,22 +3,18 @@ using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Moq;
 using RetailPulse.Api.Hubs;
-using RetailPulse.Api.Security.Anonymous;
 
 namespace RetailPulse.Tests.Security;
 
 /// <summary>
-/// Sprint 1 mandated simplification: the SignalR hubs are NO LONGER part of the anonymous surface.
-/// A valid anonymous token is denied (403) on BOTH hubs at both the negotiate and connection
-/// endpoints — proven by the deny-by-default guard in
-/// <see cref="AnonymousAuthenticationTests"/> and by the compiled endpoint-graph policy in
-/// <see cref="EndpointAuthorizationCoverageTests"/>. Because anonymous callers can never reach a
-/// hub method, the former anonymous hub session-ownership expectations are intentionally gone.
+/// Hub session-ownership guardrails. As of issue #92 the ownership registry is
+/// consulted for BOTH anonymous and authenticated callers so a hostile client
+/// that reconnects and attempts to rejoin another subject's session group is
+/// refused. First-writer-wins for a server-minted sessionId; every subsequent
+/// join (including reconnects) must match the recorded owner.
 ///
-/// What remains here is a guardrail proving the mandate's other half: <b>Entra hub behaviour is
-/// unchanged.</b> An Entra caller keeps its original (unbound) semantics on the real
-/// <see cref="TelemetryHub"/>, so the scope reduction for anonymous did not regress the
-/// authenticated real-time surface.
+/// <para>Card subscriptions remain deny-by-default for anonymous callers — the
+/// card/approval surface is not part of the anonymous scope.</para>
 /// </summary>
 public sealed class AnonymousHubOwnershipTests
 {
@@ -38,17 +34,23 @@ public sealed class AnonymousHubOwnershipTests
     }
 
     [Fact]
-    public async Task TelemetryHub_EntraCaller_IsUnbound_AndCanJoinAnySession()
+    public async Task TelemetryHub_EntraCaller_FirstJoin_ClaimsOwnership()
     {
         var registry = new SessionOwnershipRegistry();
         const string sessionId = "some-session";
 
-        // Entra behaviour is unchanged by the anonymous scope reduction — no ownership binding is
-        // enforced and the caller is added to the requested group as before.
+        // Ownership is now enforced for authenticated callers too (issue #92).
+        // The first Entra join for a fresh sessionId claims ownership and
+        // succeeds; a subsequent rejoin by the same subject also succeeds.
         (TelemetryHub entraHub, Mock<IGroupManager> entraGroups) = NewTelemetryHub(registry, Entra("entra-oid-1"), "conn-E");
         await entraHub.JoinSession(sessionId);
-        entraGroups.Verify(g => g.AddToGroupAsync("conn-E", sessionId, It.IsAny<CancellationToken>()), Times.Once,
-            "Entra callers retain their original hub semantics");
+        entraGroups.Verify(g => g.AddToGroupAsync("conn-E", sessionId, It.IsAny<CancellationToken>()), Times.Once);
+
+        // Rejoin from the same subject is allowed.
+        await entraHub.JoinSession(sessionId);
+        entraGroups.Verify(g => g.AddToGroupAsync("conn-E", sessionId, It.IsAny<CancellationToken>()), Times.Exactly(2));
+
+        registry.OwnerOf(sessionId).Should().Be("entra-oid-1");
     }
 
     [Fact]
