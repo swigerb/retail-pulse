@@ -419,6 +419,7 @@ describe('ChatPanel', () => {
       removePlanFromHistory: vi.fn().mockResolvedValue(undefined),
       openHistoryPlan: vi.fn().mockResolvedValue(undefined),
       reportStepStatus: vi.fn(),
+      applyFinalResponse: vi.fn(),
     } as unknown as import('../state/usePlanController').PlanController;
     // Point the "active" getter at state.active so PlanView renders.
     Object.defineProperty(planController, 'active', {
@@ -437,6 +438,93 @@ describe('ChatPanel', () => {
 
     // The plan-first bubble shows the plan surface — not the plain reply.
     expect(await screen.findByTestId('plan-view')).toBeInTheDocument();
+  });
+
+  it('plan-first 200 with charts forwards them via applyFinalResponse (#141)', async () => {
+    const user = userEvent.setup();
+    const charts = [
+      {
+        type: 'bar' as const,
+        title: 'Revenue by region',
+        data: [{ legend: 'q1', values: [{ x: 'NE', y: 10 }] }],
+      },
+      {
+        type: 'line' as const,
+        title: 'Weekly trend',
+        data: [{ legend: 'w', values: [{ x: 'w1', y: 5 }] }],
+      },
+    ];
+    sendMessageMock.mockResolvedValue({
+      kind: 'complete',
+      response: {
+        reply: 'aggregate reply with charts',
+        sessionId: 'sess-plan',
+        spans: [],
+        totalDurationMs: 300,
+        routing: {
+          agentKey: 'planner',
+          agentName: 'Plan Orchestrator',
+          intent: 'plan',
+          confidence: 0.5,
+          executionPath: 'plan',
+        },
+        planId: 'plan-142',
+        charts,
+      },
+    });
+
+    const applyFinalResponseSpy = vi.fn();
+    const planController = {
+      state: {
+        active: {
+          planId: 'plan-142',
+          sessionId: 'sess-plan',
+          request: 'compare',
+          status: 'completed' as const,
+          steps: [],
+          detectedIntents: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          elapsedMs: 300,
+          startedAt: Date.now(),
+        },
+        history: [],
+        historyLoading: false,
+      },
+      active: null,
+      startPlan: vi.fn().mockResolvedValue(undefined),
+      hydrate: vi.fn().mockResolvedValue(undefined),
+      approve: vi.fn().mockResolvedValue(undefined),
+      reject: vi.fn().mockResolvedValue(undefined),
+      edit: vi.fn().mockResolvedValue(undefined),
+      clarify: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      reloadHistory: vi.fn().mockResolvedValue(undefined),
+      removePlanFromHistory: vi.fn().mockResolvedValue(undefined),
+      openHistoryPlan: vi.fn().mockResolvedValue(undefined),
+      reportStepStatus: vi.fn(),
+      applyFinalResponse: applyFinalResponseSpy,
+    } as unknown as import('../state/usePlanController').PlanController;
+    Object.defineProperty(planController, 'active', {
+      get: () => planController.state.active,
+    });
+
+    renderPanel({ planController, planConnected: true });
+
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'compare');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    await waitFor(() => expect(planController.startPlan).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(applyFinalResponseSpy).toHaveBeenCalledTimes(1));
+    // The immediate path pushes reply + charts through the controller so
+    // PlanView renders them exactly like the review-resume path.
+    expect(applyFinalResponseSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planId: 'plan-142',
+        reply: 'aggregate reply with charts',
+        charts,
+      }),
+    );
   });
 
   it('202 suspended response starts the plan and shows the review bubble', async () => {
@@ -467,6 +555,7 @@ describe('ChatPanel', () => {
       removePlanFromHistory: vi.fn().mockResolvedValue(undefined),
       openHistoryPlan: vi.fn().mockResolvedValue(undefined),
       reportStepStatus: vi.fn(),
+      applyFinalResponse: vi.fn(),
     } as unknown as import('../state/usePlanController').PlanController;
 
     renderPanel({ planController, planConnected: true });

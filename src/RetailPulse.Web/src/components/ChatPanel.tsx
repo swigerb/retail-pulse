@@ -639,6 +639,17 @@ export function ChatPanel({
               sessionId: response.sessionId,
               request: trimmed,
             });
+            // Immediate plan-completion path (issue #141): the ChatResponse
+            // already carries the terminal reply and aggregate specialist
+            // charts, and no `plan_final_response` SignalR event fires for
+            // this branch. Route them through the same PLAN_FINAL reducer
+            // action the review-resume path uses so PlanView renders the
+            // final reply and charts on both plan paths identically.
+            planController.applyFinalResponse({
+              planId,
+              reply: response.reply,
+              charts: response.charts ?? null,
+            });
           }
           setMessages(prev => [
             ...prev,
