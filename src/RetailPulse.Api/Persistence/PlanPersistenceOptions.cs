@@ -53,4 +53,38 @@ public sealed class PlanPersistenceOptions
     /// work.
     /// </summary>
     public int MinDetectedIntentsForPlan { get; set; } = 2;
+
+    /// <summary>
+    /// Router-confidence floor for staying on the single-specialist fast
+    /// path (issue #95 hybrid execution). When the classifier returns a
+    /// confidence strictly below this value the request is admitted to the
+    /// plan-first path so a multi-step reconciliation can compensate for
+    /// the ambiguous classification. Default 0.6 matches the internal
+    /// <c>RetailOpsRouter</c> confidence threshold so the two decisions
+    /// stay coherent (a request the router would fall back to General on
+    /// low confidence is also the request the hybrid gate hands to the
+    /// plan path).
+    /// </summary>
+    public double MinConfidenceForFastPath { get; set; } = 0.6;
+
+    /// <summary>
+    /// Substring cues, case-insensitive, that force a request onto the
+    /// plan path even when the router returned a single high-confidence
+    /// intent (issue #95 hybrid execution). Advisory / diagnostic prompts
+    /// like "why did X drop" or "what should we do" are single-domain on
+    /// the surface but benefit from a multi-step plan (gather evidence,
+    /// synthesise, recommend). Documented defaults; leave the list empty
+    /// to disable this trigger without changing code.
+    /// </summary>
+    public IList<string> AdvisoryPhrases { get; set; } =
+    [
+        "why did",
+        "why is",
+        "why are",
+        "what should we",
+        "what should i",
+        "what do we do",
+        "recommend",
+        "diagnose",
+    ];
 }
