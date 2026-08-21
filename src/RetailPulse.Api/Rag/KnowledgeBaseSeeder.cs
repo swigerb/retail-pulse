@@ -1,3 +1,5 @@
+using RetailPulse.Api.Packs;
+
 namespace RetailPulse.Api.Rag;
 
 /// <summary>
@@ -17,7 +19,7 @@ public static class KnowledgeBaseSeeder
 {
     public static async Task SeedAsync(InMemoryKnowledgeBase kb, ILogger logger, CancellationToken ct = default)
     {
-        List<(string Title, string Source, string Content)> sampleDocs = GetSampleDocuments();
+        IReadOnlyList<(string Title, string Source, string Content)> sampleDocs = GetSampleDocuments();
         int ingested = 0;
 
         foreach ((string? title, string? source, string? content) in sampleDocs)
@@ -36,7 +38,74 @@ public static class KnowledgeBaseSeeder
             ingested, kb.DocumentCount, kb.ChunkCount);
     }
 
-    private static List<(string Title, string Source, string Content)> GetSampleDocuments() =>
+    /// <summary>
+    /// Ingest a loaded content pack's grounding corpus into
+    /// <paramref name="kb"/>. Content-hash aware: an unchanged pack does
+    /// NOT reseed, but a real content change (same source, different
+    /// body) purges the stale document and re-ingests the new one so
+    /// operators never see stale grounding after a pack update.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent by the pair (source, content-hash). Two invocations
+    /// with the same pack are a no-op; two invocations with different
+    /// packs share the store safely — a document whose source is not
+    /// present in the new pack stays until the caller purges it (fresh
+    /// process starts always begin with an empty in-memory store).
+    /// </remarks>
+    public static async Task SeedAsync(
+        InMemoryKnowledgeBase kb,
+        LoadedPack pack,
+        ILogger logger,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(kb);
+        ArgumentNullException.ThrowIfNull(pack);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        int ingested = 0;
+        int refreshed = 0;
+        int skipped = 0;
+
+        foreach (PackKnowledgeDocument doc in pack.KnowledgeDocuments)
+        {
+            string contentHash = PackContentFingerprint.ComputeContentHash(doc.Content);
+
+            if (kb.HasDocumentWithContent(doc.Source, contentHash))
+            {
+                logger.LogDebug(
+                    "Pack '{Pack}': skipping unchanged knowledge doc {Source} (hash {Hash})",
+                    pack.Name, doc.Source, contentHash[..8]);
+                skipped++;
+                continue;
+            }
+
+            int removed = kb.RemoveDocumentsBySource(doc.Source);
+            await kb.IngestDocumentAsync(doc.Title, doc.Content, doc.Source, ct).ConfigureAwait(false);
+
+            if (removed > 0)
+            {
+                refreshed++;
+            }
+            else
+            {
+                ingested++;
+            }
+        }
+
+        logger.LogInformation(
+            "Pack '{Pack}' knowledge seeding complete: {Ingested} new, {Refreshed} refreshed, {Skipped} unchanged. " +
+            "Total docs in store: {Total} ({Chunks} chunks).",
+            pack.Name, ingested, refreshed, skipped, kb.DocumentCount, kb.ChunkCount);
+    }
+
+    /// <summary>
+    /// Public list of the default-pack sample documents. Exposed so the
+    /// pack-loader equivalence tests can pin the shipped
+    /// <c>packs/default/knowledge/*.md</c> corpus to the seeder's own
+    /// content byte-for-byte, catching drift the moment either side
+    /// changes.
+    /// </summary>
+    public static IReadOnlyList<(string Title, string Source, string Content)> GetSampleDocuments() =>
     [
         ("Apex Planogram & Shelf-Set Reference", "apex-planogram-shelf-set.md", _planogramShelfSet),
         ("Apex Supplier & Distributor Service Levels", "apex-supplier-service-levels.md", _supplierServiceLevels),

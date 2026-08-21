@@ -1,25 +1,52 @@
 using System.Security.Cryptography;
 using System.Text;
 using RetailPulse.Contracts;
+using RetailPulse.McpServer;
 using RetailPulse.McpServer.Data;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
-// Load tenant configuration
-string tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "tenant.yaml");
-if (!File.Exists(tenantConfigPath))
-{
-    tenantConfigPath = Path.GetFullPath(
-        Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml"));
-}
-builder.Services.AddSingleton<ITenantProvider>(new FileTenantProvider(tenantConfigPath));
+// ── Content pack (issue #108) ─────────────────────────────────────────
+// The MCP server loads the tenant configuration and the scenario seed
+// manifest from the same active content pack the API loads so the two
+// stay in lockstep — a pack switch that changes the tenant's brands
+// also changes the SQLite seed data the tools query. Only the tenant
+// and seed sections are consumed here; the pack's agent roster,
+// starting-tasks, and knowledge corpus belong to the API. Kept
+// self-contained (no reference to the API assembly) so the MCP
+// deployment surface stays minimal.
+string? configuredActive = builder.Configuration["Packs:Active"];
+string activePackKey = string.IsNullOrWhiteSpace(configuredActive) ? "default" : configuredActive;
+string? configuredRoot = builder.Configuration["Packs:Root"];
+string configuredPacksRoot = string.IsNullOrWhiteSpace(configuredRoot) ? "packs" : configuredRoot;
 
-// Register SQLite-backed data store (seeds from tenant.yaml on first run)
+string activePackDirectory = ResolveActivePackDirectory(
+    builder.Environment.ContentRootPath,
+    configuredPacksRoot,
+    activePackKey);
+PackLoadResult activePack = PackTenantLoader.LoadFromPackDirectory(activePackDirectory);
+string activePackYamlPath = activePack.PackYamlPath;
+string activePackSeedDir = activePack.SeedDir;
+builder.Services.AddSingleton(activePack.Tenant);
+builder.Services.AddSingleton(activePack.Seed);
+
+// Register SQLite-backed data store. Content-hash reseed still applies:
+// the DB stores a hash of the active pack.yaml AND every file under
+// the pack's seed/ directory (issue #108). Switching Packs:Active
+// resolves to a different pack directory and therefore a different
+// hash; editing pack.yaml OR editing seed/scenario.yaml alone forces
+// a reseed; leaving both untouched preserves caller-driven mutations
+// across restarts.
 string dbPath = Path.Combine(Path.GetTempPath(), "retailpulse", "retailpulse.db");
 builder.Services.AddSingleton(sp =>
-    new RetailPulseDb(sp.GetRequiredService<ITenantProvider>(), dbPath, tenantConfigPath));
+    new RetailPulseDb(
+        sp.GetRequiredService<ITenantProvider>(),
+        sp.GetRequiredService<SeedManifest>(),
+        dbPath,
+        activePackYamlPath,
+        activePackSeedDir));
 
 builder.Services.AddMcpServer()
     .WithHttpTransport()
@@ -234,7 +261,7 @@ app.MapGet("/api/promo/calendar", (RetailPulseDb data, string? brand = null, str
 
 app.MapGet("/api/promo/types", (RetailPulseDb data) =>
 {
-    object result = RetailPulseDb.GetPromoTypes();
+    object result = data.GetPromoTypes();
     return Results.Ok(result);
 })
 .WithName("GetPromoTypes");
@@ -364,4 +391,57 @@ static bool ApiKeyMatches(string provided, byte[] expectedBytes)
 
     byte[] providedBytes = Encoding.UTF8.GetBytes(provided);
     return providedBytes.Length == expectedBytes.Length && CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes);
+}
+
+// Locate the active pack's directory across dev/test/published hosts.
+// Mirrors the resolution order used by the API's PackPathResolver so
+// both processes stay in lockstep without a shared reference.
+static string ResolveActivePackDirectory(string contentRootPath, string configuredRoot, string activePack)
+{
+    if (Path.IsPathRooted(configuredRoot))
+    {
+        string absolute = Path.Combine(configuredRoot, activePack);
+        return File.Exists(Path.Combine(absolute, "pack.yaml"))
+            ? absolute
+            : throw new DirectoryNotFoundException(
+            $"pack.yaml not found at configured Packs:Root: {Path.Combine(absolute, "pack.yaml")}");
+    }
+
+    var candidates = new List<string>();
+    void Add(string p)
+    {
+        try
+        {
+            string full = Path.GetFullPath(p);
+            if (!candidates.Contains(full, StringComparer.OrdinalIgnoreCase))
+            {
+                candidates.Add(full);
+            }
+        }
+        catch (Exception) { /* ignore invalid paths */ }
+    }
+
+    Add(Path.Combine(contentRootPath, configuredRoot, activePack));
+    DirectoryInfo? dir = new(contentRootPath);
+    for (int depth = 0; depth < 8 && dir is not null; depth++, dir = dir.Parent)
+    {
+        Add(Path.Combine(dir.FullName, configuredRoot, activePack));
+        if (File.Exists(Path.Combine(dir.FullName, "RetailPulse.slnx")))
+        {
+            break;
+        }
+    }
+
+    foreach (string candidate in candidates)
+    {
+        if (File.Exists(Path.Combine(candidate, "pack.yaml")))
+        {
+            return candidate;
+        }
+    }
+
+    string tried = candidates.Count == 0 ? "<no candidates>" : string.Join(", ", candidates);
+    throw new DirectoryNotFoundException(
+        $"Could not locate directory for active pack '{activePack}'. " +
+        $"Set Packs:Root to an absolute path or ensure the packs directory ships with the deployment. Tried: {tried}");
 }
