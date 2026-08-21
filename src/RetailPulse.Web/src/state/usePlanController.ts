@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import type { ActivePlanState, PlanAppState } from './planReducer';
 import { initialPlanState, isPlanRunning, isStepTerminal, planReducer } from './planReducer';
 import type {
+  ChartSpec,
   PlanClarificationPrompt,
   PlanFinalResponseEvent,
   PlanReviewNextRoundEvent,
@@ -72,6 +73,19 @@ export interface PlanController {
     status: PlanStepStatus,
     specialistKey?: string,
   ): void;
+  /**
+   * Attach the terminal reply + aggregate charts for a plan that completed
+   * synchronously on the immediate path (issue #141). The review-resume
+   * path receives the same shape via the `plan_final_response` SignalR
+   * event; both paths converge on the reducer's `PLAN_FINAL` action so
+   * `PlanView` renders `finalReply` and `finalCharts` identically.
+   */
+  applyFinalResponse(input: {
+    planId: string;
+    reply: string;
+    charts?: ChartSpec[] | null;
+    terminalReason?: string | null;
+  }): void;
 }
 
 const STEP_STATUS_ORDER: Record<PlanStepStatus, number> = {
@@ -345,6 +359,12 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
         planId: evt.planId,
         reply: evt.reply,
         terminalReason: evt.terminalReason,
+        // Forward specialist charts on the review-resume path (issue #141).
+        // Preserve the tri-state on the wire — `undefined` (field absent)
+        // preserves any prior attach, `null` explicitly clears, and an
+        // array replaces. The reducer applies the same rule for both plan
+        // paths.
+        charts: evt.charts,
       });
     });
 
@@ -604,6 +624,24 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
     [],
   );
 
+  const applyFinalResponse = useCallback(
+    (input: {
+      planId: string;
+      reply: string;
+      charts?: ChartSpec[] | null;
+      terminalReason?: string | null;
+    }) => {
+      dispatch({
+        type: 'PLAN_FINAL',
+        planId: input.planId,
+        reply: input.reply,
+        terminalReason: input.terminalReason,
+        charts: input.charts,
+      });
+    },
+    [],
+  );
+
   return useMemo<PlanController>(
     () => ({
       state,
@@ -619,6 +657,7 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
       removePlanFromHistory,
       openHistoryPlan,
       reportStepStatus,
+      applyFinalResponse,
     }),
     [
       state,
@@ -633,6 +672,7 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
       removePlanFromHistory,
       openHistoryPlan,
       reportStepStatus,
+      applyFinalResponse,
     ],
   );
 }
