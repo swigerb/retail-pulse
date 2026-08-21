@@ -395,6 +395,12 @@ builder.Configuration.GetSection(KnowledgeSourcesOptions.SectionName).Bind(knowl
 var knowledgeSourceRegistry =
     KnowledgeSourceRegistry.Build(knowledgeSourcesOptions, promptConfig.Agents);
 builder.Services.AddSingleton(knowledgeSourceRegistry);
+// PromptConfiguration is registered so read-only diagnostic endpoints (e.g. the
+// knowledge provider snapshot used by the frontend Knowledge panel, issue #106)
+// can enumerate agent display names and their declared knowledge bindings
+// without re-parsing prompts.yaml. Registered AFTER hydration so consumers see
+// the effective, tenant-resolved definitions.
+builder.Services.AddSingleton(promptConfig);
 
 // Register HttpClient for MCP server communication. The default URL is a
 // dev convenience — production should always set McpServer:BaseUrl.
