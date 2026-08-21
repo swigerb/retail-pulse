@@ -72,7 +72,7 @@ public static class ApprovalEndpoints
                 // another human response, we must NOT echo the caller-requested decision
                 // — the HTTP response and the SignalR broadcast both report the actual
                 // stored outcome so exactly one user-visible resolution is observable.
-                ApprovalResult result = await gate.RespondAsync(requestId, decision, body.Comment, ct);
+                ApprovalResult result = await gate.RespondAsync(requestId, decision, body.Comment, ct: ct);
 
                 var payload = new
                 {

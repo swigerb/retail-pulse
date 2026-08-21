@@ -541,6 +541,30 @@ public static class ChatEndpoints
                                 ParentSpanId = chatActivity?.SpanId.ToString(),
                             }, ct);
 
+                        // Plan review (#94) may suspend the plan for reviewer
+                        // input. The endpoint MUST NOT block on the review
+                        // timeout: instead, return 202 Accepted with the plan
+                        // and review request identifiers so the client (a) knows
+                        // its request was accepted and (b) can poll or subscribe
+                        // for the final response. When review is disabled or the
+                        // plan completed without suspension, the shape below
+                        // still returns 200 with the existing ChatResponse
+                        // envelope — no behavior change on that path.
+                        if (planResult.IsSuspended)
+                        {
+                            return Results.Accepted(
+                                uri: $"/api/plans/{planResult.PlanId}",
+                                value: new
+                                {
+                                    planId = planResult.PlanId,
+                                    status = planResult.Status,
+                                    reviewRequestId = planResult.ReviewRequestId,
+                                    round = planResult.ReviewRoundNumber,
+                                    sessionId,
+                                    message = "Plan is awaiting reviewer input. Subscribe to the telemetry hub for 'plan_final_response' or poll GET /api/plans/{planId}.",
+                                });
+                        }
+
                         // Output guardrail parity — the single-specialist path filters the
                         // reply through the shared PII/content-safety seam BEFORE returning
                         // (see FilterOutputAsync call below). The plan-first reply is a
