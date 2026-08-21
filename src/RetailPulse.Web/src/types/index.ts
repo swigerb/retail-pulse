@@ -3,10 +3,32 @@ export interface ChatHistoryMessage {
   content: string;
 }
 
+/**
+ * Hybrid execution decision (issue #95). Mirrors the stable UI + telemetry
+ * contract values in `RetailPulse.Contracts.Routing.ExecutionPath`:
+ *   - `fast`    — single-specialist single-shot path (today's default)
+ *   - `plan`    — plan-first workflow path (issue #93)
+ *   - `council` — dedicated portfolio-health council interception
+ */
+export type ExecutionPath = 'fast' | 'plan' | 'council';
+
+/**
+ * Paths the UI is allowed to force via the composer. Council is a
+ * router-controlled destination with its own dedicated trigger and is never
+ * a user override — the backend validator rejects it with a 400.
+ */
+export type ForceableExecutionPath = 'fast' | 'plan';
+
 export interface ChatRequest {
   message: string;
   sessionId?: string;
   history?: ChatHistoryMessage[];
+  /**
+   * Optional user override for the hybrid execution decider (issue #95).
+   * Omitted for the "Auto" composer default so the backend chooses. Only
+   * `fast` or `plan` are accepted; anything else 400s server-side.
+   */
+  forceExecutionPath?: ForceableExecutionPath;
 }
 
 export type IntentCategory =
@@ -23,6 +45,17 @@ export interface RoutingInfo {
   intent: string;
   confidence: number;
   durationMs?: number;
+  /**
+   * Execution path the backend chose for this reply (issue #95). Optional
+   * to stay backward-compatible with pre-#95 responses that never carry it.
+   */
+  executionPath?: ExecutionPath;
+  /**
+   * True when the chosen path came from an explicit `forceExecutionPath`
+   * override rather than the router's automatic decision. Optional for
+   * pre-#95 payload compatibility.
+   */
+  executionPathForced?: boolean;
 }
 
 /** Extract the top-level intent category from a slash-separated intent string.

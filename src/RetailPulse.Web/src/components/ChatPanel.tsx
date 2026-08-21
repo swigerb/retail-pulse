@@ -12,10 +12,11 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
-import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo } from '../types';
+import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo, ForceableExecutionPath } from '../types';
 import type { SendMessageOptions } from '../services/api';
 import { sendMessage, isErrorReply } from '../services/api';
 import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
+import { activeAuthMode } from '../auth/activeProvider';
 import { BrandLogo } from './BrandLogo';
 import { AgentRoutingIndicator } from './AgentRoutingIndicator';
 import { MemoryIndicator } from './MemoryIndicator';
@@ -370,6 +371,47 @@ const useChatStyles = makeStyles({
       padding: '12px 16px',
     },
   },
+  executionPathSelect: {
+    flexShrink: '0',
+    height: '32px',
+    padding: '0 26px 0 10px',
+    borderRadius: '8px',
+    border: '1px solid var(--color-border)',
+    background: 'var(--color-surface)',
+    color: 'var(--color-text-muted)',
+    fontSize: '12px',
+    fontWeight: '500',
+    cursor: 'pointer',
+    appearance: 'none',
+    backgroundImage:
+      "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%239aa0a6' d='M0 0l5 6 5-6z'/></svg>\")",
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 10px center',
+    transition: 'all 0.2s ease',
+    ':hover': {
+      background: 'var(--color-surface-hover)',
+      border: '1px solid var(--brand-accent-soft-hover)',
+      color: 'var(--brand-accent-light)',
+      backgroundImage:
+        "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%239aa0a6' d='M0 0l5 6 5-6z'/></svg>\")",
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: 'right 10px center',
+    },
+    ':focus-visible': {
+      outline: '2px solid var(--brand-accent)',
+      outlineOffset: '1px',
+    },
+    ':disabled': {
+      opacity: '0.5',
+      cursor: 'not-allowed',
+    },
+  },
+  executionPathForced: {
+    color: 'var(--brand-accent)',
+    border: '1px solid var(--brand-accent-border)',
+    background: 'var(--brand-accent-soft)',
+    fontWeight: '600',
+  },
   loadingContainer: {
     display: 'flex',
     alignItems: 'center',
@@ -390,6 +432,14 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
   const [loadingText, setLoadingText] = useState<string>('Thinking...');
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [sessionId] = useState<string>(() => crypto.randomUUID().replace(/-/g, ''));
+  // "auto" is the default — omit the field so the backend chooses. Only
+  // `fast` / `plan` are ever sent to the server; council keeps its own
+  // dedicated trigger and is not a valid override server-side.
+  const [forcePath, setForcePath] = useState<'auto' | ForceableExecutionPath>('auto');
+  // Anonymous sessions cannot force a path (backend ignores the field for
+  // anonymous users). Hide the selector so we don't present a misleading
+  // control that the server would silently drop.
+  const supportsExecutionPathOverride = activeAuthMode !== 'anonymous';
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
 
@@ -466,8 +516,19 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           .map(m => ({ role: m.role, content: m.content }));
 
         const options: SendMessageOptions = { signal: controller.signal };
+        // Only include `forceExecutionPath` when the user has explicitly
+        // picked a path AND the current auth mode supports the override.
+        // Auto (the default) omits the field so the request payload for the
+        // common case is byte-identical to the pre-#95 shape.
+        const forceExecutionPath: ForceableExecutionPath | undefined =
+          supportsExecutionPathOverride && forcePath !== 'auto' ? forcePath : undefined;
         const response = await sendMessage(
-          { message: trimmed, sessionId, history },
+          {
+            message: trimmed,
+            sessionId,
+            history,
+            ...(forceExecutionPath ? { forceExecutionPath } : {}),
+          },
           options,
         );
         if (!isMountedRef.current || controller.signal.aborted) return;
@@ -514,7 +575,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
         }
       }
     },
-    [sessionId],
+    [sessionId, forcePath, supportsExecutionPathOverride],
   );
 
   const handleSend = useCallback(async () => {
@@ -707,6 +768,33 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           onSelect={handleSuggestedClick}
           disabled={loading}
         />
+        {supportsExecutionPathOverride && (
+          <>
+            <label htmlFor="execution-path-select" className="visually-hidden">
+              Execution path
+            </label>
+            <select
+              id="execution-path-select"
+              className={`${styles.executionPathSelect} ${forcePath !== 'auto' ? styles.executionPathForced : ''}`}
+              value={forcePath}
+              onChange={(e) => setForcePath(e.target.value as 'auto' | ForceableExecutionPath)}
+              disabled={loading}
+              aria-label="Execution path"
+              title={
+                forcePath === 'auto'
+                  ? 'Execution path: Auto — the router picks fast or plan for you.'
+                  : forcePath === 'fast'
+                    ? 'Execution path: Fast (forced) — single specialist, single shot.'
+                    : 'Execution path: Plan (forced) — plan-first workflow with review when required.'
+              }
+              data-testid="execution-path-select"
+            >
+              <option value="auto">Auto</option>
+              <option value="fast">Fast</option>
+              <option value="plan">Plan</option>
+            </select>
+          </>
+        )}
         <Input
           id="chat-input"
           value={input}
