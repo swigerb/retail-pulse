@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
 using RetailPulse.Api.Auth;
-using RetailPulse.Api.Security.Anonymous;
 
 namespace RetailPulse.Api.Hubs;
 
@@ -27,17 +26,22 @@ public class StreamingHub : Hub
     /// <summary>
     /// Subscribes the caller to streaming events for a specific chat session.
     ///
-    /// For an Anonymous caller the session is bound to the caller's immutable subject: the caller may
-    /// only join a session it owns (or an as-yet-unclaimed one). This blocks an anonymous attacker
-    /// from subscribing to another subject's streamed tokens with a known/guessed session id
-    /// (Finding 6). Entra/dev callers are unchanged.
+    /// Ownership is enforced for BOTH authenticated and anonymous callers (issue #92): every
+    /// join and every rejoin binds the sessionId to the caller's immutable subject via
+    /// <see cref="ISessionOwnershipRegistry.TryBind"/>. A hostile client that reconnects and
+    /// attempts to rejoin another subject's session group is refused. The first join for a
+    /// server-minted sessionId claims ownership; every subsequent join (including reconnects)
+    /// must match the recorded owner.
     /// </summary>
     public Task JoinSession(string sessionId)
     {
-        return string.IsNullOrWhiteSpace(sessionId)
-            ? Task.CompletedTask
-            : AnonymousCapabilityPolicy.IsAnonymousPrincipal(Context.User)
-            && !_ownership.TryBind(sessionId, UserIdentity.Resolve(Context.User))
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return Task.CompletedTask;
+        }
+
+        string subject = UserIdentity.Resolve(Context.User);
+        return !_ownership.TryBind(sessionId, subject)
             ? throw new HubException("Not authorized to join this session.")
             : Groups.AddToGroupAsync(Context.ConnectionId, $"stream:{sessionId}");
     }

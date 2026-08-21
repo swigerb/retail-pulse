@@ -20,6 +20,103 @@ Requests flow through this middleware stack (in order):
 
 ---
 
+## Real-time channel resilience (issue #92)
+
+Wave 2 turns a chat "turn" into a multi-step plan that can run far longer than a
+single-shot answer. Three configuration surfaces keep the real-time channel and
+its UX honest under those long-running conditions.
+
+### SignalR keep-alive + application heartbeat — `RealtimeResilience`
+
+SignalR transport pings satisfy intermediary proxies but are opaque to the
+browser layer. RetailPulse layers an application-level heartbeat on top so the
+frontend can render "connected / stalled" without probing transport internals.
+
+| Setting                        | Default    | Purpose                                                                 |
+|--------------------------------|------------|-------------------------------------------------------------------------|
+| `KeepAliveInterval`            | `00:00:15` | Server-to-client transport ping cadence (bound to `HubOptions`).        |
+| `ClientTimeoutInterval`        | `00:00:30` | Server-side disconnect threshold. SignalR guidance: `>= 2 x KeepAlive`. |
+| `HandshakeTimeout`             | `00:00:15` | Initial protocol negotiation timeout.                                   |
+| `ApplicationHeartbeatInterval` | `00:00:15` | Cadence of the observable `heartbeat` event on both hubs.               |
+| `ApplicationHeartbeatEnabled`  | `true`     | Master switch for the hosted heartbeat emitter.                         |
+
+The 15-second keep-alive default stays well under the shortest plausible
+intermediary idle timeout we see in front of Container Apps (APIM at 240s,
+corporate proxies frequently at 60s). The `heartbeat` event is emitted on both
+`/hubs/telemetry` and `/hubs/streaming`.
+
+### Chat request timeouts — `ChatTimeout`
+
+Separate ceilings for the single-shot fast path and the long-running plan path.
+Preserves the pre-#92 single-shot 90s behavior; the plan ceiling is applied only
+when the hybrid execution decider (#95) selects the plan path.
+
+| Setting      | Default    | Purpose                                                                                     |
+|--------------|------------|---------------------------------------------------------------------------------------------|
+| `SingleShot` | `00:01:30` | Per-request timeout for a fast-path (single-specialist) run.                                |
+| `Plan`       | `00:06:00` | Replacement ceiling when the hybrid execution decider selects the plan path. Applied to `/api/chat` only after admission to the plan branch. |
+
+Keep `Plan >= PlanPersistence.PlanTimeout + 60s` so the plan orchestrator's own
+per-plan timeout fires first with a plan-specific failure reason rather than the
+request seam timing out with the generic 504.
+
+### User-initiated cancellation
+
+`POST /api/chat/{sessionId}/cancel` and `POST /api/plans/{planId}/cancel` end an
+in-flight run the caller owns. Ownership is enforced by
+`IExecutionCancellationRegistry`: a foreign-subject cancel collapses to `404` so
+the endpoints cannot be used to probe another user's live sessions or plan ids.
+Anonymous callers cannot cancel plans (`plan_cancel_unavailable`). The
+cancellation flows through the same `CancellationToken` the pipeline uses to
+invoke specialists and tools, so an in-flight tool call actually observes the
+cancellation and ceases work — not merely that the HTTP response returned.
+
+### Reconciliation after reconnect
+
+`GET /api/plans/{planId}/reconcile?afterStepIndex=N` returns durable plan status
+plus any step records with `StepIndex > N`, filtered to the caller's subject at
+the SQL layer. A cross-subject probe or unknown plan id resolves to `404`.
+Mapped only when `PlanPersistence:Enabled` is `true`, matching the rest of the
+`/api/plans` surface.
+
+### Hub ownership on reconnect
+
+Every `JoinSession` on both hubs binds the sessionId to the caller's immutable
+subject via `ISessionOwnershipRegistry`. This is now enforced for BOTH
+authenticated and anonymous callers (previously anonymous-only). A hostile
+client that reconnects and attempts to rejoin another subject's session group is
+refused with a `HubException`.
+
+### Frontend behavior on top of these contracts
+
+The SPA layers a small set of user-visible affordances on top of the backend
+contracts above so a long-running plan or a dropped channel never presents as
+a silent spinner. All of these live under `src/RetailPulse.Web/src` and are
+covered by Vitest units in `src/__tests__` (see the plan below).
+
+| UI concern | Module | Notes |
+|------------|--------|-------|
+| Reconnect schedule | `services/reconnectBackoff.ts` | Capped exponential-ish schedule (`1s → 30s` cap, 8 attempts). Returning `null` from the SignalR `IRetryPolicy` triggers `onclose` and the terminal `disconnected` state. |
+| Connection status | `services/telemetryHub.ts`, `hooks/useConnectionStatus.ts` | Exposes `connecting / connected / reconnecting / disconnected` plus a `stalled` flag (Connected but no `heartbeat` in `2 × ApplicationHeartbeatInterval`). |
+| Visible indicator | `components/ConnectionStatusIndicator.tsx` | Rendered inline in the chat composer next to Send so a dropped hub is visible where the user actually types. |
+| Timeout dialog | `components/TimeoutDialog.tsx` | Replaces the pre-#92 hung spinner when `sendMessage` throws `ChatRequestTimeoutError`; offers Retry (replay the same prompt) or Abandon (clear the in-flight state). |
+| User cancel | `services/executionControlApi.ts`, `components/ChatPanel.tsx` | The Send button flips to Cancel while a run is in flight. Cancel aborts the local fetch AND posts `/api/chat/{sessionId}/cancel`; when a `planId` is known the plan-owning UI can call `cancelPlan(planId)` from the same module. |
+| Reconcile after reconnect | `services/planReconciler.ts`, `services/executionControlApi.ts#reconcilePlan` | Deterministic merge by `stepIndex` with terminal-state monotonicity. Overlap collapses to a single entry; gaps are preserved so streaming can fill them in. |
+
+**Cross-session rejoin safety.** `joinPendingSessions()` in `telemetryHub.ts`
+only re-invokes `JoinSession` for sessionIds this client previously joined via
+`joinTelemetrySession()`. Server payloads never influence that set, so a
+hostile server message cannot trick the client into rejoining a foreign
+group. The hub also enforces subject ownership on every join and rejoin.
+
+**Deferred APIM verification.** Local Vitest units cover the schedule, ceiling,
+terminal transition, dedupe/overlap/no-gaps, and the timeout / cancel UX.
+They do not exercise a real intermediary idle timeout. The multi-minute idle
+survival criterion in the issue must be verified end-to-end through APIM
+against a deployed environment and the result recorded in the PR.
+
+---
+
 ## Circuit Breaker
 
 **Scope:** MCP Server HTTP client (all tool calls)
