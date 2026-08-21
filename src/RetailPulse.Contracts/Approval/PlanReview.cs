@@ -1,3 +1,5 @@
+using RetailPulse.Contracts;
+
 namespace RetailPulse.Contracts.Approval;
 
 /// <summary>
@@ -145,6 +147,17 @@ public sealed record PlanReviewCompletedStep
     public int OutputTokens { get; init; }
     public int TotalTokens { get; init; }
     public long DurationMs { get; init; }
+
+    /// <summary>
+    /// Charts emitted by the specialist for this pre-suspend step. Persisted
+    /// across the clarification checkpoint so the resume path can flatten
+    /// them into the final broadcast alongside charts produced by steps
+    /// that execute after the reviewer answers. Without this the plan-first
+    /// clarification path silently drops every chart a specialist produced
+    /// before the [[CLARIFY]] pause, breaking ADR-006's "9 chart types on
+    /// both paths" invariant.
+    /// </summary>
+    public IReadOnlyList<ChartSpec>? Charts { get; init; }
 }
 
 /// <summary>
