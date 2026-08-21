@@ -32,7 +32,7 @@ public sealed class PackLoaderTests : IDisposable
     {
         string root = NewFixture("empty-root");
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         Action act = () => loader.Load("does-not-exist");
 
@@ -46,7 +46,7 @@ public sealed class PackLoaderTests : IDisposable
         string root = NewFixture("both-missing");
         Directory.CreateDirectory(Path.Combine(root, "sample"));
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         PackValidationException ex =
             Assert.Throws<PackValidationException>(() => loader.Load("sample"));
@@ -83,7 +83,7 @@ public sealed class PackLoaderTests : IDisposable
         // agents.yaml intentionally missing — aggregate reporting means
         // we should still see the metadata + tenant issues alongside it.
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         PackValidationException ex =
             Assert.Throws<PackValidationException>(() => loader.Load("wobble"));
@@ -129,7 +129,7 @@ public sealed class PackLoaderTests : IDisposable
                 tools: []
             """);
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         PackValidationException ex =
             Assert.Throws<PackValidationException>(() => loader.Load("duplo"));
@@ -162,7 +162,7 @@ public sealed class PackLoaderTests : IDisposable
                   - "Prompt two"
             """);
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         PackValidationException ex =
             Assert.Throws<PackValidationException>(() => loader.Load("quibble"));
@@ -181,7 +181,7 @@ public sealed class PackLoaderTests : IDisposable
         File.WriteAllText(Path.Combine(packDir, "pack.yaml"), MinimalValidPackYaml("tinypack"));
         File.WriteAllText(Path.Combine(packDir, "agents.yaml"), MinimalValidAgentsYaml());
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
         LoadedPack pack = loader.Load("tinypack");
 
         pack.Name.Should().Be("tinypack");
@@ -200,7 +200,7 @@ public sealed class PackLoaderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(root, "alpha"));
         Directory.CreateDirectory(Path.Combine(root, "mu"));
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         loader.DiscoverPacks().Should().Equal(["alpha", "mu", "zeta"]);
     }
@@ -213,6 +213,130 @@ public sealed class PackLoaderTests : IDisposable
         Action act = () => PackLoader.ForDirectory(root);
 
         act.Should().Throw<DirectoryNotFoundException>();
+    }
+
+    [Fact]
+    public void Load_DuplicateAgentSectionKeyInYaml_IsFlaggedAsParseError()
+    {
+        // Regression guard for the acceptance hole where YamlDotNet's
+        // default deserializer silently last-one-wins on duplicate keys.
+        // Two 'demand-forecast:' entries would otherwise ship a
+        // half-defined roster; the loader now enforces
+        // WithDuplicateKeyChecking so the parser rejects the file and
+        // the aggregate report surfaces a clear parse error.
+        string root = NewFixture("dup-yaml-key");
+        string packDir = Path.Combine(root, "twinsy");
+        Directory.CreateDirectory(packDir);
+
+        File.WriteAllText(Path.Combine(packDir, "pack.yaml"), MinimalValidPackYaml("twinsy"));
+        File.WriteAllText(Path.Combine(packDir, "agents.yaml"), """
+            agents:
+              demand-forecast:
+                name: "Alpha"
+                model: "gpt-5.4-mini"
+                system_prompt: "You are alpha."
+                temperature: 0.3
+                tools: []
+              demand-forecast:
+                name: "Beta"
+                model: "gpt-5.4-mini"
+                system_prompt: "You are beta."
+                temperature: 0.3
+                tools: []
+            """);
+
+        var loader = PackLoader.ForDirectory(root);
+
+        PackValidationException ex =
+            Assert.Throws<PackValidationException>(() => loader.Load("twinsy"));
+
+        PackValidationIssue parseError = ex.Issues.Should().ContainSingle(i =>
+            i.Section == "agents.yaml" && i.Code == "pack.parse-error").Subject;
+        parseError.Message.Should().Contain("duplicate", "the parser must name the failure mode");
+        parseError.PackName.Should().Be("twinsy");
+    }
+
+    [Fact]
+    public void Load_MalformedAgentsYaml_IsFlaggedAsParseError()
+    {
+        string root = NewFixture("malformed-agents");
+        string packDir = Path.Combine(root, "brokenpack");
+        Directory.CreateDirectory(packDir);
+
+        File.WriteAllText(Path.Combine(packDir, "pack.yaml"), MinimalValidPackYaml("brokenpack"));
+        // Broken YAML: unclosed mapping.
+        File.WriteAllText(Path.Combine(packDir, "agents.yaml"), """
+            agents:
+              solo:
+                name: "Broken
+                model: gpt-5.4-mini
+                tools: [
+            """);
+
+        var loader = PackLoader.ForDirectory(root);
+
+        PackValidationException ex =
+            Assert.Throws<PackValidationException>(() => loader.Load("brokenpack"));
+
+        ex.Issues.Should().Contain(i =>
+            i.Section == "agents.yaml" && i.Code == "pack.parse-error");
+        ex.Issues.Should().OnlyContain(i => i.PackName == "brokenpack");
+        ex.Issues.Should().OnlyContain(i => !string.IsNullOrWhiteSpace(i.Section));
+    }
+
+    [Fact]
+    public void Load_UnknownStartingTaskFields_DoNotBlockLoad_ButDuplicateKeysDo()
+    {
+        // starting-tasks.yaml uses IgnoreUnmatchedProperties so a
+        // forward-compatible extra field (e.g., an author annotation)
+        // doesn't break the load — but duplicate keys within a single
+        // mapping still surface as parse errors so accidental prompt
+        // loss cannot ship silently.
+        string root = NewFixture("starting-tasks-dup");
+        string packDir = Path.Combine(root, "dupcats");
+        Directory.CreateDirectory(packDir);
+
+        File.WriteAllText(Path.Combine(packDir, "pack.yaml"), MinimalValidPackYaml("dupcats"));
+        File.WriteAllText(Path.Combine(packDir, "agents.yaml"), MinimalValidAgentsYaml());
+        File.WriteAllText(Path.Combine(packDir, "starting-tasks.yaml"), """
+            categories:
+              - id: focus
+                label: "Focus"
+                emoji: "🎯"
+                prompts:
+                  - "One"
+                prompts:
+                  - "Two"
+            """);
+
+        var loader = PackLoader.ForDirectory(root);
+
+        PackValidationException ex =
+            Assert.Throws<PackValidationException>(() => loader.Load("dupcats"));
+
+        ex.Issues.Should().Contain(i =>
+            i.Section == "starting-tasks.yaml" && i.Code == "pack.parse-error");
+    }
+
+    [Fact]
+    public void Load_EmptyKnowledgeDirectory_IsTreatedAsAbsent_NotAsFailure()
+    {
+        // Missing optional sections degrade sensibly: a knowledge dir
+        // that exists but contains only a README (no *.md corpus files)
+        // must not fail load. Guards the "empty seed/ + README" pattern
+        // used by the shipped fictional packs.
+        string root = NewFixture("no-corpus");
+        string packDir = Path.Combine(root, "emptycorpus");
+        Directory.CreateDirectory(packDir);
+        Directory.CreateDirectory(Path.Combine(packDir, "knowledge"));
+        File.WriteAllText(Path.Combine(packDir, "pack.yaml"), MinimalValidPackYaml("emptycorpus"));
+        File.WriteAllText(Path.Combine(packDir, "agents.yaml"), MinimalValidAgentsYaml());
+
+        var loader = PackLoader.ForDirectory(root);
+        LoadedPack pack = loader.Load("emptycorpus");
+
+        pack.KnowledgeDocuments.Should().BeEmpty();
+        pack.StartingTasks.Should().BeEmpty();
     }
 
     private static string MinimalValidPackYaml(string key) => $$"""

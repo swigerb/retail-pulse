@@ -48,15 +48,32 @@ public sealed partial class PackLoader
     private static readonly IDeserializer _packDeserializer = new DeserializerBuilder()
         .WithNamingConvention(CamelCaseNamingConvention.Instance)
         .IgnoreUnmatchedProperties()
+        // Duplicate key detection prevents a metadata/tenant block from
+        // silently losing content when a pack author accidentally repeats
+        // a key (e.g., two 'tenant:' entries or a doubled 'brands:' node).
+        // YamlDotNet defaults to last-one-wins, which would let a real
+        // configuration mistake ship undetected.
+        .WithDuplicateKeyChecking()
         .Build();
 
     private static readonly IDeserializer _agentsDeserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
+        // Agent rosters MUST fail loudly on duplicate section keys.
+        // Without this, YamlDotNet silently keeps the last of two
+        // 'demand-forecast:' entries and the pack ships a half-defined
+        // roster — a hostile pack could exploit this to hide overrides
+        // of a legitimate specialist. See PackLoaderTests
+        // Load_DuplicateAgentSectionKeyInYaml_IsFlaggedAsParseError.
+        .WithDuplicateKeyChecking()
         .Build();
 
     private static readonly IDeserializer _startingTasksDeserializer = new DeserializerBuilder()
         .WithNamingConvention(CamelCaseNamingConvention.Instance)
         .IgnoreUnmatchedProperties()
+        // Duplicate category keys inside a mapping would silently drop
+        // curated prompts; matches the pack-level guard the loader
+        // already applies to duplicate category ids in the sequence.
+        .WithDuplicateKeyChecking()
         .Build();
 
     [GeneratedRegex(@"^\s*#\s+(?<title>.+?)\s*$", RegexOptions.Multiline)]

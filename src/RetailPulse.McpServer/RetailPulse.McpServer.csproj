@@ -23,6 +23,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Expose PackTenantLoader to the tests project so acceptance tests
+         can assert the API/MCP pack contract without duplicating the
+         YAML deserializer wiring. -->
+    <InternalsVisibleTo Include="RetailPulse.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="..\..\tenant.yaml" Link="tenant.yaml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
