@@ -24,7 +24,7 @@ import { StreamingMessage, CacheIndicator } from './streaming';
 import { ProgressIndicator } from './ProgressIndicator';
 import type { ProgressStep } from './ProgressIndicator';
 import { BlockedRequestMessage, WithheldOutputMessage } from './guardrails';
-import { detectSafetyRefusal, buildSafetyBlockDisplay } from '../utils/safetyDisplay';
+import { detectSafetyRefusal } from '../utils/safetyDisplay';
 import type { SafetyBlockDisplayModel } from '../types';
 import { PromptLibrary } from './PromptLibrary';
 import { PROMPT_CATEGORIES } from '../constants/prompts';
@@ -479,18 +479,11 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
           ? { totalDurationMs: response.totalDurationMs }
           : { totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, routing: response.routing });
         // Sniff the reply for a Content Safety / guardrails refusal template.
-        // When it matches, replace the raw reply with a whitelisted display
-        // model so the user gets a plain-language explanation without any
-        // internal detection detail leaking through.
-        const refusal = detectSafetyRefusal(response.reply);
-        const safetyDisplay = refusal
-          ? buildSafetyBlockDisplay({
-              stage: refusal.stage,
-              decision: refusal.decision,
-              detectionType: refusal.detectionType,
-              failClosed: refusal.failClosed,
-            })
-          : null;
+        // When it matches, replace the raw reply with the whitelisted
+        // `SafetyBlockDisplayModel` returned by `detectSafetyRefusal` so the
+        // user sees a plain-language explanation without any internal
+        // detection detail leaking through.
+        const safetyDisplay = detectSafetyRefusal(response.reply);
         setMessages(prev => [
           ...prev,
           safetyDisplay

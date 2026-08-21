@@ -81,7 +81,10 @@ const useStyles = makeStyles({
   },
   filterChipActive: {
     backgroundColor: tokens.colorBrandBackground2,
-    borderColor: tokens.colorBrandStroke1,
+    borderTopColor: tokens.colorBrandStroke1,
+    borderRightColor: tokens.colorBrandStroke1,
+    borderBottomColor: tokens.colorBrandStroke1,
+    borderLeftColor: tokens.colorBrandStroke1,
     color: tokens.colorBrandForeground1,
   },
   list: {
