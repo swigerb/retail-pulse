@@ -1,0 +1,26 @@
+{
+  "issue": "#95",
+  "scenario": "hybrid-execution-fast-path",
+  "prompt": "How is Sierra Gold Tequila performing in the Northeast?",
+  "measured_code_path": "RetailPulse.Api.Agents.Routing.RetailOpsRouter.TryKeywordClassify",
+  "commit_sha": "e445f0c8bb408f940425c99aac930234dc771909",
+  "environment": {
+    "framework": ".NET 10.0.11",
+    "os_platform": "windows",
+    "process_architecture": "X64",
+    "processor_count": 24,
+    "configuration": "Release"
+  },
+  "method": {
+    "warmup_iterations": 2000,
+    "sample_count": 20000,
+    "timer_frequency_hz": 10000000,
+    "deterministic": true
+  },
+  "results": {
+    "units": "nanoseconds",
+    "p50": 5200,
+    "p95": 7700
+  },
+  "recorded_at_utc": "2026-08-21T01:53:23.8284405Z"
+}
