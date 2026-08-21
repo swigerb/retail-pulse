@@ -568,6 +568,74 @@ gate CI on their own.
 | `Eval/EvaluationRunner.cs` | Orchestrator that produces `EvaluationReport`. |
 | `Eval/EvaluationHarnessTests.cs` | The CI gate. |
 | `Eval/StabilityTests.cs` | Repeat-run byte-identical determinism check. |
+
+---
+
+## Knowledge Provider Test Strategy (Issue #107)
+
+The Wave-5 knowledge provider surface (InMemory BM25 default, Azure AI Search
+opt-in, Foundry IQ opt-in) is guarded by a layered test strategy so operator
+trust in optionality, degradation, safety, and cost is a build-time guarantee
+rather than a runtime hope. See
+`docs/rag/knowledge-provider-parity-matrix.md` for the per-operation matrix.
+
+### Layered test map
+
+| Concern                                        | Test class                                                                  | Notes                                                                 |
+| ---------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Pre-Wave-5 InMemory byte-for-byte regression   | `Rag/Baselines/PreWave5InMemoryBaselineTests`                               | Golden JSON + static BM25 kernel contract. Regen is opt-in.           |
+| Optional providers not materialized by default | `Rag/Optionality/ZeroCloudDependencyStartupTests`                           | DI-graph shape proof: no cloud SDK client resolvable when disabled.   |
+| Optional providers explicit skip when unset    | `Rag/AzureAISearch/AzureAISearchLiveConformanceTests` + Foundry equivalent  | The skip-reason itself is asserted so "silent no-op" never passes.    |
+| Shared conformance suite                       | `Rag/KnowledgeBaseConformanceTests` + per-provider subclasses               | InMemory + Foundry-fake in-process; Azure AI Search live-only.        |
+| Static provider parity vs documented matrix    | `Rag/Parity/KnowledgeProviderParityMatrixTests`                             | Fails the build if a provider drifts from the parity matrix doc.      |
+| Per-agent binding across providers             | `Rag/Parity/PerAgentBindingProviderParityTests`                             | Verifies scoped-source scope reaches every provider's scoped overload.|
+| Silent-empty-impossible invariant              | `Rag/Optionality/SilentEmptyImpossibleInvariantTests`                       | Exhaustive walk of `DegradingKnowledgeBase` state space.              |
+| Indirect-injection safety on every provider    | `Rag/Security/IndirectInjectionProviderParityTests`                         | Same poisoned+benign corpus through every provider; Content Safety drops the poisoned chunk. |
+| APIM traversal + embedding cost telemetry      | `Rag/CostLatency/EmbeddingApimTraversalTests`                               | api-key header + AOAI-shape URL + `ICostTracker` UsageEvent.          |
+| Local retrieval latency baseline               | `Rag/CostLatency/RetrievalLatencyBaselineTests`                             | Informational p50/p95 output for InMemory + Foundry-fake.             |
+| Retrieval quality Recall@3 comparison          | `Rag/AzureAISearch/AzureAISearchRetrievalQualityComparisonTests`, `Rag/FoundryIQ/FoundryIQRetrievalQualityComparisonTests` | Informational-only; live tests skip cleanly when unconfigured. |
+
+### Cloud test contract
+
+Every cloud-dependent test class:
+
+1. Guards the fact with `[LiveAzureAISearchFact]` / `[LiveFoundryIqFact]`
+   whose constructor sets `Skip` to a documented reason string when the
+   required environment variables are absent.
+2. Ships a plain `[Fact]` that always runs and asserts the exact skip
+   reason string when unconfigured. That way "unconfigured, cleanly skipped"
+   is visible in CI as an asserted state, not a silently-empty run.
+
+Required environment variables live on `AzureAISearchLiveTestConfig` /
+`FoundryIQLiveTestConfig`. When you extend a cloud test class, add its
+skip-reason assertion the same day so the CI output honestly distinguishes
+"unconfigured" from "silently no-op".
+
+### Regenerating the pre-Wave-5 baseline
+
+`Rag/Baselines/inmemory-pre-wave5.json` locks the InMemory BM25 output for
+the fixed corpus in `PreWave5BaselineFixture`. Regeneration is a two-step
+reviewable process:
+
+```powershell
+$env:RETAIL_PULSE_REGEN_BM25_BASELINE = "1"
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj `
+  --filter "FullyQualifiedName~PreWave5InMemoryBaselineTests.InMemoryBM25_MatchesPreWave5Baseline_ByteForByte"
+Remove-Item Env:RETAIL_PULSE_REGEN_BM25_BASELINE
+```
+
+The test throws after writing so regeneration is intentional. Review the
+resulting JSON diff and the accompanying static BM25 kernel contract test
+before committing.
+
+### What NOT to assert
+
+Do not compare raw scores across providers - they are provider-local by
+contract. Do not assert exact model wording, even in structural tests. Do
+not treat an empty search result as a hidden success path: a healthy
+empty corpus is legitimate; the degradation layer never emits an empty
+result to hide an outage. If a real defect exists that would violate one
+of these invariants, file a separate issue rather than weakening a test.
 | `Eval/BaselineTests.cs` | Baseline diff. |
 | `Eval/ScorerSelfTests.cs` | Known-good + known-bad self-tests. |
 | `Eval/DatasetContractTests.cs` | Structural invariants on the dataset. |
