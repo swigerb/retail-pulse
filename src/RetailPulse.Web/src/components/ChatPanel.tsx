@@ -353,6 +353,17 @@ const useChatStyles = makeStyles({
       transform: 'none',
     },
   },
+  suggestedEmpty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '24px 16px',
+    textAlign: 'center',
+    color: 'var(--color-text-muted)',
+    fontSize: '13px',
+    lineHeight: '1.5',
+  },
   message: {
     display: 'flex',
     gap: '12px',
@@ -767,6 +778,9 @@ export function ChatPanel({
     ? promptCategories.filter(c => c.id === selectedCategory)
     : promptCategories;
 
+  const totalVisibleTasks = visiblePrompts.reduce((n, c) => n + c.tasks.length, 0);
+  const hasAnyTasks = promptCategories.some((c) => c.tasks.length > 0);
+
   return (
     <div className={styles.panel}>
       <div className={styles.messages}>
@@ -783,37 +797,71 @@ export function ChatPanel({
               Ask me about sales performance, inventory trends, or customer insights across your retail portfolio.
             </Text>
             <div className={styles.suggestedQueries}>
-              <div className={styles.categoryChips}>
-                <button
-                  className={`${styles.categoryChip} ${selectedCategory === null ? styles.categoryChipActive : ''}`}
-                  onClick={() => setSelectedCategory(null)}
-                >
-                  🏪 All
-                </button>
-                {promptCategories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    className={`${styles.categoryChip} ${selectedCategory === cat.id ? styles.categoryChipActive : ''}`}
-                    onClick={() => setSelectedCategory(cat.id)}
-                  >
-                    {cat.emoji} {cat.label}
-                  </button>
-                ))}
-              </div>
-              <div className={styles.promptGrid}>
-                {visiblePrompts.map((cat) =>
-                  (selectedCategory ? cat.prompts : cat.prompts.slice(0, 1)).map((prompt, i) => (
+              {hasAnyTasks ? (
+                <>
+                  <div className={styles.categoryChips} role="group" aria-label="Suggested prompt categories">
                     <button
-                      key={`${cat.id}-${i}`}
-                      className={styles.suggestedQuery}
-                      onClick={() => handleSuggestedClick(prompt)}
-                      disabled={loading}
+                      className={`${styles.categoryChip} ${selectedCategory === null ? styles.categoryChipActive : ''}`}
+                      aria-pressed={selectedCategory === null}
+                      onClick={() => setSelectedCategory(null)}
                     >
-                      <span>{cat.emoji}</span> {prompt}
+                      🏪 All
                     </button>
-                  ))
-                )}
-              </div>
+                    {promptCategories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        className={`${styles.categoryChip} ${selectedCategory === cat.id ? styles.categoryChipActive : ''}`}
+                        aria-pressed={selectedCategory === cat.id}
+                        onClick={() => setSelectedCategory(cat.id)}
+                      >
+                        {cat.emoji} {cat.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={styles.promptGrid} data-testid="welcome-prompt-grid">
+                    {totalVisibleTasks === 0 ? (
+                      <div
+                        className={styles.suggestedEmpty}
+                        role="status"
+                        data-testid="welcome-prompt-empty"
+                      >
+                        No starting tasks in this category.
+                      </div>
+                    ) : (
+                      visiblePrompts.map((cat) =>
+                        (selectedCategory ? cat.tasks : cat.tasks.slice(0, 1)).map((task, i) => (
+                          <button
+                            key={`${cat.id}-${i}`}
+                            className={styles.suggestedQuery}
+                            data-testid="welcome-prompt-item"
+                            data-prompt-category={cat.id}
+                            data-prompt-index={i}
+                            data-prompt-text={task.prompt}
+                            data-capability-kind={task.capability?.kind ?? ''}
+                            data-capability-chart-type={task.capability?.chartType ?? ''}
+                            data-capability-plan-path={task.capability?.planPath ?? ''}
+                            aria-label={task.name}
+                            onClick={() => handleSuggestedClick(task.prompt)}
+                            disabled={loading}
+                          >
+                            <span>{cat.emoji}</span> {task.name}
+                          </button>
+                        ))
+                      )
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div
+                  className={styles.suggestedEmpty}
+                  role="status"
+                  data-testid="welcome-prompt-empty"
+                >
+                  <span aria-hidden="true">✨</span>
+                  <Text>No starting tasks are defined for the active scenario.</Text>
+                  <Text>Ask a question directly in the composer to get started.</Text>
+                </div>
+              )}
             </div>
           </div>
         )}
