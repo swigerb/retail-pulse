@@ -307,6 +307,115 @@ describe('planReducer', () => {
     expect(asked.active?.clarification?.prompt?.question).toBe('which region do you mean?');
   });
 
+  it('clarification submit-failed clears submitting so the user can retry', () => {
+    const prompt: PlanClarificationPrompt = {
+      planId: 'p1',
+      stepIndex: 0,
+      specialistKey: 'demand-forecasting',
+      question: 'which store?',
+    };
+    const asked = planReducer(
+      planReducer(initialPlanState, { type: 'PLAN_STARTED', planId: 'p1', request: 'q' }),
+      { type: 'CLARIFICATION_REQUESTED', planId: 'p1', requestId: 'req-1', prompt },
+    );
+    const submitting = planReducer(asked, {
+      type: 'CLARIFICATION_SUBMITTING',
+      planId: 'p1',
+      requestId: 'req-1',
+    });
+    expect(submitting.active?.clarification?.submitting).toBe(true);
+    const failed = planReducer(submitting, {
+      type: 'CLARIFICATION_SUBMIT_FAILED',
+      planId: 'p1',
+      requestId: 'req-1',
+    });
+    // Regression for #96 blocker: after a rejected answerPlanClarification the
+    // submit control must re-enable — submitting is false, prompt is retained
+    // so the card still renders the question for another attempt.
+    expect(failed.active?.clarification?.submitting).toBe(false);
+    expect(failed.active?.clarification?.prompt?.question).toBe('which store?');
+    expect(failed.active?.status).toBe('awaiting_clarification');
+  });
+
+  it('stale clarification failure does not corrupt a newer clarification round', () => {
+    const seed = planReducer(initialPlanState, {
+      type: 'PLAN_STARTED',
+      planId: 'p1',
+      request: 'q',
+    });
+    const round1 = planReducer(seed, {
+      type: 'CLARIFICATION_REQUESTED',
+      planId: 'p1',
+      requestId: 'req-old',
+      prompt: {
+        planId: 'p1',
+        stepIndex: 0,
+        specialistKey: 'demand-forecasting',
+        question: 'first?',
+      },
+    });
+    const round1Submitting = planReducer(round1, {
+      type: 'CLARIFICATION_SUBMITTING',
+      planId: 'p1',
+      requestId: 'req-old',
+    });
+    // The reducer has since advanced to a newer clarification round — this is
+    // the "newer clarification" the fix must not corrupt.
+    const round2 = planReducer(round1Submitting, {
+      type: 'CLARIFICATION_REQUESTED',
+      planId: 'p1',
+      requestId: 'req-new',
+      prompt: {
+        planId: 'p1',
+        stepIndex: 1,
+        specialistKey: 'promo-planning',
+        question: 'second?',
+      },
+    });
+    expect(round2.active?.clarification?.requestId).toBe('req-new');
+    expect(round2.active?.clarification?.submitting).toBeUndefined();
+    // Now the stale failure for req-old arrives — it must be a no-op.
+    const staleFailure = planReducer(round2, {
+      type: 'CLARIFICATION_SUBMIT_FAILED',
+      planId: 'p1',
+      requestId: 'req-old',
+    });
+    expect(staleFailure).toBe(round2);
+    expect(staleFailure.active?.clarification?.requestId).toBe('req-new');
+    expect(staleFailure.active?.clarification?.submitting).toBeUndefined();
+  });
+
+  it('ignores clarification submit-failed for a different active plan', () => {
+    const seed = planReducer(initialPlanState, {
+      type: 'PLAN_STARTED',
+      planId: 'p1',
+      request: 'q',
+    });
+    const asked = planReducer(seed, {
+      type: 'CLARIFICATION_REQUESTED',
+      planId: 'p1',
+      requestId: 'req-1',
+      prompt: {
+        planId: 'p1',
+        stepIndex: 0,
+        specialistKey: 'demand-forecasting',
+        question: 'which store?',
+      },
+    });
+    const submitting = planReducer(asked, {
+      type: 'CLARIFICATION_SUBMITTING',
+      planId: 'p1',
+      requestId: 'req-1',
+    });
+    const misroutedFailure = planReducer(submitting, {
+      type: 'CLARIFICATION_SUBMIT_FAILED',
+      planId: 'other-plan',
+      requestId: 'req-1',
+    });
+    expect(misroutedFailure).toBe(submitting);
+    expect(misroutedFailure.active?.clarification?.submitting).toBe(true);
+  });
+
   it('final plan sets terminal reply and stops the elapsed clock', () => {
     const seed = planReducer(initialPlanState, {
       type: 'PLAN_STARTED',

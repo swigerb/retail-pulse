@@ -417,7 +417,11 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
       await answerPlanClarification(active.planId, requestId, answer);
       dispatch({ type: 'CLARIFICATION_RESOLVED', planId: active.planId, requestId });
     } catch {
-      dispatch({ type: 'CLARIFICATION_SUBMITTING', planId: active.planId, requestId });
+      // Distinct failure action clears clarification.submitting so the submit
+      // control re-enables and the user can retry. Re-dispatching
+      // CLARIFICATION_SUBMITTING would leave submitting=true and permanently
+      // disable PlanClarificationCard after a transient API failure.
+      dispatch({ type: 'CLARIFICATION_SUBMIT_FAILED', planId: active.planId, requestId });
     }
   }, []);
 

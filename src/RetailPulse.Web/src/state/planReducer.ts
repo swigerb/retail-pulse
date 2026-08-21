@@ -141,6 +141,7 @@ export type PlanAction =
       prompt: PlanClarificationPrompt | null;
     }
   | { type: 'CLARIFICATION_SUBMITTING'; planId: string; requestId: string }
+  | { type: 'CLARIFICATION_SUBMIT_FAILED'; planId: string; requestId: string }
   | { type: 'CLARIFICATION_RESOLVED'; planId: string; requestId: string }
   | { type: 'PLAN_FINAL'; planId: string; reply: string; terminalReason?: string | null }
   | { type: 'CONNECTION_STATUS'; connected: boolean }
@@ -402,6 +403,21 @@ export function planReducer(state: PlanAppState, action: PlanAction): PlanAppSta
       return {
         ...state,
         active: { ...state.active, clarification: { ...c, submitting: true } },
+      };
+    }
+
+    case 'CLARIFICATION_SUBMIT_FAILED': {
+      // The clarification POST failed transiently. Clear the in-flight flag so
+      // PlanClarificationCard's submit control re-enables and the user can
+      // retry. Guard on both planId and requestId so a stale failure for a
+      // prior round never corrupts a newer clarification the reducer has
+      // already moved on to.
+      if (!state.active || state.active.planId !== action.planId) return state;
+      const c = state.active.clarification;
+      if (!c || c.requestId !== action.requestId) return state;
+      return {
+        ...state,
+        active: { ...state.active, clarification: { ...c, submitting: false } },
       };
     }
 
