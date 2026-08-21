@@ -77,21 +77,30 @@ export function cancelPlan(
 }
 
 /**
- * Durable plan record returned by `/api/plans/{planId}/reconcile`. Mirrors
- * the shape from `ExecutionControlEndpoints.MapPlanReconciliationEndpoint`.
+ * Durable plan step returned by `/api/plans/{planId}/reconcile`. Field
+ * names mirror the wire shape from `PlanStepRecordDto`
+ * (`RetailPulse.Contracts/Persistence/PlanDtos.cs`) after the ASP.NET
+ * default camelCase serialisation, so the type contract matches what
+ * `res.json()` actually delivers — no phantom UI-only fields that would
+ * silently be `undefined` on read and be overwritten to `undefined` when
+ * a reconciled record replaces a rendered one during merge.
  */
 export interface PlanStepRecord {
+  readonly stepId?: string;
+  readonly planId?: string;
   readonly stepIndex: number;
+  readonly specialistKey?: string | null;
+  readonly intent?: string | null;
+  readonly action?: string | null;
   readonly status: string;
-  readonly summary?: string | null;
-  readonly detail?: string | null;
+  readonly result?: string | null;
+  readonly error?: string | null;
+  readonly inputTokens?: number | null;
+  readonly outputTokens?: number | null;
+  readonly totalTokens?: number | null;
+  readonly durationMs?: number | null;
   readonly startedAt?: string | null;
   readonly completedAt?: string | null;
-  readonly durationMs?: number | null;
-  readonly toolName?: string | null;
-  readonly agentKey?: string | null;
-  readonly tokensIn?: number | null;
-  readonly tokensOut?: number | null;
 }
 
 export interface PlanReconciliationResponse {

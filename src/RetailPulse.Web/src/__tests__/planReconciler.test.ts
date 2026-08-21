@@ -41,23 +41,23 @@ describe('planReconciler.reconcilePlanSteps', () => {
   });
 
   it('never regresses a terminal rendered step (monotonicity)', () => {
-    const rendered = [step(0, 'succeeded', { summary: 'rendered-final' })];
-    const reconciled = [step(0, 'running', { summary: 'late-arrival' })];
+    const rendered = [step(0, 'succeeded', { result: 'rendered-final' })];
+    const reconciled = [step(0, 'running', { result: 'late-arrival' })];
 
     const merged = reconcilePlanSteps(rendered, reconciled);
     expect(merged).toHaveLength(1);
     expect(merged[0].status).toBe('succeeded');
-    expect(merged[0].summary).toBe('rendered-final');
+    expect(merged[0].result).toBe('rendered-final');
   });
 
   it('promotes an incoming terminal record over a non-terminal rendered one', () => {
-    const rendered = [step(0, 'running', { summary: 'stream-placeholder' })];
-    const reconciled = [step(0, 'succeeded', { summary: 'durable-final', durationMs: 1200 })];
+    const rendered = [step(0, 'running', { result: 'stream-placeholder' })];
+    const reconciled = [step(0, 'succeeded', { result: 'durable-final', durationMs: 1200 })];
 
     const merged = reconcilePlanSteps(rendered, reconciled);
     expect(merged).toHaveLength(1);
     expect(merged[0].status).toBe('succeeded');
-    expect(merged[0].summary).toBe('durable-final');
+    expect(merged[0].result).toBe('durable-final');
     expect(merged[0].durationMs).toBe(1200);
   });
 
