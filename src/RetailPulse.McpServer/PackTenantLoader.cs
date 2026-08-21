@@ -94,19 +94,20 @@ internal static class PackTenantLoader
                 $"Failed to parse pack.yaml at '{packYamlPath}': {ex.Message}", ex);
         }
 
-        if (doc is null || doc.Tenant is null)
-        {
-            throw new InvalidOperationException(
-                $"pack.yaml at '{packYamlPath}' did not contain a tenant section.");
-        }
-
-        return new PackLoadResult(new InMemoryTenantProvider(doc.Tenant), new SeedManifest(), packYamlPath, "");
+        return doc is null || doc.Tenant is null
+            ? throw new InvalidOperationException(
+                $"pack.yaml at '{packYamlPath}' did not contain a tenant section.")
+            : new PackLoadResult(new InMemoryTenantProvider(doc.Tenant), new SeedManifest(), packYamlPath, "");
     }
 
     private sealed class InMemoryTenantProvider : ITenantProvider
     {
         private readonly TenantConfiguration _tenant;
-        public InMemoryTenantProvider(TenantConfiguration tenant) => _tenant = tenant;
+        public InMemoryTenantProvider(TenantConfiguration tenant)
+        {
+            _tenant = tenant;
+        }
+
         public TenantConfiguration GetTenant() => _tenant;
     }
 

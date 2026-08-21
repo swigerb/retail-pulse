@@ -18,7 +18,7 @@ public sealed class KnowledgeBaseSeederPackTests
 {
     private static InMemoryKnowledgeBase NewKnowledgeBase()
     {
-        var options = Options.Create(new KnowledgeOptions
+        IOptions<KnowledgeOptions> options = Options.Create(new KnowledgeOptions
         {
             MaxDocuments = 100,
             MaxChunks = 5000,
@@ -40,8 +40,8 @@ public sealed class KnowledgeBaseSeederPackTests
             name: name,
             rootPath: Path.Combine(AppContext.BaseDirectory, "pack-fixtures", name),
             metadata: new PackMetadata { Key = name, DisplayName = name },
-            tenant: new RetailPulse.Contracts.TenantConfiguration { Company = "Test", Industry = "Retail" },
-            agents: new RetailPulse.Api.Models.PromptConfiguration(),
+            tenant: new Contracts.TenantConfiguration { Company = "Test", Industry = "Retail" },
+            agents: new Api.Models.PromptConfiguration(),
             knowledgeDocuments: knowledge,
             startingTasks: []);
     }
@@ -94,7 +94,7 @@ public sealed class KnowledgeBaseSeederPackTests
         // Use the shipped default pack as a stable, real fixture — the
         // fingerprint contract is asserted against the file the loader
         // actually reads, not a synthetic in-memory pack.
-        PackLoader loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
+        var loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
         LoadedPack a = loader.Load("default");
         LoadedPack b = loader.Load("default");
 
@@ -108,7 +108,7 @@ public sealed class KnowledgeBaseSeederPackTests
     [Fact]
     public void PackFingerprint_DiffersAcrossShippedPacks()
     {
-        PackLoader loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
+        var loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
         IReadOnlyList<string> packs = loader.DiscoverPacks();
         packs.Count.Should().BeGreaterThanOrEqualTo(2);
 

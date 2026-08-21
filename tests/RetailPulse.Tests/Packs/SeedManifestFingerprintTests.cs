@@ -42,7 +42,7 @@ public sealed class SeedManifestFingerprintTests : IDisposable
         string seedPath = Path.Combine(seedDir, "scenario.yaml");
         File.WriteAllText(seedPath, PackLoaderTests.MinimalValidSeedYaml());
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
         string before = PackContentFingerprint.ComputePackFingerprint(loader.Load("seed-only"));
 
         // Mutate ONLY seed content — pack.yaml, agents.yaml, and every
@@ -73,7 +73,7 @@ public sealed class SeedManifestFingerprintTests : IDisposable
         Directory.CreateDirectory(seedDir);
         File.WriteAllText(Path.Combine(seedDir, "scenario.yaml"), PackLoaderTests.MinimalValidSeedYaml());
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
         string before = PackContentFingerprint.ComputePackFingerprint(loader.Load("added-file"));
 
         File.WriteAllText(Path.Combine(seedDir, "notes.md"), "additional seed notes");
@@ -98,7 +98,7 @@ public sealed class SeedManifestFingerprintTests : IDisposable
         Directory.CreateDirectory(seedDir);
         File.WriteAllText(Path.Combine(seedDir, "scenario.yaml"), PackLoaderTests.MinimalValidSeedYaml());
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
         string first = PackContentFingerprint.ComputePackFingerprint(loader.Load("stable"));
         string second = PackContentFingerprint.ComputePackFingerprint(loader.Load("stable"));
 
@@ -113,7 +113,7 @@ public sealed class SeedManifestFingerprintTests : IDisposable
         // an upgrade — the seed manifest wasn't part of v1.
         PackContentFingerprint.Version.Should().Be("v2");
 
-        PackLoader loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
+        var loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
         LoadedPack def = loader.Load("default");
         string fp = PackContentFingerprint.ComputePackFingerprint(def);
         fp.Should().StartWith("v2:");

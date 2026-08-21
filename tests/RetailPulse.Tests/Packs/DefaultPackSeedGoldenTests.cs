@@ -132,7 +132,7 @@ public sealed class DefaultPackSeedGoldenTests : IDisposable
     {
         // Prove blocker #4 end-to-end: mutate scenario.yaml alone and
         // the SQLite hash changes so SeedIfNeeded reseeds.
-        SeedManifest seed = SeedManifestLoader.LoadFromDirectory(
+        _ = SeedManifestLoader.LoadFromDirectory(
             Path.Combine(PackTestPaths.PacksRoot, "default", "seed"));
 
         // Copy the default pack into a scratch dir so we can mutate its

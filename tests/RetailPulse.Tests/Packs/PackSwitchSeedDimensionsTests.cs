@@ -32,7 +32,7 @@ public sealed class PackSwitchSeedDimensionsTests : IDisposable
     [Fact]
     public void ShippedPacks_ShipDistinctSeedManifests()
     {
-        PackLoader loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
+        var loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
         IReadOnlyList<LoadedPack> packs = [.. loader.DiscoverPacks().Select(loader.Load)];
         packs.Count.Should().BeGreaterThanOrEqualTo(3);
 
@@ -87,7 +87,7 @@ public sealed class PackSwitchSeedDimensionsTests : IDisposable
         // Store types, disruption types, and promo names materialize
         // differently. This is the acceptance guarantee for "MCP seed
         // results change together" when Packs:Active flips.
-        PackLoader loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
+        var loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
         IReadOnlyList<LoadedPack> packs = [.. loader.DiscoverPacks().Select(loader.Load)];
 
         var storeTypesPerPack = new Dictionary<string, HashSet<string>>();

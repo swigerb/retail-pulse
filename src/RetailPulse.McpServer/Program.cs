@@ -29,7 +29,7 @@ string activePackDirectory = ResolveActivePackDirectory(
 PackLoadResult activePack = PackTenantLoader.LoadFromPackDirectory(activePackDirectory);
 string activePackYamlPath = activePack.PackYamlPath;
 string activePackSeedDir = activePack.SeedDir;
-builder.Services.AddSingleton<ITenantProvider>(activePack.Tenant);
+builder.Services.AddSingleton(activePack.Tenant);
 builder.Services.AddSingleton(activePack.Seed);
 
 // Register SQLite-backed data store. Content-hash reseed still applies:
@@ -401,11 +401,9 @@ static string ResolveActivePackDirectory(string contentRootPath, string configur
     if (Path.IsPathRooted(configuredRoot))
     {
         string absolute = Path.Combine(configuredRoot, activePack);
-        if (File.Exists(Path.Combine(absolute, "pack.yaml")))
-        {
-            return absolute;
-        }
-        throw new DirectoryNotFoundException(
+        return File.Exists(Path.Combine(absolute, "pack.yaml"))
+            ? absolute
+            : throw new DirectoryNotFoundException(
             $"pack.yaml not found at configured Packs:Root: {Path.Combine(absolute, "pack.yaml")}");
     }
 

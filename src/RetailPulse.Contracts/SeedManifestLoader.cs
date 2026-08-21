@@ -144,7 +144,7 @@ public static class SeedManifestLoader
             RequireList($"seasonality.factors.{pair.Key}", pair.Value, sourcePath);
             foreach (SeasonalMonthFactor factor in pair.Value)
             {
-                if (factor.Month < 1 || factor.Month > 12)
+                if (factor.Month is < 1 or > 12)
                 {
                     throw new SeedManifestLoadException(
                         SeedManifestIssueCategory.SectionMissing,
@@ -229,7 +229,7 @@ public static class SeedManifestLoader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(seedDir);
 
-        using System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create();
+        using var sha = System.Security.Cryptography.SHA256.Create();
         using var stream = new MemoryStream();
 
         if (Directory.Exists(seedDir))

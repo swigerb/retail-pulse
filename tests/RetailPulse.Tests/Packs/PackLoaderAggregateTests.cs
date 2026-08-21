@@ -68,7 +68,7 @@ public sealed class PackLoaderAggregateTests : IDisposable
                 prompts: ["p2"]
             """);
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         GuardrailsConfig config = ValidatorTestHarness.DefaultConfig(
             failurePolicy: AgentDefinitionFailurePolicy.RefuseStartup);
@@ -116,7 +116,7 @@ public sealed class PackLoaderAggregateTests : IDisposable
         File.WriteAllText(Path.Combine(seedDir, "scenario.yaml"),
             "seasonality:\n  factors: [not-a-mapping\n");
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         Func<Task> act = () => loader.LoadAsync("brokenpack", safetyValidator: null);
 
@@ -140,7 +140,7 @@ public sealed class PackLoaderAggregateTests : IDisposable
         File.WriteAllText(Path.Combine(packDir, "pack.yaml"), MinimalValidPackYaml("noseedpack"));
         File.WriteAllText(Path.Combine(packDir, "agents.yaml"), MinimalValidAgentsYaml());
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
 
         Func<Task> act = () => loader.LoadAsync("noseedpack", safetyValidator: null);
 
@@ -165,7 +165,7 @@ public sealed class PackLoaderAggregateTests : IDisposable
         File.WriteAllText(Path.Combine(packDir, "agents.yaml"), MinimalValidAgentsYaml());
         PackLoaderTests.PlantMinimalSeed(packDir);
 
-        PackLoader loader = PackLoader.ForDirectory(root);
+        var loader = PackLoader.ForDirectory(root);
         LoadedPack pack = await loader.LoadAsync("happypack", safetyValidator: null);
 
         pack.Seed.Should().NotBeNull();

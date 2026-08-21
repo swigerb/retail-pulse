@@ -37,26 +37,20 @@ public sealed class PackEndpointsTests : IAsyncDisposable
                 {
                     services.AddSingleton(pack);
                     services.AddRouting();
-                    services.AddRateLimiter(options =>
-                    {
-                        options.AddPolicy("relaxed", _ =>
+                    services.AddRateLimiter(options => options.AddPolicy("relaxed", _ =>
                             RateLimitPartition.GetFixedWindowLimiter("relaxed", _ =>
                                 new FixedWindowRateLimiterOptions
                                 {
                                     PermitLimit = 100,
                                     Window = TimeSpan.FromMinutes(1),
                                     QueueLimit = 0,
-                                }));
-                    });
+                                })));
                 });
                 webHost.Configure(app =>
                 {
                     app.UseRouting();
                     app.UseRateLimiter();
-                    app.UseEndpoints(endpoints =>
-                    {
-                        endpoints.MapPackEndpoints();
-                    });
+                    app.UseEndpoints(endpoints => endpoints.MapPackEndpoints());
                 });
             })
             .Build();
@@ -78,7 +72,7 @@ public sealed class PackEndpointsTests : IAsyncDisposable
         HttpResponseMessage response = await _client.GetAsync("/api/pack");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         JsonElement root = doc.RootElement;
 
         root.GetProperty("key").GetString().Should().Be("default");

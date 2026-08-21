@@ -470,7 +470,7 @@ public class RetailPulseDb
         // Packs:Active, editing pack.yaml, or editing scenario.yaml
         // alone all rehash and force reseed; an untouched pack stays
         // idempotent so caller-driven mutations survive restart.
-        using SHA256 sha = SHA256.Create();
+        using var sha = SHA256.Create();
         using var stream = new MemoryStream();
 
         void WriteHeader(string label)

@@ -18,9 +18,7 @@ public static class PackEndpoints
         // the frontend during app bootstrap to build the header, brand
         // list, and theme variables. Anonymous mode also needs this so
         // its unauthenticated shell can render the tenant branding.
-        app.MapGet("/api/pack", (LoadedPack pack) =>
-        {
-            return Results.Ok(new PackInfoResponse(
+        app.MapGet("/api/pack", (LoadedPack pack) => Results.Ok(new PackInfoResponse(
                 Key: pack.Name,
                 DisplayName: pack.Metadata.DisplayName,
                 Description: pack.Metadata.Description,
@@ -35,8 +33,7 @@ public static class PackEndpoints
                     Regions: pack.Tenant.Regions,
                     Channels: pack.Tenant.Channels,
                     Theme: pack.Tenant.Theme,
-                    Distribution: pack.Tenant.Distribution)));
-        })
+                    Distribution: pack.Tenant.Distribution))))
         .WithName("GetActivePack")
         .AllowAnonymous()
         .RequireRateLimiting("relaxed");
@@ -48,11 +45,11 @@ public static class PackEndpoints
         app.MapGet("/api/pack/starting-tasks", (LoadedPack pack) =>
         {
             IReadOnlyList<PackStartingTaskCategory> categories = pack.StartingTasks;
-            var payload = categories.Select(c => new PackStartingTaskResponse(
+            PackStartingTaskResponse[] payload = [.. categories.Select(c => new PackStartingTaskResponse(
                 Id: c.Id,
                 Label: c.Label,
                 Emoji: c.Emoji,
-                Prompts: c.Prompts)).ToArray();
+                Prompts: c.Prompts))];
 
             return Results.Ok(new PackStartingTasksResponse(
                 PackKey: pack.Name,

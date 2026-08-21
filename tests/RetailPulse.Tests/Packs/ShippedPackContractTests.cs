@@ -23,7 +23,7 @@ public sealed class ShippedPackContractTests
     [MemberData(nameof(ShippedPacks))]
     public void ShippedPack_LoadsWithoutStructuralIssues(string packName)
     {
-        PackLoader loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
+        var loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
 
         LoadedPack pack = loader.Load(packName);
 
@@ -70,7 +70,7 @@ public sealed class ShippedPackContractTests
         // PackLoader, not just SeedManifestLoader directly — this
         // guards against a regression where the loader silently
         // forgets the seed section.
-        PackLoader loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
+        var loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
         LoadedPack pack = loader.Load(packName);
 
         pack.Seed.Should().NotBeNull();
@@ -80,7 +80,7 @@ public sealed class ShippedPackContractTests
     [Fact]
     public void ShippedPacks_IncludeDefaultAndTwoFictionalExamples()
     {
-        PackLoader loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
+        var loader = PackLoader.ForDirectory(PackTestPaths.PacksRoot);
 
         IReadOnlyList<string> discovered = loader.DiscoverPacks();
 

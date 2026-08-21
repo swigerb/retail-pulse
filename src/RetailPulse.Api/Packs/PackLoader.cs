@@ -97,14 +97,11 @@ public sealed partial class PackLoader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packsRoot);
 
-        if (!Directory.Exists(packsRoot))
-        {
-            throw new DirectoryNotFoundException(
+        return !Directory.Exists(packsRoot)
+            ? throw new DirectoryNotFoundException(
                 $"Content pack root '{packsRoot}' does not exist. " +
-                "Set Packs:Root in configuration or ensure the packs directory ships with the deployment.");
-        }
-
-        return new PackLoader(Path.GetFullPath(packsRoot));
+                "Set Packs:Root in configuration or ensure the packs directory ships with the deployment.")
+            : new PackLoader(Path.GetFullPath(packsRoot));
     }
 
     /// <summary>
@@ -152,12 +149,7 @@ public sealed partial class PackLoader
         var issues = new List<PackValidationIssue>();
         LoadedPack pack = LoadInternal(packName, packRoot, issues);
 
-        if (issues.Count > 0)
-        {
-            throw new PackValidationException(packName, issues);
-        }
-
-        return pack;
+        return issues.Count > 0 ? throw new PackValidationException(packName, issues) : pack;
     }
 
     /// <summary>
@@ -231,12 +223,7 @@ public sealed partial class PackLoader
             }
         }
 
-        if (issues.Count > 0)
-        {
-            throw new PackValidationException(packName, issues);
-        }
-
-        return pack;
+        return issues.Count > 0 ? throw new PackValidationException(packName, issues) : pack;
     }
 
     /// <summary>
@@ -247,7 +234,7 @@ public sealed partial class PackLoader
     /// (agent safety validator) for aggregate reporting even when
     /// non-agent sections already reported problems.
     /// </summary>
-    private LoadedPack LoadInternal(string packName, string packRoot, List<PackValidationIssue> issues)
+    private static LoadedPack LoadInternal(string packName, string packRoot, List<PackValidationIssue> issues)
     {
         (PackDocument? _, PackMetadata metadata, TenantConfiguration tenant) =
             LoadPackDocument(packName, packRoot, issues);
@@ -643,6 +630,7 @@ public sealed partial class PackLoader
             {
                 SeedManifestIssueCategory.ParseError => "pack.parse-error",
                 SeedManifestIssueCategory.SectionMissing => "pack.section-missing",
+                SeedManifestIssueCategory.Missing => throw new NotImplementedException(),
                 _ => "pack.section-missing",
             };
             issues.Add(new PackValidationIssue(packName, subSection, ex.Message, code));
