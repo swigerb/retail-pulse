@@ -79,14 +79,27 @@ registration time, not on the first search.
 ## Reconciliation with `FoundryAgent:*`
 
 Retail Pulse already uses `PersistentAgentsClient` to run the FoundryAgent
-shipment planner (issue #91). When both surfaces target the same
-`ProjectEndpoint`, `FoundryClientAccessor` canonicalises the endpoint
-(trims trailing `/`), keys by that canonical URL, and returns the same
-`PersistentAgentsClient` instance to both consumers. Different endpoints get
-separate clients keyed by canonical URL. The accessor uses a first-wins
-`GetOrAdd` so whichever surface materialises first sets the shared client;
-`TryAddSingleton<PersistentAgentsClient>` in the DI container matches the
-same discipline.
+shipment planner (issue #91). The two optional features are gated
+independently and can target the same Foundry project, but they currently
+construct **independent SDK clients**:
+
+- `AgentServiceExtensions.AddAzureAgent<TAgent>` (the shipment path)
+  builds its own `AIProjectClient` + `PersistentAgentsClient` inline and
+  hands the client to `PersistentAgentProvider<TAgent>`. It does not
+  register a `PersistentAgentsClient` in DI and it does not call
+  `FoundryClientAccessor.Register`.
+- `FoundryIQ` builds its own `PersistentAgentsClient` lazily via
+  `FoundryClientAccessor.GetOrCreate`, keyed by canonicalised endpoint
+  (trailing `/` trimmed).
+
+Nothing today wires the two together, so pointing both at the same
+`ProjectEndpoint` results in two clients side by side, not one shared
+client. `FoundryClientAccessor.Register` is retained as a forward-compatible
+seam for a future refactor that wants to share the SDK client across
+features, but no other code calls it. This is the "coherent configuration
+story" honestly stated — the features share their configuration story
+(same endpoint, same managed identity, same MI role assignment), not their
+SDK client instances.
 
 `FoundryAgent:Enabled` continues to gate the shipment planner. Foundry IQ is
 gated independently by `Knowledge:FoundryIQ:ProjectEndpoint`. Enabling one

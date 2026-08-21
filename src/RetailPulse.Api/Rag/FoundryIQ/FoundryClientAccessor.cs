@@ -6,17 +6,19 @@ using Azure.Core;
 namespace RetailPulse.Api.Rag.FoundryIQ;
 
 /// <summary>
-/// Shared, per-endpoint <see cref="PersistentAgentsClient"/> accessor used by
-/// the Foundry IQ knowledge provider. When another consumer registers a
-/// singleton <see cref="PersistentAgentsClient"/> (today only
-/// <c>AgentServiceExtensions.AddAzureAgent&lt;TAgent&gt;</c>) that targets the
-/// same endpoint, this accessor returns the shared instance instead of
-/// constructing a duplicate. Different endpoints get separate clients keyed
-/// by canonicalised endpoint URL.
+/// Per-endpoint <see cref="PersistentAgentsClient"/> accessor owned by the
+/// Foundry IQ knowledge provider. Today the accessor only sees the client the
+/// provider itself lazily constructs via <see cref="GetOrCreate"/> — no other
+/// feature (including <c>AgentServiceExtensions.AddAzureAgent&lt;TAgent&gt;</c>,
+/// which constructs its own <see cref="PersistentAgentsClient"/> directly and
+/// does not register one in DI) currently calls <see cref="Register"/>. If a
+/// future integration wants to share a client across features that target the
+/// same Foundry project, it should call <see cref="Register"/> before the
+/// provider first resolves; the accessor's canonicalised-endpoint key is the
+/// forward-compatible seam. See ADR-013 (Relationship with FoundryAgent:*).
 ///
 /// The accessor is process-lifetime by design — <see cref="PersistentAgentsClient"/>
-/// is thread-safe and the SDK owns its own HTTP pipeline. See ADR-013
-/// (Relationship with FoundryAgent:*).
+/// is thread-safe and the SDK owns its own HTTP pipeline.
 /// </summary>
 public sealed class FoundryClientAccessor
 {
@@ -36,6 +38,9 @@ public sealed class FoundryClientAccessor
     /// without building another. Idempotent — subsequent registrations for the
     /// same endpoint are ignored so the first-wins pattern matches the
     /// SDK singleton discipline. Returns the effective client for that endpoint.
+    ///
+    /// Currently no other Retail Pulse feature calls this — it is the wiring
+    /// seam a future cross-surface sharing effort would use. See ADR-013.
     /// </summary>
     public PersistentAgentsClient Register(string projectEndpoint, PersistentAgentsClient client)
     {

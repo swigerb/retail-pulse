@@ -69,11 +69,16 @@ public static class FoundryIQServiceCollectionExtensions
         // when both are configured (TryAddSingleton — first-wins).
         services.TryAddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
 
-        // Shared PersistentAgentsClient accessor keyed by ProjectEndpoint.
-        // If FoundryAgent:* has already registered a client for the same
-        // endpoint via TryAddSingleton<PersistentAgentsClient>, the accessor
-        // adopts it; otherwise the accessor lazily builds one from the
-        // credential + endpoint.
+        // Per-endpoint PersistentAgentsClient accessor owned by this provider.
+        // Currently the accessor only sees the client it lazily constructs
+        // itself via GetOrCreate — AgentServiceExtensions.AddAzureAgent<TAgent>
+        // (the FoundryAgent shipment path) constructs its own
+        // PersistentAgentsClient directly and does not register one in DI or
+        // in this accessor. The two optional features are independently gated
+        // and can target the same Foundry project, but currently construct
+        // independent SDK clients. The accessor's Register seam is retained as
+        // the forward-compatible entry point for a future cross-surface
+        // sharing effort. See ADR-013 (Relationship with FoundryAgent:*).
         services.TryAddSingleton(sp =>
             new FoundryClientAccessor(sp.GetRequiredService<TokenCredential>()));
 

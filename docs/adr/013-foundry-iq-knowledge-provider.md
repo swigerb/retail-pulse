@@ -192,17 +192,19 @@ point at the same Foundry project:
 
 | Case | Behavior |
 |---|---|
-| Both configured, same `ProjectEndpoint` | Share the singleton `PersistentAgentsClient` via `FoundryClientAccessor.TryAdd`. No duplicate client. |
+| Both configured, same `ProjectEndpoint` | Each feature builds its own `PersistentAgentsClient` today. Foundry IQ builds one lazily through `FoundryClientAccessor.GetOrCreate`; `AgentServiceExtensions.AddAzureAgent<TAgent>` constructs its own client directly and does not register it in DI or on the accessor. No cross-surface sharing is wired. |
 | `FoundryAgent:Enabled=false`, `Knowledge:FoundryIQ:*` configured | FoundryIQ builds its own `AIProjectClient` + `PersistentAgentsClient`. Shipment specialist stays disabled; file-search corpus works independently. |
-| Different endpoints | Both clients coexist, keyed by endpoint URL. Startup logs an info-level line so operators see both target projects. |
+| Different endpoints | Each feature keeps its own client keyed by its own endpoint. |
 | Neither configured | Nothing materialized. Default demo path is unchanged. |
 
-`AgentServiceExtensions.AddAzureAgent<TAgent>` is untouched. The
-shared-client seam is a new opt-in helper
-(`FoundryClientAccessor`); it does not rewrite the shipment
-wiring. If a future refactor promotes the shipment specialist to
-use the shared accessor, ADR-013's shared-client contract is the
-forward-compatible starting point.
+`AgentServiceExtensions.AddAzureAgent<TAgent>` is untouched by this ADR
+and remains the shipment specialist's own wiring. `FoundryClientAccessor`
+is a new opt-in helper owned by the Foundry IQ provider; its `Register`
+entry point is a forward-compatible seam so a future cross-surface
+sharing effort has a first-wins, canonical-endpoint-keyed place to plug
+in. Nothing in the current codebase calls `Register`, and the two
+features' clients are independent today by design — this ADR does not
+ship the cross-surface sharing; it ships the seam and the honest doc.
 
 ## Consequences
 
@@ -211,8 +213,11 @@ forward-compatible starting point.
 - The Foundry-managed grounding corpus is reachable without pulling
   documents into Retail Pulse's own store.
 - The FoundryIQ provider and the shipment specialist are genuinely
-  orthogonal (each can be enabled independently) but share the
-  `PersistentAgentsClient` when they target the same project.
+  orthogonal — each can be enabled independently and can target the
+  same Foundry project. They currently construct independent SDK
+  clients; cross-surface `PersistentAgentsClient` sharing is a
+  forward-compatible seam on `FoundryClientAccessor`, not a live
+  wiring.
 - `SupportsMutation` is a first-class capability, so the shared
   conformance suite runs against every provider — no evasion of
   the invariant "an ingested document must be discoverable".
@@ -247,8 +252,11 @@ forward-compatible starting point.
   is a KB-only feature.
 - No changes to `FoundryShipmentAgent`, `PersistentAgentProvider`,
   or `AgentServiceExtensions.AddAzureAgent<TAgent>`. When both
-  features target the same project the shared client is added via
-  a NEW extension helper; the shipment path is not rewritten.
+  features target the same project they currently construct
+  independent SDK clients; a future refactor that wants a single
+  shared client should call `FoundryClientAccessor.Register` from
+  the shipment wiring — the accessor is the forward-compatible
+  seam, not a live sharing surface today.
 - No SDK upgrade. `Azure.AI.Agents.Persistent` stays pinned at
   1.1.0 (nuget.org disabled, `azure-default` feed only; central
   package management in `Directory.Packages.props`).

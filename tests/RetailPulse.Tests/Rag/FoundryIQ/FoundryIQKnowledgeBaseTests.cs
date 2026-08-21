@@ -2,6 +2,7 @@ using System.Reflection;
 using Azure;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Polly.CircuitBreaker;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Rag.FoundryIQ;
 using RetailPulse.Contracts.Observability;
@@ -211,6 +212,80 @@ public sealed class FoundryIQKnowledgeBaseTests
 
         (await act.Should().ThrowAsync<KnowledgeProviderUnavailableException>())
             .Which.Message.Should().Contain("503");
+    }
+
+    [Fact]
+    public async Task SearchAsync_OperationCanceledException_TranslatesToProviderUnavailableTimeoutMessage()
+    {
+        (FoundryIQKnowledgeBase kb, FakeFoundryIQClient fake, _, FoundryIQOptions options) = BuildKb();
+        // Simulate an SDK-layer cancellation (e.g. bounded timeout tripping) via the
+        // existing fake seam. The provider's translation switch must land on the
+        // OperationCanceledException branch and produce the timeout message shape
+        // operators grep for during incident triage.
+        fake.ThrowOnSearch = new OperationCanceledException("simulated cancellation");
+
+        Func<Task> act = () => kb.SearchAsync("q", topK: 5);
+
+        (await act.Should().ThrowAsync<KnowledgeProviderUnavailableException>())
+            .Which.Message.Should().Contain(
+                $"timed out after {options.RequestTimeoutMs}ms",
+                "OperationCanceledException must translate to the provider-unavailable timeout branch verbatim");
+    }
+
+    [Fact]
+    public async Task SearchAsync_BrokenCircuit_TranslatesToProviderUnavailableOpenCircuitMessage()
+    {
+        // Wire the fake to fail every search with a handled transport error so the
+        // Polly breaker inside FoundryIQKnowledgeBase (5 failures / 30s sampling /
+        // 30s break, FailureRatio 0.5) opens. Once opened, the next call
+        // short-circuits with BrokenCircuitException, which the provider must map
+        // to KnowledgeProviderUnavailableException carrying the open-circuit
+        // wording.
+        (FoundryIQKnowledgeBase kb, FakeFoundryIQClient fake, _, _) = BuildKb();
+        fake.ThrowOnSearch = new RequestFailedException(503, "Service Unavailable");
+
+        // Drive at least MinimumThroughput handled failures through the pipeline.
+        // Each call surfaces KnowledgeProviderUnavailableException — the sample
+        // window still records the failure, so after MinimumThroughput hits at
+        // 100% failure ratio the breaker opens and the NEXT call short-circuits.
+        for (int i = 0; i < 6; i++)
+        {
+            try
+            {
+                await kb.SearchAsync($"warmup-{i}", topK: 1);
+            }
+            catch (KnowledgeProviderUnavailableException)
+            {
+                // Expected while accruing failures toward the circuit threshold.
+            }
+        }
+
+        // At this point, at least one of the follow-up calls MUST short-circuit
+        // with BrokenCircuitException. Loop a small bounded number of times to
+        // absorb any residual pre-open sample-window failures without adding
+        // wall-clock delay.
+        KnowledgeProviderUnavailableException? shortCircuit = null;
+        for (int i = 0; i < 8 && shortCircuit is null; i++)
+        {
+            try
+            {
+                await kb.SearchAsync($"post-open-{i}", topK: 1);
+            }
+            catch (KnowledgeProviderUnavailableException ex) when (ex.InnerException is BrokenCircuitException)
+            {
+                shortCircuit = ex;
+            }
+            catch (KnowledgeProviderUnavailableException)
+            {
+                // Still accruing toward the threshold — keep going.
+            }
+        }
+
+        shortCircuit.Should().NotBeNull(
+            "handled failures at 100% failure ratio above MinimumThroughput must open the Polly breaker inside FoundryIQKnowledgeBase");
+        shortCircuit.Message.Should().Contain(
+            "circuit is open",
+            "BrokenCircuitException must translate to the provider-unavailable open-circuit branch verbatim so operators can grep the message");
     }
 
     [Fact]
