@@ -133,13 +133,26 @@ public enum KnowledgeRelevanceKind
 /// includes an explicit reminder that scores are not comparable across
 /// providers.
 /// </param>
+/// <param name="SupportsMutation">
+/// True when the provider accepts <see cref="IKnowledgeBase.IngestDocumentAsync"/>
+/// and <see cref="IKnowledgeBase.DeleteDocumentAsync"/> against its corpus.
+/// False for read-only, bring-your-own-corpus providers (Foundry IQ #104)
+/// whose corpus lifecycle is owned outside Retail Pulse — those providers
+/// throw <see cref="NotSupportedException"/> from the mutation entry points
+/// so callers see a first-class capability signal rather than a silent
+/// success against a different corpus. Defaults to <c>true</c> so existing
+/// mutable providers stay honest without touching their capability record.
+/// The shared conformance suite gates its ingest/list/delete assertions on
+/// this flag; the read-only path has its own targeted conformance coverage.
+/// </param>
 public record KnowledgeBaseCapabilities(
     string ProviderName,
     KnowledgeRelevanceKind Relevance,
     bool Persistent,
     bool RequiresCloud,
     KnowledgeQuotas Quotas,
-    string ScoreSemantics);
+    string ScoreSemantics,
+    bool SupportsMutation = true);
 
 /// <summary>
 /// Provider-enforced quota limits reported for observability and API surface
