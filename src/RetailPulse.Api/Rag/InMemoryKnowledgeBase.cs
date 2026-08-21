@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Configuration;
+using RetailPulse.Api.Packs;
 using RetailPulse.Contracts.Rag;
 
 namespace RetailPulse.Api.Rag;
@@ -72,7 +73,13 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
                 $"(current: {_chunks.Count}). Delete documents to free space.");
         }
 
-        var doc = new IndexedDocument(documentId, title, source, DateTime.UtcNow, chunks.Count);
+        var doc = new IndexedDocument(
+            documentId,
+            title,
+            source,
+            DateTime.UtcNow,
+            chunks.Count,
+            PackContentFingerprint.ComputeContentHash(content));
         _documents[documentId] = doc;
 
         foreach (DocumentChunker.DocumentChunk chunk in chunks)
@@ -212,6 +219,67 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
     public bool HasDocument(string title) =>
         _documents.Values.Any(d => string.Equals(d.Title, title, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// True when the store already holds a document ingested from
+    /// <paramref name="source"/> whose stored content hash matches
+    /// <paramref name="contentHash"/>. Used by the pack seeder to skip
+    /// unchanged pack knowledge — the identity is the source (filename)
+    /// paired with the SHA-256 of the normalized body, so an author who
+    /// rewrites a document but keeps its filename still forces a reseed.
+    /// </summary>
+    public bool HasDocumentWithContent(string source, string contentHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentHash);
+        return _documents.Values.Any(d =>
+            string.Equals(d.Source, source, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(d.ContentHash, contentHash, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Remove every document ingested from <paramref name="source"/> along
+    /// with its chunks. Returns the number of documents removed so a
+    /// caller can distinguish a refresh (existing docs replaced) from a
+    /// first-time ingest.
+    /// </summary>
+    public int RemoveDocumentsBySource(string source)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+
+        int removed = 0;
+        List<string> matchingIds = [.. _documents.Values
+            .Where(d => string.Equals(d.Source, source, StringComparison.OrdinalIgnoreCase))
+            .Select(d => d.Id)];
+
+        foreach (string id in matchingIds)
+        {
+            if (_documents.TryRemove(id, out _))
+            {
+                removed++;
+            }
+
+            List<string> chunkKeys = [.. _chunks.Keys.Where(k => k.StartsWith(id + ":", StringComparison.Ordinal))];
+            foreach (string key in chunkKeys)
+            {
+                _chunks.TryRemove(key, out _);
+            }
+        }
+
+        if (removed > 0)
+        {
+            lock (_statsLock)
+            {
+                _totalChunks = _chunks.Count;
+                _avgDocLength = _chunks.Count > 0 ? _chunks.Values.Average(c => c.TokenCount) : 0;
+            }
+
+            _logger.LogInformation("Removed {DocumentCount} document(s) matching source '{Source}'.",
+                removed, source);
+        }
+
+        return removed;
+    }
+
     public int DocumentCount => _documents.Count;
     public int ChunkCount => _chunks.Count;
 
@@ -256,7 +324,13 @@ public sealed class InMemoryKnowledgeBase : IKnowledgeBase
     }
 
     // Internal records
-    private record IndexedDocument(string Id, string Title, string Source, DateTime IngestedAt, int ChunkCount);
+    private record IndexedDocument(
+        string Id,
+        string Title,
+        string Source,
+        DateTime IngestedAt,
+        int ChunkCount,
+        string ContentHash);
 
     private record IndexedChunk(
         string Id, string DocumentId, string Title, string Source,

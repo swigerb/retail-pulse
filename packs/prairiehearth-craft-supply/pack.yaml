@@ -1,0 +1,65 @@
+# Retail Pulse content pack — Prairiehearth Craft Supply
+#
+# Fully fictional craft-and-hobby retailer. Every brand, region, channel,
+# and metric is invented; no third-party analysis, no competitive
+# comparison, no external material.
+
+metadata:
+  key: prairiehearth-craft-supply
+  displayName: "Prairiehearth Craft Supply Co."
+  description: >-
+    Fictional craft-and-hobby retailer serving fibre, paper, paint, and
+    workshop-kit categories through a network of workshop-anchored stores
+    plus a mail-order kit program.
+  version: "1.0.0"
+  segment: "Craft & Hobby"
+  attribution: "Fictional sample content. Prairiehearth Craft Supply Co. is an invented tenant used for pack-loader demonstration."
+
+tenant:
+  company: "Prairiehearth Craft Supply Co."
+  industry: "Craft & Hobby"
+  description: "Prairiehearth Craft Supply Co. is a fictional craft-and-hobby retailer built around workshop-anchored neighborhood stores, a mail-order kit program, and a maker-community events calendar."
+  brands:
+    - name: "Wovenwheel Fibre"
+      category: "Yarn & Fibre"
+      variants: ["Worsted", "Bulky", "Fingering", "Lace"]
+      priceSegment: "Premium"
+    - name: "Loomshire Weaving"
+      category: "Yarn & Fibre"
+      variants: ["Warp", "Weft", "Loom Kit"]
+      priceSegment: "Standard"
+    - name: "Auroralight Paint"
+      category: "Paint & Ink"
+      variants: ["Acrylic", "Gouache", "Watercolour Pans", "Ink Set"]
+      priceSegment: "Premium"
+    - name: "Pinemark Paper"
+      category: "Paper & Journal"
+      variants: ["Sketchbook", "Journal", "Card Stock", "Watercolour Block"]
+      priceSegment: "Standard"
+    - name: "Ridgeline Woodcraft"
+      category: "Kits & Workshops"
+      variants: ["Beginner Whittling", "Intermediate Carving", "Advanced Joinery"]
+      priceSegment: "Premium"
+    - name: "Marketstead Beading"
+      category: "Beading & Jewelry"
+      variants: ["Seed Bead Set", "Wirework", "Findings Assortment"]
+      priceSegment: "Standard"
+  regions:
+    - "Prairie Belt"
+    - "Lakes & Rivers"
+    - "Coastal Cottages"
+    - "Foothills"
+  channels:
+    - "Workshop Store"
+    - "Mail-Order Kit"
+    - "Community Event Booth"
+  theme:
+    primaryColor: "#7A3E2C"
+    accentColor: "#E8C9A0"
+    logoPath: "assets/prairiehearth-logo.png"
+    fontFamily: "Fraunces, Georgia, serif"
+  distribution:
+    model: "Workshop Anchor + Mail Kit"
+    distributorTypes:
+      - "Cooperative Supplier"
+      - "Direct Maker"

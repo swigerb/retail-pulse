@@ -366,7 +366,7 @@ public class PromoToolTests : IDisposable
     [Fact]
     public void GetPromoTypes_ReturnsAllTypes()
     {
-        JsonElement result = Parse(RetailPulseDb.GetPromoTypes());
+        JsonElement result = Parse(_db.GetPromoTypes());
 
         result.TryGetProperty("error", out _).Should().BeFalse();
         result.GetProperty("promo_types").GetArrayLength().Should().Be(5);
@@ -375,7 +375,7 @@ public class PromoToolTests : IDisposable
     [Fact]
     public void GetPromoTypes_ContainsExpectedTypes()
     {
-        JsonElement result = Parse(RetailPulseDb.GetPromoTypes());
+        JsonElement result = Parse(_db.GetPromoTypes());
 
         result.TryGetProperty("error", out _).Should().BeFalse();
         var codes = result.GetProperty("promo_types").EnumerateArray()

@@ -1,0 +1,229 @@
+# Prairiehearth Craft Supply Co. scenario seed manifest — issue #108.
+#
+# Every competitor name, promo type, seasonality label, disruption
+# description, store archetype, and margin driver below is invented
+# fictional Prairiehearth-universe content. No third-party analysis, no
+# competitive comparison, no external material. This file is the sole
+# machine-readable source of scenario-varying seed data for this pack;
+# any change here rehashes the pack fingerprint and forces a reseed.
+
+version: 1
+
+seasonality:
+  factors:
+    Yarn & Fibre:
+      - month: 1
+        multiplier: 1.28
+        event: New Year Casting-On
+        description: Households restart long-project knitting; premium worsted and lace demand climb
+      - month: 4
+        multiplier: 1.05
+        event: Spring Fibre Refresh
+        description: Lighter-weight fingering and cotton-blend demand rises with warmer weather
+      - month: 6
+        multiplier: 0.85
+        event: Summer Fibre Lull
+        description: Warm weather softens indoor fibre projects; workshop attendance dips
+      - month: 9
+        multiplier: 1.15
+        event: Guild Kickoff
+        description: Fall guild season restarts; workshop cohort enrollment drives fibre bundles
+      - month: 11
+        multiplier: 1.35
+        event: Handmade Gifting Push
+        description: Prairiehearth Handmade Gifting Guide kickoff peaks worsted and bulky sales
+    Paint & Ink:
+      - month: 2
+        multiplier: 1.10
+        event: Watercolour Studio Season
+        description: Watercolour pan and paper bundles rise as households restart indoor studio time
+      - month: 5
+        multiplier: 1.15
+        event: Plein-Air Prep
+        description: Household plein-air kits and portable ink sets drive spring peak
+      - month: 7
+        multiplier: 0.92
+        event: Studio Heat Slowdown
+        description: Un-air-conditioned home studios reduce mid-summer paint session length
+      - month: 10
+        multiplier: 1.18
+        event: Colour Study Cohort
+        description: Prairiehearth colour-study workshop cohort lifts acrylic and gouache bundles
+    Paper & Journal:
+      - month: 1
+        multiplier: 1.22
+        event: New Journal Season
+        description: Households refresh journaling stacks and lettering supplies for the new year
+      - month: 5
+        multiplier: 1.08
+        event: Wedding Stationery Season
+        description: Handmade wedding stationery projects lift card stock and journal-page demand
+      - month: 8
+        multiplier: 1.12
+        event: Back-to-Studio Setup
+        description: Sketchbook and watercolour block resets after summer travel
+      - month: 11
+        multiplier: 1.30
+        event: Maker Faire Season
+        description: Prairiehearth Maker Faire Season drives sketchbook and portfolio purchases
+    Kits & Workshops:
+      - month: 3
+        multiplier: 1.20
+        event: Workshop Cohort Kickoff
+        description: Spring workshop cohort start peaks beginner-whittling and joinery kit sales
+      - month: 9
+        multiplier: 1.25
+        event: Fall Cohort Kickoff
+        description: Fall workshop enrollment surges — highest kit-per-cohort attach rate
+      - month: 12
+        multiplier: 0.95
+        event: Holiday Gifting Wind-Down
+        description: Kit lead time exceeds gifting window; households shift to ready-made
+    Beading & Jewelry:
+      - month: 5
+        multiplier: 1.12
+        event: Wedding & Graduation Rush
+        description: Handmade gift jewelry demand peaks around wedding and graduation season
+      - month: 10
+        multiplier: 1.20
+        event: Guild Kit Season
+        description: Prairiehearth Guild Kit Bundle attach rate peaks at fall guild kickoff
+      - month: 12
+        multiplier: 1.28
+        event: Handmade Gifting Peak
+        description: Handmade jewelry gifts drive the year's peak for findings and wire
+
+competitive:
+  competitorsByCategory:
+    Yarn & Fibre:
+      - Farmhearth Fibre Co-op
+      - Sturdyloom Yarn House
+      - Rowanmark Craft Fibre
+    Paint & Ink:
+      - Lanternbrook Colour Studio
+      - Fernline Pigment Works
+      - Duskharbor Ink Co.
+    Paper & Journal:
+      - Bindercraft Journals
+      - Riversedge Paper Mill
+      - Quartzpine Card & Paper
+    Kits & Workshops:
+      - Barnwood Workshop Kits
+      - Chisel & Cord Studios
+      - Guildmark Kit Co.
+    Beading & Jewelry:
+      - Copperfield Beadwork
+      - Marketrun Findings
+      - Tinderrow Wirework
+  pricingSources: [guild_bulletin, cooperative_intake, workshop_visit_log]
+  shareSources: [prairiehearth_panel, cooperative_estimate, internal_estimate]
+  activityTypes: [workshop_offer, guild_bundle, kit_relaunch, cooperative_rebate]
+  impactLevels: [flagship, watchlist, monitor]
+  activityTemplates:
+    - type: workshop_offer
+      description: "{0} announced a discounted intro cohort for {2} in {3}"
+      recommendation: MATCH — Add Prairiehearth Workshop Cohort Discount at neighboring stores
+    - type: workshop_offer
+      description: "{0} launched a subscription workshop calendar for {2} in {3}"
+      recommendation: DIFFERENTIATE — Emphasize Prairiehearth guild-anchored cohort experience
+    - type: guild_bundle
+      description: "{0} bundled a fibre pack with a workshop enrollment in {3}"
+      recommendation: PREEMPT — Lock in Prairiehearth Guild Kit Bundle cadence before season peak
+    - type: guild_bundle
+      description: "{0} dropped a low-cost guild starter pack in {3}"
+      recommendation: IGNORE — Below Prairiehearth premium band; monitor for creep
+    - type: kit_relaunch
+      description: "{0} refreshed its {2} kit tier for the fall cohort in {3}"
+      recommendation: MATCH — Refresh Prairiehearth cohort kit assortment ahead of next kickoff
+    - type: kit_relaunch
+      description: "{0} paused kit sales in {2} while retooling in {3}"
+      recommendation: PREEMPT — Publish Prairiehearth kit availability to capture demand
+    - type: cooperative_rebate
+      description: "{0} secured a cooperative rebate for {2} makers in {3}"
+      recommendation: DIFFERENTIATE — Restate Prairiehearth long-term cooperative supplier relationships
+    - type: cooperative_rebate
+      description: "{0} withdrew from the regional maker cooperative in {3}"
+      recommendation: IGNORE — Cooperative posture is a Prairiehearth structural advantage
+
+promos:
+  types:
+    - name: Workshop Cohort Discount
+      liftBase: 16.0
+      liftRange: 24.0
+      coefBase: 22.0
+      coefRange: 7.0
+      code: workshop-cohort-discount
+      displayName: Workshop Cohort Discount
+      description: Discount on cohort enrollment plus the required starter kit
+    - name: Guild Kit Bundle
+      liftBase: 14.0
+      liftRange: 22.0
+      coefBase: 20.0
+      coefRange: 6.0
+      code: guild-kit-bundle
+      displayName: Guild Kit Bundle
+      description: Multi-SKU bundle timed to Prairiehearth Guild Kit Season
+    - name: Mail-Order Kit Credit
+      liftBase: 9.0
+      liftRange: 15.0
+      coefBase: 13.0
+      coefRange: 5.0
+      code: mail-order-kit-credit
+      displayName: Mail-Order Kit Credit
+      description: Store credit toward the next mail-order kit for repeat households
+    - name: Community Event Booth Coupon
+      liftBase: 6.0
+      liftRange: 12.0
+      coefBase: 9.0
+      coefRange: 4.0
+      code: community-event-booth-coupon
+      displayName: Community Event Booth Coupon
+      description: Booth-issued redemption code for a Community Event Booth attendee
+    - name: Handmade Gifting Bundle
+      liftBase: 12.0
+      liftRange: 20.0
+      coefBase: 18.0
+      coefRange: 6.0
+      code: handmade-gifting-bundle
+      displayName: Handmade Gifting Bundle
+      description: Curated gifting bundle spanning fibre, paper, and beading categories
+  successRatings: [Guild-Favorite, Cohort-Backed, Steady, Watch, Fell Short]
+
+supply:
+  disruptionTypes: [cooperative_supply, workshop_calendar, dye_lot, kit_fulfillment]
+  disruptionSeverities: [critical, elevated, watch]
+  disruptionDescriptions:
+    cooperative_supply:
+      - Prairie Belt cooperative supplier delayed fibre release for lot inspection
+      - Direct-maker cooperative rescheduled paint pigment intake window
+      - Cooperative kit-lumber supplier held shipments pending grain grade check
+    workshop_calendar:
+      - Foothills guild coordinator rescheduled cohort kickoff by one week
+      - Coastal Cottages workshop instructor unavailable during peak cohort week
+      - Community Event Booth booked venue moved indoors for weather advisory
+    dye_lot:
+      - Wovenwheel Fibre dye lot variance triggered a re-verification hold
+      - Auroralight Paint pigment batch failed color-check retest
+      - Marketstead Beading finishing bath rework delayed lot release
+    kit_fulfillment:
+      - Mail-order kit pick-and-pack line ran overtime through cohort kickoff
+      - Beginner Whittling kit component substitution slowed pack-out cadence
+      - Ridgeline Woodcraft joinery kit assembly required additional QA passes
+
+stores:
+  types:
+    - Workshop Anchor
+    - Community Storefront
+    - Mail-Order Fulfillment Hub
+    - Cooperative Pickup Point
+    - Event Booth Kit
+
+margin:
+  driverCategories:
+    - Cooperative Supplier Sourcing
+    - Workshop Instructor Labor
+    - Mail-Order Fulfillment
+    - Cohort Enrollment Incentives
+    - Kit Assembly Consumables
+    - Facility Overhead
+  trendLabels: [improving, softening, holding, seasonal]

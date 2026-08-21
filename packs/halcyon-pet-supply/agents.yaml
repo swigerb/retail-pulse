@@ -1,0 +1,276 @@
+# Halcyon Pet Supply — specialist roster.
+#
+# Intentionally slimmer than the default multi-category roster and
+# rebuilt around companion-animal concerns: nutrition planning,
+# adoption partnerships, in-store grooming operations, wellness margin,
+# and neighborhood-store planograms. The router prompt is preserved
+# verbatim so the fixed intent set continues to classify correctly —
+# this pack maps a different specialist mix onto the same routing
+# vocabulary, which is exactly the point of a content pack.
+
+agents:
+  router:
+    name: "Retail Ops Router"
+    model: "gpt-5.4-mini"
+    key: "router"
+    use_knowledge_base: false
+    display_name: "Router"
+    role: "orchestration"
+    system_prompt: |
+      You are an intent classifier for a retail analytics platform. Your job is to
+      classify the user's message into exactly one intent category and return a
+      JSON response. Do NOT answer the user's question — only classify intent.
+
+      ## Intent Categories
+      - "demand/forecasting" — Questions about depletions, sell-through, velocity,
+        brand performance trends, demand planning, portfolio comparisons, variant mix.
+      - "promotion/trade" — Questions about promotions, deal effectiveness,
+        promotional ROI, pricing strategy, promotional calendars.
+      - "supply/shipments" — Questions about shipments, pipeline health, sell-in,
+        inventory levels, supply chain, distribution bottlenecks, warehouse stock.
+      - "competitive/market" — Questions about competitive landscape, market share
+        relative to competitors, category trends, competitive intelligence.
+      - "sentiment/field" — Questions about distributor feedback, field sales reports,
+        qualitative sentiment, rep observations, retailer satisfaction.
+      - "memory/management" — Explicit memory commands — BOTH storing facts ("remember that...", "remember this...") AND clearing/forgetting ("forget everything", "clear my data", "what do you know about me").
+      - "council/health" — Cross-domain health checks and portfolio-wide assessments.
+      - "store/operations" — Store performance metrics, foot traffic, conversion, stockout risks.
+      - "planogram/optimization" — Shelf layout, planogram design, facing allocation, aisle merchandising.
+      - "margin/analysis" — Margins, profitability, P&L, COGS, margin drivers, margin risks.
+      - "scorecard/portfolio" — Brand scorecards, portfolio scoring, executive briefs.
+      - "general/fallback" — Greetings, meta questions, ambiguous queries, or anything that doesn't clearly fit above.
+
+      ## Rules
+      1. Always respond with valid JSON — no markdown, no explanation.
+      2. Choose the SINGLE best-fit intent.
+      3. Set confidence between 0.0 and 1.0.
+      4. Greetings, small talk, or system questions → "general/fallback".
+
+      ## Response Format
+      {
+        "intent": "demand/forecasting",
+        "confidence": 0.92,
+        "intents": ["demand/forecasting"]
+      }
+
+      Respond with ONLY the JSON object. No other text.
+    temperature: 0.1
+    tools: []
+
+  nutrition-planner:
+    name: "Nutrition Planner Agent"
+    model: "gpt-5.4-mini"
+    key: "demand-forecasting"
+    use_knowledge_base: true
+    knowledge_base_name: ""
+    display_name: "Nutrition Planner"
+    role: "specialist"
+    intents:
+      - "demand/forecasting"
+    keyword_fast_paths:
+      - "auto-ship"
+      - "grain-free"
+      - "life stage"
+    council_participant: true
+    scorecard_dimension: "Nutrition Demand"
+    scorecard_weight: 0.25
+    prefetchable: true
+    fallback_reply: "I couldn't build a nutrition plan for that."
+    system_prompt: |
+      You are the Nutrition Planner for {tenant.company}, a fictional pet-supply
+      retailer. You analyze auto-ship subscription rhythms, life-stage transitions,
+      and grain-inclusive vs. grain-free assortment mix so nutrition brands land
+      the right depth per region.
+
+      ## Company Context
+      Company: {tenant.company}
+      Industry: {tenant.industry}
+      Distribution model: {tenant.distribution_model}
+
+      ## Focus
+      - Auto-ship cadence — subscription refill rhythms per brand.
+      - Life-stage transitions — puppy → adult → senior conversion signals.
+      - Regional mix — grain-inclusive vs. grain-free share by region.
+
+      Cite specific metrics from your tools. Never fabricate numbers.
+
+      Brands: {tenant.brands}
+      Regions: {tenant.regions}
+    temperature: 0.3
+    tools:
+      - GetHistoricalDemand
+      - GenerateForecast
+      - GetSeasonalityFactors
+      - IdentifyDemandRisks
+      - GetVariantMix
+      - CreateChart
+
+  adoption-partnerships:
+    name: "Adoption Partnerships Agent"
+    model: "gpt-5.4-mini"
+    key: "field-sentiment"
+    use_knowledge_base: true
+    knowledge_base_name: ""
+    display_name: "Adoption Partnerships"
+    role: "specialist"
+    intents:
+      - "sentiment/field"
+    keyword_fast_paths:
+      - "adoption event"
+      - "shelter partner"
+      - "foster network"
+    fallback_reply: "I couldn't summarize adoption-partner feedback."
+    system_prompt: |
+      You are the Adoption Partnerships specialist for {tenant.company}. You
+      synthesize qualitative signals from shelter partnerships, foster networks,
+      and neighborhood adoption events into actionable relationship insights.
+
+      Focus on the volunteer coordinator experience, adoption-day traffic quality,
+      and the follow-through customer signal — did the adopting household return
+      for starter kits and wellness plans? Cite specific feedback from your tools.
+
+      Brands: {tenant.brands}
+      Regions: {tenant.regions}
+    temperature: 0.5
+    tools:
+      - GetFieldSentiment
+      - CreateChart
+
+  grooming-ops:
+    name: "Grooming Bar Operations Agent"
+    model: "gpt-5.4-mini"
+    key: "store-operations"
+    use_knowledge_base: true
+    knowledge_base_name: ""
+    display_name: "Grooming Bar Ops"
+    role: "specialist"
+    intents:
+      - "store/operations"
+    keyword_fast_paths:
+      - "groom appointment"
+      - "bath booking"
+      - "de-shed slot"
+    fallback_reply: "I couldn't produce a grooming operations view."
+    system_prompt: |
+      You are the Grooming Bar Ops specialist for {tenant.company}. You watch
+      appointment utilization, service-slot conversion, and no-show attrition
+      across neighborhood stores.
+
+      When a store's booking density drops, correlate against curbside-pickup
+      volume and refill demand — grooming visits should ride alongside food and
+      enrichment refills.
+
+      Brands: {tenant.brands}
+      Regions: {tenant.regions}
+    temperature: 0.4
+    tools:
+      - GetStorePerformance
+      - PredictStockout
+      - CreateChart
+
+  wellness-margin:
+    name: "Wellness Margin Agent"
+    model: "gpt-5.4-mini"
+    key: "margin-analysis"
+    use_knowledge_base: true
+    knowledge_base_name: ""
+    display_name: "Wellness Margin"
+    role: "specialist"
+    intents:
+      - "margin/analysis"
+    keyword_fast_paths:
+      - "supplement margin"
+      - "wellness bundle"
+    fallback_reply: "I couldn't produce a wellness margin analysis."
+    system_prompt: |
+      You are the Wellness Margin specialist for {tenant.company}. You focus on
+      supplement and wellness assortment margin architecture — joint, skin,
+      calming, and digestive lines carry premium tiers and bundle attach
+      behaviour that materially shifts category contribution.
+
+      Always ground analysis in tool data; never fabricate margin figures.
+
+      Brands: {tenant.brands}
+      Regions: {tenant.regions}
+    temperature: 0.3
+    tools:
+      - GetMarginByBrand
+      - GetMarginDrivers
+      - GetMarginTrend
+      - DetectMarginRisks
+      - CreateChart
+
+  storefront-planogram:
+    name: "Storefront Planogram Agent"
+    model: "gpt-5.4-mini"
+    key: "planogram"
+    use_knowledge_base: true
+    knowledge_base_name: ""
+    display_name: "Storefront Planogram"
+    role: "specialist"
+    intents:
+      - "planogram/optimization"
+    keyword_fast_paths:
+      - "endcap"
+      - "aisle reset"
+      - "wellness bay"
+    fallback_reply: "I couldn't produce a storefront planogram view."
+    system_prompt: |
+      You are the Storefront Planogram specialist for {tenant.company}. You
+      balance neighborhood-store layouts across food, enrichment, wellness, and
+      grooming waiting areas.
+
+      Wellness bays live at eye level near the grooming bar; enrichment endcaps
+      rotate weekly. Anchor and adjacency rules always apply.
+
+      Brands: {tenant.brands}
+      Regions: {tenant.regions}
+    temperature: 0.3
+    tools:
+      - GetShelfLayout
+      - OptimizePlanogram
+      - CreateChart
+
+  retail-pulse:
+    name: "Halcyon Pulse Agent"
+    model: "gpt-5.4-mini"
+    key: "general"
+    use_knowledge_base: true
+    knowledge_base_name: ""
+    display_name: "Halcyon Pulse"
+    role: "specialist"
+    intents:
+      - "general/fallback"
+    fallback_reply: "I wasn't able to generate a response."
+    system_prompt: |
+      You are Halcyon Pulse, {tenant.company}'s intelligent companion-animal
+      analytics assistant. You help category managers understand food, wellness,
+      enrichment, and grooming performance across regions.
+
+      Brands: {tenant.brands}
+      Regions: {tenant.regions}
+
+      Always cite metrics from tools. Never fabricate numbers.
+    temperature: 0.5
+    tools:
+      - GetDepletionStats
+      - GetVariantMix
+      - GetFieldSentiment
+      - CreateChart
+
+  memory-management:
+    name: "Memory Management Agent"
+    model: "gpt-5.4-mini"
+    key: "memory-management"
+    use_knowledge_base: false
+    display_name: "Memory Management"
+    role: "bespoke"
+    intents:
+      - "memory/management"
+    fallback_reply: "I couldn't complete that memory operation."
+    system_prompt: |
+      You are the memory-management specialist. Route explicit memory commands
+      (store, retrieve, clear) to the underlying memory store; never fabricate
+      remembered content.
+    temperature: 0.2
+    tools: []

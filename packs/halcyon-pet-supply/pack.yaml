@@ -1,0 +1,68 @@
+# Retail Pulse content pack — Halcyon Pet Supply
+#
+# Fully fictional pet-supply retailer used as a foundation example of a
+# genuinely different segment: rosters, tools, knowledge bindings, and
+# starting tasks are distinct from the default multi-category tenant.
+# All names, metrics, and vocabulary are invented; no third-party
+# analysis, no competitive comparison, no external material.
+
+metadata:
+  key: halcyon-pet-supply
+  displayName: "Halcyon Pet Supply Co."
+  description: >-
+    Fictional pet-supply retailer serving companion-animal households
+    with a curated food, wellness, and enrichment assortment. Ships a
+    narrow specialist roster tuned to nutrition compliance, adoption
+    partnerships, and grooming service performance.
+  version: "1.0.0"
+  segment: "Pet Supply"
+  attribution: "Fictional sample content. Halcyon Pet Supply Co. is an invented tenant used for pack-loader demonstration."
+
+tenant:
+  company: "Halcyon Pet Supply Co."
+  industry: "Pet Supply"
+  description: "Halcyon Pet Supply Co. is a fictional companion-animal retailer serving food, wellness, and enrichment needs across a four-region footprint with a hybrid distributor-and-direct model."
+  brands:
+    - name: "Meadowbowl Nutrition"
+      category: "Companion Food"
+      variants: ["Grain-Inclusive", "Grain-Free", "Puppy Stage", "Senior Stage"]
+      priceSegment: "Premium"
+    - name: "Riverstone Feline"
+      category: "Companion Food"
+      variants: ["Kitten", "Indoor Adult", "Weight Management", "Hairball Care"]
+      priceSegment: "Standard"
+    - name: "Timberpaw Chews"
+      category: "Enrichment"
+      variants: ["Rawhide-Free Small", "Rawhide-Free Large", "Dental Ring", "Long-Lasting"]
+      priceSegment: "Standard"
+    - name: "Nimbus Pet Wellness"
+      category: "Wellness"
+      variants: ["Joint Care", "Skin & Coat", "Calming", "Digestive"]
+      priceSegment: "Premium"
+    - name: "Skylark Small Animal"
+      category: "Small Animal"
+      variants: ["Rabbit Hay Blend", "Guinea Pig Pellets", "Hamster Enrichment", "Bird Seed"]
+      priceSegment: "Standard"
+    - name: "Halcyon Grooming Bar"
+      category: "In-Store Service"
+      variants: ["Bath", "Full Groom", "Nail Trim", "De-Shed"]
+      priceSegment: "Premium"
+  regions:
+    - "Great Lakes"
+    - "Sunbelt"
+    - "Mountain Corridor"
+    - "Pacific Metro"
+  channels:
+    - "Neighborhood Store"
+    - "Curbside Pickup"
+    - "Auto-Ship Subscription"
+  theme:
+    primaryColor: "#2F5D50"
+    accentColor: "#F4B860"
+    logoPath: "assets/halcyon-logo.png"
+    fontFamily: "Manrope, system-ui, sans-serif"
+  distribution:
+    model: "Hybrid Direct"
+    distributorTypes:
+      - "Regional Distributor"
+      - "Direct-Ship Vendor"

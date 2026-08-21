@@ -1,0 +1,105 @@
+# Retail Pulse content pack — Default (Apex Retail Group)
+#
+# The default pack reproduces the pre-#108 sample tenant exactly.
+# Every field under the `tenant:` block is a verbatim copy of the
+# historic root tenant.yaml, so a deployment that does not override
+# Packs:Active keeps its behaviour byte-for-byte after the pack loader
+# is wired in.
+#
+# Framework and orchestration prompts live in agents.yaml alongside; the
+# knowledge corpus lives in knowledge/; curated starting prompts in
+# starting-tasks.yaml.
+
+metadata:
+  key: default
+  displayName: "Apex Retail Group (Sample Tenant)"
+  description: >-
+    Fictional multi-category retail conglomerate used as the platform's
+    default sample tenant. Ships with a full specialist roster covering
+    demand forecasting, promo planning, field sentiment, competitive
+    intelligence, supply chain, store ops, planogram, and margin.
+  version: "1.0.0"
+  segment: "Multi-Category Retail"
+  attribution: "Fictional sample content. No real customer, supplier, or third-party material."
+
+tenant:
+  company: "Apex Retail Group"
+  industry: "Multi-Category Retail"
+  description: "Apex Retail Group is a diversified retail conglomerate with brands spanning spirits, grocery, quick-serve restaurants, home improvement, office supply, and furniture. Operating across North America with a Three-Tier distribution model."
+  brands:
+    # Spirits & Beverages
+    - name: "Sierra Gold Tequila"
+      category: "Spirits"
+      variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
+      priceSegment: "Premium"
+    - name: "Ridgeline Bourbon"
+      category: "Spirits"
+      variants: ["Small Batch", "Single Barrel", "Cask Strength"]
+      priceSegment: "Premium"
+    - name: "Summit Vodka"
+      category: "Spirits"
+      variants: ["Original", "Citrus", "Pepper"]
+      priceSegment: "Premium"
+    # Grocery
+    - name: "FreshMart"
+      category: "Grocery"
+      variants: ["Organic Produce", "Bakery", "Deli", "Frozen"]
+      priceSegment: "Standard"
+    - name: "Harvest Table"
+      category: "Grocery"
+      variants: ["Fresh Meals", "Meal Kits", "Prepared Foods"]
+      priceSegment: "Premium"
+    # Quick-Serve Restaurants
+    - name: "Apex Grill"
+      category: "Quick-Serve Restaurant"
+      variants: ["Burgers", "Chicken", "Breakfast", "Beverages"]
+      priceSegment: "Standard"
+    - name: "Coastline Tacos"
+      category: "Quick-Serve Restaurant"
+      variants: ["Tacos", "Burritos", "Bowls", "Sides"]
+      priceSegment: "Standard"
+    # Home Improvement
+    - name: "Pinnacle Hardware"
+      category: "Home Improvement"
+      variants: ["Lumber", "Power Tools", "Paint", "Plumbing"]
+      priceSegment: "Standard"
+    - name: "Summit Outdoor"
+      category: "Home Improvement"
+      variants: ["Patio Furniture", "Grills", "Garden", "Landscaping"]
+      priceSegment: "Premium"
+    # Office Supply
+    - name: "ClearDesk"
+      category: "Office Supply"
+      variants: ["Paper Products", "Ink & Toner", "Technology", "Furniture"]
+      priceSegment: "Standard"
+    # Furniture
+    - name: "Urban Living"
+      category: "Furniture"
+      variants: ["Living Room", "Bedroom", "Dining", "Outdoor"]
+      priceSegment: "Premium"
+    - name: "Foundry Home"
+      category: "Furniture"
+      variants: ["Sofas", "Mattresses", "Desks", "Storage"]
+      priceSegment: "Standard"
+  regions:
+    - "Northeast"
+    - "Southeast"
+    - "Midwest"
+    - "Southwest"
+    - "West Coast"
+    - "Pacific Northwest"
+  channels:
+    - "On-Premise"
+    - "Off-Premise"
+    - "E-Commerce"
+  theme:
+    primaryColor: "#1B4D7A"
+    accentColor: "#E8A838"
+    logoPath: "assets/apex-logo.png"
+    fontFamily: "Inter, system-ui, sans-serif"
+  distribution:
+    model: "Three-Tier"
+    distributorTypes:
+      - "Distributor"
+      - "Wholesaler"
+      - "Retailer"
