@@ -48,16 +48,26 @@ const mockFetchStats = vi.fn().mockResolvedValue(mockStats);
 // so DocumentUpload can render a KnowledgeIngestionBlock in place of a raw
 // error string. Tests use a lightweight stand-in that matches the shape and
 // participates in `instanceof` checks.
-class MockKnowledgeUploadError extends Error {
-  readonly display: unknown;
-  readonly status: number;
-  constructor(display: unknown, status = 422) {
-    super('safety rejection');
-    this.name = 'KnowledgeUploadError';
-    this.display = display;
-    this.status = status;
+//
+// `vi.mock` calls are hoisted above module-level `class` declarations, so a
+// plain top-level class would be in its temporal dead zone when the mock
+// factory runs (Vitest error: "Cannot access 'MockKnowledgeUploadError'
+// before initialization"). `vi.hoisted` runs alongside the hoisted mocks,
+// which guarantees the class binding is initialized before the factory
+// evaluates.
+const { MockKnowledgeUploadError } = vi.hoisted(() => {
+  class MockKnowledgeUploadError extends Error {
+    readonly display: unknown;
+    readonly status: number;
+    constructor(display: unknown, status = 422) {
+      super('safety rejection');
+      this.name = 'KnowledgeUploadError';
+      this.display = display;
+      this.status = status;
+    }
   }
-}
+  return { MockKnowledgeUploadError };
+});
 
 vi.mock('../services/knowledgeApi', () => ({
   fetchDocuments: (...args: unknown[]) => mockFetchDocs(...args),

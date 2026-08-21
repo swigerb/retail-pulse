@@ -15,8 +15,15 @@ vi.mock('recharts', () => ({
   CartesianGrid: () => <div />,
 }));
 
+// NOTE: `totalBlocked` is deliberately distinct from
+// `jailbreakAttempts + piiDetections + accessDenials` (the pattern-total
+// card's derived value). If they collide, `screen.findByText(<total>)`
+// matches two nodes — the Total Blocked card and the pattern-total card —
+// and the "renders stats after successful fetch" assertion becomes
+// ambiguous. The Total Blocked card renders no `data-testid` in production,
+// so we scope by fixture value instead.
 const mockStats: GuardrailsStats = {
-  totalBlocked: 42,
+  totalBlocked: 87,
   jailbreakAttempts: 15,
   piiDetections: 20,
   accessDenials: 7,
@@ -112,7 +119,9 @@ describe('GuardrailsDashboard', () => {
     installFetchMock();
 
     renderWithTheme(<GuardrailsDashboard />);
-    expect(await screen.findByText('42')).toBeInTheDocument();
+    // Total Blocked: distinct from the pattern-total card (15+20+7 = 42) so
+    // this findByText matches exactly one node.
+    expect(await screen.findByText('87')).toBeInTheDocument();
     expect(screen.getByText('15')).toBeInTheDocument();
     expect(screen.getByText('20')).toBeInTheDocument();
     expect(screen.getByText('7')).toBeInTheDocument();
