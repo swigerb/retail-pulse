@@ -1,5 +1,7 @@
+using System.Text.Json;
 using System.Threading.RateLimiting;
 using Asp.Versioning;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -105,7 +107,7 @@ builder.Services.AddOpenTelemetry()
 
 // SignalR for real-time telemetry
 builder.Services.AddSignalR()
-    .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
+    .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
 
 // Session-ownership registry — binds a chat sessionId to its owning subject so the hubs can refuse
 // a caller that tries to join another subject's session group (Finding 6). Consulted only for
@@ -1144,7 +1146,9 @@ if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
             sp.GetRequiredService<ICostTracker>(),
             sp.GetRequiredService<ITraceCollector>(),
             opts.Value,
-            sp.GetRequiredService<ILogger<PlanExecutor>>());
+            sp.GetRequiredService<ILogger<PlanExecutor>>(),
+            sp.GetService<PlanClarifier>(),
+            sp.GetService<PlanReviewCoordinator>());
     });
     builder.Services.AddScoped(sp =>
     {
@@ -1156,8 +1160,85 @@ if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
             sp.GetRequiredService<IPlanStore>(),
             sp.GetRequiredService<ICostTracker>(),
             opts.Value,
-            sp.GetRequiredService<ILogger<PlanOrchestrator>>());
+            sp.GetRequiredService<ILogger<PlanOrchestrator>>(),
+            sp.GetService<PlanReviewCoordinator>(),
+            sp.GetService<IOptions<PlanReviewOptions>>());
     });
+}
+
+// Plan review gate (#94). Off by default. When PlanReview:Enabled = true, wires
+// the coordinator that inserts a human review pause before plan execution,
+// swaps in the plan-aware resume strategy (adopts plan-review rows across
+// restarts instead of orphaning), and registers the clarification service
+// specialists can use for mid-plan round-trips.
+//
+// Registered independently of PlanPersistence.Enabled so an operator can
+// enable review only when plans persist — the coordinator itself refuses to
+// run without the persistence path via the PlanOrchestrator constructor gate.
+builder.Services.Configure<PlanReviewOptions>(
+    builder.Configuration.GetSection(PlanReviewOptions.SectionName));
+PlanReviewOptions planReviewOptsAtRegistration = builder.Configuration
+    .GetSection(PlanReviewOptions.SectionName)
+    .Get<PlanReviewOptions>() ?? new PlanReviewOptions();
+if (planReviewOptsAtRegistration.Enabled)
+{
+    string reviewCheckpointDir = Path.Combine(
+        dataDirectory,
+        string.IsNullOrWhiteSpace(planReviewOptsAtRegistration.CheckpointSubdirectory)
+            ? "plan-reviews"
+            : planReviewOptsAtRegistration.CheckpointSubdirectory);
+    Directory.CreateDirectory(reviewCheckpointDir);
+    // Framework checkpoint store lives on the same durable data directory as
+    // every other SQLite store the API writes. One JSON file per session id.
+    // Register the store itself + the CheckpointManager wrapper — both are
+    // needed because our PlanReviewCheckpointService calls
+    // ICheckpointStore.CreateCheckpointAsync (real write path) and
+    // CheckpointManager.GetLatestCheckpointAsync (read helper).
+    builder.Services.AddSingleton<ICheckpointStore<JsonElement>>(_ =>
+        new FileSystemJsonCheckpointStore(
+            new DirectoryInfo(reviewCheckpointDir)));
+    builder.Services.AddSingleton(sp =>
+    {
+        ICheckpointStore<JsonElement> store = sp.GetRequiredService<
+            ICheckpointStore<JsonElement>>();
+        return Microsoft.Agents.AI.Workflows.CheckpointManager.CreateJson(store, customOptions: null);
+    });
+    builder.Services.AddSingleton<PlanReviewCheckpointService>();
+
+    builder.Services.AddScoped(sp => new PlanReviewCoordinator(
+            sp.GetRequiredService<IApprovalGate>(),
+            sp.GetRequiredService<IOptions<PlanReviewOptions>>(),
+            sp.GetRequiredService<PlanReviewCheckpointService>(),
+            sp.GetRequiredService<ILogger<PlanReviewCoordinator>>(),
+            sp.GetService<IPlanReviewReplanner>(),
+            sp.GetRequiredService<TimeProvider>()));
+
+    // Default replanner delegates to the tenant PlanBuilder — only registered
+    // when a planner definition exists. If it is absent the coordinator
+    // terminates reject-with-feedback deterministically with ReplanExhausted;
+    // never a silent no-op.
+    if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
+    {
+        builder.Services.AddScoped<IPlanReviewReplanner, PlanBuilderReplanner>();
+    }
+
+    // Register the concrete first so the completion service can inject the
+    // real class (it needs OpenAsync/InterpretAnswer which live on the
+    // implementation, not the interface). The interface points at the same
+    // singleton.
+    builder.Services.AddSingleton<PlanClarifier>();
+    builder.Services.AddSingleton<IPlanClarifier>(sp => sp.GetRequiredService<PlanClarifier>());
+
+    // Swap the reconciliation resume strategy for the plan-aware one. Tool rows
+    // still orphan terminally; plan-review / clarification rows are adopted so
+    // the human decision arriving after a restart proceeds normally.
+    builder.Services.RemoveAll<IApprovalResumeStrategy>();
+    builder.Services.AddSingleton<IApprovalResumeStrategy, PlanReviewResumeStrategy>();
+
+    // Wave 2: durable completion service + restart recovery + timeout sweep.
+    builder.Services.AddSingleton<PlanReviewCompletionService>();
+    builder.Services.AddHostedService<PlanReviewRestartRecoveryService>();
+    builder.Services.AddHostedService<PlanReviewTimeoutBackgroundService>();
 }
 
 // Register ExplainabilityService (singleton for cross-request trace storage)
@@ -1282,6 +1363,12 @@ if (app.Services.GetService<ISessionStore>() is not null)
 if (app.Services.GetService<IPlanStore>() is not null)
 {
     app.MapPlanEndpoints();
+    // Plan review endpoints (#94) — mapped only when the plan store is available
+    // AND PlanReview is enabled. Cross-subject decisions collapse to 404.
+    if (planReviewOptsAtRegistration.Enabled)
+    {
+        app.MapPlanReviewEndpoints();
+    }
 }
 
 // Anonymous mode: map the single unauthenticated bootstrap endpoint that mints short-lived
