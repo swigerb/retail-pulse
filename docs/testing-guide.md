@@ -516,10 +516,29 @@ Performance regression detection for critical paths:
 | RouterClassification | Keyword fast-path vs LLM classification latency |
 | CacheLookup | MCP response cache hit/miss overhead |
 | VoteParsing | Consensus council vote JSON parsing |
+| HybridFastPath | Decision-layer overhead for the single-specialist fast path (issue #95) |
 
 ```bash
 dotnet run -c Release --project tests/RetailPulse.Benchmarks
 ```
+
+### Hybrid fast-path baseline (issue #95)
+
+A deterministic p50/p95 baseline for the single-specialist fast path is captured
+separately so before/after comparisons for the hybrid-execution decision layer do
+not depend on a full BenchmarkDotNet run. It measures
+`RetailOpsRouter.TryKeywordClassify` against the reference prompt
+`"How is Sierra Gold Tequila performing in the Northeast?"` — no network, LLM, or
+MCP call is issued.
+
+```bash
+dotnet run -c Release --project tests/RetailPulse.Benchmarks -- baseline
+```
+
+Writes `tests/RetailPulse.Benchmarks/baselines/hybrid-fast-path-baseline.json`
+with commit SHA, environment identifier, sample count, and p50/p95 in
+nanoseconds. A material regression (>5% p50 or p95 vs the recorded baseline on
+the same environment) is blocking for the hybrid-execution change.
 
 ---
 

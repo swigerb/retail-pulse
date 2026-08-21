@@ -6,6 +6,14 @@ namespace RetailPulse.Api.Endpoints;
 
 public static class EscalationEndpoints
 {
+    /// <summary>
+    /// Maps <c>POST /api/escalate</c> — the legacy L1→L2→L3 fan-out kept for
+    /// callers that opt in explicitly. The <c>/api/chat</c> pipeline no longer
+    /// routes through this endpoint; its multi-specialist admission is owned
+    /// by <see cref="Agents.Routing.HybridExecutionDecider"/>
+    /// (issue #95), which admits into the plan-first orchestrator. See the
+    /// class doc on <see cref="EscalationOrchestrator"/>.
+    /// </summary>
     public static WebApplication MapEscalationEndpoints(this WebApplication app)
     {
         app.MapPost("/api/escalate", async (ChatRequest request, EscalationOrchestrator escalation, IAgentRouter router, ILogger<Program> logger, CancellationToken ct) =>

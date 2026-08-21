@@ -13,7 +13,8 @@ public record ChatRequest(
     string Message,
     string? SessionId = null,
     UserContext? User = null,
-    List<ChatHistoryMessage>? History = null
+    List<ChatHistoryMessage>? History = null,
+    string? ForceExecutionPath = null
 );
 
 /// <summary>
@@ -24,7 +25,9 @@ public record RoutingInfo(
     string AgentName,
     string? Intent,
     double? Confidence,
-    long? DurationMs
+    long? DurationMs,
+    string? ExecutionPath = null,
+    bool? ExecutionPathForced = null
 );
 
 /// <summary>

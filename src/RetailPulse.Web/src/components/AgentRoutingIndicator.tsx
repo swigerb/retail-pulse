@@ -1,5 +1,5 @@
 import { Tooltip, makeStyles } from '@fluentui/react-components';
-import type { RoutingInfo } from '../types';
+import type { ExecutionPath, RoutingInfo } from '../types';
 import { getIntentCategory } from '../types';
 import { AGENT_COLORS, AGENT_EMOJIS } from '../constants/agentRouting';
 
@@ -11,7 +11,8 @@ const useStyles = makeStyles({
   container: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '4px',
+    gap: '6px',
+    flexWrap: 'wrap',
     marginTop: '4px',
   },
   pill: {
@@ -28,6 +29,32 @@ const useStyles = makeStyles({
     ':hover': {
       opacity: '0.9',
     },
+  },
+  pathPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '2px 8px',
+    borderRadius: '10px',
+    fontSize: '10px',
+    fontWeight: '600',
+    letterSpacing: '0.02em',
+    textTransform: 'uppercase',
+    color: 'var(--color-text-muted)',
+    backgroundColor: 'var(--color-surface)',
+    border: '1px solid var(--color-border)',
+  },
+  pathPillForced: {
+    color: 'var(--brand-accent)',
+    backgroundColor: 'var(--brand-accent-soft)',
+    border: '1px solid var(--brand-accent-border)',
+  },
+  forcedDot: {
+    display: 'inline-block',
+    width: '5px',
+    height: '5px',
+    borderRadius: '50%',
+    backgroundColor: 'var(--brand-accent)',
   },
   agentName: {
     fontWeight: '600',
@@ -54,6 +81,18 @@ const useStyles = makeStyles({
   },
 });
 
+const PATH_LABEL: Record<ExecutionPath, string> = {
+  fast: 'Fast',
+  plan: 'Plan',
+  council: 'Council',
+};
+
+const PATH_DESCRIPTION: Record<ExecutionPath, string> = {
+  fast: 'single-specialist single-shot execution',
+  plan: 'plan-first workflow',
+  council: 'consensus-council interception',
+};
+
 export function AgentRoutingIndicator({ routing }: AgentRoutingIndicatorProps) {
   const styles = useStyles();
 
@@ -61,6 +100,8 @@ export function AgentRoutingIndicator({ routing }: AgentRoutingIndicatorProps) {
   const color = AGENT_COLORS[category] ?? AGENT_COLORS.general;
   const emoji = AGENT_EMOJIS[category] ?? AGENT_EMOJIS.general;
   const pct = Math.round(routing.confidence * 100);
+  const path: ExecutionPath | undefined = routing.executionPath;
+  const forced = routing.executionPathForced === true;
 
   const pillStyle: React.CSSProperties = {
     backgroundColor: `${color}18`,
@@ -97,6 +138,27 @@ export function AgentRoutingIndicator({ routing }: AgentRoutingIndicatorProps) {
           {pillContent}
         </Tooltip>
       </div>
+      {path && (
+        <Tooltip
+          content={`Execution path: ${PATH_LABEL[path]} — ${PATH_DESCRIPTION[path]}${forced ? ' (forced by user override)' : ''}.`}
+          relationship="description"
+        >
+          <span
+            className={`${styles.pathPill} ${forced ? styles.pathPillForced : ''}`}
+            data-testid="execution-path-pill"
+            data-execution-path={path}
+            data-execution-path-forced={forced ? 'true' : 'false'}
+            aria-label={
+              forced
+                ? `Execution path: ${PATH_LABEL[path]} (forced)`
+                : `Execution path: ${PATH_LABEL[path]}`
+            }
+          >
+            {forced && <span aria-hidden="true" className={styles.forcedDot} />}
+            <span>{PATH_LABEL[path]}</span>
+          </span>
+        </Tooltip>
+      )}
     </div>
   );
 }
