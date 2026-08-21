@@ -102,7 +102,17 @@ On every `git push` it:
    whose commits touch no C# / build-graph files skip the check.
 2. First-time pushes of a new branch always run the check — a new branch
    is a legitimate moment to verify the full solution.
-3. Runs `dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic` — byte-for-byte the CI command.
+3. Checks whether the tree it is about to analyse — your working tree — is
+   identical to the tree CI will analyse (the pushed commit tree). It
+   flags two cases: pushing a ref whose tip differs from your checked-out
+   `HEAD` (for example `git push origin some-other-branch` or
+   `git push --all`), and a working tree with uncommitted / untracked
+   build-graph files. Both cases are surfaced as an advisory `NOTE:` line
+   before the formatter runs and again in the success message; the hook
+   does not block, because CI is already the authority on the pushed tree
+   and blocking would break legitimate `git push --all` and unrelated-WIP
+   pushes.
+4. Runs `dotnet format RetailPulse.slnx --verify-no-changes --verbosity diagnostic` — byte-for-byte the CI command.
 
 If the formatter finds violations, the push is blocked and the diagnostics
 are printed. If `dotnet` is not on PATH the hook skips with a warning; CI
@@ -110,13 +120,17 @@ still enforces.
 
 ### What the hooks guarantee
 
-If the applicable hook set completes without error and you do not pass
-`--no-verify`, the CI `Lint (dotnet format)` job will pass on the same
-commits. The pre-push hook is what makes that guarantee true in every
-case, because it runs the exact CI command against the whole solution;
-the pre-commit hook is a fast partial gate on top of it.
+If the pre-push hook completes without error, you do not pass
+`--no-verify`, **and** the hook confirms tree identity in its success
+message (working tree matches the pushed commit tree), the CI
+`Lint (dotnet format)` job will pass on the same commits. The pre-push
+hook is the load-bearing gate: it runs the exact CI command against the
+whole solution; the pre-commit hook is a fast partial gate on top of it.
+When tree identity does not hold, the hook still runs as an early
+warning but explicitly downgrades its success message — CI is
+authoritative for the pushed commit tree in that case.
 
-The guarantee has three explicit boundaries. Documenting them here rather
+The guarantee has four explicit boundaries. Documenting them here rather
 than implying a stronger promise:
 
 - **Bypass**: `git commit --no-verify` and `git push --no-verify` skip
@@ -127,6 +141,20 @@ than implying a stronger promise:
 - **PATH**: if `dotnet` is not on PATH when a hook runs, the hook exits 0
   with a warning rather than blocking the workflow, because a working
   install cannot be assumed. CI still enforces.
+- **Tree identity**: the hook runs `dotnet format` against your **working
+  tree**; CI runs it against the **pushed commit tree**. In the normal
+  case (`git push` of your currently checked-out branch after committing,
+  with a clean working tree) those two trees are byte-identical and the
+  guarantee holds. They diverge when you push a ref whose tip is not your
+  checked-out `HEAD` (for example `git push origin some-other-branch` or
+  `git push --all`) or the working tree has uncommitted / untracked
+  `.cs`, `.csproj`, `.props`, `.targets`, `.editorconfig`,
+  `RetailPulse.slnx`, `global.json`, or `Directory.*.props` content. The
+  hook detects both cases and prints an advisory `NOTE:` line plus an
+  "advisory only" tag on the success message; CI is authoritative for
+  the pushed commits. We chose the advisory over a fail-closed guard so
+  the hook does not break legitimate multi-branch pushes or pushes with
+  unrelated in-progress edits — CI already enforces the pushed tree.
 
 ### Bypass
 
