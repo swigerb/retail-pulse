@@ -7,14 +7,19 @@ grounding knowledge corpus, and the curated starting prompts. The
 platform reads a single pack at startup; swapping the active pack swaps
 the entire scenario in place, no code change required.
 
-> **Foundation status (issue #108)**. The pack loader and the shipped
-> packs (`default`, `halcyon-pet-supply`, `prairiehearth-craft-supply`)
-> are landed. Wiring the runtime composition root (`Program.cs`, MCP
-> server, Teams bot) to `PackLoader` instead of the pre-pack flat-file
-> reads is intentionally scoped out of the foundation and picked up in
-> the downstream integration issues so this guide is safe to read now.
-> The legacy top-level `tenant.yaml` and `src/RetailPulse.Api/prompts.yaml`
-> continue to drive the running app until that wiring lands.
+> **Runtime wiring (issue #108).** The API host, the MCP server, and the
+> web frontend all read the active pack. The API composition root loads
+> the pack at startup and registers the singleton `LoadedPack`
+> downstream (tenant provider, agent roster, in-memory RAG seeder, and
+> the `/api/pack` endpoints). The MCP server independently reads the
+> same pack directory for its tenant and its scenario seed manifest so
+> the two processes stay in lockstep. The frontend fetches
+> `/api/pack` and `/api/pack/starting-tasks` during bootstrap to build
+> the header, brand list, theme variables, and Prompt Library. The
+> legacy top-level `tenant.yaml` and `src/RetailPulse.Api/prompts.yaml`
+> remain on disk only as historical baselines pinned by the
+> `DefaultPack_TenantMatchesLegacyTenantYaml` equivalence test — they
+> do not participate in runtime configuration.
 
 ---
 
@@ -27,13 +32,15 @@ the entire scenario in place, no code change required.
 2. Optionally override the packs root with `Packs:Root` (default
    `packs`). The path is resolved from the process content root, so a
    deployment can ship packs alongside its binaries.
-3. Restart the application. The loader validates the pack as a single
-   unit and reports every issue it finds in one aggregated error — the
-   process fails fast rather than half-booting.
+3. Restart the application. Switching the active pack is a
+   config-only change plus a restart — there is no hot-swap path so
+   the composition graph stays deterministic. The loader validates
+   the pack as a single unit and reports every issue it finds in one
+   aggregated error, and the API host fails fast rather than
+   half-booting.
 
 ```jsonc
-// appsettings.json (illustrative — the pre-pack flat-file reads still
-// drive the running app until the downstream wiring lands)
+// appsettings.json (illustrative)
 {
   "Packs": {
     "Active": "halcyon-pet-supply",
@@ -41,6 +48,16 @@ the entire scenario in place, no code change required.
   }
 }
 ```
+
+On the next start-up the API host binds `PackOptions`, resolves
+`<Root>/<Active>` under the process content root via
+`PackPathResolver`, calls `PackLoader.Load(...)`, and registers the
+resulting `LoadedPack` as a singleton. The MCP server reads the same
+`Packs:Active` / `Packs:Root` keys, loads `pack.yaml` and
+`seed/scenario.yaml` through `PackTenantLoader.LoadFromPackDirectory`,
+and stamps their combined content hash into its SQLite `SeedMetadata`
+row so pack switches reseed the fact tables (see [Seed
+content-hash reseed](#seed-content-hash-reseed)).
 
 ---
 
@@ -50,12 +67,12 @@ the entire scenario in place, no code change required.
 packs/
   <pack-name>/
     pack.yaml              # required — metadata + tenant configuration
-    agents.yaml            # required — agent roster (same shape as prompts.yaml)
+    agents.yaml            # required — agent roster (same shape as legacy prompts.yaml)
     starting-tasks.yaml    # optional — curated PromptLibrary categories
     knowledge/             # optional — markdown grounding corpus
       *.md
-    seed/                  # optional — reserved for future explicit seed manifest
-      README.md
+    seed/                  # required
+      scenario.yaml        # required — MCP scenario seed manifest (issue #108)
 ```
 
 `<pack-name>` MUST match the pack's `metadata.key`. The loader flags a
@@ -73,15 +90,16 @@ finds the source on disk.
 | `key`         | yes      | Lowercase kebab-case identifier; MUST match the directory name |
 | `displayName` | yes      | Human-readable label shown in operator surfaces                |
 | `description` | no       | Free-form summary of the retail scenario                       |
-| `version`     | no       | Semver-shaped tag; informational in the foundation             |
+| `version`     | no       | Semver-shaped tag; informational                               |
 | `segment`     | no       | Retail-segment label (for example "Pet Supply")                |
 | `attribution` | no       | Attribution note — sample packs advertise their fictional status |
 
 ### `tenant` block
 
-The `tenant` block is the same shape the legacy top-level `tenant.yaml`
-used. The loader validates the required fields as a unit — a bad pack
-surfaces every missing/malformed section in one report:
+The `tenant` block deserializes into `TenantConfiguration` (see
+`src/RetailPulse.Contracts/TenantConfiguration.cs`). The loader
+validates the required fields as a unit — a bad pack surfaces every
+missing/malformed section in one report:
 
 | Field                         | Required |
 | ----------------------------- | -------- |
@@ -94,8 +112,10 @@ surfaces every missing/malformed section in one report:
 | `theme.primaryColor`          | yes      |
 | `description`, brand variants, brand `priceSegment`, theme extras, `distribution.distributorTypes` | no |
 
-See any shipped pack for a complete example — `packs/default/pack.yaml`
-preserves the legacy `tenant.yaml` verbatim.
+See any shipped pack for a complete example. The default pack's
+`tenant:` block preserves the historical `tenant.yaml` verbatim so the
+`DefaultPack_TenantMatchesLegacyTenantYaml` test can pin equivalence
+between the pack-driven load and the pre-pack baseline.
 
 ---
 
@@ -114,6 +134,9 @@ definitions. The loader:
   validator remains the single source of truth for tool-allowlist,
   jailbreak, and Content Safety checks. Pack authors must reuse the
   tool names in `AgentDefinitionValidatorToolCatalog.KnownToolNames`.
+- Rejects duplicate YAML section keys (for example two
+  `demand-forecast:` entries) at parse time so a copy/paste mistake
+  cannot silently drop earlier definitions.
 
 Pack authors MUST include the mandatory orchestration entries the
 composition root resolves by key:
@@ -130,7 +153,8 @@ present: `council-synthesis`, `council-vote`, `scorecard-synthesis`,
 ## `starting-tasks.yaml`
 
 Curated PromptLibrary categories. Optional — a pack with no
-`starting-tasks.yaml` serves the platform-neutral defaults downstream.
+`starting-tasks.yaml` (or one that returns an empty `categories:` list)
+causes the frontend to fall back to its built-in `PROMPT_CATEGORIES`.
 Category ids MUST be unique inside the file; every category MUST declare
 a `label` and at least one prompt.
 
@@ -143,6 +167,10 @@ categories:
       - "How is Meadowbowl Nutrition auto-ship depletion trending this quarter?"
       - "Compare grain-inclusive vs grain-free share by region"
 ```
+
+The `/api/pack/starting-tasks` endpoint projects the parsed categories
+verbatim and the frontend `useActivePack` hook merges them into the
+Prompt Library once the fetch resolves.
 
 ---
 
@@ -158,20 +186,70 @@ as a `PackKnowledgeDocument`; the loader:
 
 Named-source bindings (`Knowledge:Sources:Named` in `appsettings.json`)
 are still the mechanism by which an agent scopes retrieval to a
-specific subset of the corpus. In the foundation the shipped packs
-continue to reuse the legacy named-source registry; a future revision
-will let a pack declare its own named-source manifest inline.
+specific subset of the corpus; the shipped packs reuse that
+configuration-side registry.
 
 ---
 
-## `seed/`
+## `seed/scenario.yaml`
 
-Reserved for future explicit seed manifests (households, contacts,
-store list). The shipped packs currently include only a `README.md`
-placeholder — seed data is derived from tenant metadata via the
-existing `RetailPulseDb` content-hash seeder, exactly as it was before
-the pack layout landed. This keeps the default pack's runtime
-behaviour byte-identical to the pre-pack world.
+Every pack MUST ship a `seed/scenario.yaml` manifest. It is the
+machine-readable source of every scenario-varying seed input the MCP
+server writes into its SQLite fact tables at boot — seasonality
+factors, competitor rosters, promo coefficient bands, supply
+disruption vocabulary, store archetypes, and margin driver categories.
+Prior to issue #108 those values were baked into `RetailPulseDb.cs`;
+they now live inside the pack so a pack switch changes the SQLite
+dataset wholesale, not just the tenant metadata.
+
+The full schema — including validation rules — is defined by
+`SeedManifest` in `src/RetailPulse.Contracts/SeedManifest.cs`. Rather
+than duplicating every field here, refer to the shipped
+`packs/default/seed/scenario.yaml` for a byte-verbatim port of the
+historic defaults (verified by
+`DefaultPack_SeedManifest_MatchesLegacyOracle`). The manifest is organized
+into six logical sections; every one is required and every listed
+child field is required unless noted:
+
+| Section       | Required contents                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------- |
+| `seasonality` | `factors: { <category>: [ { month (1-12), multiplier, event, description } ] }` — at least one category       |
+| `competitive` | `competitorsByCategory`, `pricingSources`, `shareSources`, `activityTypes`, `impactLevels`, `activityTemplates` |
+| `promos`      | `types: [ { name, liftBase, liftRange, coefBase, coefRange, code?, displayName?, description? } ]`, `successRatings` |
+| `supply`      | `disruptionTypes`, `disruptionSeverities`, `disruptionDescriptions: { <type>: [ text, ... ] }`                |
+| `stores`      | `types: [ ... ]`                                                                                              |
+| `margin`      | `driverCategories`, `trendLabels`                                                                             |
+
+`SeedManifestLoader` opts in to duplicate-key detection so a doubled
+section in `scenario.yaml` fails the load in the same way it does in
+`pack.yaml` and `agents.yaml`. Every seed error is aggregated into the
+same `PackValidationException` as the rest of the pack.
+
+### Seed content-hash reseed
+
+The MCP server hashes the schema version, the active `pack.yaml`, and
+every file under the pack's `seed/` directory into a single
+content-hash it writes into the `SeedMetadata` table on first boot.
+On every subsequent boot:
+
+- **Unchanged pack** — the recomputed hash matches; the seeder is a
+  no-op and caller-driven mutations (approvals, session state,
+  runtime edits) survive the restart.
+- **Changed pack** — switching `Packs:Active`, editing `pack.yaml`,
+  or editing any file under `seed/` produces a new hash, and the
+  seeder wipes the fact tables and reseeds from the new manifest
+  before the server accepts traffic.
+
+The API's in-memory knowledge base uses the same content-hash
+idempotence: a document whose body changed is purged and re-ingested
+so operators never see stale grounding after a pack update, while an
+unchanged pack is a no-op.
+
+> **Ownership**. Every scenario-varying seed input consumed by the
+> MCP server is pack-owned. Non-scenario derived tables (households,
+> contacts, per-brand store rows synthesized from `tenant.brands`)
+> are still generated inside `RetailPulseDb`, but they draw entirely
+> from the pack's tenant declaration and seed manifest.
 
 ---
 
@@ -197,26 +275,42 @@ LoadedPack pack = await loader.LoadAsync("halcyon-pet-supply",
 
 The `LoadedPack` exposes every section a downstream host needs:
 `Metadata`, `Tenant`, `Agents` (a `PromptConfiguration`),
-`KnowledgeDocuments`, and `StartingTasks`. Downstream integration
-wires each into its existing subsystem (the agent registry, the
-in-memory knowledge base seeder, the PromptLibrary endpoint) so the
-pack becomes the single source of truth for the running scenario.
+`KnowledgeDocuments`, `StartingTasks`, and `Seed` (the
+`SeedManifest`). The API composition root registers the singleton
+and wires each section into its existing subsystem (the agent
+registry, the in-memory knowledge base seeder, the `/api/pack`
+endpoints), so the pack is the single source of truth for the
+running scenario. The MCP server calls
+`PackTenantLoader.LoadFromPackDirectory` on the same pack directory
+to obtain the tenant provider and the seed manifest without
+referencing the API assembly.
 
 ---
 
 ## Aggregate Validation Semantics
 
-Every discoverable issue across every section is aggregated into one
-`PackValidationException`. Each `PackValidationIssue` names the pack
-and the section (or file, or agent key) so operators reading the
-exception message can jump straight to the source:
+Every discoverable issue across every section of the pack —
+`pack.yaml` (metadata + tenant), `agents.yaml` (structural + the #99
+safety validator when supplied), `starting-tasks.yaml`, every file
+under `knowledge/`, and `seed/scenario.yaml` — is aggregated into
+one `PackValidationException`. Each `PackValidationIssue` names the
+pack and the section (or file, or agent key) so operators reading
+the exception message can jump straight to the source:
 
 ```
 Pack 'wobble' failed validation with 10 issue(s):
   - [pack 'wobble' → pack.yaml#metadata] metadata.key 'some-other-key' does not match the pack directory name 'wobble'. ...
   - [pack 'wobble' → pack.yaml#tenant.company] tenant.company is required.
   - [pack 'wobble' → agents.yaml] Required section 'agents.yaml' is missing. ...
+  - [pack 'wobble' → seed/scenario.yaml#promos.types] Seed manifest '...\seed\scenario.yaml' is missing required section 'promos.types'.
+  - [pack 'wobble' → agents.yaml#planner] [Tools] Tool 'unknown_tool' is not in the tool catalog.
 ```
+
+Safety-validator findings from `AgentDefinitionValidator` are folded
+in with a `pack.agents.safety.<ruleId>` code when the validator is
+configured for `RefuseStartup`. Under `QuarantineOffender` the
+validator removes the offending agent from `LoadedPack.Agents` and
+returns normally — no aggregate entry is produced.
 
 Optional sections that are simply absent degrade to empty collections
 — they only become issues when the section file exists but is
@@ -235,8 +329,9 @@ malformed.
    the safety validator will reject the pack at startup.
 4. Curate `starting-tasks.yaml` and the `knowledge/*.md` grounding
    corpus for the scenario.
-5. Add a placeholder `seed/README.md` explaining how seed data is
-   currently derived.
+5. Author `seed/scenario.yaml` for the scenario. Copy from a shipped
+   pack and edit — every section listed in the
+   [`seed/scenario.yaml`](#seedscenarioyaml) table is required.
 6. Run the pack test suite:
    `dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj --filter "FullyQualifiedName~Packs"`.
    The `ShippedPackContractTests` will pick up your pack automatically
@@ -253,12 +348,14 @@ represent any real retailer, cooperative, or supplier.
 
 ---
 
-## Legacy `tenant.yaml`
+## Legacy `tenant.yaml` and `prompts.yaml`
 
-The pre-pack `tenant.yaml` at the repo root continues to drive the
-running app in the foundation. The default pack extracts its full
-content into `packs/default/pack.yaml`'s `tenant:` block so the eventual
-wiring flip is observably a no-op: the pack-loader path produces the
-same `TenantConfiguration` object the legacy loader does, and the
-equivalence test `DefaultPack_TenantMatchesLegacyTenantYaml` pins that
-guarantee.
+The pre-pack `tenant.yaml` at the repo root and
+`src/RetailPulse.Api/prompts.yaml` are retained solely as historical
+baselines. Neither file participates in runtime configuration — the
+API host, the MCP server, and the frontend all read the active pack.
+The `DefaultPack_TenantMatchesLegacyTenantYaml` test pins the
+`packs/default/pack.yaml` `tenant:` block byte-for-byte against
+`tenant.yaml` so a drift between the pack-loader path and the pre-pack
+baseline surfaces as a test failure rather than an operational
+surprise.
