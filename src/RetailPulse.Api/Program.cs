@@ -34,6 +34,7 @@ using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.OpenAI;
+using RetailPulse.Api.Packs;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Rag;
 using RetailPulse.Api.Rag.AzureAISearch;
@@ -90,14 +91,29 @@ builder.Services.Configure<KnowledgeOptions>(builder.Configuration.GetSection(Kn
 builder.Services.Configure<KnowledgeProviderOptions>(builder.Configuration.GetSection(KnowledgeProviderOptions.SectionName));
 builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSection(ObservabilityOptions.SectionName));
 
-// Load tenant configuration
-string tenantConfigPath = Path.Combine(builder.Environment.ContentRootPath, "tenant.yaml");
-if (!File.Exists(tenantConfigPath))
-{
-    tenantConfigPath = Path.GetFullPath(
-        Path.Combine(builder.Environment.ContentRootPath, "..", "..", "tenant.yaml"));
-}
-var tenantProvider = new FileTenantProvider(tenantConfigPath);
+// ── Content packs (issue #108) ─────────────────────────────────────────
+// A pack is the single source of truth for the tenant, agent roster,
+// starting-tasks, and grounding corpus. The active pack — selected by
+// Packs:Active — is loaded ONCE at startup and every downstream surface
+// (tenant provider, prompt composition, RAG seeder, /api/pack endpoint)
+// resolves against that single loaded instance. Switching packs requires
+// a configuration change AND a restart; there is intentionally no
+// hot-swap path so the composition graph stays deterministic.
+builder.Services.Configure<PackOptions>(builder.Configuration.GetSection(PackOptions.SectionName));
+var packOptions = new PackOptions();
+builder.Configuration.GetSection(PackOptions.SectionName).Bind(packOptions);
+
+string resolvedPacksRoot = string.IsNullOrWhiteSpace(packOptions.Root) ? "packs" : packOptions.Root;
+string resolvedActivePack = string.IsNullOrWhiteSpace(packOptions.Active) ? "default" : packOptions.Active;
+string packsRootPath = PackPathResolver.Resolve(
+    builder.Environment.ContentRootPath,
+    resolvedPacksRoot,
+    resolvedActivePack);
+var packLoader = PackLoader.ForDirectory(packsRootPath);
+LoadedPack activePack = packLoader.Load(resolvedActivePack);
+builder.Services.AddSingleton(activePack);
+
+var tenantProvider = new PackTenantProvider(activePack);
 builder.Services.AddSingleton<ITenantProvider>(tenantProvider);
 builder.Services.AddSingleton(tenantProvider.GetTenant());
 
@@ -268,9 +284,11 @@ builder.Services.AddApiVersioning(options =>
     options.ApiVersionReader = new UrlSegmentApiVersionReader();
 });
 
-// Load prompts from YAML and resolve tenant placeholders via PromptTemplateEngine
-string promptsPath = Path.Combine(builder.Environment.ContentRootPath, "prompts.yaml");
-PromptConfiguration promptConfig = RetailPulseAgent.LoadPrompts(promptsPath);
+// Load prompts from the active content pack's agent roster and resolve
+// tenant placeholders via PromptTemplateEngine. The pack is the single
+// source of truth for agent definitions (issue #108) — the legacy
+// prompts.yaml file at the API's content root is no longer consulted.
+PromptConfiguration promptConfig = activePack.Agents;
 TenantConfiguration tenant = tenantProvider.GetTenant();
 var promptEngine = new RetailPulse.Api.Prompts.PromptTemplateEngine(tenant);
 
@@ -1279,7 +1297,13 @@ ContentSafetyToolResultAmbient.Install(
     if (kb.ActiveProviderName == InMemoryKnowledgeBase.ProviderName)
     {
         InMemoryKnowledgeBase inMemory = app.Services.GetRequiredService<InMemoryKnowledgeBase>();
-        await KnowledgeBaseSeeder.SeedAsync(inMemory, seedLogger);
+        LoadedPack loadedPack = app.Services.GetRequiredService<LoadedPack>();
+        // Pack-aware, content-hash-idempotent seed. An unchanged pack is a
+        // no-op; a knowledge document whose body changed is purged and
+        // re-ingested so operators never see stale grounding after a
+        // pack update. See KnowledgeBaseSeeder.SeedAsync(...) for the
+        // fingerprint contract.
+        await KnowledgeBaseSeeder.SeedAsync(inMemory, loadedPack, seedLogger);
     }
     else
     {
@@ -1342,6 +1366,7 @@ app.MapAlertEndpoints();
 app.MapApprovalEndpoints();
 app.MapObservabilityEndpoints();
 app.MapKnowledgeEndpoints();
+app.MapPackEndpoints();
 app.MapCardEndpoints();
 app.MapGuardrailEndpoints();
 app.MapScorecardEndpoints();

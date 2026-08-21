@@ -14,12 +14,20 @@ public class RetailPulseDb
 {
     private readonly string _connectionString;
     private readonly TenantConfiguration _tenant;
-    private readonly string _tenantConfigPath;
+    private readonly string _seedIdentityPath;
 
-    public RetailPulseDb(ITenantProvider tenantProvider, string dbPath, string tenantConfigPath)
+    /// <summary>
+    /// Build a data store. The <paramref name="seedIdentityPath"/> is the
+    /// file whose SHA-256 identifies "this tenant seed": when it
+    /// changes the store re-seeds; when it doesn't, the store preserves
+    /// caller-driven mutations across restarts. In the pack-based world
+    /// (issue #108) this is the active pack's <c>pack.yaml</c>; in
+    /// legacy tests it can still be a bare <c>tenant.yaml</c>.
+    /// </summary>
+    public RetailPulseDb(ITenantProvider tenantProvider, string dbPath, string seedIdentityPath)
     {
         _tenant = tenantProvider.GetTenant();
-        _tenantConfigPath = tenantConfigPath;
+        _seedIdentityPath = seedIdentityPath;
 
         string? dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
@@ -369,10 +377,10 @@ public class RetailPulseDb
 
     private string ComputeTenantHash()
     {
-        if (!File.Exists(_tenantConfigPath))
+        if (!File.Exists(_seedIdentityPath))
             return "no-file";
 
-        byte[] bytes = File.ReadAllBytes(_tenantConfigPath);
+        byte[] bytes = File.ReadAllBytes(_seedIdentityPath);
         byte[] hash = SHA256.HashData(bytes);
         return $"v{SchemaVersion}:{Convert.ToHexStringLower(hash)}";
     }

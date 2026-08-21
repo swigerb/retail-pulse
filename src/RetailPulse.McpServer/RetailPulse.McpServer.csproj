@@ -27,6 +27,14 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+    <!-- Content packs (issue #108). Copied under `packs/` so the MCP
+         server's Program.cs finds the active pack at
+         `ContentRootPath\packs` in dev/test/published hosts. -->
+    <Content Include="..\..\packs\**\*.*" Exclude="..\..\packs\**\bin\**;..\..\packs\**\obj\**">
+      <Link>packs\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>
