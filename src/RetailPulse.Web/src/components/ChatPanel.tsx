@@ -14,8 +14,12 @@ import {
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo, ForceableExecutionPath } from '../types';
 import type { SendMessageOptions } from '../services/api';
-import { sendMessage, isErrorReply } from '../services/api';
+import { sendMessage, isErrorReply, isChatRequestTimeoutError } from '../services/api';
 import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
+import { cancelChatSession, cancelPlan } from '../services/executionControlApi';
+import { useConnectionStatus } from '../hooks/useConnectionStatus';
+import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
+import { TimeoutDialog } from './TimeoutDialog';
 import { activeAuthMode } from '../auth/activeProvider';
 import { BrandLogo } from './BrandLogo';
 import { AgentRoutingIndicator } from './AgentRoutingIndicator';
@@ -32,6 +36,7 @@ import { PROMPT_CATEGORIES } from '../constants/prompts';
 import { sanitizeMessage } from '../utils';
 import { PlanView } from './plan';
 import type { PlanController } from '../state/usePlanController';
+import { isPlanRunning } from '../state/planReducer';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
 
@@ -461,6 +466,19 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, p
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const styles = useChatStyles();
 
+  // Real-time channel status surfaced next to the composer so a dropped
+  // hub is visible where the user actually types, not buried in a drawer.
+  const { status: hubStatus, stalled: hubStalled } = useConnectionStatus();
+
+  // Timeout dialog state (issue #92). Populated when sendMessage throws
+  // ChatRequestTimeoutError so the user can Retry or Abandon instead of
+  // staring at a spinner that will never resolve.
+  const [timeoutInfo, setTimeoutInfo] = useState<{ prompt: string; timeoutMs: number } | null>(null);
+
+  // Retains the most recent user prompt so the timeout dialog's Retry
+  // button can replay the same request without asking the user to retype.
+  const lastPromptRef = useRef<string | null>(null);
+
   // Track mounted state and abort in-flight requests on unmount so async work
   // doesn't call setState on a torn-down component (e.g. when Dashboard
   // increments chatKey to start a "New Chat").
@@ -521,6 +539,9 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, p
       abortControllerRef.current?.abort();
       const controller = new AbortController();
       abortControllerRef.current = controller;
+
+      lastPromptRef.current = trimmed;
+      setTimeoutInfo(null);
 
       setMessages(prev => [...prev, { role: 'user', content: trimmed }]);
       onResponseReceivedRef.current?.({ totalDurationMs: undefined });
@@ -636,6 +657,12 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, p
       } catch (err) {
         if (!isMountedRef.current || controller.signal.aborted) return;
         if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (isChatRequestTimeoutError(err)) {
+          // Replace the hung-spinner behavior with a decision dialog. Do NOT
+          // append an error bubble — the dialog is the visible feedback.
+          setTimeoutInfo({ prompt: trimmed, timeoutMs: err.timeoutMs });
+          return;
+        }
         setMessages(prev => [
           ...prev,
           { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}` },
@@ -649,6 +676,60 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, p
     },
     [sessionId, forcePath, supportsExecutionPathOverride, planController],
   );
+
+  // User-initiated cancel while a run is in flight (issue #92). Aborts the
+  // local fetch so the UI clears immediately, then asks the server to end
+  // the run so tools stop consuming budget. Server response is treated as
+  // fire-and-forget — the local abort already gave the user their signal.
+  const handleCancel = useCallback(() => {
+    if (!loading) return;
+    const controller = abortControllerRef.current;
+    controller?.abort();
+    // Fire-and-forget: the local abort has already resolved the UI. A
+    // 404 (nothing to cancel) is expected on the race where the run just
+    // completed on the server; we don't surface it as an error.
+    // Prefer the plan-scoped cancel when the current turn is a running
+    // plan (#96 populated planController.active with a real planId).
+    // Falls back to the session-scoped cancel for the fast/single-shot
+    // path and for anonymous callers who cannot own a plan.
+    const activePlan = planController?.active;
+    const usePlanCancel =
+      activePlan != null &&
+      activePlan.planId.length > 0 &&
+      isPlanRunning(activePlan.status);
+    const cancelPromise = usePlanCancel
+      ? cancelPlan(activePlan.planId)
+      : cancelChatSession(sessionId);
+    cancelPromise.catch((err) => {
+      if (import.meta.env.DEV) console.error('Server-side cancel failed:', err);
+    });
+    if (isMountedRef.current) {
+      setLoading(false);
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: 'Cancelled.' },
+      ]);
+    }
+  }, [loading, sessionId, planController]);
+
+  const handleTimeoutRetry = useCallback(() => {
+    const prompt = timeoutInfo?.prompt ?? lastPromptRef.current;
+    setTimeoutInfo(null);
+    if (prompt) {
+      void sendChatMessage(prompt);
+    }
+  }, [timeoutInfo, sendChatMessage]);
+
+  const handleTimeoutAbandon = useCallback(() => {
+    setTimeoutInfo(null);
+    // Ensure any lingering abort controller is released so the UI is
+    // fully editable again.
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    if (isMountedRef.current) {
+      setLoading(false);
+    }
+  }, []);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || loading) return;
@@ -858,6 +939,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, p
         <label htmlFor="chat-input" className="visually-hidden">
           Ask about retail performance
         </label>
+        <ConnectionStatusIndicator status={hubStatus} stalled={hubStalled} />
         <PromptLibrary
           categories={PROMPT_CATEGORIES}
           onSelect={handleSuggestedClick}
@@ -899,17 +981,34 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, p
           disabled={loading}
           style={FLEX_ONE_STYLE}
         />
-        <Button
-          appearance="primary"
-          icon={<Send24Regular style={{ color: '#ffffff' }} />}
-          onClick={handleSend}
-          disabled={loading || !input.trim()}
-          aria-label="Send message"
-          style={SEND_BUTTON_STYLE}
-        >
-          Send
-        </Button>
+        {loading ? (
+          <Button
+            appearance="secondary"
+            onClick={handleCancel}
+            aria-label="Cancel in-flight request"
+            data-testid="chat-cancel-button"
+          >
+            Cancel
+          </Button>
+        ) : (
+          <Button
+            appearance="primary"
+            icon={<Send24Regular style={{ color: '#ffffff' }} />}
+            onClick={handleSend}
+            disabled={!input.trim()}
+            aria-label="Send message"
+            style={SEND_BUTTON_STYLE}
+          >
+            Send
+          </Button>
+        )}
       </div>
+      <TimeoutDialog
+        open={timeoutInfo !== null}
+        timeoutMs={timeoutInfo?.timeoutMs ?? 0}
+        onRetry={handleTimeoutRetry}
+        onAbandon={handleTimeoutAbandon}
+      />
     </div>
   );
 }

@@ -106,9 +106,41 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing.AddSource("RetailPulse.Agent").AddSource("RetailPulse.Alerts"))
     .WithMetrics(metrics => metrics.AddMeter(RetailPulseMetrics.MeterName));
 
+// Real-time channel resilience (issue #92) — configurable keep-alive / client-timeout
+// / handshake and an observable application-level heartbeat. Defaults target 15s
+// keepalive with the SignalR-recommended 2x client-timeout so short-lived intermediary
+// idle drops (APIM/ACA ingress/proxies) do not sever an idle connection during a long
+// plan pause. Bound before AddSignalR so the timers reflect the resolved config.
+builder.Services.Configure<RealtimeResilienceOptions>(
+    builder.Configuration.GetSection(RealtimeResilienceOptions.SectionName));
+RealtimeResilienceOptions realtimeOptsAtRegistration = builder.Configuration
+    .GetSection(RealtimeResilienceOptions.SectionName)
+    .Get<RealtimeResilienceOptions>() ?? new RealtimeResilienceOptions();
+
 // SignalR for real-time telemetry
-builder.Services.AddSignalR()
+builder.Services.AddSignalR(hub =>
+    {
+        hub.KeepAliveInterval = realtimeOptsAtRegistration.KeepAliveInterval;
+        hub.ClientTimeoutInterval = realtimeOptsAtRegistration.ClientTimeoutInterval;
+        hub.HandshakeTimeout = realtimeOptsAtRegistration.HandshakeTimeout;
+    })
     .AddJsonProtocol(options => options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
+
+// Chat-request timeout ceilings (issue #92) — separate single-shot vs plan values so
+// long-running plan runs don't force us to widen the single-shot ceiling globally.
+builder.Services.Configure<ChatTimeoutOptions>(
+    builder.Configuration.GetSection(ChatTimeoutOptions.SectionName));
+
+// User-initiated cancellation registry (issue #92) — subject-scoped map from
+// (scope, key) to the request/plan CTS so /api/chat/{sessionId}/cancel and
+// /api/plans/{planId}/cancel can end an in-flight run they own.
+builder.Services.AddSingleton<IExecutionCancellationRegistry, ExecutionCancellationRegistry>();
+
+// Application-level hub heartbeat emitter (issue #92) — periodically emits an
+// observable heartbeat event on the telemetry and streaming hubs so the frontend
+// can render a stalled/connected signal and tests can assert cadence.
+builder.Services.AddSingleton<HubHeartbeatBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<HubHeartbeatBackgroundService>());
 
 // Session-ownership registry — binds a chat sessionId to its owning subject so the hubs can refuse
 // a caller that tries to join another subject's session group (Finding 6). Consulted only for
@@ -1160,7 +1192,8 @@ if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
             opts.Value,
             sp.GetRequiredService<ILogger<PlanExecutor>>(),
             sp.GetService<PlanClarifier>(),
-            sp.GetService<PlanReviewCoordinator>());
+            sp.GetService<PlanReviewCoordinator>(),
+            sp.GetService<IExecutionCancellationRegistry>());
     });
     builder.Services.AddScoped(sp =>
     {
@@ -1360,6 +1393,12 @@ app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();
 app.MapCacheEndpoints();
 
+// User-initiated execution control (issue #92): cancel endpoints for the
+// in-flight fast-path / streaming request and for the plan orchestrator.
+// Registered unconditionally because the cancellation registry is always
+// present; a cancel with no matching in-flight run resolves to 404.
+app.MapExecutionControlEndpoints();
+
 // Durable session endpoints — mapped only when SessionPersistence:Enabled is true so
 // no session surface exists when the feature is off. See MapSessionEndpoints and
 // SessionPersistenceServiceExtensions for the rationale (mirrors the Anonymous/GitHub
@@ -1375,6 +1414,9 @@ if (app.Services.GetService<ISessionStore>() is not null)
 if (app.Services.GetService<IPlanStore>() is not null)
 {
     app.MapPlanEndpoints();
+    // Reconciliation surface (issue #92) — mapped only when plan persistence is
+    // enabled so no reconciliation endpoint exists when the durable store is off.
+    app.MapPlanReconciliationEndpoint();
     // Plan review endpoints (#94) — mapped only when the plan store is available
     // AND PlanReview is enabled. Cross-subject decisions collapse to 404.
     if (planReviewOptsAtRegistration.Enabled)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import type { ActivePlanState, PlanAppState } from './planReducer';
-import { initialPlanState, isPlanRunning, planReducer } from './planReducer';
+import { initialPlanState, isPlanRunning, isStepTerminal, planReducer } from './planReducer';
 import type {
   PlanClarificationPrompt,
   PlanFinalResponseEvent,
@@ -9,6 +9,8 @@ import type {
   PlanReviewProposal,
   PlanReviewResolvedEvent,
   PlanReviewStep,
+  PlanStatus,
+  PlanStep,
   PlanStepStatus,
 } from '../types';
 import {
@@ -21,6 +23,10 @@ import {
   parseClarificationPrompt,
   parseReviewProposal,
 } from '../services/planApi';
+import {
+  reconcilePlan,
+  type PlanStepRecord,
+} from '../services/executionControlApi';
 
 /**
  * React binding for the plan reducer. Owns hydration, review/clarification
@@ -85,6 +91,71 @@ function selectHydratedStatus(current: PlanStepStatus, incoming: PlanStepStatus)
   return STEP_STATUS_ORDER[incoming] >= STEP_STATUS_ORDER[current] ? incoming : current;
 }
 
+// ── Reconcile-after-reconnect helpers (issue #92) ──────────────────────────
+// The reconcile endpoint returns records with the same shape as
+// PlanStepRecordDto (see RetailPulse.Contracts/Persistence/PlanDtos.cs), but
+// the FE wire type marks every non-key field as optional so an older/lax
+// backend response cannot desync the compiler. Coerce to the reducer's
+// authoritative PlanStep with strict fallbacks so a malformed record never
+// leaks `undefined` into rendered UI or overwrites a rendered step with
+// blank fields.
+
+const VALID_STEP_STATUSES: readonly PlanStepStatus[] = [
+  'pending',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+  'timed_out',
+  'skipped',
+  'unusable',
+];
+
+const VALID_PLAN_STATUSES: readonly PlanStatus[] = [
+  'draft',
+  'awaiting_review',
+  'awaiting_clarification',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+  'unusable',
+];
+
+function coerceStepStatus(raw: string | null | undefined): PlanStepStatus {
+  const trimmed = (raw ?? '').trim();
+  return (VALID_STEP_STATUSES as readonly string[]).includes(trimmed)
+    ? (trimmed as PlanStepStatus)
+    : 'pending';
+}
+
+function coercePlanStatus(raw: string | null | undefined): PlanStatus | undefined {
+  const trimmed = (raw ?? '').trim();
+  return (VALID_PLAN_STATUSES as readonly string[]).includes(trimmed)
+    ? (trimmed as PlanStatus)
+    : undefined;
+}
+
+function mapRecordToPlanStep(record: PlanStepRecord, planId: string): PlanStep {
+  return {
+    stepId: record.stepId ?? '',
+    planId: record.planId ?? planId,
+    stepIndex: record.stepIndex,
+    specialistKey: record.specialistKey ?? '',
+    intent: record.intent ?? '',
+    action: record.action ?? '',
+    status: coerceStepStatus(record.status),
+    result: record.result ?? null,
+    error: record.error ?? null,
+    inputTokens: record.inputTokens ?? null,
+    outputTokens: record.outputTokens ?? null,
+    totalTokens: record.totalTokens ?? null,
+    durationMs: record.durationMs ?? null,
+    startedAt: record.startedAt ?? null,
+    completedAt: record.completedAt ?? null,
+  };
+}
+
 function normalizeReviewProposal(raw: unknown, planId: string): PlanReviewProposal | null {
   if (!raw || typeof raw !== 'object') return null;
   const value = raw as Record<string, unknown>;
@@ -130,6 +201,56 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
   // Connection status flows into the reducer for the "connection lost" banner.
   useEffect(() => {
     dispatch({ type: 'CONNECTION_STATUS', connected: options.connection.connected });
+  }, [options.connection.connected]);
+
+  // Reconcile durable plan state after a reconnect (issue #92). Fires only
+  // on the false → true edge so a first-mount connect (no prior drop) does
+  // not trigger a needless reconcile. The endpoint returns steps with
+  // `stepIndex > afterStepIndex`, so the cursor is the highest KNOWN-terminal
+  // step index — any non-terminal step gets refreshed with the durable
+  // record. The reducer applies terminal-monotonic merge so a stream
+  // placeholder cannot regress a completed step.
+  const previousConnectedRef = useRef(options.connection.connected);
+  useEffect(() => {
+    const wasConnected = previousConnectedRef.current;
+    const nowConnected = options.connection.connected;
+    previousConnectedRef.current = nowConnected;
+    if (wasConnected || !nowConnected) return;
+
+    const active = activeRef.current;
+    if (!active) return;
+    if (!isPlanRunning(active.status)) return;
+
+    let cursor = -1;
+    for (const step of active.steps) {
+      if (isStepTerminal(step.status) && step.stepIndex > cursor) {
+        cursor = step.stepIndex;
+      }
+    }
+    const planId = active.planId;
+
+    void reconcilePlan(planId, { afterStepIndex: cursor })
+      .then(response => {
+        if (!response) return;
+        const currentActive = activeRef.current;
+        if (!currentActive || currentActive.planId !== planId) return;
+        const mappedSteps = response.steps.map(record =>
+          mapRecordToPlanStep(record, planId),
+        );
+        dispatch({
+          type: 'STEPS_RECONCILED',
+          planId,
+          steps: mappedSteps,
+          status: coercePlanStatus(response.status),
+          updatedAt: response.updatedAt ?? undefined,
+          failureReason: response.failureReason ?? null,
+        });
+      })
+      .catch(err => {
+        if (import.meta.env.DEV) {
+          console.error('Plan reconcile after reconnect failed:', err);
+        }
+      });
   }, [options.connection.connected]);
 
   // Wire SignalR events to reducer actions.
