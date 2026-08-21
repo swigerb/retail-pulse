@@ -420,6 +420,8 @@ export interface KnowledgeUploadResponse {
   documentId: string;
   title: string;
   status: string;
+  chunkCount?: number;
+  source?: string;
 }
 
 export interface Citation {
@@ -427,6 +429,63 @@ export interface Citation {
   sourceTitle: string;
   chunkPreview: string;
   relevanceScore: number;
+}
+
+// --- Knowledge provider snapshot (issue #106) ---
+// Aligned with GET /api/knowledge/provider, backed by the KnowledgeBaseCapabilities
+// record on the backend. Scores are provider-local — the frontend never compares
+// them across providers, and `scoreSemantics` MUST be surfaced verbatim so the
+// user reads honest, provider-specific relevance meaning.
+
+export type KnowledgeRelevanceKind = 'Lexical' | 'Semantic' | 'Hybrid';
+
+export type KnowledgeDegradationMode = 'FailLoud' | 'FallbackToInMemory';
+
+export interface KnowledgeProviderInfo {
+  name: string;
+  relevance: KnowledgeRelevanceKind;
+  persistent: boolean;
+  requiresCloud: boolean;
+  supportsMutation: boolean;
+  scoreSemantics: string;
+}
+
+export interface KnowledgeDegradationInfo {
+  mode: KnowledgeDegradationMode | null;
+  primaryReplacedByFallback: boolean;
+}
+
+export interface KnowledgeQuotas {
+  maxDocuments: number;
+  maxChunks: number;
+  maxDocumentSizeBytes: number;
+}
+
+export interface KnowledgeUsage {
+  documentCount: number;
+  chunkCount: number;
+}
+
+export interface KnowledgeNamedSource {
+  name: string;
+  documents: string[];
+}
+
+export interface KnowledgeAgentBinding {
+  agentKey: string;
+  agentDisplayName: string;
+  enabled: boolean;
+  sourceName: string;
+  sources: string[];
+}
+
+export interface KnowledgeProviderSnapshot {
+  provider: KnowledgeProviderInfo;
+  degradation: KnowledgeDegradationInfo;
+  quotas: KnowledgeQuotas;
+  usage: KnowledgeUsage;
+  sources: KnowledgeNamedSource[];
+  bindings: KnowledgeAgentBinding[];
 }
 
 // --- Streaming types (Sprint 3.1) ---

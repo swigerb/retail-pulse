@@ -1,4 +1,8 @@
 using System.Globalization;
+using Microsoft.Extensions.Options;
+using RetailPulse.Api.Configuration;
+using RetailPulse.Api.Models;
+using RetailPulse.Api.Rag;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Rag;
 using RetailPulse.Contracts.Routing;
@@ -15,8 +19,64 @@ public static class KnowledgeEndpoints
             if (string.IsNullOrWhiteSpace(body.Title) || string.IsNullOrWhiteSpace(body.Content))
                 return Results.BadRequest(new { error = "Fields 'title' and 'content' are required." });
 
-            string id = await kb.IngestDocumentAsync(body.Title, body.Content, body.Source ?? "upload", ct);
-            return Results.Ok(new { documentId = id, title = body.Title, status = "ingested" });
+            string source = body.Source ?? "upload";
+            try
+            {
+                string id = await kb.IngestDocumentAsync(body.Title, body.Content, source, ct);
+
+                // Enrich the response with the resolved chunk count so the UI can
+                // report an honest ingestion outcome ("accepted N chunks") without
+                // making a second round-trip. When ListDocumentsAsync cannot see
+                // the new id (e.g. asynchronous cloud indexing), fall back to 0
+                // rather than fabricating a count.
+                IReadOnlyList<DocumentInfo> docs = await kb.ListDocumentsAsync(ct);
+                DocumentInfo? persisted = docs.FirstOrDefault(d => d.Id == id);
+                int chunkCount = persisted?.ChunkCount ?? 0;
+                return Results.Ok(new
+                {
+                    documentId = id,
+                    title = body.Title,
+                    status = "ingested",
+                    chunkCount,
+                    source = persisted?.Source ?? source,
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Provider-enforced quota rejection surfaces as a structured 409
+                // so the frontend can render a "quota reached" outcome distinct
+                // from a generic failure.
+                KnowledgeBaseCapabilities caps = kb.GetCapabilities();
+                IReadOnlyList<DocumentInfo> docs = await kb.ListDocumentsAsync(ct);
+                return Results.Json(new
+                {
+                    quotaRejected = true,
+                    reason = ex.Message,
+                    quotas = new
+                    {
+                        maxDocuments = caps.Quotas.MaxDocuments,
+                        maxChunks = caps.Quotas.MaxChunks,
+                        maxDocumentSizeBytes = caps.Quotas.MaxDocumentSizeBytes,
+                    },
+                    usage = new
+                    {
+                        documentCount = docs.Count,
+                        chunkCount = docs.Sum(d => d.ChunkCount),
+                    },
+                }, statusCode: StatusCodes.Status409Conflict);
+            }
+            catch (NotSupportedException ex)
+            {
+                // Read-only providers (Foundry IQ, issue #104) report mutation
+                // as unsupported via a first-class exception. Bubble the
+                // capability signal to the UI as 405 so the panel can hide the
+                // upload affordance rather than showing a bare 500.
+                return Results.Json(new
+                {
+                    mutationUnsupported = true,
+                    reason = ex.Message,
+                }, statusCode: StatusCodes.Status405MethodNotAllowed);
+            }
         })
         .WithName("UploadKnowledge").RequireAuthorization().RequireRateLimiting("upload");
 
@@ -59,6 +119,109 @@ public static class KnowledgeEndpoints
             });
         })
         .WithName("KnowledgeStats").RequireAuthorization().RequireRateLimiting("relaxed");
+
+        // Knowledge provider snapshot (issue #106). Surfaces the honest
+        // capabilities of the active provider — durable vs volatile, relevance
+        // kind, quotas, actual usage, degradation policy, whether the primary
+        // was replaced by the in-memory fallback — plus the named source
+        // catalog and every per-agent binding. The frontend Knowledge panel
+        // consumes this to warn on volatile uploads, disclose provider score
+        // semantics honestly, and render the per-agent binding view.
+        app.MapGet("/api/knowledge/provider", async (
+            IKnowledgeBase kb,
+            KnowledgeSourceRegistry sourceRegistry,
+            IOptionsSnapshot<KnowledgeSourcesOptions> sourcesOptions,
+            PromptConfiguration promptConfig,
+            CancellationToken ct) =>
+        {
+            KnowledgeBaseCapabilities caps = kb.GetCapabilities();
+            IReadOnlyList<DocumentInfo> docs = await kb.ListDocumentsAsync(ct);
+
+            // Degradation metadata is only meaningful when the DI-registered
+            // IKnowledgeBase is the decorator; unit-tests may inject a bare
+            // provider. Reading through pattern-matching keeps the endpoint
+            // portable without a hard cast.
+            string? degradationMode = null;
+            bool primaryReplacedByFallback = false;
+            if (kb is DegradingKnowledgeBase decorator)
+            {
+                degradationMode = decorator.DegradationMode.ToString();
+                primaryReplacedByFallback = decorator.PrimaryReplacedByFallback;
+            }
+
+            KnowledgeSourcesOptions namedSources = sourcesOptions.Value;
+            var sourceCatalog = namedSources.Named
+                .Select(kvp => new
+                {
+                    name = kvp.Key,
+                    documents = kvp.Value.Documents
+                        .Where(d => !string.IsNullOrWhiteSpace(d))
+                        .Select(d => d.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray(),
+                })
+                .OrderBy(s => s.name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            // Build the per-agent binding view from the resolved registry, then
+            // enrich each row with the agent's display name and the DECLARED
+            // knowledge_base_name from prompts.yaml so the UI can label the
+            // binding by named source (not the raw document list).
+            var bindingRows = new List<object>(promptConfig.Agents.Count);
+            foreach ((string sectionKey, AgentDefinition def) in promptConfig.Agents
+                .OrderBy(kv => kv.Value.EffectiveDisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                // Orchestration/router entries are not user-facing specialists
+                // that "see" a knowledge scope in the way the UI surfaces. Skip
+                // them so the binding view stays focused on retrieval-relevant
+                // agents.
+                if (string.Equals(def.Role, "orchestration", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string agentKey = string.IsNullOrWhiteSpace(def.Key) ? sectionKey : def.Key;
+                KnowledgeBinding binding = sourceRegistry.GetBinding(agentKey);
+                bindingRows.Add(new
+                {
+                    agentKey,
+                    agentDisplayName = def.EffectiveDisplayName,
+                    enabled = binding.Enabled,
+                    sourceName = def.KnowledgeBaseName,
+                    sources = binding.Sources.ToArray(),
+                });
+            }
+
+            return Results.Ok(new
+            {
+                provider = new
+                {
+                    name = caps.ProviderName,
+                    relevance = caps.Relevance.ToString(),
+                    persistent = caps.Persistent,
+                    requiresCloud = caps.RequiresCloud,
+                    supportsMutation = caps.SupportsMutation,
+                    scoreSemantics = caps.ScoreSemantics,
+                },
+                degradation = new
+                {
+                    mode = degradationMode,
+                    primaryReplacedByFallback,
+                },
+                quotas = new
+                {
+                    maxDocuments = caps.Quotas.MaxDocuments,
+                    maxChunks = caps.Quotas.MaxChunks,
+                    maxDocumentSizeBytes = caps.Quotas.MaxDocumentSizeBytes,
+                },
+                usage = new
+                {
+                    documentCount = docs.Count,
+                    chunkCount = docs.Sum(d => d.ChunkCount),
+                },
+                sources = sourceCatalog,
+                bindings = bindingRows,
+            });
+        })
+        .WithName("KnowledgeProviderSnapshot").RequireAuthorization().RequireRateLimiting("relaxed");
 
         // ── Message Extension endpoints ──────────────────────────────────────
         app.MapPost("/api/message-extension/query", async (MessageExtensionRequest body, IKnowledgeBase kb, IEnumerable<ISpecialistAgent> specialists, ILogger<Program> logger, CancellationToken ct) =>
