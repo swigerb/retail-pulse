@@ -95,21 +95,27 @@ public sealed partial class ChartAcceptanceManifestContractTests
         string promptsPath = ResolveRepoRelativePath("src", "RetailPulse.Web", "src", "constants", "prompts.ts");
         string source = File.ReadAllText(promptsPath);
 
-        // Locate the category block by id, then extract the enclosing prompts: […] array.
-        Match idMatch = Regex.Match(source, $@"id:\s*'{Regex.Escape(categoryId)}'");
+        // Issue #109 — the category block now uses a `mirrorCategory(id, label,
+        // emoji, order, [[prompt, capability], ...])` helper so a demo pack can
+        // pair a display name with a submitted prompt. The submitted prompt is
+        // always the first single-quoted string inside each nested `[...]`
+        // tuple, so the parser locates the fifth-argument array and lifts the
+        // leading string from each tuple.
+        Match idMatch = Regex.Match(
+            source,
+            $@"mirrorCategory\(\s*'{Regex.Escape(categoryId)}'\s*,\s*'[^']*'\s*,\s*'[^']*'\s*,\s*\d+\s*,\s*\[");
         idMatch.Success.Should().BeTrue($"category '{categoryId}' must exist in prompts.ts");
 
-        int cursor = idMatch.Index;
-        Match promptsHeader = MyRegex().Match(source[cursor..]);
-        promptsHeader.Success.Should().BeTrue($"prompts array must follow id '{categoryId}'");
-        int arrStart = cursor + promptsHeader.Index + promptsHeader.Length;
-
+        int arrStart = idMatch.Index + idMatch.Length;
         int arrEnd = FindMatchingBracket(source, arrStart - 1);
         arrEnd.Should().BeGreaterThan(arrStart, $"prompts array for '{categoryId}' must be closed");
 
         string arrBody = source[arrStart..arrEnd];
         var extracted = new List<string>();
-        foreach (Match m in SingleQuotedStringRegex().Matches(arrBody))
+        // Each tuple opens with `[` followed by the submitted prompt as a
+        // single-quoted string; the capability helper that follows is not a
+        // string literal so it does not confuse this leading-string match.
+        foreach (Match m in TupleLeadingStringRegex().Matches(arrBody))
         {
             extracted.Add(Regex.Unescape(m.Groups[1].Value));
         }
@@ -172,11 +178,8 @@ public sealed partial class ChartAcceptanceManifestContractTests
             "Could not locate repository root from test binary directory: " + AppContext.BaseDirectory);
     }
 
-    [GeneratedRegex(@"prompts:\s*\[")]
-    private static partial Regex MyRegex();
-
-    [GeneratedRegex(@"'([^'\\]*(?:\\.[^'\\]*)*)'")]
-    private static partial Regex SingleQuotedStringRegex();
+    [GeneratedRegex(@"\[\s*'([^'\\]*(?:\\.[^'\\]*)*)'")]
+    private static partial Regex TupleLeadingStringRegex();
 
     [GeneratedRegex(@"^\s*[-*]\s+\*""([^""]+)""\*\s*(?:→|->)", RegexOptions.Multiline)]
     private static partial Regex ReadmeChartBulletRegex();
