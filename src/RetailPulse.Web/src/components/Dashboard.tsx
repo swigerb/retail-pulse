@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle } from '@fluentui/react-components';
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
@@ -23,7 +23,9 @@ import { StoreHeatmap, StockoutAlert, StorePerformanceTable, StoreDetailDialog }
 import { MarginWaterfall, MarginDrivers } from './margin';
 import { PortfolioScorecard, BrandScoreCard, ExplanationPanel } from './scorecard';
 import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData } from '../types';
-import { connectTelemetryHub } from '../services/telemetryHub';
+import { connectTelemetryHub, subscribeHubEvent } from '../services/telemetryHub';
+import { usePlanController } from '../state/usePlanController';
+import { PlanHistoryPanel } from './plan';
 import { featureFlags } from '../config/featureFlags';
 import { capabilities, activeAuthMode, getActiveProvider } from '../auth/activeProvider';
 import { AnonymousSessionBanner } from '../auth/gates/AnonymousAuthGate';
@@ -138,6 +140,31 @@ export function Dashboard() {
   const [explanationOpen, setExplanationOpen] = useState(false);
   const [explanationData, setExplanationData] = useState<ExplanationData | null>(null);
   const styles = useStyles();
+
+  // Plan controller (issue #96). Shared between ChatPanel (renders the plan
+  // surface for a plan-first response) and the Plan History panel in the
+  // telemetry drawer. Backed by the same SignalR connection the rest of the
+  // dashboard uses, so plan/step spans continue to flow through the existing
+  // telemetry panel — no parallel telemetry system.
+  const planConnectionRef = useRef({
+    connected: false,
+    on: (event: string, handler: (payload: unknown) => void) =>
+      subscribeHubEvent(event, handler),
+  });
+  planConnectionRef.current.connected = connected;
+  const planController = usePlanController({ connection: planConnectionRef.current });
+
+  // Refresh plan history whenever the telemetry drawer opens so the user
+  // sees a current list without a manual refresh, and once at boot.
+  useEffect(() => {
+    if (!capabilities.approvals) return;
+    void planController.reloadHistory();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (telemetryOpen) void planController.reloadHistory();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetryOpen]);
 
   // Demo data for Phase 4 views
   const demoStores: StorePerformance[] = [
@@ -619,6 +646,8 @@ export function Dashboard() {
               onResponseReceived={handleResponseReceived}
               approvals={pendingApprovals}
               onApprovalResolved={handleApprovalResolved}
+              planController={planController}
+              planConnected={connected}
             />
           </div>
           {capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner ? (
@@ -740,6 +769,19 @@ export function Dashboard() {
             <CollapsibleSection title="Agent Routing">
               <AgentRoutingPanel routingHistory={routingHistory} />
             </CollapsibleSection>
+            {capabilities.approvals && (
+              <CollapsibleSection title="Plans">
+                <PlanHistoryPanel
+                  plans={planController.state.history}
+                  loading={planController.state.historyLoading}
+                  error={planController.state.historyError}
+                  activePlanId={planController.active?.planId ?? null}
+                  onRefresh={() => { void planController.reloadHistory(); }}
+                  onOpen={id => { void planController.openHistoryPlan(id); }}
+                  onDelete={id => { void planController.removePlanFromHistory(id); }}
+                />
+              </CollapsibleSection>
+            )}
             {approvalHistory.length > 0 && (
               <CollapsibleSection title="Approval History">
                 <ApprovalHistory approvals={approvalHistory} />
