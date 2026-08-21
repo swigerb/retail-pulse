@@ -1,0 +1,41 @@
+# Curated starting prompts for Prairiehearth Craft Supply.
+categories:
+  - id: fibre-pipeline
+    label: "Fibre Pipeline"
+    emoji: "🧶"
+    prompts:
+      - "Show cooperative-supplier shipment health for Wovenwheel Fibre in the Prairie Belt"
+      - "Where are Loomshire warp-stock dye lots at risk this month?"
+      - "Summarize supply disruptions across the fibre category in Foothills stores"
+
+  - id: workshop-programming
+    label: "Workshop Programming"
+    emoji: "🎨"
+    prompts:
+      - "Forecast autumn fibre workshop enrollment in Lakes & Rivers"
+      - "Compare winter paper journaling class attach for Pinemark kits across regions"
+      - "Identify demand risks for spring plein-air paint series in Coastal Cottages"
+
+  - id: kit-assortment
+    label: "Kit Assortment"
+    emoji: "🪚"
+    prompts:
+      - "Rebalance beginner endcap adjacency to the workshop-signup counter"
+      - "Show the Ridgeline Woodcraft project-bay rotation for the Foothills"
+      - "How should we lay out Marketstead beading given the summer festival calendar?"
+
+  - id: community-signals
+    label: "Community Signals"
+    emoji: "🫱🏽‍🫲🏼"
+    prompts:
+      - "Summarize maker-circle sentiment for kit accessibility this quarter"
+      - "What are regional guilds saying about workshop pricing in the Prairie Belt?"
+      - "Which community event booths are outperforming their region's baseline?"
+
+  - id: maker-margin
+    label: "Maker Margin"
+    emoji: "📐"
+    prompts:
+      - "Show margin drivers for Auroralight Paint kits"
+      - "What is the workshop-seat contribution trend for advanced joinery?"
+      - "Detect margin risks across the paper category in Foothills"

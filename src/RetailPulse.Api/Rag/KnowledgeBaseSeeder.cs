@@ -17,7 +17,7 @@ public static class KnowledgeBaseSeeder
 {
     public static async Task SeedAsync(InMemoryKnowledgeBase kb, ILogger logger, CancellationToken ct = default)
     {
-        List<(string Title, string Source, string Content)> sampleDocs = GetSampleDocuments();
+        IReadOnlyList<(string Title, string Source, string Content)> sampleDocs = GetSampleDocuments();
         int ingested = 0;
 
         foreach ((string? title, string? source, string? content) in sampleDocs)
@@ -36,7 +36,14 @@ public static class KnowledgeBaseSeeder
             ingested, kb.DocumentCount, kb.ChunkCount);
     }
 
-    private static List<(string Title, string Source, string Content)> GetSampleDocuments() =>
+    /// <summary>
+    /// Public list of the default-pack sample documents. Exposed so the
+    /// pack-loader equivalence tests can pin the shipped
+    /// <c>packs/default/knowledge/*.md</c> corpus to the seeder's own
+    /// content byte-for-byte, catching drift the moment either side
+    /// changes.
+    /// </summary>
+    public static IReadOnlyList<(string Title, string Source, string Content)> GetSampleDocuments() =>
     [
         ("Apex Planogram & Shelf-Set Reference", "apex-planogram-shelf-set.md", _planogramShelfSet),
         ("Apex Supplier & Distributor Service Levels", "apex-supplier-service-levels.md", _supplierServiceLevels),
