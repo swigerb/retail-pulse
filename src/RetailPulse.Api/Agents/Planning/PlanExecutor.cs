@@ -610,6 +610,12 @@ public sealed class PlanExecutor
                 OutputTokens = r.OutputTokens,
                 TotalTokens = r.TotalTokens,
                 DurationMs = r.DurationMs,
+                // Persist Charts across the clarification checkpoint so a
+                // chart emitted BEFORE the [[CLARIFY]] pause survives the
+                // resume — the clarification-resume path currently skips
+                // downstream execution, so any specialist chart already in
+                // hand would be lost silently without this (#137).
+                Charts = r.Charts is { Count: > 0 } charts ? [.. charts] : null,
             }),
         ];
 
