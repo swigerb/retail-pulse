@@ -19,6 +19,12 @@ internal sealed class BenchmarkEntry
             return HybridFastPathBaselineRunner.Run(rest);
         }
 
+        if (args.Length > 0 && string.Equals(args[0], "baseline-plan", StringComparison.OrdinalIgnoreCase))
+        {
+            string[] rest = args.Length > 1 ? args[1..] : [];
+            return HybridPlanPathBaselineRunner.Run(rest);
+        }
+
         BenchmarkSwitcher.FromAssembly(typeof(BenchmarkEntry).Assembly).Run(args);
         return 0;
     }

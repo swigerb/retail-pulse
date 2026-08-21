@@ -1,0 +1,27 @@
+{
+  "issue": "#97",
+  "scenario": "hybrid-execution-plan-path",
+  "prompt": "Compare Q4 demand for Apex Grill in the Southwest with current inventory health and outstanding shipments.",
+  "measured_code_path": "RetailPulse.Api.Agents.Routing.HybridExecutionDecider.Decide",
+  "commit_sha": "9218cc4e6f306d4980231fe3e7ae566f59f2c359",
+  "environment": {
+    "framework": ".NET 10.0.11",
+    "os_platform": "windows",
+    "process_architecture": "X64",
+    "processor_count": 24,
+    "configuration": "Release"
+  },
+  "method": {
+    "warmup_iterations": 5000,
+    "sample_count": 50000,
+    "timer_frequency_hz": 10000000,
+    "deterministic": true,
+    "notes": "Decision-layer overhead only. Live plan-execution latency is covered by the load-test scenario."
+  },
+  "results": {
+    "units": "nanoseconds",
+    "p50": 100,
+    "p95": 200
+  },
+  "recorded_at_utc": "2026-08-21T04:57:53.1633901Z"
+}

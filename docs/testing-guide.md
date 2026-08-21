@@ -402,6 +402,139 @@ Contact the development team or file an issue in the repository.
 
 ---
 
+## Plan-First Orchestration Test Strategy (Wave 2, #97)
+
+Wave 2 introduces the plan-first execution path — a planner + reviewer + step
+executor pipeline that runs alongside the single-shot fast path. Tests for
+this path MUST prefer deterministic fakes over live LLM calls and MUST assert
+structural invariants (step count, span types, cost usage shape, chart list
+size) rather than exact model wording.
+
+### Which path does /api/chat pick?
+
+`HybridExecutionDecider.Decide` (`src/RetailPulse.Api/Agents/Routing/`) is a
+pure function and easy to test. It picks in this order: explicit
+`forceExecutionPath` override → Council intent → anonymous caller → planner
+unavailable → multi-domain detected intents ≥ threshold → low router
+confidence → advisory phrase → default fast path. Every branch is covered in
+`Routing/HybridExecutionDeciderTests.cs`.
+
+Anonymous callers can NEVER reach the plan path. This is a hard guarantee:
+`AnonymousChatRestrictions` intercepts before the decider, the decider itself
+refuses even for multi-domain intents, and `PlanReviewEndpoints` reject
+anonymous callers. See `Endpoints/PlanEndpointsAuthorizationTests.cs`.
+
+### Deterministic test surface
+
+- **Executor**: `Planning/PlanExecutorTests.cs` and
+  `Planning/PlanChartPropagationTests.cs` mock `ISpecialistAgent.HandleAsync`
+  so full step traversal, cost attribution, span emission
+  (`span.type = "plan"` / `"plan_step"`), and chart propagation are pinned
+  without a live model. `RecordingPlanStore` / `RecordingCostTracker` /
+  `RecordingTraceCollector` capture side effects for assertions.
+- **Orchestrator**: `Planning/PlanOrchestratorTests.cs` and
+  `Endpoints/PlanFirstRegressionTests.cs` cover the wrap layer: plan-level
+  usage event, unusable-plan short-circuit, and the three known
+  cross-cutting parity findings (default-config DI, output PII, audit +
+  exporter + session-store parity).
+- **Reviewer**: `Approval/PlanReviewCompletionServiceTests.cs` uses the
+  real `SqliteApprovalGate` + `FileSystemJsonCheckpointStore` so the
+  suspend/resume/edit/replan round-trip is exercised against the same code
+  the endpoint runs. Never assert against exact model wording; assert
+  ApprovalDecision, terminal reason strings, and audit rows.
+- **Endpoint**: `Endpoints/PlanReviewChatEndpointTests.cs` pins the 202
+  suspend response and the 200 terminal response shape.
+  `Endpoints/PlanReviewEndpointsAuthorizationTests.cs` pins cross-subject
+  refusal (404, row stays Pending).
+  `Endpoints/PlanReviewEditInjectionTests.cs` pins the reviewer-edit input
+  guardrail (400 + stable `plan_review_edit_blocked` code, row stays
+  Pending).
+
+### Restart / resume coverage
+
+The plan-first path has three legitimate suspend points and every one must
+resume after a process restart:
+
+1. **Awaiting review** — Reviewer decision pending on the initial plan
+   proposal. `PlanReviewCompletionServiceTests` +
+   `PlanReviewRestartRecoveryServiceTests` cover cold-start replay of a
+   pending approval row.
+2. **Mid-step clarification** — Specialist emits `[[CLARIFY]]`. Executor
+   pauses, persists the checkpoint, and resumes after the reviewer answers.
+3. **Reviewer `[[REPLAN]]`** — Reviewer rejects with feedback; coordinator
+   opens a new round up to `MaxReplanRounds`, then terminates with
+   `PlanReviewReplanExhausted`. Bounded — never an unbounded loop.
+
+### Adversarial coverage
+
+- **Prompt injection through EDIT actions** — Any reviewer-edited step
+  action goes back through `GuardrailsMiddleware.CheckInputAsync`; a
+  jailbreak or injection pattern returns 400 with code
+  `plan_review_edit_blocked` and the approval row remains Pending. Covered
+  by `Endpoints/PlanReviewEditInjectionTests.cs`.
+- **Cross-subject probes** — Bob cannot view, decide, or answer Alice's
+  plan review or clarification; the endpoint always returns 404 with no
+  side effect. Covered by
+  `Endpoints/PlanReviewEndpointsAuthorizationTests.cs`.
+- **Failed step, timeout, malformed / empty plan** — Executor short-circuits
+  and marks remaining steps Skipped; plan status transitions to Failed
+  with the correct FailureReason. Covered by `Planning/PlanExecutorTests`.
+- **Abandoned review** — `PlanReviewTimeoutService` closes the pending
+  approval row after `ReviewTimeout`.
+
+### 9 chart types on both paths
+
+ADR-006 requires every canonical chart type (line, bar, groupedBar,
+stackedBar, horizontalBar, pie, donut, gauge, table) to render on both the
+fast path and the plan path. `PlanChartPropagationTests` theories over the
+full 9-type list to guarantee `PlanStepResult.Charts` and
+`PlanOrchestrationResult.Charts` do not drop specialist output. Fast-path
+coverage lives in `Charts/ChartAcceptanceMatrixTests.cs`.
+
+### Cost, budget, and span hierarchy
+
+- Plan-level `UsageEvent` has `PlanStepId = null` and `AgentId = "planner"`;
+  per-step events carry the step id and specialist key.
+- ADR-006 tool-context budget is scoped once for the whole plan
+  (`RequestToolContext.Begin(..., isChartIntent: ...)`) and nested begins
+  no-op via `NestedScope` — accumulation across a wide plan is asserted in
+  `PlanExecutorTests.Budget_scope_accumulates_across_steps`.
+- Root span has `span.type = "plan"`, per-step spans have
+  `span.type = "plan_step"`.
+
+### Load and benchmark scenarios
+
+The load-test project has a matched pair of ramp scenarios:
+
+```powershell
+# Start the API first, then:
+./run-load-tests.ps1
+```
+
+`ChatEndpointScenario` covers the fast path (ramp 1→10 rps × 30 s, p95 <
+5 s). `PlanPathChatEndpointScenario` covers the plan path (ramp 1→5 rps ×
+60 s, p95 < 10 s) using `forceExecutionPath = "plan"` and a multi-domain
+prompt so `HybridExecutionDecider` is guaranteed to pick Plan.
+
+The benchmark project produces a paired deterministic decision-layer
+baseline for both paths — plan-execution live latency (planner + executor
++ synthesis) cannot be reproduced in a benchmark harness without an LLM,
+and is intentionally covered only by the load-test scenario above:
+
+```powershell
+dotnet run -c Release --project tests/RetailPulse.Benchmarks -- baseline
+dotnet run -c Release --project tests/RetailPulse.Benchmarks -- baseline-plan
+```
+
+Artifacts are written to
+`tests/RetailPulse.Benchmarks/baselines/hybrid-fast-path-baseline.json`
+and `.../hybrid-plan-path-baseline.json` and include commit SHA, coarse
+environment (framework, OS platform, process architecture, processor
+count), sample count, and p50/p95 in nanoseconds. Diff those artifacts
+across releases for a stable before/after comparison.
+
+---
+
 ## Test Infrastructure Overview
 
 RetailPulse has **3,200+ tests** across multiple testing strategies:

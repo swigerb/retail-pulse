@@ -608,11 +608,19 @@ public static class ChatEndpoints
                     string filteredPlanReply =
                         await guardrails.FilterOutputAsync(planResult.Reply, userId, ct);
 
+                    // Charts propagate from every specialist step verbatim — see
+                    // PlanStepResult.Charts and PlanOrchestrationResult.Charts.
+                    // Without this the plan path silently dropped all charts,
+                    // breaking the "9 chart types render on both paths" gate.
+                    List<ChartSpec>? planCharts = planResult.Charts is { Count: > 0 }
+                        ? [.. planResult.Charts]
+                        : null;
+
                     var planChatResponse = new ChatResponse(
                         filteredPlanReply,
                         sessionId,
                         [],
-                        null,
+                        planCharts,
                         planResult.DurationMs,
                         new TokenUsage(planResult.InputTokens, planResult.OutputTokens, planResult.TotalTokens),
                         new RoutingInfo(
