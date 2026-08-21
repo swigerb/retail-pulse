@@ -1,12 +1,23 @@
 import { useState, useCallback, useRef } from 'react';
 import { makeStyles, Button } from '@fluentui/react-components';
 import { KB_COLORS } from '../../constants/agentRouting';
-import { uploadDocument, KnowledgeUploadError } from '../../services/knowledgeApi';
-import type { SafetyBlockDisplayModel } from '../../types';
+import {
+  uploadDocument,
+  KnowledgeUploadError,
+  KnowledgeQuotaError,
+  KnowledgeMutationUnsupportedError,
+} from '../../services/knowledgeApi';
+import type {
+  KnowledgeProviderInfo,
+  KnowledgeQuotas,
+  KnowledgeUsage,
+  SafetyBlockDisplayModel,
+} from '../../types';
 import { KnowledgeIngestionBlock } from '../guardrails/KnowledgeIngestionBlock';
 
 interface DocumentUploadProps {
   onUploadComplete: () => void;
+  provider?: KnowledgeProviderInfo | null;
 }
 
 const ACCEPTED_FORMATS = ['.md', '.txt'];
@@ -23,6 +34,50 @@ const useStyles = makeStyles({
   },
   wrapperDragOver: {
     transform: 'scale(1.01)',
+  },
+  wrapperReadOnly: {
+    cursor: 'not-allowed',
+    opacity: 0.85,
+  },
+  volatileWarning: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: '8px',
+    textAlign: 'left',
+    padding: '10px 12px',
+    marginBottom: '12px',
+    borderRadius: '8px',
+    backgroundColor: 'rgba(245,158,11,0.10)',
+    border: '1px solid var(--color-accent-warning, #f59e0b)',
+    color: 'var(--color-accent-warning, #f59e0b)',
+    fontSize: '12px',
+    lineHeight: '1.5',
+  },
+  readOnlyBanner: {
+    padding: '14px 16px',
+    borderRadius: '8px',
+    backgroundColor: 'var(--color-surface-alt, rgba(255,255,255,0.04))',
+    border: '1px solid var(--color-border, rgba(255,255,255,0.15))',
+    color: 'var(--color-text, #ffffff)',
+    fontSize: '13px',
+    lineHeight: '1.5',
+  },
+  quotaBlock: {
+    marginTop: '12px',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    backgroundColor: 'rgba(239,68,68,0.10)',
+    border: '1px solid var(--color-accent-danger, #ef4444)',
+    color: 'var(--color-accent-danger, #ef4444)',
+    fontSize: '13px',
+    lineHeight: '1.5',
+    textAlign: 'left',
+  },
+  outcomeMeta: {
+    marginTop: '4px',
+    fontSize: '11px',
+    color: 'var(--color-text-muted, #94a3b8)',
   },
   icon: {
     fontSize: '32px',
@@ -108,7 +163,7 @@ const useStyles = makeStyles({
   },
 });
 
-export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps) {
+export default function DocumentUpload({ onUploadComplete, provider }: DocumentUploadProps) {
   const styles = useStyles();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -120,7 +175,19 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
     success: boolean;
     error?: string;
     safetyDisplay?: SafetyBlockDisplayModel;
+    quota?: {
+      reason: string;
+      quotas: KnowledgeQuotas | null;
+      usage: KnowledgeUsage | null;
+    };
+    accepted?: {
+      chunkCount: number;
+      source: string;
+    };
   } | null>(null);
+
+  const isReadOnly = provider ? !provider.supportsMutation : false;
+  const isVolatile = provider ? !provider.persistent : false;
 
   const handleFileSelect = useCallback((file: File) => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -134,11 +201,12 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
+    if (isReadOnly) { e.preventDefault(); return; }
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
     if (file) handleFileSelect(file);
-  }, [handleFileSelect]);
+  }, [handleFileSelect, isReadOnly]);
 
   const handleUpload = useCallback(async () => {
     if (!selectedFile || !title.trim()) return;
@@ -152,10 +220,16 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
     }, 200);
 
     try {
-      await uploadDocument(selectedFile, title);
+      const response = await uploadDocument(selectedFile, title);
       clearInterval(progressInterval);
       setUploadProgress(100);
-      setUploadResult({ success: true });
+      setUploadResult({
+        success: true,
+        accepted: {
+          chunkCount: response.chunkCount ?? 0,
+          source: response.source ?? 'upload',
+        },
+      });
       onUploadComplete();
       setTimeout(() => {
         setSelectedFile(null);
@@ -167,6 +241,13 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
       clearInterval(progressInterval);
       if (e instanceof KnowledgeUploadError) {
         setUploadResult({ success: false, safetyDisplay: e.display });
+      } else if (e instanceof KnowledgeQuotaError) {
+        setUploadResult({
+          success: false,
+          quota: { reason: e.message, quotas: e.quotas, usage: e.usage },
+        });
+      } else if (e instanceof KnowledgeMutationUnsupportedError) {
+        setUploadResult({ success: false, error: e.message });
       } else {
         setUploadResult({ success: false, error: e instanceof Error ? e.message : 'Upload failed' });
       }
@@ -175,16 +256,47 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
     }
   }, [selectedFile, title, onUploadComplete]);
 
+  if (isReadOnly) {
+    return (
+      <div
+        className={`${styles.wrapper} ${styles.wrapperReadOnly}`}
+        data-testid="document-upload"
+        data-upload-mode="read-only"
+      >
+        <div className={styles.readOnlyBanner} role="status" data-testid="upload-readonly">
+          🔒 The active knowledge provider is read-only — its corpus is managed outside
+          Retail Pulse. Manage documents in the provider’s portal and re-run search.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`${styles.wrapper} ${dragOver ? styles.wrapperDragOver : ''}`}
       style={dragOver ? { borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.1)' } : undefined}
       data-testid="document-upload"
+      data-upload-mode={isVolatile ? 'volatile' : 'durable'}
       onDragOver={e => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
       onClick={() => !selectedFile && fileInputRef.current?.click()}
     >
+      {isVolatile && (
+        <div
+          className={styles.volatileWarning}
+          role="alert"
+          data-testid="upload-volatile-warning"
+        >
+          <span aria-hidden="true">⚠️</span>
+          <span>
+            The active provider is <strong>volatile</strong>. Uploaded content lives
+            only in this process and will be lost on restart. Use a durable provider
+            for content you need to keep.
+          </span>
+        </div>
+      )}
+
       <input
         ref={fileInputRef}
         type="file"
@@ -247,6 +359,13 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
       {uploadResult?.success && (
         <div className={styles.success} data-testid="upload-success">
           ✅ Document indexed successfully
+          {uploadResult.accepted && (
+            <div className={styles.outcomeMeta} data-testid="upload-accepted-meta">
+              {uploadResult.accepted.chunkCount} chunk
+              {uploadResult.accepted.chunkCount === 1 ? '' : 's'}{' '}
+              stored as source “{uploadResult.accepted.source}”.
+            </div>
+          )}
         </div>
       )}
 
@@ -256,6 +375,18 @@ export default function DocumentUpload({ onUploadComplete }: DocumentUploadProps
             documentTitle={title || selectedFile?.name}
             display={uploadResult.safetyDisplay}
           />
+        </div>
+      )}
+
+      {uploadResult?.quota && (
+        <div className={styles.quotaBlock} role="alert" data-testid="upload-quota-block">
+          <div>🚫 Quota reached — {uploadResult.quota.reason}</div>
+          {uploadResult.quota.quotas && uploadResult.quota.usage && (
+            <div className={styles.outcomeMeta} data-testid="upload-quota-meta">
+              Documents {uploadResult.quota.usage.documentCount.toLocaleString()} / {uploadResult.quota.quotas.maxDocuments.toLocaleString()},
+              chunks {uploadResult.quota.usage.chunkCount.toLocaleString()} / {uploadResult.quota.quotas.maxChunks.toLocaleString()}.
+            </div>
+          )}
         </div>
       )}
 
