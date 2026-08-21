@@ -471,6 +471,144 @@ describe('planReducer', () => {
     expect(up.active?.connectionLost).toBe(false);
   });
 
+  it('STEPS_RECONCILED merges new step records after a reconnect delta', () => {
+    // Seed: two rendered steps (0 completed, 1 running) — the reconcile
+    // response then delivers a new step 2 the client never saw plus a
+    // refreshed durable record for step 1.
+    const hydrated = planReducer(initialPlanState, {
+      type: 'PLAN_STARTED',
+      planId: 'p1',
+      request: 'q',
+    });
+    const withDetail = planReducer(hydrated, {
+      type: 'PLAN_HYDRATED',
+      detail: detail('p1', [
+        { index: 0, status: 'completed' },
+        { index: 1, status: 'running' },
+      ]),
+    });
+    const reconciled = planReducer(withDetail, {
+      type: 'STEPS_RECONCILED',
+      planId: 'p1',
+      steps: [
+        {
+          stepId: 'p1-1',
+          planId: 'p1',
+          stepIndex: 1,
+          specialistKey: 'demand-forecasting',
+          intent: 'demand',
+          action: 'run step 1',
+          status: 'completed',
+          durationMs: 1200,
+        },
+        {
+          stepId: 'p1-2',
+          planId: 'p1',
+          stepIndex: 2,
+          specialistKey: 'promo-planning',
+          intent: 'promo',
+          action: 'run step 2',
+          status: 'running',
+        },
+      ],
+      status: 'running',
+    });
+    const steps = reconciled.active!.steps;
+    expect(steps.map(s => s.stepIndex)).toEqual([0, 1, 2]);
+    // Non-terminal (running) rendered step 1 is refreshed with the durable
+    // completed record, including the new durationMs field.
+    expect(steps[1].status).toBe('completed');
+    expect(steps[1].durationMs).toBe(1200);
+    // Step 2 is added.
+    expect(steps[2].specialistKey).toBe('promo-planning');
+  });
+
+  it('STEPS_RECONCILED never regresses a terminal rendered step', () => {
+    const hydrated = planReducer(initialPlanState, {
+      type: 'PLAN_STARTED',
+      planId: 'p1',
+      request: 'q',
+    });
+    const withDetail = planReducer(hydrated, {
+      type: 'PLAN_HYDRATED',
+      detail: detail('p1', [
+        { index: 0, status: 'completed' },
+      ]),
+    });
+    // Simulate a stale delta the endpoint should never send but the merge
+    // must still be safe against — a 'pending' record for a step the
+    // rendered state already saw complete.
+    const reconciled = planReducer(withDetail, {
+      type: 'STEPS_RECONCILED',
+      planId: 'p1',
+      steps: [
+        {
+          stepId: 'p1-0',
+          planId: 'p1',
+          stepIndex: 0,
+          specialistKey: 'demand-forecasting',
+          intent: 'demand',
+          action: 'run step 0',
+          status: 'pending',
+        },
+      ],
+    });
+    expect(reconciled.active!.steps[0].status).toBe('completed');
+  });
+
+  it('STEPS_RECONCILED refreshes the plan header from the durable snapshot', () => {
+    const hydrated = planReducer(initialPlanState, {
+      type: 'PLAN_STARTED',
+      planId: 'p1',
+      request: 'q',
+    });
+    const withDetail = planReducer(hydrated, {
+      type: 'PLAN_HYDRATED',
+      detail: detail('p1', [{ index: 0, status: 'running' }]),
+    });
+    const originalUpdatedAt = withDetail.active!.updatedAt;
+    const reconciled = planReducer(withDetail, {
+      type: 'STEPS_RECONCILED',
+      planId: 'p1',
+      steps: [],
+      status: 'failed',
+      updatedAt: new Date(9_000_000).toISOString(),
+      failureReason: 'specialist error',
+    });
+    expect(reconciled.active!.status).toBe('failed');
+    expect(reconciled.active!.updatedAt).not.toBe(originalUpdatedAt);
+    expect(reconciled.active!.failureReason).toBe('specialist error');
+    expect(reconciled.active!.finishedAt).toBeGreaterThan(0);
+  });
+
+  it('STEPS_RECONCILED for a foreign planId is a no-op', () => {
+    const hydrated = planReducer(initialPlanState, {
+      type: 'PLAN_STARTED',
+      planId: 'p1',
+      request: 'q',
+    });
+    const before = planReducer(hydrated, {
+      type: 'PLAN_HYDRATED',
+      detail: detail('p1', [{ index: 0, status: 'running' }]),
+    });
+    const after = planReducer(before, {
+      type: 'STEPS_RECONCILED',
+      planId: 'p2',
+      steps: [
+        {
+          stepId: 'p2-0',
+          planId: 'p2',
+          stepIndex: 0,
+          specialistKey: 'demand-forecasting',
+          intent: 'demand',
+          action: 'run step 0',
+          status: 'completed',
+        },
+      ],
+    });
+    expect(after).toBe(before);
+  });
+
   it('history load/error/removal keep the active plan intact', () => {
     const seed = planReducer(initialPlanState, {
       type: 'PLAN_STARTED',

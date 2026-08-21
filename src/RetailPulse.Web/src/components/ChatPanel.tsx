@@ -16,7 +16,7 @@ import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage,
 import type { SendMessageOptions } from '../services/api';
 import { sendMessage, isErrorReply, isChatRequestTimeoutError } from '../services/api';
 import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
-import { cancelChatSession } from '../services/executionControlApi';
+import { cancelChatSession, cancelPlan } from '../services/executionControlApi';
 import { useConnectionStatus } from '../hooks/useConnectionStatus';
 import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 import { TimeoutDialog } from './TimeoutDialog';
@@ -36,6 +36,7 @@ import { PROMPT_CATEGORIES } from '../constants/prompts';
 import { sanitizeMessage } from '../utils';
 import { PlanView } from './plan';
 import type { PlanController } from '../state/usePlanController';
+import { isPlanRunning } from '../state/planReducer';
 
 const ChartRenderer = lazy(() => import('./ChartRenderer'));
 
@@ -687,7 +688,19 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, p
     // Fire-and-forget: the local abort has already resolved the UI. A
     // 404 (nothing to cancel) is expected on the race where the run just
     // completed on the server; we don't surface it as an error.
-    cancelChatSession(sessionId).catch((err) => {
+    // Prefer the plan-scoped cancel when the current turn is a running
+    // plan (#96 populated planController.active with a real planId).
+    // Falls back to the session-scoped cancel for the fast/single-shot
+    // path and for anonymous callers who cannot own a plan.
+    const activePlan = planController?.active;
+    const usePlanCancel =
+      activePlan != null &&
+      activePlan.planId.length > 0 &&
+      isPlanRunning(activePlan.status);
+    const cancelPromise = usePlanCancel
+      ? cancelPlan(activePlan.planId)
+      : cancelChatSession(sessionId);
+    cancelPromise.catch((err) => {
       if (import.meta.env.DEV) console.error('Server-side cancel failed:', err);
     });
     if (isMountedRef.current) {
@@ -697,7 +710,7 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved, p
         { role: 'assistant', content: 'Cancelled.' },
       ]);
     }
-  }, [loading, sessionId]);
+  }, [loading, sessionId, planController]);
 
   const handleTimeoutRetry = useCallback(() => {
     const prompt = timeoutInfo?.prompt ?? lastPromptRef.current;

@@ -7,6 +7,7 @@ import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 const sendMessageMock = vi.fn();
 const isErrorReplyMock = vi.fn((reply: string) => reply.startsWith('⏳'));
 const cancelChatSessionMock = vi.fn().mockResolvedValue('cancelled');
+const cancelPlanMock = vi.fn().mockResolvedValue('cancelled');
 
 class ChatRequestTimeoutError extends Error {
   readonly name = 'ChatRequestTimeoutError';
@@ -26,6 +27,7 @@ vi.mock('../services/api', () => ({
 
 vi.mock('../services/executionControlApi', () => ({
   cancelChatSession: (...args: unknown[]) => cancelChatSessionMock(...args),
+  cancelPlan: (...args: unknown[]) => cancelPlanMock(...args),
 }));
 
 vi.mock('../services/telemetryHub', () => ({
@@ -59,6 +61,8 @@ beforeEach(() => {
   sendMessageMock.mockReset();
   cancelChatSessionMock.mockClear();
   cancelChatSessionMock.mockResolvedValue('cancelled');
+  cancelPlanMock.mockClear();
+  cancelPlanMock.mockResolvedValue('cancelled');
   isErrorReplyMock.mockClear();
   isErrorReplyMock.mockImplementation((reply: string) => reply.startsWith('⏳'));
 });

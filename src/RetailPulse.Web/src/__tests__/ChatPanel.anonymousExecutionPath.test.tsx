@@ -28,6 +28,7 @@ vi.mock('../services/telemetryHub', () => ({
 
 vi.mock('../services/executionControlApi', () => ({
   cancelChatSession: vi.fn().mockResolvedValue('cancelled'),
+  cancelPlan: vi.fn().mockResolvedValue('cancelled'),
 }));
 
 vi.mock('../auth/activeProvider', () => ({

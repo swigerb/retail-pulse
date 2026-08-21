@@ -29,6 +29,7 @@ vi.mock('../services/telemetryHub', () => ({
 
 vi.mock('../services/executionControlApi', () => ({
   cancelChatSession: vi.fn().mockResolvedValue('cancelled'),
+  cancelPlan: vi.fn().mockResolvedValue('cancelled'),
 }));
 
 // activeAuthMode drives whether the execution-path selector is rendered.

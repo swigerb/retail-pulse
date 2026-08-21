@@ -145,6 +145,18 @@ export type PlanAction =
   | { type: 'CLARIFICATION_RESOLVED'; planId: string; requestId: string }
   | { type: 'PLAN_FINAL'; planId: string; reply: string; terminalReason?: string | null }
   | { type: 'CONNECTION_STATUS'; connected: boolean }
+  | {
+      // Reconciled delta after a hub reconnect (issue #92): merges any
+      // durable step records the client did not render while offline into
+      // the active plan without regressing terminal steps and refreshes
+      // the plan header from the durable snapshot.
+      type: 'STEPS_RECONCILED';
+      planId: string;
+      steps: readonly PlanStep[];
+      status?: PlanStatus;
+      updatedAt?: string;
+      failureReason?: string | null;
+    }
   | { type: 'ELAPSED_TICK'; now: number }
   | { type: 'CLOSE_ACTIVE' }
   | { type: 'HISTORY_LOADING' }
@@ -477,6 +489,58 @@ export function planReducer(state: PlanAppState, action: PlanAction): PlanAppSta
       return {
         ...state,
         active: { ...state.active, connectionLost: !action.connected },
+      };
+    }
+
+    case 'STEPS_RECONCILED': {
+      if (!state.active || state.active.planId !== action.planId) return state;
+      // Terminal-monotonic merge, keyed by stepIndex. A step already terminal
+      // in the rendered state is NEVER overwritten by a non-terminal record
+      // — that would let a stale streamed placeholder regress a completed
+      // step during reconnect reconciliation. Non-terminal existing steps
+      // are always replaced by the incoming record so refreshed durable
+      // detail (final result / durationMs / tokens) supersedes the stream
+      // placeholder.
+      const byIndex = new Map<number, PlanStep>();
+      for (const existing of state.active.steps) {
+        byIndex.set(existing.stepIndex, existing);
+      }
+      for (const incoming of action.steps) {
+        if (!Number.isFinite(incoming.stepIndex)) continue;
+        const existing = byIndex.get(incoming.stepIndex);
+        if (!existing) {
+          byIndex.set(incoming.stepIndex, incoming);
+          continue;
+        }
+        if (isStepTerminal(existing.status) && !isStepTerminal(incoming.status)) {
+          continue;
+        }
+        byIndex.set(incoming.stepIndex, incoming);
+      }
+      const mergedSteps = [...byIndex.values()].sort(
+        (a, b) => a.stepIndex - b.stepIndex,
+      );
+
+      const nextStatus = action.status ?? state.active.status;
+      const wasRunning = isPlanRunning(state.active.status);
+      const stillRunning = isPlanRunning(nextStatus);
+      const finishedAt = wasRunning && !stillRunning && !state.active.finishedAt
+        ? Date.now()
+        : state.active.finishedAt;
+
+      return {
+        ...state,
+        active: {
+          ...state.active,
+          steps: mergedSteps,
+          status: nextStatus,
+          updatedAt: action.updatedAt ?? state.active.updatedAt,
+          failureReason:
+            action.failureReason !== undefined
+              ? action.failureReason
+              : state.active.failureReason,
+          finishedAt,
+        },
       };
     }
 
