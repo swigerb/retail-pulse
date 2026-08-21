@@ -23,7 +23,9 @@ import { ApprovalCard } from './ApprovalCard';
 import { StreamingMessage, CacheIndicator } from './streaming';
 import { ProgressIndicator } from './ProgressIndicator';
 import type { ProgressStep } from './ProgressIndicator';
-import { BlockedRequestMessage } from './guardrails';
+import { BlockedRequestMessage, WithheldOutputMessage } from './guardrails';
+import { detectSafetyRefusal } from '../utils/safetyDisplay';
+import type { SafetyBlockDisplayModel } from '../types';
 import { PromptLibrary } from './PromptLibrary';
 import { PROMPT_CATEGORIES } from '../constants/prompts';
 import { sanitizeMessage } from '../utils';
@@ -42,7 +44,7 @@ interface ChatMessage {
   approval?: ApprovalRequest;
   isStreaming?: boolean;
   cacheInfo?: CacheInfo;
-  blocked?: { reason: string; suggestion?: string };
+  blocked?: { reason: string; suggestion?: string; display?: SafetyBlockDisplayModel };
 }
 
 interface ChatPanelProps {
@@ -476,11 +478,27 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
         onResponseReceivedRef.current?.(errorMasked
           ? { totalDurationMs: response.totalDurationMs }
           : { totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, routing: response.routing });
+        // Sniff the reply for a Content Safety / guardrails refusal template.
+        // When it matches, replace the raw reply with the whitelisted
+        // `SafetyBlockDisplayModel` returned by `detectSafetyRefusal` so the
+        // user sees a plain-language explanation without any internal
+        // detection detail leaking through.
+        const safetyDisplay = detectSafetyRefusal(response.reply);
         setMessages(prev => [
           ...prev,
-          errorMasked
-            ? { role: 'assistant' as const, content: response.reply }
-            : { role: 'assistant' as const, content: response.reply, spans: response.spans, charts: response.charts, routing: response.routing, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, memoryContext: response.memoryContext },
+          safetyDisplay
+            ? {
+                role: 'assistant' as const,
+                content: safetyDisplay.reason,
+                blocked: {
+                  reason: safetyDisplay.reason,
+                  suggestion: safetyDisplay.suggestion,
+                  display: safetyDisplay,
+                },
+              }
+            : errorMasked
+              ? { role: 'assistant' as const, content: response.reply }
+              : { role: 'assistant' as const, content: response.reply, spans: response.spans, charts: response.charts, routing: response.routing, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, memoryContext: response.memoryContext },
         ]);
       } catch (err) {
         if (!isMountedRef.current || controller.signal.aborted) return;
@@ -589,7 +607,19 @@ export function ChatPanel({ onResponseReceived, approvals, onApprovalResolved }:
                 appearance="subtle"
               >
                 {msg.role === 'assistant' && msg.blocked ? (
-                  <BlockedRequestMessage reason={msg.blocked.reason} suggestion={msg.blocked.suggestion} />
+                  msg.blocked.display?.stage === 'output' ? (
+                    <WithheldOutputMessage
+                      display={msg.blocked.display}
+                      suggestion={msg.blocked.suggestion}
+                    />
+                  ) : msg.blocked.display ? (
+                    <BlockedRequestMessage display={msg.blocked.display} />
+                  ) : (
+                    <BlockedRequestMessage
+                      reason={msg.blocked.reason}
+                      suggestion={msg.blocked.suggestion}
+                    />
+                  )
                 ) : msg.role === 'assistant' && msg.isStreaming ? (
                   <StreamingMessage
                     tokens={sanitizeMessage(msg.content)}

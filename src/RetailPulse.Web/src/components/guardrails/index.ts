@@ -1,4 +1,13 @@
 export { BlockedRequestMessage } from './BlockedRequestMessage';
+export type { BlockedRequestMessageProps } from './BlockedRequestMessage';
+export { WithheldOutputMessage } from './WithheldOutputMessage';
+export type { WithheldOutputMessageProps } from './WithheldOutputMessage';
+export { PlanStepSafetyBlock } from './PlanStepSafetyBlock';
+export type { PlanStepSafetyBlockProps } from './PlanStepSafetyBlock';
+export { KnowledgeIngestionBlock } from './KnowledgeIngestionBlock';
+export type { KnowledgeIngestionBlockProps } from './KnowledgeIngestionBlock';
+export { ContentSafetyStatusBadge } from './ContentSafetyStatusBadge';
+export type { ContentSafetyStatusBadgeProps } from './ContentSafetyStatusBadge';
 export { GuardrailsDashboard } from './GuardrailsDashboard';
 export { PiiRedactionBadge, renderWithRedactions } from './PiiRedactionBadge';
 export { GuardrailsConfig } from './GuardrailsConfig';
