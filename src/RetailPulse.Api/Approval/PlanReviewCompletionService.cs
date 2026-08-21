@@ -193,22 +193,66 @@ public sealed class PlanReviewCompletionService
         switch (continuation.Kind)
         {
             case PlanReviewContinuationKind.Approved:
-                return await ExecuteApprovedPlanAsync(
-                    sp, planStore, plan, state,
-                    continuation.ApprovedSteps ?? state.Steps,
-                    continuation.TerminalReason, ct);
+                {
+                    // Atomic claim: two concurrent resume drivers (endpoint kickoff
+                    // + restart recovery, or two endpoint callers racing the same
+                    // approval row) both observe the persisted winner via
+                    // FindLatestRowForPlanAsync, then both would call
+                    // ExecuteApprovedPlanAsync and run the specialists twice.
+                    // Collapse that race to one caller via a conditional
+                    // AwaitingReview → Running transition; the loser NoOps.
+                    bool claimed = await planStore.TryTransitionStatusAsync(
+                        plan.PlanId, state.Subject,
+                        PlanStatus.AwaitingReview, PlanStatus.Running, ct);
+                    return !claimed
+                        ? PlanReviewCompletionResult.NoOp(
+                            "another resume driver already claimed this plan for execution")
+                        : await ExecuteApprovedPlanAsync(
+                        sp, planStore, plan, state,
+                        continuation.ApprovedSteps ?? state.Steps,
+                        continuation.TerminalReason, ct);
+                }
 
             case PlanReviewContinuationKind.Terminal:
-                await FinaliseAsFailedAsync(planStore, plan, state.Subject,
-                    $"{continuation.TerminalReason}: {continuation.FailureMessage}", sp, ct);
-                await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, state.SessionId,
-                    BuildTerminalReply(continuation.TerminalReason), continuation.TerminalReason);
-                return PlanReviewCompletionResult.TerminatedWithoutExecution(
-                    continuation.TerminalReason,
-                    continuation.FailureMessage);
+                {
+                    // Same-race guard as the Approved branch: only the caller that
+                    // wins the AwaitingReview → Failed transition finalizes the
+                    // row and broadcasts. The loser NoOps so the SignalR surface
+                    // sees exactly one terminal broadcast.
+                    bool claimed = await planStore.TryTransitionStatusAsync(
+                        plan.PlanId, state.Subject,
+                        PlanStatus.AwaitingReview, PlanStatus.Failed, ct);
+                    if (!claimed)
+                    {
+                        return PlanReviewCompletionResult.NoOp(
+                            "another resume driver already terminated this plan");
+                    }
+                    await FinaliseAsFailedAsync(planStore, plan, state.Subject,
+                        $"{continuation.TerminalReason}: {continuation.FailureMessage}", sp, ct);
+                    await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, state.SessionId,
+                        BuildTerminalReply(continuation.TerminalReason), continuation.TerminalReason);
+                    return PlanReviewCompletionResult.TerminatedWithoutExecution(
+                        continuation.TerminalReason,
+                        continuation.FailureMessage);
+                }
 
             case PlanReviewContinuationKind.NeedsReplan:
                 {
+                    // Two callers with the same persisted-rejected decision would
+                    // otherwise both write new checkpoints and both open new
+                    // approval rows for round N+1. Claim exclusive ownership via
+                    // AwaitingReview → Running; only the winner opens the new
+                    // round. Restore to AwaitingReview after so external
+                    // observers (poll, list) see a coherent status.
+                    bool claimed = await planStore.TryTransitionStatusAsync(
+                        plan.PlanId, state.Subject,
+                        PlanStatus.AwaitingReview, PlanStatus.Running, ct);
+                    if (!claimed)
+                    {
+                        return PlanReviewCompletionResult.NoOp(
+                            "another resume driver already opened the next round");
+                    }
+
                     // Rehydrate the roster from the current process's DI so we
                     // replan against the same specialists the executor will run.
                     IReadOnlyList<ISpecialistAgent> roster =
@@ -219,6 +263,9 @@ public sealed class PlanReviewCompletionService
                     if (replanned is null || replanned.IsUnusable)
                     {
                         string msg = replanned?.UnusableReason ?? "planner unavailable";
+                        // We already own the claim, so a straight FinaliseAsFailed
+                        // (unconditional Running → Failed) is safe: no other
+                        // caller reached this branch.
                         await FinaliseAsFailedAsync(planStore, plan, state.Subject,
                             $"{PlanReviewTerminalReason.ReplanExhausted}: {msg}", sp, ct);
                         await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, state.SessionId,
@@ -256,13 +303,24 @@ public sealed class PlanReviewCompletionService
                         PrincipalKey = state.PrincipalKey,
                     }, ct);
 
-                    // Broadcast that a new review round is waiting.
+                    // Restore the plan to AwaitingReview so it accurately
+                    // reflects "a new round is open for the reviewer" before
+                    // the SignalR broadcast fires.
+                    await planStore.UpdatePlanStatusAsync(new PlanStatusUpdate
+                    {
+                        PlanId = plan.PlanId,
+                        Subject = state.Subject,
+                        Status = PlanStatus.AwaitingReview,
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                    }, ct);
+
+                    // Broadcast that a new review round is waiting — scoped to
+                    // the persisted session group (#141) so a different subject's
+                    // UI never receives this reviewer's next-round pointer.
+                    // Fail closed (log + no broadcast) when the session id is
+                    // missing so an isolation-critical event never fans out to
+                    // Clients.All by accident.
                     IHubContext<TelemetryHub>? hub = sp.GetService<IHubContext<TelemetryHub>>();
-                    // Session-scoped delivery (#141): the next-round event
-                    // reveals the plan id and reviewer request id of another
-                    // subject's in-flight plan and MUST NOT reach other
-                    // clients. Route it through the owning session's group;
-                    // fail closed on missing identity.
                     await SendToOwningSessionAsync(
                         hub, state.SessionId, "plan_review_next_round", new
                         {
@@ -304,6 +362,17 @@ public sealed class PlanReviewCompletionService
 
         if (!clarification.IsAnswered)
         {
+            // Concurrent-caller guard: only the caller that wins the
+            // AwaitingClarification → Failed transition finalizes and
+            // broadcasts; the loser NoOps.
+            bool claimedTerminal = await planStore.TryTransitionStatusAsync(
+                plan.PlanId, state.Subject,
+                PlanStatus.AwaitingClarification, PlanStatus.Failed, ct);
+            if (!claimedTerminal)
+            {
+                return PlanReviewCompletionResult.NoOp(
+                    "another resume driver already terminated this clarification");
+            }
             await FinaliseAsFailedAsync(planStore, plan, state.Subject,
                 $"{clarification.TerminalReason}: reviewer did not provide a usable answer.",
                 sp, ct);
@@ -313,26 +382,39 @@ public sealed class PlanReviewCompletionService
                 clarification.TerminalReason, "no usable clarification answer");
         }
 
+        // Concurrent-caller guard for the answered path — only the caller
+        // that flips AwaitingClarification → Running proceeds; the losing
+        // caller NoOps. Without this the executor would run twice and the
+        // final broadcast would fire twice per specialist.
+        bool claimedRun = await planStore.TryTransitionStatusAsync(
+            plan.PlanId, state.Subject,
+            PlanStatus.AwaitingClarification, PlanStatus.Running, ct);
+        if (!claimedRun)
+        {
+            return PlanReviewCompletionResult.NoOp(
+                "another resume driver already claimed this clarification for execution");
+        }
+
         // Substitute the answer as the paused step's Result, then execute the
         // remaining steps AFTER the paused step.
         //
-        // Index-rebase note (#141): the executor stores <c>state.Steps</c>
-        // rebased to start at the pause — see PlanExecutor.SuspendForClarificationAsync
-        // which writes <c>execution.Plan.Steps.Skip(stepIndex)</c>. Element 0
-        // of <c>state.Steps</c> IS the paused (CLARIFY) step; elements 1..N
-        // are the post-pause specialists that still need to run.
-        //
-        // The previous implementation indexed <c>state.Steps</c> with
-        // <c>state.PausedAtStepIndex</c> — the ORIGINAL plan index — so on any
-        // plan that paused past index 0 it (a) recorded the wrong step as the
-        // "answer" transcript and (b) skipped the first post-pause specialist
-        // entirely. Rebase against element 0 instead, and take the true
-        // remaining as <c>Skip(1)</c>. The persisted
-        // <see cref="PlanReviewCompletedStep.StepIndex"/> keeps the original
-        // index so downstream numbering is unchanged.
-        int pauseIndex = state.PausedAtStepIndex ?? 0;
-        List<PlanReviewCompletedStep> priorCompleted =
-            [.. state.CompletedSteps ?? []];
+        // Coherent checkpoint coordinate model (see PlanReviewCheckpointState
+        // XML doc, #141): every suspension writer slices <c>Steps</c> so the
+        // paused step sits at position 0 and every downstream step follows at
+        // positions 1..N. The reader ALWAYS resolves the paused step as
+        // <c>Steps[0]</c> and the downstream plan as <c>Steps.Skip(1)</c>.
+        // Legacy checkpoints from before this fix wrote the same sliced Steps
+        // but recorded <c>PausedAtStepIndex</c> as the ABSOLUTE index in the
+        // ORIGINAL plan; the buggy reader treated that absolute value as an
+        // index into the sliced list, which for any non-first clarification
+        // either fabricated a synthetic paused step or produced an empty
+        // remaining slice and silently skipped every downstream step. Under
+        // the new model, <c>PausedAtStepIndex</c> is preserved for audit only
+        // — the reader ignores it for element resolution so the same code
+        // path works for both the buggy legacy shape and freshly written
+        // checkpoints. The persisted <see cref="PlanReviewCompletedStep.StepIndex"/>
+        // still uses the original absolute index so downstream numbering is
+        // unchanged.
 
         PlanReviewStepDto paused = state.Steps.Count > 0
             ? state.Steps[0]
@@ -342,9 +424,19 @@ public sealed class PlanReviewCompletionService
                 Intent = "clarification",
                 Action = "clarification",
             };
+        // Cumulative context: every previously-completed step (from earlier
+        // rounds — could include the transcripts of a prior clarification
+        // resume) plus the just-answered paused step. Repeated clarifications
+        // must not reset this list; the executor is seeded with the whole
+        // transcript so a downstream [[CLARIFY]] on the resumed plan writes a
+        // checkpoint whose CompletedSteps preserves every prior chart/result.
+        List<PlanReviewCompletedStep> priorCompleted =
+            [.. state.CompletedSteps ?? []];
+        int absolutePausedIndex = state.PausedAtStepIndex
+            ?? priorCompleted.Count;
         priorCompleted.Add(new PlanReviewCompletedStep
         {
-            StepIndex = pauseIndex,
+            StepIndex = absolutePausedIndex,
             SpecialistKey = paused.SpecialistKey,
             Intent = paused.Intent,
             Action = paused.Action,
@@ -362,7 +454,8 @@ public sealed class PlanReviewCompletionService
             remaining,
             PlanReviewTerminalReason.ReviewerApproved,
             ct,
-            resumeCompletedSteps: priorCompleted);
+            resumeCompletedSteps: priorCompleted,
+            claimedRunning: true);
     }
 
     // ── Shared execute path ──────────────────────────────────────────────
@@ -375,8 +468,19 @@ public sealed class PlanReviewCompletionService
         IReadOnlyList<PlanReviewStepDto> effectiveSteps,
         string terminalReason,
         CancellationToken ct,
-        IReadOnlyList<PlanReviewCompletedStep>? resumeCompletedSteps = null)
+        IReadOnlyList<PlanReviewCompletedStep>? resumeCompletedSteps = null,
+        bool claimedRunning = false)
     {
+        // Callers on the Review-Approved and Terminal branches claim the
+        // AwaitingReview → Running transition before calling us; the
+        // clarification path passes `claimedRunning: true` so it does not
+        // repeat the claim. When neither has claimed (initial plan-review
+        // resume with no prior guard — currently unreachable but kept
+        // defensive), we still write the plan into Running below so a
+        // second concurrent caller observes it and short-circuits at the
+        // top-level idempotency guard on the next round.
+        _ = claimedRunning;
+
         // Move plan to Running and materialise step ids so the executor and
         // store agree on the same shape.
         var effectivePlan = new PlanBuildResult
@@ -436,6 +540,17 @@ public sealed class PlanReviewCompletionService
             Plan = effectivePlan,
             StepIds = stepIds,
             SpecialistLookup = lookup,
+            // Seed the executor's initial AccumulatedResults with every
+            // previously-completed step (from earlier rounds and prior
+            // clarification answers). A downstream [[CLARIFY]] emitted by
+            // the resumed plan's executor sees the FULL transcript through
+            // its PlanStepMessage.AccumulatedResults, so the checkpoint it
+            // opens carries every prior chart/result forward — otherwise
+            // repeated clarifications would silently drop all pre-resume
+            // state.
+            PriorAccumulatedResults = resumeCompletedSteps is { Count: > 0 }
+                ? [.. resumeCompletedSteps.Select(ToStepResult)]
+                : [],
         };
 
         PlanExecutor executor = sp.GetRequiredService<PlanExecutor>();
@@ -499,6 +614,29 @@ public sealed class PlanReviewCompletionService
 
         return PlanReviewCompletionResult.Executed(filtered, outcome, planCharts);
     }
+
+    /// <summary>
+    /// Convert a persisted <see cref="PlanReviewCompletedStep"/> into the
+    /// executor's per-step transcript shape so the initial
+    /// <see cref="PlanStepMessage.AccumulatedResults"/> reflects the full
+    /// pre-resume history — including specialist charts.
+    /// </summary>
+    private static PlanStepResult ToStepResult(PlanReviewCompletedStep s) => new(
+        StepIndex: s.StepIndex,
+        StepId: $"resumed-{s.StepIndex}",
+        SpecialistKey: s.SpecialistKey,
+        Intent: s.Intent,
+        Action: s.Action,
+        Status: PlanStepStatus.Completed,
+        Result: s.Result,
+        Error: null,
+        InputTokens: s.InputTokens,
+        OutputTokens: s.OutputTokens,
+        TotalTokens: s.TotalTokens,
+        DurationMs: s.DurationMs)
+    {
+        Charts = s.Charts is { Count: > 0 } charts ? [.. charts] : null,
+    };
 
     private static string ComposeFinalReply(
         IReadOnlyList<PlanReviewCompletedStep>? resumeCompletedSteps,

@@ -232,7 +232,12 @@ public sealed class PlanExecutor
                 Request: execution.Request,
                 History: execution.History,
                 User: execution.User,
-                AccumulatedResults: []);
+                // Seed with any pre-completed steps the resume path passed in.
+                // A downstream [[CLARIFY]] on a resumed plan needs to see the
+                // full transcript (earlier round's completed steps + this
+                // execution's) so its checkpoint's CompletedSteps carries
+                // every prior chart/result forward.
+                AccumulatedResults: [.. execution.PriorAccumulatedResults]);
 
             var checkpointManager = CheckpointManager.CreateInMemory();
             Run run = await InProcessExecution
@@ -771,6 +776,19 @@ public sealed record PlanExecutionRequest
     public required PlanBuildResult Plan { get; init; }
     public required IReadOnlyList<string> StepIds { get; init; }
     public required IReadOnlyDictionary<string, ISpecialistAgent> SpecialistLookup { get; init; }
+
+    /// <summary>
+    /// Optional pre-executed step transcripts to seed the workflow's initial
+    /// <see cref="PlanStepMessage.AccumulatedResults"/> with. Populated by the
+    /// plan-review resume path so specialists on a resumed (clarification)
+    /// plan see the same accumulated context earlier specialists produced
+    /// before the pause. Without this a downstream <c>[[CLARIFY]]</c> on a
+    /// resumed plan would open a new checkpoint whose <c>CompletedSteps</c>
+    /// carries only THIS execution's transcripts, dropping every earlier
+    /// completed step and its charts — the "AccumulatedResults reset across
+    /// repeated clarifications" defect.
+    /// </summary>
+    public IReadOnlyList<PlanStepResult> PriorAccumulatedResults { get; init; } = [];
 }
 
 /// <summary>Terminal outcome returned to the chat endpoint.</summary>

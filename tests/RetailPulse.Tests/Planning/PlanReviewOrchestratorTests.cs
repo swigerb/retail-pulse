@@ -63,6 +63,8 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
         { Creates.Enqueue(plan); return Task.CompletedTask; }
         public Task UpdatePlanStatusAsync(PlanStatusUpdate update, CancellationToken ct = default)
         { StatusUpdates.Enqueue(update); return Task.CompletedTask; }
+        public Task<bool> TryTransitionStatusAsync(string planId, string subject, string fromStatus, string toStatus, CancellationToken ct = default)
+            => Task.FromResult(true);
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)
         { StepUpdates.Enqueue(update); return Task.CompletedTask; }
         public Task<IReadOnlyList<PlanSummaryDto>> ListPlansForSubjectAsync(string subject, CancellationToken ct = default)

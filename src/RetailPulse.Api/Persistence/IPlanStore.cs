@@ -32,6 +32,32 @@ public interface IPlanStore
     Task UpdatePlanStatusAsync(PlanStatusUpdate update, CancellationToken ct = default);
 
     /// <summary>
+    /// Atomic conditional status transition: writes <paramref name="toStatus"/>
+    /// onto the plan row for <paramref name="subject"/> only when its current
+    /// status equals <paramref name="fromStatus"/>. Returns <c>true</c> when
+    /// exactly one row transitioned (the caller "won" the transition), and
+    /// <c>false</c> when another caller already advanced the row.
+    ///
+    /// <para>
+    /// The plan-review resume path uses this to claim the effective execution
+    /// for exactly one caller when two concurrent decision / clarification
+    /// submissions race the same approval row: <see cref="IApprovalGate.RespondAsync"/>
+    /// records exactly one persisted winner, then each caller fires
+    /// <c>ResolveAsync</c>; without this claim both would call
+    /// <c>UpdatePlanStatusAsync(Running)</c>, run the executor twice, and
+    /// broadcast a duplicate <c>plan_final_response</c>. The conditional
+    /// UPDATE keyed on the pre-transition status collapses that race to a
+    /// single execution and a single broadcast.
+    /// </para>
+    /// </summary>
+    Task<bool> TryTransitionStatusAsync(
+        string planId,
+        string subject,
+        string fromStatus,
+        string toStatus,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Update one step in place — status transition, result content, tokens,
     /// duration, timestamps, or error. Every field except the primary key is
     /// nullable so the orchestrator can commit whatever it knows at each

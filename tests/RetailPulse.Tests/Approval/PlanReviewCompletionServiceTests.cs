@@ -464,6 +464,7 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
     internal sealed class InMemoryPlanStore : IPlanStore
     {
         private readonly Dictionary<string, Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>> _bySub = new(StringComparer.Ordinal);
+        private readonly Lock _sync = new();
         public Task CreatePlanAsync(PlanWrite plan, CancellationToken ct = default)
         {
             if (!_bySub.TryGetValue(plan.Subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket))
@@ -486,6 +487,40 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
             }
             return Task.CompletedTask;
         }
+
+        // Conditional transition mirrors the SqlitePlanStore semantics: only
+        // one caller can flip the status from `from` to `to`; a second caller
+        // observing a mid-transition state returns false and skips its work.
+        // A `_sync` monitor makes the check-and-set atomic so the concurrent
+        // resume-driver tests see one true winner even when two callers race
+        // this method inside <c>Task.WhenAll</c>.
+        public Task<bool> TryTransitionStatusAsync(
+            string planId, string subject, string fromStatus, string toStatus, CancellationToken ct = default)
+        {
+            lock (_sync)
+            {
+                if (!_bySub.TryGetValue(subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)
+                    || !bucket.TryGetValue(planId, out (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps) row))
+                {
+                    return Task.FromResult(false);
+                }
+                string current = row.Status?.Status ?? row.Create.Status;
+                if (!string.Equals(current, fromStatus, StringComparison.Ordinal))
+                {
+                    return Task.FromResult(false);
+                }
+                var next = new PlanStatusUpdate
+                {
+                    PlanId = planId,
+                    Subject = subject,
+                    Status = toStatus,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                };
+                bucket[planId] = (row.Create, next, row.Steps);
+                return Task.FromResult(true);
+            }
+        }
+
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)
         {
             if (_bySub.TryGetValue(update.Subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)

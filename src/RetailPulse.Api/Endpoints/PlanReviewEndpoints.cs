@@ -195,16 +195,28 @@ public static class PlanReviewEndpoints
                 responsePayload: payloadJson,
                 ct: ct);
 
+            // Build the response DTO from the PERSISTED WINNER, not the
+            // caller's own body. When two callers race the same approval row
+            // RespondAsync collapses them to a single terminal outcome; the
+            // losing caller would otherwise broadcast its own requested
+            // `kind` / `feedback` even though the row records a different
+            // decision. Resolving `kind` and `feedback` back from the
+            // persisted <see cref="ApprovalResult.ResponsePayload"/> keeps
+            // the HTTP body, the SignalR broadcast, and the durable row
+            // reporting exactly one user-visible decision end-to-end.
+            (string persistedKind, string? persistedFeedback) =
+                ExtractWinner(result, kind, feedback);
             var responseDto = new
             {
                 requestId = result.RequestId,
                 planId,
                 decision = result.Decision.ToString().ToLowerInvariant(),
-                kind,
+                kind = persistedKind,
                 comment = result.Comment,
                 respondedAt = result.RespondedAt,
                 terminalReason = result.TerminalReason,
                 round = row.Context.RoundNumber,
+                feedback = persistedFeedback,
             };
 
             // Session-scoped delivery (#141): the plan_review_resolved event
@@ -231,7 +243,9 @@ public static class PlanReviewEndpoints
             // Drive the plan through the resume path so the reviewer's
             // decision produces a real final response (execute the effective
             // plan, filter, persist, broadcast). ResolveAsync is idempotent
-            // and short-circuits when the plan is already terminal.
+            // and short-circuits when the plan is already terminal, and its
+            // TryTransitionStatusAsync guard collapses two concurrent
+            // KickoffCompletion calls to a single execution.
             if (completion is not null)
             {
                 _ = KickoffCompletionAsync(completion, planId, subject);
@@ -375,6 +389,41 @@ public static class PlanReviewEndpoints
                 return (ApprovalDecision.Modified, PlanReviewKinds.Edit, body.EditedSteps, null, null);
             default:
                 return (default, kind, null, null, $"Unknown decision kind '{kind}'. Expected approve, reject, or edit.");
+        }
+    }
+
+    /// <summary>
+    /// Resolve the winning decision's <c>kind</c> and reviewer feedback from
+    /// the persisted <see cref="ApprovalResult.ResponsePayload"/> so a losing
+    /// concurrent caller does not advertise a decision the row does not
+    /// record. Falls back to the caller-requested <paramref name="requestedKind"/>
+    /// and <paramref name="requestedFeedback"/> when the persisted payload is
+    /// missing or unparseable (e.g., a legacy or reconciler-terminated row
+    /// that never carried a plan-review payload); the caller-requested
+    /// values still describe SOMETHING coherent for that edge case, and the
+    /// gate itself already returned the correct <see cref="ApprovalResult"/>
+    /// so a caller-vs-winner drift is bounded.
+    /// </summary>
+    internal static (string Kind, string? Feedback) ExtractWinner(
+        ApprovalResult result, string requestedKind, string? requestedFeedback)
+    {
+        if (string.IsNullOrWhiteSpace(result.ResponsePayload))
+        {
+            return (requestedKind, requestedFeedback);
+        }
+        try
+        {
+            PlanReviewResponsePayload? persisted =
+                JsonSerializer.Deserialize<PlanReviewResponsePayload>(result.ResponsePayload, _jsonOptions);
+            if (persisted is null || string.IsNullOrWhiteSpace(persisted.Kind))
+            {
+                return (requestedKind, requestedFeedback);
+            }
+            return (persisted.Kind.Trim().ToLowerInvariant(), persisted.Feedback);
+        }
+        catch (JsonException)
+        {
+            return (requestedKind, requestedFeedback);
         }
     }
 

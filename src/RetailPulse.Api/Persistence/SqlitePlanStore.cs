@@ -199,6 +199,41 @@ public sealed class SqlitePlanStore : IPlanStore
         }
     }
 
+    public async Task<bool> TryTransitionStatusAsync(
+        string planId,
+        string subject,
+        string fromStatus,
+        string toStatus,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(planId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subject);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromStatus);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toStatus);
+
+        string now = DateTimeOffset.UtcNow.ToString(_iso8601, CultureInfo.InvariantCulture);
+
+        await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
+        await using SqliteCommand cmd = conn.CreateCommand();
+        // Single conditional UPDATE keyed on the pre-transition status. Two
+        // concurrent callers targeting the same row can only see rows == 1
+        // for one of them; the other observes rows == 0 and returns false.
+        cmd.CommandText = """
+            UPDATE Plans SET
+                Status = @to,
+                UpdatedAt = @now
+            WHERE PlanId = @pid AND Subject = @subject AND Status = @from
+            """;
+        cmd.Parameters.AddWithValue("@to", toStatus);
+        cmd.Parameters.AddWithValue("@from", fromStatus);
+        cmd.Parameters.AddWithValue("@now", now);
+        cmd.Parameters.AddWithValue("@pid", planId);
+        cmd.Parameters.AddWithValue("@subject", subject);
+
+        int rows = await cmd.ExecuteNonQueryAsync(ct);
+        return rows == 1;
+    }
+
     public async Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(update);

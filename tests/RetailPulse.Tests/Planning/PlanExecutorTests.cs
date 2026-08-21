@@ -39,6 +39,19 @@ public sealed class PlanExecutorTests
             return Task.CompletedTask;
         }
 
+        public Task<bool> TryTransitionStatusAsync(
+            string planId, string subject, string fromStatus, string toStatus, CancellationToken ct = default)
+        {
+            StatusUpdates.Enqueue(new PlanStatusUpdate
+            {
+                PlanId = planId,
+                Subject = subject,
+                Status = toStatus,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            });
+            return Task.FromResult(true);
+        }
+
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)
         {
             StepUpdates.Enqueue(update);
