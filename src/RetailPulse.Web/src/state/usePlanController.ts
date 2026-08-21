@@ -359,11 +359,12 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
         planId: evt.planId,
         reply: evt.reply,
         terminalReason: evt.terminalReason,
-        // Forward specialist charts on the review-resume path (issue #141).
+        // Forward specialist charts on the review-resume path (issues #137, #141).
         // Preserve the tri-state on the wire — `undefined` (field absent)
-        // preserves any prior attach, `null` explicitly clears, and an
-        // array replaces. The reducer applies the same rule for both plan
-        // paths.
+        // preserves any prior attach, `null` explicitly clears, and an array
+        // replaces. The reducer applies the same rule for both plan paths, so
+        // an older backend that omits `charts` never clears one already
+        // delivered by the immediate path.
         charts: evt.charts,
       });
     });

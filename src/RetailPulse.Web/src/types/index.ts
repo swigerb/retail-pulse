@@ -1039,8 +1039,8 @@ export interface PlanFinalResponseEvent {
   terminalReason?: string | null;
   /**
    * Optional aggregate charts produced by specialists during plan execution
-   * (issue #141). Populated on the review-resume path by
-   * `PlanReviewCompletionService.BroadcastFinalAsync`. The immediate path
+   * (issues #137, #141). Populated on the review-resume path by
+   * `PlanReviewCompletionService.BroadcastFinalAsync`; the immediate path
    * carries the same shape inline on `ChatResponse.charts`, so both plan
    * paths converge on `ChartSpec[]` for rendering.
    */

@@ -9,8 +9,12 @@ import { PlanReviewCard } from './PlanReviewCard';
 import { PlanClarificationCard } from './PlanClarificationCard';
 import { ErrorBoundary } from '../ErrorBoundary';
 
-// Lazy-load the chart renderer to keep the plan surface from pulling Recharts
-// into the initial bundle. Matches how ChatPanel and PlanStepRow load it.
+// Lazy-load `ChartRenderer` on the same chunk boundary the fast-path chat
+// bubble uses (see `ChatPanel.tsx`). Sharing the module keeps chart
+// rendering behavior (accepts, unavailable diagnostic, all 9 canonical
+// types) identical across chat, plan-first immediate, and plan-review
+// resume — the "one chart contract on both paths" invariant from issues
+// #137 and #141. Matches how ChatPanel and PlanStepRow load it.
 const ChartRenderer = lazy(() => import('../ChartRenderer'));
 
 /**

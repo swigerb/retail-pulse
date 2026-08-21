@@ -67,11 +67,15 @@ export interface ActivePlanState {
   finalReply?: string;
   terminalReason?: string | null;
   /**
-   * Aggregate charts attached to the plan's terminal response (issue #141).
-   * Populated on both plan paths: the immediate path forwards
-   * `ChatResponse.charts`, and the review-resume path forwards the
-   * `plan_final_response` event's `charts` payload. Rendered by `PlanView`
-   * near `finalReply` so specialist charts survive the plan boundary.
+   * Aggregate charts attached to the plan's terminal response (issues #137, #141).
+   * Populated by `PLAN_FINAL` from either the immediate plan-first HTTP response
+   * (`ChatResponse.charts`) or the `plan_final_response` SignalR broadcast on the
+   * review-resume path; ordering matches the specialist order the backend
+   * flattened. Rendered by `PlanView` near `finalReply` so specialist charts
+   * survive the plan boundary. Undefined until the plan settles; `null` or empty
+   * when no specialist emitted a chart. Reset transitions (PLAN_STARTED,
+   * PLAN_HYDRATED across plans, CLOSE_ACTIVE) never carry stale charts into a
+   * fresh plan.
    */
   finalCharts?: ChartSpec[] | null;
 
@@ -157,7 +161,11 @@ export type PlanAction =
       planId: string;
       reply: string;
       terminalReason?: string | null;
-      /** Aggregate charts attached to the terminal reply. */
+      /**
+       * Aggregate charts attached to the terminal reply (issues #137, #141).
+       * Flattened by the backend across every executed step, preserving
+       * specialist order. Optional/null when no specialist emitted charts.
+       */
       charts?: ChartSpec[] | null;
     }
   | { type: 'CONNECTION_STATUS'; connected: boolean }
@@ -231,6 +239,11 @@ function detailToActive(detail: PlanDetail, base: ActivePlanState | null): Activ
     clarification: base?.clarification,
     finalReply: base?.finalReply,
     terminalReason: base?.terminalReason,
+    // PlanDetail from `/api/plans/{id}` never carries aggregate `charts`,
+    // so we preserve whatever `PLAN_FINAL` already delivered for the same
+    // plan (immediate response or resume broadcast). `base` is only ever
+    // the SAME plan (guarded by planId equality in the caller), so this
+    // cannot leak charts across plans.
     finalCharts: base?.finalCharts,
     connectionLost: base?.connectionLost,
     hydrateError: undefined,
