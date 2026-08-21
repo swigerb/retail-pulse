@@ -119,7 +119,7 @@ public sealed class FoundryIQKnowledgeBase : IKnowledgeBase
     /// <inheritdoc />
     public async Task ProbeAsync(CancellationToken ct = default)
     {
-        using var linked = LinkTimeout(ct);
+        using CancellationTokenSource linked = LinkTimeout(ct);
         try
         {
             await _pipeline
@@ -162,7 +162,7 @@ public sealed class FoundryIQKnowledgeBase : IKnowledgeBase
         }
 
         int effectiveTopK = Math.Min(topK, _options.MaxResults);
-        using var linked = LinkTimeout(ct);
+        using CancellationTokenSource linked = LinkTimeout(ct);
 
         FoundryIQSearchRunResult runResult;
         try
@@ -214,7 +214,7 @@ public sealed class FoundryIQKnowledgeBase : IKnowledgeBase
     /// <inheritdoc />
     public async Task<IReadOnlyList<DocumentInfo>> ListDocumentsAsync(CancellationToken ct = default)
     {
-        using var linked = LinkTimeout(ct);
+        using CancellationTokenSource linked = LinkTimeout(ct);
         List<FoundryIQVectorStoreFileInfo> fileIds;
         try
         {
@@ -295,7 +295,7 @@ public sealed class FoundryIQKnowledgeBase : IKnowledgeBase
                 ProviderName, notFound.Message, notFound),
             FoundryIQRunFailedException runFailed => new KnowledgeProviderUnavailableException(
                 ProviderName, $"Foundry IQ {operation} failed: {runFailed.Message}", runFailed),
-            RequestFailedException rfe when rfe.Status == 401 || rfe.Status == 403 => new KnowledgeProviderUnavailableException(
+            RequestFailedException rfe when rfe.Status is 401 or 403 => new KnowledgeProviderUnavailableException(
                 ProviderName,
                 $"Foundry IQ {operation} unauthorized ({rfe.Status}). Confirm the managed identity has 'Azure AI Developer' on the project.",
                 rfe),

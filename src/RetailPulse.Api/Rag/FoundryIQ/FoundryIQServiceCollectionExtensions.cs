@@ -74,10 +74,10 @@ public static class FoundryIQServiceCollectionExtensions
         // endpoint via TryAddSingleton<PersistentAgentsClient>, the accessor
         // adopts it; otherwise the accessor lazily builds one from the
         // credential + endpoint.
-        services.TryAddSingleton<FoundryClientAccessor>(sp =>
+        services.TryAddSingleton(sp =>
             new FoundryClientAccessor(sp.GetRequiredService<TokenCredential>()));
 
-        services.TryAddSingleton<PersistentAgentsClient>(sp =>
+        services.TryAddSingleton(sp =>
         {
             FoundryIQOptions opts = sp.GetRequiredService<FoundryIQOptions>();
             FoundryClientAccessor accessor = sp.GetRequiredService<FoundryClientAccessor>();
