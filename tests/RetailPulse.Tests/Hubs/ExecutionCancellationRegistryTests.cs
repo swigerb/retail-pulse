@@ -90,6 +90,7 @@ public sealed class ExecutionCancellationRegistryTests
 
         int loopIterations = 0;
         bool observedCancellation = false;
+        var firstIteration = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var toolTask = Task.Run(async () =>
         {
@@ -98,7 +99,8 @@ public sealed class ExecutionCancellationRegistryTests
                 while (true)
                 {
                     cts.Token.ThrowIfCancellationRequested();
-                    Interlocked.Increment(ref loopIterations);
+                    int n = Interlocked.Increment(ref loopIterations);
+                    if (n == 1) firstIteration.TrySetResult();
                     await Task.Delay(10, cts.Token).ConfigureAwait(false);
                 }
             }
@@ -108,8 +110,11 @@ public sealed class ExecutionCancellationRegistryTests
             }
         });
 
-        // Let the "tool" run a few iterations.
-        await Task.Delay(60);
+        // Wait deterministically for the tool to actually enter its loop rather
+        // than sleeping a fixed budget. Under CPU contention from the full suite,
+        // a fixed Task.Delay would race the thread-pool scheduler and observe
+        // zero iterations, causing spurious failures like #152.
+        await firstIteration.Task.WaitAsync(TimeSpan.FromSeconds(10));
         int before = Volatile.Read(ref loopIterations);
         before.Should().BeGreaterThan(0);
 
@@ -119,14 +124,15 @@ public sealed class ExecutionCancellationRegistryTests
         result.Should().Be(ExecutionCancelResult.Cancelled);
 
         // The tool loop must actually stop — assert BOTH termination AND
-        // that the iteration count freezes (proving the tool ceased its
-        // work, not merely that the outer HTTP response returned).
-        await toolTask.WaitAsync(TimeSpan.FromSeconds(2));
+        // that the iteration count freezes after the task has terminated
+        // (proving the tool ceased its work, not merely that the outer HTTP
+        // response returned). Because we await toolTask first, no additional
+        // iterations can occur regardless of scheduler load.
+        await toolTask.WaitAsync(TimeSpan.FromSeconds(5));
         observedCancellation.Should().BeTrue(
             "the in-flight tool invocation must observe cancellation via the shared CTS token");
 
         int after = Volatile.Read(ref loopIterations);
-        await Task.Delay(80);
         int later = Volatile.Read(ref loopIterations);
         later.Should().Be(after,
             "the tool loop must actually stop iterating after cancellation, not just return HTTP");
