@@ -391,6 +391,36 @@ export function planReducer(state: PlanAppState, action: PlanAction): PlanAppSta
       if (!state.active || state.active.planId !== action.planId) return state;
       const review = state.active.review;
       if (!review || review.requestId !== action.requestId) return state;
+      // Guard against a late HTTP decision response landing after the plan
+      // already went terminal via plan_final_response (issue #145 finding 4).
+      // If the plan is already carrying a final reply OR sits in a terminal
+      // status, we must preserve the terminal snapshot and only reconcile
+      // the review handle (clear decisionInFlight, record resolvedKind).
+      // Reverting to `running`/`awaiting_review` here would regress a
+      // completed / failed / cancelled / unusable plan back into a
+      // non-terminal state and break PlanView's terminal rendering.
+      const terminalStatuses: readonly PlanStatus[] = [
+        'completed',
+        'failed',
+        'cancelled',
+        'unusable',
+      ];
+      const alreadyTerminal =
+        state.active.finalReply !== undefined
+        || terminalStatuses.includes(state.active.status);
+      if (alreadyTerminal) {
+        return {
+          ...state,
+          active: {
+            ...state.active,
+            review: {
+              ...review,
+              decisionInFlight: undefined,
+              resolvedKind: action.kind,
+            },
+          },
+        };
+      }
       // Approved & edited move the plan back to running (executor resumes);
       // rejected keeps it in awaiting_review until the next round arrives.
       const nextStatus: PlanStatus =

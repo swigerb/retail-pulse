@@ -127,6 +127,24 @@ public sealed record PlanReviewCheckpointState
 
     // Clarification-only fields, null on plain plan-review checkpoints.
     public int? PausedAtStepIndex { get; init; }
+
+    /// <summary>
+    /// Persisted step id (as materialised by the caller that wrote the initial
+    /// plan) of the paused step. Present on clarification checkpoints so the
+    /// resume path can transition that specific row out of
+    /// <c>Pending</c> and record the reviewer's answer on it. Without this
+    /// pointer the answered clarification's row keeps advertising itself as
+    /// pending indefinitely (finding 1b, #145).
+    /// </summary>
+    public string? PausedStepId { get; init; }
+
+    /// <summary>
+    /// Steps that already completed before the suspension. Populated on both
+    /// clarification checkpoints AND mid-plan review checkpoints so the
+    /// completed prefix survives across the reviewer round-trip: without it,
+    /// approving a mid-plan <c>[[REPLAN]]</c> silently drops the pre-marker
+    /// results and charts on the final reply (finding 2, #145).
+    /// </summary>
     public IReadOnlyList<PlanReviewCompletedStep>? CompletedSteps { get; init; }
 }
 

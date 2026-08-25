@@ -163,6 +163,10 @@ public sealed class PlanReviewCoordinator
             ApprovalRequestId = string.Empty,
             CreatedAt = _timeProvider.GetUtcNow(),
             RevisionReason = input.RevisionReason,
+            // Preserve the completed prefix across the reviewer round-trip so
+            // ExecuteApprovedPlanAsync / a subsequent replan round can flatten
+            // it back into the final broadcast (finding 2, #145).
+            CompletedSteps = input.CompletedSteps,
         };
 
         CheckpointInfo checkpoint = await _checkpoints.SaveAsync(checkpointState, ct).ConfigureAwait(false);
@@ -564,6 +568,16 @@ public sealed record PlanReviewOpenInput
     public string? TraceId { get; init; }
     public string? ParentSpanId { get; init; }
     public string? PrincipalKey { get; init; }
+
+    /// <summary>
+    /// Steps that already completed before this review round was opened.
+    /// Populated when a mid-plan <c>[[REPLAN]]</c> suspension carries the
+    /// pre-marker prefix forward, and when a follow-up replan round needs to
+    /// preserve the same prefix across another reviewer round-trip. Without
+    /// this the completed prefix's specialist replies and charts are dropped
+    /// on the final broadcast (finding 2, #145).
+    /// </summary>
+    public IReadOnlyList<PlanReviewCompletedStep>? CompletedSteps { get; init; }
 }
 
 /// <summary>

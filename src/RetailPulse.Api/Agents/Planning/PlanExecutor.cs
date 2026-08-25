@@ -354,6 +354,12 @@ public sealed class PlanExecutor
         DateTimeOffset stepStart = DateTimeOffset.UtcNow;
         var sw = Stopwatch.StartNew();
 
+        // Cumulative index for consumer-visible reporting (span tags,
+        // PlanStepResult.StepIndex). Zero-shifted on the fast/initial path;
+        // shifted on the resume path so the emitted index matches the plan
+        // store's cumulative step keying (finding 1a, #145).
+        int reportedIndex = stepIndex + execution.StepIndexOffset;
+
         // Mid-plan clarification / replan signals — detected from a marker
         // prefix on the step's action so specialists don't need a new
         // interface. Both suspend the plan through the same durable
@@ -390,7 +396,7 @@ public sealed class PlanExecutor
             }, CancellationToken.None).ConfigureAwait(false);
 
             return new PlanStepResult(
-                stepIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
+                reportedIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
                 PlanStepStatus.Unusable, "", $"specialist '{planned.SpecialistKey}' not registered",
                 0, 0, 0, sw.ElapsedMilliseconds);
         }
@@ -509,12 +515,12 @@ public sealed class PlanExecutor
             _logger.LogWarning(ex, "Failed to record cost for plan {PlanId} step {StepIndex}.", execution.PlanId, stepIndex);
         }
 
-        EmitStepSpan(execution, stepIndex, stepId, planned, status, stepStart, sw, input, output);
+        EmitStepSpan(execution, reportedIndex, stepId, planned, status, stepStart, sw, input, output);
 
         // Forward the specialist's Charts verbatim (see PlanStepResult.Charts):
         // the plan-first path must not silently drop specialist charts.
         return new PlanStepResult(
-            stepIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
+            reportedIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
             status, response?.Reply ?? "", error, input, output, total, sw.ElapsedMilliseconds)
         {
             Charts = response?.Charts is { Count: > 0 } charts
@@ -600,6 +606,7 @@ public sealed class PlanExecutor
         Stopwatch sw,
         DateTimeOffset stepStart)
     {
+        int reportedIndex = stepIndex + execution.StepIndexOffset;
         string question = ExtractQuestion(planned.Action, ClarifyMarker);
 
         IReadOnlyList<PlanReviewStepDto> remaining =
@@ -642,7 +649,10 @@ public sealed class PlanExecutor
             Request = execution.Request,
             SpecialistKey = planned.SpecialistKey,
             Question = question,
-            PausedAtStepIndex = stepIndex,
+            PausedAtStepIndex = reportedIndex,
+            // Persist the paused step id so the resume path can transition
+            // that specific row out of Pending on answer (finding 1b, #145).
+            PausedStepId = stepId,
             RemainingSteps = remaining,
             SpecialistKeys = [.. execution.SpecialistLookup.Keys],
             CompletedSteps = completed,
@@ -665,12 +675,12 @@ public sealed class PlanExecutor
 
         _logger.LogInformation(
             "Plan {PlanId} step {StepIndex} suspended for clarification (requestId={RequestId}).",
-            execution.PlanId, stepIndex, handle.RequestId);
+            execution.PlanId, reportedIndex, handle.RequestId);
 
         // Return a non-Completed status so the workflow halts here — the
         // executor closure sees the status and yields terminal.
         return new PlanStepResult(
-            stepIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
+            reportedIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
             PlanStepStatus.Pending, "", null, 0, 0, 0, sw.ElapsedMilliseconds);
     }
 
@@ -684,6 +694,7 @@ public sealed class PlanExecutor
         Stopwatch sw,
         DateTimeOffset stepStart)
     {
+        int reportedIndex = stepIndex + execution.StepIndexOffset;
         string feedback = ExtractQuestion(planned.Action, ReplanMarker);
 
         IReadOnlyList<PlanReviewStepDto> remaining =
@@ -693,6 +704,27 @@ public sealed class PlanExecutor
                 SpecialistKey = s.SpecialistKey,
                 Intent = s.Intent,
                 Action = s.Action,
+            }),
+        ];
+
+        // Preserve the completed prefix (steps that ran before the [[REPLAN]]
+        // marker) across the reviewer round-trip. Without this the resume
+        // path silently drops those specialist replies and charts from the
+        // final broadcast even though they already succeeded (finding 2, #145).
+        IReadOnlyList<PlanReviewCompletedStep> completed =
+        [
+            .. message.AccumulatedResults.Select(r => new PlanReviewCompletedStep
+            {
+                StepIndex = r.StepIndex,
+                SpecialistKey = r.SpecialistKey,
+                Intent = r.Intent,
+                Action = r.Action,
+                Result = r.Result,
+                InputTokens = r.InputTokens,
+                OutputTokens = r.OutputTokens,
+                TotalTokens = r.TotalTokens,
+                DurationMs = r.DurationMs,
+                Charts = r.Charts is { Count: > 0 } charts ? [.. charts] : null,
             }),
         ];
 
@@ -710,6 +742,7 @@ public sealed class PlanExecutor
             TraceId = execution.TraceId,
             ParentSpanId = execution.ParentSpanId,
             PrincipalKey = execution.PrincipalKey,
+            CompletedSteps = completed,
         }, CancellationToken.None).ConfigureAwait(false);
 
         suspension.ReviewHandle = handle;
@@ -717,7 +750,7 @@ public sealed class PlanExecutor
         sw.Stop();
         _logger.LogInformation(
             "Plan {PlanId} step {StepIndex} suspended for mid-execution review (requestId={RequestId}).",
-            execution.PlanId, stepIndex, handle.RequestId);
+            execution.PlanId, reportedIndex, handle.RequestId);
 
         await _planStore.UpdateStepAsync(new PlanStepUpdate
         {
@@ -729,7 +762,7 @@ public sealed class PlanExecutor
         }, CancellationToken.None).ConfigureAwait(false);
 
         return new PlanStepResult(
-            stepIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
+            reportedIndex, stepId, planned.SpecialistKey, planned.Intent, planned.Action,
             PlanStepStatus.Pending, "", null, 0, 0, 0, sw.ElapsedMilliseconds);
     }
 
@@ -771,6 +804,18 @@ public sealed record PlanExecutionRequest
     public required PlanBuildResult Plan { get; init; }
     public required IReadOnlyList<string> StepIds { get; init; }
     public required IReadOnlyDictionary<string, ISpecialistAgent> SpecialistLookup { get; init; }
+
+    /// <summary>
+    /// Cumulative index of <see cref="Plan"/>'s step 0 within the ORIGINAL
+    /// plan. Zero on the fast path and on the initial-plan run. Set to the
+    /// count of already-completed prefix steps when the completion service
+    /// resumes execution after a clarification / mid-plan replan pause, so
+    /// telemetry (<c>plan.step_index</c> tags on emitted step spans and
+    /// <see cref="PlanStepResult.StepIndex"/>) reports the cumulative index
+    /// consumers can join back to persisted step rows — not the local
+    /// 0-based index of the post-pause slice (finding 1a, #145).
+    /// </summary>
+    public int StepIndexOffset { get; init; }
 }
 
 /// <summary>Terminal outcome returned to the chat endpoint.</summary>
