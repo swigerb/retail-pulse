@@ -105,6 +105,80 @@ function countMarks(rootEl, chartType) {
   }
 }
 
+// `ChartRenderer.tsx` lowercases the chart type before emitting it
+// (`data-chart-type={spec.type.toLowerCase()}`), and existing frontend tests
+// assert the lowercase form (e.g. `[data-chart-type="horizontalbar"]` in
+// `ChartRenderer.horizontalBarRanking.test.tsx` and
+// `ChartRenderer.productionCanary.test.tsx`). The runner's CASES use the
+// canonical camelCase names from `ChartAcceptanceManifest.cs`, so a strict
+// equality comparison would deterministically false-fail every correctly-
+// rendered `horizontalBar` / `groupedBar` case (issue #54 item 2 revision;
+// PR #148 blocker B1). Compare case-insensitively without weakening the
+// wrong-type detection: any non-empty rendered type must still equal the
+// expected type after both are lowercased.
+function normalizeChartType(t) {
+  return String(t == null ? '' : t).toLowerCase();
+}
+
+function chartTypeMatches(renderedChartType, expectedChartType) {
+  if (renderedChartType == null) return true;
+  return normalizeChartType(renderedChartType) === normalizeChartType(expectedChartType);
+}
+
+// Offline invariant self-test for the chart-type comparator. Mirrors the
+// `-SelfTest` pattern used by `scripts/Verify-ApimLlmLogPairing.ps1` /
+// `scripts/Verify-ApimAiGateway.ps1`: no network, no npm, no browser. It
+// documents the DOM contract this runner relies on so any future regression
+// (e.g. someone re-tightens the comparison to strict equality) fails loudly
+// instead of silently mislabelling valid renders as failures.
+function selfTest() {
+  const failures = [];
+  const assert = (name, actual, expected) => {
+    if (actual !== expected) {
+      failures.push({ name, actual, expected });
+    }
+  };
+
+  // ChartRenderer emits lowercase; CASES use canonical camelCase. All three
+  // camelCase types must match their lowercase rendered form.
+  assert('horizontalbar vs horizontalBar', chartTypeMatches('horizontalbar', 'horizontalBar'), true);
+  assert('groupedbar vs groupedBar',       chartTypeMatches('groupedbar',   'groupedBar'),    true);
+  assert('stackedbar vs stackedBar',       chartTypeMatches('stackedbar',   'stackedBar'),    true);
+
+  // Single-word types (already lowercase on both sides) still match.
+  assert('bar vs bar',     chartTypeMatches('bar',   'bar'),   true);
+  assert('line vs line',   chartTypeMatches('line',  'line'),  true);
+  assert('pie vs pie',     chartTypeMatches('pie',   'pie'),   true);
+  assert('donut vs donut', chartTypeMatches('donut', 'donut'), true);
+  assert('gauge vs gauge', chartTypeMatches('gauge', 'gauge'), true);
+  assert('table vs table', chartTypeMatches('table', 'table'), true);
+
+  // Wrong-type detection must NOT be weakened by the case-insensitive fix.
+  assert('bar vs line (wrong)',                chartTypeMatches('bar', 'line'),                 false);
+  assert('bar vs horizontalBar (wrong)',       chartTypeMatches('bar', 'horizontalBar'),        false);
+  assert('groupedbar vs stackedBar (wrong)',   chartTypeMatches('groupedbar', 'stackedBar'),    false);
+  assert('table vs gauge (wrong)',             chartTypeMatches('table', 'gauge'),              false);
+
+  // Defensive: a null/missing `data-chart-type` (older builds pre-testids)
+  // must not itself cause a false failure — the runner already gates render
+  // success on marks + entities + unavailable-note, so an absent attribute
+  // yields "unknown" not "wrong."
+  assert('null rendered vs any (permissive)',      chartTypeMatches(null,      'horizontalBar'), true);
+  assert('undefined rendered vs any (permissive)', chartTypeMatches(undefined, 'bar'),           true);
+
+  // Every case declared by this runner must round-trip through the
+  // comparator against its own lowercased form (guards CASES drift).
+  for (const c of CASES) {
+    assert(
+      `CASES entry lowercases: ${c.chartType}`,
+      chartTypeMatches(normalizeChartType(c.chartType), c.chartType),
+      true,
+    );
+  }
+
+  return { ok: failures.length === 0, failures };
+}
+
 function findLatestChartCard() {
   const cards = document.querySelectorAll('[data-testid="chart-card"]');
   return cards.length ? cards[cards.length - 1] : null;
@@ -208,6 +282,14 @@ async function waitForResponse(prevCardCount, prevNoteCount, chartType, minMarks
 }
 
 async function runChartAcceptance() {
+  // Fail-fast on the DOM-contract invariant so a future regression to the
+  // pre-#148 strict-equality comparator can't silently label valid renders
+  // as failures (PR #148 blocker B1).
+  const st = selfTest();
+  if (!st.ok) {
+    console.error('❌ browser-chart-acceptance selfTest failed:', st.failures);
+    throw new Error('browser-chart-acceptance selfTest failed — chart-type comparator invariant broken.');
+  }
   const results = [];
   for (const c of CASES) {
     const prevCards = document.querySelectorAll('[data-testid="chart-card"]').length;
@@ -222,7 +304,9 @@ async function runChartAcceptance() {
       const cardText = card ? card.textContent : '';
       const missingEntities = c.entities.filter((e) => !cardText.includes(e));
       const cardChartType = card ? card.getAttribute('data-chart-type') : null;
-      const chartTypeMatches = !cardChartType || cardChartType === c.chartType;
+      // Case-insensitive: ChartRenderer lowercases `data-chart-type` while
+      // CASES use the canonical camelCase names from ChartAcceptanceManifest.
+      const chartTypeMatched = chartTypeMatches(cardChartType, c.chartType);
 
       const pass =
         outcome.kind === 'chart' &&
@@ -230,7 +314,7 @@ async function runChartAcceptance() {
         !note &&
         marks >= c.minMarks &&
         missingEntities.length === 0 &&
-        chartTypeMatches;
+        chartTypeMatched;
 
       results.push({
         prompt: c.prompt,
@@ -257,3 +341,20 @@ async function runChartAcceptance() {
 
 // Export for the console.
 globalThis.runChartAcceptance = runChartAcceptance;
+globalThis.chartAcceptanceSelfTest = selfTest;
+
+// When loaded under Node (no DOM globals), run the offline self-test so this
+// script can be validated without a browser, npm, or the registry. This
+// mirrors the `-SelfTest` mode in `scripts/Verify-ApimLlmLogPairing.ps1`.
+if (typeof document === 'undefined') {
+  const result = selfTest();
+  if (result.ok) {
+    console.log('SELFTEST PASS: browser-chart-acceptance chart-type comparator');
+  } else {
+    console.error('SELFTEST FAIL: browser-chart-acceptance chart-type comparator');
+    for (const f of result.failures) {
+      console.error(`  - ${f.name}: got ${JSON.stringify(f.actual)}, expected ${JSON.stringify(f.expected)}`);
+    }
+    if (typeof process !== 'undefined' && process.exit) process.exit(1);
+  }
+}
