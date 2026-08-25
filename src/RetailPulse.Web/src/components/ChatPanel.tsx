@@ -794,7 +794,7 @@ export function ChatPanel({
 
   return (
     <div className={styles.panel}>
-      <div className={styles.messages}>
+      <div className={styles.messages} data-testid="chat-message-list">
         {messages.length === 0 && (
           <div className={styles.welcome}>
             <div className={styles.welcomeLogo}><BrandLogo size={56} /></div>
@@ -882,6 +882,9 @@ export function ChatPanel({
             key={`msg-${msg.role}-${i}`}
             className={`${styles.message} ${msg.role === 'user' ? styles.messageUser : styles.messageAssistant}`}
             style={msg.planId ? { maxWidth: '95%' } : undefined}
+            data-testid={msg.role === 'assistant' ? 'chat-message-assistant' : 'chat-message-user'}
+            data-message-index={i}
+            data-message-streaming={msg.role === 'assistant' && msg.isStreaming ? 'true' : 'false'}
           >
             <Avatar
               size={36}
@@ -1054,6 +1057,7 @@ export function ChatPanel({
           placeholder="Ask about retail performance..."
           disabled={loading}
           style={FLEX_ONE_STYLE}
+          data-testid="chat-input"
         />
         {loading ? (
           <Button
@@ -1072,6 +1076,7 @@ export function ChatPanel({
             disabled={!input.trim()}
             aria-label="Send message"
             style={SEND_BUTTON_STYLE}
+            data-testid="chat-send-button"
           >
             Send
           </Button>
