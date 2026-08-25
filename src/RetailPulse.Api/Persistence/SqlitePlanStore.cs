@@ -166,38 +166,94 @@ public sealed class SqlitePlanStore : IPlanStore
         ArgumentException.ThrowIfNullOrWhiteSpace(update.Status);
 
         string now = update.UpdatedAt.ToString(_iso8601, CultureInfo.InvariantCulture);
+        bool isTerminal = IsTerminalPlanStatus(update.Status);
 
         await using SqliteConnection conn = await SqliteMount.OpenAsync(_connectionString, ct);
-        await using SqliteCommand cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            UPDATE Plans SET
-                Status = @status,
-                FailureReason = COALESCE(@reason, FailureReason),
-                TotalInputTokens = COALESCE(@in, TotalInputTokens),
-                TotalOutputTokens = COALESCE(@out, TotalOutputTokens),
-                TotalTokens = COALESCE(@tot, TotalTokens),
-                TotalDurationMs = COALESCE(@dur, TotalDurationMs),
-                UpdatedAt = @now
-            WHERE PlanId = @pid AND Subject = @subject
-            """;
-        cmd.Parameters.AddWithValue("@status", update.Status);
-        cmd.Parameters.AddWithValue("@reason", (object?)update.FailureReason ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@in", (object?)update.TotalInputTokens ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@out", (object?)update.TotalOutputTokens ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@tot", (object?)update.TotalTokens ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@dur", (object?)update.TotalDurationMs ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@now", now);
-        cmd.Parameters.AddWithValue("@pid", update.PlanId);
-        cmd.Parameters.AddWithValue("@subject", update.Subject);
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
-        int rows = await cmd.ExecuteNonQueryAsync(ct);
-        if (rows == 0)
+        int planRows;
+        await using (SqliteCommand cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                UPDATE Plans SET
+                    Status = @status,
+                    FailureReason = COALESCE(@reason, FailureReason),
+                    TotalInputTokens = COALESCE(@in, TotalInputTokens),
+                    TotalOutputTokens = COALESCE(@out, TotalOutputTokens),
+                    TotalTokens = COALESCE(@tot, TotalTokens),
+                    TotalDurationMs = COALESCE(@dur, TotalDurationMs),
+                    UpdatedAt = @now
+                WHERE PlanId = @pid AND Subject = @subject
+                """;
+            cmd.Parameters.AddWithValue("@status", update.Status);
+            cmd.Parameters.AddWithValue("@reason", (object?)update.FailureReason ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@in", (object?)update.TotalInputTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@out", (object?)update.TotalOutputTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@tot", (object?)update.TotalTokens ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@dur", (object?)update.TotalDurationMs ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@now", now);
+            cmd.Parameters.AddWithValue("@pid", update.PlanId);
+            cmd.Parameters.AddWithValue("@subject", update.Subject);
+            planRows = await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        if (planRows == 0)
         {
             _logger.LogWarning(
                 "Plan status update rejected — no row for plan {PlanId} owned by subject {Subject}",
                 update.PlanId, update.Subject);
+            await tx.CommitAsync(ct);
+            return;
         }
+
+        // Terminal-transition orphan sweep (issue #149). Once a plan reaches
+        // any terminal state, no step row for that plan may remain Pending or
+        // Running — the persisted history must honestly reflect "the plan is
+        // over; this step was never executed". The initial `{planId}-s{i}` rows
+        // that PlanOrchestrator.SuspendForReviewAsync writes at review-open
+        // time are the canonical case: reviewer-approved execution writes a
+        // parallel `{planId}-r{round}-s{i}` set and the initial rows would
+        // otherwise linger as Pending forever, over-counting anything that
+        // reads plan state directly (audit, /api/plans/{id}/reconcile,
+        // reporting, and the #91 / #141 recovery surfaces). Doing the sweep
+        // inside the same transaction guarantees atomicity — a status write
+        // that succeeds cannot leave stale Pending step rows behind.
+        if (isTerminal)
+        {
+            await using SqliteCommand sweep = conn.CreateCommand();
+            sweep.Transaction = tx;
+            sweep.CommandText = """
+                UPDATE PlanSteps SET
+                    Status = @terminalStepStatus,
+                    CompletedAt = COALESCE(CompletedAt, @now)
+                WHERE PlanId = @pid
+                  AND Status IN (@pending, @running)
+                  AND EXISTS (SELECT 1 FROM Plans p WHERE p.PlanId = @pid AND p.Subject = @subject)
+                """;
+            sweep.Parameters.AddWithValue("@terminalStepStatus", PlanStepStatus.Skipped);
+            sweep.Parameters.AddWithValue("@now", now);
+            sweep.Parameters.AddWithValue("@pid", update.PlanId);
+            sweep.Parameters.AddWithValue("@subject", update.Subject);
+            sweep.Parameters.AddWithValue("@pending", PlanStepStatus.Pending);
+            sweep.Parameters.AddWithValue("@running", PlanStepStatus.Running);
+            int swept = await sweep.ExecuteNonQueryAsync(ct);
+            if (swept > 0)
+            {
+                _logger.LogDebug(
+                    "Plan {PlanId} reached terminal status {Status}; swept {Count} orphaned pending/running step row(s) to Skipped.",
+                    update.PlanId, update.Status, swept);
+            }
+        }
+
+        await tx.CommitAsync(ct);
     }
+
+    private static bool IsTerminalPlanStatus(string status) =>
+        status is PlanStatus.Completed
+            or PlanStatus.Failed
+            or PlanStatus.Cancelled
+            or PlanStatus.Unusable;
 
     public async Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)
     {
