@@ -223,4 +223,108 @@ public sealed class SqlitePlanStoreTests : IDisposable
         (await store.GetPlanAsync("alice", "plan-old")).Should().BeNull();
         (await store.GetPlanAsync("alice", "plan-fresh")).Should().NotBeNull();
     }
+
+    /// <summary>
+    /// Issue #149: a terminal plan-status write must atomically sweep every
+    /// remaining Pending / Running step row for the plan to Skipped so no
+    /// orphan step rows survive after the plan reaches its terminal state.
+    /// The parallel `{planId}-r{round}-s{i}` execution rows written by the
+    /// review-approved path leave the initial `{planId}-s{i}` rows Pending
+    /// forever without this guarantee.
+    /// </summary>
+    [Theory]
+    [InlineData(PlanStatus.Completed)]
+    [InlineData(PlanStatus.Failed)]
+    [InlineData(PlanStatus.Cancelled)]
+    [InlineData(PlanStatus.Unusable)]
+    public async Task Terminal_Status_Sweeps_Orphaned_Pending_Steps(string terminalStatus)
+    {
+        SqlitePlanStore store = NewStore();
+        await store.CreatePlanAsync(MakePlan("plan-149", "alice"));
+
+        // Baseline: both initial rows are Pending, as SuspendForReviewAsync writes them.
+        PlanDetailDto? before = await store.GetPlanAsync("alice", "plan-149");
+        before.Should().NotBeNull();
+        before.Steps.Should().OnlyContain(s => s.Status == PlanStepStatus.Pending);
+
+        await store.UpdatePlanStatusAsync(new PlanStatusUpdate
+        {
+            PlanId = "plan-149",
+            Subject = "alice",
+            Status = terminalStatus,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+        PlanDetailDto? after = await store.GetPlanAsync("alice", "plan-149");
+        after.Should().NotBeNull();
+        after.Status.Should().Be(terminalStatus);
+        after.Steps.Should().NotContain(s => s.Status == PlanStepStatus.Pending,
+            $"a {terminalStatus} plan must not leave step rows in Pending (issue #149).");
+        after.Steps.Should().NotContain(s => s.Status == PlanStepStatus.Running,
+            $"a {terminalStatus} plan must not leave step rows in Running (issue #149).");
+        after.Steps.Should().OnlyContain(s => s.Status == PlanStepStatus.Skipped,
+            "the initial planner-proposed step rows are swept to Skipped once the plan is terminal.");
+        after.Steps.Should().OnlyContain(s => s.CompletedAt != null,
+            "the sweep must stamp CompletedAt so downstream consumers see the row as terminal-with-timestamp.");
+    }
+
+    [Fact]
+    public async Task Terminal_Status_Sweep_Preserves_Steps_Already_Completed()
+    {
+        SqlitePlanStore store = NewStore();
+        await store.CreatePlanAsync(MakePlan("plan-mixed", "alice"));
+
+        DateTimeOffset step0Completed = DateTimeOffset.UtcNow.AddSeconds(-5);
+        await store.UpdateStepAsync(new PlanStepUpdate
+        {
+            StepId = "plan-mixed-s0",
+            PlanId = "plan-mixed",
+            Subject = "alice",
+            Status = PlanStepStatus.Completed,
+            Result = "s0 done",
+            CompletedAt = step0Completed,
+        });
+
+        await store.UpdatePlanStatusAsync(new PlanStatusUpdate
+        {
+            PlanId = "plan-mixed",
+            Subject = "alice",
+            Status = PlanStatus.Completed,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+        PlanDetailDto? after = await store.GetPlanAsync("alice", "plan-mixed");
+        after.Should().NotBeNull();
+
+        PlanStepRecordDto step0 = after.Steps.Single(s => s.StepId == "plan-mixed-s0");
+        step0.Status.Should().Be(PlanStepStatus.Completed,
+            "a step that reached Completed before the plan terminal write must NOT be rewritten by the sweep.");
+        step0.Result.Should().Be("s0 done",
+            "the sweep must leave the existing Result untouched — it only transitions Pending/Running rows.");
+
+        PlanStepRecordDto step1 = after.Steps.Single(s => s.StepId == "plan-mixed-s1");
+        step1.Status.Should().Be(PlanStepStatus.Skipped,
+            "the step that never ran must be swept to Skipped by the terminal transition.");
+    }
+
+    [Fact]
+    public async Task Non_Terminal_Status_Update_Does_Not_Sweep_Pending_Steps()
+    {
+        SqlitePlanStore store = NewStore();
+        await store.CreatePlanAsync(MakePlan("plan-run", "alice"));
+
+        await store.UpdatePlanStatusAsync(new PlanStatusUpdate
+        {
+            PlanId = "plan-run",
+            Subject = "alice",
+            Status = PlanStatus.Running,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+        PlanDetailDto? after = await store.GetPlanAsync("alice", "plan-run");
+        after.Should().NotBeNull();
+        after.Status.Should().Be(PlanStatus.Running);
+        after.Steps.Should().OnlyContain(s => s.Status == PlanStepStatus.Pending,
+            "non-terminal status transitions must NOT sweep step rows — steps are still legitimately Pending.");
+    }
 }
