@@ -118,7 +118,7 @@ public sealed class PlanStateIntegrityTests : IDisposable
         PlanStepUpdate? pausedUpdate = plans.GetLastStepUpdate("user-1", suspend.PlanId, pausedStepId);
         pausedUpdate.Should().NotBeNull(
             "the paused clarification step's row must exist under the initial-plan step id.");
-        pausedUpdate!.Status.Should().Be(PlanStepStatus.Completed,
+        pausedUpdate.Status.Should().Be(PlanStepStatus.Completed,
             "an answered clarification MUST transition its persisted row out of Pending — otherwise " +
             "plan-detail reads keep reporting the answered step as awaiting reviewer input (finding 1b).");
         pausedUpdate.Result.Should().Contain("REVIEWER_ANSWER",
@@ -590,13 +590,11 @@ public sealed class PlanStateIntegrityTests : IDisposable
             // still Running. The completion service's own recovery write
             // (Failed) must be allowed through — that's the whole point of
             // the fix: contain the fault and finalize the row anyway.
-            if (ExplodeOnTerminalTransitions
-                && string.Equals(update.Status, PlanStatus.Completed, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"simulated transient failure writing plan status '{update.Status}' for {update.PlanId}");
-            }
-            return _inner.UpdatePlanStatusAsync(update, ct);
+            return ExplodeOnTerminalTransitions
+                && string.Equals(update.Status, PlanStatus.Completed, StringComparison.Ordinal)
+                ? throw new InvalidOperationException(
+                    $"simulated transient failure writing plan status '{update.Status}' for {update.PlanId}")
+                : _inner.UpdatePlanStatusAsync(update, ct);
         }
 
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)

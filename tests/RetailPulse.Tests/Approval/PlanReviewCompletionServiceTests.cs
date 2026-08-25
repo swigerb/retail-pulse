@@ -534,13 +534,11 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
         /// </summary>
         internal PlanStepUpdate? GetLastStepUpdate(string subject, string planId, string stepId)
         {
-            if (_bySub.TryGetValue(subject, out var bucket)
-                && bucket.TryGetValue(planId, out var row)
-                && row.Steps.TryGetValue(stepId, out var step))
-            {
-                return step;
-            }
-            return null;
+            return _bySub.TryGetValue(subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)
+                && bucket.TryGetValue(planId, out (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps) row)
+                && row.Steps.TryGetValue(stepId, out PlanStepUpdate? step)
+                ? step
+                : null;
         }
 
         /// <summary>
@@ -552,12 +550,10 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
         /// </summary>
         internal PlanStatusUpdate? GetLastStatusUpdate(string subject, string planId)
         {
-            if (_bySub.TryGetValue(subject, out var bucket)
-                && bucket.TryGetValue(planId, out var row))
-            {
-                return row.Status;
-            }
-            return null;
+            return _bySub.TryGetValue(subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)
+                && bucket.TryGetValue(planId, out (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps) row)
+                ? row.Status
+                : null;
         }
     }
 

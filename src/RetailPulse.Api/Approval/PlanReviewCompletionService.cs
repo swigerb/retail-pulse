@@ -378,7 +378,7 @@ public sealed class PlanReviewCompletionService
             {
                 await planStore.UpdateStepAsync(new PlanStepUpdate
                 {
-                    StepId = state.PausedStepId!,
+                    StepId = state.PausedStepId,
                     PlanId = plan.PlanId,
                     Subject = state.Subject,
                     Status = PlanStepStatus.Completed,
