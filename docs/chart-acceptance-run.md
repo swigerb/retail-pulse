@@ -24,9 +24,29 @@ does the same thing end-to-end for each curated prompt.
 3. Land on the empty chat.
 4. Open DevTools → Console; paste the contents of
    `scripts/browser-chart-acceptance.js`; run `await runChartAcceptance()`.
+   The runner uses **stable `data-testid` selectors** on the composer
+   (`chat-input`, `chat-send-button`), on the message wrappers
+   (`chat-message-assistant`), and on the chart surfaces
+   (`chart-card`, `chart-unavailable`, `chart-table`, `chart-gauge-svg`) so
+   selector drift is impossible against any recent build. It also polls
+   **actual mark readiness** — the case's `minMarks` bar-rectangles /
+   pie-sectors / line dots / table rows / gauge SVG must be present AND
+   stable across one polling interval before the runner scrapes the DOM.
 5. Copy the resulting JSON from the `COPY-TO-DOCS:` log line into the
    "Latest run" section below with the date, provider mode, and app version
    (git SHA).
+
+### Also available: prose (non-chart) prompt library sweep
+
+The sibling script
+[`scripts/browser-prompt-library-acceptance.js`](../scripts/browser-prompt-library-acceptance.js)
+covers every **prose** (non-chart) curated prompt across the six domain
+categories. It reuses the same stable testids, expects a non-empty prose
+response with no chart card leak, and reports the observed routing pill so a
+prose prompt that accidentally landed on the Consensus Council fails
+explicitly. Paired with the chart runner it exercises the full
+`PROMPT_CATEGORIES` library — the surface the production sweep in issue #63
+requires.
 
 ## Latest run
 
