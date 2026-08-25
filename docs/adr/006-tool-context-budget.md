@@ -77,5 +77,9 @@ tool is added without a bounded-output classification.
 ## Related
 
 - ADR-002 (MCP tool server), ADR-004 (caching strategy)
+- ADR-014 (plan-first orchestration) — a plan is opened once as the outer
+  `RequestToolContext` scope so the dedup map, distinct-call counter, and
+  cumulative-chars ceiling accumulate across every step of a plan instead of
+  resetting per specialist call.
 - `docs/tool-context-budget.md`
 - `src/RetailPulse.Api/Budget/*`, `tests/RetailPulse.Tests/Budget/*`

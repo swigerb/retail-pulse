@@ -14,11 +14,49 @@
 
 ## Overview
 
-Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI to analyze depletion trends, shipment dynamics, and field sentiment for retail & CPG brands. A **multi-agent system** powered by the Microsoft AI Framework (MAF) and Model Context Protocol (MCP) reasons over natural-language questions, delegates to specialist agents, and calls MCP tools to fetch data, streaming every step back to the browser with full distributed tracing.
+Retail Pulse is an AI-powered brand intelligence platform that analyses depletion trends, shipment dynamics, and field sentiment for retail & CPG brands. The API is built on the **Microsoft Agent Framework** (`Microsoft.Agents.AI` 1.18.0). Every LLM call — router, specialists, planner, and consensus council — runs through the shared `MafAgentInvoker` seam, which materialises a per-invocation `ChatClientAgent` with `UseProvidedChatClientAsIs = true` so the DI-registered `IChatClient` decorator stack (function invocation cap, OpenTelemetry, MCP HTTP resilience) is preserved end-to-end. Multi-domain turns are lifted onto the plan-first orchestrator, which is a real `Microsoft.Agents.AI.Workflows.InProcessExecution` with framework checkpoints for suspend/resume, review, edit, replan, and mid-plan clarification.
 
-**Key differentiator:** Retail Pulse is **tenant-configurable**. Define your company, brands, regions, and theme in a single `tenant.yaml` file and the entire platform adapts. No code changes required.
+**Key differentiators:**
 
-**Built with:** .NET Aspire, Microsoft AI Framework (MAF), Model Context Protocol (MCP), React + Vite, Azure Container Apps, Azure Static Web Apps, Azure Bot Framework, and Azure API Management (AI Gateway).
+- **Data-driven specialists.** Adding an analyst-style agent is a `packs/<pack>/agents.yaml` edit — no C# change (ADR-008). A load-time safety validator (ADR-011) refuses to start with a violation.
+- **Content-pack tenanting.** `packs/<pack>/pack.yaml` bundles the tenant model, agent roster, starting tasks, and knowledge corpus in one directory. `Packs:Active` selects one at boot; a `default` pack (Apex Retail Group), a `halcyon-pet-supply` pack, and a `prairiehearth-craft-supply` pack ship with the repo.
+- **Plan-first, review-gated.** `HybridExecutionDecider` admits multi-domain / low-confidence / advisory-phrased turns to the plan path. When plan review is enabled, `/api/chat` returns `202 Accepted` with a `planId` + `reviewRequestId`, and the reviewer's decision drives approve / edit / reject / replan / clarify through a durable checkpoint store (ADR-014).
+- **Optional cloud knowledge & safety.** In-memory BM25 knowledge is the default and needs no cloud dependency. Azure AI Search (ADR-012), Azure AI Foundry IQ (ADR-013), and Azure AI Content Safety + Prompt Shields (ADR-010) are all opt-in — clone + `dotnet build` demonstrates the platform without them.
+
+**Built with:** .NET Aspire 13.3, Microsoft Agent Framework (`Microsoft.Agents.AI` / `.Abstractions` / `.OpenAI` / `.Workflows` 1.18.0), Microsoft.Extensions.AI 10.9.0, Model Context Protocol (MCP), React 19 + Vite, Azure Container Apps, Azure Static Web Apps, Azure Bot Framework, and Azure API Management (AI Gateway).
+
+## Required vs Optional Azure Resources
+
+Retail Pulse is designed to demo locally from a fresh clone without any optional cloud dependency. The table below is the authoritative "what must exist vs what is opt-in" for the platform itself; see [docs/deployment-azd.md](docs/deployment-azd.md) for the Bicep parameters that toggle each optional resource.
+
+### Required (any deployment)
+
+| Resource | Purpose | How it is provisioned |
+|----------|---------|-----------------------|
+| **Azure OpenAI + APIM AI Gateway** | Chat completions for every LLM call (router, specialists, planner, council). APIM enforces token-per-minute limits, emits usage metrics, and authenticates to Azure OpenAI with managed identity. | `infra/modules/apim.bicep` + `infra/modules/apim-openai-api.bicep`, verified live by `scripts/Verify-ApimAiGateway.ps1`. |
+| **Azure Container Apps + Container Apps Environment** | Hosts `RetailPulse.Api`, `RetailPulse.McpServer`, and `RetailPulse.TeamsBot` with managed identities and scale-to-zero. | `infra/modules/aca-environment.bicep`, `infra/modules/aca-app.bicep`. |
+| **Azure Container Registry (Basic)** | Stores the three backend images. Container Apps pull with managed identity — no admin secrets. | `infra/modules/acr.bicep`. |
+| **Azure Static Web Apps** | Serves the React/Vite build; the SPA calls the Container Apps API directly for long-running chat / SignalR. | `infra/modules/static-web-app.bicep`. |
+| **Application Insights + Log Analytics** | OpenTelemetry sink for traces, metrics, and logs. | `infra/modules/monitoring.bicep`. |
+| **Entra ID app registration** | Only auth mode ever deployed to production (`Authentication__Mode = Entra`, single-tenant, PKCE). | `infra/modules/entra-*.bicep` and `scripts/Setup-EntraApp.ps1`. |
+
+### Optional (opt-in — the platform still runs without any of them)
+
+| Resource | Enables | Enabled by |
+|----------|---------|------------|
+| **Azure AI Search** | Vector + BM25 knowledge over your corpus (ADR-012). | `Knowledge:Provider:Mode=AzureAISearch` and `Knowledge:AzureAISearch:Endpoint` set. Default degradation is `FailLoud`; set `Degradation=FallbackToInMemory` to soft-fail. |
+| **Azure AI Foundry IQ (Azure AI Projects)** | Foundry-hosted retrieval agent (ADR-013). | `Knowledge:Provider:Mode=FoundryIQ` and `Knowledge:FoundryIQ:ProjectEndpoint` set. |
+| **Azure AI Content Safety + Prompt Shields** | Prompt-injection + harmful-content filtering on inputs and outputs (ADR-010). | `Security:ContentSafety:Enabled=true` and the endpoint / API version set. |
+| **Azure AI Foundry Agent Service** | Foundry-hosted persistent shipment specialist (bespoke). | `FoundryAgent:Enabled=true` + project endpoint / agent name. |
+| **Azure Files durable mount** | Cross-replica persistence of the SQLite stores (`memory.db`, `approvals.db`, `sessions.db`, `plans.db`, `audit.db`, `costs.db`, `alerts.db`). | Currently blocked by tenant governance policy (see [docs/deployment-azd.md](docs/deployment-azd.md)); the deployed demo runs with `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`. |
+
+> **Local demo (zero optional resources).** `dotnet build RetailPulse.slnx` succeeds with no
+> optional cloud resource configured. `dotnet run --project src/RetailPulse.AppHost`
+> then launches the full stack — see [Quick Start](#quick-start) for the
+> `OpenAI:Endpoint` requirement, the pre-built frontend prerequisite (`npm ci`
+> against the internal proxy), and the exact honest limits.
+
+**Built with:** .NET Aspire, Microsoft Agent Framework (MAF), Model Context Protocol (MCP), React + Vite, Azure Container Apps, Azure Static Web Apps, Azure Bot Framework, and Azure API Management (AI Gateway).
 
 ---
 
@@ -40,12 +78,16 @@ Retail Pulse is an AI-powered brand intelligence platform that uses agentic AI t
 
 ### Key Patterns
 
-- **Tenant config** (`tenant.yaml`) drives everything - prompts, data seeding, UI branding. Loaded by `FileTenantProvider`, injected into system prompts.
-- **AI Gateway** - APIM fronts Azure OpenAI/Foundry with token limiting, metrics, managed identity auth. Deployed via Bicep.
-- **Real-time telemetry** - SignalR hub broadcasts agent spans to the frontend. Dashboard shows live tool calls, agent thoughts, and timing.
-- **MCP tools** - SQLite-backed retail metrics (depletions, shipments, field sentiment) shaped by tenant brands/regions. Agent can **read and write** data via `UpdateMetrics` tool.
-- **Foundry delegation** - can hand off to persistent Azure AI Foundry agents for deeper analysis.
-- **Frontend** - single-page dashboard with ChatPanel, suggested retail prompts (grocery, QSR, home improvement, office supply, furniture), chart rendering, and span timeline.
+- **Content packs** (`packs/<pack>/`) bundle tenant model, agent roster, knowledge corpus, and starting tasks. `Packs:Active` selects one at boot; adding a specialist or a starting task is a YAML edit. See [Tenant Configuration Guide](docs/tenant-configuration.md) and ADR-008.
+- **Shared MAF invocation seam** — every LLM call (router, specialists, planner, council) goes through `MafAgentInvoker` → `ChatClientAgent` with `UseProvidedChatClientAsIs = true`, preserving the ADR-006 function-invocation cap, OpenTelemetry, and MCP resilience decorators. Proven by `MafPrimitivesCharacterizationTests`. See ADR-007.
+- **Hybrid execution admission** — `HybridExecutionDecider` chooses Fast / Plan / Council per turn using router confidence, `DetectedIntents`, an explicit user override, and configured advisory phrases (ADR-014).
+- **Plan-first with review gate** — multi-domain turns run through `PlanExecutor` (Microsoft.Agents.AI.Workflows `InProcessExecution` with framework checkpoints). When `PlanReview:Enabled=true`, `/api/chat` returns `202 Accepted` and the reviewer's approve / edit / reject / clarify decision drives the workflow (ADR-014).
+- **AI Gateway** — APIM fronts Azure OpenAI/Foundry with token limiting, metrics, managed identity auth. Deployed via Bicep and verified live by `Verify-ApimAiGateway.ps1`.
+- **Real-time telemetry** — SignalR hub broadcasts agent spans to the frontend. Dashboard shows live tool calls, agent thoughts, and timing.
+- **Pluggable knowledge providers** — InMemory BM25 by default; Azure AI Search (ADR-012) and Foundry IQ (ADR-013) are opt-in via `Knowledge:Provider:Mode` and per-agent `use_knowledge_base` / `knowledge_base_name` bindings.
+- **MCP tools** — SQLite-backed retail metrics (depletions, shipments, field sentiment) shaped by the pack's tenant. Agents can **read and write** data via the `UpdateMetrics` tool.
+- **Optional Foundry delegation** — hand off to persistent Azure AI Foundry agents for deeper analysis when `FoundryAgent:Enabled=true`.
+- **Frontend** — single-page dashboard with ChatPanel, pack-sourced suggested starting tasks, chart rendering, and span timeline.
 
 ### Three-Tier Distribution Model
 
@@ -58,8 +100,8 @@ Retail Pulse is designed for industries using a Three-Tier distribution model (m
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- [Node.js 20+](https://nodejs.org/)
-- An OpenAI API key (or Azure OpenAI endpoint)
+- [Node.js 20+](https://nodejs.org/) — required for the frontend build. The AppHost launches `npm ci` + `npm run dev` for `src/RetailPulse.Web` on startup, so an unusable npm environment blocks the full-stack demo.
+- An **Azure OpenAI endpoint** (or an OpenAI-compatible endpoint). The API requires both `OpenAI:Endpoint` and a valid deployment name (`OpenAI:Deployment`) to start.
 
 ### 1. Clone the repo
 
@@ -68,25 +110,34 @@ git clone https://github.com/swigerb/retail-pulse.git
 cd retail-pulse
 ```
 
-### 2. Configure tenant.yaml (or use the included Apex Retail Group sample)
+### 2. Pick a content pack (or use the shipped `default` Apex Retail Group pack)
 
-The repo ships with a sample `tenant.yaml` for **Apex Retail Group**, a fictional multi-category retail conglomerate with 12 brands across 6 categories. To customize for your own brand, see the [Tenant Configuration Guide](docs/tenant-configuration.md).
+Retail Pulse ships three content packs under `packs/`:
+
+- `default` — **Apex Retail Group** (multi-category retail conglomerate, 12 brands, 6 categories, 6 regions). Loaded by default.
+- `halcyon-pet-supply` — a specialty pet-supply retailer example.
+- `prairiehearth-craft-supply` — a craft-supply retailer example.
+
+Each pack bundles its tenant model, agent roster (`agents.yaml`), starting tasks (`starting-tasks.yaml`), and knowledge corpus (`knowledge/*.md`) in one directory. Select a pack at boot with `Packs:Active`. See the [Tenant Configuration Guide](docs/tenant-configuration.md) for the schema and worked examples.
 
 ### 3. Set up Azure OpenAI credentials
 
+The API needs an endpoint + deployment name; the API key falls back to `demo-key` in Development but the endpoint has no fallback and the deployment must resolve non-empty (a missing `OpenAI:Deployment` with a specialist that also has no `model` in `agents.yaml` will fail startup at `AzureOpenAIClient.GetChatClient("")`).
+
 ```bash
+dotnet user-secrets set "OpenAI:Endpoint" "<your-azure-openai-or-apim-endpoint>" --project src/RetailPulse.Api
+dotnet user-secrets set "OpenAI:Deployment" "<your-deployment-name>" --project src/RetailPulse.Api
 dotnet user-secrets set "OpenAI:ApiKey" "<your-api-key>" --project src/RetailPulse.Api
 ```
 
-> To use Azure OpenAI directly (bypassing APIM), also set the endpoint:
-> ```bash
-> dotnet user-secrets set "OpenAI:Endpoint" "<your-azure-openai-endpoint>" --project src/RetailPulse.Api
-> ```
+> To point directly at Azure OpenAI (bypassing APIM), set `OpenAI:Endpoint` to the account URL. To route through the APIM AI Gateway, use the gateway URL emitted by `azd env get-values` after `azd provision`.
 
 > **Every setting in one place:** [`src/RetailPulse.Api/appsettings.json`](src/RetailPulse.Api/appsettings.json)
 > is the checked-in reference config — loaded in every environment and
-> documenting all sections (OpenAI, Security, FoundryAgent, ToolCache,
-> TokenPricing, Observability, …) with safe defaults. Edit it directly for
+> documenting all sections (`OpenAI`, `Packs`, `Knowledge`, `Guardrails`,
+> `PlanPersistence`, `SessionPersistence`, `Approval`, `RealtimeResilience`,
+> `ChatTimeout`, `Security`, `FoundryAgent`, `ToolCache`, `TokenPricing`,
+> `Observability`, …) with safe defaults. Edit it directly for
 > non-secret tweaks; keep real secrets in user-secrets, **not** in this
 > committed file. For deployment, see
 > [`appsettings.Production.json`](src/RetailPulse.Api/appsettings.Production.json),
@@ -191,38 +242,42 @@ Navigate to [http://localhost:5173](http://localhost:5173) and start asking ques
 
 ## Tenant Configuration
 
-Retail Pulse reads `tenant.yaml` at the repo root to configure the entire platform:
+Retail Pulse loads a **content pack** at boot to configure the entire platform (see the **Content packs** reference table under [§ Configuration](#configuration) below). The active pack is selected by `Packs:Active` (default `default`) and the pack root by `Packs:Root` (default `packs`). `Program.cs` wires `PackTenantProvider(activePack)` as the `ITenantProvider`; the pack's `agents.yaml` is the roster consumed by `ConfiguredSpecialistAgent` + `MafAgentInvoker` (ADR-008). The legacy root `tenant.yaml` and `src/RetailPulse.Api/prompts.yaml` files are retained on disk for byte-equivalence comparison tests only — the runtime never reads them (see the "Legacy `tenant.yaml` and `prompts.yaml`" section in [`docs/tenant-configuration.md`](docs/tenant-configuration.md)).
+
+The `tenant:` block inside `packs/<pack>/pack.yaml` follows the historical tenant schema — company, industry, brands, regions, theme — so the sample below is the shape the runtime actually reads:
 
 ```yaml
-company: "Apex Retail Group"
-industry: "Multi-Category Retail"
-brands:
-  - name: "Sierra Gold Tequila"
-    category: "Spirits"
-    variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
-    priceSegment: "Premium"
-  - name: "FreshMart"
-    category: "Grocery"
-    variants: ["Organic Produce", "Bakery", "Deli", "Frozen"]
-    priceSegment: "Standard"
-  - name: "Apex Grill"
-    category: "Quick-Serve Restaurant"
-    variants: ["Burgers", "Chicken", "Breakfast", "Beverages"]
-    priceSegment: "Standard"
-  # ... 12 brands across 6 categories
-regions:
-  - "Northeast"
-  - "Southeast"
-  - "Midwest"
-  - "Southwest"
-  - "West Coast"
-  - "Pacific Northwest"
-theme:
-  primaryColor: "#1B4D7A"
-  accentColor: "#E8A838"
+# packs/default/pack.yaml (excerpt — `tenant:` block)
+tenant:
+  company: "Apex Retail Group"
+  industry: "Multi-Category Retail"
+  brands:
+    - name: "Sierra Gold Tequila"
+      category: "Spirits"
+      variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
+      priceSegment: "Premium"
+    - name: "FreshMart"
+      category: "Grocery"
+      variants: ["Organic Produce", "Bakery", "Deli", "Frozen"]
+      priceSegment: "Standard"
+    - name: "Apex Grill"
+      category: "Quick-Serve Restaurant"
+      variants: ["Burgers", "Chicken", "Breakfast", "Beverages"]
+      priceSegment: "Standard"
+    # ... 12 brands across 6 categories
+  regions:
+    - "Northeast"
+    - "Southeast"
+    - "Midwest"
+    - "Southwest"
+    - "West Coast"
+    - "Pacific Northwest"
+  theme:
+    primaryColor: "#1B4D7A"
+    accentColor: "#E8A838"
 ```
 
-The included **Apex Retail Group** sample tenant demonstrates a multi-category retail conglomerate with **12 brands** across **6 categories**:
+The shipped **Apex Retail Group** sample tenant (`packs/default`) demonstrates a multi-category retail conglomerate with **12 brands** across **6 categories**:
 
 | Category | Brands |
 |----------|--------|
@@ -233,7 +288,7 @@ The included **Apex Retail Group** sample tenant demonstrates a multi-category r
 | 📎 Office Supply | ClearDesk |
 | 🛋️ Furniture | Urban Living, Foundry Home |
 
-All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwest, West Coast, and Pacific Northwest. See the [Tenant Configuration Guide](docs/tenant-configuration.md) for full schema reference and examples for different industries.
+All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwest, West Coast, and Pacific Northwest. The `halcyon-pet-supply` and `prairiehearth-craft-supply` packs ship as alternate scenarios; switch by setting `Packs:Active` at boot. See the [Tenant Configuration Guide](docs/tenant-configuration.md) for the full pack schema, live validation rules, and a worked example of adding a specialist by configuration only.
 
 ---
 
@@ -243,14 +298,15 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 |-------|-----------|---------|---------|
 | **Orchestration** | .NET Aspire | 13.3.0 | Service discovery, health checks, dashboard |
 | **Runtime** | .NET | 10 | Backend services |
-| **Agent** | Microsoft AI Framework (MAF) | — | AI agent with tool calling |
+| **Agent Framework** | Microsoft Agent Framework (`Microsoft.Agents.AI` + `.Abstractions` + `.OpenAI` + `.Workflows`) | 1.18.0 | `ChatClientAgent` for router/specialists/planner/council + `Microsoft.Agents.AI.Workflows.InProcessExecution` for plan-first orchestration (ADR-007, ADR-014). Contract test `MafPackageVersionContractTests` fails CI on downgrades. |
+| **AI Middleware** | Microsoft.Extensions.AI | 10.9.0 | `IChatClient`, function invocation, OpenTelemetry — preserved end-to-end via `UseProvidedChatClientAsIs = true`. |
 | **Model** | GPT-5.4-mini (via APIM AI Gateway) | — | Reasoning and natural language |
 | **Tools** | Model Context Protocol (MCP) | — | Standardized tool access |
-| **Data** | SQLite (Microsoft.Data.Sqlite) | — | Mutable tenant-seeded metrics store |
+| **Data** | SQLite (Microsoft.Data.Sqlite) | — | Mutable tenant-seeded metrics store + durable session/plan/approval/audit stores |
 | **Frontend** | React + Vite + TypeScript | 19 / 8 / 6 | Interactive dashboard |
 | **UI Components** | Fluent UI React | 9.x | Design system |
 | **Real-time** | SignalR | 10.x | Live telemetry streaming |
-| **Multi-Agent** | Azure AI Foundry Agent Service | — | Foundry-hosted Shipment Specialist (optional) |
+| **Foundry-hosted agents** | Azure AI Foundry Agent Service (optional) | — | Bespoke shipment specialist when `FoundryAgent:Enabled=true`. Foundry IQ knowledge is a separate opt-in provider (ADR-013). |
 | **Observability** | OpenTelemetry + Aspire Dashboard | — | Distributed traces, metrics, logs |
 | **Monitoring** | Azure Application Insights | — | Production telemetry and traces |
 | **Gateway** | Azure API Management | — | Token metering, rate limiting, audit |
@@ -265,8 +321,17 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 
 ```
 retail-pulse/
-├── tenant.yaml                       # Tenant configuration (brands, regions, theme)
+├── tenant.yaml                       # Legacy sample tenant (byte-equivalent to packs/default's tenant: block) — no longer read at runtime
 ├── RetailPulse.slnx                  # Solution file
+├── packs/                            # Content packs (issue #108) — active runtime source of tenant + agents + knowledge
+│   ├── default/                      # Apex Retail Group sample (loaded by default)
+│   │   ├── pack.yaml                 # Tenant metadata (brands, regions, theme) + pack manifest
+│   │   ├── agents.yaml               # Agent roster (specialist prompts, model, tools, knowledge bindings)
+│   │   ├── starting-tasks.yaml       # Suggested starting prompts surfaced by the SPA
+│   │   ├── knowledge/                # Grounding corpus (indexed by the active knowledge provider)
+│   │   └── seed/scenario.yaml        # Deterministic SQLite seed data
+│   ├── halcyon-pet-supply/           # Alternate sample: specialty pet-supply retailer
+│   └── prairiehearth-craft-supply/   # Alternate sample: craft-supply retailer
 ├── src/
 │   ├── RetailPulse.AppHost/          # Aspire 13.3.0 orchestrator
 │   ├── RetailPulse.Api/              # Agent API service
@@ -281,7 +346,7 @@ retail-pulse/
 │   │   ├── Telemetry/                # Custom business metrics (OpenTelemetry)
 │   │   ├── Tools/                    # MCP tool wrappers
 │   │   ├── Validation/               # Input validation (ChatRequestValidator)
-│   │   └── prompts.yaml              # Agent prompt configuration (`src/RetailPulse.Api/prompts.yaml`, tenant-templated)
+│   │   └── prompts.yaml              # Legacy prompts file (mirrored to packs/default/agents.yaml; no longer read at runtime)
 │   ├── RetailPulse.McpServer/        # MCP server (data tools)
 │   │   ├── Tools/                    # MCP tool definitions (parameterized queries)
 │   │   └── Data/                     # SQLite-backed tenant-driven metrics
@@ -582,31 +647,48 @@ The web app navigation is intentionally minimal by default: Chat, Real-Time Tele
 
 ## Configuration
 
-### User Secrets
+### User Secrets & core configuration
 
-| Setting | User Secret Key | Default |
-|---------|----------------|---------|
-| API Key | `OpenAI:ApiKey` | *(required)* |
-| LLM Endpoint | `OpenAI:Endpoint` | APIM gateway URL |
-| API Version | `OpenAI:ApiVersion` | `2025-03-01-preview` |
-| MCP Server URL | `McpServer:BaseUrl` | `http://localhost:5200` |
-| Foundry Enabled | `FoundryAgent:Enabled` | `false` |
-| Foundry Project Endpoint | `FoundryAgent:ProjectEndpoint` | *(set by deploy script)* |
-| Foundry Agent Name | `FoundryAgent:ShipmentAgentName` | `Distribution Analysis Specialist` |
-| App Insights | `APPLICATIONINSIGHTS_CONNECTION_STRING` | *(set in AppHost)* |
+`src/RetailPulse.Api/appsettings.json` is the checked-in reference config with safe defaults for every section. The table below is a per-surface quick reference; edit `appsettings.json` for non-secret tweaks and keep secrets in user-secrets or environment variables.
 
-### tenant.yaml
+| Setting | Key | Default | Purpose |
+|---------|-----|---------|---------|
+| API Key | `OpenAI:ApiKey` | *(Development falls back to `demo-key`)* | Bearer credential passed to the OpenAI-compatible endpoint. |
+| LLM Endpoint | `OpenAI:Endpoint` | *(required, no fallback)* | Azure OpenAI account URL or APIM AI Gateway URL. Startup fails if unset. |
+| Deployment Name | `OpenAI:Deployment` | *(must resolve non-empty)* | Deployment / model name for the default agent when the pack does not override `agents.<key>.model`. |
+| API Version | `OpenAI:ApiVersion` | `2025-03-01-preview` | Azure OpenAI REST API version. |
+| Active Pack | `Packs:Active` | `default` | Content pack selected at boot. Values: any directory name under `packs/`. |
+| Pack Root | `Packs:Root` | `packs` | Filesystem root scanned for content packs. |
+| Knowledge Provider | `Knowledge:Provider:Mode` | `InMemory` | `InMemory` (BM25, no cloud dep) \| `AzureAISearch` \| `FoundryIQ`. |
+| Knowledge Degradation | `Knowledge:Provider:Degradation` | `FailLoud` | `FailLoud` \| `FallbackToInMemory` when the optional cloud provider is unreachable. |
+| Azure AI Search Endpoint | `Knowledge:AzureAISearch:Endpoint` | *(empty)* | Enables ADR-012 provider when set. |
+| Foundry IQ Project | `Knowledge:FoundryIQ:ProjectEndpoint` | *(empty)* | Enables ADR-013 provider when set. |
+| Content Safety | `Security:ContentSafety:Enabled` | `false` | ADR-010 opt-in for Prompt Shields + harmful-content classification. |
+| Agent-def guardrails | `Guardrails:AgentDefinition:OnValidationFailure` | `RefuseStartup` (prod) | ADR-011 load-time validator; refuses startup on any violation in prod. |
+| Plan persistence | `PlanPersistence:Enabled` | `false` | Enables `/api/plans/*`, plan review, `HybridExecutionDecider` plan path (ADR-014). |
+| Session persistence | `SessionPersistence:Enabled` | `false` | Enables `/api/sessions/*` durable conversation store. |
+| SignalR heartbeat | `RealtimeResilience:ApplicationHeartbeatEnabled` | `true` | Server-side keep-alive tick emitted by the telemetry hub. |
+| Fast timeout | `ChatTimeout:SingleShot` | `00:01:30` | Hard timeout for a single-shot chat turn. |
+| Plan timeout | `ChatTimeout:Plan` | `00:06:00` | Hard timeout for a full plan execution. |
+| MCP Server URL | `McpServer:BaseUrl` | `http://localhost:5200` | Local MCP server address. |
+| Foundry Enabled | `FoundryAgent:Enabled` | `false` | Enables the bespoke Foundry shipment specialist. |
+| Foundry Project | `FoundryAgent:ProjectEndpoint` | *(set by deploy script)* | Azure AI Foundry project endpoint. |
+| Foundry Agent | `FoundryAgent:ShipmentAgentName` | `Distribution Analysis Specialist` | Persistent agent name. |
+| App Insights | `APPLICATIONINSIGHTS_CONNECTION_STRING` | *(set in AppHost)* | Distributed traces + custom metrics sink. |
 
-All tenant configuration lives in `tenant.yaml` at the repo root. Changes take effect on restart — no code changes required.
+### Content packs (`packs/<pack>/`)
 
-| Key | Purpose |
-|-----|---------|
-| `company` / `industry` | Company identity, injected into agent system prompts |
-| `brands[]` | Brand definitions with category, variants, and price segment |
-| `regions[]` | Geographic regions for data segmentation |
-| `channels[]` | Distribution channels (On-Premise, Off-Premise, E-Commerce) |
-| `theme` | UI branding (primary/accent colors, logo, font) |
-| `distribution` | Distribution model config (Three-Tier, distributor types) |
+Retail Pulse loads a **content pack** at boot (`Packs:Active`, default `default`) instead of a single monolithic `tenant.yaml`. A pack bundles the tenant model, agent roster, starting tasks, and knowledge corpus in one directory so a whole scenario can be swapped in place. Changes take effect on restart — no code changes required.
+
+| File | Purpose |
+|------|---------|
+| `pack.yaml` | Pack manifest: id, display name, industry, company, brands, regions, channels, theme, distribution model. Injected into agent system prompts. |
+| `agents.yaml` | Specialist roster: keys, intents, model, temperature, tool bindings, `use_knowledge_base` / `knowledge_base_name`. Adding a specialist is an edit here (ADR-008). |
+| `starting-tasks.yaml` | Suggested chat prompts surfaced by the SPA. |
+| `knowledge/*.md` | Grounding corpus indexed by the active knowledge provider (default InMemory BM25). |
+| `seed/scenario.yaml` | Optional deterministic seed data for the SQLite store. |
+
+See the [Tenant Configuration Guide](docs/tenant-configuration.md) for the full schema, live validation rules, and a worked example of adding a specialist by configuration only.
 
 ## Ports
 
@@ -650,4 +732,4 @@ See [Testing Guide](docs/testing-guide.md) for manual testing options and test s
 
 MIT - see [LICENSE](LICENSE) for details.
 
-This project is for demonstration purposes. All data is fictional, seeded from `tenant.yaml`, and does not represent actual business data.
+This project is for demonstration purposes. All data is fictional, seeded from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`), and does not represent actual business data.

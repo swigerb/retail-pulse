@@ -12,7 +12,7 @@ The component diagram shows the five-service architecture orchestrated by .NET A
 
 - **React Frontend** — Chat UI, telemetry dashboard, agent routing indicators, streaming message display, collaborative cards
 - **RetailPulse API** — Composition root with endpoint group extensions (`Endpoints/*.cs`), multi-agent router pipeline, guardrails/cache/streaming middleware, bounded telemetry and memory channels, rate limiting (4 tiers), observability suite (cost tracking, audit log, conversation export)
-- **MCP Server** — REST + MCP dual endpoints for all domain tools (depletions, shipments, sentiment, demand, promo, competitive, store ops, margin), SQLite data store with deterministic seeding from `tenant.yaml`
+- **MCP Server** — REST + MCP dual endpoints for all domain tools (depletions, shipments, sentiment, demand, promo, competitive, store ops, margin), SQLite data store with deterministic seeding from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`, loaded by `PackTenantLoader.LoadFromPackDirectory` in `RetailPulse.McpServer.Program.cs`)
 - **Teams Bot** — Adaptive Card rendering, SSO via `TeamsSsoHandler` with `StrictTenantValidation`, configurable health checks (`HealthMode: fail-fast | degraded`), `DevelopmentAuthHandler` bypass in local dev
 - **Aspire AppHost** — Non-containerized orchestration, OpenTelemetry, service discovery, health endpoints
 
@@ -44,12 +44,12 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 | Step | Component | What Happens |
 |------|-----------|-------------|
 | **1. User sends message** | `ChatPanel.tsx` | Frontend sends `POST /api/chat` with `{ message, sessionId, history }`. Conversation history (up to 10 turns) is included for context continuity. |
-| **2. Agent builds prompt** | `RetailPulseAgent.cs` | Assembles a message array: system prompt (from `src/RetailPulse.Api/prompts.yaml`) + conversation history + current user message. Starts a `Stopwatch` to measure wall-clock duration. |
+| **2. Agent builds prompt** | `RetailPulseAgent.cs` | Assembles a message array: system prompt (resolved by `PromptTemplateEngine` from the active content pack's `agents.yaml` — the roster loaded into `PromptConfiguration` via `activePack.Agents` in `Program.cs`) + conversation history + current user message. Starts a `Stopwatch` to measure wall-clock duration. |
 | **3. Model inference** | Azure OpenAI via APIM | The `IChatClient` (backed by `AzureOpenAIClient`) sends the messages to APIM. APIM applies token limiting (default **80,000 TPM** per subscription — configurable via the `tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`), emits metrics, and forwards to Azure OpenAI using managed identity. Model: `gpt-5.4-mini` (shipped deployment `gpt-5.4-mini-2026-03-17`). |
 | **4. Tool selection** | Azure OpenAI | The model examines the user's question and the available tool schemas, then decides which tools to call and with what parameters. For a portfolio-wide question, it may call `GetPortfolioDepletionStats`; for a single brand, `GetDepletionStats`. |
 | **5. Tool execution loop** | MAF (`UseFunctionInvocation`) | Microsoft.Extensions.AI middleware intercepts each tool call. It invokes the registered `AITool` implementation, captures the result, and sends it back to the model. The model may call additional tools or generate its final response. Tools execute sequentially within a single turn. |
 | **6. API proxy call** | e.g., `DepletionStatsTool.cs` | Each tool is an HTTP proxy. It calls the MCP Server's REST endpoint (e.g., `GET /api/depletion-stats?brand=X&region=Y&period=Z`). If the MCP Server is unreachable, the tool returns hardcoded fallback data and logs a warning. |
-| **7. Data retrieval** | `RetailPulseDb.cs` | The MCP Server's singleton SQLite service queries (or updates) the data. Data is seeded from `tenant.yaml` configuration (12 brands, 6 regions, 3 channels) using deterministic algorithms. The `UpdateMetrics` tool can also write to the database, enabling real-time data mutations by the agent. |
+| **7. Data retrieval** | `RetailPulseDb.cs` | The MCP Server's singleton SQLite service queries (or updates) the data. Data is seeded from the active content pack (`packs/<Packs:Active>/pack.yaml` for the tenant model — 12 brands, 6 regions, 3 channels in the shipped `default` pack — plus `packs/<Packs:Active>/seed/scenario.yaml` for deterministic starting metrics) using deterministic algorithms. The `UpdateMetrics` tool can also write to the database, enabling real-time data mutations by the agent. |
 | **8. Response assembly** | `RetailPulseAgent.cs` | After the model produces its final text response, the agent packages it with telemetry spans, chart data (if any), and `TotalDurationMs` (from the `Stopwatch`). |
 | **9. Frontend rendering** | `ChatPanel.tsx` | The response is displayed as formatted markdown. Charts render via `ChartRenderer` (Recharts). Telemetry spans stream to `TelemetryPanel` via SignalR for real-time display. |
 
@@ -57,14 +57,14 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 
 | Data | Location | Persistence |
 |------|----------|-------------|
-| **Depletion metrics** (sales velocity, YoY trends, inventory) | `RetailPulseDb` → SQLite `Depletions` table, keyed by `(Brand, Region)` | On disk (`data/retailpulse.db`). Seeded from `tenant.yaml` on first run; persists AI mutations across restarts. |
+| **Depletion metrics** (sales velocity, YoY trends, inventory) | `RetailPulseDb` → SQLite `Depletions` table, keyed by `(Brand, Region)` | On disk (`%TEMP%/retailpulse/retailpulse.db`). Seeded from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`) on first run; persists AI mutations across restarts. |
 | **Shipment data** (distribution, fill rates) | `RetailPulseDb` → SQLite `Shipments` table | Same as above. |
 | **Field sentiment** (rep feedback, scores) | `RetailPulseDb` → SQLite `Sentiment` table | Same as above. |
-| **Tenant configuration** (brands, regions, channels) | `tenant.yaml` at repo root → loaded by `FileTenantProvider` | On disk. Single source of truth for the business domain. Changing this file triggers a database re-seed on next restart. |
+| **Tenant configuration** (brands, regions, channels) | `packs/<Packs:Active>/pack.yaml` (`tenant:` block) → loaded by `PackTenantProvider` (constructed with the `LoadedPack` returned by `PackLoader.ForDirectory(...).Load(activePack)` in `Program.cs`) | On disk. Single source of truth for the business domain. Editing the active pack's `pack.yaml` or any file under `packs/<Packs:Active>/seed/` changes the content-hash the MCP server records and triggers a database re-seed on next restart. The legacy root `tenant.yaml` is retained for byte-equivalence tests only and is not read at runtime. |
 | **Conversation history** | Frontend state (`ChatPanel.tsx`) → sent with each request; optionally mirrored to the durable server-side session store when `SessionPersistence:Enabled=true` (issue #90). | Browser session only by default. When enabled, sessions and turns for **authenticated** subjects are persisted to `data/sessions.db` via `SqliteSessionStore`, so a browser refresh can rehydrate the last conversation. Anonymous sessions are **never** persisted (see Session Persistence below). |
 | **Telemetry spans** | Frontend state (`Dashboard.tsx`) via SignalR | Browser session only. Resets on "Clear Telemetry" or "+ New Chat". |
 
-> **Key insight:** The analytics dataset lives in a SQLite database (`data/retailpulse.db`), seeded deterministically from `tenant.yaml`. Unlike the earlier in-memory approach, the agent can now **read and write** data via the `UpdateMetrics` MCP tool — enabling real-time scenario modeling, what-if analysis, and live data updates during demos. The database re-seeds automatically when `tenant.yaml` changes (tracked via content hash). To reset to baseline, delete the database file and restart. Swapping to production data sources requires only replacing the MCP Server tool implementations.
+> **Key insight:** The analytics dataset lives in a SQLite database (`%TEMP%/retailpulse/retailpulse.db` in the MCP server), seeded deterministically from the active content pack. Unlike the earlier in-memory approach, the agent can now **read and write** data via the `UpdateMetrics` MCP tool — enabling real-time scenario modeling, what-if analysis, and live data updates during demos. The database re-seeds automatically when the active `packs/<Packs:Active>/pack.yaml` or any file under `packs/<Packs:Active>/seed/` changes (tracked via a content hash covering both). Switching `Packs:Active` resolves to a different pack directory and therefore a different hash, so the store re-seeds against the new tenant. To reset to baseline, delete the database file and restart. Swapping to production data sources requires only replacing the MCP Server tool implementations.
 
 ---
 
@@ -83,7 +83,7 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 | Decision | Rationale |
 |----------|-----------|
 | **Why MAF over LangChain/Semantic Kernel?** | Native .NET integration. Built on `Microsoft.Extensions.AI` abstraction — works with any `IChatClient` implementation. OpenTelemetry tracing is built in, not bolted on. |
-| **Why GPT-5.4-mini?** | Best balance of reasoning quality, speed, and cost for tool-calling scenarios. Architecture is model-agnostic — swap via `prompts.yaml`. |
+| **Why GPT-5.4-mini?** | Best balance of reasoning quality, speed, and cost for tool-calling scenarios. Architecture is model-agnostic — swap via the `model:` field on an entry in the active pack's `packs/<pack>/agents.yaml`. |
 | **Prompt configuration in YAML** | Separates prompt engineering from code. Non-developers can iterate on prompts without touching C#. Supports multiple agent definitions. |
 
 #### MAF & Microsoft.Extensions.AI package versions
@@ -145,7 +145,7 @@ captured in [`ADR-007: MAF agent primitives for specialist/router/council execut
 |----------|-----------|
 | **Why MCP over direct HTTP calls?** | MCP is an emerging standard. Today's tools query a SQLite database; tomorrow, swap to real APIs without changing agent code. Any MCP-compatible agent can use these tools. |
 | **REST + MCP dual endpoints** | MCP SSE for agent communication. REST endpoints (`/api/depletion-stats`) for direct testing and integration. Same backing data, two access patterns. |
-| **SQLite data store** | Enables demo without real data dependencies. Seeded from `tenant.yaml` with rich, realistic patterns. Supports **read + write** — the agent can update data in real time via the `UpdateMetrics` tool. |
+| **SQLite data store** | Enables demo without real data dependencies. Seeded from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`) with rich, realistic patterns. Supports **read + write** — the agent can update data in real time via the `UpdateMetrics` tool. |
 
 ### React + Vite + TypeScript — Frontend
 
@@ -310,58 +310,135 @@ tool added to the agent must log first, then fall back.
 
 ## Multi-Agent Router Architecture
 
-Retail Pulse uses a three-layer multi-agent system: a **Router** classifies user intent, **Specialist Agents** handle domain-specific queries, and an **Escalation Orchestrator** coordinates cross-domain analysis.
+Retail Pulse routes every `/api/chat` turn through three layers that are wired together at startup: the LLM-based **Router**, the pure **HybridExecutionDecider** admission gate, and a pool of **specialists** (data-driven + a handful of bespoke ones). A dedicated **Portfolio Health Council** and the durable **plan-first orchestrator** (ADR-014) sit alongside the fast single-shot path — the admission gate chooses between them.
 
-### Router → Specialist Dispatch Flow
+### Router → HybridExecutionDecider → Fast / Plan / Council
 
 ```
 User Message → GuardrailsMiddleware (input filter)
   → Cache Check (SHA256 key of normalized query)
   → ConversationMemoryMiddleware (inject prior context)
   → RetailOpsRouter (LLM classification, temp 0.1)
-      ├── confidence ≥ 0.6 → Specialist Agent (domain-specific tools + prompt)
-      └── confidence < 0.6 → GeneralAgent (all 7 original tools, fallback)
+        → RoutingDecision { agentKey, intent, confidence, detectedIntents[] }
+  → HybridExecutionDecider.Decide(decision, message, ctx, options)
+        ├── Fast    → single specialist via AgentExecutionPipeline → MafAgentInvoker
+        ├── Plan    → PlanOrchestrator → planner → (optional plan review, ADR-014) → PlanExecutor
+        └── Council → ConsensusOrchestrator (portfolio-health dedicated trigger)
   → Response Assembly (charts, telemetry, cost tracking)
   → GuardrailsMiddleware (output PII redaction)
   → Cache Store (deterministic queries only)
-  → Return
+  → Return   (fast: 200 OK; plan-with-review: 202 Accepted)
 ```
 
-The `RetailOpsRouter` uses a dedicated low-temperature classification prompt (`agents.router` in `prompts.yaml`) that returns JSON with `intent`, `confidence`, and `reasoning` fields. Intent strings use slash-separated format (e.g., `demand/forecasting`) for future sub-categorization.
+The `RetailOpsRouter` uses a dedicated low-temperature classification prompt (`agents.router` in the active pack's `agents.yaml`) that returns JSON with `intent`, `confidence`, and — critically — `detectedIntents` (every domain the LLM found in the message). Intent strings use slash-separated format (e.g., `demand/forecasting`) for future sub-categorization.
 
-### Specialist Agent Registry
+`HybridExecutionDecider` (`src/RetailPulse.Api/Agents/Routing/HybridExecutionDecider.cs`) is a pure static function on the hot path. Its precedence, top to bottom:
 
-| Agent Key | Display Name | Intents | Temperature | Tools |
-|-----------|-------------|---------|-------------|-------|
-| `demand-forecasting` | Demand Forecast | `demand/forecasting` | 0.3 | GetHistoricalDemand, GenerateForecast, GetSeasonalityFactors, IdentifyDemandRisks |
-| `promo-planning` | Promo Planning | `promo/planning` | 0.3 | GetPromoHistory, CalculateLift, EvaluateTiming, EstimateROI |
-| `competitive-intel` | Competitive Intel | `competitive/intelligence` | 0.4 | GetCompetitorPricing, GetMarketShare, DetectThreats, GetCompetitiveLandscape |
-| `supply-chain` | Supply Chain | `supply/analysis` | 0.3 | GetShipmentStats + supply-specific tools |
-| `store-ops` | Store Operations | `store/operations` | 0.3 | GetStorePerformance, PredictStockout |
-| `planogram` | Planogram | `planogram/optimization` | 0.3 | GetShelfLayout, OptimizePlanogram |
-| `margin` | Margin Analysis | `margin/analysis` | 0.3 | GetMarginByBrand, GetMarginDrivers, GetMarginTrend, DetectMarginRisks |
-| `general` | General | All unmatched intents | 0.7 | All 7 original tools (depletions, shipments, sentiment, etc.) |
+1. **Explicit user override** — an authenticated caller may force `Fast` or `Plan`, but only when the requested path is reachable (a `Plan` force with no planner registered is ignored).
+2. **Council intent** — the portfolio-health intent always resolves to `Council` when no valid override wins.
+3. **Planner unavailable** — anonymous callers, plan orchestrator not registered, or empty `DetectedIntents` → `Fast`. The plan path simply is not a destination for that request.
+4. **Multi-domain** — `DetectedIntents.Count >= PlanPersistence:MinDetectedIntentsForPlan` (default 2) → `Plan`.
+5. **Low confidence** — router confidence strictly below `PlanPersistence:MinConfidenceForFastPath` (default 0.6) → `Plan`.
+6. **Advisory / diagnostic phrases** — configured phrases in `PlanPersistence:AdvisoryPhrases` → `Plan`.
+7. Otherwise → `Fast`.
 
-All specialists implement `ISpecialistAgent` (in `RetailPulse.Contracts.Routing`) and register via DI through the `AddAgentRouting()` extension method. Adding a new specialist requires one class implementing the interface and one DI registration line.
+### Specialist Registry (data-driven — ADR-008)
 
-> **Architecture note (Sprint 2):** The specialist agent pipeline was identified for consolidation into a shared `SpecialistAgentBase` to reduce copy/paste duplication of message construction, history truncation, chart extraction, and token accounting across agents. This refactoring is tracked but not yet implemented — each specialist currently repeats the common orchestration logic in its `HandleAsync` method.
+Specialists are no longer one-class-per-domain. The active content pack's `packs/<pack>/agents.yaml` declares each specialist with a `key`, `intents[]`, `model`, `temperature`, prompt bindings, and — for domains that use tools — `tool_bindings`. `ConfiguredSpecialistAgent` (`src/RetailPulse.Api/Agents/Specialists/ConfiguredSpecialistAgent.cs`) binds a definition to the shared `MafAgentInvoker` at startup. Adding a new specialist is a config change: append a new entry to `agents.yaml`, restart, and the new key is discovered by the router and by `IEnumerable<ISpecialistAgent>` DI. See `docs/tenant-configuration.md` for the schema and a worked example.
 
-### Registration Pattern
+The shipped `default` pack registers the following specialists (see `packs/default/agents.yaml` for the authoritative list; each also declares its intents and tool bindings):
 
-```csharp
-// In RoutingServiceExtensions.cs
-services.AddScoped<ISpecialistAgent>(sp => new DemandForecastAgent(...));
-services.AddScoped<ISpecialistAgent>(sp => new PromoPlanningAgent(...));
-// ... each specialist auto-discovered by IEnumerable<ISpecialistAgent>
-```
+| Agent Key | Purpose | Path |
+|-----------|---------|------|
+| `router` | Intent classification (JSON output) | data-driven |
+| `demand-forecasting` | Demand forecasts, seasonality, demand risk | data-driven |
+| `promo-planning` | Promo lift, ROI, timing evaluation | data-driven (bespoke helper for lift math) |
+| `competitive-intel` | Competitor pricing, market share, threats | data-driven (bespoke helper for landscape rollup) |
+| `supply-chain` | Shipment health, disruptions, fulfilment | data-driven |
+| `store-ops` | Store performance, stockout risk | data-driven |
+| `planogram` | Shelf layout, planogram optimisation | data-driven |
+| `margin` | Margin drivers, trends, risks | data-driven |
+| `memory-management` | User-facing memory ("forget everything") | bespoke (`MemoryManagementAgent`) |
+| `general` | Fallback when no specialist matches | data-driven |
 
-The router discovers all specialists via `IEnumerable<ISpecialistAgent>` — no manual mapping required. The `GeneralAgent` catches all intent categories as the fallback handler.
+Bespoke C# specialists remain for behaviour that cannot be expressed as a
+prompt + tool binding (memory GDPR flows, some competitive/promo helper
+math). Every specialist — data-driven or bespoke — goes through
+`MafAgentInvoker` on invocation, so token accounting, tracing, tool
+budgets, and content safety apply uniformly.
+
+### Agent-definition safety validation (ADR-011)
+
+`AgentDefinitionValidator` runs at load time and scans every parsed
+`AgentDefinition` against `Guardrails:AgentDefinition:*`
+(allowed-models list, allowed-tools list, privileged-tools list,
+temperature bounds, max system-prompt length, max keyword-fast-path
+length, optional Content Safety pre-flight on the system prompt). The
+default policy is `RefuseStartup` — the API refuses to start with a
+violation. See `docs/adr/011-agent-definition-safety-validation.md`.
 
 ---
 
-## Escalation Chain (L1 → L2 → L3)
+## Plan-first orchestration + review gate (ADR-014)
 
-When a query exceeds what a single specialist can handle, the `EscalationOrchestrator` coordinates multi-agent resolution:
+When `HybridExecutionDecider` returns `Plan` and `PlanPersistence:Enabled=true`,
+the request is lifted onto the plan-first orchestrator instead of running a
+single specialist inline.
+
+```
+POST /api/chat (multi-domain / low-confidence / advisory)
+  → PlanOrchestrator → planner (MAF ChatClientAgent) → typed Plan { steps[] }
+  → PlanStore.PersistAsync — status = awaiting_review (or ready_to_run)
+
+  If PlanReview:Enabled=true:
+    → PlanReviewCoordinator.OpenRoundAsync
+        ├── writes a genuine Microsoft.Agents.AI.Workflows checkpoint
+        │   (ICheckpointStore<JsonElement>, JSON store rooted at
+        │    {data-dir}/plan-reviews)
+        └── opens a Pending approval row (Kind = "plan_review")
+    → /api/chat returns 202 Accepted { planId, reviewRequestId, round, sessionId }
+    → Reviewer decides via POST /api/plans/{planId}/reviews/{requestId}/decision
+        ├── approve / edit → PlanExecutor runs the effective plan
+        ├── reject         → planner replans, new checkpoint, next review round
+        └── timeout        → PlanReviewTimeoutBackgroundService trips the row
+  Else:
+    → PlanExecutor runs the plan directly (200 OK envelope)
+
+PlanExecutor
+  = Microsoft.Agents.AI.Workflows.InProcessExecution
+  + CheckpointManager (JSON checkpoint per step)
+  + step edges wired 1 → 2 → ... → 5 (max plan width per ADR-014)
+  + each step invokes the target specialist through the same MafAgentInvoker seam
+  + [[CLARIFY]] / [[REPLAN]] markers pause the workflow durably
+```
+
+The 202 handoff, review decision, mid-plan clarification, and replan
+lifecycle are exhaustively documented in `docs/API.md` (see
+"Non-blocking suspend/resume" and `POST /api/plans/{planId}/reviews/{requestId}/decision`).
+
+The pre-#94 hot path is preserved byte-for-byte when `PlanReview:Enabled = false`:
+the plan runs inline and `/api/chat` returns the standard `200 OK`
+`ChatResponse` envelope. When `PlanPersistence:Enabled = false`, the plan
+path is unreachable — `HybridExecutionDecider` treats the planner as
+unavailable and always returns `Fast`.
+
+### Related durable state
+
+- `data/plans.db` — plans, steps, review rows, clarifications
+- `{data-dir}/plan-reviews/*.json` — framework checkpoints for suspend/resume
+- `data/approvals.db` — Wave-1 approval gate (see below), also carries `Kind = "plan_review"` and `Kind = "clarification"` rows
+
+---
+
+## Escalation Chain (legacy — compatibility only)
+
+> **Deprecated.** `/api/chat` no longer routes through this path. Multi-domain
+> admission is owned by `HybridExecutionDecider` and lifted onto the
+> plan-first orchestrator (see the section above and ADR-014). `/api/escalate`
+> is retained for callers that opt in explicitly.
+
+Historically, when a query exceeded what a single specialist could handle,
+the `EscalationOrchestrator` coordinated a legacy L1→L2→L3 fan-out:
 
 ```
 User Query → Router → L1 (Single Specialist)
@@ -381,7 +458,11 @@ User Query → Router → L1 (Single Specialist)
 | **L2** | Multiple specialists fan out in parallel | 15 seconds | When L1 times out, or query explicitly spans domains |
 | **L3** | Flags for human review | N/A | When L2 cannot reach confident resolution |
 
-The escalation endpoint is `POST /api/escalate`. Each level's activity is traced as OTel spans with escalation metadata.
+The escalation endpoint is `POST /api/escalate`. Each level's activity is
+traced as OTel spans with escalation metadata. See
+[`EscalationEndpoints`](../src/RetailPulse.Api/Endpoints/EscalationEndpoints.cs)
+— the class documentation explicitly labels this path legacy and points at
+`HybridExecutionDecider` for the current admission logic.
 
 ---
 
@@ -845,7 +926,7 @@ var hydrated = engine.Hydrate(agentDefinition);
 // Replaces {tenant.company}, {tenant.brands}, {tenant.regions}, etc.
 ```
 
-This replaced 8 repetitive `.Replace()` chains in Program.cs with a single DRY call. The engine loads `prompts.yaml` and applies tenant configuration from `FileTenantProvider`.
+This replaced 8 repetitive `.Replace()` chains in Program.cs with a single DRY call. The engine consumes the hydrated `PromptConfiguration` loaded from the active content pack (`activePack.Agents`) and applies tenant configuration from `PackTenantProvider(activePack)`. The legacy root `tenant.yaml` and `src/RetailPulse.Api/prompts.yaml` files are retained on disk for byte-equivalence tests only — the engine no longer reads them.
 
 ---
 
