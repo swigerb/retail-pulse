@@ -667,9 +667,19 @@ Detect margin-destructive patterns across brands.
 
 ---
 
-### POST /api/escalate
+### POST /api/escalate  *(deprecated — compatibility only)*
 
-Escalate a query through the L1→L2→L3 escalation pipeline. Routes through progressively senior agent layers.
+> **Deprecated.** The `/api/chat` pipeline no longer routes multi-domain
+> requests through this endpoint. Admission for cross-domain analysis is
+> owned by `HybridExecutionDecider` (issue #95), which lifts qualifying
+> turns onto the plan-first path (`ADR-014`, `/api/chat` → **HTTP 202
+> Accepted** with `planId`/`reviewRequestId`). `/api/escalate` is retained
+> for explicit legacy callers only; new integrations should use `/api/chat`
+> and observe the 202 handoff. See the class documentation on
+> [`EscalationEndpoints`](../src/RetailPulse.Api/Endpoints/EscalationEndpoints.cs)
+> and [`EscalationOrchestrator`](../src/RetailPulse.Api/Escalation/EscalationOrchestrator.cs).
+
+Escalate a query through the legacy L1→L2→L3 escalation pipeline. Routes through progressively senior agent layers.
 
 **Request Body:** Same as `POST /api/chat`
 
@@ -685,6 +695,85 @@ Escalate a query through the L1→L2→L3 escalation pipeline. Routes through pr
   "escalationReason": "Cross-domain query requiring multi-agent synthesis"
 }
 ```
+
+---
+
+## Plan store & execution control  *(opt-in — `PlanPersistence:Enabled=true`)*
+
+These endpoints are only mapped when `PlanPersistence:Enabled` is `true` and
+the caller is authenticated. Anonymous callers are refused at entry and
+cross-subject reads collapse into `404` so a plan id cannot be probed. All
+routes below are wired by
+[`PlanEndpoints`](../src/RetailPulse.Api/Endpoints/PlanEndpoints.cs) and
+[`ExecutionControlEndpoints`](../src/RetailPulse.Api/Endpoints/ExecutionControlEndpoints.cs).
+
+### GET /api/plans
+
+List the caller's persisted plans, newest activity first.
+
+**Response (200):** array of `PlanSummaryDto` (`planId`, `sessionId`,
+`intent`, `status`, `stepCount`, `updatedAt`, …).
+
+### GET /api/plans/{planId}
+
+Rehydrate one persisted plan with its ordered steps.
+
+**Response (200):** `PlanDetailDto` — plan header plus `steps[]`
+(`stepIndex`, `specialistKey`, `intent`, `action`, `status`, `output`,
+`tokens`, `startedAt`, `completedAt`).
+
+**Errors:** `403` for anonymous callers, `404` for unknown or cross-subject
+plan ids.
+
+### DELETE /api/plans/{planId}
+
+Remove one persisted plan (and every step under it) owned by the caller.
+Cascades in a single transaction.
+
+**Response:** `204 No Content` on success, `404` if the plan does not exist
+or belongs to a different subject.
+
+### POST /api/chat/{sessionId}/cancel
+
+Cancel the caller's in-flight `/api/chat` (fast-path or streaming) run for
+`sessionId`. Ownership-scoped through `IExecutionCancellationRegistry`.
+
+**Response:** `204 No Content` on cancel; `404` for no active run OR a
+foreign owner (foreign owners collapse to `404` so live sessions of other
+callers cannot be probed).
+
+### POST /api/plans/{planId}/cancel
+
+Cancel the caller's in-flight plan orchestration keyed on `planId`. Same
+ownership contract as `/api/chat/{sessionId}/cancel`.
+
+**Response:** `204 No Content`, `403` for anonymous callers, `404`
+otherwise.
+
+### GET /api/plans/{planId}/reconcile
+
+Rehydrate durable plan state after a reconnect. Accepts an optional
+`afterStepIndex` query parameter — the response only includes steps whose
+`stepIndex > afterStepIndex`, so a reconnecting client can render just the
+ones it missed.
+
+**Response (200):**
+
+```json
+{
+  "planId": "...",
+  "sessionId": "...",
+  "status": "in_progress",
+  "failureReason": null,
+  "updatedAt": "2026-...",
+  "totalStepCount": 3,
+  "afterStepIndex": 0,
+  "steps": [ { "stepIndex": 1, "specialistKey": "demand-forecasting", "status": "completed", "output": "…" } ]
+}
+```
+
+**Errors:** `403` for anonymous callers, `404` for unknown or cross-subject
+plan ids.
 
 ---
 
