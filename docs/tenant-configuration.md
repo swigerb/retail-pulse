@@ -348,6 +348,184 @@ represent any real retailer, cooperative, or supplier.
 
 ---
 
+## Worked example: add a specialist by configuration only (ADR-008)
+
+This section walks through the whole "add a new analyst-style agent
+without touching C#" surface end-to-end, on the shipped `default` pack.
+It demonstrates the ADR-008 promise: a specialist entry is a YAML edit;
+`ConfiguredSpecialistAgent` binds the definition to `MafAgentInvoker` at
+startup so tracing, tool budgets, and content safety apply uniformly.
+
+### 1. Append the specialist entry to `packs/default/agents.yaml`
+
+Add a new top-level entry under `agents:` — do **not** rewrite an
+existing one:
+
+```yaml
+agents:
+  # ...existing entries...
+  shrink-analysis:
+    name: "Shrink Analysis Agent"
+    model: "gpt-5.4-mini"
+    key: "shrink-analysis"
+    use_knowledge_base: false
+    display_name: "Shrink Analysis"
+    role: "specialist"
+    intents:
+      - "shrink/analysis"
+    keyword_fast_paths:
+      - "inventory shrink"
+      - "shrinkage report"
+    fallback_reply: "I couldn't run a shrink analysis for that scope."
+    system_prompt: |
+      You are a Shrink Analysis specialist for {tenant.company}.
+      You quantify inventory shrinkage patterns by store, category, and week.
+
+      ## Available Tools
+      - GetStorePerformance: rolled-up store KPI snapshots.
+      - PredictStockout: forward-looking stockout risk (bounded by category).
+
+      ## Rules
+      1. Always report an absolute shrink figure alongside the % of category.
+      2. Never claim a driver you cannot cite from a tool response.
+```
+
+Only tools listed in
+`AgentDefinitionValidatorToolCatalog.KnownToolNames` are accepted — the
+ADR-011 safety validator will refuse startup with
+`agent-definition-policy` otherwise. To use knowledge grounding, set
+`use_knowledge_base: true` and `knowledge_base_name: "<source>"` where
+`<source>` is a key defined in `Knowledge:Sources:Named` in
+`appsettings.json` (or a document `Source` under the pack's `knowledge/`
+directory).
+
+### 2. Add the intent to the router prompt (same file)
+
+Router intent classification is data-driven. Add the new intent to the
+`router` agent's `system_prompt`:
+
+```yaml
+  router:
+    # ...existing keys...
+    system_prompt: |
+      # ...existing category list...
+      - "shrink/analysis" — Questions about inventory shrinkage, loss
+        prevention, damage, and category-level shrink comparisons.
+      # ...
+```
+
+### 3. (Optional) Surface a starting task
+
+Append an entry under an existing category in
+`packs/default/starting-tasks.yaml` so the SPA offers it as a quick
+prompt:
+
+```yaml
+categories:
+  - id: store-ops
+    label: "Store Operations"
+    prompts:
+      - "Show me shrink trends for our grocery brands in the Midwest"
+```
+
+### 4. Restart the API
+
+No project or DI change is needed. On restart, the pack loader will:
+
+1. Parse the new entry, defaulting `key` to `shrink-analysis`.
+2. Register a `ConfiguredSpecialistAgent` bound to `MafAgentInvoker`.
+3. Run `AgentDefinitionValidator` (ADR-011). The API logs
+   `AgentDefinitionValidator scanned N definition(s) with 0 violation(s)`
+   on success or refuses to start on any policy violation
+   (`Guardrails:AgentDefinition:OnValidationFailure = RefuseStartup`
+   is the shipped default in production).
+4. Expose the specialist via `GET /api/info` and `IEnumerable<ISpecialistAgent>`.
+
+The router's LLM classification now emits `shrink/analysis` for matching
+questions, `HybridExecutionDecider` routes single-domain shrink questions
+to the new specialist on the fast path, and multi-domain requests (for
+example "shrink + margin") get lifted onto the plan path with
+`shrink-analysis` as one of the plan's steps.
+
+### 5. Verify
+
+```bash
+# From repo root, with the API pointed at your OpenAI:Endpoint:
+curl -s http://localhost:5100/api/info | jq '.specialists[] | select(.key=="shrink-analysis")'
+
+# Or ask the router directly:
+curl -s -X POST http://localhost:5100/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"how bad is our shrink in the Midwest last quarter","sessionId":"demo"}'
+```
+
+`ShippedPackContractTests` will fail if the new entry is malformed;
+`AgentDefinitionPolicyTests` will fail if you referenced a
+non-catalogued tool or exceeded the temperature bounds. Both catch the
+mistake before it reaches CI.
+
+---
+
+## Worked example: enable Azure AI Search knowledge (ADR-012)
+
+Retail Pulse defaults to the in-memory BM25 knowledge provider and needs
+no cloud dependency to demo. To route retrieval through Azure AI Search
+in production without touching code:
+
+### 1. Flip the provider mode
+
+`src/RetailPulse.Api/appsettings.Production.json` (or an environment
+override):
+
+```json
+{
+  "Knowledge": {
+    "Provider": {
+      "Mode": "AzureAISearch",
+      "Degradation": "FailLoud"
+    },
+    "AzureAISearch": {
+      "Endpoint": "https://<your-search>.search.windows.net",
+      "IndexName": "retail-pulse-knowledge",
+      "SchemaVersion": "v1",
+      "Embeddings": {
+        "Endpoint": "https://<your-openai>.openai.azure.com",
+        "Deployment": "text-embedding-3-large"
+      }
+    }
+  }
+}
+```
+
+Leave `Knowledge:AzureAISearch:Endpoint` empty and the provider stays
+unmaterialised — even with `Mode = AzureAISearch` set, the composition
+root treats it as unconfigured. That is intentional: a copy-paste of the
+schema shape into `appsettings.json` does not silently activate the
+optional dependency.
+
+### 2. Bind agents to a named source
+
+`Knowledge:Sources:Named` in `appsettings.json` defines the source keys
+each agent references via `knowledge_base_name`. Named entries scope
+retrieval to a subset of the indexed corpus.
+
+### 3. Degradation
+
+`Degradation = FailLoud` (default) surfaces a knowledge failure to the
+caller so operators notice a broken index. `FallbackToInMemory` allows
+the provider to degrade to the shipped in-memory corpus if the cloud
+provider is unreachable — pick one deliberately per environment.
+
+### 4. Foundry IQ alternative
+
+The same pattern works for the Azure AI Foundry IQ provider (ADR-013):
+set `Knowledge:Provider:Mode = FoundryIQ` and populate
+`Knowledge:FoundryIQ:ProjectEndpoint`, `VectorStoreName` /
+`VectorStoreId`, `RetrievalAgentName`, and `Model`. The composition
+root selects exactly one active provider at boot.
+
+---
+
 ## Legacy `tenant.yaml` and `prompts.yaml`
 
 The pre-pack `tenant.yaml` at the repo root and
