@@ -28,6 +28,22 @@ public interface IPlanStore
     /// orchestrator at status transitions (running/completed/failed/…) so the
     /// persisted view always reflects the live state; a restart therefore
     /// rehydrates whatever the last committed status was.
+    ///
+    /// <para>
+    /// Terminal-status contract (issue #149): when <see cref="PlanStatusUpdate.Status"/>
+    /// is one of <see cref="PlanStatus.Completed"/>,
+    /// <see cref="PlanStatus.Failed"/>,
+    /// <see cref="PlanStatus.Cancelled"/>, or
+    /// <see cref="PlanStatus.Unusable"/>, the implementation
+    /// MUST atomically transition every remaining <see cref="PlanStepStatus.Pending"/>
+    /// or <see cref="PlanStepStatus.Running"/> step row
+    /// for the plan to <see cref="PlanStepStatus.Skipped"/>
+    /// in the same write. This prevents orphaned step rows lingering after
+    /// review-approved execution supersedes the initial <c>{planId}-s{i}</c>
+    /// rows with round-scoped <c>{planId}-r{round}-s{i}</c> rows (see
+    /// <c>PlanOrchestrator.SuspendForReviewAsync</c> and
+    /// <c>PlanReviewCompletionService.ExecuteApprovedPlanAsync</c>).
+    /// </para>
     /// </summary>
     Task UpdatePlanStatusAsync(PlanStatusUpdate update, CancellationToken ct = default);
 

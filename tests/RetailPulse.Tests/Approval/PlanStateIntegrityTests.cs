@@ -337,6 +337,192 @@ public sealed class PlanStateIntegrityTests : IDisposable
 
     // ── Fixtures ─────────────────────────────────────────────────────────
 
+    // ── Finding 4 (issue #149): terminal plan state leaves no orphan Pending step rows ─
+
+    /// <summary>
+    /// Reproduces issue #149: <see cref="PlanOrchestrator.SuspendForReviewAsync"/>
+    /// writes initial step rows under <c>{planId}-s{i}</c> as
+    /// <see cref="PlanStepStatus.Pending"/>. When the reviewer approves and
+    /// execution succeeds via <see cref="PlanReviewCompletionService.ExecuteApprovedPlanAsync"/>,
+    /// execution writes a parallel <c>{planId}-r{round}-s{i}</c> set — the
+    /// original rows would otherwise linger as Pending forever. The contract
+    /// this test pins: after ANY terminal plan status is written, no step row
+    /// for that plan may remain Pending or Running. Enforced inside
+    /// <see cref="IPlanStore.UpdatePlanStatusAsync"/> so every caller (executor
+    /// finally block, completion-service finalisers, restart recovery)
+    /// inherits the invariant without having to remember to sweep.
+    /// </summary>
+    [Fact]
+    public async Task Review_approved_completed_plan_leaves_no_orphan_pending_step_rows()
+    {
+        (ServiceProvider sp, PlanOrchestrator orch,
+            PlanReviewCompletionServiceTests.InMemoryPlanStore plans,
+            SqliteApprovalGate gate, _) = BuildHost();
+
+        PlanOrchestrationResult suspend = await orch.RunAsync(SampleInput(), default);
+        suspend.IsSuspended.Should().BeTrue();
+
+        // Confirm the initial `{planId}-s{i}` rows exist as Pending before
+        // approval — this is the state that would otherwise be orphaned.
+        PlanDetailDto? beforeApproval = await plans.GetPlanAsync("user-1", suspend.PlanId);
+        beforeApproval.Should().NotBeNull();
+        beforeApproval.Steps.Should().HaveCount(2);
+        beforeApproval.Steps.Should().OnlyContain(s => s.Status == PlanStepStatus.Pending,
+            "the initial planner-proposed step rows are Pending at review-open time.");
+        beforeApproval.Steps.Select(s => s.StepId).Should().BeEquivalentTo(
+            [$"{suspend.PlanId}-s0", $"{suspend.PlanId}-s1"],
+            "the initial rows use the '{{planId}}-s{{i}}' naming scheme from SuspendForReviewAsync.");
+
+        ApprovalRequest reviewRow = (await gate.GetPendingAsync("user-1"))
+            .Single(r => r.Context.PlanId == suspend.PlanId
+                      && r.Context.Kind == ApprovalKind.PlanReview);
+        await gate.RespondAsync(reviewRow.RequestId, ApprovalDecision.Approved, "go",
+            JsonSerializer.Serialize(new PlanReviewResponsePayload
+            {
+                Kind = PlanReviewKinds.Approve,
+            }, _json));
+
+        PlanReviewCompletionService completion = sp.GetRequiredService<PlanReviewCompletionService>();
+        PlanReviewCompletionResult result = await completion.ResolveAsync(suspend.PlanId, "user-1");
+        result.Kind.Should().Be(PlanReviewCompletionKind.Executed);
+
+        PlanDetailDto? after = await plans.GetPlanAsync("user-1", suspend.PlanId);
+        after.Should().NotBeNull();
+        after.Status.Should().Be(PlanStatus.Completed,
+            "the plan must reach a Completed terminal state on approved-and-successful execution.");
+        after.Steps.Should().NotContain(s => s.Status == PlanStepStatus.Pending,
+            "no step row may remain Pending after the plan reaches a terminal state (issue #149). " +
+            "Without the terminal-transition orphan sweep in UpdatePlanStatusAsync, the initial " +
+            "'{{planId}}-s{{i}}' rows written by SuspendForReviewAsync would linger as Pending forever.");
+        after.Steps.Should().NotContain(s => s.Status == PlanStepStatus.Running,
+            "no step row may remain Running after the plan reaches a terminal state (issue #149).");
+
+        // The initial `{planId}-s{i}` rows specifically must be Skipped (not
+        // still-Pending, not still-Running) — this is the exact orphan class
+        // the issue calls out.
+        IEnumerable<PlanStepRecordDto> initialRows = after.Steps
+            .Where(s => s.StepId == $"{suspend.PlanId}-s0" || s.StepId == $"{suspend.PlanId}-s1");
+        initialRows.Should().OnlyContain(s => s.Status == PlanStepStatus.Skipped,
+            "the pre-execution planner-proposal rows must be transitioned to Skipped when execution " +
+            "supersedes them with round-scoped rows.");
+
+        await sp.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Issue #149, terminal Failed variant: any terminal transition to
+    /// <see cref="PlanStatus.Failed"/> must sweep orphan Pending/Running step
+    /// rows to Skipped. Verified directly at the store contract so the
+    /// invariant holds no matter which failure path (planner unavailable,
+    /// replan exhausted, executor fault) wrote the transition.
+    /// </summary>
+    [Fact]
+    public async Task Review_rejected_failed_plan_leaves_no_orphan_pending_step_rows()
+    {
+        var plans = new PlanReviewCompletionServiceTests.InMemoryPlanStore();
+        await SeedSuspendedPlanAsync(plans, "plan-fail-149");
+
+        await plans.UpdatePlanStatusAsync(new PlanStatusUpdate
+        {
+            PlanId = "plan-fail-149",
+            Subject = "user-1",
+            Status = PlanStatus.Failed,
+            FailureReason = "PlanReviewRejected: reviewer rejected",
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+        PlanDetailDto? after = await plans.GetPlanAsync("user-1", "plan-fail-149");
+        after.Should().NotBeNull();
+        after.Status.Should().Be(PlanStatus.Failed);
+        after.Steps.Should().NotContain(s => s.Status == PlanStepStatus.Pending,
+            "no step row may remain Pending after the plan reaches Failed (issue #149).");
+        after.Steps.Should().OnlyContain(s => s.Status == PlanStepStatus.Skipped,
+            "on a rejected/failed terminal plan every initial step row must be Skipped — none of them ever ran.");
+    }
+
+    /// <summary>
+    /// Issue #149, terminal Cancelled variant: a plan that reaches
+    /// <see cref="PlanStatus.Cancelled"/> (via caller-initiated cancellation,
+    /// timeout, or any other cancel path) must not leave step rows in
+    /// Pending or Running. Verified directly at the plan-store level so the
+    /// invariant holds no matter which caller writes the terminal transition.
+    /// </summary>
+    [Fact]
+    public async Task Cancelled_plan_leaves_no_orphan_pending_step_rows()
+    {
+        var plans = new PlanReviewCompletionServiceTests.InMemoryPlanStore();
+        await SeedSuspendedPlanAsync(plans, "plan-cancel-149");
+
+        // Simulate a Running claim before cancellation (mirrors the real
+        // flow: AwaitingReview → Running → Cancelled if the executor's
+        // OperationCanceledException catch fires).
+        await plans.UpdateStepAsync(new PlanStepUpdate
+        {
+            StepId = "plan-cancel-149-r0-s0",
+            PlanId = "plan-cancel-149",
+            Subject = "user-1",
+            Status = PlanStepStatus.Running,
+            StartedAt = DateTimeOffset.UtcNow,
+        });
+
+        await plans.UpdatePlanStatusAsync(new PlanStatusUpdate
+        {
+            PlanId = "plan-cancel-149",
+            Subject = "user-1",
+            Status = PlanStatus.Cancelled,
+            FailureReason = "cancelled by caller",
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+        PlanDetailDto? after = await plans.GetPlanAsync("user-1", "plan-cancel-149");
+        after.Should().NotBeNull();
+        after.Status.Should().Be(PlanStatus.Cancelled);
+        after.Steps.Should().NotContain(s => s.Status == PlanStepStatus.Pending,
+            "no step row may remain Pending after the plan reaches Cancelled (issue #149).");
+        after.Steps.Should().NotContain(s => s.Status == PlanStepStatus.Running,
+            "no step row may remain Running after the plan reaches Cancelled (issue #149) — " +
+            "otherwise a stranded Running row survives the cancel.");
+        after.Steps.Should().OnlyContain(s => s.Status == PlanStepStatus.Skipped,
+            "every non-terminal step must be swept to Skipped on the Cancelled transition.");
+    }
+
+    private static async Task SeedSuspendedPlanAsync(
+        PlanReviewCompletionServiceTests.InMemoryPlanStore plans, string planId)
+    {
+        await plans.CreatePlanAsync(new PlanWrite
+        {
+            PlanId = planId,
+            Subject = "user-1",
+            SessionId = "sess",
+            TenantId = "Contoso",
+            Request = "multi",
+            DetectedIntents = ["scorecard", "demand"],
+            Status = PlanStatus.AwaitingReview,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Steps =
+            [
+                new PlanStepWrite
+                {
+                    StepId = $"{planId}-s0",
+                    StepIndex = 0,
+                    SpecialistKey = "scorecard",
+                    Intent = "scorecard",
+                    Action = "act-0",
+                    Status = PlanStepStatus.Pending,
+                },
+                new PlanStepWrite
+                {
+                    StepId = $"{planId}-s1",
+                    StepIndex = 1,
+                    SpecialistKey = "demand",
+                    Intent = "demand",
+                    Action = "act-1",
+                    Status = PlanStepStatus.Pending,
+                },
+            ],
+        });
+    }
+
     private static ChartSpec MakeChart(string type, string title) => new()
     {
         Type = type,
