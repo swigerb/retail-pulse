@@ -21,6 +21,39 @@ public partial class AgentExecutionPipeline
 {
     internal readonly record struct ChartFulfillmentResult(List<ChartSpec> Charts, string Reply);
 
+    /// <summary>
+    /// Structural chart-type families. Members share the same underlying data shape
+    /// (series-of-{X,Y}) so within-family differences are presentation-only rendering
+    /// hints (orientation / grouping / stacking). Cross-family differences imply a
+    /// different data model and are treated as an explicit chart-type mismatch — never
+    /// silently rewritten. The nine canonical <see cref="ChartSpec.Type"/> values are:
+    /// <c>bar, horizontalBar, groupedBar, stackedBar, line, pie, donut, gauge, table</c>.
+    /// Gauge and table are singletons because their data shapes (single-scalar; row
+    /// grid) don't bind to any other chart type. See issue #76 Group D.
+    /// </summary>
+    private static readonly string[][] _chartTypeFamilies =
+    [
+        ["bar", "horizontalBar", "groupedBar", "stackedBar"],
+        ["line"],
+        ["pie", "donut"],
+        ["gauge"],
+        ["table"],
+    ];
+
+    private static string[]? ChartTypeFamily(string? type)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return null;
+        foreach (string[] family in _chartTypeFamilies)
+        {
+            foreach (string member in family)
+            {
+                if (string.Equals(member, type, StringComparison.OrdinalIgnoreCase))
+                    return family;
+            }
+        }
+        return null;
+    }
+
     internal ChartFulfillmentResult EnforceChartFulfillment(
         string? userMessage,
         Microsoft.Extensions.AI.ChatResponse response,
@@ -29,10 +62,57 @@ public partial class AgentExecutionPipeline
     {
         ChartIntent intent = ChartRequestDetector.Detect(userMessage);
 
-        // Not an explicit chart request → never force a chart.
+        // ── GROUP A (issue #76): inverse chart-on-prose invariant ─────────────
+        // When the request is NOT an explicit chart request, any model-emitted
+        // chart is unsolicited noise — the prose the user actually asked for is
+        // the source of truth. Drop every chart before the response leaves the
+        // pipeline. Design decision (issue #76): NO prose intent carries a
+        // legitimate chart exception. The nine curated chart prompts all pass
+        // through ChartRequestDetector as explicit; anything the detector
+        // classifies as prose is prose, full stop. This closes the exact P0
+        // failure mode where "How is the portfolio performing?" surfaced a
+        // model-emitted chart that the user had not asked for.
         if (!intent.IsExplicitChartRequest)
         {
+            if (charts.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Chart-fulfillment: dropping {ChartCount} model-emitted chart(s) — the user "
+                    + "did not ask for a visualization (chart-on-prose invariant, issue #76 Group A).",
+                    charts.Count);
+                charts.Clear();
+            }
             return new ChartFulfillmentResult(charts, reply);
+        }
+
+        // ── GROUP D (issue #76): family-aware chart-type enforcement ──────────
+        // ChartRequestDetector.Detect() captured the requested type. Validate
+        // every model-emitted chart against that request:
+        //   * exact-type match  → keep as-is;
+        //   * same family       → coerce Type in place (identical data shape,
+        //     presentation-only rewrite is safe and deterministic);
+        //   * cross family      → fail closed with a structured diagnostic —
+        //     never a silent rewrite (data would not bind, and the user's
+        //     stated intent was structurally different).
+        // Undeclared type intent (intent.ChartType is null) → no enforcement.
+        if (!string.IsNullOrWhiteSpace(intent.ChartType) && charts.Count > 0)
+        {
+            ChartTypeEnforcementResult typeCheck = EnforceRequestedChartType(charts, intent.ChartType);
+            charts = typeCheck.Charts;
+            if (typeCheck.CrossFamilyMismatch is { } mismatch)
+            {
+                _logger.LogWarning(
+                    "Chart-fulfillment: model emitted '{ModelType}' but the user asked for "
+                    + "'{RequestedType}' (different structural family). Failing closed with a "
+                    + "chart-type mismatch diagnostic — issue #76 Group D.",
+                    mismatch.ModelType, mismatch.RequestedType);
+                string mismatchDiag = BuildChartTypeMismatchDiagnostic(mismatch.ModelType, mismatch.RequestedType);
+                string mismatchScrubbed = StripFallbackClaims(reply);
+                string mismatchReply = string.IsNullOrWhiteSpace(mismatchScrubbed)
+                    ? mismatchDiag
+                    : $"{mismatchScrubbed}\n\n{mismatchDiag}";
+                return new ChartFulfillmentResult(charts, mismatchReply);
+            }
         }
 
         bool isPortfolioRanking = IsPortfolioRankingIntent(userMessage, intent);
@@ -177,6 +257,82 @@ public partial class AgentExecutionPipeline
             + "underlying data tools returned no chartable values for this request. This is a "
             + "data-availability issue, not a rendering failure — please retry with a specific "
             + "brand and region, or confirm the entity exists for this tenant.";
+    }
+
+    /// <summary>
+    /// Result of <see cref="EnforceRequestedChartType"/>: the (possibly coerced) chart list,
+    /// plus — when the model emitted a chart from a different structural family than the
+    /// user asked for — the mismatch tuple so the caller can fail closed with a diagnostic.
+    /// </summary>
+    internal readonly record struct ChartTypeEnforcementResult(
+        List<ChartSpec> Charts,
+        (string ModelType, string RequestedType)? CrossFamilyMismatch);
+
+    /// <summary>
+    /// Family-aware enforcement of the chart type the user explicitly requested. Iterates
+    /// every model-emitted chart:
+    /// <list type="bullet">
+    ///   <item>exact-type match → keep unchanged;</item>
+    ///   <item>same family (identical data shape, presentation-only difference) → coerce
+    ///     <see cref="ChartSpec.Type"/> to the requested type in place;</item>
+    ///   <item>cross family → drop the chart and record the first mismatch so the caller
+    ///     can fail closed with a chart-type-mismatch diagnostic. A silent rewrite here
+    ///     would bind the wrong data shape and hide a real model error (issue #76 Group D).</item>
+    /// </list>
+    /// </summary>
+    internal ChartTypeEnforcementResult EnforceRequestedChartType(
+        List<ChartSpec> charts,
+        string requestedType)
+    {
+        string[]? requestedFamily = ChartTypeFamily(requestedType);
+        if (requestedFamily is null)
+        {
+            // The requested type isn't in our nine canonical types — no enforcement possible.
+            return new ChartTypeEnforcementResult(charts, null);
+        }
+
+        (string ModelType, string RequestedType)? firstMismatch = null;
+        var kept = new List<ChartSpec>(charts.Count);
+        foreach (ChartSpec? chart in charts)
+        {
+            if (chart is null) continue;
+
+            if (string.Equals(chart.Type, requestedType, StringComparison.OrdinalIgnoreCase))
+            {
+                kept.Add(chart);
+                continue;
+            }
+
+            string[]? actualFamily = ChartTypeFamily(chart.Type);
+            if (actualFamily is not null && ReferenceEquals(actualFamily, requestedFamily))
+            {
+                // Within-family coercion: safe presentation-only rewrite.
+                _logger.LogInformation(
+                    "Chart-fulfillment: coercing model-emitted '{ModelType}' chart to user-stated "
+                    + "'{RequestedType}' (same structural family) — issue #76 Group D.",
+                    chart.Type, requestedType);
+                kept.Add(chart with { Type = requestedType });
+                continue;
+            }
+
+            // Cross-family (or unknown-family) mismatch: fail closed.
+            firstMismatch ??= (chart.Type ?? "unknown", requestedType);
+            _logger.LogWarning(
+                "Chart-fulfillment: dropping cross-family chart — model emitted '{ModelType}', "
+                + "user asked for '{RequestedType}' — issue #76 Group D.",
+                chart.Type, requestedType);
+        }
+
+        return new ChartTypeEnforcementResult(kept, firstMismatch);
+    }
+
+    private static string BuildChartTypeMismatchDiagnostic(string modelType, string requestedType)
+    {
+        return $"⚠️ Chart unavailable: you asked for a {requestedType} chart, but the underlying "
+            + $"tools returned data shaped for a {modelType} chart — a different chart family. "
+            + "The data shape and the requested chart type are incompatible, so no chart is emitted. "
+            + $"Please retry and confirm the request is for a {modelType}-shaped visualization, or "
+            + $"narrow the query so a {requestedType}-shaped answer can be produced.";
     }
 
     /// <summary>
