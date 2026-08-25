@@ -115,3 +115,35 @@ The record of the most recent live browser verification is
 
 If any prompt fails to render as expected, the matrix has drifted from live
 behavior — add or tighten a matrix case and let CI enforce it.
+
+### Browser runner: stable `data-testid` selectors
+
+The DevTools runner in
+[`scripts/browser-chart-acceptance.js`](../scripts/browser-chart-acceptance.js)
+targets DOM elements exclusively via **stable `data-testid` attributes** the
+frontend components expose. Previous revisions used Griffel class-substring
+selectors (`[class*="chartCard"]`) that never matched at runtime because
+Griffel compiles `className={styles.chartCard}` to atomic hashed class names
+(e.g. `___ivt4970_0000000`), and Recharts internal class names that changed
+between minor releases. Issue #54 (item 2) locked the runner onto identity
+hooks that survive both problems:
+
+| testid | Component | Purpose |
+| ------ | --------- | ------- |
+| `chat-input` | `ChatPanel` Fluent UI `<Input>` | Composer input the runner types into. |
+| `chat-send-button` | `ChatPanel` primary `<Button>` | Alt-path for triggering send. |
+| `chat-message-list` | `ChatPanel` messages container | Root the runner scans for message churn. |
+| `chat-message-assistant` | Assistant message wrapper | Latest assistant turn; carries `data-message-streaming="true|false"`. |
+| `chat-message-user` | User message wrapper | User turn. |
+| `chart-card` | `ChartRenderer` `<Card>` | The populated chart card. Also carries `data-chart-type`. |
+| `chart-title` | Chart card title | Optional entity/legend fallback. |
+| `chart-unavailable` | Chart card diagnostic | The "Chart unavailable" no-render note. |
+| `chart-table` | Table body root | Table charts; `[data-testid="chart-table"] tbody tr` is the mark set. |
+| `chart-gauge` / `chart-gauge-svg` | Gauge container / gauge SVG | Gauge charts. |
+
+The runner also polls actual mark readiness before scraping: for every case
+it waits for the manifest's `minMarks` bar-rectangles / pie-sectors / line
+dots / table rows / gauge SVG to be present AND for one poll interval where
+the count did not grow before declaring the render complete. This replaces
+the historical `body.innerText` scrape that produced the case-7 "missing
+Summit Outdoor" race Publix reported on PR #53.
