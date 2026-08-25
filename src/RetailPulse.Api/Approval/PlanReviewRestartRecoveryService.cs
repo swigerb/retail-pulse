@@ -73,8 +73,19 @@ public sealed class PlanReviewRestartRecoveryService : IHostedService
             {
                 PlanDetailDto? plan = await planStore.GetPlanAsync(subject, planId, cancellationToken);
                 if (plan is null) continue;
-                if (plan.Status is not (PlanStatus.AwaitingReview or PlanStatus.AwaitingClarification))
+                // Recover any plan that a decision row was recorded for and
+                // that has not yet reached a terminal state. Awaiting* is
+                // the normal case; Running is the stranded-crash case
+                // (finding 3, #145) — an earlier process's completion service
+                // claimed Running and died before writing a terminal status.
+                // The completion service is idempotent, so replaying it is
+                // safe.
+                if (plan.Status is not (PlanStatus.AwaitingReview
+                    or PlanStatus.AwaitingClarification
+                    or PlanStatus.Running))
+                {
                     continue;
+                }
 
                 PlanReviewCompletionResult result = await completion.ResolveAsync(planId, subject, cancellationToken);
                 _logger.LogInformation(
