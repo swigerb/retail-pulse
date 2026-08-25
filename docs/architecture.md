@@ -310,58 +310,135 @@ tool added to the agent must log first, then fall back.
 
 ## Multi-Agent Router Architecture
 
-Retail Pulse uses a three-layer multi-agent system: a **Router** classifies user intent, **Specialist Agents** handle domain-specific queries, and an **Escalation Orchestrator** coordinates cross-domain analysis.
+Retail Pulse routes every `/api/chat` turn through three layers that are wired together at startup: the LLM-based **Router**, the pure **HybridExecutionDecider** admission gate, and a pool of **specialists** (data-driven + a handful of bespoke ones). A dedicated **Portfolio Health Council** and the durable **plan-first orchestrator** (ADR-014) sit alongside the fast single-shot path — the admission gate chooses between them.
 
-### Router → Specialist Dispatch Flow
+### Router → HybridExecutionDecider → Fast / Plan / Council
 
 ```
 User Message → GuardrailsMiddleware (input filter)
   → Cache Check (SHA256 key of normalized query)
   → ConversationMemoryMiddleware (inject prior context)
   → RetailOpsRouter (LLM classification, temp 0.1)
-      ├── confidence ≥ 0.6 → Specialist Agent (domain-specific tools + prompt)
-      └── confidence < 0.6 → GeneralAgent (all 7 original tools, fallback)
+        → RoutingDecision { agentKey, intent, confidence, detectedIntents[] }
+  → HybridExecutionDecider.Decide(decision, message, ctx, options)
+        ├── Fast    → single specialist via AgentExecutionPipeline → MafAgentInvoker
+        ├── Plan    → PlanOrchestrator → planner → (optional plan review, ADR-014) → PlanExecutor
+        └── Council → ConsensusOrchestrator (portfolio-health dedicated trigger)
   → Response Assembly (charts, telemetry, cost tracking)
   → GuardrailsMiddleware (output PII redaction)
   → Cache Store (deterministic queries only)
-  → Return
+  → Return   (fast: 200 OK; plan-with-review: 202 Accepted)
 ```
 
-The `RetailOpsRouter` uses a dedicated low-temperature classification prompt (`agents.router` in `prompts.yaml`) that returns JSON with `intent`, `confidence`, and `reasoning` fields. Intent strings use slash-separated format (e.g., `demand/forecasting`) for future sub-categorization.
+The `RetailOpsRouter` uses a dedicated low-temperature classification prompt (`agents.router` in the active pack's `agents.yaml`) that returns JSON with `intent`, `confidence`, and — critically — `detectedIntents` (every domain the LLM found in the message). Intent strings use slash-separated format (e.g., `demand/forecasting`) for future sub-categorization.
 
-### Specialist Agent Registry
+`HybridExecutionDecider` (`src/RetailPulse.Api/Agents/Routing/HybridExecutionDecider.cs`) is a pure static function on the hot path. Its precedence, top to bottom:
 
-| Agent Key | Display Name | Intents | Temperature | Tools |
-|-----------|-------------|---------|-------------|-------|
-| `demand-forecasting` | Demand Forecast | `demand/forecasting` | 0.3 | GetHistoricalDemand, GenerateForecast, GetSeasonalityFactors, IdentifyDemandRisks |
-| `promo-planning` | Promo Planning | `promo/planning` | 0.3 | GetPromoHistory, CalculateLift, EvaluateTiming, EstimateROI |
-| `competitive-intel` | Competitive Intel | `competitive/intelligence` | 0.4 | GetCompetitorPricing, GetMarketShare, DetectThreats, GetCompetitiveLandscape |
-| `supply-chain` | Supply Chain | `supply/analysis` | 0.3 | GetShipmentStats + supply-specific tools |
-| `store-ops` | Store Operations | `store/operations` | 0.3 | GetStorePerformance, PredictStockout |
-| `planogram` | Planogram | `planogram/optimization` | 0.3 | GetShelfLayout, OptimizePlanogram |
-| `margin` | Margin Analysis | `margin/analysis` | 0.3 | GetMarginByBrand, GetMarginDrivers, GetMarginTrend, DetectMarginRisks |
-| `general` | General | All unmatched intents | 0.7 | All 7 original tools (depletions, shipments, sentiment, etc.) |
+1. **Explicit user override** — an authenticated caller may force `Fast` or `Plan`, but only when the requested path is reachable (a `Plan` force with no planner registered is ignored).
+2. **Council intent** — the portfolio-health intent always resolves to `Council` when no valid override wins.
+3. **Planner unavailable** — anonymous callers, plan orchestrator not registered, or empty `DetectedIntents` → `Fast`. The plan path simply is not a destination for that request.
+4. **Multi-domain** — `DetectedIntents.Count >= PlanPersistence:MinDetectedIntentsForPlan` (default 2) → `Plan`.
+5. **Low confidence** — router confidence strictly below `PlanPersistence:MinConfidenceForFastPath` (default 0.6) → `Plan`.
+6. **Advisory / diagnostic phrases** — configured phrases in `PlanPersistence:AdvisoryPhrases` → `Plan`.
+7. Otherwise → `Fast`.
 
-All specialists implement `ISpecialistAgent` (in `RetailPulse.Contracts.Routing`) and register via DI through the `AddAgentRouting()` extension method. Adding a new specialist requires one class implementing the interface and one DI registration line.
+### Specialist Registry (data-driven — ADR-008)
 
-> **Architecture note (Sprint 2):** The specialist agent pipeline was identified for consolidation into a shared `SpecialistAgentBase` to reduce copy/paste duplication of message construction, history truncation, chart extraction, and token accounting across agents. This refactoring is tracked but not yet implemented — each specialist currently repeats the common orchestration logic in its `HandleAsync` method.
+Specialists are no longer one-class-per-domain. The active content pack's `packs/<pack>/agents.yaml` declares each specialist with a `key`, `intents[]`, `model`, `temperature`, prompt bindings, and — for domains that use tools — `tool_bindings`. `ConfiguredSpecialistAgent` (`src/RetailPulse.Api/Agents/Specialists/ConfiguredSpecialistAgent.cs`) binds a definition to the shared `MafAgentInvoker` at startup. Adding a new specialist is a config change: append a new entry to `agents.yaml`, restart, and the new key is discovered by the router and by `IEnumerable<ISpecialistAgent>` DI. See `docs/tenant-configuration.md` for the schema and a worked example.
 
-### Registration Pattern
+The shipped `default` pack registers the following specialists (see `packs/default/agents.yaml` for the authoritative list; each also declares its intents and tool bindings):
 
-```csharp
-// In RoutingServiceExtensions.cs
-services.AddScoped<ISpecialistAgent>(sp => new DemandForecastAgent(...));
-services.AddScoped<ISpecialistAgent>(sp => new PromoPlanningAgent(...));
-// ... each specialist auto-discovered by IEnumerable<ISpecialistAgent>
-```
+| Agent Key | Purpose | Path |
+|-----------|---------|------|
+| `router` | Intent classification (JSON output) | data-driven |
+| `demand-forecasting` | Demand forecasts, seasonality, demand risk | data-driven |
+| `promo-planning` | Promo lift, ROI, timing evaluation | data-driven (bespoke helper for lift math) |
+| `competitive-intel` | Competitor pricing, market share, threats | data-driven (bespoke helper for landscape rollup) |
+| `supply-chain` | Shipment health, disruptions, fulfilment | data-driven |
+| `store-ops` | Store performance, stockout risk | data-driven |
+| `planogram` | Shelf layout, planogram optimisation | data-driven |
+| `margin` | Margin drivers, trends, risks | data-driven |
+| `memory-management` | User-facing memory ("forget everything") | bespoke (`MemoryManagementAgent`) |
+| `general` | Fallback when no specialist matches | data-driven |
 
-The router discovers all specialists via `IEnumerable<ISpecialistAgent>` — no manual mapping required. The `GeneralAgent` catches all intent categories as the fallback handler.
+Bespoke C# specialists remain for behaviour that cannot be expressed as a
+prompt + tool binding (memory GDPR flows, some competitive/promo helper
+math). Every specialist — data-driven or bespoke — goes through
+`MafAgentInvoker` on invocation, so token accounting, tracing, tool
+budgets, and content safety apply uniformly.
+
+### Agent-definition safety validation (ADR-011)
+
+`AgentDefinitionValidator` runs at load time and scans every parsed
+`AgentDefinition` against `Guardrails:AgentDefinition:*`
+(allowed-models list, allowed-tools list, privileged-tools list,
+temperature bounds, max system-prompt length, max keyword-fast-path
+length, optional Content Safety pre-flight on the system prompt). The
+default policy is `RefuseStartup` — the API refuses to start with a
+violation. See `docs/adr/011-agent-definition-safety-validation.md`.
 
 ---
 
-## Escalation Chain (L1 → L2 → L3)
+## Plan-first orchestration + review gate (ADR-014)
 
-When a query exceeds what a single specialist can handle, the `EscalationOrchestrator` coordinates multi-agent resolution:
+When `HybridExecutionDecider` returns `Plan` and `PlanPersistence:Enabled=true`,
+the request is lifted onto the plan-first orchestrator instead of running a
+single specialist inline.
+
+```
+POST /api/chat (multi-domain / low-confidence / advisory)
+  → PlanOrchestrator → planner (MAF ChatClientAgent) → typed Plan { steps[] }
+  → PlanStore.PersistAsync — status = awaiting_review (or ready_to_run)
+
+  If PlanReview:Enabled=true:
+    → PlanReviewCoordinator.OpenRoundAsync
+        ├── writes a genuine Microsoft.Agents.AI.Workflows checkpoint
+        │   (ICheckpointStore<JsonElement>, JSON store rooted at
+        │    {data-dir}/plan-reviews)
+        └── opens a Pending approval row (Kind = "plan_review")
+    → /api/chat returns 202 Accepted { planId, reviewRequestId, round, sessionId }
+    → Reviewer decides via POST /api/plans/{planId}/reviews/{requestId}/decision
+        ├── approve / edit → PlanExecutor runs the effective plan
+        ├── reject         → planner replans, new checkpoint, next review round
+        └── timeout        → PlanReviewTimeoutBackgroundService trips the row
+  Else:
+    → PlanExecutor runs the plan directly (200 OK envelope)
+
+PlanExecutor
+  = Microsoft.Agents.AI.Workflows.InProcessExecution
+  + CheckpointManager (JSON checkpoint per step)
+  + step edges wired 1 → 2 → ... → 5 (max plan width per ADR-014)
+  + each step invokes the target specialist through the same MafAgentInvoker seam
+  + [[CLARIFY]] / [[REPLAN]] markers pause the workflow durably
+```
+
+The 202 handoff, review decision, mid-plan clarification, and replan
+lifecycle are exhaustively documented in `docs/API.md` (see
+"Non-blocking suspend/resume" and `POST /api/plans/{planId}/reviews/{requestId}/decision`).
+
+The pre-#94 hot path is preserved byte-for-byte when `PlanReview:Enabled = false`:
+the plan runs inline and `/api/chat` returns the standard `200 OK`
+`ChatResponse` envelope. When `PlanPersistence:Enabled = false`, the plan
+path is unreachable — `HybridExecutionDecider` treats the planner as
+unavailable and always returns `Fast`.
+
+### Related durable state
+
+- `data/plans.db` — plans, steps, review rows, clarifications
+- `{data-dir}/plan-reviews/*.json` — framework checkpoints for suspend/resume
+- `data/approvals.db` — Wave-1 approval gate (see below), also carries `Kind = "plan_review"` and `Kind = "clarification"` rows
+
+---
+
+## Escalation Chain (legacy — compatibility only)
+
+> **Deprecated.** `/api/chat` no longer routes through this path. Multi-domain
+> admission is owned by `HybridExecutionDecider` and lifted onto the
+> plan-first orchestrator (see the section above and ADR-014). `/api/escalate`
+> is retained for callers that opt in explicitly.
+
+Historically, when a query exceeded what a single specialist could handle,
+the `EscalationOrchestrator` coordinated a legacy L1→L2→L3 fan-out:
 
 ```
 User Query → Router → L1 (Single Specialist)
@@ -381,7 +458,11 @@ User Query → Router → L1 (Single Specialist)
 | **L2** | Multiple specialists fan out in parallel | 15 seconds | When L1 times out, or query explicitly spans domains |
 | **L3** | Flags for human review | N/A | When L2 cannot reach confident resolution |
 
-The escalation endpoint is `POST /api/escalate`. Each level's activity is traced as OTel spans with escalation metadata.
+The escalation endpoint is `POST /api/escalate`. Each level's activity is
+traced as OTel spans with escalation metadata. See
+[`EscalationEndpoints`](../src/RetailPulse.Api/Endpoints/EscalationEndpoints.cs)
+— the class documentation explicitly labels this path legacy and points at
+`HybridExecutionDecider` for the current admission logic.
 
 ---
 
