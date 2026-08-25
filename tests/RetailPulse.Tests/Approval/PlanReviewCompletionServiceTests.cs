@@ -524,6 +524,41 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
         public Task<bool> DeletePlanAsync(string subject, string planId, CancellationToken ct = default) => Task.FromResult(true);
         public Task<PlanCleanupResult> PurgeExpiredAsync(DateTimeOffset olderThan, CancellationToken ct = default)
             => Task.FromResult(new PlanCleanupResult(0, 0));
+
+        /// <summary>
+        /// Test-only accessor exposing the last recorded step transition for a
+        /// given plan/step id. Returns <see langword="null"/> when the plan or
+        /// step id has never been touched. Used by state-integrity regression
+        /// tests to prove that resume paths update in-flight step rows out of
+        /// their <c>Pending</c> holding state instead of leaving them stranded.
+        /// </summary>
+        internal PlanStepUpdate? GetLastStepUpdate(string subject, string planId, string stepId)
+        {
+            if (_bySub.TryGetValue(subject, out var bucket)
+                && bucket.TryGetValue(planId, out var row)
+                && row.Steps.TryGetValue(stepId, out var step))
+            {
+                return step;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Test-only accessor exposing the last plan-level status update.
+        /// Returns <see langword="null"/> when the plan was created but never
+        /// transitioned. Used by state-integrity regression tests to prove
+        /// that plans never strand in <c>Running</c> after the resume path
+        /// takes ownership.
+        /// </summary>
+        internal PlanStatusUpdate? GetLastStatusUpdate(string subject, string planId)
+        {
+            if (_bySub.TryGetValue(subject, out var bucket)
+                && bucket.TryGetValue(planId, out var row))
+            {
+                return row.Status;
+            }
+            return null;
+        }
     }
 
     private sealed class NoOpTraceCollector : ITraceCollector
