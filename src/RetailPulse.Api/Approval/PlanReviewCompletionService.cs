@@ -196,7 +196,13 @@ public sealed class PlanReviewCompletionService
                 return await ExecuteApprovedPlanAsync(
                     sp, planStore, plan, state,
                     continuation.ApprovedSteps ?? state.Steps,
-                    continuation.TerminalReason, ct);
+                    continuation.TerminalReason, ct,
+                    // Preserve the completed prefix produced before a mid-plan
+                    // [[REPLAN]] suspension (or a previous replan round). The
+                    // executor only runs the reviewer-approved remainder, so
+                    // ExecuteApprovedPlanAsync flattens this prefix's results
+                    // and charts into the final broadcast (finding 2, #145).
+                    resumeCompletedSteps: state.CompletedSteps);
 
             case PlanReviewContinuationKind.Terminal:
                 await FinaliseAsFailedAsync(planStore, plan, state.Subject,
@@ -254,6 +260,11 @@ public sealed class PlanReviewCompletionService
                         TraceId = state.TraceId,
                         ParentSpanId = state.ParentSpanId,
                         PrincipalKey = state.PrincipalKey,
+                        // Carry the completed prefix into the next round so a
+                        // multi-round replan chain never drops results that
+                        // succeeded before an earlier [[REPLAN]] suspension
+                        // (finding 2, #145).
+                        CompletedSteps = state.CompletedSteps,
                     }, ct);
 
                     // Broadcast that a new review round is waiting.
@@ -355,6 +366,34 @@ public sealed class PlanReviewCompletionService
             DurationMs = 0,
         });
 
+        // Transition the persisted step row that was paused mid-plan out of
+        // Pending. Without this, a subsequent GET /api/plans/{planId} keeps
+        // reporting an answered clarification as awaiting reviewer input,
+        // which breaks downstream reconciliation (finding 1b, #145). The
+        // update is best-effort: a store fault must not derail the resume
+        // path itself (the completion is finalized further down).
+        if (!string.IsNullOrWhiteSpace(state.PausedStepId))
+        {
+            try
+            {
+                await planStore.UpdateStepAsync(new PlanStepUpdate
+                {
+                    StepId = state.PausedStepId!,
+                    PlanId = plan.PlanId,
+                    Subject = state.Subject,
+                    Status = PlanStepStatus.Completed,
+                    Result = clarification.Answer ?? string.Empty,
+                    CompletedAt = DateTimeOffset.UtcNow,
+                }, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Could not transition paused step {StepId} to Completed on clarification resume for plan {PlanId}.",
+                    state.PausedStepId, plan.PlanId);
+            }
+        }
+
         IReadOnlyList<PlanReviewStepDto> remaining =
             [.. state.Steps.Skip(1)];
         return await ExecuteApprovedPlanAsync(
@@ -436,10 +475,64 @@ public sealed class PlanReviewCompletionService
             Plan = effectivePlan,
             StepIds = stepIds,
             SpecialistLookup = lookup,
+            // Cumulative offset so emitted span tags and PlanStepResult
+            // indices report the true step position (offset+i), not the
+            // local 0-based index into the post-resume slice (finding 1a, #145).
+            StepIndexOffset = offset,
         };
 
         PlanExecutor executor = sp.GetRequiredService<PlanExecutor>();
-        PlanExecutionOutcome outcome = await executor.ExecuteAsync(executionRequest, ct);
+        PlanExecutionOutcome outcome;
+        try
+        {
+            outcome = await executor.ExecuteAsync(executionRequest, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Genuine caller cancel — propagate. The caller's cancellation
+            // path takes responsibility for the plan record.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The plan row was just claimed as Running above. If the executor
+            // (or its finally block, which writes the terminal status) throws
+            // and we return without settling the row, the plan strands in
+            // Running forever — the restart-recovery sweep only picks up
+            // Awaiting* rows (finding 3, #145). Finalize the row as Failed
+            // and broadcast a terminal reply so the reviewer surface stops
+            // waiting. Both writes are best-effort to survive a nested store
+            // fault.
+            _logger.LogError(ex,
+                "PlanExecutor.ExecuteAsync threw for plan {PlanId} after the Running claim; finalizing as Failed.",
+                plan.PlanId);
+            string reason = $"{PlanReviewTerminalReason.ReviewTimedOut}: executor faulted after resume ({ex.GetType().Name}: {ex.Message})";
+            try
+            {
+                await FinaliseAsFailedAsync(planStore, plan, state.Subject, reason, sp, ct);
+            }
+            catch (Exception nested)
+            {
+                _logger.LogError(nested,
+                    "Failed to persist Failed status for plan {PlanId} after executor fault; restart recovery must clean up.",
+                    plan.PlanId);
+            }
+            try
+            {
+                await BroadcastFinalAsync(sp, plan.PlanId, state.Subject, state.SessionId,
+                    BuildTerminalReply(PlanReviewTerminalReason.ReviewTimedOut),
+                    PlanReviewTerminalReason.ReviewTimedOut);
+            }
+            catch (Exception nested)
+            {
+                _logger.LogWarning(nested,
+                    "Failed to broadcast terminal reply for plan {PlanId} after executor fault.",
+                    plan.PlanId);
+            }
+            return PlanReviewCompletionResult.TerminatedWithoutExecution(
+                PlanReviewTerminalReason.ReviewTimedOut,
+                $"executor faulted after resume: {ex.Message}");
+        }
 
         // If the executor asks to pause for clarification / replan, hand off.
         if (outcome.Status == PlanStatus.AwaitingClarification

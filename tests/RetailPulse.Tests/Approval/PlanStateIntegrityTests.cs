@@ -107,12 +107,14 @@ public sealed class PlanStateIntegrityTests : IDisposable
         PlanReviewCompletionResult clarResume = await completion.ResolveAsync(suspend.PlanId, "user-1");
         clarResume.Kind.Should().Be(PlanReviewCompletionKind.Executed);
 
-        // The paused step was persisted under the initial-plan naming scheme
-        // (`{planId}-s{index}`) with Status = Pending at suspension time.
-        // After the answer resumes execution, that same row must transition
-        // to Completed so plan-detail reads don't advertise an answered
-        // clarification as still pending.
-        string pausedStepId = $"{suspend.PlanId}-s1";
+        // Plan-review + clarification double-suspends materialize step rows
+        // under the review-round naming scheme `{planId}-r{round}-s{index}`
+        // (see PlanReviewCompletionService.ExecuteApprovedPlanAsync). The
+        // executor's SuspendForClarificationAsync then writes the paused row
+        // under that same id with Status = Pending. On answer resume it MUST
+        // transition to Completed so plan-detail reads don't advertise an
+        // answered clarification as still pending.
+        string pausedStepId = $"{suspend.PlanId}-r0-s1";
         PlanStepUpdate? pausedUpdate = plans.GetLastStepUpdate("user-1", suspend.PlanId, pausedStepId);
         pausedUpdate.Should().NotBeNull(
             "the paused clarification step's row must exist under the initial-plan step id.");
@@ -581,10 +583,15 @@ public sealed class PlanStateIntegrityTests : IDisposable
 
         public Task UpdatePlanStatusAsync(PlanStatusUpdate update, CancellationToken ct = default)
         {
+            // Simulate the specific fault that surfaces finding 3: the
+            // executor's finally block writes the derived terminal status
+            // (Completed on the happy path) and the store rejects it, so the
+            // executor throws out of ExecuteAsync while the plan record is
+            // still Running. The completion service's own recovery write
+            // (Failed) must be allowed through — that's the whole point of
+            // the fix: contain the fault and finalize the row anyway.
             if (ExplodeOnTerminalTransitions
-                && !string.Equals(update.Status, PlanStatus.Running, StringComparison.Ordinal)
-                && !string.Equals(update.Status, PlanStatus.AwaitingReview, StringComparison.Ordinal)
-                && !string.Equals(update.Status, PlanStatus.AwaitingClarification, StringComparison.Ordinal))
+                && string.Equals(update.Status, PlanStatus.Completed, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     $"simulated transient failure writing plan status '{update.Status}' for {update.PlanId}");

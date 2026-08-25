@@ -87,6 +87,7 @@ public sealed class PlanClarifier : IPlanClarifier
             ApprovalRequestId = string.Empty,
             CreatedAt = DateTimeOffset.UtcNow,
             PausedAtStepIndex = input.PausedAtStepIndex,
+            PausedStepId = input.PausedStepId,
             CompletedSteps = input.CompletedSteps,
         };
 
@@ -202,6 +203,14 @@ public sealed record PlanClarificationOpenInput
     public required string SpecialistKey { get; init; }
     public required string Question { get; init; }
     public required int PausedAtStepIndex { get; init; }
+    /// <summary>
+    /// Persisted step id (from <see cref="PlanExecutionRequest.StepIds"/>)
+    /// of the paused step. Threaded through the checkpoint so the resume
+    /// path can transition that specific row from Pending to Completed
+    /// once the reviewer answers (finding 1b, #145). Optional for
+    /// existing callers that don't yet supply it.
+    /// </summary>
+    public string? PausedStepId { get; init; }
     public required IReadOnlyList<PlanReviewStepDto> RemainingSteps { get; init; }
     public required IReadOnlyCollection<string> SpecialistKeys { get; init; }
     public IReadOnlyList<string> DetectedIntents { get; init; } = [];
