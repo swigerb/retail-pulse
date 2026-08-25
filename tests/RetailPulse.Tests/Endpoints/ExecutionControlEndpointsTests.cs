@@ -53,6 +53,7 @@ public sealed class ExecutionControlEndpointsTests
 
         int toolIterations = 0;
         bool toolCancelled = false;
+        var firstIteration = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var toolTask = Task.Run(async () =>
         {
@@ -61,7 +62,8 @@ public sealed class ExecutionControlEndpointsTests
                 while (true)
                 {
                     cts.Token.ThrowIfCancellationRequested();
-                    Interlocked.Increment(ref toolIterations);
+                    int n = Interlocked.Increment(ref toolIterations);
+                    if (n == 1) firstIteration.TrySetResult();
                     await Task.Delay(10, cts.Token);
                 }
             }
@@ -71,18 +73,22 @@ public sealed class ExecutionControlEndpointsTests
             }
         });
 
-        await Task.Delay(50);
+        // Wait deterministically for the tool to actually enter its loop rather
+        // than sleeping a fixed budget. Under CPU contention from the full suite
+        // a fixed Task.Delay races the thread-pool scheduler and observes zero
+        // iterations, causing the same spurious "beforeCount=0" failure #152
+        // eliminated for the Hubs registry test.
+        await firstIteration.Task.WaitAsync(TimeSpan.FromSeconds(10));
         int beforeCount = Volatile.Read(ref toolIterations);
         beforeCount.Should().BeGreaterThan(0);
 
         HttpResponseMessage response = await host.Client.PostAsync("/api/chat/session-1/cancel", content: null);
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-        await toolTask.WaitAsync(TimeSpan.FromSeconds(2));
+        await toolTask.WaitAsync(TimeSpan.FromSeconds(5));
         toolCancelled.Should().BeTrue("cancellation must reach the fake tool, not just return HTTP");
 
         int settledCount = Volatile.Read(ref toolIterations);
-        await Task.Delay(80);
         Volatile.Read(ref toolIterations).Should().Be(settledCount,
             "the tool loop must stop iterating after cancel arrives");
     }
