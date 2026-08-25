@@ -285,6 +285,77 @@ describe('planReducer', () => {
     expect(rejected.active?.status).toBe('awaiting_review');
   });
 
+  it('late REVIEW_RESOLVED after PLAN_FINAL preserves terminal status (issue #145 finding 4)', () => {
+    // Simulate a plan-final broadcast arriving BEFORE the HTTP POST /decision
+    // response resolves — the reducer's REVIEW_RESOLVED action must not
+    // regress a plan that already carries `finalReply` back to `running`
+    // (approve/edit) or `awaiting_review` (reject).
+    const seed = planReducer(
+      planReducer(initialPlanState, { type: 'PLAN_STARTED', planId: 'p1', request: 'q' }),
+      {
+        type: 'REVIEW_REQUESTED',
+        planId: 'p1',
+        requestId: 'req-1',
+        round: 0,
+        proposal: null,
+      },
+    );
+    const terminated = planReducer(seed, {
+      type: 'PLAN_FINAL',
+      planId: 'p1',
+      reply: 'plan already finished',
+      terminalReason: null,
+    });
+    expect(terminated.active?.status).toBe('completed');
+    expect(terminated.active?.finalReply).toBe('plan already finished');
+    const lateApprove = planReducer(terminated, {
+      type: 'REVIEW_RESOLVED',
+      planId: 'p1',
+      requestId: 'req-1',
+      kind: 'approve',
+    });
+    expect(lateApprove.active?.status).toBe('completed');
+    expect(lateApprove.active?.finalReply).toBe('plan already finished');
+    expect(lateApprove.active?.review?.resolvedKind).toBe('approve');
+    expect(lateApprove.active?.review?.decisionInFlight).toBeUndefined();
+    const lateReject = planReducer(terminated, {
+      type: 'REVIEW_RESOLVED',
+      planId: 'p1',
+      requestId: 'req-1',
+      kind: 'reject',
+    });
+    expect(lateReject.active?.status).toBe('completed');
+  });
+
+  it('late REVIEW_RESOLVED after PLAN_FINAL with failed reason keeps failed status (issue #145 finding 4)', () => {
+    const seed = planReducer(
+      planReducer(initialPlanState, { type: 'PLAN_STARTED', planId: 'p1', request: 'q' }),
+      {
+        type: 'REVIEW_REQUESTED',
+        planId: 'p1',
+        requestId: 'req-1',
+        round: 0,
+        proposal: null,
+      },
+    );
+    const failed = planReducer(seed, {
+      type: 'PLAN_FINAL',
+      planId: 'p1',
+      reply: 'replan exhausted',
+      terminalReason: 'PlanReviewReplanExhausted',
+    });
+    expect(failed.active?.status).toBe('failed');
+    const lateEdit = planReducer(failed, {
+      type: 'REVIEW_RESOLVED',
+      planId: 'p1',
+      requestId: 'req-1',
+      kind: 'edit',
+    });
+    expect(lateEdit.active?.status).toBe('failed');
+    expect(lateEdit.active?.finalReply).toBe('replan exhausted');
+    expect(lateEdit.active?.review?.resolvedKind).toBe('edit');
+  });
+
   it('opens a clarification round with a parsed prompt', () => {
     const prompt: PlanClarificationPrompt = {
       planId: 'p1',
