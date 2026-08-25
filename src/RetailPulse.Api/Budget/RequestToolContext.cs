@@ -57,7 +57,7 @@ public sealed class RequestToolContext
     {
         // If a caller already opened an outer budget scope (for example the
         // plan-first orchestrator wrapping a whole plan around per-step
-        // specialist invocations — see issue #93 and ADR-011), reuse it so the
+        // specialist invocations — see issue #93 and ADR-014), reuse it so the
         // returned-character counter, dedup map, and distinct-call counter
         // accumulate cumulatively across the whole plan instead of resetting
         // per step. The nested scope is a no-op on dispose in that case so

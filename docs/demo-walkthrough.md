@@ -359,7 +359,7 @@ A competitor just launched a massive Memorial Day sale in the Southwest. Decreas
 
 > *"What you've just seen is a fundamental shift. The AI isn't just reading data — it's a collaborator that can update, analyze, and advise. And every single change is traceable in the telemetry. You can see exactly what was updated, when, and by whom. That's enterprise-grade agentic AI."*
 
-> **Pro tip:** To reset the data for the next demo, simply delete the SQLite database file (`data/retailpulse.db`) and restart the MCP Server. It will re-seed from `tenant.yaml` automatically.
+> **Pro tip:** To reset the data for the next demo, simply delete the SQLite database file (`%TEMP%/retailpulse/retailpulse.db`) and restart the MCP Server. It will re-seed from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`) automatically.
 
 ---
 
@@ -644,7 +644,7 @@ Forget everything
 
 > *"Enterprise AI isn't just about intelligence — it's about trust. Guardrails prevent misuse. Streaming delivers UX parity with consumer AI. Caching cuts costs without sacrificing freshness. Memory creates continuity. And the observability suite gives compliance and finance complete visibility. Every one of these features is running right now, on every message, in real time."*
 
-> **Pro tip:** To reset the data for the next demo, simply delete the SQLite database file (`data/retailpulse.db`) and restart the MCP Server. It will re-seed from `tenant.yaml` automatically.
+> **Pro tip:** To reset the data for the next demo, simply delete the SQLite database file (`%TEMP%/retailpulse/retailpulse.db`) and restart the MCP Server. It will re-seed from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`) automatically.
 
 ---
 
@@ -688,11 +688,11 @@ Forget everything
 
 ### "What model does it use?"
 
-> GPT-5.4-mini via Azure AI Foundry (through APIM AI Gateway). The architecture is model-agnostic — swap to GPT-4.1, Claude, or any `IChatClient`-compatible model by changing one line in `prompts.yaml`.
+> GPT-5.4-mini via Azure AI Foundry (through APIM AI Gateway). The architecture is model-agnostic — swap to GPT-4.1, Claude, or any `IChatClient`-compatible model by changing the `model:` field on an entry in the active pack's `packs/<pack>/agents.yaml`.
 
 ### "Does the agent actually change the data?"
 
-> Yes. The `UpdateMetrics` MCP tool writes directly to the SQLite database. Changes persist across queries within the same session and survive MCP Server restarts (the database file is on disk). To reset to the original state, delete `data/retailpulse.db` and restart — it re-seeds automatically from `tenant.yaml`.
+> Yes. The `UpdateMetrics` MCP tool writes directly to the SQLite database. Changes persist across queries within the same session and survive MCP Server restarts (the database file is on disk). To reset to the original state, delete `%TEMP%/retailpulse/retailpulse.db` and restart — it re-seeds automatically from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`).
 
 ### "How long did this take to build?"
 
@@ -775,10 +775,10 @@ Northeast, Southeast, Midwest, Southwest, West Coast, Pacific Northwest
 | Aspire Dashboard not loading | The dashboard URL is dynamic; check the terminal for `Login to the dashboard at...` |
 | SignalR connection fails | Verify the API is running; check browser console for WebSocket errors |
 | Telemetry shows "Disconnected" | This is expected before the first query. Send a message and it will connect. |
-| MCP tools return empty data | Diacritics are handled automatically - "Anejo" matches "Añejo". Check brand/region spelling against tenant.yaml. |
-| MCP tools return no data | Verify brand name matches tenant.yaml exactly. Check region spelling. |
+| MCP tools return empty data | Diacritics are handled automatically - "Anejo" matches "Añejo". Check brand/region spelling against the active pack's `packs/<Packs:Active>/pack.yaml` (`tenant.brands` / `tenant.regions`). |
+| MCP tools return no data | Verify brand name matches the active pack's `packs/<Packs:Active>/pack.yaml` (`tenant.brands`) exactly. Check region spelling. |
 | No data in App Insights | Allow 2-5 minutes for telemetry to appear. Check the connection string in AppHost.cs. |
-| Data not resetting between demos | Delete `data/retailpulse.db` and restart the MCP Server. It will re-seed from `tenant.yaml`. |
+| Data not resetting between demos | Delete `%TEMP%/retailpulse/retailpulse.db` and restart the MCP Server. It will re-seed from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`). |
 | UpdateMetrics returns "Invalid field" | Check field spelling against valid fields: Depletions (`DepletionsYoY`, `SellThroughYoY`, `InventoryWeeks`, `Status`, `SentimentSummary`), Shipments (`ShipmentsYoY`, `CasesShipped`, `CasesDepleted`, `AnomalyType`, `RiskLevel`), Sentiment (`Sentiment`). |
 | HTTP 429 Too Many Requests | Rate limiting is active. `strict` policy allows 10/min on chat routes. Wait a few seconds or adjust rate limiter config for demo. |
 | Bot SSO not working in Emulator | Expected — Bot Framework Emulator does not support SSO. Use `DevelopmentAuthHandler` (automatic in Development environment). See [Testing Guide](testing-guide.md). |

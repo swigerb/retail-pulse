@@ -2,6 +2,43 @@
 
 Retail Pulse supports one-command deployment to Azure using the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/).
 
+## Required vs Optional Azure resources
+
+The table below is the authoritative "what must exist vs what is opt-in" for
+an Azure deployment. Optional resources default off; a fresh `azd up` will
+deploy a working, secured stack without them, and the platform demos locally
+with none of them (see the top-level [README](../README.md#required-vs-optional-azure-resources)
+for the local-only walkthrough).
+
+### Required
+
+| Component | Azure Service | Bicep module | Notes |
+|-----------|--------------|--------------|-------|
+| API | Azure Container Apps | `infra/modules/aca-app.bicep` | .NET minimal API + agent host (`RetailPulse.Api`) |
+| MCP Server | Azure Container Apps | `infra/modules/aca-app.bicep` | Retail metrics tool host (`RetailPulse.McpServer`) |
+| Teams Bot | Azure Container Apps | `infra/modules/aca-app.bicep` | Microsoft Agents SDK (`RetailPulse.TeamsBot`) |
+| Container Apps Environment | Managed environment | `infra/modules/aca-environment.bicep` | Shared network + log analytics workspace binding |
+| Container Registry | Azure Container Registry (Basic) | `infra/modules/acr.bicep` | Dedicated registry; Container Apps pull with `AcrPull` on the managed identity — no admin secrets |
+| Frontend | Azure Static Web Apps | `infra/modules/static-web-app.bicep` | React/Vite build (Standard SKU); the SPA calls the Container Apps API directly for chat/SignalR |
+| Monitoring | Application Insights + Log Analytics | `infra/modules/monitoring.bicep` | OpenTelemetry sink |
+| App data storage | Container-local temp (no durable volume) | — | See "App data storage" note below. |
+| AI Gateway | Azure API Management (Developer) | `infra/modules/apim.bicep`, `infra/modules/apim-openai-api.bicep` | Token limits, metrics, managed-identity auth to Azure OpenAI; verified live by `scripts/Verify-ApimAiGateway.ps1` |
+| Authentication | Microsoft Entra ID (single-tenant, MSAL PKCE) | `infra/modules/entra-*.bicep`, `scripts/Setup-EntraApp.ps1` | Only auth mode ever deployed to production — see [ADR-005](./adr/005-provider-neutral-authentication.md) and [authentication-entra.md](./authentication-entra.md). |
+
+### Optional (opt-in — every one is off by default)
+
+| Feature | Azure Service | How to enable | ADR |
+|---------|--------------|---------------|-----|
+| Vector + BM25 knowledge | Azure AI Search | `Knowledge:Provider:Mode = AzureAISearch` + `Knowledge:AzureAISearch:Endpoint`. Default degradation is `FailLoud`; set `Degradation = FallbackToInMemory` to soft-fail. | [ADR-012](adr/012-azure-ai-search-provider.md) |
+| Foundry retrieval agent | Azure AI Foundry IQ (Azure AI Projects) | `Knowledge:Provider:Mode = FoundryIQ` + `Knowledge:FoundryIQ:ProjectEndpoint`, plus vector store id / retrieval agent name from the pack. | [ADR-013](adr/013-foundry-iq-knowledge-provider.md) |
+| Prompt injection + harmful content filtering | Azure AI Content Safety + Prompt Shields | `Security:ContentSafety:Enabled = true` + endpoint/API version. Bicep helper: `infra/modules/content-safety.bicep`. | [ADR-010](adr/010-content-safety-layering.md) |
+| Persistent Foundry shipment specialist | Azure AI Foundry Agent Service | `FoundryAgent:Enabled = true` + `FoundryAgent:ProjectEndpoint` + agent name. | — |
+| Durable SQLite mount | Azure Files SMB mount on the API Container App | Currently **not enabled** — this tenant's governance policy forces new storage accounts to `allowSharedKeyAccess=false` and blocks key-based CIFS mounts. The API therefore ships with `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`. See the "App data storage" note below for the incident detail and the future durable path. | — |
+
+The rest of this document describes the required stack in detail — jump to
+["Optional features (opt-in, disabled by default)"](#optional-features-opt-in-disabled-by-default)
+below for worked examples of enabling Azure AI Search and Content Safety.
+
 ## Architecture
 
 | Component | Azure Service | Notes |
@@ -374,8 +411,9 @@ fail-closed path is **not** weakened — a future policy-compatible durable back
 options below) can drop the opt-out and set a real durable path instead.
 
 The **MCP server** still writes its seeded retail dataset (`retailpulse.db`) under
-the OS temp directory. That is intentional and safe: it **re-seeds from
-`tenant.yaml` on first run**, so the demo data regenerates automatically and needs
+the OS temp directory. That is intentional and safe: it **re-seeds from the
+active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`)
+on first run**, so the demo data regenerates automatically and needs
 no durable volume.
 
 **Single writer & SMB-safe pragmas (retained helper).** The API keeps
@@ -531,10 +569,15 @@ since the old origin is already compiled into the previously deployed bundle.
 
 ### Content-file packaging
 
-`tenant.yaml` is now packaged into the API and MCP server publish output
-(`CopyToPublishDirectory`), and both resolve it from the content root first, falling back
-to the repo-relative path for local `dotnet run`. This is required because the container
-image does not contain the repository layout.
+The active content-pack tree (`packs/**` — `pack.yaml`, `agents.yaml`,
+`starting-tasks.yaml`, `knowledge/**`, `seed/**`) is packaged into both the API
+and MCP server publish output (`CopyToPublishDirectory`, linked under `packs/`
+in `RetailPulse.Api.csproj` and `RetailPulse.McpServer.csproj`). Both hosts
+resolve the active pack directory from `ContentRootPath\packs\<Packs:Active>`
+first, falling back to the repo-relative path for local `dotnet run`. This is
+required because the container image does not contain the repository layout.
+The legacy root `tenant.yaml` and `src/RetailPulse.Api/prompts.yaml` are still
+copied for byte-equivalence tests but are not consulted by the runtime.
 
 ### Cross-platform provision hooks
 
