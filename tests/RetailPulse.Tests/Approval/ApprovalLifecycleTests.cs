@@ -32,6 +32,26 @@ public sealed class ApprovalLifecycleTests : IDisposable
     private SqliteApprovalGate CreateGate(TimeProvider clock, TimeSpan? defaultTimeout = null)
         => new(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>(), defaultTimeout ?? TimeSpan.FromMinutes(5), clock);
 
+    /// <summary>
+    /// Polls <paramref name="condition"/> on a small logical cadence until it
+    /// returns true or <paramref name="timeout"/> elapses. Tests use this to wait
+    /// for a background task (typically the exponential-backoff waiter inside
+    /// <see cref="SqliteApprovalGate.WaitForApprovalAsync"/>) to reach
+    /// <see cref="Task.Delay(TimeSpan, TimeProvider, CancellationToken)"/> and
+    /// register a timer with the fake clock — the pre-condition for
+    /// <see cref="FakeClock.Advance"/> to deterministically wake it.
+    /// </summary>
+    private static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (condition()) return true;
+            await Task.Delay(10);
+        }
+        return condition();
+    }
+
     private static ApprovalContext MakeContext(
         string agentId = "agent-1",
         string userId = "user-1",
@@ -199,7 +219,14 @@ public sealed class ApprovalLifecycleTests : IDisposable
 
         Task<ApprovalResult> waitTask = gate.WaitForApprovalAsync(req.RequestId, timeout: TimeSpan.FromSeconds(60));
 
-        await Task.Yield();
+        // Determinism (issue #154 sibling audit): the fake clock only wakes an
+        // already-parked Task.Delay. Wait for the waiter to register its timer
+        // BEFORE the human response so the sequence is fully deterministic —
+        // waiter parked → human writes Approved → Advance wakes waiter → waiter
+        // re-reads the row and returns the human's Approved decision.
+        bool parked = await WaitUntilAsync(() => clock.TimerCount >= 1, TimeSpan.FromSeconds(5));
+        parked.Should().BeTrue("the waiter must park at Task.Delay(_timeProvider) before the human responds");
+
         await gate.RespondAsync(req.RequestId, ApprovalDecision.Approved, "green-lit");
 
         // Advance clock enough to release the next backoff tick without crossing the deadline.
@@ -256,6 +283,10 @@ public sealed class ApprovalLifecycleTests : IDisposable
         // maximise the odds of an interleaving; assert the invariant on every
         // iteration: the row and the waiter always report one and only one
         // terminal decision and it is one of {Approved, TimedOut}.
+        //
+        // Determinism (issue #154 sibling audit): the FakeClock's Advance only
+        // wakes an already-parked Task.Delay. Wait for the waiter to register
+        // its timer before Advance so the deadline check is guaranteed to run.
         for (int trial = 0; trial < 15; trial++)
         {
             string dbPath = Path.Combine(Path.GetTempPath(), $"approval_race_{Guid.NewGuid():N}.db");
@@ -266,6 +297,10 @@ public sealed class ApprovalLifecycleTests : IDisposable
                 ApprovalRequest req = await gate.RequestApprovalAsync(MakeContext());
 
                 Task<ApprovalResult> waitTask = gate.WaitForApprovalAsync(req.RequestId, timeout: TimeSpan.FromSeconds(60));
+
+                bool parked = await WaitUntilAsync(() => clock.TimerCount >= 1, TimeSpan.FromSeconds(5));
+                parked.Should().BeTrue($"trial {trial}: the waiter must park at Task.Delay(_timeProvider) before Advance is called");
+
                 var humanTask = Task.Run(async () =>
                 {
                     // Give the waiter a moment to see Pending once, then race the
@@ -301,12 +336,19 @@ public sealed class ApprovalLifecycleTests : IDisposable
         // Two waiters (e.g., a retry) observing the same request must both return
         // the same terminal outcome — the conditional UPDATE guarantees at most one
         // writer flips Pending, and the other side re-reads the actual winner.
+        //
+        // Determinism (issue #154 sibling audit): wait for BOTH waiters to park at
+        // Task.Delay(_timeProvider) before Advance, so each waiter is guaranteed
+        // to be woken by the fake clock's advance.
         var clock = new FakeClock(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
         SqliteApprovalGate gate = CreateGate(clock, TimeSpan.FromSeconds(60));
         ApprovalRequest req = await gate.RequestApprovalAsync(MakeContext());
 
         Task<ApprovalResult> a = gate.WaitForApprovalAsync(req.RequestId, timeout: TimeSpan.FromSeconds(60));
         Task<ApprovalResult> b = gate.WaitForApprovalAsync(req.RequestId, timeout: TimeSpan.FromSeconds(60));
+
+        bool bothParked = await WaitUntilAsync(() => clock.TimerCount >= 2, TimeSpan.FromSeconds(5));
+        bothParked.Should().BeTrue("both waiters must park at Task.Delay(_timeProvider) before Advance is called");
 
         clock.Advance(TimeSpan.FromSeconds(120));
         ApprovalResult[] results = await Task.WhenAll(a, b).WaitAsync(TimeSpan.FromSeconds(5));
@@ -331,6 +373,13 @@ public sealed class ApprovalLifecycleTests : IDisposable
         (req.ExpiresAt - req.CreatedAt).Should().Be(TimeSpan.FromSeconds(45));
 
         Task<ApprovalResult> waitTask = gate.WaitForApprovalAsync(req.RequestId);
+
+        // Determinism (issue #154 sibling audit): the fake clock only wakes an
+        // already-parked Task.Delay, so wait for the waiter to register its
+        // timer before advancing past the deadline.
+        bool parked = await WaitUntilAsync(() => clock.TimerCount >= 1, TimeSpan.FromSeconds(5));
+        parked.Should().BeTrue("the waiter must park at Task.Delay(_timeProvider) before Advance is called");
+
         clock.Advance(TimeSpan.FromSeconds(90));
 
         ApprovalResult result = await waitTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -501,6 +550,15 @@ public sealed class ApprovalLifecycleTests : IDisposable
         // Concurrent human-vs-timeout at the endpoint boundary. RespondAsync (the
         // endpoint call) and WaitForApprovalAsync (the agent's blocking waiter) must
         // return the same terminal decision, matching the durable row exactly.
+        //
+        // Determinism protocol (issue #154): the FakeClock only wakes an already-
+        // parked Task.Delay. If we Advance before the waiter has reached
+        // Task.Delay(backoff, _timeProvider, ct) and registered its timer, Advance
+        // fires on an empty timer list and the waiter is stranded — the outer
+        // WaitAsync(5s) then trips a real TimeoutException (~1 in 9 full-suite
+        // runs). Wait for TimerCount to observe the waiter has parked, THEN kick
+        // the endpoint and Advance so the timeout branch and the endpoint's
+        // conditional UPDATE genuinely race for the single Pending row.
         for (int trial = 0; trial < 15; trial++)
         {
             string dbPath = Path.Combine(Path.GetTempPath(), $"approval_endpoint_race_{Guid.NewGuid():N}.db");
@@ -511,6 +569,14 @@ public sealed class ApprovalLifecycleTests : IDisposable
                 ApprovalRequest req = await gate.RequestApprovalAsync(MakeContext());
 
                 Task<ApprovalResult> waitTask = gate.WaitForApprovalAsync(req.RequestId, timeout: TimeSpan.FromSeconds(60));
+
+                // The waiter's first loop iteration reads Pending, heartbeats,
+                // checks the deadline (not yet crossed), then awaits Task.Delay
+                // against the injected clock. Only after that Task.Delay lands
+                // does TimerCount reach 1.
+                bool parked = await WaitUntilAsync(() => clock.TimerCount >= 1, TimeSpan.FromSeconds(5));
+                parked.Should().BeTrue($"trial {trial}: the waiter must park at Task.Delay(_timeProvider) before Advance is called");
+
                 Task<ApprovalResult> endpointTask = Task.Run(async () =>
                 {
                     await Task.Yield();
@@ -589,6 +655,20 @@ public sealed class ApprovalLifecycleTests : IDisposable
         public override DateTimeOffset GetUtcNow()
         {
             lock (_lock) return _now;
+        }
+
+        /// <summary>
+        /// Count of currently-registered (undisposed) timers. Tests await
+        /// <see cref="TimerCount"/> reaching an expected value before calling
+        /// <see cref="Advance"/> so the advance is guaranteed to wake at least
+        /// one parked <see cref="Task.Delay(TimeSpan, TimeProvider, CancellationToken)"/>
+        /// — otherwise Advance can fire on an empty timer list and the waiter
+        /// registers its timer after time has already moved, leaving it
+        /// stranded until the outer WaitAsync wall-clock timeout trips.
+        /// </summary>
+        public int TimerCount
+        {
+            get { lock (_lock) return _timers.Count; }
         }
 
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
