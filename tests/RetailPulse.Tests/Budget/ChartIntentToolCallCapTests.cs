@@ -163,4 +163,36 @@ public sealed class ChartIntentToolCallCapTests
         json.Should().NotContain("truncated");
         json.Should().NotContain("placeholder");
     }
+
+    /// <summary>
+    /// Issue #76 Group F: the per-request explicit-chart intent cap default is
+    /// <see cref="ToolResultBudgetOptions.MaxToolCallsForChartIntent"/> = 5 and
+    /// <see cref="BudgetedAIFunction"/> enforces it using ONLY the default options
+    /// (no explicit override). Regressing either the constant or the read site
+    /// silently reopens the fan-out failure class from the P0 sweep.
+    /// </summary>
+    [Fact]
+    public async Task ChartIntent_UsesDefaultCapOfFive_WithoutExplicitOverride()
+    {
+        // Take the shipped defaults verbatim — this test would fail if a future
+        // config change lowered the default under 5 or raised it above 5 without
+        // the caller opting in explicitly.
+        ToolResultBudgetOptions shipped = new();
+        shipped.MaxToolCallsForChartIntent.Should().Be(5,
+            "ADR-006 tool-context budget: explicit chart intents are hard-capped at 5 distinct tool calls");
+
+        var inner = new CountingFunction("GetHistoricalDemand",
+            a => JsonSerializer.Serialize(new { brand = a["brand"] }));
+        BudgetedAIFunction fn = Wrap(inner, shipped);
+
+        using IDisposable scope = RequestToolContext.Begin("session-defaults", isChartIntent: true);
+        for (int i = 0; i < 9; i++)
+        {
+            await fn.InvokeAsync(Args($"Brand{i}"));
+        }
+
+        inner.Invocations.Should().Be(5,
+            "BudgetedAIFunction must read the shipped default MaxToolCallsForChartIntent (5) " +
+            "when the caller does not override it — issue #76 Group F");
+    }
 }
