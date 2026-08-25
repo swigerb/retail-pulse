@@ -471,7 +471,25 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
                 bucket = new(StringComparer.Ordinal);
                 _bySub[plan.Subject] = bucket;
             }
-            bucket[plan.PlanId] = (plan, null, []);
+
+            // Seed the initial step rows into the update dictionary so orphan
+            // sweeps and step reads see them (issue #149). Each initial step is
+            // synthesized as a PlanStepUpdate carrying its initial Status
+            // (typically Pending) so downstream reads reflect the actual
+            // starting state, not an empty history.
+            Dictionary<string, PlanStepUpdate> steps = new(StringComparer.Ordinal);
+            foreach (PlanStepWrite step in plan.Steps)
+            {
+                steps[step.StepId] = new PlanStepUpdate
+                {
+                    StepId = step.StepId,
+                    PlanId = plan.PlanId,
+                    Subject = plan.Subject,
+                    Status = step.Status,
+                };
+            }
+
+            bucket[plan.PlanId] = (plan, null, steps);
             return Task.CompletedTask;
         }
         public void RestoreCreate(string subject, PlanWrite plan) => CreatePlanAsync(plan).Wait();
@@ -483,9 +501,35 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
                 && bucket.TryGetValue(update.PlanId, out (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps) row))
             {
                 bucket[update.PlanId] = (row.Create, update, row.Steps);
+
+                // Mirror SqlitePlanStore's terminal-status orphan sweep
+                // (issue #149): any Pending/Running step row is transitioned
+                // to Skipped so the test double honors the same contract the
+                // production store enforces.
+                if (IsTerminalPlanStatus(update.Status))
+                {
+                    foreach (string stepId in row.Steps.Keys.ToArray())
+                    {
+                        PlanStepUpdate existing = row.Steps[stepId];
+                        if (existing.Status is PlanStepStatus.Pending or PlanStepStatus.Running)
+                        {
+                            row.Steps[stepId] = existing with
+                            {
+                                Status = PlanStepStatus.Skipped,
+                                CompletedAt = existing.CompletedAt ?? update.UpdatedAt,
+                            };
+                        }
+                    }
+                }
             }
             return Task.CompletedTask;
         }
+
+        private static bool IsTerminalPlanStatus(string status) =>
+            status is PlanStatus.Completed
+                or PlanStatus.Failed
+                or PlanStatus.Cancelled
+                or PlanStatus.Unusable;
         public Task UpdateStepAsync(PlanStepUpdate update, CancellationToken ct = default)
         {
             if (_bySub.TryGetValue(update.Subject, out Dictionary<string, (PlanWrite Create, PlanStatusUpdate? Status, Dictionary<string, PlanStepUpdate> Steps)>? bucket)
@@ -507,6 +551,36 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
 
             string status = row.Status?.Status ?? row.Create.Status;
             string? failureReason = row.Status?.FailureReason;
+
+            // Project step updates back into PlanStepRecordDto so callers
+            // (including regression tests for issue #149) can observe the
+            // step-lifecycle state through the standard read path. The
+            // originating PlanStepWrite carries the specialist metadata; the
+            // latest PlanStepUpdate carries the lifecycle transition.
+            var writesByStepId = row.Create.Steps.ToDictionary(s => s.StepId, StringComparer.Ordinal);
+            var stepRecords = new List<PlanStepRecordDto>();
+            foreach ((string stepId, PlanStepUpdate stepUpdate) in row.Steps)
+            {
+                writesByStepId.TryGetValue(stepId, out PlanStepWrite? initialWrite);
+                stepRecords.Add(new PlanStepRecordDto(
+                    StepId: stepId,
+                    PlanId: row.Create.PlanId,
+                    StepIndex: initialWrite?.StepIndex ?? 0,
+                    SpecialistKey: initialWrite?.SpecialistKey ?? string.Empty,
+                    Intent: initialWrite?.Intent ?? string.Empty,
+                    Action: initialWrite?.Action ?? string.Empty,
+                    Status: stepUpdate.Status,
+                    Result: stepUpdate.Result,
+                    Error: stepUpdate.Error,
+                    InputTokens: stepUpdate.InputTokens,
+                    OutputTokens: stepUpdate.OutputTokens,
+                    TotalTokens: stepUpdate.TotalTokens,
+                    DurationMs: stepUpdate.DurationMs,
+                    StartedAt: stepUpdate.StartedAt,
+                    CompletedAt: stepUpdate.CompletedAt));
+            }
+            stepRecords = [.. stepRecords.OrderBy(s => s.StepIndex).ThenBy(s => s.StepId, StringComparer.Ordinal)];
+
             return Task.FromResult<PlanDetailDto?>(new PlanDetailDto(
                 PlanId: row.Create.PlanId,
                 SessionId: row.Create.SessionId,
@@ -519,7 +593,7 @@ public sealed class PlanReviewCompletionServiceTests : IDisposable
                 TotalDurationMs: null,
                 CreatedAt: row.Create.CreatedAt,
                 UpdatedAt: row.Status?.UpdatedAt ?? row.Create.CreatedAt,
-                Steps: []));
+                Steps: stepRecords));
         }
         public Task<bool> DeletePlanAsync(string subject, string planId, CancellationToken ct = default) => Task.FromResult(true);
         public Task<PlanCleanupResult> PurgeExpiredAsync(DateTimeOffset olderThan, CancellationToken ct = default)
