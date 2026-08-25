@@ -38,6 +38,15 @@ Retail Pulse behaves differently depending on where you're testing. Understandin
 
 ## Running Unit Tests
 
+> **Golden-dataset answer-quality gate (deterministic).** The offline
+> deterministic case set in `tests/RetailPulse.Tests/Eval/` runs on every
+> PR through `EvaluationHarnessTests.OfflineDeterministicGate_PassesAllCases`
+> and asserts every deterministic golden case still routes to the right
+> specialist, produces the right chart shape, and stays under the per-run
+> cost cap. See ["Answer-Quality Evaluation Harness"](#answer-quality-evaluation-harness-issue-110)
+> below for the dataset schema, per-category pass-rate report, and refresh
+> workflow.
+
 ### Run All Tests
 
 ```bash
@@ -48,6 +57,13 @@ dotnet test
 
 ```bash
 dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj
+```
+
+### Run the offline eval gate alone
+
+```bash
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
+  --filter "FullyQualifiedName~EvaluationHarnessTests"
 ```
 
 ### Run Tests with Detailed Output

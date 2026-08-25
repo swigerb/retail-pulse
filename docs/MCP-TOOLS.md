@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-The Retail Pulse MCP (Model Context Protocol) Server exposes domain-specific tools that specialist agents invoke via function calling. The MCP server runs at `http://localhost:5200` and is backed by a SQLite database seeded from `tenant.yaml`.
+The Retail Pulse MCP (Model Context Protocol) Server exposes domain-specific tools that specialist agents invoke via function calling. The MCP server runs at `http://localhost:5200` and is backed by a SQLite database seeded from the active content pack (`Packs:Active`, default `default`).
 
 All tools are registered as `[McpServerTool]` classes and are accessible both through the MCP protocol and via proxy REST endpoints on the API server.
 
