@@ -453,7 +453,7 @@ public sealed class PlanExecutorTests
     [Fact]
     public async Task Full_width_five_step_plan_executes_every_edge_in_declared_order()
     {
-        // ADR-011 pins the plan width at 5. This test proves the workflow
+        // ADR-014 pins the plan width at 5. This test proves the workflow
         // graph really wires all five edges (step_i -> step_{i+1}) and each
         // step runs exactly once, in order, when nothing fails.
         var store = new RecordingPlanStore();
