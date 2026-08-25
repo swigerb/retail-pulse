@@ -59,5 +59,6 @@ We implement a **specialist agent routing architecture** where:
   turns onto the plan path (ADR-014). `/api/escalate` is retained only as a
   deprecated compatibility endpoint.
 - Confidence threshold tuning is now the
-  `Planning:MinConfidenceForFastPath` setting evaluated by
-  `HybridExecutionDecider`, not a router-internal constant.
+  `PlanPersistence:MinConfidenceForFastPath` setting evaluated by
+  `HybridExecutionDecider` (bound via `PlanPersistenceOptions.SectionName =
+  "PlanPersistence"`), not a router-internal constant.

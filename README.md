@@ -242,38 +242,42 @@ Navigate to [http://localhost:5173](http://localhost:5173) and start asking ques
 
 ## Tenant Configuration
 
-Retail Pulse reads `tenant.yaml` at the repo root to configure the entire platform:
+Retail Pulse loads a **content pack** at boot to configure the entire platform (see the **Content packs** reference table under [§ Configuration](#configuration) below). The active pack is selected by `Packs:Active` (default `default`) and the pack root by `Packs:Root` (default `packs`). `Program.cs` wires `PackTenantProvider(activePack)` as the `ITenantProvider`; the pack's `agents.yaml` is the roster consumed by `ConfiguredSpecialistAgent` + `MafAgentInvoker` (ADR-008). The legacy root `tenant.yaml` and `src/RetailPulse.Api/prompts.yaml` files are retained on disk for byte-equivalence comparison tests only — the runtime never reads them (see the "Legacy `tenant.yaml` and `prompts.yaml`" section in [`docs/tenant-configuration.md`](docs/tenant-configuration.md)).
+
+The `tenant:` block inside `packs/<pack>/pack.yaml` follows the historical tenant schema — company, industry, brands, regions, theme — so the sample below is the shape the runtime actually reads:
 
 ```yaml
-company: "Apex Retail Group"
-industry: "Multi-Category Retail"
-brands:
-  - name: "Sierra Gold Tequila"
-    category: "Spirits"
-    variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
-    priceSegment: "Premium"
-  - name: "FreshMart"
-    category: "Grocery"
-    variants: ["Organic Produce", "Bakery", "Deli", "Frozen"]
-    priceSegment: "Standard"
-  - name: "Apex Grill"
-    category: "Quick-Serve Restaurant"
-    variants: ["Burgers", "Chicken", "Breakfast", "Beverages"]
-    priceSegment: "Standard"
-  # ... 12 brands across 6 categories
-regions:
-  - "Northeast"
-  - "Southeast"
-  - "Midwest"
-  - "Southwest"
-  - "West Coast"
-  - "Pacific Northwest"
-theme:
-  primaryColor: "#1B4D7A"
-  accentColor: "#E8A838"
+# packs/default/pack.yaml (excerpt — `tenant:` block)
+tenant:
+  company: "Apex Retail Group"
+  industry: "Multi-Category Retail"
+  brands:
+    - name: "Sierra Gold Tequila"
+      category: "Spirits"
+      variants: ["Blanco", "Reposado", "Añejo", "Extra Añejo"]
+      priceSegment: "Premium"
+    - name: "FreshMart"
+      category: "Grocery"
+      variants: ["Organic Produce", "Bakery", "Deli", "Frozen"]
+      priceSegment: "Standard"
+    - name: "Apex Grill"
+      category: "Quick-Serve Restaurant"
+      variants: ["Burgers", "Chicken", "Breakfast", "Beverages"]
+      priceSegment: "Standard"
+    # ... 12 brands across 6 categories
+  regions:
+    - "Northeast"
+    - "Southeast"
+    - "Midwest"
+    - "Southwest"
+    - "West Coast"
+    - "Pacific Northwest"
+  theme:
+    primaryColor: "#1B4D7A"
+    accentColor: "#E8A838"
 ```
 
-The included **Apex Retail Group** sample tenant demonstrates a multi-category retail conglomerate with **12 brands** across **6 categories**:
+The shipped **Apex Retail Group** sample tenant (`packs/default`) demonstrates a multi-category retail conglomerate with **12 brands** across **6 categories**:
 
 | Category | Brands |
 |----------|--------|
@@ -284,7 +288,7 @@ The included **Apex Retail Group** sample tenant demonstrates a multi-category r
 | 📎 Office Supply | ClearDesk |
 | 🛋️ Furniture | Urban Living, Foundry Home |
 
-All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwest, West Coast, and Pacific Northwest. See the [Tenant Configuration Guide](docs/tenant-configuration.md) for full schema reference and examples for different industries.
+All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwest, West Coast, and Pacific Northwest. The `halcyon-pet-supply` and `prairiehearth-craft-supply` packs ship as alternate scenarios; switch by setting `Packs:Active` at boot. See the [Tenant Configuration Guide](docs/tenant-configuration.md) for the full pack schema, live validation rules, and a worked example of adding a specialist by configuration only.
 
 ---
 
@@ -317,8 +321,17 @@ All brands operate across **6 regions**: Northeast, Southeast, Midwest, Southwes
 
 ```
 retail-pulse/
-├── tenant.yaml                       # Tenant configuration (brands, regions, theme)
+├── tenant.yaml                       # Legacy sample tenant (byte-equivalent to packs/default's tenant: block) — no longer read at runtime
 ├── RetailPulse.slnx                  # Solution file
+├── packs/                            # Content packs (issue #108) — active runtime source of tenant + agents + knowledge
+│   ├── default/                      # Apex Retail Group sample (loaded by default)
+│   │   ├── pack.yaml                 # Tenant metadata (brands, regions, theme) + pack manifest
+│   │   ├── agents.yaml               # Agent roster (specialist prompts, model, tools, knowledge bindings)
+│   │   ├── starting-tasks.yaml       # Suggested starting prompts surfaced by the SPA
+│   │   ├── knowledge/                # Grounding corpus (indexed by the active knowledge provider)
+│   │   └── seed/scenario.yaml        # Deterministic SQLite seed data
+│   ├── halcyon-pet-supply/           # Alternate sample: specialty pet-supply retailer
+│   └── prairiehearth-craft-supply/   # Alternate sample: craft-supply retailer
 ├── src/
 │   ├── RetailPulse.AppHost/          # Aspire 13.3.0 orchestrator
 │   ├── RetailPulse.Api/              # Agent API service
@@ -333,7 +346,7 @@ retail-pulse/
 │   │   ├── Telemetry/                # Custom business metrics (OpenTelemetry)
 │   │   ├── Tools/                    # MCP tool wrappers
 │   │   ├── Validation/               # Input validation (ChatRequestValidator)
-│   │   └── prompts.yaml              # Agent prompt configuration (`src/RetailPulse.Api/prompts.yaml`, tenant-templated)
+│   │   └── prompts.yaml              # Legacy prompts file (mirrored to packs/default/agents.yaml; no longer read at runtime)
 │   ├── RetailPulse.McpServer/        # MCP server (data tools)
 │   │   ├── Tools/                    # MCP tool definitions (parameterized queries)
 │   │   └── Data/                     # SQLite-backed tenant-driven metrics
@@ -719,4 +732,4 @@ See [Testing Guide](docs/testing-guide.md) for manual testing options and test s
 
 MIT - see [LICENSE](LICENSE) for details.
 
-This project is for demonstration purposes. All data is fictional, seeded from `tenant.yaml`, and does not represent actual business data.
+This project is for demonstration purposes. All data is fictional, seeded from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`), and does not represent actual business data.

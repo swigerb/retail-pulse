@@ -36,8 +36,8 @@ for the local-only walkthrough).
 | Durable SQLite mount | Azure Files SMB mount on the API Container App | Currently **not enabled** — this tenant's governance policy forces new storage accounts to `allowSharedKeyAccess=false` and blocks key-based CIFS mounts. The API therefore ships with `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`. See the "App data storage" note below for the incident detail and the future durable path. | — |
 
 The rest of this document describes the required stack in detail — jump to
-["Optional cloud knowledge providers"](#optional-cloud-knowledge-providers)
-below for worked examples of enabling Azure AI Search and Foundry IQ.
+["Optional features (opt-in, disabled by default)"](#optional-features-opt-in-disabled-by-default)
+below for worked examples of enabling Azure AI Search and Content Safety.
 
 ## Architecture
 
@@ -411,8 +411,9 @@ fail-closed path is **not** weakened — a future policy-compatible durable back
 options below) can drop the opt-out and set a real durable path instead.
 
 The **MCP server** still writes its seeded retail dataset (`retailpulse.db`) under
-the OS temp directory. That is intentional and safe: it **re-seeds from
-`tenant.yaml` on first run**, so the demo data regenerates automatically and needs
+the OS temp directory. That is intentional and safe: it **re-seeds from the
+active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`)
+on first run**, so the demo data regenerates automatically and needs
 no durable volume.
 
 **Single writer & SMB-safe pragmas (retained helper).** The API keeps
@@ -568,10 +569,15 @@ since the old origin is already compiled into the previously deployed bundle.
 
 ### Content-file packaging
 
-`tenant.yaml` is now packaged into the API and MCP server publish output
-(`CopyToPublishDirectory`), and both resolve it from the content root first, falling back
-to the repo-relative path for local `dotnet run`. This is required because the container
-image does not contain the repository layout.
+The active content-pack tree (`packs/**` — `pack.yaml`, `agents.yaml`,
+`starting-tasks.yaml`, `knowledge/**`, `seed/**`) is packaged into both the API
+and MCP server publish output (`CopyToPublishDirectory`, linked under `packs/`
+in `RetailPulse.Api.csproj` and `RetailPulse.McpServer.csproj`). Both hosts
+resolve the active pack directory from `ContentRootPath\packs\<Packs:Active>`
+first, falling back to the repo-relative path for local `dotnet run`. This is
+required because the container image does not contain the repository layout.
+The legacy root `tenant.yaml` and `src/RetailPulse.Api/prompts.yaml` are still
+copied for byte-equivalence tests but are not consulted by the runtime.
 
 ### Cross-platform provision hooks
 

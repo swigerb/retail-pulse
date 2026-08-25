@@ -755,7 +755,7 @@ on every run. CI also uploads this file as the `eval-harness-report` artifact.
 
 1. Add a new case to `Eval/Data/golden-dataset.json`. Every case needs a unique id,
    a category, a fictional prompt consistent with the seeded Apex Retail Group tenant
-   (see `tenant.yaml`), and an `expectations` block with:
+   (see the `tenant:` block in `packs/default/pack.yaml`), and an `expectations` block with:
    - `explicit_chart` (bool) + `chart_type` (canonical `ChartSpec.Type` or `null`)
    - `routing_mode`: `keyword-fast-path` (deterministically graded) or `llm-required`
      (routing recorded but not graded — the deterministic scorer only gates on the

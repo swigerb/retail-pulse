@@ -12,7 +12,7 @@ The component diagram shows the five-service architecture orchestrated by .NET A
 
 - **React Frontend** — Chat UI, telemetry dashboard, agent routing indicators, streaming message display, collaborative cards
 - **RetailPulse API** — Composition root with endpoint group extensions (`Endpoints/*.cs`), multi-agent router pipeline, guardrails/cache/streaming middleware, bounded telemetry and memory channels, rate limiting (4 tiers), observability suite (cost tracking, audit log, conversation export)
-- **MCP Server** — REST + MCP dual endpoints for all domain tools (depletions, shipments, sentiment, demand, promo, competitive, store ops, margin), SQLite data store with deterministic seeding from `tenant.yaml`
+- **MCP Server** — REST + MCP dual endpoints for all domain tools (depletions, shipments, sentiment, demand, promo, competitive, store ops, margin), SQLite data store with deterministic seeding from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`, loaded by `PackTenantLoader.LoadFromPackDirectory` in `RetailPulse.McpServer.Program.cs`)
 - **Teams Bot** — Adaptive Card rendering, SSO via `TeamsSsoHandler` with `StrictTenantValidation`, configurable health checks (`HealthMode: fail-fast | degraded`), `DevelopmentAuthHandler` bypass in local dev
 - **Aspire AppHost** — Non-containerized orchestration, OpenTelemetry, service discovery, health endpoints
 
@@ -44,12 +44,12 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 | Step | Component | What Happens |
 |------|-----------|-------------|
 | **1. User sends message** | `ChatPanel.tsx` | Frontend sends `POST /api/chat` with `{ message, sessionId, history }`. Conversation history (up to 10 turns) is included for context continuity. |
-| **2. Agent builds prompt** | `RetailPulseAgent.cs` | Assembles a message array: system prompt (from `src/RetailPulse.Api/prompts.yaml`) + conversation history + current user message. Starts a `Stopwatch` to measure wall-clock duration. |
+| **2. Agent builds prompt** | `RetailPulseAgent.cs` | Assembles a message array: system prompt (resolved by `PromptTemplateEngine` from the active content pack's `agents.yaml` — the roster loaded into `PromptConfiguration` via `activePack.Agents` in `Program.cs`) + conversation history + current user message. Starts a `Stopwatch` to measure wall-clock duration. |
 | **3. Model inference** | Azure OpenAI via APIM | The `IChatClient` (backed by `AzureOpenAIClient`) sends the messages to APIM. APIM applies token limiting (default **80,000 TPM** per subscription — configurable via the `tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`), emits metrics, and forwards to Azure OpenAI using managed identity. Model: `gpt-5.4-mini` (shipped deployment `gpt-5.4-mini-2026-03-17`). |
 | **4. Tool selection** | Azure OpenAI | The model examines the user's question and the available tool schemas, then decides which tools to call and with what parameters. For a portfolio-wide question, it may call `GetPortfolioDepletionStats`; for a single brand, `GetDepletionStats`. |
 | **5. Tool execution loop** | MAF (`UseFunctionInvocation`) | Microsoft.Extensions.AI middleware intercepts each tool call. It invokes the registered `AITool` implementation, captures the result, and sends it back to the model. The model may call additional tools or generate its final response. Tools execute sequentially within a single turn. |
 | **6. API proxy call** | e.g., `DepletionStatsTool.cs` | Each tool is an HTTP proxy. It calls the MCP Server's REST endpoint (e.g., `GET /api/depletion-stats?brand=X&region=Y&period=Z`). If the MCP Server is unreachable, the tool returns hardcoded fallback data and logs a warning. |
-| **7. Data retrieval** | `RetailPulseDb.cs` | The MCP Server's singleton SQLite service queries (or updates) the data. Data is seeded from `tenant.yaml` configuration (12 brands, 6 regions, 3 channels) using deterministic algorithms. The `UpdateMetrics` tool can also write to the database, enabling real-time data mutations by the agent. |
+| **7. Data retrieval** | `RetailPulseDb.cs` | The MCP Server's singleton SQLite service queries (or updates) the data. Data is seeded from the active content pack (`packs/<Packs:Active>/pack.yaml` for the tenant model — 12 brands, 6 regions, 3 channels in the shipped `default` pack — plus `packs/<Packs:Active>/seed/scenario.yaml` for deterministic starting metrics) using deterministic algorithms. The `UpdateMetrics` tool can also write to the database, enabling real-time data mutations by the agent. |
 | **8. Response assembly** | `RetailPulseAgent.cs` | After the model produces its final text response, the agent packages it with telemetry spans, chart data (if any), and `TotalDurationMs` (from the `Stopwatch`). |
 | **9. Frontend rendering** | `ChatPanel.tsx` | The response is displayed as formatted markdown. Charts render via `ChartRenderer` (Recharts). Telemetry spans stream to `TelemetryPanel` via SignalR for real-time display. |
 
@@ -57,14 +57,14 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 
 | Data | Location | Persistence |
 |------|----------|-------------|
-| **Depletion metrics** (sales velocity, YoY trends, inventory) | `RetailPulseDb` → SQLite `Depletions` table, keyed by `(Brand, Region)` | On disk (`data/retailpulse.db`). Seeded from `tenant.yaml` on first run; persists AI mutations across restarts. |
+| **Depletion metrics** (sales velocity, YoY trends, inventory) | `RetailPulseDb` → SQLite `Depletions` table, keyed by `(Brand, Region)` | On disk (`%TEMP%/retailpulse/retailpulse.db`). Seeded from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`) on first run; persists AI mutations across restarts. |
 | **Shipment data** (distribution, fill rates) | `RetailPulseDb` → SQLite `Shipments` table | Same as above. |
 | **Field sentiment** (rep feedback, scores) | `RetailPulseDb` → SQLite `Sentiment` table | Same as above. |
-| **Tenant configuration** (brands, regions, channels) | `tenant.yaml` at repo root → loaded by `FileTenantProvider` | On disk. Single source of truth for the business domain. Changing this file triggers a database re-seed on next restart. |
+| **Tenant configuration** (brands, regions, channels) | `packs/<Packs:Active>/pack.yaml` (`tenant:` block) → loaded by `PackTenantProvider` (constructed with the `LoadedPack` returned by `PackLoader.ForDirectory(...).Load(activePack)` in `Program.cs`) | On disk. Single source of truth for the business domain. Editing the active pack's `pack.yaml` or any file under `packs/<Packs:Active>/seed/` changes the content-hash the MCP server records and triggers a database re-seed on next restart. The legacy root `tenant.yaml` is retained for byte-equivalence tests only and is not read at runtime. |
 | **Conversation history** | Frontend state (`ChatPanel.tsx`) → sent with each request; optionally mirrored to the durable server-side session store when `SessionPersistence:Enabled=true` (issue #90). | Browser session only by default. When enabled, sessions and turns for **authenticated** subjects are persisted to `data/sessions.db` via `SqliteSessionStore`, so a browser refresh can rehydrate the last conversation. Anonymous sessions are **never** persisted (see Session Persistence below). |
 | **Telemetry spans** | Frontend state (`Dashboard.tsx`) via SignalR | Browser session only. Resets on "Clear Telemetry" or "+ New Chat". |
 
-> **Key insight:** The analytics dataset lives in a SQLite database (`data/retailpulse.db`), seeded deterministically from `tenant.yaml`. Unlike the earlier in-memory approach, the agent can now **read and write** data via the `UpdateMetrics` MCP tool — enabling real-time scenario modeling, what-if analysis, and live data updates during demos. The database re-seeds automatically when `tenant.yaml` changes (tracked via content hash). To reset to baseline, delete the database file and restart. Swapping to production data sources requires only replacing the MCP Server tool implementations.
+> **Key insight:** The analytics dataset lives in a SQLite database (`%TEMP%/retailpulse/retailpulse.db` in the MCP server), seeded deterministically from the active content pack. Unlike the earlier in-memory approach, the agent can now **read and write** data via the `UpdateMetrics` MCP tool — enabling real-time scenario modeling, what-if analysis, and live data updates during demos. The database re-seeds automatically when the active `packs/<Packs:Active>/pack.yaml` or any file under `packs/<Packs:Active>/seed/` changes (tracked via a content hash covering both). Switching `Packs:Active` resolves to a different pack directory and therefore a different hash, so the store re-seeds against the new tenant. To reset to baseline, delete the database file and restart. Swapping to production data sources requires only replacing the MCP Server tool implementations.
 
 ---
 
@@ -83,7 +83,7 @@ Browser (ChatPanel) → POST /api/chat → RetailPulseAgent
 | Decision | Rationale |
 |----------|-----------|
 | **Why MAF over LangChain/Semantic Kernel?** | Native .NET integration. Built on `Microsoft.Extensions.AI` abstraction — works with any `IChatClient` implementation. OpenTelemetry tracing is built in, not bolted on. |
-| **Why GPT-5.4-mini?** | Best balance of reasoning quality, speed, and cost for tool-calling scenarios. Architecture is model-agnostic — swap via `prompts.yaml`. |
+| **Why GPT-5.4-mini?** | Best balance of reasoning quality, speed, and cost for tool-calling scenarios. Architecture is model-agnostic — swap via the `model:` field on an entry in the active pack's `packs/<pack>/agents.yaml`. |
 | **Prompt configuration in YAML** | Separates prompt engineering from code. Non-developers can iterate on prompts without touching C#. Supports multiple agent definitions. |
 
 #### MAF & Microsoft.Extensions.AI package versions
@@ -145,7 +145,7 @@ captured in [`ADR-007: MAF agent primitives for specialist/router/council execut
 |----------|-----------|
 | **Why MCP over direct HTTP calls?** | MCP is an emerging standard. Today's tools query a SQLite database; tomorrow, swap to real APIs without changing agent code. Any MCP-compatible agent can use these tools. |
 | **REST + MCP dual endpoints** | MCP SSE for agent communication. REST endpoints (`/api/depletion-stats`) for direct testing and integration. Same backing data, two access patterns. |
-| **SQLite data store** | Enables demo without real data dependencies. Seeded from `tenant.yaml` with rich, realistic patterns. Supports **read + write** — the agent can update data in real time via the `UpdateMetrics` tool. |
+| **SQLite data store** | Enables demo without real data dependencies. Seeded from the active content pack (`packs/<Packs:Active>/pack.yaml` + `packs/<Packs:Active>/seed/scenario.yaml`) with rich, realistic patterns. Supports **read + write** — the agent can update data in real time via the `UpdateMetrics` tool. |
 
 ### React + Vite + TypeScript — Frontend
 
@@ -926,7 +926,7 @@ var hydrated = engine.Hydrate(agentDefinition);
 // Replaces {tenant.company}, {tenant.brands}, {tenant.regions}, etc.
 ```
 
-This replaced 8 repetitive `.Replace()` chains in Program.cs with a single DRY call. The engine loads `prompts.yaml` and applies tenant configuration from `FileTenantProvider`.
+This replaced 8 repetitive `.Replace()` chains in Program.cs with a single DRY call. The engine consumes the hydrated `PromptConfiguration` loaded from the active content pack (`activePack.Agents`) and applies tenant configuration from `PackTenantProvider(activePack)`. The legacy root `tenant.yaml` and `src/RetailPulse.Api/prompts.yaml` files are retained on disk for byte-equivalence tests only — the engine no longer reads them.
 
 ---
 
