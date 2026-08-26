@@ -1,0 +1,31 @@
+<!--
+  Operation-scope policy for the `listModels` readiness probe.
+
+  This deliberately does NOT include <base /> in <inbound>. The API-scope policy
+  applies `azure-openai-token-limit` and `azure-openai-emit-token-metric`, both of
+  which are defined only for Azure OpenAI inference payloads - they parse a chat
+  request body to estimate and meter prompt tokens. A token-free GET has no such
+  body, so inheriting them would meter a non-inference call and risk a policy fault
+  on the one route that has to stay dependable when things are going wrong.
+
+  Everything the request genuinely needs is therefore re-declared explicitly:
+  the same backend, and the same managed-identity authentication to Azure AI
+  Foundry. The AI Gateway invariant is untouched - this operation is served by
+  APIM, routed to the APIM backend, and requires the API's subscription key. It
+  creates no path from the API to Azure OpenAI that bypasses the gateway.
+-->
+<policies>
+    <inbound>
+        <set-backend-service backend-id="{backend-id}" />
+        <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>
