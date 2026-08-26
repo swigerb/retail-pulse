@@ -17,12 +17,12 @@ public static class CompetitiveTools
         [Description("Comma-separated competitor names (e.g. 'Jack Daniel\\'s,Patrón'). Omit for all.")] string? competitors = null) => data.GetCompetitorPricing(brand, category, region, competitors);
 
     [McpServerTool(Name = "GetMarketShare")]
-    [Description("Get market share trends over time. Returns quarterly share data with period-over-period changes. Identifies significant share losses (>2 points). Filterable by brand, category, region, and time period.")]
+    [Description("Get market share trends over time. Returns quarterly share data with period-over-period changes. Identifies significant share losses (>2 points). Filterable by brand, category, region, and time period. Pass region='National' for a nationwide rollup (the unweighted mean of each brand's regional shares); pass a specific region for that region's rows.")]
     public static object GetMarketShare(
         RetailPulseDb data,
         [Description("Brand name to filter. Omit for all brands.")] string? brand = null,
         [Description("Category to filter. Omit for all categories.")] string? category = null,
-        [Description("Region to filter. Omit for all regions.")] string? region = null,
+        [Description("Region to filter, or 'National' for a nationwide rollup. Omit for all regions.")] string? region = null,
         [Description("Period to filter (e.g. '2026-Q1', '2025-Q4'). Omit for all periods.")] string? period = null) => data.GetMarketShare(brand, category, region, period);
 
     [McpServerTool(Name = "DetectThreats")]
