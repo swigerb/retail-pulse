@@ -42,6 +42,24 @@ public sealed class EntraAuthOptions
     /// <summary>App role name required on every protected endpoint/hub (roles claim).</summary>
     public string AppRole { get; init; } = DefaultAppRole;
 
+    /// <summary>
+    /// When true, app-only (client-credentials) tokens — those carrying a <c>roles</c>
+    /// claim and NO <c>scp</c> claim — are accepted, provided the required app role is
+    /// present. Delegated (user) tokens are unaffected. Defaults to <c>false</c>: unset
+    /// configuration behaves exactly as before this flag existed and rejects app-only
+    /// tokens.
+    /// </summary>
+    public bool AllowAppOnlyTokens { get; init; }
+
+    /// <summary>
+    /// Optional allow-list of application (client) IDs that may authenticate via
+    /// app-only tokens when <see cref="AllowAppOnlyTokens"/> is <c>true</c>. An empty
+    /// list means no client-ID restriction — every app-only token bearing the required
+    /// app role is accepted. When populated, the token's <c>azp</c> (v2) or
+    /// <c>appid</c> (v1) claim MUST match one of the listed GUIDs.
+    /// </summary>
+    public string[] AllowedAppClientIds { get; init; } = [];
+
     /// <summary>When true, real JWT bearer validation is enforced. Defaults to true outside Development.</summary>
     public bool RequireAuth { get; init; } = true;
 
@@ -100,6 +118,12 @@ public sealed class EntraAuthOptions
         string? clientId = Clean(entra["ClientId"]);
         string? audience = Clean(entra["Audience"]) ?? legacyAudience;
 
+        // Opt-in: accept app-only (client-credentials) tokens. Default false — an unset
+        // deployment behaves exactly as before this feature existed. See docs/security.md
+        // §"App-only (client-credentials) tokens" and docs/authentication-matrix.md.
+        bool allowAppOnly = configuration.GetValue($"{SectionName}:AllowAppOnlyTokens", false);
+        string[] allowedAppClientIds = ReadAllowedAppClientIds(entra);
+
         var options = new EntraAuthOptions
         {
             Instance = Clean(entra["Instance"]) ?? "https://login.microsoftonline.com/",
@@ -108,8 +132,18 @@ public sealed class EntraAuthOptions
             Audience = audience,
             ApiScope = Clean(entra["ApiScope"]) ?? DefaultApiScope,
             AppRole = Clean(entra["AppRole"]) ?? DefaultAppRole,
+            AllowAppOnlyTokens = allowAppOnly,
+            AllowedAppClientIds = allowedAppClientIds,
             RequireAuth = requireAuth,
         };
+
+        // Fail-closed validation for the opt-in runs in EVERY environment (Development
+        // included). If a deployment opts in, it must do so correctly regardless of where
+        // it runs — no silent fallback to a weaker policy on a misconfigured opt-in.
+        if (allowAppOnly)
+        {
+            options.ValidateAppOnlyOptIn();
+        }
 
         // Validation runs for ALL non-Development environments, regardless of the flag.
         if (nonDevelopment)
@@ -141,6 +175,43 @@ public sealed class EntraAuthOptions
         }
     }
 
+    /// <summary>
+    /// Fail-fast validation for the app-only opt-in. Runs whenever
+    /// <see cref="AllowAppOnlyTokens"/> is <c>true</c> so a misconfigured opt-in never
+    /// silently falls through to a weaker policy — it fails startup instead.
+    /// </summary>
+    public void ValidateAppOnlyOptIn()
+    {
+        if (string.IsNullOrWhiteSpace(AppRole) || IsPlaceholder(AppRole))
+        {
+            throw new InvalidOperationException(
+                "MicrosoftEntra:AppRole is required (and must not be a placeholder) when " +
+                "MicrosoftEntra:AllowAppOnlyTokens=true. App-only tokens are authorized " +
+                "solely by the configured app role, so leaving it unset would grant access " +
+                "to any client-credentials caller.");
+        }
+
+        foreach (string entry in AllowedAppClientIds)
+        {
+            if (string.IsNullOrWhiteSpace(entry) || IsPlaceholder(entry))
+            {
+                throw new InvalidOperationException(
+                    "MicrosoftEntra:AllowedAppClientIds contains a blank or placeholder " +
+                    "entry. Every allow-list entry must be a real application (client) ID " +
+                    "so a typo cannot silently disable the restriction.");
+            }
+
+            if (!Guid.TryParse(entry, out _))
+            {
+                throw new InvalidOperationException(
+                    $"MicrosoftEntra:AllowedAppClientIds contains '{entry}', which is not a " +
+                    "valid GUID. Every entry must be an application (client) ID from the " +
+                    "Entra tenant so app-only requests can be matched against the token's " +
+                    "azp/appid claim.");
+            }
+        }
+    }
+
     /// <summary>Detects documentation placeholders such as "&lt;your-tenant-id&gt;".</summary>
     private static bool IsPlaceholder(string? value) =>
         !string.IsNullOrWhiteSpace(value) && (value.Contains('<') || value.Contains('>'));
@@ -168,5 +239,38 @@ public sealed class EntraAuthOptions
         return Uri.TryCreate(authority, UriKind.Absolute, out Uri? uri) && uri.Segments.Length >= 2
             ? uri.Segments[1].TrimEnd('/')
             : null;
+    }
+
+    /// <summary>
+    /// Reads the optional <c>MicrosoftEntra:AllowedAppClientIds</c> configuration array,
+    /// preserving raw values so <see cref="ValidateAppOnlyOptIn"/> can reject placeholders
+    /// and malformed GUIDs at startup. Blank entries are dropped so a trailing empty slot
+    /// in configuration is treated as absent (not as a validation failure).
+    /// </summary>
+    private static string[] ReadAllowedAppClientIds(IConfigurationSection entra)
+    {
+        IConfigurationSection section = entra.GetSection("AllowedAppClientIds");
+        if (!section.Exists())
+        {
+            return [];
+        }
+
+        List<string> entries = [];
+        foreach (IConfigurationSection child in section.GetChildren())
+        {
+            string? raw = child.Value;
+            if (raw is null)
+            {
+                continue;
+            }
+
+            string trimmed = raw.Trim();
+            if (trimmed.Length > 0)
+            {
+                entries.Add(trimmed);
+            }
+        }
+
+        return [.. entries];
     }
 }

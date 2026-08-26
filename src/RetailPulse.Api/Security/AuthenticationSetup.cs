@@ -21,7 +21,10 @@ namespace RetailPulse.Api.Security;
 ///     <c>/hubs</c> requests (browsers cannot set Authorization headers on WebSocket
 ///     handshakes); all other endpoints require the Authorization header.</item>
 ///   <item>Every protected endpoint/hub requires an authenticated user, the required app
-///     role (<c>roles</c> claim), and the delegated API scope (<c>scp</c> claim).</item>
+///     role (<c>roles</c> claim), and either the delegated API scope (<c>scp</c> claim) or
+///     — only when <see cref="EntraAuthOptions.AllowAppOnlyTokens"/> is opted in — an
+///     app-only (client-credentials) token bearing the required app role and, if
+///     configured, an allow-listed <c>azp</c>/<c>appid</c>.</item>
 ///   <item>Development uses the synthetic <see cref="DevelopmentAuthHandler"/> so the demo
 ///     runs locally without real tokens — never available outside Development.</item>
 /// </list>
@@ -102,7 +105,7 @@ public static class AuthenticationSetup
         {
             builder
                 .RequireRole(options.AppRole)
-                .RequireAssertion(ctx => HasRequiredScope(ctx.User, options.ApiScope));
+                .RequireAssertion(ctx => IsAuthorizedPrincipal(ctx.User, options));
         }
 
         return builder.Build();
@@ -160,6 +163,43 @@ public static class AuthenticationSetup
     }
 
     /// <summary>
+    /// Returns true when the principal is authorized under the dual-mode token policy:
+    /// <list type="bullet">
+    ///   <item>Delegated tokens (carrying <c>scp</c>) MUST carry the configured API scope.
+    ///     Behaviour is byte-for-byte unchanged from before the app-only opt-in existed —
+    ///     and is unaffected by whether the opt-in is on or off.</item>
+    ///   <item>App-only tokens (carrying <c>roles</c> but NO <c>scp</c>) are accepted ONLY
+    ///     when <see cref="EntraAuthOptions.AllowAppOnlyTokens"/> is <c>true</c>. The
+    ///     required app role is already enforced by <c>RequireRole</c> on the policy; if
+    ///     <see cref="EntraAuthOptions.AllowedAppClientIds"/> is populated, the token's
+    ///     <c>azp</c>/<c>appid</c> must additionally match one of the listed client IDs.</item>
+    ///   <item>Tokens carrying neither <c>scp</c> nor <c>roles</c> are rejected.</item>
+    /// </list>
+    /// </summary>
+    public static bool IsAuthorizedPrincipal(ClaimsPrincipal principal, EntraAuthOptions options)
+    {
+        if (HasScopeClaim(principal))
+        {
+            // Delegated (user) token — behaviour unchanged: require the configured scope.
+            return HasRequiredScope(principal, options.ApiScope);
+        }
+
+        if (HasRolesClaim(principal))
+        {
+            // App-only (client-credentials) token. The required app role is already
+            // enforced by RequireRole on the policy. This branch decides whether the
+            // opt-in accepts app-only at all and, if configured, whether the calling
+            // client is on the allow-list.
+            return options.AllowAppOnlyTokens
+                && (options.AllowedAppClientIds.Length == 0
+                    || HasAllowedAppClientId(principal, options.AllowedAppClientIds));
+        }
+
+        // Neither scp nor roles → no authorization signal at all → reject.
+        return false;
+    }
+
+    /// <summary>
     /// Returns true when the principal carries the required delegated scope. The <c>scp</c>
     /// claim is a space-delimited list, so a single claim can contain several scopes.
     /// </summary>
@@ -195,6 +235,71 @@ public static class AuthenticationSetup
         foreach (string scope in scopeClaimValue.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (string.Equals(scope, requiredScope, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Returns true when the principal has any <c>scp</c>-style claim (v1 short or v2 long form).</summary>
+    private static bool HasScopeClaim(ClaimsPrincipal principal) =>
+        principal.HasClaim(c =>
+            c.Type is "scp" or "http://schemas.microsoft.com/identity/claims/scope");
+
+    /// <summary>Returns true when the principal has any <c>roles</c> claim.</summary>
+    private static bool HasRolesClaim(ClaimsPrincipal principal) =>
+        principal.HasClaim(c => c.Type == "roles");
+
+    /// <summary>
+    /// Returns true when the token's <c>azp</c> (v2) or <c>appid</c> (v1) claim matches
+    /// one of the allow-listed application (client) IDs. Comparison is GUID-normalized so
+    /// case, formatting, and braces cannot bypass the check.
+    /// </summary>
+    private static bool HasAllowedAppClientId(ClaimsPrincipal principal, IReadOnlyList<string> allowedClientIds)
+    {
+        var allowed = new Guid[allowedClientIds.Count];
+        for (int i = 0; i < allowedClientIds.Count; i++)
+        {
+            if (!Guid.TryParse(allowedClientIds[i], out allowed[i]))
+            {
+                // Startup validation already rejects non-GUID entries — an unparseable
+                // entry here means someone bypassed FromConfiguration/Validate. Fail
+                // closed rather than treating it as a match.
+                return false;
+            }
+        }
+
+        foreach (Claim claim in principal.FindAll("azp"))
+        {
+            if (MatchesAny(claim.Value, allowed))
+            {
+                return true;
+            }
+        }
+
+        foreach (Claim claim in principal.FindAll("appid"))
+        {
+            if (MatchesAny(claim.Value, allowed))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool MatchesAny(string tokenClientId, Guid[] allowed)
+    {
+        if (!Guid.TryParse(tokenClientId, out Guid parsed))
+        {
+            return false;
+        }
+
+        foreach (Guid candidate in allowed)
+        {
+            if (candidate == parsed)
             {
                 return true;
             }
