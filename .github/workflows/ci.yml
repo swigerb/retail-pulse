@@ -306,3 +306,32 @@ jobs:
       - name: Run Verify-ApimAiGateway.ps1 -SelfTest
         shell: pwsh
         run: ./scripts/Verify-ApimAiGateway.ps1 -SelfTest
+
+  synthetic-monitor-selftest:
+    name: Invoke-SyntheticChatMonitor offline self-test (#57)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Offline regression fence for the OPTIONAL authenticated synthetic
+      # monitor (issue #57). Proves the smoke set stays synchronised with
+      # ChartAcceptanceManifest, the response-contract validator distinguishes
+      # well-formed from malformed payloads, the config-missing path reports
+      # SKIP (not fabricated PASS, not spurious FAIL), and the script contains
+      # no client-secret code path (federation-only). Requires no Azure
+      # signin; runs on Linux to guarantee cross-platform pwsh compatibility.
+      - name: Run Invoke-SyntheticChatMonitor.ps1 -SelfTest
+        shell: pwsh
+        run: ./scripts/Invoke-SyntheticChatMonitor.ps1 -SelfTest
+
+      # Belt-and-braces: with no configuration at all the live entry point
+      # must SKIP with exit 0 — an unconfigured fork or clean-clone user
+      # must never see this workflow turn CI red.
+      - name: Verify unconfigured invocation SKIPs with exit 0
+        shell: pwsh
+        run: |
+          $env:RETAIL_PULSE_SYNTHETIC_API_ORIGIN = $null
+          $env:RETAIL_PULSE_SYNTHETIC_API_RESOURCE = $null
+          $env:AZURE_API_APP_URL = $null
+          ./scripts/Invoke-SyntheticChatMonitor.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Unconfigured monitor exited $LASTEXITCODE — expected 0 (skip)." }
