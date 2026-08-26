@@ -1,0 +1,81 @@
+name: Synthetic Chat Monitor (Optional, #57)
+
+# Optional, credential-gated add-on for the authenticated chat path.
+# Fully no-ops when the deployment has not opted into the monitor. Uses
+# workload-identity federation ONLY — the `azure/login@v2` step consumes
+# GitHub Actions' OIDC token via `permissions: id-token: write` and the
+# non-secret `client-id` / `tenant-id` inputs. There is NO client secret
+# involved anywhere in this workflow, and no credential in GitHub Actions
+# secrets.
+#
+# Wiring (all optional, all repository variables — none are secrets):
+#   vars.RETAIL_PULSE_SYNTHETIC_ENABLED       'true' to opt into the run
+#   vars.RETAIL_PULSE_SYNTHETIC_CLIENT_ID     Federated app registration client id
+#                                             (default: retail-pulse-synthetic-monitor)
+#   vars.RETAIL_PULSE_SYNTHETIC_TENANT_ID     Target tenant id
+#   vars.RETAIL_PULSE_SYNTHETIC_API_ORIGIN    Deployed API base URL
+#   vars.RETAIL_PULSE_SYNTHETIC_API_RESOURCE  App ID URI / scope (aud) for the API
+#
+# When RETAIL_PULSE_SYNTHETIC_ENABLED is unset or not 'true', every real
+# step short-circuits and the job completes green — the exact behaviour
+# required for unconfigured forks and clean-clone users.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 06:15 UTC daily — cheap smoke pulse when configured, a no-op when not.
+    - cron: '15 6 * * *'
+
+permissions:
+  # Required for the OIDC token exchange in azure/login@v2. NEVER add
+  # `secrets: write`; this workflow reads no secrets.
+  id-token: write
+  contents: read
+
+concurrency:
+  group: synthetic-chat-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    name: Invoke-SyntheticChatMonitor
+    runs-on: ubuntu-latest
+    steps:
+      - name: Announce configuration status
+        id: gate
+        shell: bash
+        run: |
+          if [[ "${{ vars.RETAIL_PULSE_SYNTHETIC_ENABLED }}" == "true" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Optional synthetic monitor is enabled — proceeding with configured run."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Synthetic monitor (issue #57) skipped::RETAIL_PULSE_SYNTHETIC_ENABLED is not 'true'. This is the expected state for any deployment that has not opted into the optional monitor. Nothing was executed, no live result was fabricated, and no credential was accessed."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.enabled == 'true'
+
+      # Federation-only sign-in. `client-id` and `tenant-id` are plain
+      # (non-secret) repository variables; there is NO `client-secret`
+      # input by design. The RetailPulse.User app role granted to
+      # `retail-pulse-synthetic-monitor` is what authorises the token
+      # `az account get-access-token` will subsequently mint for the API
+      # audience.
+      - name: Azure login (workload-identity federation)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.RETAIL_PULSE_SYNTHETIC_CLIENT_ID }}
+          tenant-id: ${{ vars.RETAIL_PULSE_SYNTHETIC_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Run authenticated synthetic monitor
+        if: steps.gate.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          RETAIL_PULSE_SYNTHETIC_API_ORIGIN: ${{ vars.RETAIL_PULSE_SYNTHETIC_API_ORIGIN }}
+          RETAIL_PULSE_SYNTHETIC_API_RESOURCE: ${{ vars.RETAIL_PULSE_SYNTHETIC_API_RESOURCE }}
+          AZURE_TENANT_ID: ${{ vars.RETAIL_PULSE_SYNTHETIC_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ vars.RETAIL_PULSE_SYNTHETIC_CLIENT_ID }}
+        run: ./scripts/Invoke-SyntheticChatMonitor.ps1
