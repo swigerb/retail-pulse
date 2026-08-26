@@ -145,10 +145,14 @@ script that mirrors the shape of `scripts/Verify-ApimAiGateway.ps1` and
 - With any required value missing, the script prints
   `SKIP: optional synthetic monitor is not configured — missing …`
   and exits 0. It never turns an unconfigured fork red.
-- With config present but the signed-in principal lacking authorisation
-  (see "Remaining authorisation step" below), token acquisition
-  produces an actionable `SKIP:` message that names the missing app
-  role and exits 0. It never fabricates a live result.
+- With config present but token acquisition failing, the script emits an
+  actionable `SKIP:` naming the likely causes (wrong `--resource` /
+  App ID URI, wrong tenant, or a principal with no `RetailPulse.User`
+  assignment) and exits 0. It never fabricates a live result.
+- With a token acquired but the API rejecting it `403`, the run reports
+  a `FAIL` for that prompt naming the most likely cause: the deployed
+  API has not opted in to app-only tokens (see "Remaining condition for
+  a live PASS" below).
 
 `.github/workflows/synthetic-monitor.yml` — `workflow_dispatch` and a
 daily `06:15 UTC` schedule. The job is gated on the repository variable
@@ -156,20 +160,72 @@ daily `06:15 UTC` schedule. The job is gated on the repository variable
 short-circuits and the workflow completes green with a `::notice::`
 explaining the outcome.
 
-## Remaining authorisation step (does NOT block delivery)
+## Entra authorisation — COMPLETE
 
-The identity is fully provisioned but not yet **authorised**: the
-`retail-pulse-synthetic-monitor` service principal still needs the
-`RetailPulse.User` app role granted against the API app registration,
-with admin consent. Until that grant is in place, live runs will report
-a clean actionable `SKIP:` naming the missing app role rather than a
-pass or a hard failure.
+The identity is fully provisioned **and authorised**. The app-role grant
+and admin consent that an earlier revision of this document listed as
+outstanding are both in place. Do not go looking for them.
 
-That grant is the only remaining step to move the monitor from
-"delivered + gated" to "producing live PASS results". It does not block
-this delivery — the whole point of the optional/credential-gated model
-is that the code lands complete and the deployment decision is
-independent.
+| Item | Value |
+|---|---|
+| Monitor app | `retail-pulse-synthetic-monitor` |
+| Client ID | `b8212317-e16d-4f06-996b-955e885ca1ca` |
+| Tenant ID | `48351615-345c-4547-bb6f-8fcc8d6e2568` |
+| Credential | Federated `github-actions-main` — **no client secret exists** |
+| Subject | `repo:swigerb@1630580/retail-pulse@1223914087:ref:refs/heads/main` |
+| Audience | `api://AzureADTokenExchange` |
+| API app | `Retail Pulse` — `b03317ab-a407-49cc-8769-0a15062777b1` |
+| App role member types | `Users/Groups` → **`Users/Groups,Applications`** |
+| Application permission | `RetailPulse.User` |
+| Admin consent | **Granted for Contoso** |
+
+All values above are non-secret identifiers, safe to commit.
+
+### Why the app role allows "Both", not "Applications"
+
+`RetailPulse.User` was originally declared with `allowedMemberTypes:
+["User"]`, which Entra will not let an application be assigned to. It was
+widened to `["User", "Application"]` — the "Both" option in the portal.
+
+"Applications" **alone** was rejected deliberately: it would have removed
+users' ability to hold `RetailPulse.User`, and since the API requires that
+same role on every authenticated request, every interactive human sign-in
+would have started failing `403`. "Both" is purely additive — existing user
+assignments keep working untouched, and applications become assignable in
+addition.
+
+## Remaining condition for a live PASS
+
+The remaining condition is **configuration on the API**, not a grant in
+Entra.
+
+PR [#164](https://github.com/swigerb/retail-pulse/pull/164) (issue
+[#163](https://github.com/swigerb/retail-pulse/issues/163)) added opt-in
+app-only (client-credentials) token acceptance. Before it, the API's
+authorization policy required *both* the `RetailPulse.User` app role **and**
+a delegated `scp` scope claim. An app-only token carries `roles` but no
+`scp`, so it satisfied the role check and still failed the scope check —
+`403`, no matter how complete the Entra configuration was.
+
+The monitor therefore produces a live PASS only against a deployment that
+has opted in:
+
+| Key | Default | Effect |
+|---|---|---|
+| `MicrosoftEntra:AllowAppOnlyTokens` | **`false`** | Master opt-in. While `false` — the shipped default, and what the current Bicep deploys — every app-only token is rejected `403`. |
+| `MicrosoftEntra:AllowedAppClientIds` | **empty** | Optional allow-list. Empty means the app role alone gates access. When populated, the token's `azp`/`appid` must match a listed GUID — set it to the monitor's client ID to keep the grant narrow. |
+
+Environment-variable form:
+`MicrosoftEntra__AllowAppOnlyTokens=true`,
+`MicrosoftEntra__AllowedAppClientIds__0=b8212317-e16d-4f06-996b-955e885ca1ca`.
+
+The opt-in is fail-closed and validated at startup in every environment —
+see `docs/security.md` §"App-only (client-credentials) tokens".
+
+**With the opt-in left at its default, the monitor still behaves
+correctly:** it acquires a token and reports the `403` as a clean,
+actionable failure rather than fabricating a result. Nothing about the
+default deployment is broken; it simply does not accept machine callers.
 
 ## Manual interactive alternative (unchanged)
 
@@ -178,7 +234,8 @@ run manually via
 `scripts/browser-chart-acceptance.js` and
 `scripts/browser-prompt-library-acceptance.js` (PR #148) with an
 interactive Entra sign-in. This remains the supported alternative when
-the automated monitor is not authorised or not enabled.
+the automated monitor is not enabled, or when the target deployment has
+not opted in to app-only tokens.
 
 ## Historical note
 
