@@ -226,25 +226,125 @@ public sealed class ChartFulfillmentTests
     }
 
     [Fact]
-    public void EnforceChartFulfillment_AlreadyHasChart_LeavesItUnchanged()
+    public void EnforceChartFulfillment_ModelChartMeetingTheMarkFloor_IsKept_WhenNothingCanBeRebuilt()
     {
+        // With no tool payloads there is nothing to rebuild from, so a model-emitted
+        // chart is the fallback — and it is kept, provided it clears the mark floor
+        // for its type.
         AgentExecutionPipeline pipeline = CreatePipeline();
-        MeaiChatResponse response = ResponseWithToolResults(
-            CompactedDemand("Summit Vodka", "Northeast", 910.0));
+        MeaiChatResponse response = ResponseWithToolResults();
 
         var existing = new ChartSpec
         {
             Type = "bar",
             Title = "Existing",
-            Data = [new ChartSeries { Legend = "S", Values = [new ChartDataPoint { X = "A", Y = 1 }] }]
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "S",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "A", Y = 1 },
+                        new ChartDataPoint { X = "B", Y = 2 },
+                        new ChartDataPoint { X = "C", Y = 3 },
+                    ],
+                },
+            ],
         };
         var charts = new List<ChartSpec> { existing };
 
         AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
             "Show me a bar chart of depletion velocity in the Northeast", response, charts, "Done.");
 
-        result.Charts.Should().ContainSingle().Which.Should().BeSameAs(existing);
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("bar");
+        result.Charts[0].Data.Sum(s => s.Values.Count).Should().Be(3);
         result.Reply.Should().Be("Done.");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_PrefersTheDeterministicChart_OverAnUnderPopulatedModelChart()
+    {
+        // Issue #172: the tool payload is the source of truth. A model chart carrying
+        // a single mark must not win over a chart the code can build from the data.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactedDemand("Sierra Gold Tequila", "Northeast", 1893.2),
+            CompactedDemand("Ridgeline Bourbon", "Northeast", 2109.5),
+            CompactedDemand("Summit Vodka", "Northeast", 2296.3));
+
+        var thin = new ChartSpec
+        {
+            Type = "bar",
+            Title = "Model chart with one brand",
+            Data = [new ChartSeries { Legend = "S", Values = [new ChartDataPoint { X = "Summit Vodka", Y = 2296.3 }] }]
+        };
+        var charts = new List<ChartSpec> { thin };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast",
+            response, charts, "Here you go.");
+
+        result.Charts.Should().ContainSingle("the deterministic chart replaces the model's");
+        result.Charts[0].Should().NotBeSameAs(thin);
+        result.Charts[0].Data.Sum(s => s.Values.Count)
+            .Should().BeGreaterThanOrEqualTo(3, "all three seeded Northeast spirits brands must appear");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_UnderPopulatedModelChart_IsDroppedRatherThanRendered()
+    {
+        // An under-populated chart is worse than no chart: it renders, so it looks
+        // like success while misrepresenting the data. With nothing to rebuild from,
+        // fail closed to the diagnostic.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults();
+
+        var thin = new ChartSpec
+        {
+            Type = "bar",
+            Title = "One mark",
+            Data = [new ChartSeries { Legend = "S", Values = [new ChartDataPoint { X = "A", Y = 1 }] }]
+        };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a bar chart of depletion velocity in the Northeast",
+            response, [thin], "Done.");
+
+        result.Charts.Should().BeEmpty();
+        result.Reply.Should().Contain("Chart unavailable");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_UsesTheUsersOriginalRequest_NotAScopedStepRewrite()
+    {
+        // Issue #172: on the plan path the specialist receives a rewritten message —
+        // "<step action> — original user request: <what the user typed>". If chart
+        // intent were read from that rewrite, a step action mentioning a bar would
+        // override the user's actual table request, and a bar would be emitted under
+        // a "create a table …" ask. UserIntentMessage is what must drive detection.
+        var scoped = new ChatRequest(
+            Message: "Chart the regional rollup as a bar chart — original user request: "
+                + "Create a table showing depletion stats for all home improvement brands by region",
+            OriginalMessage: "Create a table showing depletion stats for all home improvement brands by region");
+
+        scoped.UserIntentMessage.Should().Be(
+            "Create a table showing depletion stats for all home improvement brands by region");
+
+        ChartIntent fromRewrite = ChartRequestDetector.Detect(scoped.Message);
+        ChartIntent fromUser = ChartRequestDetector.Detect(scoped.UserIntentMessage);
+
+        fromRewrite.ChartType.Should().Be("bar", "the step action's own wording wins on the rewritten message");
+        fromUser.ChartType.Should().Be("table", "the user's actual request is a table");
+    }
+
+    [Fact]
+    public void ChatRequest_UserIntentMessage_FallsBackToMessage_OnTheSingleShotPath()
+    {
+        // No rewrite in play — Message already is what the user asked for.
+        var direct = new ChatRequest("Create a pie chart showing market share breakdown");
+        direct.UserIntentMessage.Should().Be("Create a pie chart showing market share breakdown");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

@@ -436,7 +436,11 @@ public sealed class PlanExecutor
             Message: stepMessage,
             SessionId: execution.SessionId,
             User: message.User,
-            History: stepHistory);
+            History: stepHistory,
+            // Chart intent must come from what the USER asked for, not from the step
+            // action woven into the message above — otherwise a step phrased as
+            // "…as a bar chart" overrides the user's "create a table …" (issue #172).
+            OriginalMessage: message.Request);
 
         using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(workflowCt);
         if (_options.StepTimeout > TimeSpan.Zero)
