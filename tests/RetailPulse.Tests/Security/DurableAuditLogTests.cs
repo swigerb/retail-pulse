@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using RetailPulse.Api.Security;
 using RetailPulse.Contracts.Observability;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Security;
 
@@ -15,7 +16,7 @@ public class DurableAuditLogTests : IDisposable
 
     public DurableAuditLogTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"audit_test_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("audit_test");
         _auditLog = new DurableAuditLog(_dbPath);
     }
 
@@ -132,7 +133,7 @@ public class DurableAuditLogTests : IDisposable
     public void Dispose()
     {
         _auditLog.Dispose();
-        try { File.Delete(_dbPath); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
         GC.SuppressFinalize(this);
     }
 }

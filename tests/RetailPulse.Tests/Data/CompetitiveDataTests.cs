@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Data;
 
@@ -38,7 +39,7 @@ public class CompetitiveDataTests : IDisposable
         string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
-        _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_compdata_test_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("retailpulse_compdata_test");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
         _tenant = tenantProvider.GetTenant();
 
@@ -55,9 +56,7 @@ public class CompetitiveDataTests : IDisposable
     public void Dispose()
     {
         GC.SuppressFinalize(this);
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     private SqliteConnection OpenConnection()

@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using RetailPulse.Api.Packs;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Packs;
 
@@ -21,16 +22,13 @@ public sealed class DefaultPackSeedGoldenTests : IDisposable
 
     public DefaultPackSeedGoldenTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"rp_default_seed_golden_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("rp_default_seed_golden");
     }
 
     public void Dispose()
     {
         GC.SuppressFinalize(this);
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     [Fact]
@@ -138,7 +136,7 @@ public sealed class DefaultPackSeedGoldenTests : IDisposable
         // Copy the default pack into a scratch dir so we can mutate its
         // seed without touching the real shipped pack.
         string scratch = Path.Combine(
-            Path.GetTempPath(), $"rp_default_seed_scratch_{Guid.NewGuid():N}");
+            SqliteTestCleanup.TempRoot, $"rp_default_seed_scratch_{Guid.NewGuid():N}");
         Directory.CreateDirectory(scratch);
         try
         {

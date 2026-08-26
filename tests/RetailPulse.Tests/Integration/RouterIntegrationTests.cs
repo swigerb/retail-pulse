@@ -18,6 +18,7 @@ using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Integration;
 
@@ -451,7 +452,7 @@ public class RouterIntegrationTests
     [Fact]
     public async Task MemoryPersists_AcrossMultipleConversations()
     {
-        string dbPath = Path.Combine(Path.GetTempPath(), $"integ_mem_{Guid.NewGuid():N}.db");
+        string dbPath = SqliteTestCleanup.NewDbPath("integ_mem");
         try
         {
             using var memory = new SqliteConversationMemory(dbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
@@ -472,16 +473,14 @@ public class RouterIntegrationTests
         }
         finally
         {
-            try { File.Delete(dbPath); } catch { }
-            try { File.Delete(dbPath + "-wal"); } catch { }
-            try { File.Delete(dbPath + "-shm"); } catch { }
+            SqliteTestCleanup.ReleaseAndDelete(dbPath);
         }
     }
 
     [Fact]
     public async Task ApprovalFlow_EndToEnd_RequestRespondAgentReceives()
     {
-        string dbPath = Path.Combine(Path.GetTempPath(), $"integ_appr_{Guid.NewGuid():N}.db");
+        string dbPath = SqliteTestCleanup.NewDbPath("integ_appr");
         try
         {
             var gate = new SqliteApprovalGate(dbPath, Mock.Of<ILogger<SqliteApprovalGate>>());
@@ -501,9 +500,7 @@ public class RouterIntegrationTests
         }
         finally
         {
-            try { File.Delete(dbPath); } catch { }
-            try { File.Delete(dbPath + "-wal"); } catch { }
-            try { File.Delete(dbPath + "-shm"); } catch { }
+            SqliteTestCleanup.ReleaseAndDelete(dbPath);
         }
     }
 

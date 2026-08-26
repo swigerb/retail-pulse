@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts.Persistence;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Persistence;
 
@@ -22,15 +23,10 @@ public sealed class SessionStoreRestartTests : IDisposable
 
     public SessionStoreRestartTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"session_restart_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("session_restart");
     }
 
-    public void Dispose()
-    {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private static SessionTurnWrite MakeTurn(string sessionId, string subject, string role, string content) =>
         new()

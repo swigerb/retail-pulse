@@ -6,6 +6,7 @@ using RetailPulse.Api.Approval;
 using RetailPulse.Api.Memory;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Memory;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Approval;
 
@@ -23,8 +24,8 @@ public class AsyncSqliteTests : IDisposable
 
     public AsyncSqliteTests()
     {
-        _approvalDbPath = Path.Combine(Path.GetTempPath(), $"async_approval_{Guid.NewGuid():N}.db");
-        _memoryDbPath = Path.Combine(Path.GetTempPath(), $"async_memory_{Guid.NewGuid():N}.db");
+        _approvalDbPath = SqliteTestCleanup.NewDbPath("async_approval");
+        _memoryDbPath = SqliteTestCleanup.NewDbPath("async_memory");
         _gate = new SqliteApprovalGate(_approvalDbPath, Mock.Of<ILogger<SqliteApprovalGate>>());
         _memory = new SqliteConversationMemory(_memoryDbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
     }
@@ -34,9 +35,7 @@ public class AsyncSqliteTests : IDisposable
         _memory.Dispose();
         foreach (string? path in new[] { _approvalDbPath, _memoryDbPath })
         {
-            try { File.Delete(path); } catch { }
-            try { File.Delete(path + "-wal"); } catch { }
-            try { File.Delete(path + "-shm"); } catch { }
+            SqliteTestCleanup.ReleaseAndDelete(path);
         }
     }
 

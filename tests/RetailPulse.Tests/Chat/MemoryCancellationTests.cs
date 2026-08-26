@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Memory;
 using RetailPulse.Contracts.Memory;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Chat;
 
@@ -21,7 +22,7 @@ public class MemoryCancellationTests : IDisposable
 
     public MemoryCancellationTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"cancel_memory_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("cancel_memory");
         _memory = new SqliteConversationMemory(_dbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
         _middlewareLogger = new Mock<ILogger<ConversationMemoryMiddleware>>();
         _extractionLogger = new Mock<ILogger<MemoryExtractionService>>();
@@ -30,9 +31,7 @@ public class MemoryCancellationTests : IDisposable
     public void Dispose()
     {
         _memory.Dispose();
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     // ── Memory Work Receives CancellationToken ──────────────────────────

@@ -13,6 +13,7 @@ using RetailPulse.Api.Models;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.McpServer.Data;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Promo;
 
@@ -31,7 +32,7 @@ public class TaskModuleTests : IDisposable
         string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
-        _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_taskmod_test_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("retailpulse_taskmod_test");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
         _db = new RetailPulseDb(tenantProvider, _dbPath, tenantConfigPath);
     }
@@ -39,9 +40,7 @@ public class TaskModuleTests : IDisposable
     public void Dispose()
     {
         GC.SuppressFinalize(this);
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     private static JsonElement Parse(object obj) =>
