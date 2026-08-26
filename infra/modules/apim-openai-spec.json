@@ -15,6 +15,36 @@
     }
   ],
   "paths": {
+    "/models": {
+      "get": {
+        "operationId": "listModels",
+        "summary": "List Model Deployments",
+        "description": "Lists the model deployments available on the upstream Azure AI Foundry account. Exposed as a cheap, token-free readiness probe for the inference path — a 200 proves gateway routing, the APIM subscription key, APIM's managed-identity authentication to Azure AI Foundry, and upstream availability, without consuming any model tokens.",
+        "tags": [
+          "Operations"
+        ],
+        "parameters": [
+          {
+            "name": "api-version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "default": "2025-03-01-preview"
+            },
+            "description": "The Azure OpenAI API version to use."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "401": {
+            "description": "Missing or invalid APIM subscription key"
+          }
+        }
+      }
+    },
     "/deployments/{deployment-id}/chat/completions": {
       "post": {
         "operationId": "createChatCompletion",

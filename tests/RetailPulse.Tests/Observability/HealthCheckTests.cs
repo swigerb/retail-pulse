@@ -158,6 +158,74 @@ public class HealthCheckTests
         request.Headers.Contains("api-key").Should().BeFalse();
     }
 
+    [Fact]
+    public async Task AzureOpenAiHealthCheck_ProbesGatewayModelsRoute_IncludingOpenAiSegmentAndApiVersion()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        DelegatingHandler handler = CreateCapturingHandler(HttpStatusCode.OK, request => capturedRequest = request);
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig(
+            endpoint: "https://test.azure-api.net/inference",
+            apiKey: null,
+            apimSubscriptionKey: "apim-sub-key",
+            useManagedIdentity: false,
+            apiVersion: "2025-03-01-preview");
+        var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
+
+        var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
+        await check.CheckHealthAsync(new HealthCheckContext());
+
+        HttpRequestMessage request = capturedRequest ?? throw new InvalidOperationException("Expected the health check to issue a request.");
+
+        // The APIM inference API is registered at path "{inference}/openai", so a probe
+        // of "{endpoint}/models" matches no API and 404s on every gateway deployment.
+        request.RequestUri!.AbsoluteUri.Should()
+            .Be("https://test.azure-api.net/inference/openai/models?api-version=2025-03-01-preview");
+    }
+
+    [Theory]
+    // Gateway base — the SDK's own "/openai" segment must be appended.
+    [InlineData("https://test.azure-api.net/inference", "https://test.azure-api.net/inference/openai/models?api-version=v1")]
+    // Trailing slash must not produce a doubled separator.
+    [InlineData("https://test.azure-api.net/inference/", "https://test.azure-api.net/inference/openai/models?api-version=v1")]
+    // Direct Azure OpenAI account (Development / AllowDirectEndpoint).
+    [InlineData("https://test.cognitiveservices.azure.com", "https://test.cognitiveservices.azure.com/openai/models?api-version=v1")]
+    // Defensive: an endpoint that already carries "/openai" must not be doubled.
+    [InlineData("https://test.azure-api.net/inference/openai", "https://test.azure-api.net/inference/openai/models?api-version=v1")]
+    public void BuildModelsProbeUrl_ComposesTheSdkRouteShape(string endpoint, string expected) =>
+        AzureOpenAiHealthCheck.BuildModelsProbeUrl(endpoint, "v1").Should().Be(expected);
+
+    [Fact]
+    public async Task AzureOpenAiHealthCheck_ReturnsDegradedNamingTheRoute_WhenProbeReturns404()
+    {
+        DelegatingHandler handler = CreateMockHandler(HttpStatusCode.NotFound);
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig("https://test.azure-api.net/inference", "key");
+        var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
+
+        var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
+        HealthCheckResult result = await check.CheckHealthAsync(new HealthCheckContext());
+
+        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Description.Should().Contain("404").And.Contain("model-listing route");
+    }
+
+    [Fact]
+    public async Task AzureOpenAiHealthCheck_FallsBackToADefaultApiVersion_WhenNotConfigured()
+    {
+        HttpRequestMessage? capturedRequest = null;
+        DelegatingHandler handler = CreateCapturingHandler(HttpStatusCode.OK, request => capturedRequest = request);
+        Mock<IHttpClientFactory> factory = CreateRawFactory(handler);
+        IConfiguration config = CreateConfig("https://test.azure-api.net/inference", "key");
+        var logger = new Mock<ILogger<AzureOpenAiHealthCheck>>();
+
+        var check = new AzureOpenAiHealthCheck(factory.Object, config, logger.Object);
+        await check.CheckHealthAsync(new HealthCheckContext());
+
+        HttpRequestMessage request = capturedRequest ?? throw new InvalidOperationException("Expected the health check to issue a request.");
+        request.RequestUri!.Query.Should().StartWith("?api-version=").And.NotBe("?api-version=");
+    }
+
     #endregion
 
     #region Helpers
@@ -211,13 +279,15 @@ public class HealthCheckTests
         string? endpoint,
         string? apiKey,
         string? apimSubscriptionKey = null,
-        bool? useManagedIdentity = null)
+        bool? useManagedIdentity = null,
+        string? apiVersion = null)
     {
         var configData = new Dictionary<string, string?>();
         if (endpoint != null) configData["OpenAI:Endpoint"] = endpoint;
         if (apiKey != null) configData["OpenAI:ApiKey"] = apiKey;
         if (apimSubscriptionKey != null) configData["OpenAI:ApimSubscriptionKey"] = apimSubscriptionKey;
         if (useManagedIdentity.HasValue) configData["OpenAI:UseManagedIdentity"] = useManagedIdentity.Value.ToString();
+        if (apiVersion != null) configData["OpenAI:ApiVersion"] = apiVersion;
 
         return new ConfigurationBuilder()
             .AddInMemoryCollection(configData)
