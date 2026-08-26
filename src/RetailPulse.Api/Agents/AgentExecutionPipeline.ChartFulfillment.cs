@@ -189,17 +189,33 @@ public partial class AgentExecutionPipeline
         if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, requiredMarks, out ChartSpec? deterministic)
             && deterministic is not null)
         {
-            _logger.LogInformation(
-                "Chart-fulfillment: built a {ChartType} chart deterministically from tool results "
-                + "for an explicit chart request (deterministic-first, issue #172).",
-                deterministic.Type);
+            // Prefer the deterministic chart, but never at the cost of completeness.
+            // When the model also produced a valid chart of the requested type that
+            // covers MORE of the data, keeping the thinner rebuild would be a
+            // regression — the tool payload is authoritative about what is true, not
+            // about what is complete (a turn may have queried only some regions).
+            // Deterministic wins ties, so behaviour stays stable run to run.
+            ChartSpec? modelRival = charts.FirstOrDefault(c => c is not null
+                && string.Equals(c.Type, deterministic.Type, StringComparison.OrdinalIgnoreCase));
 
-            // Drop model charts of the same type — the deterministic chart is
-            // authoritative for the requested visualization. Any unrelated extra
-            // chart the model produced is left alone.
+            ChartSpec? richerModelChart = null;
+            if (modelRival is not null
+                && ChartSpecValidator.TryGetRenderable(modelRival, minSeries: 1, minMarks: requiredMarks, out ChartSpec? cleanedRival)
+                && cleanedRival is not null
+                && CountMarks(cleanedRival) > CountMarks(deterministic))
+            {
+                richerModelChart = cleanedRival;
+            }
+
+            ChartSpec chosen = richerModelChart ?? deterministic;
+            _logger.LogInformation(
+                "Chart-fulfillment: emitting a {ChartType} chart with {Marks} marks from the "
+                + "{Source} source for an explicit chart request (deterministic-first, issue #172).",
+                chosen.Type, CountMarks(chosen), richerModelChart is null ? "deterministic" : "model (richer)");
+
             charts.RemoveAll(c => c is null
                 || string.Equals(c.Type, deterministic.Type, StringComparison.OrdinalIgnoreCase));
-            charts.Insert(0, deterministic);
+            charts.Insert(0, chosen);
             return new ChartFulfillmentResult(charts, StripFallbackClaims(reply));
         }
 
@@ -259,6 +275,21 @@ public partial class AgentExecutionPipeline
             : $"{reply}\n\n{diagnostic}";
 
         return new ChartFulfillmentResult(charts, updatedReply);
+    }
+
+    /// <summary>Total finite datapoints across every series in a chart.</summary>
+    private static int CountMarks(ChartSpec? chart)
+    {
+        if (chart is null) return 0;
+        int n = 0;
+        foreach (ChartSeries s in chart.Data)
+        {
+            foreach (ChartDataPoint p in s.Values)
+            {
+                if (p is not null && double.IsFinite(p.Y)) n++;
+            }
+        }
+        return n;
     }
 
     private static IReadOnlyList<string> ComputeMissingBrands(
