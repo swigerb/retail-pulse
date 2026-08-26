@@ -244,6 +244,10 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         reply = inlineCharts.Reply;
         charts = MergeInlineCharts(charts, inlineCharts.Charts);
 
+        // Near-miss chart scaffolding the extractor could not bind (e.g. {"chart":"groupedBar"})
+        // must not reach the chat bubble as raw JSON - G2 forbids leaked chart JSON.
+        reply = StripResidualChartJson(reply);
+
         // Chart-fulfillment invariant: an explicit chart request must yield a renderable
         // chart (reconstructed deterministically from tool results if the model emitted
         // none) or a structured chart-unavailable diagnostic — never silent prose-only.
@@ -532,6 +536,10 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         InlineChartExtraction inlineCharts = ExtractInlineCharts(reply);
         reply = inlineCharts.Reply;
         charts = MergeInlineCharts(charts, inlineCharts.Charts);
+
+        // Near-miss chart scaffolding the extractor could not bind (e.g. {"chart":"groupedBar"})
+        // must not reach the chat bubble as raw JSON - G2 forbids leaked chart JSON.
+        reply = StripResidualChartJson(reply);
 
         // Chart-fulfillment invariant (streaming): reconstruct deterministically or append
         // a structured chart-unavailable diagnostic before streaming, so the streamed reply
