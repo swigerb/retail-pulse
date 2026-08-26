@@ -110,6 +110,26 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
   }
 }
 
+// The `listModels` readiness probe overrides the API-scope policy so the
+// AI-Gateway token policies — which are defined only for inference payloads —
+// never run against a token-free GET. See apim-openai-models-policy.xml.
+resource listModelsOperation 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' existing = {
+  parent: api
+  name: 'listModels'
+}
+
+resource listModelsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
+  parent: listModelsOperation
+  name: 'policy'
+  properties: {
+    format: 'rawxml'
+    value: replace(loadTextContent('apim-openai-models-policy.xml'), '{backend-id}', backend.name)
+  }
+  dependsOn: [
+    apiPolicy
+  ]
+}
+
 resource appInsightsLogger 'Microsoft.ApiManagement/service/loggers@2024-06-01-preview' existing = {
   parent: apim
   name: 'appinsights-logger'
