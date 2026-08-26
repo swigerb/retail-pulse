@@ -571,6 +571,106 @@ attack surface. The live build stays `Entra`.
 - **Managed Identity:** For Azure OpenAI (via APIM) and other Azure resources — no client
   secrets in code.
 
+### App-only (client-credentials) tokens — opt-in, fail-closed
+
+By default the API accepts only **delegated** (user) tokens — a token bearing the
+`RetailPulse.User` app role AND the `access_as_user` scope. An **app-only**
+(client-credentials) token — which carries `roles` but no `scp` — is rejected
+`403`. This is the pre-#163 behaviour and is preserved bit-for-bit for every
+unset deployment. It matches the ADR-005 / epic #27 guardrails: **"Live
+production stays Entra only and fails closed"**, **"No silent downgrade"**.
+
+Machine callers (for example the optional synthetic monitor in `#57`) need an
+app-only token, so the Entra boundary now supports an **opt-in** app-only path.
+It is additive, narrow, and fail-closed:
+
+- **Disabled by default.** Unset configuration behaves exactly as it did
+  before this feature existed.
+- **Delegated behaviour unchanged.** Enabling the flag does not alter the
+  delegated (user) path in any way — same role check, same scope check, same
+  claim shapes.
+- **Narrow scope.** Only tokens bearing the configured app role are accepted,
+  and both SignalR hubs plus every REST endpoint remain protected. The
+  anonymous-session hardening is untouched. There is no reusable general
+  scope-bypass path that a future endpoint could inherit unintentionally.
+- **Fail closed.** A malformed or incomplete opt-in configuration (placeholder
+  or non-GUID entry in the allow-list, blank app role) fails startup — never a
+  warning-and-continue, never a fallback to a weaker policy.
+- **Client-ID allow-list is optional but supported.** Populating
+  `MicrosoftEntra:AllowedAppClientIds` requires the token's `azp` (v2) or
+  `appid` (v1) claim to match one of the listed GUIDs, so consenting an
+  unrelated application to `RetailPulse.User` does not automatically grant it
+  API access.
+
+#### Configuration keys
+
+All keys live in the `MicrosoftEntra` section (env-var form
+`MicrosoftEntra__...`). Existing `AppRole` and `ApiScope` values are unchanged.
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `MicrosoftEntra:AllowAppOnlyTokens` | bool | **`false`** | Master opt-in. When `false`, every app-only token is rejected `403` (this matches the shipped Bicep and preserves pre-#163 behaviour). When `true`, an app-only token bearing the required app role is accepted — subject to the optional allow-list below. |
+| `MicrosoftEntra:AllowedAppClientIds` | string[] (config-array) | **empty** | Optional allow-list of application (client) IDs (Entra service-principal client IDs) permitted to authenticate via app-only tokens. Empty means the app role alone gates access. When populated, the token's `azp` (v2) or `appid` (v1) claim MUST match one of the listed GUIDs. |
+| `MicrosoftEntra:AppRole` | string | `RetailPulse.User` | The role required on **every** authenticated request. In the app-only path this is the primary gate — a blank or placeholder value fails startup when the opt-in is on. |
+
+#### Startup validation (fail-closed)
+
+`EntraAuthOptions.FromConfiguration` runs `ValidateAppOnlyOptIn()` whenever
+`AllowAppOnlyTokens=true`, in **every** environment (Development included). Any
+of the following throws `InvalidOperationException` before authentication is
+registered:
+
+- A blank `AppRole` on the resolved options (a documentation placeholder is
+  scrubbed and the default `RetailPulse.User` kicks in — this catches the
+  direct-construction case).
+- Any entry in `AllowedAppClientIds` that is blank or looks like a
+  documentation placeholder (`<...>`).
+- Any entry in `AllowedAppClientIds` that is not a valid GUID.
+
+Development is not exempt: a typo that slips past a local build would otherwise
+propagate to a deployed environment. The opt-in must be spelled right or the
+process refuses to start.
+
+#### How each token shape is evaluated
+
+The dual-mode assertion (`AuthenticationSetup.IsAuthorizedPrincipal`) is a
+strict branch on token type — there is no fallback and no "or":
+
+- Token carries `scp` (delegated) → require the configured API scope
+  (`HasRequiredScope`). Behaviour is byte-for-byte identical to pre-#163.
+- Token carries `roles` and NO `scp` (app-only) → require
+  `AllowAppOnlyTokens=true` AND, if the allow-list is populated, the token's
+  `azp`/`appid` matches an allow-listed GUID. The `RequireRole` requirement
+  on the policy handles the role check for both branches.
+- Token carries neither `scp` nor `roles` → deny.
+
+#### Client-ID / object-ID allow-list decision (recorded per #163)
+
+**Decision:** support an **optional** `MicrosoftEntra:AllowedAppClientIds`
+allow-list keyed on the token's `azp` (v2) / `appid` (v1) claim, with an empty
+list meaning "no client-ID restriction". Object-ID (`oid`) allow-listing was
+considered and deliberately not adopted.
+
+**Reasoning:**
+
+- Entra emits `azp` on v2 tokens and `appid` on v1 tokens; both are the
+  Microsoft-documented "authorized party" identifier — the client ID of the
+  application that obtained the token. Matching on this claim maps directly to
+  the identity a tenant admin registers and consents in Entra, so operators can
+  reason about who is on the allow-list without decoding token internals.
+- The service-principal object ID (`oid`) also uniquely identifies the caller
+  within a tenant, but it is one indirection removed from the identity operators
+  actually manage (the app registration). Using `azp`/`appid` keeps the
+  configuration and audit trail aligned with the Entra admin experience.
+- Making the list optional preserves the single-tenant default (role assignment
+  + admin consent is already tenant-admin-gated), while giving deployments
+  defense-in-depth when they want it — critical because the `RetailPulse.User`
+  app role now allows `Users/Groups,Applications` and any admin-consented app in
+  the tenant could otherwise gain API access silently.
+- Any entry that is not a valid GUID fails startup, so a typo can never silently
+  disable the restriction. Comparison is GUID-normalized so case/format
+  differences cannot bypass the check.
+
 ---
 
 ## Rate Limiting

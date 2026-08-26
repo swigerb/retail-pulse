@@ -215,4 +215,135 @@ public sealed class EntraAuthOptionsTests
         // RequireAuthenticatedUser + RequireRole + a scope assertion → at least 3 requirements.
         policy.Requirements.Should().HaveCountGreaterThanOrEqualTo(3);
     }
+
+    // ── #163: app-only opt-in — configuration contract ────────────────────────
+
+    [Fact]
+    public void AllowAppOnlyTokens_DefaultsToFalse()
+    {
+        IConfiguration config = Config(
+            ("MicrosoftEntra:TenantId", TenantId),
+            ("MicrosoftEntra:ClientId", ClientId));
+
+        var options = EntraAuthOptions.FromConfiguration(config, Env("Production"));
+
+        options.AllowAppOnlyTokens.Should().BeFalse(
+            "unset MicrosoftEntra:AllowAppOnlyTokens must behave exactly as it did before the opt-in existed");
+        options.AllowedAppClientIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AllowAppOnlyTokens_WhenTrue_WithoutAllowlist_IsAccepted()
+    {
+        IConfiguration config = Config(
+            ("MicrosoftEntra:TenantId", TenantId),
+            ("MicrosoftEntra:ClientId", ClientId),
+            ("MicrosoftEntra:AllowAppOnlyTokens", "true"));
+
+        var options = EntraAuthOptions.FromConfiguration(config, Env("Production"));
+
+        options.AllowAppOnlyTokens.Should().BeTrue();
+        options.AllowedAppClientIds.Should().BeEmpty(
+            "the client-ID allow-list is optional — an empty list means no additional restriction");
+    }
+
+    [Fact]
+    public void AllowAppOnlyTokens_WithValidAllowlist_IsAccepted()
+    {
+        const string MonitorAppId = "b8212317-e16d-4f06-996b-955e885ca1ca";
+
+        IConfiguration config = Config(
+            ("MicrosoftEntra:TenantId", TenantId),
+            ("MicrosoftEntra:ClientId", ClientId),
+            ("MicrosoftEntra:AllowAppOnlyTokens", "true"),
+            ("MicrosoftEntra:AllowedAppClientIds:0", MonitorAppId));
+
+        var options = EntraAuthOptions.FromConfiguration(config, Env("Production"));
+
+        options.AllowAppOnlyTokens.Should().BeTrue();
+        options.AllowedAppClientIds.Should().ContainSingle().Which.Should().Be(MonitorAppId);
+    }
+
+    [Fact]
+    public void AllowAppOnlyTokens_WithPlaceholderInAllowlist_ThrowsAtStartup()
+    {
+        IConfiguration config = Config(
+            ("MicrosoftEntra:TenantId", TenantId),
+            ("MicrosoftEntra:ClientId", ClientId),
+            ("MicrosoftEntra:AllowAppOnlyTokens", "true"),
+            ("MicrosoftEntra:AllowedAppClientIds:0", "<your-monitor-client-id>"));
+
+        Action act = () => EntraAuthOptions.FromConfiguration(config, Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AllowedAppClientIds*placeholder*");
+    }
+
+    [Fact]
+    public void AllowAppOnlyTokens_WithNonGuidInAllowlist_ThrowsAtStartup()
+    {
+        IConfiguration config = Config(
+            ("MicrosoftEntra:TenantId", TenantId),
+            ("MicrosoftEntra:ClientId", ClientId),
+            ("MicrosoftEntra:AllowAppOnlyTokens", "true"),
+            ("MicrosoftEntra:AllowedAppClientIds:0", "not-a-guid"));
+
+        Action act = () => EntraAuthOptions.FromConfiguration(config, Env("Production"));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*not a valid GUID*");
+    }
+
+    [Fact]
+    public void AllowAppOnlyTokens_WithPlaceholderAppRole_FallsBackToDefault()
+    {
+        // A placeholder AppRole is scrubbed by FromConfiguration and the default takes
+        // effect, so the opt-in validation is satisfied. This proves the option validation
+        // interacts correctly with the placeholder-cleaning rules — a copy-pasted
+        // documentation placeholder cannot silently pin the app role to "".
+        IConfiguration config = Config(
+            ("MicrosoftEntra:TenantId", TenantId),
+            ("MicrosoftEntra:ClientId", ClientId),
+            ("MicrosoftEntra:AllowAppOnlyTokens", "true"),
+            ("MicrosoftEntra:AppRole", "<your-app-role>"));
+
+        var options = EntraAuthOptions.FromConfiguration(config, Env("Production"));
+
+        options.AppRole.Should().Be(EntraAuthOptions.DefaultAppRole);
+    }
+
+    [Fact]
+    public void AllowAppOnlyTokens_WithExplicitlyEmptyAppRole_ThrowsAtStartup()
+    {
+        // Direct-object misuse: someone bypasses FromConfiguration and constructs the
+        // options with a blank AppRole. ValidateAppOnlyOptIn must still refuse to accept
+        // that shape — an app-only token would otherwise be authorized on role alone with
+        // an empty role name.
+        var options = new EntraAuthOptions
+        {
+            RequireAuth = true,
+            TenantId = TenantId,
+            ClientId = ClientId,
+            AllowAppOnlyTokens = true,
+            AppRole = "",
+        };
+
+        Action act = options.ValidateAppOnlyOptIn;
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*AppRole*");
+    }
+
+    [Fact]
+    public void AllowAppOnlyTokens_MisconfigurationFailsStartupEvenInDevelopment()
+    {
+        // Opt-in misconfig fails EVERYWHERE — Development included. Otherwise a dev-only
+        // typo would silently pass local build and then trip the deployed environment.
+        IConfiguration config = Config(
+            ("MicrosoftEntra:AllowAppOnlyTokens", "true"),
+            ("MicrosoftEntra:AllowedAppClientIds:0", "<placeholder>"));
+
+        Action act = () => EntraAuthOptions.FromConfiguration(config, Env("Development"));
+
+        act.Should().Throw<InvalidOperationException>();
+    }
 }
