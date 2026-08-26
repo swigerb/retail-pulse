@@ -70,7 +70,11 @@ regardless of what the UI renders).
 
 ## Runtime authorization matrix (Entra mode)
 
-Behavior for the `Entra` mode is identical to the pre-foundation implementation.
+Behavior for the `Entra` mode is identical to the pre-foundation implementation
+for delegated (user) tokens. Optionally, a deployment may opt in to accepting
+app-only (client-credentials) tokens for machine callers such as the synthetic
+monitor — see [App-only (client-credentials) tokens](#app-only-client-credentials-tokens-entra-mode)
+below. The opt-in is **off by default** and never widens the delegated path.
 
 | Request | Credential | Expected result |
 |---------|-----------|-----------------|
@@ -81,6 +85,42 @@ Behavior for the `Entra` mode is identical to the pre-foundation implementation.
 | `/hubs/*` | no token | 401 |
 | REST endpoint | token via `?access_token` query string only | 401 (query token is honored only on `/hubs/*`) |
 | `/health`, `/alive` | none | 200 (anonymous by design — health-only invariant) |
+
+### App-only (client-credentials) tokens (Entra mode)
+
+App-only acceptance is an **opt-in, fail-closed** capability. It is **off by
+default**: an unset deployment behaves exactly as it did before this feature
+existed and rejects every client-credentials token with `403`. The opt-in never
+touches the delegated (user) path — a delegated token is authorized byte-for-byte
+identically whether the opt-in is on or off. There is no reusable scope-bypass:
+both SignalR hubs and every REST endpoint remain protected, anonymous-session
+hardening is unchanged, and a misconfigured opt-in fails startup rather than
+silently falling through to a weaker policy.
+
+**Configuration keys** (all under the `MicrosoftEntra:` section — env vars
+`MicrosoftEntra__...`):
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `AllowAppOnlyTokens` | bool | `false` | Master opt-in. When `false`, app-only tokens are rejected 403 regardless of role. When `true`, an app-only token bearing the required app role is accepted (subject to the optional allow-list below). |
+| `AllowedAppClientIds` | string[] (config-array) | *empty* | Optional allow-list of application (client) IDs permitted to authenticate via app-only tokens. When empty, no client-ID restriction (the app role itself is the gate). When populated, the token's `azp` (v2) or `appid` (v1) claim MUST match one of the listed GUIDs — enforced case-insensitively via GUID normalization. |
+| `AppRole` | string | `RetailPulse.User` | Existing key. The app-only path is authorized on this role alone (no `scp`); a blank/placeholder value fails startup when the opt-in is on. |
+| `ApiScope` | string | `access_as_user` | Existing key. Delegated-only. Not consulted for app-only tokens. |
+
+| Request | Credential | `AllowAppOnlyTokens` | `AllowedAppClientIds` | Expected result |
+|---------|-----------|----------------------|-----------------------|-----------------|
+| Protected REST/hub | app-only token (`roles=RetailPulse.User`, no `scp`) | `false` (default) | — | **403** — the default policy rejects every app-only token, matching pre-#163 behaviour |
+| Protected REST/hub | app-only token bearing the required app role | `true` | *empty* | **200** — accepted; the app role is the gate |
+| Protected REST/hub | app-only token bearing the required app role and an allow-listed `azp` (v2) | `true` | `[<monitor-app-id>]` | **200** — accepted; both the role and the allow-list are satisfied |
+| Protected REST/hub | app-only token bearing the required app role and an allow-listed `appid` (v1) | `true` | `[<monitor-app-id>]` | **200** — v1 tokens surface the caller as `appid` and match the same allow-list |
+| Protected REST/hub | app-only token bearing the required app role but no `azp`/`appid` | `true` | `[<monitor-app-id>]` | **403** — no claim to match against the allow-list; fail closed |
+| Protected REST/hub | app-only token bearing the required app role and a non-allow-listed `azp` | `true` | `[<monitor-app-id>]` | **403** — another admin-consented app in the tenant cannot piggy-back onto the role |
+| Protected REST/hub | app-only token with the wrong role or no `roles` claim | `true` | any | **403** — `RequireRole` fails; the role is the primary app-only gate |
+| Protected REST/hub | signed token carrying neither `scp` nor `roles` | any | any | **403** — no authorization signal at all |
+| Delegated (user) token with role + scope | valid delegated token | any | any | **200** — byte-for-byte unchanged from the delegated behaviour above |
+| Delegated (user) token missing scope or role | valid delegated token | any | any | **403** — the delegated path always requires the exact scope and role |
+| Startup with `AllowAppOnlyTokens=true` and a placeholder / non-GUID in `AllowedAppClientIds` | — | `true` | malformed | **Startup fails** — `InvalidOperationException`; no fallback to a weaker policy |
+| Startup with `AllowAppOnlyTokens=true` and a blank `AppRole` on the resolved options | — | `true` | any | **Startup fails** — the app role is the only app-only gate; it cannot be empty |
 
 ## Runtime authorization matrix (Anonymous mode)
 
