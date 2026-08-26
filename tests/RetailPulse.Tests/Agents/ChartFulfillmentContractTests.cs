@@ -37,6 +37,8 @@ public sealed class ChartFulfillmentContractTests
                 "curated manifest prompt '{0}' must be treated as an explicit chart request", c.Prompt);
             intent.ChartType.Should().Be(c.ChartType,
                 "the manifest declares the chart type for '{0}'", c.Prompt);
+            intent.MinMarks.Should().Be(c.MinMarks,
+                "the manifest's acceptance floor must reach the live pipeline for '{0}'", c.Prompt);
         }
     }
 

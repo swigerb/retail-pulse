@@ -186,6 +186,13 @@ public partial class AgentExecutionPipeline
             ? Math.Max(6, ChartSpecValidator.MinimumMarksForType(intent.ChartType))
             : ChartSpecValidator.MinimumMarksForType(intent.ChartType);
 
+        // A curated prompt carries its own acceptance floor from the chart manifest.
+        // Enforcing it here means the live pipeline holds a chart to the SAME contract
+        // the acceptance tests assert, rather than the looser "is it renderable at all"
+        // per-type minimum — e.g. the two-brand region comparison needs 4 marks, where
+        // the generic groupedBar floor is only 2.
+        requiredMarks = Math.Max(requiredMarks, intent.MinMarks);
+
         if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, requiredMarks, out ChartSpec? deterministic)
             && deterministic is not null)
         {
