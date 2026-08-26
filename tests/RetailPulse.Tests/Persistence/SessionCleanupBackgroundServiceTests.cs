@@ -21,9 +21,14 @@ public sealed class SessionCleanupBackgroundServiceTests
     public async Task PurgesExpiredSessions_OnClockTick_AndLogsRowCounts()
     {
         var store = new Mock<ISessionStore>(MockBehavior.Strict);
-        DateTimeOffset? seenCutoff = null;
+        // Record EVERY cutoff, not just the first. The service sweeps once
+        // immediately on start and again on each timer tick, so capturing only the
+        // first observation raced the clock: whichever of the two sweeps happened to
+        // land first decided the assertion. Recording all of them lets the test pin
+        // each sweep to its own point on the injected clock.
+        var seenCutoffs = new System.Collections.Concurrent.ConcurrentQueue<DateTimeOffset>();
         store.Setup(s => s.PurgeExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Callback<DateTimeOffset, CancellationToken>((cutoff, _) => seenCutoff ??= cutoff)
+            .Callback<DateTimeOffset, CancellationToken>((cutoff, _) => seenCutoffs.Enqueue(cutoff))
             .ReturnsAsync(new CleanupResult(SessionsDeleted: 3, TurnsDeleted: 12));
 
         IOptions<SessionPersistenceOptions> options = Options.Create(new SessionPersistenceOptions
@@ -42,17 +47,28 @@ public sealed class SessionCleanupBackgroundServiceTests
         using var cts = new CancellationTokenSource();
         Task loop = svc.StartAsync(cts.Token);
 
-        // One tick of the CleanupInterval → PeriodicTimer fires → PurgeExpiredAsync runs.
+        // The service sweeps immediately on start, before waiting on the timer. Let
+        // that first sweep settle BEFORE advancing the clock, so the tick-driven
+        // sweep is unambiguously the second observation.
+        bool startupSwept = await WaitUntilAsync(() => seenCutoffs.Count >= 1, TimeSpan.FromSeconds(5));
+        startupSwept.Should().BeTrue("the service must sweep once on start, before the first interval elapses");
+
+        seenCutoffs.TryPeek(out DateTimeOffset startupCutoff).Should().BeTrue();
+        startupCutoff.Should().Be(now - options.Value.RetentionTtl,
+            "the startup sweep's cutoff must be (injected-now - RetentionTtl)");
+
+        // One tick of the CleanupInterval → PeriodicTimer fires → a second sweep runs.
         // Poll rather than sleep so the test doesn't race the timer's own scheduling.
         clock.Advance(options.Value.CleanupInterval);
-        bool purged = await WaitUntilAsync(() => seenCutoff.HasValue, TimeSpan.FromSeconds(5));
-        purged.Should().BeTrue("the first tick after CleanupInterval must trigger a purge sweep");
+        bool purged = await WaitUntilAsync(() => seenCutoffs.Count >= 2, TimeSpan.FromSeconds(5));
+        purged.Should().BeTrue("the first tick after CleanupInterval must trigger another purge sweep");
 
-        // The sweep reads GetUtcNow() at tick time, which is now start + CleanupInterval.
+        // The tick sweep reads GetUtcNow() at tick time, which is now + CleanupInterval.
         // The cutoff must therefore reflect the injected clock at THAT moment, not the
         // wall clock — the whole point of the TimeProvider abstraction.
         DateTimeOffset expectedCutoff = now + options.Value.CleanupInterval - options.Value.RetentionTtl;
-        seenCutoff.Should().Be(expectedCutoff,
+        DateTimeOffset[] cutoffs = [.. seenCutoffs];
+        cutoffs[1].Should().Be(expectedCutoff,
             "the cutoff must be exactly (injected-now - RetentionTtl) so the injected clock — not the wall clock — drives retention");
 
         bool logged = await WaitUntilAsync(() => logger.InformationCount >= 2, TimeSpan.FromSeconds(5));
