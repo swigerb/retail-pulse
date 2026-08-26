@@ -1,5 +1,6 @@
 using FluentAssertions;
 using RetailPulse.Api.Charts;
+using RetailPulse.Contracts.Charts;
 using RetailPulse.Contracts.Routing;
 using Xunit;
 
@@ -20,6 +21,55 @@ public sealed class ChartFulfillmentContractTests
 {
     private const string P0Prompt =
         "Show a horizontal bar chart ranking all brands by depletion growth rate";
+
+    [Fact]
+    public void Detect_TreatsEveryCuratedChartManifestPrompt_AsAnExplicitChartRequest()
+    {
+        // The manifest is the authoritative list of prompts that MUST yield a chart.
+        // Not all of them name a chart — "Compare Coastline Tacos vs Apex Grill
+        // depletions across all regions" has no chart noun — so the grammar rules alone
+        // classified it as prose and the #76 Group A invariant dropped its chart.
+        foreach (ChartAcceptanceCase c in ChartAcceptanceManifest.Cases)
+        {
+            ChartIntent intent = ChartRequestDetector.Detect(c.Prompt);
+
+            intent.IsExplicitChartRequest.Should().BeTrue(
+                "curated manifest prompt '{0}' must be treated as an explicit chart request", c.Prompt);
+            intent.ChartType.Should().Be(c.ChartType,
+                "the manifest declares the chart type for '{0}'", c.Prompt);
+        }
+    }
+
+    [Fact]
+    public void Detect_CuratedMatch_StillRoutesThroughTheDomainCues_NotTheManifest()
+    {
+        // The manifest's RoutedIntent is documentation and has drifted: it still lists
+        // DemandForecasting for the P0 ranking prompt, which #74 re-routed to General so
+        // the portfolio aggregate tool is reachable. Routing must stay with the cues.
+        ChartIntent intent = ChartRequestDetector.Detect(P0Prompt);
+        intent.RoutedIntent.Should().Be(AgentIntent.General);
+    }
+
+    [Fact]
+    public void Detect_DoesNotTreatTheGroceryProseComparison_AsAChartRequest()
+    {
+        // Near-identical shape to the QSR chart comparison, but it lives in the PROSE
+        // manifest. The manifest match must stay exact so it cannot bleed across.
+        ChartIntent intent = ChartRequestDetector.Detect(
+            "Compare Harvest Table vs FreshMart sell-through rates by region");
+
+        intent.IsExplicitChartRequest.Should().BeFalse(
+            "this prompt is prose — only curated chart-manifest entries are forced to charts");
+    }
+
+    [Fact]
+    public void Detect_MatchesCuratedPrompts_IgnoringCaseWhitespaceAndTrailingPunctuation()
+    {
+        string prompt = ChartAcceptanceManifest.Cases[0].Prompt;
+        string scruffy = "  " + prompt.ToUpperInvariant().Replace(" ", "   ") + ".  ";
+
+        ChartRequestDetector.Detect(scruffy).IsExplicitChartRequest.Should().BeTrue();
+    }
 
     [Fact]
     public void ChartRequestDetector_ExactP0Phrase_IsHorizontalBar_RoutedToGeneral()

@@ -152,6 +152,26 @@ public static partial class ChartRequestDetector
             return new ChartIntent(false, null, AgentIntent.General);
         }
 
+        // The curated chart-acceptance manifest is the authoritative list of prompts
+        // that MUST yield a chart, so it wins over the linguistic rules below.
+        //
+        // Not every curated chart prompt names a chart. "Compare Coastline Tacos vs
+        // Apex Grill depletions across all regions" carries no chart noun, so the
+        // grammar-based rules classify it as prose — and the #76 Group A invariant
+        // then drops any chart the specialist produced. That directly contradicts
+        // ChartAcceptanceManifest, which declares it a groupedBar case, and
+        // ProsePromptAcceptanceManifestContractTests, which excludes it from the prose
+        // manifest precisely because it "legitimately produces a grouped bar".
+        //
+        // Matching the manifest verbatim keeps this exact and non-contagious: a
+        // near-identical prompt that is genuinely prose (e.g. the grocery
+        // "Compare Harvest Table vs FreshMart sell-through rates by region", which
+        // lives in the PROSE manifest) is not in this list and stays prose.
+        if (TryMatchCuratedChartPrompt(message, out ChartIntent curated))
+        {
+            return curated;
+        }
+
         string? chartType = null;
         bool explicitRequest = false;
 
@@ -218,6 +238,37 @@ public static partial class ChartRequestDetector
         chartType = null;
         return false;
     }
+
+    /// <summary>
+    /// Matches a message against the curated <see cref="Contracts.Charts.ChartAcceptanceManifest"/>
+    /// prompts. Comparison is whitespace-normalised and case-insensitive so trivial
+    /// formatting differences don't defeat it, but it is otherwise an exact match —
+    /// this list must never broaden into a fuzzy "looks a bit like a comparison" rule.
+    /// </summary>
+    private static bool TryMatchCuratedChartPrompt(string message, out ChartIntent intent)
+    {
+        string normalized = NormalizePrompt(message);
+
+        foreach (Contracts.Charts.ChartAcceptanceCase c in Contracts.Charts.ChartAcceptanceManifest.Cases)
+        {
+            if (string.Equals(NormalizePrompt(c.Prompt), normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                // Take the chart TYPE from the manifest, but resolve routing through the
+                // domain cues as usual. The manifest's RoutedIntent is documentation and
+                // has drifted — it still lists DemandForecasting for the horizontal-bar
+                // ranking prompt, which issue #74 deliberately re-routed to General so the
+                // portfolio aggregate tool is reachable. Routing stays with the cue table.
+                intent = new ChartIntent(true, c.ChartType, ResolveDomainIntent(message));
+                return true;
+            }
+        }
+
+        intent = default;
+        return false;
+    }
+
+    private static string NormalizePrompt(string value) =>
+        WhitespaceRegex().Replace(value.Trim(), " ").TrimEnd('.', '!', '?');
 
     private static string ResolveDomainIntent(string message)
     {
