@@ -14,8 +14,28 @@ public record ChatRequest(
     string? SessionId = null,
     UserContext? User = null,
     List<ChatHistoryMessage>? History = null,
-    string? ForceExecutionPath = null
-);
+    string? ForceExecutionPath = null,
+    /// <summary>
+    /// The user's original, unmodified request, when <see cref="Message"/> is a derived
+    /// or scoped rewrite of it — as the plan path does, weaving a step action into the
+    /// message it hands each specialist.
+    ///
+    /// Chart intent MUST be detected from this rather than from the rewritten message:
+    /// a step action such as "chart the regional rollup as a bar" would otherwise win
+    /// over the user's actual "create a table …" ask, because the detector matches the
+    /// first chart-type phrase it sees. Null on the single-shot path, where
+    /// <see cref="Message"/> already is the original.
+    /// </summary>
+    string? OriginalMessage = null
+)
+{
+    /// <summary>
+    /// The text that represents what the USER asked for — <see cref="OriginalMessage"/>
+    /// when a scoped rewrite is in play, otherwise <see cref="Message"/>.
+    /// </summary>
+    public string UserIntentMessage =>
+        string.IsNullOrWhiteSpace(OriginalMessage) ? Message : OriginalMessage;
+}
 
 /// <summary>
 /// Routing metadata included in the chat response for telemetry display.

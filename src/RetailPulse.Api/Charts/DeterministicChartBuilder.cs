@@ -189,10 +189,15 @@ internal static class DeterministicChartBuilder
                     ?? TryBuildDemandBar(payloads, requestedType),
                 "line" => TryBuildDemandLine(payloads)
                     ?? TryBuildDemandBar(payloads, "line"),
-                "pie" or "donut" => TryBuildShareOrMixPie(payloads, requestedType ?? "pie")
-                    ?? TryBuildDemandBar(payloads, requestedType),
-                "table" => TryBuildDepletionStatsTable(payloads)
-                    ?? TryBuildDemandBar(payloads, "bar"),
+                // Pie/donut and table are their own structural families (share/mix
+                // proportions; a row grid). Falling through to a bar here produced a
+                // chart in a DIFFERENT family from the one the user asked for — the
+                // pipeline's own Group D guard would then have to drop it, so the
+                // fallback could only ever waste work or, when type enforcement was
+                // bypassed, leak a bar under a "create a table…" request. Fail closed
+                // instead, exactly as the horizontalBar ranking above does.
+                "pie" or "donut" => TryBuildShareOrMixPie(payloads, requestedType ?? "pie"),
+                "table" => TryBuildDepletionStatsTable(payloads),
                 _ => TryBuildDemandBar(payloads, requestedType) ?? TryBuildGauge(payloads),
             };
     }
