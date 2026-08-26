@@ -245,7 +245,7 @@ function Get-ApiAccessToken {
         $out = & az @args 2>$errorFile
         if ($LASTEXITCODE -ne 0) {
             $err = (Get-Content $errorFile -Raw -ErrorAction SilentlyContinue)
-            return @{ Ok = $false; Reason = "az account get-access-token failed for resource '$Resource' — the signed-in principal likely lacks the RetailPulse.User app role on the API app registration (admin consent still required). az error: $($err.Trim())" }
+            return @{ Ok = $false; Reason = "az account get-access-token failed for resource '$Resource'. Likely causes, in rough order: (1) the signed-in principal is not the federated 'retail-pulse-synthetic-monitor' SP (check azure/login@v2 client-id / tenant-id, or your local 'az account show'); (2) the resource value is not the API app registration's audience — it must be 'api://<api-client-id>/.default' or the App ID URI; (3) tenant mismatch between the signed-in context and the target tenant. az error: $($err.Trim())" }
         }
         $token = ($out | Out-String).Trim()
         if ([string]::IsNullOrWhiteSpace($token)) {
@@ -387,7 +387,24 @@ function Invoke-Live {
             $detail = "transport error: $($_.Exception.Message)"
         }
         if ($status -ne 200) {
-            $reason = if ($detail) { $detail } else { "HTTP $status (expected 200)" }
+            $reason = if ($detail) {
+                $detail
+            }
+            elseif ($status -eq 403) {
+                # A 403 on /api/chat with a token in hand means the token was accepted as
+                # syntactically valid but the API's authorization policy rejected it. The
+                # most likely cause on any deployment that has NOT explicitly opted in is
+                # that app-only (client-credentials) tokens are disabled by default —
+                # `MicrosoftEntra:AllowAppOnlyTokens` is `false` unless the deployment
+                # sets it. See docs/security.md §"App-only (client-credentials) tokens".
+                "HTTP 403 (expected 200). Likely causes, in rough order: (1) MicrosoftEntra:AllowAppOnlyTokens is false (the shipped default) so the API rejects every app-only token — this is the primary blocker for a synthetic-monitor live run; (2) MicrosoftEntra:AllowedAppClientIds is populated but does not include the monitor's client id, so the token's azp/appid claim is not on the allow-list; (3) the token does not carry the required app role (MicrosoftEntra:AppRole, default 'RetailPulse.User') — check the app-role assignment on the API service principal; (4) tenant/audience mismatch between the token and the API's pinned MicrosoftEntra:TenantId / ClientId."
+            }
+            elseif ($status -eq 401) {
+                "HTTP 401 (expected 200). The API rejected the bearer token before authorization ran — likely an audience or issuer mismatch (the token was minted for a different resource or tenant than the API validates)."
+            }
+            else {
+                "HTTP $status (expected 200)"
+            }
             Write-PromptResult $promptText $false $reason
             $failures++
             continue

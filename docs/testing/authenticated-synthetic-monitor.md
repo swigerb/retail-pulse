@@ -145,10 +145,13 @@ script that mirrors the shape of `scripts/Verify-ApimAiGateway.ps1` and
 - With any required value missing, the script prints
   `SKIP: optional synthetic monitor is not configured — missing …`
   and exits 0. It never turns an unconfigured fork red.
-- With config present but the signed-in principal lacking authorisation
-  (see "Remaining authorisation step" below), token acquisition
-  produces an actionable `SKIP:` message that names the missing app
-  role and exits 0. It never fabricates a live result.
+- With config present but the API rejecting the token, the transport-level
+  result is reported per-prompt with the correct likely causes named —
+  primarily `MicrosoftEntra:AllowAppOnlyTokens=false` (the shipped default)
+  disabling every app-only token, see "Remaining live-run condition" below.
+  Token-acquisition failures still surface as an actionable `SKIP:` (naming
+  federated-identity, resource, or tenant mismatches) rather than a
+  fabricated live result.
 
 `.github/workflows/synthetic-monitor.yml` — `workflow_dispatch` and a
 daily `06:15 UTC` schedule. The job is gated on the repository variable
@@ -156,20 +159,91 @@ daily `06:15 UTC` schedule. The job is gated on the repository variable
 short-circuits and the workflow completes green with a `::notice::`
 explaining the outcome.
 
-## Remaining authorisation step (does NOT block delivery)
+## Entra configuration — complete
 
-The identity is fully provisioned but not yet **authorised**: the
-`retail-pulse-synthetic-monitor` service principal still needs the
-`RetailPulse.User` app role granted against the API app registration,
-with admin consent. Until that grant is in place, live runs will report
-a clean actionable `SKIP:` naming the missing app role rather than a
-pass or a hard failure.
+The Entra identity, federated credential, API app role, and admin consent
+are all in place. Nothing about the Entra provisioning is outstanding; the
+gate between "delivered + gated" and "producing live results" is now
+purely a **configuration** decision on the API side — see "Remaining
+live-run condition (configuration only)" below.
 
-That grant is the only remaining step to move the monitor from
-"delivered + gated" to "producing live PASS results". It does not block
-this delivery — the whole point of the optional/credential-gated model
-is that the code lands complete and the deployment decision is
-independent.
+### Verified Entra state (all values non-secret)
+
+Tenant `MngEnvMCAP617906` / "Contoso":
+
+| Item | Value |
+|---|---|
+| Monitor app | `retail-pulse-synthetic-monitor` |
+| Client ID | `b8212317-e16d-4f06-996b-955e885ca1ca` |
+| Tenant ID | `48351615-345c-4547-bb6f-8fcc8d6e2568` |
+| Credential | Federated `github-actions-main` — **no client secret exists** |
+| Subject | `repo:swigerb@1630580/retail-pulse@1223914087:ref:refs/heads/main` |
+| Audience | `api://AzureADTokenExchange` |
+| API app | `Retail Pulse` — `b03317ab-a407-49cc-8769-0a15062777b1` |
+| App role member types | `Users/Groups` → **`Users/Groups,Applications`** |
+| Application permission | `RetailPulse.User` |
+| Admin consent | **Granted for Contoso** |
+
+### Why "Both" (Users/Groups + Applications), not "Applications" alone
+
+The `RetailPulse.User` app role's `allowedMemberTypes` was widened from
+`User` to **`User,Application`** ("Both"), not switched to `Application`.
+That distinction matters:
+
+- **Additive, not substitutive.** "Both" keeps the existing delegated
+  (user) path exactly as it was — real users can still be assigned the
+  `RetailPulse.User` role and hold it in their tokens, so interactive
+  sign-in through the SPA continues to work unchanged.
+- **"Applications" alone would have been a regression.** Narrowing the
+  role to `Application` only would have removed users' ability to hold
+  `RetailPulse.User` and broken interactive sign-in — the SPA's users
+  would have started getting `403` on every protected endpoint. That is
+  not an acceptable trade-off for enabling one optional machine caller.
+- **The optional monitor is the only new capability.** Widening the role
+  to accept application members lets the federated
+  `retail-pulse-synthetic-monitor` service principal be granted
+  `RetailPulse.User` and mint an app-only token that carries the role.
+  Every other consumer of the role is unaffected.
+
+## Remaining live-run condition (configuration only)
+
+With the Entra provisioning complete, the gate on a live PASS is now
+configuration on the API side. The default configuration still rejects
+app-only tokens, so an out-of-the-box deployment will surface a `403`
+from `/api/chat` (or a `SKIP:` earlier if token acquisition is
+misconfigured) — never a fabricated PASS. No live run has been performed;
+this document does not claim one.
+
+To move the monitor from "configuration complete, no live run yet" to
+"producing live PASS results" the API must opt into accepting app-only
+tokens through `EntraAuthOptions` — see
+[docs/security.md](../security.md) §"App-only (client-credentials) tokens"
+for the full contract:
+
+- `MicrosoftEntra:AllowAppOnlyTokens` (bool, default **`false`**) — the
+  master opt-in. While it remains `false` (the shipped default) every
+  app-only token — including one minted by the synthetic monitor — is
+  rejected `403`, exactly as it was before #163 landed. This is the
+  primary remaining blocker for a live run.
+- `MicrosoftEntra:AllowedAppClientIds` (string[], default **empty**) —
+  optional allow-list from #163. When populated it must include
+  `b8212317-e16d-4f06-996b-955e885ca1ca` (the monitor's client ID); the
+  token's `azp` (v2) / `appid` (v1) claim MUST match one of the listed
+  GUIDs. When empty, the app role alone gates access.
+- `MicrosoftEntra:AppRole` (default `RetailPulse.User`) — unchanged, and
+  fail-closed: startup rejects a blank/placeholder role when the opt-in
+  is enabled.
+
+With `AllowAppOnlyTokens=false` (the default), the monitor does NOT
+fabricate a PASS: token acquisition succeeds against the API audience,
+`/api/chat` returns `403`, and the script's per-prompt failure message
+names `MicrosoftEntra:AllowAppOnlyTokens=false` as the primary likely
+cause — followed by the other supported causes (allow-list mismatch,
+missing app role, tenant/audience mismatch) — and the run reports a
+final FAIL summary. Token-acquisition failures earlier in the flow still
+surface as a clean `SKIP:` (federated identity, resource, or tenant
+misconfiguration) and exit 0. Either way, no live PASS is claimed
+against a deployment that has not opted in.
 
 ## Manual interactive alternative (unchanged)
 
@@ -178,7 +252,8 @@ run manually via
 `scripts/browser-chart-acceptance.js` and
 `scripts/browser-prompt-library-acceptance.js` (PR #148) with an
 interactive Entra sign-in. This remains the supported alternative when
-the automated monitor is not authorised or not enabled.
+the automated monitor is not enabled (either the workflow variable is
+unset, or the API has not opted into app-only token acceptance).
 
 ## Historical note
 
