@@ -24,6 +24,7 @@ using RetailPulse.Contracts.Persistence;
 using RetailPulse.Contracts.Routing;
 using RetailPulse.Contracts.Tracing;
 using RetailPulse.Tests.Fixtures;
+using RetailPulse.Tests.TestInfrastructure;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Tests.Approval;
@@ -55,16 +56,14 @@ public sealed class PlanReviewCompletionChartPropagationTests : IDisposable
 
     public PlanReviewCompletionChartPropagationTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"prv_charts_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("prv_charts");
         _checkpointDir = Path.Combine(Path.GetTempPath(), $"prv_charts_ckpt_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_checkpointDir);
     }
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
         try { Directory.Delete(_checkpointDir, recursive: true); } catch { }
     }
 

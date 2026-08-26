@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using RetailPulse.Api.Approval;
 using RetailPulse.Contracts.Approval;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Approval;
 
@@ -21,16 +22,14 @@ public sealed class PlanClarifierTests : IDisposable
 
     public PlanClarifierTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"plan_clarify_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("plan_clarify");
         _checkpointDir = Path.Combine(Path.GetTempPath(), $"plan_clarify_ckpt_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_checkpointDir);
     }
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
         try { Directory.Delete(_checkpointDir, recursive: true); } catch { }
     }
 

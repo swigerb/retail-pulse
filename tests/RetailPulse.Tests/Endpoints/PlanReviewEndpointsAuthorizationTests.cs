@@ -26,6 +26,7 @@ using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Guardrails;
 using RetailPulse.Contracts.Persistence;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Endpoints;
 
@@ -175,13 +176,14 @@ public sealed class PlanReviewEndpointsAuthorizationTests
         public required HttpClient Client { get; init; }
         public required SqliteApprovalGate Gate { get; init; }
         public required string SeededRequestId { get; init; }
+        public required string DbPath { get; init; }
 
         public static async Task<PlanReviewHost> CreateAsync(
             string subjectClaim,
             SeedRow aliceRow,
             bool asAnonymous = false)
         {
-            string dbPath = Path.Combine(Path.GetTempPath(), $"prv_ep_{Guid.NewGuid():N}.db");
+            string dbPath = SqliteTestCleanup.NewDbPath("prv_ep");
 
             WebApplicationBuilder builder = WebApplication.CreateSlimBuilder();
             builder.WebHost.UseTestServer();
@@ -277,6 +279,7 @@ public sealed class PlanReviewEndpointsAuthorizationTests
                 Client = app.GetTestClient(),
                 Gate = gate,
                 SeededRequestId = seededRow.RequestId,
+                DbPath = dbPath,
             };
         }
 
@@ -284,6 +287,7 @@ public sealed class PlanReviewEndpointsAuthorizationTests
         {
             Client.Dispose();
             await App.DisposeAsync();
+            SqliteTestCleanup.ReleaseAndDelete(DbPath);
         }
     }
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using RetailPulse.Api.Approval;
 using RetailPulse.Contracts.Approval;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Approval;
 
@@ -19,15 +20,10 @@ public sealed class ApprovalLifecycleTests : IDisposable
 
     public ApprovalLifecycleTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"approval_lifecycle_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("approval_lifecycle");
     }
 
-    public void Dispose()
-    {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private SqliteApprovalGate CreateGate(TimeProvider clock, TimeSpan? defaultTimeout = null)
         => new(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>(), defaultTimeout ?? TimeSpan.FromMinutes(5), clock);
@@ -289,7 +285,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
         // its timer before Advance so the deadline check is guaranteed to run.
         for (int trial = 0; trial < 15; trial++)
         {
-            string dbPath = Path.Combine(Path.GetTempPath(), $"approval_race_{Guid.NewGuid():N}.db");
+            string dbPath = SqliteTestCleanup.NewDbPath("approval_race");
             try
             {
                 var clock = new FakeClock(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -323,9 +319,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
             }
             finally
             {
-                try { File.Delete(dbPath); } catch { }
-                try { File.Delete(dbPath + "-wal"); } catch { }
-                try { File.Delete(dbPath + "-shm"); } catch { }
+                SqliteTestCleanup.ReleaseAndDelete(dbPath);
             }
         }
     }
@@ -570,7 +564,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
         //      waiter genuinely hangs, this test hangs — a real, visible bug.
         for (int trial = 0; trial < 15; trial++)
         {
-            string dbPath = Path.Combine(Path.GetTempPath(), $"approval_endpoint_race_{Guid.NewGuid():N}.db");
+            string dbPath = SqliteTestCleanup.NewDbPath("approval_endpoint_race");
             try
             {
                 var clock = new FakeClock(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
@@ -612,9 +606,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
             }
             finally
             {
-                try { File.Delete(dbPath); } catch { }
-                try { File.Delete(dbPath + "-wal"); } catch { }
-                try { File.Delete(dbPath + "-shm"); } catch { }
+                SqliteTestCleanup.ReleaseAndDelete(dbPath);
             }
         }
     }

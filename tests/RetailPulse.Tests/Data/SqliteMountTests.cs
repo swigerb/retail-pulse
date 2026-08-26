@@ -2,6 +2,7 @@ using System.Globalization;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using RetailPulse.Api.Data;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Data;
 
@@ -24,19 +25,11 @@ public sealed class SqliteMountTests : IDisposable
 
     public SqliteMountTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"rp-mount-{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("rp-mount");
         _connectionString = new SqliteConnectionStringBuilder { DataSource = _dbPath }.ToString();
     }
 
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        foreach (string f in Directory.EnumerateFiles(
-            Path.GetDirectoryName(_dbPath)!, Path.GetFileNameWithoutExtension(_dbPath) + "*"))
-        {
-            try { File.Delete(f); } catch { /* best effort */ }
-        }
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private static long ReadLong(SqliteConnection conn, string pragma)
     {

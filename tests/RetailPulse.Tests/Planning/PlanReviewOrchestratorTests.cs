@@ -18,6 +18,7 @@ using RetailPulse.Contracts.Persistence;
 using RetailPulse.Contracts.Routing;
 using RetailPulse.Contracts.Tracing;
 using RetailPulse.Tests.Fixtures;
+using RetailPulse.Tests.TestInfrastructure;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Tests.Planning;
@@ -35,16 +36,14 @@ public sealed class PlanReviewOrchestratorTests : IDisposable
 
     public PlanReviewOrchestratorTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"plan_review_orch_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("plan_review_orch");
         _checkpointDir = Path.Combine(Path.GetTempPath(), $"plan_review_orch_ckpt_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_checkpointDir);
     }
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
         try { Directory.Delete(_checkpointDir, recursive: true); } catch { }
     }
 
