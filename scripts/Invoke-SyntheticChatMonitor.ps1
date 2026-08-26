@@ -245,7 +245,7 @@ function Get-ApiAccessToken {
         $out = & az @args 2>$errorFile
         if ($LASTEXITCODE -ne 0) {
             $err = (Get-Content $errorFile -Raw -ErrorAction SilentlyContinue)
-            return @{ Ok = $false; Reason = "az account get-access-token failed for resource '$Resource' — the signed-in principal likely lacks the RetailPulse.User app role on the API app registration (admin consent still required). az error: $($err.Trim())" }
+            return @{ Ok = $false; Reason = "az account get-access-token failed for resource '$Resource' — check the resource matches the API app registration's App ID URI, that the tenant is correct, and that the signed-in principal is assigned the RetailPulse.User app role. (The app-role grant and admin consent for retail-pulse-synthetic-monitor are already in place; a failure here is most likely a resource/tenant mismatch.) az error: $($err.Trim())" }
         }
         $token = ($out | Out-String).Trim()
         if ([string]::IsNullOrWhiteSpace($token)) {
@@ -387,7 +387,15 @@ function Invoke-Live {
             $detail = "transport error: $($_.Exception.Message)"
         }
         if ($status -ne 200) {
-            $reason = if ($detail) { $detail } else { "HTTP $status (expected 200)" }
+            $reason =
+                if ($detail) { $detail }
+                elseif ($status -eq 403) {
+                    "HTTP 403 (expected 200) — the token was accepted but authorization was denied. Most likely the deployed API has not opted in to app-only tokens: set MicrosoftEntra__AllowAppOnlyTokens=true (default false), and if MicrosoftEntra:AllowedAppClientIds is populated ensure this client ID is listed. See docs/testing/authenticated-synthetic-monitor.md."
+                }
+                elseif ($status -eq 401) {
+                    "HTTP 401 (expected 200) — the token was rejected outright. Check the audience/App ID URI in -ApiResource and that the API's MicrosoftEntra:TenantId/ClientId match the token's issuer and audience."
+                }
+                else { "HTTP $status (expected 200)" }
             Write-PromptResult $promptText $false $reason
             $failures++
             continue
