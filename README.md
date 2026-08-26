@@ -48,6 +48,7 @@ Retail Pulse is designed to demo locally from a fresh clone without any optional
 | **Azure AI Foundry IQ (Azure AI Projects)** | Foundry-hosted retrieval agent (ADR-013). | `Knowledge:Provider:Mode=FoundryIQ` and `Knowledge:FoundryIQ:ProjectEndpoint` set. |
 | **Azure AI Content Safety + Prompt Shields** | Prompt-injection + harmful-content filtering on inputs and outputs (ADR-010). | `Security:ContentSafety:Enabled=true` and the endpoint / API version set. |
 | **Azure AI Foundry Agent Service** | Foundry-hosted persistent shipment specialist (bespoke). | `FoundryAgent:Enabled=true` + project endpoint / agent name. |
+| **Authenticated synthetic chat monitor** | Non-interactive smoke-test of the deployed authenticated `/api/chat` path against the curated chart-acceptance smoke set (issue #57). Auth is workload-identity federation only — there is NO client secret anywhere in the workflow, in GitHub Actions secrets, or in the repo. | Set the `RETAIL_PULSE_SYNTHETIC_ENABLED=true` repository variable plus `RETAIL_PULSE_SYNTHETIC_CLIENT_ID`, `RETAIL_PULSE_SYNTHETIC_TENANT_ID`, `RETAIL_PULSE_SYNTHETIC_API_ORIGIN`, and `RETAIL_PULSE_SYNTHETIC_API_RESOURCE`. When unset the `.github/workflows/synthetic-monitor.yml` schedule + `workflow_dispatch` no-ops with a `::notice::` explanation and never turns CI red. Script: `scripts/Invoke-SyntheticChatMonitor.ps1`; offline self-test wired into CI. See [docs/testing/authenticated-synthetic-monitor.md](docs/testing/authenticated-synthetic-monitor.md). |
 | **Azure Files durable mount** | Cross-replica persistence of the SQLite stores (`memory.db`, `approvals.db`, `sessions.db`, `plans.db`, `audit.db`, `costs.db`, `alerts.db`). | Currently blocked by tenant governance policy (see [docs/deployment-azd.md](docs/deployment-azd.md)); the deployed demo runs with `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`. |
 
 > **Local demo (zero optional resources).** `dotnet build RetailPulse.slnx` succeeds with no
@@ -486,6 +487,7 @@ The CI pipeline runs on every push and PR to `main`:
 | **lint** | Verify code style (`dotnet format --verify-no-changes`) |
 | **bicep** | Compile every Bicep module transitively from `infra/main.bicep` via `az bicep build` — cheapest possible regression gate for the APIM AI Gateway / Container Apps contract; uploads the compiled ARM template as an artifact |
 | **verify-apim** | `Verify-ApimAiGateway offline self-test` — runs `scripts/Verify-ApimAiGateway.ps1 -SelfTest` (no Azure signin, no live APIM traffic) to lock in the shape and header/body contracts of the live-verification script itself so a broken script can't silently pass a live deploy |
+| **synthetic-monitor-selftest** | Offline regression fence for the OPTIONAL authenticated synthetic chat monitor (issue #57) — runs `scripts/Invoke-SyntheticChatMonitor.ps1 -SelfTest` and then re-invokes the script with no configuration to prove it exits 0 with a `SKIP:` message. No Azure signin, no live traffic, no credential — the whole surface is federation-only |
 
 ### Run locally
 
