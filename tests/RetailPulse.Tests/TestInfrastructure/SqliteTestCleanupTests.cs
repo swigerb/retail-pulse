@@ -161,11 +161,13 @@ public sealed class SqliteTestCleanupTests
     public void ReleaseAndDelete_DoesNotTouchCallerOwnedSqliteConnection_NoObjectDisposedRace()
     {
         // Guards against reintroducing the SafeHandle / ObjectDisposedException
-        // race audited in issue #156: the helper opens NO caller-owned handle.
-        // The connection it constructs to satisfy SqliteConnection.ClearPool's
-        // signature is a fresh, never-opened instance — proving that here so
-        // a future "helpful" refactor cannot silently start disposing shared
-        // state.
+        // race audited in issue #156: the helper only builds fresh, never-opened
+        // SqliteConnection instances as probes for SqliteConnection.ClearPool,
+        // and it only clears buckets keyed on THIS fixture's unique db path —
+        // so it can never touch the caller-owned handle above. And because
+        // clearing is path-scoped (never SqliteConnection.ClearAllPools()), a
+        // parallel xUnit fixture cannot have its live sqlite3 handle disposed
+        // under it either.
         string dbPath = SqliteTestCleanup.NewDbPath("no-shared-handle");
 
         // A caller opens their own connection, uses it, disposes it. The

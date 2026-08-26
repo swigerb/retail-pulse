@@ -31,10 +31,18 @@ namespace RetailPulse.Tests.TestInfrastructure;
 ///     unrelated <c>%TEMP%</c> noise (see PR body for the counting
 ///     methodology).</item>
 ///   <item><see cref="ReleaseAndDelete(string)"/> calls
-///     <see cref="SqliteConnection.ClearPool"/> using the exact connection
-///     string shape the stores use (<c>Mode=ReadWriteCreate</c>,
-///     <c>Cache=Shared</c>) before any <c>File.Delete</c>. That releases the
-///     pooled handle, so the delete succeeds instead of failing silently.</item>
+///     <see cref="SqliteConnection.ClearPool"/> for the specific
+///     <c>Data Source=&lt;path&gt;</c> across every connection-string
+///     variant tests are known to open (RWCreate+Shared for the stores,
+///     ReadOnly+Shared and plain ReadOnly for verification reads, and
+///     bare <c>Data Source=&lt;path&gt;</c>). Path-scoped clearing is
+///     used instead of
+///     <see cref="SqliteConnection.ClearAllPools"/> so it cannot race
+///     with a sibling xUnit fixture running in parallel — every fixture
+///     allocates a unique DB path, so per-path clearing only touches
+///     handles this fixture owns. A process-wide clear would reproduce
+///     the SafeHandle / <see cref="ObjectDisposedException"/> race
+///     audited in issue #156.</item>
 ///   <item>Every SQLite sidecar (<c>-journal</c>, <c>-wal</c>, <c>-shm</c>)
 ///     is deleted, not just the main <c>.db</c>. Even though <c>SqliteMount</c>
 ///     runs <c>journal_mode=DELETE</c> (no <c>-wal</c> / <c>-shm</c> in normal
@@ -49,11 +57,9 @@ namespace RetailPulse.Tests.TestInfrastructure;
 /// <para>
 /// Disposal ordering: fixture <c>Dispose</c> must dispose its store handles
 /// (if any) <em>before</em> calling this helper. This helper never touches
-/// caller-owned <see cref="SqliteConnection"/> instances, so it cannot
-/// reintroduce the SafeHandle / <see cref="ObjectDisposedException"/> race
-/// audited in issue #156 — it only creates a fresh, never-opened
-/// <see cref="SqliteConnection"/> to satisfy the <see cref="SqliteConnection.ClearPool"/>
-/// signature (which reads the connection string off the instance).
+/// caller-owned <see cref="SqliteConnection"/> instances — it never
+/// constructs or opens one — so it cannot reintroduce the SafeHandle /
+/// <see cref="ObjectDisposedException"/> race audited in issue #156.
 /// </para>
 /// </summary>
 public static class SqliteTestCleanup
@@ -88,27 +94,59 @@ public static class SqliteTestCleanup
     {
         ArgumentException.ThrowIfNullOrEmpty(dbPath);
 
-        // 1) Release the pooled handle for the exact connection string every
-        //    store in this project uses. Do this BEFORE any File.Delete so the
-        //    OS handle is closed and the delete can succeed on Windows.
-        var probe = new SqliteConnection(new SqliteConnectionStringBuilder
+        // 1) Release every pooled handle keyed on THIS specific path. Pool
+        //    buckets are keyed on the exact connection string, so we clear
+        //    each variant tests are known to open against a temp DB:
+        //      • RWCreate + Shared cache : the shape every store builds via
+        //        SqliteMount (SqliteApprovalGate, SqlitePlanStore,
+        //        SqliteSessionStore, SqliteAlertService, SqliteConversationMemory,
+        //        RetailPulseDb).
+        //      • ReadOnly  + Shared cache : verification reads in
+        //        DemandDataTests, CompetitiveDataTests, PromoDataTests,
+        //        SupplyDataTests, StoreDataTests, MarginDataTests.
+        //      • ReadOnly (no cache)     : StoreOpsToolTests, PlanogramTests
+        //        ("Data Source=<path>;Mode=ReadOnly").
+        //      • Bare "Data Source=<path>" : DurableCostTracker,
+        //        DurableAuditLog, PackSwitchSeedDimensionsTests,
+        //        DefaultPackSeedGoldenTests, MountedStorePragmaContractTests.
+        //    Missing any one of these leaves an OS handle open on Windows
+        //    and the delete fails — which is the exact leak this helper
+        //    guards against (#158).
+        //
+        //    Per-path clearing is chosen over SqliteConnection.ClearAllPools()
+        //    on purpose: xUnit v2 runs fixtures in parallel in the same
+        //    process, and ClearAllPools disposes idle handles across every
+        //    pool bucket. If a sibling fixture just checked out one of
+        //    those handles, the process-wide clear races with its next
+        //    Open and reproduces the SafeHandle / ObjectDisposedException
+        //    from issue #156. Path-scoped clearing cannot race with a
+        //    sibling because every fixture allocates a unique DB path.
+        ClearPoolForConnectionString(new SqliteConnectionStringBuilder
         {
             DataSource = dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared,
         }.ToString());
-        SqliteConnection.ClearPool(probe);
 
-        // 2) A handful of tests build a simpler `Data Source=<path>` string for
-        //    read-back verification (PRAGMA reads, seeded-row checks). That
-        //    lands in a different pool bucket, so clear that shape too.
-        var probeSimple = new SqliteConnection(new SqliteConnectionStringBuilder
+        ClearPoolForConnectionString(new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Shared,
+        }.ToString());
+
+        ClearPoolForConnectionString(new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadOnly,
+        }.ToString());
+
+        ClearPoolForConnectionString(new SqliteConnectionStringBuilder
         {
             DataSource = dbPath,
         }.ToString());
-        SqliteConnection.ClearPool(probeSimple);
 
-        // 3) Delete the database + every SQLite sidecar. Sidecars are:
+        // 2) Delete the database + every SQLite sidecar. Sidecars are:
         //      -journal : DELETE rollback journal (the mode SqliteMount uses)
         //      -wal / -shm : write-ahead log + shared-memory index (not used
         //                    by our policy, but deleted defensively so a
@@ -136,6 +174,22 @@ public static class SqliteTestCleanup
                 $"SqliteTestCleanup.ReleaseAndDelete failed for '{dbPath}'.",
                 errors);
         }
+    }
+
+    /// <summary>
+    /// Clears the Microsoft.Data.Sqlite pool bucket keyed on the given
+    /// connection string. Uses a fresh, never-opened
+    /// <see cref="SqliteConnection"/> purely as a carrier for the string —
+    /// <see cref="SqliteConnection.ClearPool"/> reads its
+    /// <see cref="SqliteConnection.ConnectionString"/> to locate the
+    /// bucket. The carrier is never opened and its underlying
+    /// <c>SQLitePCL.sqlite3</c> is never referenced, so this cannot
+    /// reintroduce the SafeHandle disposal race audited in issue #156.
+    /// </summary>
+    private static void ClearPoolForConnectionString(string connectionString)
+    {
+        var probe = new SqliteConnection(connectionString);
+        SqliteConnection.ClearPool(probe);
     }
 
     /// <summary>
