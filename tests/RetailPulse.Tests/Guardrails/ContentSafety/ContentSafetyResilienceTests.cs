@@ -68,21 +68,46 @@ public class ContentSafetyResilienceTests
     [Fact]
     public async Task Timeout_HangingHandler_IsBoundedByTimeoutMs()
     {
+        // Invariant (issue #156): a hanging Content Safety region cannot be
+        // allowed to stall the middleware — the bounded timeout must fire AND
+        // cancellation must reach the primary handler. The prior wall-clock
+        // Stopwatch upper bound was load-sensitive under the full 3,396-test
+        // suite (observed ~6.1 s against a 3.2 s ceiling ≈ 1 in 10 runs).
+        //
+        // Assert the invariant on observable cancellation instead of on real
+        // elapsed time:
+        //   1. The pipeline surfaces ServiceUnavailable (Polly timeout fired).
+        //   2. The primary HttpMessageHandler observed the cancellation token
+        //      being cancelled — the ONLY way this happens is if the bounded
+        //      timeout propagated cancellation into the underlying transport
+        //      before it could complete a real request.
+        //
+        // If the pipeline were broken and never cancelled the inner handler,
+        // (2) would fail — either because the OCE from Task.Delay would never
+        // fire, or because the evaluator would never return. Either way the
+        // failure is unambiguous and independent of the machine's load.
         var handler = new HangingHandler();
         AzureContentSafetyEvaluator evaluator = BuildResilientEvaluator(handler);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         ContentSafetyResult result = await evaluator.EvaluateAsync(
             "will-hang",
             ContentSafetyStage.Input,
             new ContentSafetyEvaluationContext(UserId: "u", CheckPromptShield: true),
             CancellationToken.None);
-        stopwatch.Stop();
 
         result.Decision.Should().Be(ContentSafetyDecision.ServiceUnavailable);
-        stopwatch.Elapsed.Should().BeLessThan(
-            TimeSpan.FromMilliseconds(_timeoutMs * 8),
-            "a hanging Content Safety region cannot be allowed to stall the middleware; the bounded timeout must fire");
+
+        // Polly cancels the linked token synchronously when its timeout fires,
+        // and CancellationToken.Register callbacks run synchronously from that
+        // Cancel() call before Polly unwinds. By the time the evaluator has
+        // returned ServiceUnavailable the registered callback has therefore
+        // run — so awaiting the already-completed task is a no-op. If the
+        // pipeline is broken and cancellation never propagates, this await
+        // hangs (a real bug, caught by CI job timeout — not a flaky assertion).
+        await handler.CancellationObserved;
+        handler.CancellationObserved.IsCompleted.Should().BeTrue(
+            "the bounded timeout MUST propagate cancellation into the primary handler; " +
+            "a hanging Content Safety region cannot be allowed to stall the middleware");
     }
 
     [Fact]
@@ -174,8 +199,28 @@ public class ContentSafetyResilienceTests
 
     private sealed class HangingHandler : HttpMessageHandler
     {
+        private readonly TaskCompletionSource _cancellationObserved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        /// Completes when the primary handler observes the request's
+        /// <see cref="CancellationToken"/> being cancelled — the observable
+        /// invariant that the bounded Polly timeout propagated into the
+        /// underlying transport. If cancellation never fires, this task
+        /// never completes and the test will hang (unambiguous real bug,
+        /// not a wall-clock tolerance to tune).
+        /// </summary>
+        public Task CancellationObserved => _cancellationObserved.Task;
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            // Signal from the CT registration rather than the OCE handler so
+            // the observation is captured even if the delay unwinds before
+            // Polly's timeout strategy translates the OCE into its result.
+            using CancellationTokenRegistration reg = cancellationToken.Register(
+                static tcs => ((TaskCompletionSource)tcs!).TrySetResult(),
+                _cancellationObserved);
+
             // Wait until cancelled by the Polly timeout — the pipeline signals
             // cancellation via the token so this is a well-behaved hang.
             await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
