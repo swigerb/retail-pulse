@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Approval;
 using RetailPulse.Contracts.Approval;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Approval;
 
@@ -18,15 +19,13 @@ public class AsyncSqliteApprovalTests : IDisposable
 
     public AsyncSqliteApprovalTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"approval_async_test_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("approval_async_test");
         _gate = new SqliteApprovalGate(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>());
     }
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     private static ApprovalContext MakeContext(string action = "Test action")

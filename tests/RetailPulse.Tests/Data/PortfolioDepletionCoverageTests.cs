@@ -3,6 +3,7 @@ using FluentAssertions;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
 using Xunit;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Data;
 
@@ -27,7 +28,7 @@ public class PortfolioDepletionCoverageTests : IDisposable
         string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
-        _dbPath = Path.Combine(Path.GetTempPath(), $"rp_portfolio_coverage_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("rp_portfolio_coverage");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
         _tenant = tenantProvider.GetTenant();
         _db = new RetailPulseDb(tenantProvider, _dbPath, tenantConfigPath);
@@ -36,9 +37,7 @@ public class PortfolioDepletionCoverageTests : IDisposable
     public void Dispose()
     {
         GC.SuppressFinalize(this);
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     [Fact]

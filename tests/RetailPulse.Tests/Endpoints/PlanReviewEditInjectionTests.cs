@@ -25,6 +25,7 @@ using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Guardrails;
 using RetailPulse.Contracts.Persistence;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Endpoints;
 
@@ -108,11 +109,12 @@ public sealed class PlanReviewEditInjectionTests
         public required SqliteApprovalGate Gate { get; init; }
         public required string SeededRequestId { get; init; }
         public required string PlanId { get; init; }
+        public required string DbPath { get; init; }
 
         public static async Task<Host> CreateAsync(string subject)
         {
             const string planId = "plan-injection-1";
-            string dbPath = Path.Combine(Path.GetTempPath(), $"prv_inj_{Guid.NewGuid():N}.db");
+            string dbPath = SqliteTestCleanup.NewDbPath("prv_inj");
 
             WebApplicationBuilder builder = WebApplication.CreateSlimBuilder();
             builder.WebHost.UseTestServer();
@@ -178,6 +180,7 @@ public sealed class PlanReviewEditInjectionTests
                 Gate = gate,
                 SeededRequestId = row.RequestId,
                 PlanId = planId,
+                DbPath = dbPath,
             };
         }
 
@@ -185,6 +188,7 @@ public sealed class PlanReviewEditInjectionTests
         {
             Client.Dispose();
             await App.DisposeAsync();
+            SqliteTestCleanup.ReleaseAndDelete(DbPath);
         }
     }
 

@@ -8,6 +8,7 @@ using Moq;
 using RetailPulse.Api.Approval;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Routing;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Approval;
 
@@ -25,16 +26,14 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
 
     public PlanReviewCoordinatorTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"plan_review_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("plan_review");
         _checkpointDir = Path.Combine(Path.GetTempPath(), $"plan_review_ckpt_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_checkpointDir);
     }
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
         try { Directory.Delete(_checkpointDir, recursive: true); } catch { }
     }
 

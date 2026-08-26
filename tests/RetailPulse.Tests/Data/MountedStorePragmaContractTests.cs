@@ -11,6 +11,7 @@ using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Memory;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.Security;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Data;
 
@@ -37,20 +38,12 @@ public sealed class MountedStorePragmaContractTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
-        foreach (string db in _dbPaths)
-        {
-            foreach (string f in Directory.EnumerateFiles(
-                Path.GetDirectoryName(db)!, Path.GetFileNameWithoutExtension(db) + "*"))
-            {
-                try { File.Delete(f); } catch { /* best effort */ }
-            }
-        }
+        SqliteTestCleanup.ReleaseAndDelete([.. _dbPaths]);
     }
 
     private string NewDbPath(string label)
     {
-        string p = Path.Combine(Path.GetTempPath(), $"rp-{label}-{Guid.NewGuid():N}.db");
+        string p = SqliteTestCleanup.NewDbPath($"rp-{label}");
         _dbPaths.Add(p);
         return p;
     }

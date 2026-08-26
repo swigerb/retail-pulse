@@ -25,6 +25,7 @@ using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Guardrails;
 using RetailPulse.Contracts.Persistence;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Endpoints;
 
@@ -247,6 +248,7 @@ public sealed class PlanReviewGuardrailExtensionTests
         public required SqliteApprovalGate Gate { get; init; }
         public required string SeededRequestId { get; init; }
         public required string PlanId { get; init; }
+        public required string DbPath { get; init; }
 
         public static async Task<Host> CreateAsync(
             string subject,
@@ -255,7 +257,7 @@ public sealed class PlanReviewGuardrailExtensionTests
             bool contentSafetyBlocks = false)
         {
             const string planId = "plan-guardrail-1";
-            string dbPath = Path.Combine(Path.GetTempPath(), $"prv_guard_{Guid.NewGuid():N}.db");
+            string dbPath = SqliteTestCleanup.NewDbPath("prv_guard");
 
             WebApplicationBuilder builder = WebApplication.CreateSlimBuilder();
             builder.WebHost.UseTestServer();
@@ -328,6 +330,7 @@ public sealed class PlanReviewGuardrailExtensionTests
                 Gate = gate,
                 SeededRequestId = row.RequestId,
                 PlanId = planId,
+                DbPath = dbPath,
             };
         }
 
@@ -335,6 +338,7 @@ public sealed class PlanReviewGuardrailExtensionTests
         {
             Client.Dispose();
             await App.DisposeAsync();
+            SqliteTestCleanup.ReleaseAndDelete(DbPath);
         }
     }
 

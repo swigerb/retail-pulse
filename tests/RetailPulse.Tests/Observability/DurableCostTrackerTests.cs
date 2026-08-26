@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Observability;
 using RetailPulse.Contracts.Observability;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Observability;
 
@@ -23,16 +24,12 @@ public sealed class DurableCostTrackerTests : IDisposable
 
     public DurableCostTrackerTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"rp-costs-{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("rp-costs");
     }
 
     public void Dispose()
     {
-        foreach (string f in Directory.EnumerateFiles(
-            Path.GetDirectoryName(_dbPath)!, Path.GetFileNameWithoutExtension(_dbPath) + "*"))
-        {
-            try { File.Delete(f); } catch { /* best effort cleanup */ }
-        }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     private static IConfiguration Pricing() =>
@@ -84,7 +81,7 @@ public sealed class DurableCostTrackerTests : IDisposable
         // instance — a fresh replica remounting the same share at the same path —
         // must observe the prior history. Durability comes from the mounted
         // directory, not the process, which is the whole point of the fix.
-        string mountDir = Path.Combine(Path.GetTempPath(), $"rp-mount-{Guid.NewGuid():N}");
+        string mountDir = Path.Combine(SqliteTestCleanup.TempRoot, $"rp-mount-{Guid.NewGuid():N}");
         Directory.CreateDirectory(mountDir);
         string mountedDbPath = Path.Combine(mountDir, "costs.db");
         try
@@ -102,6 +99,7 @@ public sealed class DurableCostTrackerTests : IDisposable
         }
         finally
         {
+            SqliteTestCleanup.ReleaseAndDelete(mountedDbPath);
             try { Directory.Delete(mountDir, recursive: true); } catch { /* best effort */ }
         }
     }

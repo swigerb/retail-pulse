@@ -25,6 +25,7 @@ using RetailPulse.Contracts.Routing;
 using RetailPulse.Contracts.Tracing;
 using RetailPulse.Tests.Fixtures;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Approval;
 
@@ -42,16 +43,14 @@ public sealed class PlanStateIntegrityTests : IDisposable
 
     public PlanStateIntegrityTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"prv_state_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("prv_state");
         _checkpointDir = Path.Combine(Path.GetTempPath(), $"prv_state_ckpt_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_checkpointDir);
     }
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
         try { Directory.Delete(_checkpointDir, recursive: true); } catch { }
     }
 
