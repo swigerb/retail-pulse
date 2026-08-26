@@ -347,6 +347,45 @@ public sealed class ChartFulfillmentTests
         direct.UserIntentMessage.Should().Be("Create a pie chart showing market share breakdown");
     }
 
+    [Fact]
+    public void EnforceChartFulfillment_KeepsTheRicherModelChart_WhenTheRebuildCoversLessData()
+    {
+        // Deterministic-first must not cost completeness. A turn may have queried only
+        // some regions, so the rebuild can be thinner than a valid model chart. The
+        // tool payload is authoritative about what is TRUE, not about what is COMPLETE.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactedDemand("FreshMart", "Northeast", 900.0),
+            CompactedDemand("Harvest Table", "Northeast", 800.0));
+
+        var richer = new ChartSpec
+        {
+            Type = "bar",
+            Title = "Model chart covering more regions",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "FreshMart",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Northeast", Y = 900 },
+                        new ChartDataPoint { X = "Midwest", Y = 850 },
+                        new ChartDataPoint { X = "Southeast", Y = 810 },
+                        new ChartDataPoint { X = "West Coast", Y = 790 },
+                    ],
+                },
+            ],
+        };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a bar chart of depletion velocity in the Northeast", response, [richer], "Done.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Data.Sum(s => s.Values.Count)
+            .Should().Be(4, "the richer valid model chart is kept over a thinner rebuild");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static AgentExecutionPipeline CreatePipeline()
