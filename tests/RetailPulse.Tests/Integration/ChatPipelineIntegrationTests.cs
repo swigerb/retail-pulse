@@ -99,6 +99,98 @@ public class ChatPipelineIntegrationTests
     }
 
     [Fact]
+    public async Task CacheHit_ReplaysChartsAndRouting_SoARepeatedChartQuestionKeepsItsChart()
+    {
+        // Issue #170: the cache used to store only the reply string, so the second
+        // identical chart question inside the TTL came back as prose with no chart,
+        // no routing, and no tool spans — the #50/#55 "chart vanished" failure
+        // reached through repetition instead of routing.
+        var harness = new PipelineHarness();
+        harness.WhenRouterClassifies(AgentIntent.General, confidence: 0.9);
+        harness.WhenAgentReplies("LIVE AGENT RESPONSE — should not appear");
+
+        const string query = "Show a horizontal bar chart ranking all brands by depletion growth rate";
+        string cacheKey = CacheHelpers.BuildCacheKey("pre-route", query);
+
+        var chart = new ChartSpec
+        {
+            Type = "horizontalBar",
+            Title = "Depletion growth by brand",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "YoY growth",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "BrandA", Y = 12 },
+                        new ChartDataPoint { X = "BrandB", Y = 8 },
+                        new ChartDataPoint { X = "BrandC", Y = 5 },
+                        new ChartDataPoint { X = "BrandD", Y = 3 },
+                        new ChartDataPoint { X = "BrandE", Y = 1 },
+                        new ChartDataPoint { X = "BrandF", Y = -2 },
+                    ],
+                },
+            ],
+        };
+        var routing = new RoutingInfo("demand", "Demand Forecasting", AgentIntent.DemandForecasting, 0.92, 1234);
+
+        await harness.Cache.SetAsync(cacheKey,
+            new CachedResponse("Cached ranking prose.", "demand", DateTime.UtcNow, cacheKey, [chart], routing),
+            TimeSpan.FromMinutes(5));
+
+        ChatResponse response = await harness.RunPipelineAsync(
+            new ChatRequest(query, SessionId: "cache-hit-chart"));
+
+        harness.AgentWasInvoked.Should().BeFalse("the cache hit must still short-circuit execution");
+        response.Reply.Should().Be("Cached ranking prose.");
+
+        response.Charts.Should().NotBeNull("a cached chart answer must replay its chart");
+        response.Charts.Should().ContainSingle();
+        response.Charts[0].Type.Should().Be("horizontalBar");
+        response.Charts[0].Data.Sum(s => s.Values.Count).Should().BeGreaterThanOrEqualTo(6, "the G3 mark floor must survive a cache hit");
+
+        response.Routing.Should().NotBeNull("routing metadata must survive a cache hit");
+        response.Routing.Intent.Should().Be(AgentIntent.DemandForecasting);
+    }
+
+    [Fact]
+    public async Task CacheRoundTrip_PreservesCharts_SoBackToBackIdenticalRequestsMatch()
+    {
+        // The write-back path and the read path must agree: whatever a fresh run
+        // returns, the cached replay of that same question must return too.
+        var harness = new PipelineHarness();
+        harness.WhenRouterClassifies(AgentIntent.DemandForecasting, confidence: 0.9);
+
+        var chart = new ChartSpec
+        {
+            Type = "groupedBar",
+            Title = "Two-brand comparison",
+            Data =
+            [
+                new ChartSeries { Legend = "BrandA", Values = [new ChartDataPoint { X = "Northeast", Y = 10 }, new ChartDataPoint { X = "Midwest", Y = 12 }] },
+                new ChartSeries { Legend = "BrandB", Values = [new ChartDataPoint { X = "Northeast", Y = 8 }, new ChartDataPoint { X = "Midwest", Y = 9 }] },
+            ],
+        };
+        harness.WhenAgentRepliesWithCharts("Here is the comparison.", [chart]);
+
+        const string query = "Compare two brands across all regions";
+
+        ChatResponse first = await harness.RunPipelineAsync(new ChatRequest(query, SessionId: "s1"));
+        first.Charts.Should().NotBeNull();
+        first.Charts.Should().ContainSingle();
+
+        ChatResponse second = await harness.RunPipelineAsync(new ChatRequest(query, SessionId: "s2"));
+
+        second.Spans.Should().Contain(s => s.Type == "cache", "the second identical request must be served from cache");
+        second.Charts.Should().NotBeNull("the cached replay must carry the same chart");
+        second.Charts.Should().ContainSingle();
+        second.Charts[0].Type.Should().Be(first.Charts[0].Type);
+        second.Charts[0].Data.Sum(s => s.Values.Count)
+            .Should().Be(first.Charts[0].Data.Sum(s => s.Values.Count));
+    }
+
+    [Fact]
     public async Task CacheMiss_FallsThroughToFullPipeline()
     {
         var harness = new PipelineHarness();
@@ -267,6 +359,7 @@ public class ChatPipelineIntegrationTests
         private readonly List<ISpecialistAgent> _specialists = [];
         private readonly Mock<IAgentRouter> _routerMock = new();
         private string _cannedReply = "default reply";
+        private List<ChartSpec>? _cannedCharts;
         private readonly Dictionary<string, Func<ChatRequest, CancellationToken, Task<ChatResponse>>> _agentHandlers = [];
 
         public PipelineHarness()
@@ -297,7 +390,7 @@ public class ChatPipelineIntegrationTests
                             new AgentSpan($"agent.{key}.thought", "thought", "Thinking", 5, DateTimeOffset.UtcNow, req.SessionId),
                             new AgentSpan($"agent.{key}.response", "response", "Done", 12, DateTimeOffset.UtcNow, req.SessionId)
                         ],
-                        Charts: null,
+                        Charts: _cannedCharts is { Count: > 0 } cc ? [.. cc] : null,
                         TotalDurationMs: 17));
                 });
 
@@ -326,6 +419,12 @@ public class ChatPipelineIntegrationTests
         }
 
         public void WhenAgentReplies(string reply) => _cannedReply = reply;
+
+        public void WhenAgentRepliesWithCharts(string reply, List<ChartSpec> charts)
+        {
+            _cannedReply = reply;
+            _cannedCharts = charts;
+        }
 
         public void ResetCallTracking()
         {
@@ -365,7 +464,10 @@ public class ChatPipelineIntegrationTests
                         cached.Response,
                         sessionId,
                         [new AgentSpan("cache.hit", "cache", $"Served from cache (agent: {cached.AgentId})", 0, DateTimeOffset.UtcNow, sessionId)],
-                        null, 0);
+                        cached.Charts is { Count: > 0 } cachedCharts ? [.. cachedCharts] : null,
+                        0,
+                        null,
+                        cached.Routing);
                 }
             }
 
@@ -402,7 +504,13 @@ public class ChatPipelineIntegrationTests
             {
                 string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                 await Cache.SetAsync(cacheKey,
-                    new CachedResponse(response.Reply, specialist.Key, DateTime.UtcNow, cacheKey),
+                    new CachedResponse(
+                        response.Reply,
+                        specialist.Key,
+                        DateTime.UtcNow,
+                        cacheKey,
+                        response.Charts is { Count: > 0 } c ? [.. c] : null,
+                        response.Routing),
                     TimeSpan.FromMinutes(5), ct);
             }
 
