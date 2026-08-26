@@ -169,42 +169,85 @@ public partial class AgentExecutionPipeline
             }
         }
 
-        // Already fulfilled by the model / inline recovery.
-        if (charts.Count > 0)
-        {
-            // If a roster-complete portfolio ranking chart is present, scrub any
-            // fallback/truncation vocabulary the model may have narrated into the
-            // prose (issue #74) — the chart is authoritative and the prose must
-            // not undermine it.
-            string sanitizedReply = (roster is { Count: > 0 } && charts.Any(c =>
-                    string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)
-                    && DeterministicChartBuilder.CoversRoster(c, roster)))
-                ? StripFallbackClaims(reply)
-                : reply;
-            return new ChartFulfillmentResult(charts, sanitizedReply);
-        }
-
-        // Deterministic, no-LLM reconstruction from this turn's tool results. For a
-        // horizontal-bar ranking ask we raise the minimum-marks floor to the P0
-        // contract (>= 6 finite marks, at least one non-zero) so an underpopulated
-        // or all-zero result FAILS CLOSED to the chart-unavailable diagnostic below
-        // rather than reaching the frontend as an empty shell.
-        int fallbackMinMarks = isPortfolioRanking
+        // ── Deterministic-first chart construction (issue #172) ──────────────
+        // The tool payload — not the model's improvisation — is the source of
+        // truth for an explicit chart request. Build from it whenever we can and
+        // prefer that chart over whatever the model emitted.
+        //
+        // This generalises the portfolio-ranking coverage contract above to every
+        // chart intent, and that precedent is the evidence for it: the ranking
+        // prompt was the ONLY curated chart that rendered correctly on every live
+        // run precisely because its chart was rebuilt from tool data, while the
+        // eight prompts left to model discretion drifted between runs — wrong
+        // type, too few marks, or the chart JSON narrated into the prose.
+        //
+        // The model still writes the words; the code draws the chart.
+        int requiredMarks = isPortfolioRanking
             ? Math.Max(6, ChartSpecValidator.MinimumMarksForType(intent.ChartType))
             : ChartSpecValidator.MinimumMarksForType(intent.ChartType);
 
-        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, fallbackMinMarks, out ChartSpec? built) && built is not null)
+        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, requiredMarks, out ChartSpec? deterministic)
+            && deterministic is not null)
         {
             _logger.LogInformation(
-                "Chart-fulfillment: reconstructed a {ChartType} chart deterministically from tool results "
-                + "for an explicit chart request that returned prose-only.",
-                built.Type);
-            charts.Add(built);
-            return new ChartFulfillmentResult(charts, reply);
+                "Chart-fulfillment: built a {ChartType} chart deterministically from tool results "
+                + "for an explicit chart request (deterministic-first, issue #172).",
+                deterministic.Type);
+
+            // Drop model charts of the same type — the deterministic chart is
+            // authoritative for the requested visualization. Any unrelated extra
+            // chart the model produced is left alone.
+            charts.RemoveAll(c => c is null
+                || string.Equals(c.Type, deterministic.Type, StringComparison.OrdinalIgnoreCase));
+            charts.Insert(0, deterministic);
+            return new ChartFulfillmentResult(charts, StripFallbackClaims(reply));
         }
 
-        // No renderable chart and no data to build one — surface a precise, structured
-        // diagnostic instead of a silent prose-only reply.
+        // Already fulfilled by the model / inline recovery.
+        if (charts.Count > 0)
+        {
+            // No deterministic reconstruction was possible, so the model-emitted
+            // chart is the fallback — but it is held to the same renderability and
+            // mark floor rather than trusted on sight. An under-populated chart
+            // (e.g. a "compare all spirits brands" bar carrying one mark) is worse
+            // than no chart: it renders, so it looks like success while silently
+            // misrepresenting the data.
+            ChartSpec? candidate = charts.FirstOrDefault(c => c is not null
+                && (string.IsNullOrWhiteSpace(intent.ChartType)
+                    || string.Equals(c.Type, intent.ChartType, StringComparison.OrdinalIgnoreCase)));
+
+            if (candidate is not null
+                && ChartSpecValidator.TryGetRenderable(candidate, minSeries: 1, minMarks: requiredMarks, out ChartSpec? cleanedModelChart)
+                && cleanedModelChart is not null)
+            {
+                // If a roster-complete portfolio ranking chart is present, scrub any
+                // fallback/truncation vocabulary the model may have narrated into the
+                // prose (issue #74) — the chart is authoritative and the prose must
+                // not undermine it.
+                string sanitizedReply = (roster is { Count: > 0 } && charts.Any(c =>
+                        string.Equals(c?.Type, "horizontalBar", StringComparison.OrdinalIgnoreCase)
+                        && DeterministicChartBuilder.CoversRoster(c, roster)))
+                    ? StripFallbackClaims(reply)
+                    : reply;
+
+                int replaceAt = charts.IndexOf(candidate);
+                charts[replaceAt] = cleanedModelChart;
+                return new ChartFulfillmentResult(charts, sanitizedReply);
+            }
+
+            _logger.LogWarning(
+                "Chart-fulfillment: dropping a model-emitted chart that does not meet the "
+                + "{MinMarks}-mark floor for '{ChartType}' and could not be rebuilt from tool "
+                + "results — failing closed rather than rendering an under-populated chart.",
+                requiredMarks, intent.ChartType ?? "chart");
+            charts.Clear();
+        }
+
+        // No renderable chart and no data to build one — the deterministic-first
+        // attempt above already tried to reconstruct from this turn's tool results
+        // with the same mark floor, so reaching here means the tool payload simply
+        // does not contain a chartable shape for what was asked. Surface a precise,
+        // structured diagnostic instead of a silent prose-only reply.
         _logger.LogWarning(
             "Chart-fulfillment: explicit {ChartType} chart request could not be satisfied — "
             + "no renderable chart and no chartable tool data present; emitting chart-unavailable diagnostic.",

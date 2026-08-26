@@ -152,7 +152,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
         using IDisposable budgetScope = RequestToolContext.Begin(
             sessionId,
-            isChartIntent: Charts.ChartRequestDetector.Detect(request.Message).IsExplicitChartRequest);
+            isChartIntent: Charts.ChartRequestDetector.Detect(request.UserIntentMessage).IsExplicitChartRequest);
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
@@ -247,7 +247,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         // Chart-fulfillment invariant: an explicit chart request must yield a renderable
         // chart (reconstructed deterministically from tool results if the model emitted
         // none) or a structured chart-unavailable diagnostic — never silent prose-only.
-        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply);
+        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.UserIntentMessage, response, charts, reply);
         charts = fulfillment.Charts;
         reply = fulfillment.Reply;
 
@@ -445,7 +445,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
         using IDisposable budgetScope = RequestToolContext.Begin(
             sessionId,
-            isChartIntent: Charts.ChartRequestDetector.Detect(request.Message).IsExplicitChartRequest);
+            isChartIntent: Charts.ChartRequestDetector.Detect(request.UserIntentMessage).IsExplicitChartRequest);
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
@@ -536,7 +536,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         // Chart-fulfillment invariant (streaming): reconstruct deterministically or append
         // a structured chart-unavailable diagnostic before streaming, so the streamed reply
         // matches the final response and never silently omits an explicitly requested chart.
-        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.Message, response, charts, reply);
+        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.UserIntentMessage, response, charts, reply);
         charts = fulfillment.Charts;
         reply = fulfillment.Reply;
 
