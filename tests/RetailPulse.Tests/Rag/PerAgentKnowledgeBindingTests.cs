@@ -292,6 +292,16 @@ public sealed class PerAgentKnowledgeBindingTests
         // Attach an ActivityListener that captures the `rag.retrieve` span
         // regardless of whether the app under test wired a listener. Assert
         // the tags the tenant-configuration docs promise.
+        //
+        // xUnit runs tests in different classes in parallel — other tests
+        // in this run can produce their own `rag.retrieve` activities in the
+        // shared `RetailPulse.Agent` ActivitySource during the listener's
+        // lifetime. Filter to the specific `retrieval.agent_key` this test
+        // sets so cross-test contamination never turns into a spurious
+        // multiple-span failure. ContainSingle() on the filtered slice
+        // still catches "the code under test emitted an extra activity for
+        // MY agent key" — the invariant the test actually cares about.
+        const string agentKey = "planogram-agent";
         var captured = new List<Activity>();
         var listener = new ActivityListener
         {
@@ -299,7 +309,8 @@ public sealed class PerAgentKnowledgeBindingTests
             Sample = (ref _) => ActivitySamplingResult.AllData,
             ActivityStopped = a =>
             {
-                if (a.OperationName == "rag.retrieve")
+                if (a.OperationName == "rag.retrieve" &&
+                    string.Equals(a.GetTagItem("retrieval.agent_key") as string, agentKey, StringComparison.Ordinal))
                 {
                     captured.Add(a);
                 }
@@ -311,7 +322,7 @@ public sealed class PerAgentKnowledgeBindingTests
             InMemoryKnowledgeBase kb = CreateSeededKb();
             var registry = KnowledgeSourceRegistry.Build(
                 Sources(("planogram", "planogram.md")),
-                Agents(("planogram-agent", true, "planogram")));
+                Agents((agentKey, true, "planogram")));
 
             var provider = new RagContextProvider(
                 kb,
@@ -321,7 +332,7 @@ public sealed class PerAgentKnowledgeBindingTests
             _ = await provider.GetContextForAgentAsync(
                 "Apex planogram anchor",
                 userId: "u",
-                agentKey: "planogram-agent");
+                agentKey: agentKey);
 
             Activity? span = captured.Should().ContainSingle().Which;
             span.GetTagItem("span.type").Should().Be("retrieval");
