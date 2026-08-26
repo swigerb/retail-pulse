@@ -2709,8 +2709,29 @@ public class RetailPulseDb
         };
     }
 
+    /// <summary>
+    /// Region tokens that mean "the whole country", not a literal region row. Depletion
+    /// stats, variant mix and historical demand already normalise these to a national
+    /// rollup; market share did not, so <c>Region LIKE '%National%'</c> matched nothing
+    /// and any "market share breakdown … nationally" ask returned zero rows — the pie
+    /// chart then failed closed with a chart-unavailable diagnostic (issue #59 / G2).
+    /// </summary>
+    private static bool IsNationalRegionToken(string region) =>
+        region.Trim() is var r && (
+            r.Equals("National", StringComparison.OrdinalIgnoreCase)
+            || r.Equals("Nationwide", StringComparison.OrdinalIgnoreCase)
+            || r.Equals("Aggregate", StringComparison.OrdinalIgnoreCase)
+            || r.Equals("US", StringComparison.OrdinalIgnoreCase)
+            || r.Equals("USA", StringComparison.OrdinalIgnoreCase)
+            || r.Equals("United States", StringComparison.OrdinalIgnoreCase));
+
     public object GetMarketShare(string? brand = null, string? category = null, string? region = null, string? period = null)
     {
+        // An explicit national ask is a ROLLUP, not a region filter. A blank region is
+        // left alone — it already means "every region's rows", which existing callers
+        // depend on.
+        bool nationalRollup = !string.IsNullOrWhiteSpace(region) && IsNationalRegionToken(region);
+
         using SqliteConnection conn = OpenConnection();
         conn.Open();
         using SqliteCommand cmd = conn.CreateCommand();
@@ -2726,7 +2747,7 @@ public class RetailPulseDb
             filters.Add("Category LIKE @category");
             cmd.Parameters.AddWithValue("@category", $"%{category}%");
         }
-        if (!string.IsNullOrWhiteSpace(region))
+        if (!nationalRollup && !string.IsNullOrWhiteSpace(region))
         {
             filters.Add("Region LIKE @region");
             cmd.Parameters.AddWithValue("@region", $"%{region}%");
@@ -2738,6 +2759,65 @@ public class RetailPulseDb
         }
 
         string where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
+
+        if (nationalRollup)
+        {
+            // Average each brand's regional share for the period. The table carries no
+            // volume weights, so an unweighted mean across the regions that reported is
+            // the honest rollup — and it is stated as such in the payload rather than
+            // being passed off as a measured national figure.
+            cmd.CommandText = $"""
+                SELECT Brand,
+                       Category,
+                       Period,
+                       AVG(SharePercent)          AS SharePercent,
+                       AVG(PreviousSharePercent)  AS PreviousSharePercent,
+                       AVG(ShareChangePoints)     AS ShareChangePoints,
+                       COUNT(DISTINCT Region)     AS RegionsCounted
+                FROM MarketShare
+                {where}
+                GROUP BY Brand, Category, Period
+                ORDER BY Period DESC, SharePercent DESC
+                LIMIT 300
+                """;
+
+            using SqliteDataReader nationalReader = cmd.ExecuteReader();
+            var nationalRecords = new List<object>();
+            int nationalLosses = 0;
+            while (nationalReader.Read())
+            {
+                double? changePoints = nationalReader.IsDBNull(5) ? null : nationalReader.GetDouble(5);
+                if (changePoints is < -2.0) nationalLosses++;
+
+                nationalRecords.Add(new
+                {
+                    brand = nationalReader.GetString(0),
+                    category = nationalReader.GetString(1),
+                    region = "National",
+                    period = nationalReader.GetString(2),
+                    share_percent = Math.Round(nationalReader.GetDouble(3), 2),
+                    previous_share_percent = nationalReader.IsDBNull(4) ? (double?)null : Math.Round(nationalReader.GetDouble(4), 2),
+                    share_change_points = changePoints is null ? (double?)null : Math.Round(changePoints.Value, 2),
+                    regions_counted = nationalReader.GetInt32(6),
+                    source = "national rollup (unweighted mean of regional shares)"
+                });
+            }
+
+            return new
+            {
+                filters = new { brand = brand ?? "all", category = category ?? "all", region = "National", period = period ?? "all" },
+                total_records = nationalRecords.Count,
+                significant_share_losses = nationalLosses,
+                aggregation = new
+                {
+                    scope = "national",
+                    method = "unweighted mean of regional SharePercent, grouped by brand, category and period",
+                    note = "The source table stores share by region with no volume weights, so a national figure is the average of the regions that reported."
+                },
+                share_data = nationalRecords
+            };
+        }
+
         cmd.CommandText = $"""
             SELECT Brand, Category, Region, Period, SharePercent, PreviousSharePercent, ShareChangePoints, Source
             FROM MarketShare

@@ -14,11 +14,11 @@ public class MarketShareTool
         _logger = logger;
     }
 
-    [Description("Get market share trends over time. Returns quarterly share data with period-over-period changes and identifies significant share losses.")]
+    [Description("Get market share trends over time. Returns quarterly share data with period-over-period changes and identifies significant share losses. Pass region='National' for a nationwide rollup (the unweighted mean of each brand's regional shares); pass a specific region for that region's rows.")]
     public async Task<string> GetMarketShare(
         [Description("Brand name to filter. Omit for all brands.")] string? brand = null,
         [Description("Category to filter. Omit for all categories.")] string? category = null,
-        [Description("Region to filter. Omit for all regions.")] string? region = null,
+        [Description("Region to filter, or 'National' for a nationwide rollup. Omit for all regions.")] string? region = null,
         [Description("Period to filter (e.g. '2026-Q1'). Omit for all periods.")] string? period = null,
         CancellationToken cancellationToken = default)
     {
