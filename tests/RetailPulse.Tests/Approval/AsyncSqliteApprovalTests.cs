@@ -96,15 +96,29 @@ public class AsyncSqliteApprovalTests : IDisposable
     {
         ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
 
-        // Respond after a short delay
-        _ = Task.Run(async () =>
+        // Respond after a short delay. Track the responder as a proper Task
+        // and await it in a finally so a slow responder cannot outlive the
+        // test method and race the test's IDisposable disposing the SQLite
+        // files under it. Under CPU load the fire-and-forget original
+        // occasionally raced with the waiter's own connection open across
+        // Microsoft.Data.Sqlite's shared cache and surfaced as an
+        // ObjectDisposedException on the sqlite3 SafeHandle.
+        using var respondCts = new CancellationTokenSource();
+        var responder = Task.Run(async () =>
         {
-            await Task.Delay(500);
+            await Task.Delay(500, respondCts.Token);
             await _gate.RespondAsync(request.RequestId, ApprovalDecision.Approved);
-        });
-
-        ApprovalResult result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: TimeSpan.FromSeconds(5));
-        result.Decision.Should().Be(ApprovalDecision.Approved);
+        }, respondCts.Token);
+        try
+        {
+            ApprovalResult result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: TimeSpan.FromSeconds(5));
+            result.Decision.Should().Be(ApprovalDecision.Approved);
+        }
+        finally
+        {
+            respondCts.Cancel();
+            try { await responder; } catch (OperationCanceledException) { }
+        }
     }
 
     [Fact]
