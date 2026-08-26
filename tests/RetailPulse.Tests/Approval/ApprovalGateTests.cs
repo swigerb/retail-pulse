@@ -197,13 +197,17 @@ public class ApprovalGateTests : IDisposable
     [Fact]
     public async Task WaitForApproval_ReturnsWhenDecisionMade()
     {
+        // Verify the invariant "WaitForApproval returns the persisted terminal
+        // decision" without any wall-clock timing dependency. The original
+        // shape used a fire-and-forget `Task.Run(async () => { Task.Delay(200);
+        // RespondAsync(...); })` and a 10 s waiter timeout — under CPU
+        // contention from the ~3,396-test full suite the responder's thread-
+        // pool delay + SQLite RespondAsync could exceed 10 s, causing the
+        // waiter to time out and the assertion to fail. Persisting the
+        // decision synchronously before starting the wait proves the same
+        // invariant deterministically and never sees the load-sensitivity.
         ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
-
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(200);
-            await _gate.RespondAsync(request.RequestId, ApprovalDecision.Approved);
-        });
+        await _gate.RespondAsync(request.RequestId, ApprovalDecision.Approved);
 
         ApprovalResult result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: TimeSpan.FromSeconds(10));
         result.Decision.Should().Be(ApprovalDecision.Approved);

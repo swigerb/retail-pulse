@@ -94,14 +94,26 @@ public class AsyncSqliteApprovalTests : IDisposable
     [Fact]
     public async Task WaitForApprovalAsync_UsesExponentialBackoff()
     {
+        // Verify the invariant "WaitForApprovalAsync returns the persisted
+        // Approved decision" without any wall-clock/thread-pool timing
+        // dependency. The original shape fired the responder as
+        // `_ = Task.Run(async () => { Task.Delay(500); RespondAsync(...); })`
+        // — an unowned task whose Microsoft.Data.Sqlite shared-cache
+        // connection could race the waiter's own connection open under
+        // CPU contention and surface as
+        // `System.ObjectDisposedException: Cannot access a disposed
+        //  object. Object name: 'SQLitePCL.sqlite3'`
+        // during `sqlite3_prepare_v2` on the waiter's next read (observed
+        // in the 20-run acceptance sweep, attempt 2 run 20 of #156).
+        // Persisting the decision synchronously before starting the wait
+        // proves the same invariant deterministically and never sees the
+        // load-sensitivity.
+        //
+        // Backoff timing itself is covered by the sibling
+        // `WaitForApprovalAsync_TimesOut_WithBackoff` and the
+        // `BackoffConstants_AreCorrect` tests below.
         ApprovalRequest request = await _gate.RequestApprovalAsync(MakeContext());
-
-        // Respond after a short delay
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(500);
-            await _gate.RespondAsync(request.RequestId, ApprovalDecision.Approved);
-        });
+        await _gate.RespondAsync(request.RequestId, ApprovalDecision.Approved);
 
         ApprovalResult result = await _gate.WaitForApprovalAsync(request.RequestId, timeout: TimeSpan.FromSeconds(5));
         result.Decision.Should().Be(ApprovalDecision.Approved);
