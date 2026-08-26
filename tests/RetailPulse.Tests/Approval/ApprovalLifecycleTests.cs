@@ -205,7 +205,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
             clock.Advance(TimeSpan.FromSeconds(30));
         }
 
-        ApprovalResult result = await waitTask.WaitAsync(TimeSpan.FromSeconds(5));
+        ApprovalResult result = await waitTask;
         result.Decision.Should().Be(ApprovalDecision.TimedOut);
         result.TerminalReason.Should().Be(SqliteApprovalGate.ReasonTimeout);
     }
@@ -232,7 +232,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
         // Advance clock enough to release the next backoff tick without crossing the deadline.
         clock.Advance(TimeSpan.FromSeconds(1));
 
-        ApprovalResult result = await waitTask.WaitAsync(TimeSpan.FromSeconds(5));
+        ApprovalResult result = await waitTask;
         result.Decision.Should().Be(ApprovalDecision.Approved);
         result.Comment.Should().Be("green-lit");
         result.TerminalReason.Should().Be(SqliteApprovalGate.ReasonHumanApproved);
@@ -264,7 +264,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
         Task<ApprovalResult> waitTask = gate.WaitForApprovalAsync(req.RequestId, timeout: TimeSpan.FromSeconds(60));
         clock.Advance(TimeSpan.FromSeconds(120));
 
-        ApprovalResult result = await waitTask.WaitAsync(TimeSpan.FromSeconds(5));
+        ApprovalResult result = await waitTask;
 
         result.Decision.Should().Be(ApprovalDecision.Modified, "the human already resolved the row before the waiter tried to time out");
         result.TerminalReason.Should().Be(SqliteApprovalGate.ReasonHumanModified);
@@ -310,7 +310,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
                 });
 
                 clock.Advance(TimeSpan.FromSeconds(120));
-                await Task.WhenAll(waitTask, humanTask).WaitAsync(TimeSpan.FromSeconds(5));
+                await Task.WhenAll(waitTask, humanTask);
 
                 ApprovalResult waiter = await waitTask;
                 ApprovalResult stored = await gate.GetResultAsync(req.RequestId);
@@ -351,7 +351,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
         bothParked.Should().BeTrue("both waiters must park at Task.Delay(_timeProvider) before Advance is called");
 
         clock.Advance(TimeSpan.FromSeconds(120));
-        ApprovalResult[] results = await Task.WhenAll(a, b).WaitAsync(TimeSpan.FromSeconds(5));
+        ApprovalResult[] results = await Task.WhenAll(a, b);
 
         results[0].Decision.Should().Be(results[1].Decision);
         results[0].Decision.Should().Be(ApprovalDecision.TimedOut);
@@ -382,7 +382,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
 
         clock.Advance(TimeSpan.FromSeconds(90));
 
-        ApprovalResult result = await waitTask.WaitAsync(TimeSpan.FromSeconds(5));
+        ApprovalResult result = await waitTask;
         result.Decision.Should().Be(ApprovalDecision.TimedOut);
     }
 
@@ -466,7 +466,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
             await Task.Yield();
             clock.Advance(TimeSpan.FromSeconds(30));
         }
-        ApprovalResult waiter = await waitTask.WaitAsync(TimeSpan.FromSeconds(5));
+        ApprovalResult waiter = await waitTask;
         waiter.Decision.Should().Be(ApprovalDecision.TimedOut);
 
         ApprovalResult endpointResult = await gate.RespondAsync(req.RequestId, ApprovalDecision.Approved, "late human");
@@ -551,14 +551,23 @@ public sealed class ApprovalLifecycleTests : IDisposable
         // endpoint call) and WaitForApprovalAsync (the agent's blocking waiter) must
         // return the same terminal decision, matching the durable row exactly.
         //
-        // Determinism protocol (issue #154): the FakeClock only wakes an already-
-        // parked Task.Delay. If we Advance before the waiter has reached
-        // Task.Delay(backoff, _timeProvider, ct) and registered its timer, Advance
-        // fires on an empty timer list and the waiter is stranded — the outer
-        // WaitAsync(5s) then trips a real TimeoutException (~1 in 9 full-suite
-        // runs). Wait for TimerCount to observe the waiter has parked, THEN kick
-        // the endpoint and Advance so the timeout branch and the endpoint's
-        // conditional UPDATE genuinely race for the single Pending row.
+        // Determinism protocol (issues #154 + #156):
+        //   1. The FakeClock only wakes an already-parked Task.Delay. If we
+        //      Advance before the waiter has reached
+        //      Task.Delay(backoff, _timeProvider, ct) and registered its timer,
+        //      Advance fires on an empty timer list and the waiter is stranded.
+        //      Wait for TimerCount >= 1 so Advance is guaranteed to wake it.
+        //   2. Once both sides are racing for the single conditional UPDATE, we
+        //      await the tasks WITHOUT a wall-clock guard. The prior
+        //      WaitAsync(TimeSpan.FromSeconds(5)) tripped a real TimeoutException
+        //      under CPU contention from the ~3,396-test full suite (~1 in 9 runs
+        //      even after the timer-registration fix): the FakeClock was doing
+        //      its job, but SQLite I/O + thread-pool scheduling for the two
+        //      terminal writes occasionally exceeded 5 s of real time. A wider
+        //      guard hides the load-sensitivity rather than removing it; a
+        //      logical-time guard is impossible here because the real work isn't
+        //      driven by TimeProvider. If the invariant is ever broken so the
+        //      waiter genuinely hangs, this test hangs — a real, visible bug.
         for (int trial = 0; trial < 15; trial++)
         {
             string dbPath = Path.Combine(Path.GetTempPath(), $"approval_endpoint_race_{Guid.NewGuid():N}.db");
@@ -584,7 +593,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
                 });
 
                 clock.Advance(TimeSpan.FromSeconds(120));
-                await Task.WhenAll(waitTask, endpointTask).WaitAsync(TimeSpan.FromSeconds(5));
+                await Task.WhenAll(waitTask, endpointTask);
 
                 ApprovalResult waiter = await waitTask;
                 ApprovalResult endpoint = await endpointTask;
