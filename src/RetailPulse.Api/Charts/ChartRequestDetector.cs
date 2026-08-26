@@ -25,10 +25,18 @@ namespace RetailPulse.Api.Charts;
 /// an explicit chart request must reach a data+chart specialist, not the multi-agent
 /// council (which produces prose/votes, no chart).
 /// </param>
+/// <param name="MinMarks">
+/// The minimum finite datapoints this chart must carry, when the prompt is a curated
+/// entry in <see cref="Contracts.Charts.ChartAcceptanceManifest"/>. Zero for an ad-hoc
+/// request, where only the generic per-type floor applies. Carrying the manifest's own
+/// figure means the live pipeline enforces the SAME contract the acceptance tests
+/// assert, instead of the looser "is it renderable at all" minimum.
+/// </param>
 public readonly record struct ChartIntent(
     bool IsExplicitChartRequest,
     string? ChartType,
-    string RoutedIntent);
+    string RoutedIntent,
+    int MinMarks = 0);
 
 /// <summary>
 /// Deterministic, generic detector for explicit chart requests. Shared by the router
@@ -258,7 +266,7 @@ public static partial class ChartRequestDetector
                 // has drifted — it still lists DemandForecasting for the horizontal-bar
                 // ranking prompt, which issue #74 deliberately re-routed to General so the
                 // portfolio aggregate tool is reachable. Routing stays with the cue table.
-                intent = new ChartIntent(true, c.ChartType, ResolveDomainIntent(message));
+                intent = new ChartIntent(true, c.ChartType, ResolveDomainIntent(message), c.MinMarks);
                 return true;
             }
         }
