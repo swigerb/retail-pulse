@@ -116,7 +116,11 @@ param(
     [string]$TenantId,
     [string]$ClientId,
     [object[]]$Prompts,
-    [int]$TimeoutSec = 60,
+    # The API's own single-shot ceiling for /api/chat is 90s (ChatTimeoutOptions).
+    # A 60s client timeout sat below that, so a legitimately slow-but-successful
+    # turn was reported as a transport failure rather than being allowed to
+    # complete. Give the server room to hit its own ceiling first, plus margin.
+    [int]$TimeoutSec = 120,
     [switch]$SelfTest
 )
 
@@ -272,12 +276,15 @@ function Test-ChatResponseContract {
         return @{ Ok = $false; Detail = 'response body was null / could not be parsed as JSON'; CorrelationId = '' }
     }
     $text = $null
-    if ($Body.PSObject.Properties['text']) { $text = $Body.text }
+    # ChatResponse.Reply — serialised as `reply`. An earlier revision read `text`,
+    # which no version of the API has ever emitted; because the self-test builds its
+    # own payloads it stayed self-consistently wrong until the first live run.
+    if ($Body.PSObject.Properties['reply']) { $text = $Body.reply }
     if ([string]::IsNullOrWhiteSpace($text)) {
-        return @{ Ok = $false; Detail = 'response body has no non-empty `text` assistant payload'; CorrelationId = '' }
+        return @{ Ok = $false; Detail = 'response body has no non-empty `reply` assistant payload'; CorrelationId = '' }
     }
     $charts = $null
-    if ($Body.PSObject.Properties['charts']) { $charts = @($Body.charts) }
+    if ($Body.PSObject.Properties['charts']) { $charts = @($Body.charts | Where-Object { $null -ne $_ }) }
     if (-not $charts -or $charts.Count -eq 0) {
         return @{ Ok = $false; Detail = 'response body has no `charts[]` entries'; CorrelationId = '' }
     }
@@ -291,16 +298,17 @@ function Test-ChatResponseContract {
     }
     $marks = 0
     if ($expected.PSObject.Properties['data'] -and $expected.data) {
-        # Chart data is a set of series each with data points. Count the sum
-        # of data-point counts across series ("marks" in the acceptance
-        # contract) with a graceful fallback for either a flat shape or a
-        # per-series shape.
+        # ChartSpec.Data is a list of ChartSeries, each with a `values` list of
+        # {x,y} datapoints — `charts[].data[].values[]`. "Marks" is the total
+        # datapoint count across series. An earlier revision walked
+        # `data[].data[]`, which does not exist on the wire, so every series
+        # silently counted as a single mark.
         $data = $expected.data
         if ($data -is [System.Collections.IEnumerable] -and -not ($data -is [string])) {
             foreach ($series in $data) {
                 if ($null -eq $series) { continue }
-                if ($series.PSObject.Properties['data'] -and $series.data -is [System.Collections.IEnumerable]) {
-                    $marks += @($series.data).Count
+                if ($series.PSObject.Properties['values'] -and $series.values -is [System.Collections.IEnumerable]) {
+                    $marks += @($series.values | Where-Object { $null -ne $_ }).Count
                 }
                 else {
                     $marks += 1
@@ -328,6 +336,16 @@ function Test-ChatResponseContract {
 }
 
 # ── live-run driver ────────────────────────────────────────────────────────
+# Redact an identifier down to its last four characters for log output. Tenant
+# and client ids are non-secret configuration, but there is no reason to print
+# them in full.
+function Get-IdTail {
+    param([AllowNull()][string]$Value)
+    if ([string]::IsNullOrEmpty($Value)) { return '' }
+    if ($Value.Length -gt 4) { return $Value.Substring($Value.Length - 4) }
+    return $Value
+}
+
 function Invoke-Live {
     param(
         [Parameter(Mandatory)][hashtable]$Config,
@@ -335,11 +353,14 @@ function Invoke-Live {
         [Parameter(Mandatory)][int]$TimeoutSec
     )
 
+    # PowerShell has no `if` expression, so an inline `(if (...) {...} else {...})`
+    # inside a -f argument is a parse-time-valid but run-time fatal construct: it
+    # only fails when the live path actually executes. Use a helper instead.
     Write-Host "Optional authenticated synthetic monitor (issue #57)"
     Write-Host ("  apiOrigin   = {0}" -f $Config.ApiOrigin)
     Write-Host ("  apiResource = {0}" -f $Config.ApiResource)
-    Write-Host ("  tenantId    = ****{0}" -f (if ($Config.TenantId.Length -gt 4) { $Config.TenantId.Substring($Config.TenantId.Length - 4) } else { $Config.TenantId }))
-    Write-Host ("  clientId    = ****{0}" -f (if ($Config.ClientId.Length -gt 4) { $Config.ClientId.Substring($Config.ClientId.Length - 4) } else { $Config.ClientId }))
+    Write-Host ("  tenantId    = ****{0}" -f (Get-IdTail $Config.TenantId))
+    Write-Host ("  clientId    = ****{0}" -f (Get-IdTail $Config.ClientId))
     Write-Host ("  prompts     = {0}" -f $Prompts.Count)
     Write-Host ""
 
@@ -349,7 +370,7 @@ function Invoke-Live {
         exit 0
     }
 
-    Write-Host "Acquiring API access token via federation (`az account get-access-token`) ..."
+    Write-Host "Acquiring API access token via federation ('az account get-access-token') ..."
     $tok = Get-ApiAccessToken -Resource $Config.ApiResource -TenantId $Config.TenantId
     if (-not $tok.Ok) {
         Write-Skip $tok.Reason
@@ -370,7 +391,7 @@ function Invoke-Live {
         $promptText = [string]$p.Prompt
         $expectedType = [string]$p.ExpectedChartType
         $minMarks = [int]$p.MinMarks
-        $bodyJson = @{ prompt = $promptText } | ConvertTo-Json -Depth 4 -Compress
+        $bodyJson = @{ message = $promptText } | ConvertTo-Json -Depth 4 -Compress
         $status = 0
         $parsed = $null
         $detail = ''
@@ -450,14 +471,14 @@ function Invoke-SelfTest {
 
     # (b) Response validator — PASS path on a well-formed payload.
     $goodBody = [pscustomobject]@{
-        text     = 'Here is the horizontal bar chart ranking depletion growth.'
+        reply    = 'Here is the horizontal bar chart ranking depletion growth.'
         traceId  = '00-abcdef1234567890abcdef1234567890-0011223344556677-01'
         sessionId = 'session-000-selftest'
         charts   = @(
             [pscustomobject]@{
                 type = 'horizontalBar'
                 data = @(
-                    [pscustomobject]@{ name = 'series-a'; data = @(
+                    [pscustomobject]@{ legend = 'series-a'; values = @(
                             [pscustomobject]@{ x = 'BrandA'; y = 12 },
                             [pscustomobject]@{ x = 'BrandB'; y = 8 },
                             [pscustomobject]@{ x = 'BrandC'; y = 5 },
@@ -477,28 +498,44 @@ function Invoke-SelfTest {
 
     # (b) Response validator — FAIL paths on malformed payloads. Each of
     # these should produce Ok=$false with a clear reason, NOT throw and NOT
-    # falsely pass. Missing text / missing charts / wrong type / too few
+    # falsely pass. Missing reply / missing charts / wrong type / too few
     # marks / missing correlation id / null body.
     $null1 = Test-ChatResponseContract -Body $null -ExpectedChartType 'horizontalBar' -MinMarks 6
     _Expect 'validator FAILs a null body' (-not $null1.Ok)
     $noText = [pscustomobject]@{ charts = @([pscustomobject]@{ type = 'horizontalBar'; data = @() }) }
     $r = Test-ChatResponseContract -Body $noText -ExpectedChartType 'horizontalBar' -MinMarks 6
-    _Expect 'validator FAILs a response with no `text` payload' (-not $r.Ok)
-    $noCharts = [pscustomobject]@{ text = 'no charts here'; traceId = 't' }
+    _Expect 'validator FAILs a response with no `reply` payload' (-not $r.Ok)
+    # A body carrying the OLD `text` field must still fail — the API never emits it,
+    # so accepting it would re-open exactly the drift this guard exists to catch.
+    $legacyText = [pscustomobject]@{
+        text = 'legacy field'; traceId = 't'
+        charts = @([pscustomobject]@{ type = 'horizontalBar'; data = @([pscustomobject]@{ legend = 's'; values = 1..8 }) })
+    }
+    $r = Test-ChatResponseContract -Body $legacyText -ExpectedChartType 'horizontalBar' -MinMarks 6
+    _Expect 'validator FAILs a body using the legacy `text` field instead of `reply`' (-not $r.Ok)
+    $noCharts = [pscustomobject]@{ reply = 'no charts here'; traceId = 't' }
     $r = Test-ChatResponseContract -Body $noCharts -ExpectedChartType 'horizontalBar' -MinMarks 6
     _Expect 'validator FAILs a response with no `charts[]`' (-not $r.Ok)
-    $wrongType = [pscustomobject]@{ text = 'wrong type'; traceId = 't'; charts = @([pscustomobject]@{ type = 'pie'; data = @() }) }
+    $wrongType = [pscustomobject]@{ reply = 'wrong type'; traceId = 't'; charts = @([pscustomobject]@{ type = 'pie'; data = @() }) }
     $r = Test-ChatResponseContract -Body $wrongType -ExpectedChartType 'horizontalBar' -MinMarks 6
     _Expect 'validator FAILs when chart type does not match' (-not $r.Ok)
     $tooFewMarks = [pscustomobject]@{
-        text = 'too few marks'; traceId = 't'
-        charts = @([pscustomobject]@{ type = 'horizontalBar'; data = @([pscustomobject]@{ name = 's'; data = @(1, 2, 3) }) })
+        reply = 'too few marks'; traceId = 't'
+        charts = @([pscustomobject]@{ type = 'horizontalBar'; data = @([pscustomobject]@{ legend = 's'; values = @(1, 2, 3) }) })
     }
     $r = Test-ChatResponseContract -Body $tooFewMarks -ExpectedChartType 'horizontalBar' -MinMarks 6
     _Expect 'validator FAILs when marks < required' (-not $r.Ok)
+    # Marks must be counted over data[].values[], not per-series. A single series
+    # carrying 8 datapoints satisfies MinMarks 6; counting series would yield 1.
+    $oneSeriesManyMarks = [pscustomobject]@{
+        reply = 'one series, eight marks'; traceId = 't'
+        charts = @([pscustomobject]@{ type = 'horizontalBar'; data = @([pscustomobject]@{ legend = 's'; values = 1..8 }) })
+    }
+    $r = Test-ChatResponseContract -Body $oneSeriesManyMarks -ExpectedChartType 'horizontalBar' -MinMarks 6
+    _Expect 'validator counts marks across data[].values[], not per series' $r.Ok
     $noCorr = [pscustomobject]@{
-        text = 'no correlation'
-        charts = @([pscustomobject]@{ type = 'horizontalBar'; data = @([pscustomobject]@{ name = 's'; data = 1..8 }) })
+        reply = 'no correlation'
+        charts = @([pscustomobject]@{ type = 'horizontalBar'; data = @([pscustomobject]@{ legend = 's'; values = 1..8 }) })
     }
     $r = Test-ChatResponseContract -Body $noCorr -ExpectedChartType 'horizontalBar' -MinMarks 6
     _Expect 'validator FAILs when no correlation id is present' (-not $r.Ok)
@@ -574,6 +611,49 @@ function Invoke-SelfTest {
     $secretParamPattern = '\[string\]\s*\$' + $CS + '\b'
     $hasSecretParam = ($codeOnly -match $secretParamPattern)
     _Expect 'federation-only guard: no [string]$ClientSecret parameter is declared' (-not $hasSecretParam)
+
+    # (d) Live-contract drift guard: the request/response field names this script
+    # uses MUST match the real DTOs. This is the guard that was missing when the
+    # monitor shipped posting `prompt` and reading `text` — the self-test built its
+    # own payloads in the same wrong shape, so it stayed self-consistently wrong and
+    # a live run would have failed 400 on every prompt (issue #176). Read the
+    # contracts from source, exactly as the manifest check above does, so the guard
+    # stays offline and signin-free.
+    $chatModelsPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\src\RetailPulse.Contracts\ChatModels.cs'))
+    $chartSpecPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\src\RetailPulse.Contracts\ChartSpec.cs'))
+    _Expect 'ChatModels.cs is discoverable relative to scripts/' (Test-Path $chatModelsPath)
+    _Expect 'ChartSpec.cs is discoverable relative to scripts/' (Test-Path $chartSpecPath)
+
+    if ((Test-Path $chatModelsPath) -and (Test-Path $chartSpecPath)) {
+        $chatModelsSrc = Get-Content -LiteralPath $chatModelsPath -Raw
+        $chartSpecSrc = Get-Content -LiteralPath $chartSpecPath -Raw
+        $scriptSrc = Get-Content -LiteralPath $PSCommandPath -Raw
+
+        # ChatRequest's first positional member is the prompt text the API reads.
+        # Scope the request-body guards to the line that actually builds the JSON
+        # body — the curated smoke set legitimately uses a `Prompt` hashtable key,
+        # and a naive search would match that instead.
+        $bodyLines = @($scriptSrc -split "`n" | Where-Object { $_ -match 'ConvertTo-Json' -and $_ -match '@\{' })
+        _Expect 'a request-body construction line is present' ($bodyLines.Count -ge 1)
+        _Expect 'ChatRequest declares `Message` (so the live body must post `message`)' `
+            ($chatModelsSrc -match 'record\s+ChatRequest\s*\(\s*\r?\n?\s*string\s+Message\b')
+        _Expect 'live request body posts `message =`' `
+            (@($bodyLines | Where-Object { $_ -match '@\{\s*message\s*=' }).Count -ge 1)
+        _Expect 'live request body does NOT post the non-existent `prompt` field' `
+            (@($bodyLines | Where-Object { $_ -match '@\{\s*prompt\s*=' }).Count -eq 0)
+
+        # ChatResponse's first positional member is the assistant text.
+        _Expect 'ChatResponse declares `Reply` (so the validator must read `reply`)' `
+            ($chatModelsSrc -match 'record\s+ChatResponse\s*\(\s*\r?\n?\s*string\s+Reply\b')
+        _Expect 'validator reads Body.reply' ($scriptSrc -match "Properties\['reply'\]")
+        _Expect 'validator does NOT read the non-existent Body.text' (-not ($scriptSrc -match "Properties\['text'\]"))
+
+        # ChartSpec.Data is List<ChartSeries>; ChartSeries.Values is the datapoint list.
+        _Expect 'ChartSpec declares `Data` as the series list' ($chartSpecSrc -match 'List<ChartSeries>\s+Data\b')
+        _Expect 'ChartSeries declares `Values` as the datapoint list' ($chartSpecSrc -match 'List<ChartDataPoint>\s+Values\b')
+        _Expect 'mark counting walks series.values' ($scriptSrc -match "Properties\['values'\]")
+        _Expect 'mark counting does NOT walk the non-existent series.data' (-not ($scriptSrc -match "\`$series\.PSObject\.Properties\['data'\]"))
+    }
 
     if ($script:_selfFailed -gt 0) {
         Write-Host ("SELFTEST FAIL ({0} case(s))" -f $script:_selfFailed) -ForegroundColor Red
