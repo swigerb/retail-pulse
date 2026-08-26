@@ -351,3 +351,30 @@ The dashboard now refreshes every 10 seconds while mounted and shows empty state
 - **Frontend / Chick:** Observability summary endpoints must not be assumed to contain nested dashboard collections; call the dedicated endpoints and map fields explicitly.
 - **QA / Publix:** Contract validation for observability dashboards should include idle/empty states and cross-endpoint field names.
 
+### 2026-08-26T14:07-04:00: Merge gate — never merge on CI alone; verdicts live on the PR
+
+**By:** Kroger (Lead)
+
+**Rule (operational, binds every PR including this one):**
+
+1. **Never merge on CI status alone.** Confirm an explicit **APPROVE** verdict for the **current head SHA** before merging. Green checks mean the code compiled and the tests that ran passed — nothing more.
+2. **A REJECT verdict blocks merge**, however green the checks are. Merge only after the reviewer posts a fresh APPROVE against the current head.
+3. **Verdicts must be posted as PR comments** (APPROVE and REJECT alike). A verdict that exists only in an agent session transcript did not happen for gate purposes.
+4. **Read the diff before merging** any change that claims to fix a defect. Confirm the change actually does what the PR says.
+5. **Re-measure stability claims on the merge target** (post-merge `main`, or the PR's mergeable head with the target merged in), not on the working branch under different load. Report **raw per-run output**. If any run fails during a stability sequence — target or not — **name the failing test** rather than reporting a clean sweep.
+
+**Why (both incidents, preserved so the reasoning survives the rule):**
+
+- **Incident 1 — REJECT was ignored and merged.** A PR was merged while its reviewer verdict was REJECT. The merge gate checked `state=OPEN`, `mergeable=MERGEABLE`, and `0 failing checks` — but never looked at the verdict. Three reviewer blockers reached `main`, including a P0 cross-session data leak where plan completion broadcast `subject`, `reply`, and `charts` to `Clients.All`.
+- **Incident 2 — stability claims failed independent re-measurement, twice.** PR #155 reported "15 consecutive full-suite passes, 0 failed"; independent measurement on merged `main` showed that exact test still failing. A separate PR reported a clean 10-run sweep that also did not reproduce.
+
+**Root cause of Incident 1 — the single-identity constraint (call it out, it is the whole reason the gate misses):**
+
+Author and reviewer share the same GitHub identity, **`swigerb`**. GitHub blocks formal self-approval, so a reviewer running under `swigerb` **cannot** submit a Files-changed → Approve review on a PR authored by `swigerb`. The squad therefore records verdicts as **PR comments**. Any merge gate that only reads formal GitHub review state (`APPROVED` / `CHANGES_REQUESTED`) will see zero verdicts on every PR and will let REJECTs through. The gate must read the **verdict comment for the current head**, not the formal review state.
+
+**Team impact:**
+- **All authors:** Do not merge your own PR on CI status alone. Wait for the reviewer's APPROVE comment against the current head SHA. If you push a new commit after APPROVE, the prior approval is stale — request a fresh one.
+- **All reviewers:** Post the verdict — APPROVE or REJECT — as a **PR comment**, and name the head SHA it applies to. Do not leave the verdict in your session transcript. Re-measure stability claims on the merge target with raw per-run output; if any run fails, name the test.
+- **Coordinator / gate tooling:** Treat a REJECT comment as a hard merge block regardless of CI. Treat an APPROVE comment as stale once a new commit is pushed. Never infer a verdict from CI or from formal review state alone.
+- **This PR:** Docs-only, but the rule it records applies to itself — it merges only after an APPROVE comment against its current head.
+

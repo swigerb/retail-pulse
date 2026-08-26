@@ -10,7 +10,37 @@ source: "extracted"
 
 When a team member has a **Reviewer** role (e.g., Tester, Code Reviewer, Lead), they may approve or reject work from other agents. On rejection, the coordinator enforces strict lockout rules to ensure the original author does NOT self-revise. This prevents defensive feedback loops and ensures independent review.
 
+Reviewers also gate merge. CI green means the code compiled and the tests that ran passed — it does not mean the change is correct and it does not mean the suite is stable. The merge gate rules below are non-negotiable.
+
 ## Patterns
+
+### Merge Gate — Verdicts, Not CI Alone
+
+These rules bind every PR in this repository, including docs-only PRs.
+
+1. **Never merge on CI status alone.** Before merging, confirm an explicit **APPROVE** verdict for the **current head SHA**. Green checks are necessary but not sufficient.
+2. **REJECT blocks merge**, regardless of check status. Do not merge a PR whose most recent verdict for the current head is REJECT, even if every check is green. Merge only after the reviewer posts a fresh APPROVE against the current head.
+3. **Verdicts must be posted as PR comments.** Both APPROVE and REJECT are recorded as comments on the pull request itself. A verdict that exists only in an agent session transcript is not a verdict for gate purposes.
+4. **Read the diff before merging a defect fix.** For any PR that claims to fix a bug or regression, inspect the diff and confirm the change actually does what the PR description says.
+5. **Re-measure stability claims on the merge target.** Stability sweeps ("N consecutive passes", flake reproduction attempts) must be run against the PR's mergeable head with the target merged in — not against the working branch under different load. Report **raw per-run output**. If any run fails during a stability sequence — target or not — **name the failing test**. Do not report a clean sweep that omits observed failures.
+
+#### Why verdicts are comments — the single-identity constraint
+
+Author and reviewer in this repository share the same GitHub identity, **`swigerb`**. GitHub blocks formal self-approval, so a reviewer running under `swigerb` **cannot** submit a Files-changed → Approve review on a PR authored by `swigerb`. Verdicts are therefore recorded as **PR comments**. A merge gate that only reads formal GitHub review state (`APPROVED` / `CHANGES_REQUESTED`) will see zero verdicts on every PR and will let REJECTs through. The gate — human or tooling — must read the **verdict comment for the current head SHA**, not the formal review state and not the CI status.
+
+#### Verdict staleness
+
+An APPROVE applies to the exact head SHA it was posted against. Any new commit invalidates it — the PR must receive a fresh APPROVE against the new head before it may merge. A REJECT similarly applies until the reviewer posts a new verdict against a newer head.
+
+#### Anti-patterns for the merge gate
+
+- ❌ Merging because checks are green without locating an APPROVE comment for the current head
+- ❌ Merging over a REJECT comment because CI is green or because the reviewer's concerns "seem minor"
+- ❌ Leaving a verdict in a session transcript instead of posting it to the PR
+- ❌ Merging a defect fix without reading the diff to confirm the change matches the PR description
+- ❌ Reporting a clean stability sweep run on the working branch instead of the merge target
+- ❌ Reporting a clean stability sweep that silently drops runs where a test failed — every observed failure must be named
+- ❌ Inferring a verdict from formal GitHub review state alone (self-approval is blocked by the shared `swigerb` identity, so formal state is always empty)
 
 ### Reviewer Rejection Protocol
 
