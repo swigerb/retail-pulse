@@ -30,8 +30,23 @@ public interface IResponseCache
 
 /// <summary>
 /// A cached agent response with metadata for staleness tracking.
+///
+/// <para>
+/// <paramref name="Charts"/> and <paramref name="Routing"/> are carried so a cache hit
+/// can replay the FULL response, not just its prose. Storing the reply alone made a
+/// repeated chart question silently lose its visualization inside the TTL (issue #170)
+/// — the same user-visible failure as #50/#55, reached through repetition rather than
+/// routing. Both fields are optional and trailing, so existing positional construction
+/// is unaffected and a non-chart response simply leaves them null.
+/// </para>
 /// </summary>
-public record CachedResponse(string Response, string AgentId, DateTime CachedAt, string QueryHash);
+public record CachedResponse(
+    string Response,
+    string AgentId,
+    DateTime CachedAt,
+    string QueryHash,
+    List<ChartSpec>? Charts = null,
+    RoutingInfo? Routing = null);
 
 /// <summary>
 /// Snapshot of cache health metrics.

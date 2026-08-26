@@ -201,8 +201,14 @@ public static class ChatEndpoints
                             cached.Response,
                             sessionId,
                             [new AgentSpan("cache.hit", "cache", $"Served from cache (agent: {cached.AgentId})", 0, DateTimeOffset.UtcNow, sessionId)],
+                            // Replay the charts and routing captured with this entry so a
+                            // cached answer is indistinguishable from a fresh one apart from
+                            // cost and latency (issue #170). Copy the list so a caller cannot
+                            // mutate the cached instance through the returned response.
+                            cached.Charts is { Count: > 0 } cachedCharts ? [.. cachedCharts] : null,
+                            0,
                             null,
-                            0));
+                            cached.Routing));
                     }
                 }
 
@@ -905,7 +911,16 @@ public static class ChatEndpoints
                 {
                     string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                     await responseCache.SetAsync(cacheKey,
-                        new CachedResponse(response.Reply, specialist.Key, DateTime.UtcNow, cacheKey),
+                        new CachedResponse(
+                            response.Reply,
+                            specialist.Key,
+                            DateTime.UtcNow,
+                            cacheKey,
+                            // Charts and routing travel with the reply so a hit replays the
+                            // whole answer (issue #170). Copy the list — the cache must not
+                            // alias a collection the pipeline may still mutate.
+                            response.Charts is { Count: > 0 } c ? [.. c] : null,
+                            response.Routing),
                         TimeSpan.FromMinutes(5), ct);
                 }
 
