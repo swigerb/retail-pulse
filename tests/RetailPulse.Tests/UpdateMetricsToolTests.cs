@@ -3,6 +3,7 @@ using FluentAssertions;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
 using RetailPulse.McpServer.Tools;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests;
 
@@ -16,7 +17,7 @@ public class UpdateMetricsToolTests : IDisposable
         string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
 
-        _dbPath = Path.Combine(Path.GetTempPath(), $"retailpulse_test_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("retailpulse_test");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
         _db = new RetailPulseDb(tenantProvider, _dbPath, tenantConfigPath);
     }
@@ -24,9 +25,7 @@ public class UpdateMetricsToolTests : IDisposable
     public void Dispose()
     {
         GC.SuppressFinalize(this);
-        try { File.Delete(_dbPath); } catch { /* file may be locked by WAL */ }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     private static string ToJson(object obj) => JsonSerializer.Serialize(obj);

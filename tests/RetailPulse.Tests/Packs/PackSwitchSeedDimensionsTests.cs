@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using RetailPulse.Api.Packs;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Packs;
 
@@ -20,13 +21,7 @@ public sealed class PackSwitchSeedDimensionsTests : IDisposable
     public void Dispose()
     {
         GC.SuppressFinalize(this);
-        SqliteConnection.ClearAllPools();
-        foreach (string path in _dbPaths)
-        {
-            try { File.Delete(path); } catch { }
-            try { File.Delete(path + "-wal"); } catch { }
-            try { File.Delete(path + "-shm"); } catch { }
-        }
+        SqliteTestCleanup.ReleaseAndDelete([.. _dbPaths]);
     }
 
     [Fact]
@@ -96,10 +91,8 @@ public sealed class PackSwitchSeedDimensionsTests : IDisposable
 
         foreach (LoadedPack pack in packs)
         {
-            string dbPath = Path.Combine(Path.GetTempPath(),
-                $"rp_pack_switch_{pack.Name}_{Guid.NewGuid():N}.db");
+            string dbPath = SqliteTestCleanup.NewDbPath($"rp_pack_switch_{pack.Name}");
             _dbPaths.Add(dbPath);
-            SqliteConnection.ClearAllPools();
 
             // Every shipped pack ships its own tenant declaration; wrap
             // it as an in-memory provider for the seeder.

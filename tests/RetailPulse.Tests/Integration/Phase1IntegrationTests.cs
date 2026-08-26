@@ -20,6 +20,7 @@ using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Memory;
 using RetailPulse.Contracts.Routing;
 using RetailPulse.Contracts.Tracing;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Integration;
 
@@ -39,8 +40,8 @@ public class Phase1IntegrationTests : IDisposable
 
     public Phase1IntegrationTests()
     {
-        _memoryDbPath = Path.Combine(Path.GetTempPath(), $"phase1_mem_{Guid.NewGuid():N}.db");
-        _approvalDbPath = Path.Combine(Path.GetTempPath(), $"phase1_appr_{Guid.NewGuid():N}.db");
+        _memoryDbPath = SqliteTestCleanup.NewDbPath("phase1_mem");
+        _approvalDbPath = SqliteTestCleanup.NewDbPath("phase1_appr");
         _memory = new SqliteConversationMemory(_memoryDbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
         _approvalGate = new SqliteApprovalGate(_approvalDbPath, Mock.Of<ILogger<SqliteApprovalGate>>());
         _alertService = new InMemoryAlertService(throttleWindow: TimeSpan.FromMilliseconds(50));
@@ -54,12 +55,7 @@ public class Phase1IntegrationTests : IDisposable
         CleanDb(_approvalDbPath);
     }
 
-    private static void CleanDb(string path)
-    {
-        try { File.Delete(path); } catch { }
-        try { File.Delete(path + "-wal"); } catch { }
-        try { File.Delete(path + "-shm"); } catch { }
-    }
+    private static void CleanDb(string path) => SqliteTestCleanup.ReleaseAndDelete(path);
 
     #region Router Still Routes Correctly
 

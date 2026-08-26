@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Memory;
 using RetailPulse.Contracts.Memory;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Memory;
 
@@ -18,16 +19,14 @@ public class ConversationMemoryTests : IDisposable
 
     public ConversationMemoryTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"memory_test_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("memory_test");
         _memory = new SqliteConversationMemory(_dbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
     }
 
     public void Dispose()
     {
         _memory.Dispose();
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     private static MemoryEntry MakeEntry(

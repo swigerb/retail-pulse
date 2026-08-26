@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using RetailPulse.Api.Resilience;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Chaos;
 
@@ -14,7 +15,7 @@ public class DeadLetterQueueTests : IDisposable
 
     public DeadLetterQueueTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"dlq-test-{Guid.NewGuid()}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("dlq-test");
         _queue = new DeadLetterQueue(NullLogger<DeadLetterQueue>.Instance, _dbPath);
     }
 
@@ -90,6 +91,6 @@ public class DeadLetterQueueTests : IDisposable
     public void Dispose()
     {
         _queue.Dispose();
-        try { File.Delete(_dbPath); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 }

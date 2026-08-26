@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Memory;
 using RetailPulse.Contracts.Memory;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Memory;
 
@@ -20,7 +21,7 @@ public class MemoryMiddlewareTests : IDisposable
 
     public MemoryMiddlewareTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"middleware_test_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("middleware_test");
         _memory = new SqliteConversationMemory(_dbPath, Mock.Of<ILogger<SqliteConversationMemory>>());
 
         _extractionClient = new Mock<IChatClient>();
@@ -37,9 +38,7 @@ public class MemoryMiddlewareTests : IDisposable
     public void Dispose()
     {
         _memory.Dispose();
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     private void SetupExtractionResponse(string json)

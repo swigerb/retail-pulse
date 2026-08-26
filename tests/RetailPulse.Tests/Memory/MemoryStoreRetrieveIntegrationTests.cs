@@ -4,6 +4,7 @@ using RetailPulse.Api.Agents.Specialists;
 using RetailPulse.Api.Memory;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Memory;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Memory;
 
@@ -15,7 +16,7 @@ public class MemoryStoreRetrieveIntegrationTests : IDisposable
 
     public MemoryStoreRetrieveIntegrationTests()
     {
-        _dbPath = Path.Combine(AppContext.BaseDirectory, $"memory-store-retrieve-{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("memory-store-retrieve");
         _memory = new SqliteConversationMemory(_dbPath, NullLogger<SqliteConversationMemory>.Instance);
         _agent = new MemoryManagementAgent(_memory, NullLogger<MemoryManagementAgent>.Instance);
     }
@@ -143,9 +144,7 @@ public class MemoryStoreRetrieveIntegrationTests : IDisposable
     public void Dispose()
     {
         _memory.Dispose();
-        TryDelete(_dbPath);
-        TryDelete(_dbPath + "-wal");
-        TryDelete(_dbPath + "-shm");
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
     private static MemoryEntry CreateEntry(
@@ -174,19 +173,4 @@ public class MemoryStoreRetrieveIntegrationTests : IDisposable
             Message: message,
             SessionId: sessionId,
             User: new UserContext(userId, "Test User", "test@example.com"));
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch
-        {
-            // Best-effort cleanup for SQLite sidecar files.
-        }
-    }
 }

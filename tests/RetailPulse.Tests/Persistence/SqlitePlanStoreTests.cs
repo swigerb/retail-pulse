@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts.Persistence;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Persistence;
 
@@ -16,15 +17,10 @@ public sealed class SqlitePlanStoreTests : IDisposable
 
     public SqlitePlanStoreTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"plan_store_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("plan_store");
     }
 
-    public void Dispose()
-    {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private SqlitePlanStore NewStore() =>
         new(_dbPath, Mock.Of<ILogger<SqlitePlanStore>>());

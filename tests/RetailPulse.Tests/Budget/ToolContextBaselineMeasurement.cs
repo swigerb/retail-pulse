@@ -1,6 +1,7 @@
 using System.Text.Json;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
+using RetailPulse.Tests.TestInfrastructure;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -32,7 +33,7 @@ public sealed class ToolContextBaselineMeasurement : IDisposable
         _out = output;
         string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         string tenantConfigPath = Path.Combine(repoRoot, "tenant.yaml");
-        _dbPath = Path.Combine(AppContext.BaseDirectory, $"budget_measure_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("budget_measure");
         var tenantProvider = new FileTenantProvider(tenantConfigPath);
         _db = new RetailPulseDb(tenantProvider, _dbPath, tenantConfigPath);
     }
@@ -90,8 +91,5 @@ public sealed class ToolContextBaselineMeasurement : IDisposable
         Assert.True(total > 0);
     }
 
-    public void Dispose()
-    {
-        try { File.Delete(_dbPath); } catch { /* best effort cleanup */ }
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using RetailPulse.Api.Persistence;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Persistence;
 
@@ -31,7 +32,7 @@ public sealed class SessionPersistenceServiceExtensionsTests
     [Fact]
     public void Disabled_DoesNotRegisterStore_OrCleanupService_OrTouchDisk()
     {
-        string dbPath = Path.Combine(Path.GetTempPath(), $"session_disabled_{Guid.NewGuid():N}.db");
+        string dbPath = SqliteTestCleanup.NewDbPath("session_disabled");
 
         IServiceCollection services = BuildServices(
             new Dictionary<string, string?> { ["SessionPersistence:Enabled"] = "false" },
@@ -53,7 +54,7 @@ public sealed class SessionPersistenceServiceExtensionsTests
     [Fact]
     public void Enabled_RegistersStore_AndCleanupService()
     {
-        string dbPath = Path.Combine(Path.GetTempPath(), $"session_enabled_{Guid.NewGuid():N}.db");
+        string dbPath = SqliteTestCleanup.NewDbPath("session_enabled");
 
         try
         {
@@ -72,9 +73,7 @@ public sealed class SessionPersistenceServiceExtensionsTests
         }
         finally
         {
-            try { File.Delete(dbPath); } catch { }
-            try { File.Delete(dbPath + "-shm"); } catch { }
-            try { File.Delete(dbPath + "-wal"); } catch { }
+            SqliteTestCleanup.ReleaseAndDelete(dbPath);
         }
     }
 }

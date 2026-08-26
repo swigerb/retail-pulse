@@ -8,6 +8,7 @@ using Moq;
 using RetailPulse.Api.Approval;
 using RetailPulse.Contracts.Approval;
 using RetailPulse.Contracts.Routing;
+using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Approval;
 
@@ -22,19 +23,36 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
 {
     private readonly string _dbPath;
     private readonly string _checkpointDir;
+    // #158: two tests below intentionally simulate a "process crash" by
+    // firing CoordinateAsync and never awaiting it. Without cancellation
+    // that background waiter keeps a live SqliteConnection open past the
+    // fixture's Dispose, which then legitimately can't delete the DB.
+    // Track those tasks + a shared CTS so Dispose can release them BEFORE
+    // SqliteTestCleanup runs.
+    private readonly CancellationTokenSource _backgroundCts = new();
+    private readonly List<Task> _backgroundTasks = [];
 
     public PlanReviewCoordinatorTests()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"plan_review_{Guid.NewGuid():N}.db");
+        _dbPath = SqliteTestCleanup.NewDbPath("plan_review");
         _checkpointDir = Path.Combine(Path.GetTempPath(), $"plan_review_ckpt_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_checkpointDir);
     }
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
-        try { File.Delete(_dbPath + "-wal"); } catch { }
-        try { File.Delete(_dbPath + "-shm"); } catch { }
+        _backgroundCts.Cancel();
+        try
+        {
+            // Give abandoned coord waiters up to 2s to observe cancellation and
+            // release their pooled SqliteConnection. Any timeout here would be
+            // a real test-code leak — surface it via SqliteTestCleanup below.
+            Task.WhenAll(_backgroundTasks).Wait(TimeSpan.FromSeconds(2));
+        }
+        catch { /* individual task failures/cancellations are expected */ }
+        _backgroundCts.Dispose();
+
+        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
         try { Directory.Delete(_checkpointDir, recursive: true); } catch { }
     }
 
@@ -324,12 +342,13 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
             PlanReviewCoordinator coord = CreateCoordinator(firstGate, options, TimeProvider.System);
 
             PlanReviewCoordinationInput input = SampleInput();
-            Task<PlanReviewOutcome> coordTask = coord.CoordinateAsync(input, CancellationToken.None);
+            Task<PlanReviewOutcome> coordTask = coord.CoordinateAsync(input, _backgroundCts.Token);
             ApprovalRequest row = await WaitForPending(firstGate, input.Subject);
             requestId = row.RequestId;
 
-            // Simulate crash: abandon the coordinator waiter.
-            _ = coordTask; // no observation
+            // Simulate crash: abandon the coordinator waiter (tracked so
+            // fixture Dispose can cancel + release its SQLite handle — #158).
+            _backgroundTasks.Add(coordTask);
         }
 
         // New "process": a fresh gate + reconciliation with the plan-aware strategy
@@ -373,7 +392,7 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
         PlanReviewCoordinator coord = CreateCoordinator(gate, options, TimeProvider.System);
 
         PlanReviewCoordinationInput input = SampleInput() with { Subject = "alice" };
-        _ = coord.CoordinateAsync(input, CancellationToken.None);
+        _backgroundTasks.Add(coord.CoordinateAsync(input, _backgroundCts.Token));
         _ = await WaitForPending(gate, input.Subject);
 
         (await gate.GetPendingAsync("bob")).Should().BeEmpty(
