@@ -25,10 +25,7 @@ public sealed class SqliteSessionStoreTests : IDisposable
         _store = new SqliteSessionStore(_dbPath, Mock.Of<ILogger<SqliteSessionStore>>());
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private static SessionTurnWrite MakeTurn(
         string sessionId,

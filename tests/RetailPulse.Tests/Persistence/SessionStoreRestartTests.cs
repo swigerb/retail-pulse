@@ -26,10 +26,7 @@ public sealed class SessionStoreRestartTests : IDisposable
         _dbPath = SqliteTestCleanup.NewDbPath("session_restart");
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private static SessionTurnWrite MakeTurn(string sessionId, string subject, string role, string content) =>
         new()

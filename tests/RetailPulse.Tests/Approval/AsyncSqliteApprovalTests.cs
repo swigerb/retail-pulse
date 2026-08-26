@@ -23,10 +23,7 @@ public class AsyncSqliteApprovalTests : IDisposable
         _gate = new SqliteApprovalGate(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>());
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private static ApprovalContext MakeContext(string action = "Test action")
         => new("agent-1", "user-1", action, "Low", "medium", "Testing");

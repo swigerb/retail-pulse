@@ -18,8 +18,8 @@ using RetailPulse.Contracts.Persistence;
 using RetailPulse.Contracts.Routing;
 using RetailPulse.Contracts.Tracing;
 using RetailPulse.Tests.Fixtures;
-using ChatResponse = RetailPulse.Contracts.ChatResponse;
 using RetailPulse.Tests.TestInfrastructure;
+using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
 namespace RetailPulse.Tests.Planning;
 

@@ -29,10 +29,7 @@ public sealed class SqliteMountTests : IDisposable
         _connectionString = new SqliteConnectionStringBuilder { DataSource = _dbPath }.ToString();
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private static long ReadLong(SqliteConnection conn, string pragma)
     {

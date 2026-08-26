@@ -24,10 +24,7 @@ public class ApprovalApiTests : IDisposable
         _gate = new SqliteApprovalGate(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>());
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private static ApprovalContext MakeContext(
         string userId = "user-1", string action = "Test action")

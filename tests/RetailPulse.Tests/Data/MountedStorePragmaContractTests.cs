@@ -36,10 +36,7 @@ public sealed class MountedStorePragmaContractTests : IDisposable
     private static readonly string RepoRoot = FindRepoRoot();
     private readonly List<string> _dbPaths = [];
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete([.. _dbPaths]);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete([.. _dbPaths]);
 
     private string NewDbPath(string label)
     {

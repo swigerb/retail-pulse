@@ -20,10 +20,7 @@ public sealed class SqlitePlanStoreTests : IDisposable
         _dbPath = SqliteTestCleanup.NewDbPath("plan_store");
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private SqlitePlanStore NewStore() =>
         new(_dbPath, Mock.Of<ILogger<SqlitePlanStore>>());

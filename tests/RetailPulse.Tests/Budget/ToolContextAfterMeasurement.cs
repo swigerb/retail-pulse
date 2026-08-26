@@ -3,9 +3,9 @@ using FluentAssertions;
 using RetailPulse.Api.Budget;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
+using RetailPulse.Tests.TestInfrastructure;
 using Xunit;
 using Xunit.Abstractions;
-using RetailPulse.Tests.TestInfrastructure;
 
 namespace RetailPulse.Tests.Budget;
 
@@ -129,8 +129,5 @@ public sealed class ToolContextAfterMeasurement : IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 }

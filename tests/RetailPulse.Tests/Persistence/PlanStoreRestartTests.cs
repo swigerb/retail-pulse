@@ -24,10 +24,7 @@ public sealed class PlanStoreRestartTests : IDisposable
         _dbPath = SqliteTestCleanup.NewDbPath("plan_restart");
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     [Fact]
     public async Task Full_Plan_Survives_A_Store_Restart_With_Full_Fidelity()

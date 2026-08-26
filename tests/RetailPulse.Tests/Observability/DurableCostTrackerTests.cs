@@ -27,10 +27,7 @@ public sealed class DurableCostTrackerTests : IDisposable
         _dbPath = SqliteTestCleanup.NewDbPath("rp-costs");
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private static IConfiguration Pricing() =>
         new ConfigurationBuilder()

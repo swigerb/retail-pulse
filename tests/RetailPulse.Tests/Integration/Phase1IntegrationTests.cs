@@ -55,10 +55,7 @@ public class Phase1IntegrationTests : IDisposable
         CleanDb(_approvalDbPath);
     }
 
-    private static void CleanDb(string path)
-    {
-        SqliteTestCleanup.ReleaseAndDelete(path);
-    }
+    private static void CleanDb(string path) => SqliteTestCleanup.ReleaseAndDelete(path);
 
     #region Router Still Routes Correctly
 

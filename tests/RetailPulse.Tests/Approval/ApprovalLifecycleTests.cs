@@ -23,10 +23,7 @@ public sealed class ApprovalLifecycleTests : IDisposable
         _dbPath = SqliteTestCleanup.NewDbPath("approval_lifecycle");
     }
 
-    public void Dispose()
-    {
-        SqliteTestCleanup.ReleaseAndDelete(_dbPath);
-    }
+    public void Dispose() => SqliteTestCleanup.ReleaseAndDelete(_dbPath);
 
     private SqliteApprovalGate CreateGate(TimeProvider clock, TimeSpan? defaultTimeout = null)
         => new(_dbPath, Mock.Of<ILogger<SqliteApprovalGate>>(), defaultTimeout ?? TimeSpan.FromMinutes(5), clock);

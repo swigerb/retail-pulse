@@ -2,8 +2,8 @@ using System.Text.Json;
 using FluentAssertions;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
-using Xunit;
 using RetailPulse.Tests.TestInfrastructure;
+using Xunit;
 
 namespace RetailPulse.Tests.Data;
 
