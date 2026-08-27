@@ -239,4 +239,26 @@ public sealed partial class ContainerAppDeploymentContractTests
             @"name:\s*'SessionPersistence__Enabled'\s*value:\s*'true'",
             "durable session history must be on for the full demo");
     }
+
+    /// <summary>
+    /// The optional Azure AI Content Safety layer is wired from the provisioned
+    /// account's endpoint. The Security dashboard reported "Content safety disabled"
+    /// because the endpoint was never injected, so the API fell back to the regex-only
+    /// baseline. Pin the wiring, and pin that no key is passed — authentication is
+    /// managed identity by design.
+    /// </summary>
+    [Fact]
+    [Trait("OWASP", "A02-CryptographicFailures")]
+    public void Api_WiresContentSafetyByEndpoint_WithoutAnyKey()
+    {
+        (_, string body) = BlockFor("ca-retailpulse-api");
+
+        body.Should().MatchRegex(
+            @"name:\s*'Guardrails__ContentSafety__Endpoint'",
+            "the API must receive the Content Safety endpoint or the second layer stays off");
+
+        body.Should().NotMatchRegex(
+            @"Guardrails__ContentSafety__(ApiKey|Key|SecretKey)",
+            "Content Safety authenticates with managed identity — no key may appear in configuration");
+    }
 }

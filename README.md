@@ -667,7 +667,26 @@ The SignalR `TelemetryHub` streams agent execution spans to connected clients in
 
 The React dashboard renders these as an interactive span timeline alongside the chat panel.
 
-The web app navigation is intentionally minimal by default: Chat, Real-Time Telemetry, and Observability. Real-Time Telemetry is always available, while Observability remains enabled by default for the AI Gateway via Azure APIM view of costs, token usage, and metrics. Secondary demo tabs such as Campaign Planner, Competitive, Knowledge Base, Health Council, Security, Cards, Stores, Financials, and Portfolio are gated behind `VITE_FEATURE_*` flags; copy `src/RetailPulse.Web/.env.example` to `.env.local` to enable them locally.
+### Navigation and feature flags
+
+Every secondary view is gated behind a `VITE_FEATURE_*` build-time flag, so a
+deployment can narrow the surface it exposes. The flags default to `false`
+(except Observability) for a minimal local build; copy
+`src/RetailPulse.Web/.env.example` to `.env.local` to turn them on.
+
+The **deployed demo environment enables all of them** — `infra/main.bicep` emits
+every `VITE_FEATURE_*` as an infra output so the Vite build embeds `true`, and
+`ContainerAppDeploymentContractTests` pins the corresponding API-side switches.
+
+Because ten views do not fit in one header row, the navigation is data-driven:
+the first four stay inline and the rest collapse into a **More** menu. The active
+view is always promoted out of the overflow so you can see where you are and
+click the same button to return to chat.
+
+Panels are individually fault-isolated. Each secondary view renders inside a
+`PanelErrorBoundary`, so an uncaught error is contained to that panel instead of
+replacing the whole dashboard — the header stays usable and navigating away
+resets the boundary.
 
 ---
 

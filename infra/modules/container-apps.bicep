@@ -51,6 +51,9 @@ param containerRegistryLoginServer string = ''
 @secure()
 param mcpApiKey string = '${uniqueString(resourceGroup().id, 'mcp-api-key')}${uniqueString(subscription().subscriptionId, 'retail-pulse-mcp')}'
 
+@description('Azure AI Content Safety endpoint. Empty disables the optional second guardrail layer, leaving the regex-only baseline in place.')
+param contentSafetyEndpoint string = ''
+
 var apimSubscriptionKeySecretName = 'apim-sub-key'
 var mcpApiKeySecretName = 'mcp-api-key'
 
@@ -306,6 +309,20 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'SessionPersistence__Enabled'
               value: 'true'
+            }
+            // Azure AI Content Safety second layer (issue #100). The regex
+            // guardrails always run first; this adds text moderation and Prompt
+            // Shields on top. Authentication is managed identity — there is no
+            // key here by design, and the endpoint is injected only when the
+            // account was provisioned (contentSafetyEnabled). An empty endpoint
+            // leaves the layer off and the regex-only baseline in place.
+            {
+              name: 'Guardrails__ContentSafety__Enabled'
+              value: empty(contentSafetyEndpoint) ? 'false' : 'true'
+            }
+            {
+              name: 'Guardrails__ContentSafety__Endpoint'
+              value: contentSafetyEndpoint
             }
             {
               name: 'ASPNETCORE_ENVIRONMENT'

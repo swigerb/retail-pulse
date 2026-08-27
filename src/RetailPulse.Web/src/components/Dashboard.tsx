@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle } from '@fluentui/react-components';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton } from '@fluentui/react-components';
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { TelemetryPanel } from './TelemetryPanel';
@@ -157,6 +157,18 @@ const VIEW_LABELS: Readonly<Record<string, string>> = {
   portfolio: 'Portfolio',
 };
 
+/**
+ * How many view buttons stay inline before the rest collapse into "More".
+ * Four keeps the header readable at ~1280px while still advertising the
+ * headline capabilities.
+ */
+const MAX_INLINE_NAV_ITEMS = 4;
+
+/** The dashboard views the header can navigate between. */
+type ActiveView =
+  | 'chat' | 'promo' | 'competitive' | 'knowledge' | 'council' | 'security'
+  | 'cards' | 'observability' | 'stores' | 'financials' | 'portfolio';
+
 // CSS custom properties overridden from the active pack's theme block.
 // We intentionally stop at the two primary brand tokens; App.css already
 // derives every semantic accent shade (accent-soft, border, hover, ...)
@@ -192,7 +204,7 @@ export function Dashboard() {
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRequest[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [traces, setTraces] = useState<Trace[]>([]);
-  const [activeView, setActiveView] = useState<'chat' | 'promo' | 'competitive' | 'knowledge' | 'council' | 'security' | 'cards' | 'observability' | 'stores' | 'financials' | 'portfolio'>('chat');
+  const [activeView, setActiveView] = useState<ActiveView>('chat');
   const [selectedBrand, setSelectedBrand] = useState<BrandScore | null>(null);
   const [selectedStore, setSelectedStore] = useState<StorePerformance | null>(null);
   const [explanationOpen, setExplanationOpen] = useState(false);
@@ -535,6 +547,37 @@ export function Dashboard() {
     setAlerts(prev => prev.map(a => a.status === 'active' ? { ...a, status: 'dismissed' as const } : a));
   }, []);
 
+  // Header navigation, derived from the enabled capability + feature-flag set.
+  // Building this as data (rather than ten hand-written buttons) is what lets the
+  // header collapse gracefully instead of overflowing once every flag is on.
+  const navItems = useMemo(() => {
+    const alt = capabilities.alternateViews;
+    const all: Array<{ view: ActiveView; label: string; icon: JSX.Element; color: string; enabled: boolean }> = [
+      { view: 'competitive', label: 'Competitive', icon: <Shield24Regular />, color: '#ef4444', enabled: alt && featureFlags.competitive },
+      { view: 'council', label: 'Health Council', icon: <HeartPulse24Regular />, color: '#0f7b0f', enabled: alt && featureFlags.healthCouncil },
+      { view: 'knowledge', label: 'Knowledge Base', icon: <Library24Regular />, color: '#06b6d4', enabled: alt && featureFlags.knowledgeBase },
+      { view: 'observability', label: 'Observability', icon: <Eye24Regular />, color: '#06b6d4', enabled: capabilities.observability && featureFlags.observability },
+      { view: 'promo', label: 'Campaign Planner', icon: <TargetArrow24Regular />, color: '#22c55e', enabled: alt && featureFlags.campaignPlanner },
+      { view: 'security', label: 'Security', icon: <ShieldCheckmark24Regular />, color: '#f59e0b', enabled: alt && featureFlags.security },
+      { view: 'cards', label: 'Cards', icon: <CardUi24Regular />, color: '#3b82f6', enabled: alt && featureFlags.cards },
+      { view: 'stores', label: 'Stores', icon: <Building24Regular />, color: '#22c55e', enabled: alt && featureFlags.stores },
+      { view: 'financials', label: 'Financials', icon: <Money24Regular />, color: '#3b82f6', enabled: alt && featureFlags.financials },
+      { view: 'portfolio', label: 'Portfolio', icon: <Star24Regular />, color: '#8b5cf6', enabled: alt && featureFlags.portfolio },
+    ];
+    return all.filter(i => i.enabled);
+  }, [capabilities.alternateViews, capabilities.observability]);
+
+  // Promote the active view out of the overflow so the operator can always see
+  // which panel they are on — and click the same button to get back to chat.
+  const { primaryNavItems, overflowNavItems } = useMemo(() => {
+    const inline = navItems.slice(0, MAX_INLINE_NAV_ITEMS);
+    const rest = navItems.slice(MAX_INLINE_NAV_ITEMS);
+    const activeInRest = rest.find(i => i.view === activeView);
+    return activeInRest
+      ? { primaryNavItems: [...inline, activeInRest], overflowNavItems: rest.filter(i => i.view !== activeView) }
+      : { primaryNavItems: inline, overflowNavItems: rest };
+  }, [navItems, activeView]);
+
   // The chat surface is a SINGLE persistently-mounted ChatPanel. It is visible only
   // when no alternate dashboard view is active; otherwise it is hidden (but kept
   // mounted) so its conversation state survives navigation. This boolean mirrors —
@@ -582,106 +625,49 @@ export function Dashboard() {
               onClick={() => setTelemetryOpen(true)}
             />
           )}
-          {capabilities.alternateViews && featureFlags.campaignPlanner && (
-            <Button
-              appearance={activeView === 'promo' ? 'primary' : 'subtle'}
-              icon={<TargetArrow24Regular />}
-              onClick={() => setActiveView(prev => prev === 'promo' ? 'chat' : 'promo')}
-              style={activeView === 'promo' ? { backgroundColor: '#22c55e', borderColor: '#22c55e' } : undefined}
-            >
-              {activeView === 'promo' ? 'Back to Chat' : 'Campaign Planner'}
-            </Button>
-          )}
-          {capabilities.alternateViews && featureFlags.competitive && (
-            <Button
-              appearance={activeView === 'competitive' ? 'primary' : 'subtle'}
-              icon={<Shield24Regular />}
-              onClick={() => setActiveView(prev => prev === 'competitive' ? 'chat' : 'competitive')}
-              style={activeView === 'competitive' ? { backgroundColor: '#ef4444', borderColor: '#ef4444' } : undefined}
-            >
-              {activeView === 'competitive' ? 'Back to Chat' : 'Competitive'}
-            </Button>
-          )}
-          {capabilities.alternateViews && featureFlags.knowledgeBase && (
-            <Button
-              appearance={activeView === 'knowledge' ? 'primary' : 'subtle'}
-              icon={<Library24Regular />}
-              onClick={() => setActiveView(prev => prev === 'knowledge' ? 'chat' : 'knowledge')}
-              style={activeView === 'knowledge' ? { backgroundColor: '#06b6d4', borderColor: '#06b6d4' } : undefined}
-            >
-              {activeView === 'knowledge' ? 'Back to Chat' : 'Knowledge Base'}
-            </Button>
-          )}
-          {capabilities.alternateViews && featureFlags.healthCouncil && (
-            <Button
-              appearance={activeView === 'council' ? 'primary' : 'subtle'}
-              icon={<HeartPulse24Regular />}
-              onClick={() => setActiveView(prev => prev === 'council' ? 'chat' : 'council')}
-              style={activeView === 'council' ? { backgroundColor: '#0f7b0f', borderColor: '#0f7b0f' } : undefined}
-            >
-              {activeView === 'council' ? 'Back to Chat' : 'Health Council'}
-            </Button>
-          )}
-          {capabilities.alternateViews && featureFlags.security && (
-            <Button
-              appearance={activeView === 'security' ? 'primary' : 'subtle'}
-              icon={<ShieldCheckmark24Regular />}
-              onClick={() => setActiveView(prev => prev === 'security' ? 'chat' : 'security')}
-              style={activeView === 'security' ? { backgroundColor: '#f59e0b', borderColor: '#f59e0b' } : undefined}
-            >
-              {activeView === 'security' ? 'Back to Chat' : 'Security'}
-            </Button>
-          )}
-          {capabilities.alternateViews && featureFlags.cards && (
-            <Button
-              appearance={activeView === 'cards' ? 'primary' : 'subtle'}
-              icon={<CardUi24Regular />}
-              onClick={() => setActiveView(prev => prev === 'cards' ? 'chat' : 'cards')}
-              style={activeView === 'cards' ? { backgroundColor: '#3b82f6', borderColor: '#3b82f6' } : undefined}
-            >
-              {activeView === 'cards' ? 'Back to Chat' : 'Cards'}
-            </Button>
-          )}
-          {capabilities.observability && featureFlags.observability && (
-            <Button
-              appearance={activeView === 'observability' ? 'primary' : 'subtle'}
-              icon={<Eye24Regular />}
-              onClick={() => setActiveView(prev => prev === 'observability' ? 'chat' : 'observability')}
-              style={activeView === 'observability' ? { backgroundColor: '#06b6d4', borderColor: '#06b6d4' } : undefined}
-            >
-              {activeView === 'observability' ? 'Back to Chat' : 'Observability'}
-            </Button>
-          )}
-          {capabilities.alternateViews && featureFlags.stores && (
-            <Button
-              appearance={activeView === 'stores' ? 'primary' : 'subtle'}
-              icon={<Building24Regular />}
-              onClick={() => setActiveView(prev => prev === 'stores' ? 'chat' : 'stores')}
-              style={activeView === 'stores' ? { backgroundColor: '#22c55e', borderColor: '#22c55e' } : undefined}
-            >
-              {activeView === 'stores' ? 'Back to Chat' : 'Stores'}
-            </Button>
-          )}
-          {capabilities.alternateViews && featureFlags.financials && (
-            <Button
-              appearance={activeView === 'financials' ? 'primary' : 'subtle'}
-              icon={<Money24Regular />}
-              onClick={() => setActiveView(prev => prev === 'financials' ? 'chat' : 'financials')}
-              style={activeView === 'financials' ? { backgroundColor: '#3b82f6', borderColor: '#3b82f6' } : undefined}
-            >
-              {activeView === 'financials' ? 'Back to Chat' : 'Financials'}
-            </Button>
-          )}
-          {capabilities.alternateViews && featureFlags.portfolio && (
-            <Button
-              appearance={activeView === 'portfolio' ? 'primary' : 'subtle'}
-              icon={<Star24Regular />}
-              onClick={() => setActiveView(prev => prev === 'portfolio' ? 'chat' : 'portfolio')}
-              style={activeView === 'portfolio' ? { backgroundColor: '#8b5cf6', borderColor: '#8b5cf6' } : undefined}
-            >
-              {activeView === 'portfolio' ? 'Back to Chat' : 'Portfolio'}
-            </Button>
-          )}
+          {/* View navigation.
+              These were ten individually-rendered buttons, which overflowed and
+              crushed the header once every feature flag was enabled. They are now
+              data-driven: the first few stay visible for discoverability and the
+              remainder collapse into a "More" menu, so the header fits regardless
+              of how many views a deployment enables. The active view is always
+              promoted out of the overflow so the operator can see where they are
+              and click back. */}
+          {capabilities.alternateViews || capabilities.observability ? (
+            <>
+              {primaryNavItems.map(item => (
+                <Button
+                  key={item.view}
+                  appearance={activeView === item.view ? 'primary' : 'subtle'}
+                  icon={item.icon}
+                  onClick={() => setActiveView(prev => (prev === item.view ? 'chat' : item.view))}
+                  style={activeView === item.view ? { backgroundColor: item.color, borderColor: item.color } : undefined}
+                >
+                  {activeView === item.view ? 'Back to Chat' : item.label}
+                </Button>
+              ))}
+              {overflowNavItems.length > 0 && (
+                <Menu>
+                  <MenuTrigger disableButtonEnhancement>
+                    <MenuButton appearance="subtle" data-testid="nav-more">More</MenuButton>
+                  </MenuTrigger>
+                  <MenuPopover>
+                    <MenuList>
+                      {overflowNavItems.map(item => (
+                        <MenuItem
+                          key={item.view}
+                          icon={item.icon}
+                          onClick={() => setActiveView(item.view)}
+                        >
+                          {item.label}
+                        </MenuItem>
+                      ))}
+                    </MenuList>
+                  </MenuPopover>
+                </Menu>
+              )}
+            </>
+          ) : null}
           <Button
             appearance="subtle"
             icon={<Add24Regular />}

@@ -75,7 +75,11 @@ caller from smuggling a very large context past the per-message cap.
 
 ## Content Safety (optional second layer)
 
-> **Status:** disabled by default. See
+> **Status:** opt-in, and **enabled in the deployed demo environment**
+> (`contentSafetyEnabled = true` in `infra/main.bicep` provisions the account and
+> injects `Guardrails__ContentSafety__Endpoint`). It remains **off by default in
+> code**, so a build with no endpoint configured runs the regex-only baseline
+> unchanged. See
 > [ADR-010](adr/010-content-safety-layering.md) for the full design rationale.
 
 The regex-based guardrails
@@ -341,13 +345,19 @@ conventions.
 
 ### Storage lifetime
 
-Production ships `Enabled=false` today because the deployed synthetic demo
-runs on ephemeral per-replica storage (`RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`;
-see the deployment note in `docs/architecture.md`). Enabling persistence
-on ephemeral storage would set a durability expectation the substrate
-cannot honour. Once a policy-compatible durable volume is available,
-`SessionPersistence__Enabled=true` on the target environment joins the
-`sessions.db` file to the other durable stores under the same mount.
+The deployed demo now sets `SessionPersistence__Enabled=true` (alongside
+`PlanPersistence__Enabled` and `PlanReview__Enabled`) so the full capability
+surface is exercisable end to end.
+
+That environment still runs on **ephemeral per-replica storage**
+(`RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`; see the deployment note in
+`docs/architecture.md`), so this is a deliberate, bounded trade: session and plan
+rows survive within a warm replica and **reset on revision change, replica
+replacement, or scale-to-zero**. For a demo the store is a live view of the
+current session, not a system of record — do not present it as durable history.
+
+Once a policy-compatible durable volume is available, the same flag joins
+`sessions.db` to the other durable stores under that mount with no code change.
 
 ---
 
