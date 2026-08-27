@@ -171,6 +171,26 @@ public sealed partial class ContainerAppDeploymentContractTests
     }
 
     [Fact]
+    [Trait("OWASP", "A02-CryptographicFailures")]
+    public void McpApiKeyDefault_IsDeterministic_SoProvisionIsIdempotent()
+    {
+        string text = BicepText();
+
+        // newGuid() would mint a fresh key on every provision. The API and the MCP
+        // server read it from separate Container Apps secrets, and a secret-value
+        // change does not necessarily roll both revisions together — so a rotating
+        // default can leave the API presenting a stale key and every MCP call
+        // failing 401 until both apps happen to restart.
+        text.Should().NotMatchRegex(
+            @"param\s+mcpApiKey\s+string\s*=\s*newGuid\(\)",
+            "the MCP shared secret must not be regenerated on every provision");
+
+        text.Should().MatchRegex(
+            @"param\s+mcpApiKey\s+string\s*=\s*'\$\{uniqueString\(",
+            "the MCP shared secret default must be derived deterministically");
+    }
+
+    [Fact]
     [Trait("OWASP", "A05-SecurityMisconfiguration")]
     public void EveryContainerApp_RejectsInsecureTransport()
     {
