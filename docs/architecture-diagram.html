@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<!--
+  Source of truth for docs/architecture-diagram.png.
+
+  To regenerate the PNG: open this file in a Chromium-based browser at a 1860px
+  viewport and take a full-page screenshot (DevTools > Run command > "Capture
+  full size screenshot"), then save over docs/architecture-diagram.png.
+
+  Keep this file honest: every box below must correspond to something that
+  actually ships in this repo. If a capability is opt-in, say so on the box.
+-->
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1860px;
+    background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 100%);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: #1a1a2e;
+    padding: 26px 30px 22px;
+  }
+  h1 { text-align: center; font-size: 30px; font-weight: 700; letter-spacing: -0.3px; }
+  .sub { text-align: center; font-size: 14.5px; color: #4a5568; margin: 7px 0 22px; }
+
+  .cols { display: flex; gap: 22px; align-items: flex-start; }
+  .zone {
+    border: 2px dashed #9aa5b8;
+    border-radius: 14px;
+    padding: 30px 16px 16px;
+    position: relative;
+    background: rgba(255,255,255,0.35);
+  }
+  .zone > .zone-label {
+    position: absolute; top: -12px; left: 18px;
+    background: #eef2f7; border: 1px solid #c3ccdb; border-radius: 6px;
+    padding: 2px 10px; font-size: 12.5px; font-weight: 700; color: #3d4757;
+  }
+  .zone.aspire { flex: 1 1 62%; border-color: #8b5cf6; }
+  .zone.aspire > .zone-label { border-color: #c4b5fd; color: #6d28d9; }
+  .zone.azure  { flex: 1 1 38%; border-color: #2563eb; }
+  .zone.azure  > .zone-label { border-color: #bfdbfe; color: #1d4ed8; }
+
+  .box {
+    border-radius: 11px; padding: 11px 13px; margin-bottom: 11px;
+    border: 2px solid #cbd5e1; background: #fff;
+  }
+  .box h3 {
+    font-size: 14.5px; font-weight: 700; margin-bottom: 3px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .box h3 .port { margin-left: auto; font-size: 11.5px; font-weight: 600; color: #64748b; }
+  .box .meta { font-size: 11px; color: #64748b; margin-bottom: 5px; }
+  ul { list-style: none; }
+  li { font-size: 11.5px; color: #334155; padding: 1.5px 0; }
+  li::before { content: "\25AA"; color: #94a3b8; margin-right: 6px; font-size: 9px; vertical-align: 2px; }
+  code { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.8px; background: #f1f5f9; padding: 0 3px; border-radius: 3px; }
+
+  .req  { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+          padding: 2px 7px; border-radius: 999px; margin-left: auto; }
+  .req.required { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+  .req.optional { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+
+  .web   { border-color: #3b82f6; background: #eff6ff; }
+  .teams { border-color: #8b5cf6; background: #f5f3ff; }
+  .api   { border-color: #2563eb; background: #eff6ff; }
+  .mcp   { border-color: #ea580c; background: #fff7ed; }
+  .gw    { border-color: #0891b2; background: #ecfeff; }
+  .ai    { border-color: #0284c7; background: #f0f9ff; }
+  .id    { border-color: #7c3aed; background: #faf5ff; }
+  .obs   { border-color: #16a34a; background: #f0fdf4; }
+  .opt   { border-color: #d97706; background: #fffbeb; }
+  .host  { border-color: #475569; background: #f8fafc; }
+  .pack  { border-color: #db2777; background: #fdf2f8; }
+
+  .inner { display: flex; gap: 10px; flex-wrap: wrap; }
+  .inner > div {
+    flex: 1 1 calc(33.333% - 7px); min-width: 195px;
+    border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; padding: 8px 10px;
+  }
+  .inner h4 { font-size: 12.2px; font-weight: 700; margin-bottom: 3px; color: #1e293b; }
+  .inner .note { font-size: 10.3px; color: #64748b; margin-top: 3px; }
+
+  .flow { text-align: center; font-size: 11.5px; color: #475569; font-weight: 600; margin: -4px 0 7px; }
+  .flow span { background: #fff; border: 1px solid #cbd5e1; border-radius: 999px; padding: 2px 11px; }
+
+  .legend {
+    margin-top: 16px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff;
+    padding: 10px 14px; display: flex; gap: 24px; justify-content: center; flex-wrap: wrap;
+    font-size: 11.5px; color: #475569;
+  }
+  .legend b { color: #1e293b; }
+  .foot { text-align: right; font-size: 11px; color: #94a3b8; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>Retail Pulse Architecture</h1>
+<div class="sub">
+  .NET 10 &middot; Microsoft Agent Framework 1.18 &middot; MCP tools &middot; APIM AI Gateway &middot; content-pack tenanting
+</div>
+
+<div class="cols">
+
+  <!-- ────────────────────────── Application ────────────────────────── -->
+  <div class="zone aspire">
+    <div class="zone-label">.NET Aspire AppHost &nbsp;&middot;&nbsp; orchestrates all four services</div>
+
+    <div class="box web">
+      <h3>🌐 RetailPulse.Web <span class="port">:5173 &rarr; Azure Static Web Apps</span></h3>
+      <div class="meta">React 19 &middot; Vite &middot; TypeScript &middot; Fluent UI &middot; Recharts &middot; MSAL</div>
+      <ul>
+        <li>Chat panel, live span timeline, plan review surface</li>
+        <li>Starting tasks sourced from the active content pack</li>
+        <li>Signs in with Entra (PKCE); calls the API directly</li>
+      </ul>
+    </div>
+
+    <div class="box teams">
+      <h3>💬 RetailPulse.TeamsBot <span class="port">:5300</span></h3>
+      <div class="meta">Microsoft Agents SDK &middot; Adaptive Cards &middot; SSO</div>
+    </div>
+
+    <div class="flow"><span>POST /api/chat &nbsp;·&nbsp; SignalR spans stream back</span></div>
+
+    <div class="box api">
+      <h3>⚙️ RetailPulse.Api <span class="port">:5100</span></h3>
+      <div class="meta">Minimal API &middot; every LLM call goes through <code>MafAgentInvoker</code> &rarr; <code>ChatClientAgent</code></div>
+      <div class="inner">
+        <div>
+          <h4>Routing</h4>
+          <code>RetailOpsRouter</code>
+          <div class="note">Classifies intent, then <code>HybridExecutionDecider</code> picks Fast, Plan or Council.</div>
+        </div>
+        <div>
+          <h4>Specialists (from YAML)</h4>
+          <div class="note">demand-forecasting · competitive-intel · supply-chain · promo-planning · field-sentiment · store-ops · planogram · margin-analysis · general</div>
+        </div>
+        <div>
+          <h4>Plan-first workflow</h4>
+          <code>PlanExecutor</code>
+          <div class="note">Workflows <code>InProcessExecution</code> + checkpoints. Review gate returns <code>202</code> for approve / edit / reject / replan / clarify.</div>
+        </div>
+        <div>
+          <h4>Consensus council</h4>
+          <div class="note">Multi-agent vote and synthesis for portfolio-health questions.</div>
+        </div>
+        <div>
+          <h4>Chart fulfillment</h4>
+          <div class="note">Charts are rebuilt from tool payloads, not model JSON. Type, mark-count and roster contracts enforced; fails closed with a diagnostic.</div>
+        </div>
+        <div>
+          <h4>Guardrails &amp; auth</h4>
+          <div class="note">Entra JWT bearer + app role, rate limiting, prompt-injection checks, audit log.</div>
+        </div>
+        <div>
+          <h4>SignalR TelemetryHub</h4>
+          <div class="note">Streams routing, tool calls, memory reads, tokens and timings live.</div>
+        </div>
+        <div>
+          <h4>Knowledge</h4>
+          <div class="note">In-memory BM25 by default; Azure AI Search or Foundry IQ by configuration.</div>
+        </div>
+        <div>
+          <h4>SQLite stores</h4>
+          <div class="note">memory · sessions · plans · approvals · audit · costs · alerts</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow"><span>HTTP /api/* &nbsp;·&nbsp; MCP</span></div>
+
+    <div class="box mcp">
+      <h3>🛠️ RetailPulse.McpServer <span class="port">:5200</span></h3>
+      <div class="meta">MCP tool host over a seeded SQLite database (<code>RetailPulseDb</code>) — read <em>and</em> write</div>
+      <div class="inner">
+        <div>
+          <h4>Demand</h4>
+          <div class="note">GetDepletionStats · GetPortfolioDepletionStats · GetHistoricalDemand · GetVariantMix · GenerateForecast · GetSeasonalityFactors · IdentifyDemandRisks</div>
+        </div>
+        <div>
+          <h4>Supply</h4>
+          <div class="note">GetShipmentStats · GetInventoryLevels · GetSupplyHealthSummary · GetSupplyDisruptions · GetFulfillmentRate · PredictStockout</div>
+        </div>
+        <div>
+          <h4>Competitive</h4>
+          <div class="note">GetMarketShare · GetCompetitorPricing · GetCompetitiveLandscape · DetectThreats</div>
+        </div>
+        <div>
+          <h4>Promotion</h4>
+          <div class="note">GetPromoHistory · CalculateLift · EstimateROI · EvaluateTiming</div>
+        </div>
+        <div>
+          <h4>Margin &amp; store</h4>
+          <div class="note">GetMarginByBrand · GetMarginTrend · GetMarginDrivers · DetectMarginRisks · GetStorePerformance · GetShelfLayout · OptimizePlanogram</div>
+        </div>
+        <div>
+          <h4>Field &amp; write-back</h4>
+          <div class="note">GetFieldSentiment · UpdateMetrics</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="box pack">
+      <h3>📦 Content packs <span class="port">packs/&lt;pack&gt;/</span></h3>
+      <div class="meta">One directory holds the tenant model, agent roster, starting tasks and knowledge corpus. <code>Packs:Active</code> selects it at boot.</div>
+      <ul>
+        <li><code>default</code> (Apex Retail Group) &middot; <code>halcyon-pet-supply</code> &middot; <code>prairiehearth-craft-supply</code></li>
+        <li>A load-time validator refuses to start if an agent definition breaks the safety rules</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ────────────────────────── Azure ────────────────────────── -->
+  <div class="zone azure">
+    <div class="zone-label">Azure</div>
+
+    <div class="box host">
+      <h3>🚀 Hosting <span class="req required">required</span></h3>
+      <ul>
+        <li><b>Container Apps</b> — API, MCP server, Teams bot; managed identity, scale to zero</li>
+        <li><b>Container Registry</b> — images pulled with managed identity, no admin secrets</li>
+        <li><b>Static Web Apps</b> — serves the React build</li>
+      </ul>
+    </div>
+
+    <div class="box gw">
+      <h3>🛡️ APIM AI Gateway <span class="req required">required</span></h3>
+      <div class="meta">Every LLM call routes through it — there is no direct-to-Azure-OpenAI path, and a deployment test enforces that.</div>
+      <ul>
+        <li>Token limit 80,000 TPM per subscription</li>
+        <li>Token metrics to App Insights &middot; LLM request/response logging</li>
+        <li>Circuit breaker on 429 &middot; managed identity to Foundry</li>
+        <li>Operations: <code>createChatCompletion</code>, <code>listModels</code></li>
+      </ul>
+    </div>
+
+    <div class="box ai">
+      <h3>🧠 Azure AI Foundry <span class="req required">required</span></h3>
+      <div class="meta">Chat completions behind the gateway</div>
+      <ul>
+        <li><code>gpt-5.4-mini</code> deployment</li>
+        <li>Model-agnostic through <code>IChatClient</code></li>
+      </ul>
+    </div>
+
+    <div class="box id">
+      <h3>🔑 Microsoft Entra ID <span class="req required">required</span></h3>
+      <div class="meta">The only auth mode ever deployed to production</div>
+      <ul>
+        <li>Single tenant, PKCE; SPA and API registrations</li>
+        <li><code>RetailPulse.User</code> app role on every request</li>
+        <li>Optional app-only tokens for machine callers, off by default</li>
+      </ul>
+    </div>
+
+    <div class="box obs">
+      <h3>📊 Observability <span class="req required">required</span></h3>
+      <ul>
+        <li>Application Insights + Log Analytics (OpenTelemetry)</li>
+        <li>Aspire dashboard locally</li>
+        <li>End-to-end traces: request &rarr; router &rarr; agent &rarr; tool &rarr; LLM</li>
+      </ul>
+    </div>
+
+    <div class="box opt">
+      <h3>➕ Opt-in services <span class="req optional">optional</span></h3>
+      <div class="meta">The platform runs fully without any of these</div>
+      <ul>
+        <li><b>Azure AI Search</b> — vector + BM25 knowledge</li>
+        <li><b>Azure AI Foundry IQ</b> — hosted retrieval agent</li>
+        <li><b>Content Safety + Prompt Shields</b> — input/output filtering</li>
+        <li><b>Foundry Agent Service</b> — hosted shipment specialist</li>
+        <li><b>Synthetic chat monitor</b> — federated, non-interactive smoke test</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <div><b>Required</b> — provisioned by <code>infra/main.bicep</code> on every deployment</div>
+  <div><b>Optional</b> — enabled by configuration; absent by default</div>
+  <div><b>Agents &amp; tenants are data</b> — YAML in <code>packs/</code>, no C# change</div>
+  <div><b>Charts</b> — built from tool data, not model output</div>
+</div>
+
+<div class="foot">github.com/swigerb/retail-pulse</div>
+
+</body>
+</html>
