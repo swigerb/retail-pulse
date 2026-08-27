@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactElement } from 'react';
-import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton } from '@fluentui/react-components';
+import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton, Spinner } from '@fluentui/react-components';
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { fetchFinancials, fetchScorecard, fetchStores, fetchStockoutRisks } from '../services/operationsApi';
@@ -272,7 +272,10 @@ export function Dashboard() {
     setBrandsLoading(true);
     void (async () => {
       const packBrands = activePack.pack?.tenant.brands?.map(b => b.name) ?? [];
-      const target = packBrands.length > 0 ? packBrands : ['Apex Grill', 'Summit Brew', 'Wave Drinks'];
+      // Each brand fans out five specialist assessments, so the whole pack (11+
+      // brands) would be 55 agent calls and minutes of latency. Cap the panel at a
+      // portfolio-sized slice that still returns in a demo-reasonable time.
+      const target = (packBrands.length > 0 ? packBrands : ['Apex Grill', 'Summit Vodka', 'FreshMart']).slice(0, 6);
       const result = await fetchScorecard(target);
       if (cancelled) return;
       setBrands(result.brands);
@@ -743,7 +746,7 @@ export function Dashboard() {
               operator navigates, so a failed panel does not stay broken. */}
           <PanelErrorBoundary key={activeView} name={VIEW_LABELS[activeView] ?? 'This view'}>
           {capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner ? (
-            <div style={{ overflow: 'auto', height: '100%' }}>
+            <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <PromoTaskModule />
             </div>
           ) : activeView === 'competitive' && featureFlags.competitive ? (
@@ -753,16 +756,16 @@ export function Dashboard() {
           ) : activeView === 'council' && featureFlags.healthCouncil ? (
             <CouncilPanel />
           ) : activeView === 'security' && featureFlags.security ? (
-            <div style={{ overflow: 'auto', height: '100%' }}>
+            <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <GuardrailsDashboard />
               <GuardrailsConfig />
             </div>
           ) : activeView === 'cards' && featureFlags.cards ? (
-            <div style={{ overflow: 'auto', height: '100%' }}>
+            <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <AdaptiveCardPanel />
             </div>
           ) : capabilities.observability && activeView === 'observability' && featureFlags.observability ? (
-            <div style={{ overflow: 'auto', height: '100%' }}>
+            <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <ObservabilityPanel />
             </div>
           ) : activeView === 'stores' && featureFlags.stores ? (
@@ -779,7 +782,7 @@ export function Dashboard() {
               <StoreDetailDialog store={selectedStore} open={!!selectedStore} onClose={() => setSelectedStore(null)} />
             </div>
           ) : activeView === 'financials' && featureFlags.financials ? (
-            <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
+            <div style={{ overflow: 'auto', height: '100%', padding: '24px', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>💰 Financials</h2>
               <MarginWaterfall steps={waterfall} title={financialsPeriod} />
               <div style={{ marginTop: '24px' }}>
@@ -788,12 +791,20 @@ export function Dashboard() {
               </div>
             </div>
           ) : activeView === 'portfolio' && featureFlags.portfolio ? (
-            <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
+            <div style={{ overflow: 'auto', height: '100%', padding: '24px', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>⭐ Portfolio Scorecard</h2>
               {selectedBrand ? (
                 <div>
                   <Button appearance="subtle" onClick={() => setSelectedBrand(null)} style={{ marginBottom: '16px' }}>← Back to all brands</Button>
                   <BrandScoreCard brand={selectedBrand} onWhyClick={handleWhyClick} />
+                </div>
+              ) : brandsLoading ? (
+                /* Each brand fans out five specialist assessments, so this genuinely
+                   takes a while. Say so, rather than showing an empty grid that reads
+                   as a broken panel. */
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '32px', color: 'var(--color-text-secondary)' }}>
+                  <Spinner size="small" />
+                  <span>Assessing the portfolio — each brand is scored across five specialist dimensions.</span>
                 </div>
               ) : (
                 <PortfolioScorecard

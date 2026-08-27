@@ -16,7 +16,7 @@ public static class StoreEndpoints
             ILoggerFactory loggerFactory,
             CancellationToken ct,
             string? region = null,
-            int limit = 12) =>
+            int limit = 20) =>
         {
             try
             {
@@ -34,10 +34,10 @@ public static class StoreEndpoints
                 if (!doc.RootElement.TryGetProperty("items", out System.Text.Json.JsonElement items)
                     || items.ValueKind != System.Text.Json.JsonValueKind.Array)
                 {
-                    return Results.Ok(Array.Empty<object>());
+                    return Results.Ok(Array.Empty<StockoutRisk>());
                 }
 
-                var risks = new List<object>();
+                var risks = new List<StockoutRisk>();
                 foreach (System.Text.Json.JsonElement row in items.EnumerateArray())
                 {
                     string status = ReadString(row, "status");
@@ -59,28 +59,31 @@ public static class StoreEndpoints
                         ? Math.Round(currentStock / daysOfSupply, 1)
                         : Math.Round(safetyStock / 30d, 1);
 
-                    risks.Add(new
-                    {
-                        skuId = ReadString(row, "sku"),
-                        skuName = $"{ReadString(row, "brand")} — {ReadString(row, "category")}",
-                        brand = ReadString(row, "brand"),
-                        region = ReadString(row, "region"),
-                        currentVelocity = velocity,
-                        daysRemaining = daysOfSupply,
+                    risks.Add(new StockoutRisk(
+                        ReadString(row, "sku"),
+                        $"{ReadString(row, "brand")} — {ReadString(row, "category")}",
+                        ReadString(row, "brand"),
+                        ReadString(row, "region"),
+                        velocity,
+                        daysOfSupply,
                         // Replenish back above safety stock plus a fortnight of cover.
-                        recommendedReorder = (int)Math.Max(50, Math.Round((safetyStock + (velocity * 14)) / 50d) * 50),
-                    });
-
-                    if (risks.Count >= limit) break;
+                        (int)Math.Max(50, Math.Round((safetyStock + (velocity * 14)) / 50d) * 50)));
                 }
 
-                return Results.Ok(risks);
+                // Order by urgency before truncating. Taking the first N in feed order
+                // returned twelve identical zero-day outages and hid the critical and
+                // low-cover SKUs that are the ones still worth acting on.
+                return Results.Ok(risks
+                    .OrderBy(r => r.DaysRemaining)
+                    .ThenByDescending(r => r.CurrentVelocity)
+                    .Take(Math.Clamp(limit, 1, 50))
+                    .ToList());
             }
             catch (Exception ex)
             {
                 loggerFactory.CreateLogger(typeof(StoreEndpoints))
                     .LogWarning(ex, "Stockout risks unavailable from the MCP server.");
-                return Results.Ok(Array.Empty<object>());
+                return Results.Ok(Array.Empty<StockoutRisk>());
             }
         })
         .WithName("GetStockoutRisks").RequireAuthorization().RequireRateLimiting("relaxed");
@@ -151,3 +154,13 @@ public static class StoreEndpoints
                 ? d
                 : 0d;
 }
+
+/// <summary>Portfolio-wide stockout risk row for the Store Operations panel.</summary>
+record StockoutRisk(
+    string SkuId,
+    string SkuName,
+    string Brand,
+    string Region,
+    double CurrentVelocity,
+    double DaysRemaining,
+    int RecommendedReorder);
