@@ -1,3 +1,4 @@
+using System.Text.Json;
 using RetailPulse.Contracts.Approval;
 
 namespace RetailPulse.Api.Endpoints;
@@ -24,6 +25,70 @@ public static class PromoEndpoints
             return Results.Content(json, "application/json");
         })
         .WithName("GetPromoCalendar").RequireAuthorization().RequireRateLimiting("relaxed");
+
+        // Existing campaigns for the Campaign Planner panel.
+        //
+        // The SPA has always called GET /api/campaigns, which was never mapped —
+        // it 404'd, promoApi.fetchExistingCampaigns threw on the non-OK status,
+        // and the uncaught error took the whole dashboard down through the
+        // app-level ErrorBoundary. The data it wants is the promo calendar, so
+        // this projects that MCP payload into the PromoCampaign shape the panel
+        // declares. An unreachable MCP server yields an empty list rather than a
+        // 500: an empty planner is a better failure mode than a dead dashboard.
+        app.MapGet("/api/campaigns", async (
+            IHttpClientFactory httpFactory,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                HttpClient client = httpFactory.CreateClient("McpServer");
+                HttpResponseMessage response = await client.GetAsync("/api/promo/calendar?months=12", ct);
+                response.EnsureSuccessStatusCode();
+
+                await using Stream stream = await response.Content.ReadAsStreamAsync(ct);
+                using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+                if (!doc.RootElement.TryGetProperty("calendar", out JsonElement calendar)
+                    || calendar.ValueKind != JsonValueKind.Array)
+                {
+                    return Results.Ok(Array.Empty<object>());
+                }
+
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+                var campaigns = new List<object>(calendar.GetArrayLength());
+                int index = 0;
+
+                foreach (JsonElement row in calendar.EnumerateArray())
+                {
+                    string start = ReadString(row, "start_date");
+                    string end = ReadString(row, "end_date");
+
+                    campaigns.Add(new
+                    {
+                        id = $"campaign-{index++}",
+                        name = ReadString(row, "campaign"),
+                        brand = ReadString(row, "brand"),
+                        region = ReadString(row, "region"),
+                        promoType = ReadString(row, "promo_type"),
+                        budget = ReadDouble(row, "spend"),
+                        startDate = start,
+                        endDate = end,
+                        roi = ReadDouble(row, "roi"),
+                        status = DeriveStatus(start, end, now),
+                    });
+                }
+
+                return Results.Ok(campaigns);
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger(typeof(PromoEndpoints))
+                    .LogWarning(ex, "Campaign list unavailable from the MCP server.");
+                return Results.Ok(Array.Empty<object>());
+            }
+        })
+        .WithName("GetCampaigns").RequireAuthorization().RequireRateLimiting("relaxed");
 
         app.MapGet("/api/promo/types", async (IHttpClientFactory httpFactory, CancellationToken ct) =>
         {
@@ -69,8 +134,8 @@ public static class PromoEndpoints
             string roiJson = await roiTask;
 
             // Parse ROI for approval gate decision
-            using var roiDoc = System.Text.Json.JsonDocument.Parse(roiJson);
-            double expectedRoi = roiDoc.RootElement.TryGetProperty("expected_roi", out System.Text.Json.JsonElement roiProp) ? roiProp.GetDouble() : 0;
+            using var roiDoc = JsonDocument.Parse(roiJson);
+            double expectedRoi = roiDoc.RootElement.TryGetProperty("expected_roi", out JsonElement roiProp) ? roiProp.GetDouble() : 0;
 
             // Determine recommendation
             string recommendation = expectedRoi switch
@@ -83,14 +148,14 @@ public static class PromoEndpoints
 
             // Build risk factors
             var riskFactors = new List<string>();
-            using var timingDoc = System.Text.Json.JsonDocument.Parse(timingJson);
-            if (timingDoc.RootElement.TryGetProperty("conflicts", out System.Text.Json.JsonElement conflicts) && conflicts.GetArrayLength() > 0)
+            using var timingDoc = JsonDocument.Parse(timingJson);
+            if (timingDoc.RootElement.TryGetProperty("conflicts", out JsonElement conflicts) && conflicts.GetArrayLength() > 0)
                 riskFactors.Add($"{conflicts.GetArrayLength()} overlapping campaign(s) detected");
-            if (timingDoc.RootElement.TryGetProperty("risks", out System.Text.Json.JsonElement risks))
+            if (timingDoc.RootElement.TryGetProperty("risks", out JsonElement risks))
             {
-                foreach (System.Text.Json.JsonElement risk in risks.EnumerateArray())
+                foreach (JsonElement risk in risks.EnumerateArray())
                 {
-                    if (risk.TryGetProperty("detail", out System.Text.Json.JsonElement detail))
+                    if (risk.TryGetProperty("detail", out JsonElement detail))
                         riskFactors.Add(detail.GetString() ?? "Unknown risk");
                 }
             }
@@ -130,10 +195,10 @@ public static class PromoEndpoints
                 budget = request.Budget,
                 period = new { start = request.StartDate, end = request.EndDate, duration_weeks = durationWeeks },
                 target_lift = request.TargetLift,
-                roi_estimate = System.Text.Json.JsonSerializer.Deserialize<object>(roiJson),
-                timing_assessment = System.Text.Json.JsonSerializer.Deserialize<object>(timingJson),
-                lift_analysis = System.Text.Json.JsonSerializer.Deserialize<object>(liftJson),
-                historical_context = System.Text.Json.JsonSerializer.Deserialize<object>(historyJson),
+                roi_estimate = JsonSerializer.Deserialize<object>(roiJson),
+                timing_assessment = JsonSerializer.Deserialize<object>(timingJson),
+                lift_analysis = JsonSerializer.Deserialize<object>(liftJson),
+                historical_context = JsonSerializer.Deserialize<object>(historyJson),
                 risk_factors = riskFactors,
                 approval = requiresApproval ? new
                 {
@@ -151,6 +216,34 @@ public static class PromoEndpoints
         .WithName("PromoTaskModule").RequireAuthorization().RequireRateLimiting("moderate");
 
         return app;
+    }
+
+    private static string ReadString(JsonElement row, string name) =>
+        row.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
+
+    private static double ReadDouble(JsonElement row, string name) =>
+        row.TryGetProperty(name, out JsonElement value)
+            && value.ValueKind == JsonValueKind.Number
+            && value.TryGetDouble(out double parsed)
+            ? parsed
+            : 0d;
+
+    /// <summary>
+    /// The promo calendar carries dates but no lifecycle state, while the planner's
+    /// PromoCampaign contract requires one. Derive it from the window so the panel can
+    /// group campaigns honestly instead of labelling every row the same.
+    /// </summary>
+    private static string DeriveStatus(string startDate, string endDate, DateTimeOffset now)
+    {
+        bool hasStart = DateTimeOffset.TryParse(startDate, out DateTimeOffset start);
+        bool hasEnd = DateTimeOffset.TryParse(endDate, out DateTimeOffset end);
+
+        return hasEnd && end < now ? "completed"
+            : hasStart && start > now ? "planned"
+            : hasStart && hasEnd ? "active"
+            : "proposed";
     }
 }
 
