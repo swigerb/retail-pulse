@@ -104,10 +104,24 @@ public class ConsensusOrchestrator : IConsensusCouncil
     }
 
     /// <summary>
-    /// Lightweight voting mode: sends a focused prompt directly to the LLM without
-    /// tool calls. Each voter gets a stripped system prompt and returns a JSON vote
-    /// based on domain knowledge. Temperature 0 for deterministic voting.
-    /// Falls back to full agent execution only if lightweight mode fails.
+    /// Collects one specialist's vote by running the REAL agent — tools included.
+    ///
+    /// <para>
+    /// This used to take a "lightweight" path: a direct toolless LLM call whose prompt
+    /// nonetheless instructed the model to "use your available tools to gather current
+    /// data". With no tools attached the model did the only honest thing available to
+    /// it — reported that it had no data, rated Yellow, and returned ~0.12 confidence.
+    /// Every council convened produced a procedurally valid verdict built on nothing.
+    /// The comment claiming it "falls back to full agent execution" described a
+    /// fallback that was never implemented.
+    /// </para>
+    ///
+    /// <para>
+    /// Routing through <see cref="ISpecialistAgent.HandleAsync"/> gives each voter its
+    /// real tool set, so the vote is grounded in the same MCP-backed data the chat path
+    /// uses. It costs a tool round-trip per specialist, which is why the timeout is the
+    /// tool-aware <see cref="_agentTimeout"/> rather than the old 10s budget.
+    /// </para>
     /// </summary>
     private async Task<AgentVote?> CollectVoteAsync(
         ISpecialistAgent agent, string brand, string? region, CancellationToken ct)
@@ -118,44 +132,26 @@ public class ConsensusOrchestrator : IConsensusCouncil
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(_lightweightVoteTimeout);
+            timeoutCts.CancelAfter(_agentTimeout);
 
-            // Lightweight path: direct LLM call with voting system prompt, no tools
-            var messages = new List<ChatMessage>
-            {
-                new(ChatRole.System, _voteDef.SystemPrompt),
-                new(ChatRole.User, $"[{agent.DisplayName}] {votePrompt}")
-            };
-
-            var options = new ChatOptions
-            {
-                Temperature = 0f,
-                ResponseFormat = ChatResponseFormat.Json
-            };
-
-            // Route through MAF: the lightweight voter is a real ChatClientAgent invocation
-            // (no tools attached; UseProvidedChatClientAsIs preserves the DI decorator stack).
-            AgentResponse response = await MafAgentInvoker.RunAsync(
-                _chatClient,
-                $"{MafVoterAgentName}.{agent.Key}",
-                messages,
-                options,
-                _loggerFactory,
+            Contracts.ChatResponse response = await agent.HandleAsync(
+                new ChatRequest(votePrompt, SessionId: $"council-{agent.Key}-{Guid.NewGuid():N}"),
                 timeoutCts.Token);
+
             agentSw.Stop();
 
-            string responseText = response.Text ?? "";
+            string responseText = response.Reply ?? "";
             return ParseVote(agent.Key, agent.DisplayName, responseText, agentSw.Elapsed);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             agentSw.Stop();
-            _logger.LogWarning("Agent {AgentKey} timed out after {Ms}ms during lightweight council vote",
+            _logger.LogWarning("Agent {AgentKey} timed out after {Ms}ms during council vote",
                 agent.Key, agentSw.ElapsedMilliseconds);
 
             return new AgentVote(
                 agent.Key, agent.DisplayName, HealthRating.Yellow,
-                $"Agent timed out after {_lightweightVoteTimeout.TotalSeconds}s — unable to complete assessment.",
+                $"Agent timed out after {_agentTimeout.TotalSeconds}s — unable to complete assessment.",
                 0.0, ["timeout"], agentSw.Elapsed);
         }
         catch (Exception ex)
@@ -177,7 +173,8 @@ public class ConsensusOrchestrator : IConsensusCouncil
         return $$"""
             Provide a health assessment for the brand "{{brand}}" {{regionClause}}.
 
-            Use your available tools to gather current data, then respond with a JSON vote:
+            Call your tools to gather current data first, then respond with a JSON vote
+            grounded in what they returned:
 
             {
               "rating": "Green" | "Yellow" | "Red",
@@ -191,6 +188,7 @@ public class ConsensusOrchestrator : IConsensusCouncil
             - Yellow: Some concerns or mixed signals requiring monitoring
             - Red: Critical issues requiring immediate attention
 
+            Populate key_metrics with actual figures your tools returned, not placeholders.
             Respond with ONLY the JSON object. No other text.
             """;
     }
