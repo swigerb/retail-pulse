@@ -268,3 +268,26 @@ output VITE_ENTRA_API_SCOPE string = entraApiScope
 output VITE_ENTRA_AUDIENCE string = empty(entraAudience) && !empty(entraClientId)
   ? 'api://${entraClientId}'
   : entraAudience
+
+// - VITE_FEATURE_*: build-time capability switches read by the Vite frontend
+//   (src/RetailPulse.Web/src/config/featureFlags.ts). Every one of these except
+//   observability defaults to FALSE in the SPA, so without these outputs the
+//   deployed app hides its own feature surface — campaign planner, competitive
+//   dashboard, knowledge base, health council, guardrails/security, adaptive
+//   cards, store ops, financials and portfolio were all invisible in the live
+//   demo even though the API mapped their endpoints.
+//
+//   This deployment is a full-capability demo environment, so every flag is on.
+//   They are emitted as infra outputs (rather than hardcoded in the SPA) so a
+//   differently-scoped deployment can still narrow the surface by overriding
+//   them, and so what the frontend renders stays traceable to the environment.
+output VITE_FEATURE_CAMPAIGN_PLANNER string = 'true'
+output VITE_FEATURE_COMPETITIVE string = 'true'
+output VITE_FEATURE_KNOWLEDGE_BASE string = 'true'
+output VITE_FEATURE_HEALTH_COUNCIL string = 'true'
+output VITE_FEATURE_SECURITY string = 'true'
+output VITE_FEATURE_CARDS string = 'true'
+output VITE_FEATURE_STORES string = 'true'
+output VITE_FEATURE_FINANCIALS string = 'true'
+output VITE_FEATURE_PORTFOLIO string = 'true'
+output VITE_FEATURE_OBSERVABILITY string = 'true'
