@@ -433,6 +433,48 @@ public sealed class ChartFulfillmentTests
         result.Charts[0].Data.Sum(s => s.Values.Count).Should().Be(4);
     }
 
+    [Fact]
+    public void EnforceChartFulfillment_BuildsABar_FromDepletionStatsWhenThatIsWhatTheTurnFetched()
+    {
+        // Issue #59: a brand comparison is answerable from either demand history or
+        // depletion stats, and which one the model reaches for varies run to run. When it
+        // picked depletion stats, the historical-demand builders found no
+        // summary.total_volume / by_region fingerprint and the chart failed closed.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            DepletionStats("Sierra Gold Tequila", "Northeast", "4.2%"),
+            DepletionStats("Ridgeline Bourbon", "Northeast", "-1.8%"),
+            DepletionStats("Summit Vodka", "Northeast", "2.6%"));
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast",
+            response, [], "Here you go.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("bar");
+        result.Charts[0].Data.Sum(s => s.Values.Count).Should().Be(3, "one bar per brand");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_BuildsAGroupedBar_FromPerRegionDepletionStats()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            DepletionStats("Coastline Tacos", "Northeast", "3.1%"),
+            DepletionStats("Coastline Tacos", "Midwest", "1.4%"),
+            DepletionStats("Apex Grill", "Northeast", "-2.2%"),
+            DepletionStats("Apex Grill", "Midwest", "0.9%"));
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Compare Coastline Tacos vs Apex Grill depletions across all regions",
+            response, [], "Here you go.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("groupedBar");
+        result.Charts[0].Data.Should().HaveCount(2, "one series per brand");
+        result.Charts[0].Data.Sum(s => s.Values.Count).Should().Be(4);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static AgentExecutionPipeline CreatePipeline()
@@ -456,6 +498,22 @@ public sealed class ChartFulfillmentTests
                 new { region, volume = avgWeekly * 52, units = 1000, avg_weekly_volume = avgWeekly, weeks = 52 }
             },
             compaction = new { compacted = true, aggregate_complete = true }
+        });
+
+    private static string DepletionStats(string brand, string region, string depletionsYoy) =>
+        JsonSerializer.Serialize(new
+        {
+            brand,
+            region,
+            period = "YTD",
+            metrics = new
+            {
+                depletions_yoy = depletionsYoy,
+                sell_through_yoy = "-1.2%",
+                inventory_weeks_on_hand = 8.4,
+                status = "Healthy",
+            },
+            sentiment_summary = "Sample summary.",
         });
 
     private static MeaiChatResponse ResponseWithToolResults(params string[] toolResultJson)
