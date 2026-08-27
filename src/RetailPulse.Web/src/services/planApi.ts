@@ -41,8 +41,24 @@ function throwFor(action: string, res: Response, detail: string): never {
   throw new Error(`Failed to ${action}: ${res.status} ${detail}`.trim());
 }
 
+/**
+ * Raised when the plan surface is not present in this deployment.
+ *
+ * `/api/plans/*` is mapped only when `PlanPersistence:Enabled` is true — with it
+ * off, `IPlanStore` is never registered and the routes do not exist, so the API
+ * answers 404. That is a deliberate configuration, not a failure, and it must
+ * not surface to the user as a raw "404 Unknown error".
+ */
+export class PlanSurfaceUnavailableError extends Error {
+  readonly name = 'PlanSurfaceUnavailableError';
+  constructor() {
+    super('Plan history is not available in this deployment.');
+  }
+}
+
 export async function fetchPlans(signal?: AbortSignal): Promise<PlanSummary[]> {
   const res = await fetch(resolveApiUrl('/api/plans/'), { signal });
+  if (res.status === 404) throw new PlanSurfaceUnavailableError();
   if (!res.ok) throwFor('list plans', res, await parseErrorBody(res));
   const data: unknown = await res.json();
   return Array.isArray(data) ? (data as PlanSummary[]) : [];

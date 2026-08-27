@@ -201,4 +201,22 @@ public sealed partial class ContainerAppDeploymentContractTests
                 $"container app '{name}' must not accept plaintext HTTP on its ingress");
         }
     }
+
+    /// <summary>
+    /// Plan-first orchestration is gated on <c>PlanPersistence:Enabled</c>. That single
+    /// flag registers <c>IPlanStore</c>, which is what maps <c>/api/plans/*</c> AND wires
+    /// the <c>PlanOrchestrator</c>. Deployed with it off, the SPA's "Plan" execution-path
+    /// option was an inert control and the Plans panel showed a raw 404 from a route that
+    /// was never mapped. Pin it so the deployed surface and the UI stay in agreement.
+    /// </summary>
+    [Fact]
+    public void Api_EnablesPlanPersistence_SoThePlanSurfaceExists()
+    {
+        (_, string body) = BlockFor("ca-retailpulse-api");
+
+        body.Should().MatchRegex(
+            @"name:\s*'PlanPersistence__Enabled'\s*value:\s*'true'",
+            "the API must enable plan persistence, or /api/plans/* is unmapped and the "
+            + "Plan execution path silently falls back to the single-specialist route");
+    }
 }

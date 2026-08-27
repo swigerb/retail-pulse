@@ -23,6 +23,7 @@ import {
   fetchPlans,
   parseClarificationPrompt,
   parseReviewProposal,
+  PlanSurfaceUnavailableError,
 } from '../services/planApi';
 import {
   reconcilePlan,
@@ -576,6 +577,13 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
       const plans = await fetchPlans();
       dispatch({ type: 'HISTORY_LOADED', plans });
     } catch (err) {
+      // A 404 means this deployment has no plan surface at all
+      // (PlanPersistence:Enabled=false). That is configuration, not failure —
+      // render the explanatory empty state rather than a raw error.
+      if (err instanceof PlanSurfaceUnavailableError) {
+        dispatch({ type: 'HISTORY_UNAVAILABLE' });
+        return;
+      }
       dispatch({
         type: 'HISTORY_ERROR',
         error: err instanceof Error ? err.message : 'Failed to load plan history',

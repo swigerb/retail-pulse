@@ -87,6 +87,12 @@ export interface PlanAppState {
   history: PlanSummary[];
   historyLoading: boolean;
   historyError?: string;
+  /**
+   * True when the API reported no plan surface at all (404 from `/api/plans/`),
+   * i.e. this deployment runs with `PlanPersistence:Enabled=false`. Distinct
+   * from `historyError`, which means a real failure the user should see.
+   */
+  historyUnavailable?: boolean;
 }
 
 export const initialPlanState: PlanAppState = {
@@ -178,6 +184,7 @@ export type PlanAction =
   | { type: 'HISTORY_LOADING' }
   | { type: 'HISTORY_LOADED'; plans: PlanSummary[] }
   | { type: 'HISTORY_ERROR'; error: string }
+  | { type: 'HISTORY_UNAVAILABLE' }
   | { type: 'HISTORY_PLAN_REMOVED'; planId: string };
 
 // ── Reducer ─────────────────────────────────────────────────────────────────
@@ -613,10 +620,27 @@ export function planReducer(state: PlanAppState, action: PlanAction): PlanAppSta
       return { ...state, historyLoading: true, historyError: undefined };
 
     case 'HISTORY_LOADED':
-      return { ...state, historyLoading: false, history: action.plans, historyError: undefined };
+      return {
+        ...state,
+        historyLoading: false,
+        history: action.plans,
+        historyError: undefined,
+        historyUnavailable: false,
+      };
 
     case 'HISTORY_ERROR':
       return { ...state, historyLoading: false, historyError: action.error };
+
+    case 'HISTORY_UNAVAILABLE':
+      // Not an error: the deployment simply has no plan surface. Clear any prior
+      // error so the panel renders the calm explanatory state instead.
+      return {
+        ...state,
+        historyLoading: false,
+        history: [],
+        historyError: undefined,
+        historyUnavailable: true,
+      };
 
     case 'HISTORY_PLAN_REMOVED':
       return {
