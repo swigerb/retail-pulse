@@ -28,15 +28,20 @@
   --color-border-strong: rgba(255, 255, 255, 0.15);
   --color-border-faint: rgba(255, 255, 255, 0.06);
 
-  /* Accent transparency tokens */
-  --brand-accent-soft: rgba(66, 165, 245, 0.12);
-  --brand-accent-soft-hover: rgba(66, 165, 245, 0.2);
-  --brand-accent-border: rgba(66, 165, 245, 0.25);
-  --brand-accent-border-faint: rgba(66, 165, 245, 0.15);
+  /* Accent transparency tokens.
+     Derived from --brand-accent via color-mix so a pack/tenant theme override
+     (Dashboard.applyPackTheme sets --brand-accent at runtime) recolours the
+     soft fills, borders and scrollbars coherently. These were previously
+     hardcoded to rgba(66, 165, 245, ...) — the default blue — so a pack with a
+     different accent produced accent-coloured text sitting on blue chrome. */
+  --brand-accent-soft: color-mix(in srgb, var(--brand-accent) 12%, transparent);
+  --brand-accent-soft-hover: color-mix(in srgb, var(--brand-accent) 20%, transparent);
+  --brand-accent-border: color-mix(in srgb, var(--brand-accent) 25%, transparent);
+  --brand-accent-border-faint: color-mix(in srgb, var(--brand-accent) 15%, transparent);
 
   /* Scrollbar tokens */
-  --color-scrollbar: rgba(66, 165, 245, 0.2);
-  --color-scrollbar-hover: rgba(66, 165, 245, 0.35);
+  --color-scrollbar: color-mix(in srgb, var(--brand-accent) 20%, transparent);
+  --color-scrollbar-hover: color-mix(in srgb, var(--brand-accent) 35%, transparent);
 }
 
 * {
