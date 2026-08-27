@@ -26,6 +26,7 @@
 *.woff2       binary
 *.ttf         binary
 *.otf         binary
+*.mp4         binary
 
 # Squad: union merge for append-only team state files
 .squad/decisions.md merge=union
