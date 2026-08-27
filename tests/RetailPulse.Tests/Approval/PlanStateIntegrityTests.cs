@@ -106,14 +106,13 @@ public sealed class PlanStateIntegrityTests : IDisposable
         PlanReviewCompletionResult clarResume = await completion.ResolveAsync(suspend.PlanId, "user-1");
         clarResume.Kind.Should().Be(PlanReviewCompletionKind.Executed);
 
-        // Plan-review + clarification double-suspends materialize step rows
-        // under the review-round naming scheme `{planId}-r{round}-s{index}`
-        // (see PlanReviewCompletionService.ExecuteApprovedPlanAsync). The
-        // executor's SuspendForClarificationAsync then writes the paused row
-        // under that same id with Status = Pending. On answer resume it MUST
-        // transition to Completed so plan-detail reads don't advertise an
-        // answered clarification as still pending.
-        string pausedStepId = $"{suspend.PlanId}-r0-s1";
+        // Plan-review + clarification resumes drive the CANONICAL step rows
+        // `{planId}-s{index}` (see PlanReviewCompletionService.ExecuteApprovedPlanAsync).
+        // The executor's SuspendForClarificationAsync writes the paused row under
+        // that same id with Status = Pending. On answer resume it MUST transition
+        // to Completed so plan-detail reads don't advertise an answered
+        // clarification as still pending.
+        string pausedStepId = $"{suspend.PlanId}-s1";
         PlanStepUpdate? pausedUpdate = plans.GetLastStepUpdate("user-1", suspend.PlanId, pausedStepId);
         pausedUpdate.Should().NotBeNull(
             "the paused clarification step's row must exist under the initial-plan step id.");
@@ -339,17 +338,18 @@ public sealed class PlanStateIntegrityTests : IDisposable
     // ── Finding 4 (issue #149): terminal plan state leaves no orphan Pending step rows ─
 
     /// <summary>
-    /// Reproduces issue #149: <see cref="PlanOrchestrator.SuspendForReviewAsync"/>
+    /// Issue #149 plus the resume-id defect. <see cref="PlanOrchestrator.SuspendForReviewAsync"/>
     /// writes initial step rows under <c>{planId}-s{i}</c> as
-    /// <see cref="PlanStepStatus.Pending"/>. When the reviewer approves and
-    /// execution succeeds via <see cref="PlanReviewCompletionService.ExecuteApprovedPlanAsync"/>,
-    /// execution writes a parallel <c>{planId}-r{round}-s{i}</c> set — the
-    /// original rows would otherwise linger as Pending forever. The contract
-    /// this test pins: after ANY terminal plan status is written, no step row
-    /// for that plan may remain Pending or Running. Enforced inside
-    /// <see cref="IPlanStore.UpdatePlanStatusAsync"/> so every caller (executor
-    /// finally block, completion-service finalisers, restart recovery)
-    /// inherits the invariant without having to remember to sweep.
+    /// <see cref="PlanStepStatus.Pending"/>. When the reviewer approves,
+    /// <see cref="PlanReviewCompletionService.ExecuteApprovedPlanAsync"/> drives
+    /// those same canonical rows to Completed.
+    /// <para>
+    /// Two contracts are pinned here: after ANY terminal plan status no step row
+    /// may remain Pending or Running (enforced by the sweep inside
+    /// <see cref="IPlanStore.UpdatePlanStatusAsync"/> so every caller inherits
+    /// it), and an approved run that succeeded must report its steps as
+    /// Completed rather than Skipped.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task Review_approved_completed_plan_leaves_no_orphan_pending_step_rows()
@@ -396,14 +396,23 @@ public sealed class PlanStateIntegrityTests : IDisposable
         after.Steps.Should().NotContain(s => s.Status == PlanStepStatus.Running,
             "no step row may remain Running after the plan reaches a terminal state (issue #149).");
 
-        // The initial `{planId}-s{i}` rows specifically must be Skipped (not
-        // still-Pending, not still-Running) — this is the exact orphan class
-        // the issue calls out.
+        // The initial `{planId}-s{i}` rows ARE the rows execution drives, so an
+        // approved-and-successful run leaves them Completed.
+        //
+        // This assertion previously expected Skipped. That encoded a defect:
+        // the resume path minted round-scoped ids (`{planId}-r{round}-s{i}`) for
+        // a parallel row set it never actually persisted, so every executor
+        // update no-opped, the canonical rows stayed Pending, and the terminal
+        // sweep marked them Skipped. A plan that genuinely ran — real tool
+        // calls, real tokens, real answer — therefore reported 0/N progress with
+        // every step "skipped". The resume now drives the canonical rows, so
+        // they legitimately reach Completed and the sweep finds nothing to do.
         IEnumerable<PlanStepRecordDto> initialRows = after.Steps
             .Where(s => s.StepId == $"{suspend.PlanId}-s0" || s.StepId == $"{suspend.PlanId}-s1");
-        initialRows.Should().OnlyContain(s => s.Status == PlanStepStatus.Skipped,
-            "the pre-execution planner-proposal rows must be transitioned to Skipped when execution " +
-            "supersedes them with round-scoped rows.");
+        initialRows.Should().HaveCount(2);
+        initialRows.Should().OnlyContain(s => s.Status == PlanStepStatus.Completed,
+            "approved execution drives the canonical step rows to Completed — reporting them as " +
+            "Skipped would misrepresent a plan that actually ran.");
 
         await sp.DisposeAsync();
     }
