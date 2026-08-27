@@ -200,23 +200,38 @@ public class MafPrimitivesCharacterizationTests
 
     #region Consensus Council
 
+    /// <summary>
+    /// The council's synthesis pass must flow through MAF, and each voter must be
+    /// collected by invoking the REAL specialist agent rather than a toolless direct
+    /// chat call.
+    /// <para>
+    /// This previously asserted four probe calls — three votes plus the synthesis —
+    /// because voters took a "lightweight" path that called <see cref="IChatClient"/>
+    /// directly with no tools attached. That path is why every council verdict came
+    /// back ungrounded ("no tool data available", ~0.12 confidence): the prompt asked
+    /// the model to use tools it had never been given. Voters now delegate to
+    /// <see cref="ISpecialistAgent.HandleAsync"/>, so the MAF invariant is upheld one
+    /// level down by the specialists themselves — proven for all nine LLM-backed
+    /// specialists by the inventory characterization below.
+    /// </para>
+    /// </summary>
     [Fact]
-    public async Task ConsensusOrchestrator_VoterAndSynthesizer_BothRouteThroughMaf()
+    public async Task ConsensusOrchestrator_DelegatesVotesToSpecialists_AndSynthesizesThroughMaf()
     {
 #pragma warning disable JSON002 // deliberate stub-vote payload; not produced by application code
         var probe = MafChatClientProbe.WithAssistantReply(
             "{\"rating\":\"Green\",\"reasoning\":\"stable performance across domain\",\"confidence\":0.85,\"tags\":[]}");
 #pragma warning restore JSON002
 
-        ISpecialistAgent[] specialists =
+        Mock<ISpecialistAgent>[] specialistMocks =
         [
-            AgentTestFixtures.CreateMockSpecialist("demand-forecasting", [AgentIntent.DemandForecasting]),
-            AgentTestFixtures.CreateMockSpecialist("competitive-intel",  [AgentIntent.CompetitiveMarket]),
-            AgentTestFixtures.CreateMockSpecialist("supply-chain",       [AgentIntent.SupplyShipments]),
+            CreateVotingSpecialistMock("demand-forecasting", AgentIntent.DemandForecasting),
+            CreateVotingSpecialistMock("competitive-intel", AgentIntent.CompetitiveMarket),
+            CreateVotingSpecialistMock("supply-chain", AgentIntent.SupplyShipments),
         ];
 
         var orchestrator = new ConsensusOrchestrator(
-            specialists,
+            [.. specialistMocks.Select(m => m.Object)],
             probe,
             synthesisDef: new AgentDefinition { Name = "council-synth", SystemPrompt = "Synthesize.", Temperature = 0.1 },
             voteDef: new AgentDefinition { Name = "council-vote", SystemPrompt = "Vote.", Temperature = 0.0 },
@@ -227,11 +242,43 @@ public class MafPrimitivesCharacterizationTests
 
         verdict.Should().NotBeNull();
 
-        // 3 specialists vote in parallel + 1 synthesis pass = 4 MAF-routed chat calls.
-        probe.Calls.Should().HaveCount(4,
-            "the council must issue exactly one MAF-routed vote per participant plus one MAF-routed synthesis call");
+        // Each participant must be asked for a vote through its real (tool-bearing)
+        // entry point. This is the assertion that keeps the council grounded.
+        foreach (Mock<ISpecialistAgent> specialist in specialistMocks)
+        {
+            specialist.Verify(
+                a => a.HandleAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()),
+                Times.Once,
+                "every council participant must vote via its tool-enabled HandleAsync path");
+        }
+
+        // Only the synthesis pass talks to the chat client directly, and it must be
+        // MAF-routed like every other first-party LLM call.
+        probe.Calls.Should().HaveCount(1,
+            "the orchestrator itself issues exactly one direct chat call — the synthesis pass");
         probe.Calls.Should().OnlyContain(c => c.WasCalledFromMafFrame,
-            "every voter and synthesis call must flow through the shared MafAgentInvoker path");
+            "the synthesis call must flow through the shared MafAgentInvoker path");
+    }
+
+    /// <summary>
+    /// A specialist whose HandleAsync returns a well-formed JSON vote, so the
+    /// orchestrator's parse path is exercised rather than short-circuited.
+    /// </summary>
+    private static Mock<ISpecialistAgent> CreateVotingSpecialistMock(string key, string intent)
+    {
+        var mock = new Mock<ISpecialistAgent>();
+        mock.Setup(a => a.Key).Returns(key);
+        mock.Setup(a => a.DisplayName).Returns(key);
+        mock.Setup(a => a.Model).Returns("gpt-4o");
+        mock.Setup(a => a.SupportedIntents).Returns([intent]);
+        mock.Setup(a => a.HandleAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Contracts.ChatResponse(
+#pragma warning disable JSON002 // deliberate stub-vote payload
+                "{\"rating\":\"Green\",\"reasoning\":\"grounded in tool data\",\"confidence\":0.9,\"key_metrics\":[\"depletions: +4%\"]}",
+#pragma warning restore JSON002
+                $"session-{key}",
+                []));
+        return mock;
     }
 
     #endregion
