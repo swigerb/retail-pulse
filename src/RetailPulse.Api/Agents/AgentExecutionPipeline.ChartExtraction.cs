@@ -32,6 +32,67 @@ public partial class AgentExecutionPipeline
     [GeneratedRegex(@"(\r?\n){3,}")]
     private static partial Regex ExcessiveBlankLinesPattern();
 
+    // A fenced ```json block, captured with its body so the body can be inspected.
+    [GeneratedRegex(@"```json\s*(?<body>\{.*?\})\s*```", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex FencedJsonBlockPattern();
+
+    /// <summary>
+    /// Keys that mark a fenced JSON block as chart scaffolding rather than content the
+    /// user asked for. <c>chart</c> is deliberately included: a model that writes
+    /// <c>{"chart":"groupedBar","title":"…"}</c> is announcing a chart, not answering a
+    /// question — and because that shape has no <c>type</c> key it never binds to a
+    /// <see cref="ChartSpec"/>, so <see cref="ExtractInlineCharts"/> leaves it in the
+    /// prose. The user then sees raw JSON in the chat bubble, which the G2 acceptance
+    /// contract forbids.
+    /// </summary>
+    private static readonly string[] _chartScaffoldingKeys =
+        ["\"chart\"", "\"type\"", "\"xaxistitle\"", "\"yaxistitle\"", "\"series\"", "\"datapoints\"", "\"legend\""];
+
+    /// <summary>
+    /// Removes fenced JSON blocks that are chart scaffolding but did NOT resolve to a
+    /// renderable chart. Runs after <see cref="ExtractInlineCharts"/>, which already
+    /// strips the blocks it could bind — this catches the near-misses it cannot.
+    ///
+    /// <para>
+    /// Deliberately narrow: only fenced <c>```json</c> blocks whose body parses as a
+    /// JSON object AND carries a chart-scaffolding key are removed. Arbitrary JSON the
+    /// user legitimately asked for is left alone.
+    /// </para>
+    /// </summary>
+    internal static string StripResidualChartJson(string reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply) || !reply.Contains("```", StringComparison.Ordinal))
+        {
+            return reply;
+        }
+
+        string cleaned = FencedJsonBlockPattern().Replace(reply, match =>
+        {
+            string body = match.Groups["body"].Value;
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+                {
+                    return match.Value;
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return match.Value;
+            }
+
+            string lowered = body.ToLowerInvariant();
+            bool looksLikeChart = Array.Exists(_chartScaffoldingKeys, k => lowered.Contains(k, StringComparison.Ordinal));
+            return looksLikeChart ? string.Empty : match.Value;
+        });
+
+        cleaned = EmptyCodeFencePattern().Replace(cleaned, string.Empty);
+        cleaned = ExcessiveBlankLinesPattern().Replace(cleaned, "\n\n");
+        return cleaned.Trim();
+    }
+
     internal readonly record struct InlineChartExtraction(string Reply, List<ChartSpec> Charts);
 
     /// <summary>
