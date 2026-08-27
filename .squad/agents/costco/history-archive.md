@@ -1,5 +1,31 @@
 # Costco — History
 
+## Summary (June 2026, archived by Scribe 2026-08-11 — history.md exceeded 15KB gate)
+
+- **2026-06-04T08:49:32Z** — Memory Panel Empty: UserId Resolution Divergence. Root cause:
+  ChatEndpoints (write) resolved userId via `request.User?.ObjectId ?? "anonymous"` while
+  MemoryEndpoints (read) resolved via `HttpContext.User.FindFirst("oid")`, so writes and
+  reads never agreed. Fixed via new `UserIdentity.Resolve()` single source of truth
+  (priority: body → oid claim → "anonymous"), added missing DELETE /api/memory handler,
+  7 new `UserIdentityTests`. 1,992 tests passing.
+- **2026-06-03T21:25:19Z** — Memory Routing Priority Beats Brand Lookup: added
+  `IsMemoryCommand()` as first router gate so "remember…" directives aren't intercepted by
+  brand/performance shortcuts. 1,972 tests pass.
+- **2026-06-03T21:45:00Z** — Memory Store Routing Restored: restored "remember that"/
+  "remember this" keyword routing to MemoryManagement; 117 memory/prompt/router tests pass.
+- **2026-06-03T20:06:00Z** — Memory Management Router Defense-in-Depth: removed "remember"
+  and store-intent keywords from destructive memory/management router patterns; added
+  store-vs-clear discrimination to the specialist agent so routing fails closed on
+  destructive intent only. Decision recorded in decisions.md. 1,972 tests pass.
+- **2026-06-30T16:54:45-04:00** — Observability Cost Dashboard Top Tools Endpoint: added
+  `ToolUsageStat`, `ITraceCollector.GetToolStats`, `InMemoryTraceCollector` aggregation, and
+  `GET /api/observability/costs/tools`. Root cause of the broken dashboard: frontend was
+  reading `trend`/`agentBreakdown`/`topTools` off the summary-only `/costs` response instead
+  of calling dedicated endpoints. Team impact: duration-aware tool stats must come from
+  `ITraceCollector`, not `ICostTracker` usage events. 1,998 backend tests passed / 2 skipped.
+
+---
+
 ## Summary (May 2026)
 
 **Major Accomplishments:**

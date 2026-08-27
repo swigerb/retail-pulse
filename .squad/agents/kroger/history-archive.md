@@ -62,6 +62,15 @@
 
 ---
 
+## Archived from history.md on 2026-08-11 (Scribe summarization, threshold >15KB)
+
+- **2026-05-14 — Promo Planning Agent + Task Module (Sprint 2.1):** PromoPlanningAgent (Key="promo-planning", temp 0.3) follows the ISpecialistAgent pattern; tools GetPromoHistory/CalculateLift/EvaluateTiming/EstimateROI follow the MCP→REST→proxy chain. ROI model uses diminishing returns above MaxEffectiveSpend. Approval gate: $500K+ always requires approval, $100K-$500K requires approval when ROI < 2.0x. Task Module endpoint `POST /api/taskmodule/promo` orchestrates all tools in parallel then applies gating with no LLM involvement. Key files: `Agents/Specialists/PromoPlanningAgent.cs`, `Tools/{PromoHistoryTool,CalculateLiftTool,EvaluateTimingTool,EstimateROITool}.cs`, `McpServer/Tools/PromoTools.cs`, `prompts.yaml`, `RoutingServiceExtensions.cs`. 574 tests passing at the time.
+- **2026-06-29 — Board Cleanup:** Removed 15 byte-identical stray template duplicates from `.squad/` root (verified via MD5 before deletion); `.squad/templates/` is the single source of truth. Committed separately from the tracked Squad v0.9.4 governance upgrade (commit `61516b8`).
+- **2026-06-29 — PR #1 Review REQUEST_CHANGES → later approved:** Blocking finding was CWE-290/639 authentication bypass in `UserIdentity.cs` — `Resolve()` trusted client-supplied body `ObjectId` over the authenticated `oid` claim, allowing identity spoofing. Fix: claims-first resolution (`oid` claim → body `ObjectId` fallback only when no claim present → `AnonymousUserId`). Kroger (not original author Costco) took ownership of the fix per Lead responsibility. Approved sections: 429 throttling fix (cross-region fast-path + retry budget 1→2 + backoff), dependency upgrades (Aspire 13.4.3, Agents.AI 1.9.0, MCP 1.4.0, ESLint 10/React 19.2.7/Vite 8.0.16, 1,992 tests), memory-store normalization via `UserIdentity.Resolve()` (fixed "0 memories" read/write divergence), Squad v0.10.0 upgrade. Non-blocking: memory type enum renames (`ConversationSummary`→"conversation", `EntityMention`→"entity", new `expiresAt` field) needed Chick's frontend verification. `gh pr review --request-changes` failed for both personal and EMU accounts (self-review / EMU restrictions) — used `gh pr comment` instead; established pattern for future self-owned-repo reviews.
+- **2026-08-05T09:57:34-04:00 — Architecture gate: Issue #11 secretless-ACR deployment:** APPROVE (final) after Costco corrected RBAC-prerequisite and placeholder-image documentation. Secretless system-identity ACR pull established as the deployment standard.
+
+---
+
 # Kroger — History (Continued from archive)
 
 ## May 13-15, 2026 — Recent Work
