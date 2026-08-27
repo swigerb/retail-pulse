@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import type { ReactElement } from 'react';
 import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton } from '@fluentui/react-components';
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
@@ -552,7 +553,7 @@ export function Dashboard() {
   // header collapse gracefully instead of overflowing once every flag is on.
   const navItems = useMemo(() => {
     const alt = capabilities.alternateViews;
-    const all: Array<{ view: ActiveView; label: string; icon: JSX.Element; color: string; enabled: boolean }> = [
+    const all: Array<{ view: ActiveView; label: string; icon: ReactElement; color: string; enabled: boolean }> = [
       { view: 'competitive', label: 'Competitive', icon: <Shield24Regular />, color: '#ef4444', enabled: alt && featureFlags.competitive },
       { view: 'council', label: 'Health Council', icon: <HeartPulse24Regular />, color: '#0f7b0f', enabled: alt && featureFlags.healthCouncil },
       { view: 'knowledge', label: 'Knowledge Base', icon: <Library24Regular />, color: '#06b6d4', enabled: alt && featureFlags.knowledgeBase },
