@@ -743,7 +743,7 @@ export function Dashboard() {
               operator navigates, so a failed panel does not stay broken. */}
           <PanelErrorBoundary key={activeView} name={VIEW_LABELS[activeView] ?? 'This view'}>
           {capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner ? (
-            <div style={{ overflow: 'auto', height: '100%' }}>
+            <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <PromoTaskModule />
             </div>
           ) : activeView === 'competitive' && featureFlags.competitive ? (
@@ -753,16 +753,16 @@ export function Dashboard() {
           ) : activeView === 'council' && featureFlags.healthCouncil ? (
             <CouncilPanel />
           ) : activeView === 'security' && featureFlags.security ? (
-            <div style={{ overflow: 'auto', height: '100%' }}>
+            <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <GuardrailsDashboard />
               <GuardrailsConfig />
             </div>
           ) : activeView === 'cards' && featureFlags.cards ? (
-            <div style={{ overflow: 'auto', height: '100%' }}>
+            <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <AdaptiveCardPanel />
             </div>
           ) : capabilities.observability && activeView === 'observability' && featureFlags.observability ? (
-            <div style={{ overflow: 'auto', height: '100%' }}>
+            <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <ObservabilityPanel />
             </div>
           ) : activeView === 'stores' && featureFlags.stores ? (
@@ -779,7 +779,7 @@ export function Dashboard() {
               <StoreDetailDialog store={selectedStore} open={!!selectedStore} onClose={() => setSelectedStore(null)} />
             </div>
           ) : activeView === 'financials' && featureFlags.financials ? (
-            <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
+            <div style={{ overflow: 'auto', height: '100%', padding: '24px', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>💰 Financials</h2>
               <MarginWaterfall steps={waterfall} title={financialsPeriod} />
               <div style={{ marginTop: '24px' }}>
@@ -788,7 +788,7 @@ export function Dashboard() {
               </div>
             </div>
           ) : activeView === 'portfolio' && featureFlags.portfolio ? (
-            <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
+            <div style={{ overflow: 'auto', height: '100%', padding: '24px', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>⭐ Portfolio Scorecard</h2>
               {selectedBrand ? (
                 <div>
