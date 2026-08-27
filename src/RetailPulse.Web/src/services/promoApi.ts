@@ -16,19 +16,32 @@ interface WirePromoEvaluation {
   readonly recommendation?: string;
   readonly risk_factors?: readonly string[];
   readonly roi_estimate?: {
-    readonly expected_roi?: number;
-    readonly roi_range?: { readonly low?: number; readonly high?: number };
+    readonly roi?: {
+      readonly expected?: number;
+      readonly lower_bound?: number;
+      readonly upper_bound?: number;
+    };
+    readonly break_even_weeks?: number;
     readonly break_even_days?: number;
-    readonly historical_avg_roi?: number;
+    readonly inputs?: { readonly expected_lift_percent?: number };
   };
   readonly timing_assessment?: {
-    readonly assessment?: string;
+    readonly recommendation?: string;
+    readonly timing_score?: number;
+    readonly seasonality_score?: number;
     readonly conflicts?: readonly unknown[];
-    readonly seasonality?: string;
     readonly risks?: readonly { readonly type?: string; readonly detail?: string; readonly severity?: string }[];
   };
-  readonly lift_analysis?: { readonly reasoning?: string };
-  readonly historical_context?: { readonly campaign_count?: number };
+  readonly lift_analysis?: {
+    readonly reasoning?: string;
+    readonly summary?: string;
+    readonly expected_lift_percent?: number;
+  };
+  readonly historical_context?: {
+    readonly total_campaigns?: number;
+    readonly avg_roi?: number;
+    readonly campaigns?: readonly { readonly roi?: number }[];
+  };
 }
 
 const RECOMMENDATION_LEVELS: ReadonlySet<string> = new Set([
@@ -90,21 +103,50 @@ function toConflicts(wire: WirePromoEvaluation): string[] {
   });
 }
 
+/** Renders the 0..1 seasonality score as a phrase the panel can display. */
+function toSeasonalityFit(score: number | undefined): string {
+  if (score === undefined) return '';
+  if (score >= 0.75) return `Strong seasonal fit (${Math.round(score * 100)}%)`;
+  if (score >= 0.5) return `Acceptable seasonal fit (${Math.round(score * 100)}%)`;
+  return `Weak seasonal fit (${Math.round(score * 100)}%)`;
+}
+
 export function mapPromoEvaluation(wire: WirePromoEvaluation): PromoEvaluation {
-  const roi = wire.roi_estimate ?? {};
+  const est = wire.roi_estimate ?? {};
+  const roi = est.roi ?? {};
+  const hist = wire.historical_context ?? {};
+
+  // The MCP payload reports break-even in weeks; the panel labels it in days.
+  const breakEvenDays = est.break_even_days
+    ?? (est.break_even_weeks !== undefined ? Math.round(est.break_even_weeks * 7) : 0);
+
+  // No aggregate average is published, so derive it from the returned campaigns
+  // rather than showing a hardcoded zero.
+  const campaignRois = (hist.campaigns ?? [])
+    .map(c => c.roi)
+    .filter((r): r is number => typeof r === 'number');
+  const historicalAvgRoi = hist.avg_roi
+    ?? (campaignRois.length > 0
+      ? campaignRois.reduce((a, b) => a + b, 0) / campaignRois.length
+      : 0);
+
   return {
     recommendation: toRecommendation(wire.recommendation),
-    roi: roi.expected_roi ?? 0,
-    roiLower: roi.roi_range?.low ?? roi.expected_roi ?? 0,
-    roiUpper: roi.roi_range?.high ?? roi.expected_roi ?? 0,
-    reasoning: wire.lift_analysis?.reasoning ?? '',
-    timingAssessment: wire.timing_assessment?.assessment ?? '',
+    roi: roi.expected ?? 0,
+    roiLower: roi.lower_bound ?? roi.expected ?? 0,
+    roiUpper: roi.upper_bound ?? roi.expected ?? 0,
+    reasoning: wire.lift_analysis?.reasoning
+      ?? wire.lift_analysis?.summary
+      ?? (wire.lift_analysis?.expected_lift_percent !== undefined
+        ? `Modelled lift of ${wire.lift_analysis.expected_lift_percent}% against the regional baseline.`
+        : ''),
+    timingAssessment: wire.timing_assessment?.recommendation ?? '',
     conflicts: toConflicts(wire),
-    seasonalityFit: wire.timing_assessment?.seasonality ?? '',
+    seasonalityFit: toSeasonalityFit(wire.timing_assessment?.seasonality_score),
     risks: toRisks(wire),
-    similarCampaigns: wire.historical_context?.campaign_count ?? 0,
-    breakEvenDays: roi.break_even_days ?? 0,
-    historicalAvgRoi: roi.historical_avg_roi ?? 0,
+    similarCampaigns: hist.total_campaigns ?? 0,
+    breakEvenDays,
+    historicalAvgRoi,
   };
 }
 

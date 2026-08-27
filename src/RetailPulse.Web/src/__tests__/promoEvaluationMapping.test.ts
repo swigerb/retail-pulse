@@ -19,19 +19,19 @@ describe('promo evaluation mapping', () => {
       'Expected ROI below breakeven (1.0x)',
     ],
     roi_estimate: {
-      expected_roi: 2.4,
-      roi_range: { low: 1.8, high: 3.1 },
-      break_even_days: 21,
-      historical_avg_roi: 2.1,
+      roi: { expected: 2.4, lower_bound: 1.8, upper_bound: 3.1 },
+      break_even_weeks: 3,
+      inputs: { expected_lift_percent: 16.71 },
     },
     timing_assessment: {
-      assessment: 'Good window',
+      recommendation: 'Acceptable, review conflicts',
+      timing_score: 0.6,
+      seasonality_score: 0.8,
       conflicts: [{ campaign: 'Apex Grill BOGO Sep25' }],
-      seasonality: 'Favourable',
       risks: [{ type: 'timing', detail: 'Overlaps a holiday freeze', severity: 'high' }],
     },
     lift_analysis: { reasoning: 'Lift is supported by prior comparable promos.' },
-    historical_context: { campaign_count: 7 },
+    historical_context: { total_campaigns: 7, campaigns: [{ roi: 2.0 }, { roi: 3.0 }] },
   };
 
   it('maps the flat wire shape onto the view model', () => {
@@ -41,12 +41,16 @@ describe('promo evaluation mapping', () => {
     expect(e.roi).toBe(2.4);
     expect(e.roiLower).toBe(1.8);
     expect(e.roiUpper).toBe(3.1);
+    // break_even_weeks is reported in weeks; the panel labels days.
     expect(e.breakEvenDays).toBe(21);
-    expect(e.historicalAvgRoi).toBe(2.1);
     expect(e.similarCampaigns).toBe(7);
-    expect(e.timingAssessment).toBe('Good window');
-    expect(e.seasonalityFit).toBe('Favourable');
+    expect(e.timingAssessment).toBe('Acceptable, review conflicts');
+    expect(e.seasonalityFit).toContain('Strong seasonal fit');
     expect(e.reasoning).toContain('Lift is supported');
+  });
+
+  it('derives the historical average ROI from the returned campaigns', () => {
+    expect(mapPromoEvaluation(wire).historicalAvgRoi).toBe(2.5);
   });
 
   it('merges structured timing risks with the flat risk_factors sentences', () => {
