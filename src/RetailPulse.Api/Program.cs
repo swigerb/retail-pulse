@@ -1,11 +1,9 @@
 using System.Text.Json;
-using System.Threading.RateLimiting;
 using Asp.Versioning;
 using Microsoft.Agents.AI.Workflows.Checkpointing;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -219,93 +217,8 @@ if (entraAuthOptions is not null)
 }
 
 // ── Rate Limiting ───────────────────────────────────────────────────────
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-
-    options.AddFixedWindowLimiter("strict", opt =>
-    {
-        opt.PermitLimit = 10;
-        opt.Window = TimeSpan.FromMinutes(1);
-        opt.QueueLimit = 0;
-    });
-
-    options.AddFixedWindowLimiter("upload", opt =>
-    {
-        opt.PermitLimit = 5;
-        opt.Window = TimeSpan.FromMinutes(1);
-        opt.QueueLimit = 0;
-    });
-
-    options.AddFixedWindowLimiter("moderate", opt =>
-    {
-        opt.PermitLimit = 30;
-        opt.Window = TimeSpan.FromMinutes(1);
-        opt.QueueLimit = 0;
-    });
-
-    options.AddFixedWindowLimiter("relaxed", opt =>
-    {
-        opt.PermitLimit = 100;
-        opt.Window = TimeSpan.FromMinutes(1);
-        opt.QueueLimit = 0;
-    });
-
-    // Rate limiter for the unauthenticated Anonymous bootstrap endpoint. Always registered so the
-    // limiter graph is stable and testable; only used when Authentication:Mode=Anonymous maps the
-    // bootstrap route.
-    //
-    // IMPORTANT (ACA ingress reality): when hosted behind Azure Container Apps, every request
-    // arrives from the ingress/proxy, so HttpContext.Connection.RemoteIpAddress is the proxy's IP,
-    // NOT the client's — a per-IP partition would therefore collapse to a single global bucket
-    // anyway. We do NOT trust X-Forwarded-For to recover the client IP: ACA does not give us a
-    // cryptographically verifiable client-IP header, and an attacker can forge XFF to shard around a
-    // per-IP limit. So bootstrap is intentionally a single GLOBAL, conservative fixed window — it
-    // caps total anonymous session minting per minute for the whole replica and cannot be bypassed
-    // by header spoofing. Fine-grained abuse control is enforced AFTER bootstrap by the per-subject
-    // (immutable, server-minted sub) limits in AnonymousGuardMiddleware, which is the primary
-    // control. Note: this window is replica-local; hosted Anonymous runs at maxReplicas=1.
-    //
-    // Config key: Anonymous:Bootstrap:GlobalPerMinute (conservative default 5). The legacy
-    // Anonymous:Bootstrap:PerIpPerMinute key is still honoured as a fallback for backward
-    // compatibility — it was never actually per-IP behind ACA, hence the rename.
-    options.AddPolicy("anonymous-bootstrap", _ =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: "anonymous-bootstrap-global",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = builder.Configuration.GetValue("Anonymous:Bootstrap:GlobalPerMinute",
-                    builder.Configuration.GetValue("Anonymous:Bootstrap:PerIpPerMinute", 5)),
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-            }));
-
-    // Rate limiters for the GitHub confidential OAuth BFF endpoints. Always registered so the limiter
-    // graph is stable and testable; only used when Authentication:Mode=GitHub maps the endpoints.
-    // Behind ACA the client IP is the proxy's and X-Forwarded-For is forgeable, so these are single
-    // GLOBAL per-replica fixed windows (not per-IP) that cap login-flow abuse (state minting and code
-    // redemption) without being bypassable by header spoofing. Replica-local; hosted GitHub runs at
-    // maxReplicas=1. Config keys: GitHub:RateLimits:StartPerMinute / ExchangePerMinute.
-    options.AddPolicy("github-start", _ =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: "github-start-global",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = builder.Configuration.GetValue("GitHub:RateLimits:StartPerMinute", 10),
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-            }));
-
-    options.AddPolicy("github-exchange", _ =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: "github-exchange-global",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = builder.Configuration.GetValue("GitHub:RateLimits:ExchangePerMinute", 20),
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-            }));
-});
+// Policies live in RateLimitingSetup so tests can exercise the real limits.
+builder.Services.AddRetailPulseRateLimiting(builder.Configuration);
 
 // ── API Versioning ──────────────────────────────────────────────────────
 builder.Services.AddApiVersioning(options =>
@@ -458,8 +371,30 @@ string mcpBaseUrl = builder.Configuration["McpServer:BaseUrl"]
     ?? (builder.Environment.IsDevelopment() ? "http://localhost:5200" : null)
     ?? throw new InvalidOperationException(
         "Configuration value 'McpServer:BaseUrl' is required outside of Development.");
+
+// Shared secret presented to the MCP server's API-key gate. The MCP server runs
+// with ApiKey:Enabled=true outside Development, so a deployed API that does not
+// send this header is refused. Required outside Development — failing closed here
+// surfaces a misconfiguration at startup rather than as 401s at request time.
+string? mcpApiKey = builder.Configuration["McpServer:ApiKey"];
+if (!builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(mcpApiKey))
+{
+    throw new InvalidOperationException(
+        "Configuration value 'McpServer:ApiKey' is required outside of Development. "
+        + "The MCP server enforces its API-key gate in every non-Development environment.");
+}
+
+string mcpApiKeyHeader = builder.Configuration["McpServer:ApiKeyHeader"] ?? "X-Api-Key";
+
 builder.Services.AddTransient<McpResponseCachingHandler>();
-builder.Services.AddHttpClient("McpServer", client => client.BaseAddress = new Uri(mcpBaseUrl)).AddHttpMessageHandler<McpResponseCachingHandler>()
+builder.Services.AddHttpClient("McpServer", client =>
+    {
+        client.BaseAddress = new Uri(mcpBaseUrl);
+        if (!string.IsNullOrWhiteSpace(mcpApiKey))
+        {
+            client.DefaultRequestHeaders.Add(mcpApiKeyHeader, mcpApiKey);
+        }
+    }).AddHttpMessageHandler<McpResponseCachingHandler>()
   .AddMcpResilienceHandler();
 
 // Register tools
