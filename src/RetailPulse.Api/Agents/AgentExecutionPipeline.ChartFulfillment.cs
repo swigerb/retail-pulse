@@ -182,21 +182,44 @@ public partial class AgentExecutionPipeline
         // type, too few marks, or the chart JSON narrated into the prose.
         //
         // The model still writes the words; the code draws the chart.
-        int requiredMarks = isPortfolioRanking
+        //
+        // A curated prompt carries its own acceptance floor from the chart manifest.
+        // Aim for it — the live pipeline should hold a chart to the SAME contract the
+        // acceptance tests assert, rather than the looser "is it renderable at all"
+        // per-type minimum (the two-brand region comparison wants 4 marks where the
+        // generic groupedBar floor is only 2).
+        //
+        // But treat it as a TARGET, not a cliff. The manifest describes a complete
+        // turn — two brands across all six regions is twelve marks — and a turn where
+        // the model scoped its tool calls more narrowly yields fewer. Dropping the
+        // chart entirely in that case is the worst outcome: real data exists, it
+        // renders correctly, and the user is shown nothing. So we try the manifest
+        // floor first and fall back to the per-type floor, never below it.
+        int typeFloor = isPortfolioRanking
             ? Math.Max(6, ChartSpecValidator.MinimumMarksForType(intent.ChartType))
             : ChartSpecValidator.MinimumMarksForType(intent.ChartType);
+        int targetMarks = Math.Max(typeFloor, intent.MinMarks);
 
-        // A curated prompt carries its own acceptance floor from the chart manifest.
-        // Enforcing it here means the live pipeline holds a chart to the SAME contract
-        // the acceptance tests assert, rather than the looser "is it renderable at all"
-        // per-type minimum — e.g. the two-brand region comparison needs 4 marks, where
-        // the generic groupedBar floor is only 2.
-        requiredMarks = Math.Max(requiredMarks, intent.MinMarks);
-
-        if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, requiredMarks, out ChartSpec? deterministic)
-            && deterministic is not null)
+        int requiredMarks = targetMarks;
+        if (!DeterministicChartBuilder.TryBuild(response, intent.ChartType, targetMarks, out ChartSpec? deterministic)
+            || deterministic is null)
         {
-            // Prefer the deterministic chart, but never at the cost of completeness.
+            requiredMarks = typeFloor;
+            if (targetMarks > typeFloor
+                && DeterministicChartBuilder.TryBuild(response, intent.ChartType, typeFloor, out ChartSpec? relaxed)
+                && relaxed is not null)
+            {
+                _logger.LogInformation(
+                    "Chart-fulfillment: tool data supports {Marks} marks, below the curated "
+                    + "{Target}-mark contract for '{ChartType}'. Emitting the chart the data does "
+                    + "support rather than nothing.",
+                    CountMarks(relaxed), targetMarks, intent.ChartType ?? "chart");
+                deterministic = relaxed;
+            }
+        }
+
+        if (deterministic is not null)
+        {
             // When the model also produced a valid chart of the requested type that
             // covers MORE of the data, keeping the thinner rebuild would be a
             // regression — the tool payload is authoritative about what is true, not
