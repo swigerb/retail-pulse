@@ -68,8 +68,8 @@ channels:
   - "Off-Premise"
   - "E-Commerce"
 theme:
-  primaryColor: "#1B4D7A"
-  accentColor: "#E8A838"
+  primaryColor: "#1565C0"
+  accentColor: "#42A5F5"
   logoPath: "assets/apex-logo.png"
   fontFamily: "Inter, system-ui, sans-serif"
 distribution:

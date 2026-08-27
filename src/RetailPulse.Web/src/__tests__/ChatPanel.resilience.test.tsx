@@ -78,10 +78,10 @@ beforeEach(() => {
 // Import AFTER vi.mock so the mocked modules are used.
 import { ChatPanel } from '../components/ChatPanel';
 
-function renderPanel() {
+function renderPanel(props: { telemetryOpen?: boolean } = {}) {
   return render(
     <FluentProvider theme={teamsDarkTheme}>
-      <ChatPanel />
+      <ChatPanel {...props} />
     </FluentProvider>,
   );
 }
@@ -92,6 +92,26 @@ describe('ChatPanel resilience surface (issue #92)', () => {
     const indicator = screen.getByTestId('connection-status-indicator');
     expect(indicator).toBeInTheDocument();
     expect(indicator).toHaveAttribute('data-status', 'connected');
+  });
+
+  // The composer pill and the Real-Time Telemetry drawer badge report the SAME
+  // SignalR connection. Rendering both states one fact twice, so the composer
+  // pill yields to the drawer badge whenever the drawer is open.
+  it('hides the composer connection pill while the telemetry drawer is open', () => {
+    renderPanel({ telemetryOpen: true });
+    expect(screen.queryByTestId('connection-status-indicator')).not.toBeInTheDocument();
+  });
+
+  it('restores the composer connection pill when the telemetry drawer closes', () => {
+    const { rerender } = renderPanel({ telemetryOpen: true });
+    expect(screen.queryByTestId('connection-status-indicator')).not.toBeInTheDocument();
+
+    rerender(
+      <FluentProvider theme={teamsDarkTheme}>
+        <ChatPanel telemetryOpen={false} />
+      </FluentProvider>,
+    );
+    expect(screen.getByTestId('connection-status-indicator')).toBeInTheDocument();
   });
 
   it('shows a visible Cancel button while a run is in flight and hides Send', async () => {

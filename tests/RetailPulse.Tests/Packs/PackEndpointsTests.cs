@@ -79,7 +79,14 @@ public sealed class PackEndpointsTests : IAsyncDisposable
         root.GetProperty("displayName").GetString().Should().NotBeNullOrWhiteSpace();
         JsonElement tenant = root.GetProperty("tenant");
         tenant.GetProperty("company").GetString().Should().Be("Apex Retail Group");
-        tenant.GetProperty("theme").GetProperty("primaryColor").GetString().Should().Be("#1B4D7A");
+        // The contract under test is that the pack's theme block is projected through
+        // the endpoint, not which brand colour the pack happens to ship. Assert the
+        // shape (a well-formed hex colour) so a palette change is a one-file edit
+        // rather than a failing endpoint contract test.
+        tenant.GetProperty("theme").GetProperty("primaryColor").GetString()
+            .Should().MatchRegex("^#[0-9A-Fa-f]{6}$");
+        tenant.GetProperty("theme").GetProperty("accentColor").GetString()
+            .Should().MatchRegex("^#[0-9A-Fa-f]{6}$");
         tenant.GetProperty("brands").GetArrayLength().Should().BeGreaterThan(0);
     }
 

@@ -710,6 +710,7 @@ export function Dashboard() {
               promptCategories={activePack.categories}
               planController={planController}
               planConnected={connected}
+              telemetryOpen={telemetryOpen}
             />
           </div>
           {capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner ? (
