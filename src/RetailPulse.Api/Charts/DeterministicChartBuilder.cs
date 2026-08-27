@@ -313,8 +313,15 @@ internal static class DeterministicChartBuilder
     /// </summary>
     private static ChartSpec? TryBuildGroupedRegionBar(IReadOnlyList<JsonElement> payloads, string? requestedType)
     {
-        var series = new List<ChartSeries>();
-        var seenBrands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Accumulate per brand ACROSS payloads. A turn does not always fetch one
+        // whole-country rollup per brand — the model may fan out region by region, which
+        // yields several payloads for the same brand. Keeping only the first (the old
+        // behaviour) threw the rest away, so a brand queried across six regions
+        // contributed a single point, and a two-brand comparison could collapse below
+        // the two-series minimum and produce no chart at all despite ample data.
+        var byBrand = new Dictionary<string, List<ChartDataPoint>>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<string>();
+        var seenRegionPerBrand = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (JsonElement payload in payloads)
         {
@@ -325,11 +332,18 @@ internal static class DeterministicChartBuilder
             if (!payload.TryGetProperty("summary", out JsonElement summary) || summary.ValueKind != JsonValueKind.Object)
                 continue;
 
-            string brand = ReadBrand(payload) ?? $"Series {series.Count + 1}";
-            if (!seenBrands.Add(brand))
-                continue;
+            string brand = ReadBrand(payload) ?? $"Series {order.Count + 1}";
 
-            var points = new List<ChartDataPoint>();
+            if (!byBrand.TryGetValue(brand, out List<ChartDataPoint>? points))
+            {
+                points = [];
+                byBrand[brand] = points;
+                seenRegionPerBrand[brand] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                order.Add(brand);
+            }
+
+            HashSet<string> seenRegions = seenRegionPerBrand[brand];
+
             foreach (JsonElement row in byRegion.EnumerateArray())
             {
                 if (row.ValueKind != JsonValueKind.Object)
@@ -339,11 +353,22 @@ internal static class DeterministicChartBuilder
                 // Prefer volume; never substitute zero for a missing metric.
                 if (!TryReadDouble(row, "volume", out double volume) || !double.IsFinite(volume))
                     continue;
-                points.Add(new ChartDataPoint { X = regionEl.GetString()!, Y = Math.Round(volume, 1) });
-            }
 
-            if (points.Count > 0)
-                series.Add(new ChartSeries { Legend = brand, Values = points });
+                string region = regionEl.GetString()!;
+                // A region repeated across payloads for the same brand is the same fact
+                // reported twice, not two bars.
+                if (!seenRegions.Add(region))
+                    continue;
+
+                points.Add(new ChartDataPoint { X = region, Y = Math.Round(volume, 1) });
+            }
+        }
+
+        var series = new List<ChartSeries>();
+        foreach (string brand in order)
+        {
+            if (byBrand[brand].Count > 0)
+                series.Add(new ChartSeries { Legend = brand, Values = byBrand[brand] });
         }
 
         // A grouped/region comparison needs at least two brand series to be meaningful.
