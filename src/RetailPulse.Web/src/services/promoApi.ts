@@ -76,8 +76,11 @@ function toRisks(wire: WirePromoEvaluation): PromoRisk[] {
     severity: toSeverity(r.severity),
   }));
 
+  // RiskCard shows `type` as the headline and reveals `detail` on expand, so the
+  // flat sentences must carry their text in `type` — otherwise every planning risk
+  // renders as the literal word "planning" with the real reason hidden behind a click.
   const flat: PromoRisk[] = (wire.risk_factors ?? []).map(text => ({
-    type: 'planning',
+    type: text,
     detail: text,
     // The endpoint only emits a risk factor when a threshold was crossed, so
     // "medium" is the honest floor — these are not advisory notes.
