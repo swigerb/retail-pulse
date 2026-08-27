@@ -4,6 +4,87 @@ public static class StoreEndpoints
 {
     public static WebApplication MapStoreEndpoints(this WebApplication app)
     {
+        // Portfolio-wide stockout risks for the Store Operations panel.
+        //
+        // The panel previously rendered a hardcoded three-item array declared inline
+        // in Dashboard.tsx. The real signal lives in the MCP inventory feed, which
+        // carries stock levels, days of supply and a status per SKU — this projects
+        // the at-risk subset into the StockoutRisk shape the panel already declares,
+        // so the cards show what the system actually knows.
+        app.MapGet("/api/stores/stockout-risks", async (
+            IHttpClientFactory httpFactory,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct,
+            string? region = null,
+            int limit = 12) =>
+        {
+            try
+            {
+                HttpClient client = httpFactory.CreateClient("McpServer");
+                string url = "/api/supply/inventory?";
+                if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
+
+                HttpResponseMessage response = await client.GetAsync(url, ct);
+                response.EnsureSuccessStatusCode();
+
+                await using Stream stream = await response.Content.ReadAsStreamAsync(ct);
+                using System.Text.Json.JsonDocument doc =
+                    await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+                if (!doc.RootElement.TryGetProperty("items", out System.Text.Json.JsonElement items)
+                    || items.ValueKind != System.Text.Json.JsonValueKind.Array)
+                {
+                    return Results.Ok(Array.Empty<object>());
+                }
+
+                var risks = new List<object>();
+                foreach (System.Text.Json.JsonElement row in items.EnumerateArray())
+                {
+                    string status = ReadString(row, "status");
+                    double daysOfSupply = ReadDouble(row, "days_of_supply");
+
+                    // Only surface SKUs that are actually in trouble. Everything else is
+                    // noise on a panel whose whole purpose is "what needs attention".
+                    bool atRisk = status is "out_of_stock" or "critical" or "low"
+                        || (daysOfSupply > 0 && daysOfSupply <= 10);
+                    if (!atRisk) continue;
+
+                    double safetyStock = ReadDouble(row, "safety_stock");
+                    double currentStock = ReadDouble(row, "current_stock");
+
+                    // Inventory reports stock and cover, not velocity. Derive the implied
+                    // daily draw from them so the card can show a real units/day figure
+                    // rather than an invented constant.
+                    double velocity = daysOfSupply > 0
+                        ? Math.Round(currentStock / daysOfSupply, 1)
+                        : Math.Round(safetyStock / 30d, 1);
+
+                    risks.Add(new
+                    {
+                        skuId = ReadString(row, "sku"),
+                        skuName = $"{ReadString(row, "brand")} — {ReadString(row, "category")}",
+                        brand = ReadString(row, "brand"),
+                        region = ReadString(row, "region"),
+                        currentVelocity = velocity,
+                        daysRemaining = daysOfSupply,
+                        // Replenish back above safety stock plus a fortnight of cover.
+                        recommendedReorder = (int)Math.Max(50, Math.Round((safetyStock + (velocity * 14)) / 50d) * 50),
+                    });
+
+                    if (risks.Count >= limit) break;
+                }
+
+                return Results.Ok(risks);
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger(typeof(StoreEndpoints))
+                    .LogWarning(ex, "Stockout risks unavailable from the MCP server.");
+                return Results.Ok(Array.Empty<object>());
+            }
+        })
+        .WithName("GetStockoutRisks").RequireAuthorization().RequireRateLimiting("relaxed");
+
         app.MapGet("/api/stores/performance", async (IHttpClientFactory httpFactory, CancellationToken ct, string? region = null) =>
         {
             HttpClient client = httpFactory.CreateClient("McpServer");
@@ -57,4 +138,16 @@ public static class StoreEndpoints
 
         return app;
     }
+    private static string ReadString(System.Text.Json.JsonElement row, string name) =>
+        row.TryGetProperty(name, out System.Text.Json.JsonElement v)
+            && v.ValueKind == System.Text.Json.JsonValueKind.String
+                ? v.GetString() ?? string.Empty
+                : string.Empty;
+
+    private static double ReadDouble(System.Text.Json.JsonElement row, string name) =>
+        row.TryGetProperty(name, out System.Text.Json.JsonElement v)
+            && v.ValueKind == System.Text.Json.JsonValueKind.Number
+            && v.TryGetDouble(out double d)
+                ? d
+                : 0d;
 }

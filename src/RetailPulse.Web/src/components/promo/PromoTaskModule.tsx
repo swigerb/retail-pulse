@@ -96,7 +96,13 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: '12px',
     justifyContent: 'flex-end',
+    alignItems: 'center',
     marginTop: '8px',
+    flexWrap: 'wrap',
+  },
+  missingHint: {
+    fontSize: '12px',
+    color: 'var(--colorNeutralForeground3)',
   },
   evaluateButton: {
     minWidth: '180px',
@@ -157,6 +163,17 @@ export default function PromoTaskModule() {
   }, []);
 
   const isFormValid = brand && region && promoType && budget && startDate && endDate && Number(budget) > 0;
+
+  // The Evaluate button used to sit disabled with no explanation, which read as a
+  // broken feature when it was really an unfilled field. Name what is missing.
+  const missingFields = [
+    !brand && 'brand',
+    !region && 'region',
+    !promoType && 'promotion type',
+    (!budget || Number(budget) <= 0) && 'a budget above zero',
+    !startDate && 'start date',
+    !endDate && 'end date',
+  ].filter((f): f is string => typeof f === 'string');
 
   const handleEvaluate = useCallback(async () => {
     if (!isFormValid || !promoType) return;
@@ -311,6 +328,11 @@ export default function PromoTaskModule() {
         </div>
 
         <div className={styles.actions}>
+          {missingFields.length > 0 && (
+            <span className={styles.missingHint} data-testid="evaluate-blocked-reason">
+              Complete to evaluate: {missingFields.join(', ')}
+            </span>
+          )}
           <Button
             appearance="primary"
             size="large"
@@ -318,7 +340,6 @@ export default function PromoTaskModule() {
             disabled={!isFormValid || loading}
             onClick={handleEvaluate}
             data-testid="evaluate-button"
-            style={{ backgroundColor: '#22c55e', borderColor: '#22c55e' }}
           >
             {loading ? <Spinner size="tiny" /> : '🎯 Evaluate Campaign'}
           </Button>

@@ -1054,6 +1054,10 @@ static AITool WrapCached(IServiceProvider sp, AITool tool)
 }
 
 // Register ConsensusOrchestrator for Portfolio Health Council
+// The history store is registered unconditionally so GET /api/council/history always
+// answers (with an empty list) rather than 404ing when the council itself is off.
+builder.Services.AddSingleton<CouncilHistoryStore>();
+
 if (councilSynthesisDef is not null && councilVoteDef is not null)
 {
     builder.Services.AddScoped<RetailPulse.Contracts.Consensus.IConsensusCouncil>(sp =>
