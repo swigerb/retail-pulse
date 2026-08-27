@@ -22,7 +22,11 @@ public class ScorecardOrchestrator
     private readonly ILogger<ScorecardOrchestrator> _logger;
     private readonly IReadOnlyList<ScorecardDimensionConfig> _scoringDimensionsConfig;
 
-    private static readonly TimeSpan _agentTimeout = TimeSpan.FromSeconds(12);
+    // Specialist assessments make tool calls, so they need the same headroom the
+    // consensus council was given. At 12s every dimension timed out and the whole
+    // scorecard degraded to a flat neutral 5.0, which looked like a working feature
+    // reporting that every brand was mediocre.
+    private static readonly TimeSpan _agentTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>Default dimensions — kept as a fallback so tests and legacy composition
     /// roots that don't supply a configuration list continue to work.</summary>

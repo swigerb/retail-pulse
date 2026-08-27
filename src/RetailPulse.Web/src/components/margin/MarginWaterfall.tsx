@@ -36,6 +36,15 @@ const useStyles = makeStyles({
     backgroundColor: MARGIN_COLORS.cardBg,
     border: `1px solid ${MARGIN_COLORS.cardBorder}`,
     borderRadius: '12px',
+    // The panel that hosts this chart is `overflow: auto`. Without pinning the
+    // wrapper, recharts' ResponsiveContainer measures the scroll container, which
+    // widens the scroll width, which re-measures wider again — the chart ran away
+    // to ~2400px inside a viewport-width panel and the bars rendered off-screen.
+    // Pinning the width and clipping breaks that feedback loop.
+    width: '100%',
+    minWidth: 0,
+    boxSizing: 'border-box',
+    overflow: 'hidden',
   },
   title: {
     fontSize: '15px',
