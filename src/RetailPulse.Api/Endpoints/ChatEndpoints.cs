@@ -9,6 +9,7 @@ using RetailPulse.Api.Agents.Planning;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Auth;
 using RetailPulse.Api.Configuration;
+using RetailPulse.Api.Consensus;
 using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Memory;
@@ -1203,7 +1204,7 @@ public static class ChatEndpoints
         .RequireRateLimiting("relaxed");
 
         // ── Council endpoints ────────────────────────────────────────────────
-        app.MapPost("/api/council/convene", async (CouncilConveneRequest body, ILogger<Program> logger, CancellationToken ct, IConsensusCouncil? council = null) =>
+        app.MapPost("/api/council/convene", async (CouncilConveneRequest body, ILogger<Program> logger, CancellationToken ct, IConsensusCouncil? council = null, [FromServices] CouncilHistoryStore? history = null) =>
         {
             if (string.IsNullOrWhiteSpace(body.Brand))
                 return Results.BadRequest(new { error = "Field 'brand' is required." });
@@ -1218,6 +1219,8 @@ public static class ChatEndpoints
                 body.Brand, body.Region ?? "All");
 
             CouncilVerdict verdict = await council.ConveneAsync(body.Brand, body.Region, ct);
+            // Optional so hosts that map these routes without the store still start.
+            history?.Record(verdict);
 
             return Results.Ok(new
             {
@@ -1243,6 +1246,34 @@ public static class ChatEndpoints
             });
         })
         .WithName("ConveneCouncil").RequireAuthorization().RequireRateLimiting("strict");
+
+        // The SPA has always called this route; until now nothing answered it, so
+        // "Load History" was permanently empty.
+        app.MapGet("/api/council/history", ([FromServices] CouncilHistoryStore? history, int limit = 20) =>
+            Results.Ok((history?.GetRecent(limit) ?? []).Select(v => new
+            {
+                id = $"{v.Brand}-{v.ConvenedAt:O}",
+                brand = v.Brand,
+                region = v.Region ?? "All Regions",
+                convened_at = v.ConvenedAt,
+                overall_rating = v.OverallRating.ToString(),
+                synthesis = v.Synthesis,
+                is_unanimous = v.IsUnanimous,
+                disagreements = v.Disagreements,
+                action_items = v.ActionItems,
+                total_duration_ms = v.TotalDuration.TotalMilliseconds,
+                votes = v.Votes.Select(vote => new
+                {
+                    agent_id = vote.AgentId,
+                    agent_name = vote.AgentName,
+                    rating = vote.Rating.ToString(),
+                    reasoning = vote.Reasoning,
+                    confidence = vote.Confidence,
+                    key_metrics = vote.KeyMetrics,
+                    response_time_ms = vote.ResponseTime.TotalMilliseconds
+                })
+            })))
+        .WithName("CouncilHistory").RequireAuthorization().RequireRateLimiting("relaxed");
 
         app.MapGet("/api/council/agents", (IEnumerable<ISpecialistAgent> specialists) =>
         {
