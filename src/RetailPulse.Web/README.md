@@ -131,4 +131,4 @@ VS users need the Node.js workload installed locally.
 - [Recharts](https://recharts.org/) — chart rendering.
 - [Fluent UI React v9](https://react.fluentui.dev/) — design system.
 - [Microsoft SignalR client](https://learn.microsoft.com/aspnet/core/signalr/javascript-client) — real-time telemetry hubs.
-- [MSAL React](https://learn.microsoft.com/entra/identity-platform/tutorial-single-page-app-react-sign-in) — Entra sign-in in `Entra` mode.
+- [MSAL React](https://learn.microsoft.com/entra/identity-platform/tutorial-single-page-app-react-prepare-app) — Entra sign-in in `Entra` mode.

@@ -12,32 +12,64 @@
 
 ## Security Headers
 
-All responses include these security headers (via `SecurityHeadersMiddleware`):
+`SecurityHeadersMiddleware`
+([`src/RetailPulse.Api/Middleware/SecurityHeadersMiddleware.cs`](../src/RetailPulse.Api/Middleware/SecurityHeadersMiddleware.cs))
+adds the following headers to every response:
 
 | Header | Value | Purpose |
 |--------|-------|---------|
-| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Force HTTPS |
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'unsafe-inline'...` | Prevent XSS/injection |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'` | Same-origin lockdown. `'unsafe-inline'` is granted to **styles only** — scripts are same-origin with no inline allowance. |
 | `X-Content-Type-Options` | `nosniff` | Prevent MIME sniffing |
 | `X-Frame-Options` | `DENY` | Prevent clickjacking |
-| `X-XSS-Protection` | `0` | Disabled (CSP is preferred) |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Limit referrer leakage |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Restrict browser APIs |
+
+One header is conditional:
+
+| Header | Value | Condition |
+|--------|-------|-----------|
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Emitted only when `Request.IsHttps`. Behind the Azure Container Apps ingress the in-container request is plain HTTP, so HSTS is asserted at the edge rather than by this middleware. |
+
+Every header is written with `TryAdd`, so a value already set by an upstream
+component or the hosting platform is preserved rather than overwritten.
+
+`X-XSS-Protection` is deliberately **not** emitted. The header is deprecated,
+and its legacy auditor is a known XSS-filter side-channel; the CSP above is the
+control that matters. Do not add it back.
 
 ---
 
 ## Input Validation
 
-All chat requests are validated by `ChatRequestValidator` before reaching the agent:
+All chat requests pass through `ChatRequestValidator`
+([`src/RetailPulse.Api/Validation/ChatRequestValidator.cs`](../src/RetailPulse.Api/Validation/ChatRequestValidator.cs))
+before the agent pipeline runs, so an oversized or malformed request is refused
+**before** it is billed against a model:
 
-| Rule | Limit | Error |
-|------|-------|-------|
-| Message length | Max 2000 characters | 400 — "Message exceeds maximum length" |
-| Message format | Non-empty, trimmed | 400 — "Message is required" |
-| XSS detection | No `<script>`, `javascript:`, `on*=` patterns | 400 — "Message contains disallowed content" |
-| Session ID format | Alphanumeric + hyphens only | 400 — "Invalid session ID format" |
+| Rule | Limit | Error key |
+|------|-------|-----------|
+| Message present | Non-null, non-whitespace | `message` |
+| Message length | Max 4000 characters | `message` |
+| Session ID format | 1–64 characters, alphanumeric or hyphen (when supplied) | `sessionId` |
+| History count | Max 50 prior turns | `history` |
+| History entry length | Max 4000 characters per entry | `history[i]` |
+| History aggregate | Max 100,000 characters across all entries | `history.aggregate` |
+| Forced execution path | `fast` or `plan` only — `council` is router-controlled and never user-forceable | `forceExecutionPath` |
 
-Validation errors return RFC 7807 Problem Details with specific error descriptions.
+Validation failures return an RFC 7807 Problem Details payload via
+`Results.ValidationProblem`, keyed by the field names above.
+
+### What this layer does *not* do
+
+This validator is a **shape and size** gate, not a content filter. Injection-style
+payloads — `<script>`, `javascript:`, `'; DROP TABLE ...` — are **accepted** here
+by design and are handled downstream by the guardrails layer described below.
+`OwaspTests.A03_XssAndSqlInjection_DoNotCrashValidator` pins that contract
+explicitly, so do not read the size caps as an anti-XSS control.
+
+The three bounds on `history` exist because the array is caller-supplied prompt
+context. Capping count, per-entry size, and aggregate size independently stops a
+caller from smuggling a very large context past the per-message cap.
 
 ---
 
@@ -162,7 +194,7 @@ resource idempotently — a re-provision never duplicates the assignment.
 
 ---
 
-## Agent-definition validation gate (Issue #99)
+## Agent-definition validation gate
 
 Agent and tenant configuration is validated at host startup, *before* any
 agent or tool is constructed. The gate lives in
@@ -270,7 +302,7 @@ All chat interactions are recorded in a tamper-evident audit log (`DurableAuditL
 
 ---
 
-## Session Persistence (Issue #90)
+## Session persistence
 
 Durable server-side conversation history is available as an **opt-in** feature
 behind the `SessionPersistence:Enabled` configuration switch. It follows the
@@ -328,12 +360,11 @@ configuration key (`Authentication__Mode`). Resolution is deterministic and
 fails closed — it never auto-detects a provider:
 
 - `Entra` (the production mode) routes to the unchanged Entra boundary.
-- `Anonymous` is implemented (Sprint 1) as an **opt-in, fail-closed** capability
-  that is **not deployed by default** (hosted only behind an explicit
-  `Anonymous:AllowHosted=true` opt-in) — see
+- `Anonymous` is an **opt-in, fail-closed** capability that is **not deployed by
+  default** (hosted only behind an explicit `Anonymous:AllowHosted=true` opt-in) — see
   [Anonymous mode](#anonymous-mode-opt-in-fail-closed) below.
-- `GitHub` is implemented (Sprint 2) as an **opt-in, fail-closed** confidential
-  OAuth backend-for-frontend capability that is **not deployed** — see
+- `GitHub` is an **opt-in, fail-closed** confidential OAuth
+  backend-for-frontend capability that is **not deployed** — see
   [GitHub mode](#github-mode-confidential-oauth-bff-opt-in-fail-closed) below.
 - A missing mode defaults to `Entra` **only in Development**. Outside
   Development a missing, unknown, or malformed mode fails startup.
@@ -345,15 +376,14 @@ Production pins `Authentication__Mode=Entra` explicitly in
 
 ### Anonymous mode (opt-in, fail-closed)
 
-Anonymous mode lets a future self-serve frontend (Sprint 3) reach a **single
-chat capability** — authenticated `POST /api/chat` — without an identity provider.
-It is additive and fail-closed. In Sprint 1 the **SignalR hubs are NOT part of the
+Anonymous mode lets a self-serve frontend reach a **single chat capability** —
+authenticated `POST /api/chat` — without an identity provider.
+It is additive and fail-closed. The **SignalR hubs are NOT part of the
 anonymous surface**: anonymous sessions have no real-time telemetry or token
 streaming, and a valid anonymous token is denied `403` on both hubs. Hosted
 Anonymous **is permitted only behind an explicit
 opt-in** (`Anonymous:AllowHosted=true`); by default it is never deployed, and the
 **live deployment artifacts stay Entra**, proven so by deployment-contract tests.
-It is not deployed this sprint.
 
 - **Smallest useful surface (deny-by-default).** The anonymous surface is exactly
   **two routes**: the unauthenticated bootstrap and authenticated `POST /api/chat`.
@@ -429,10 +459,10 @@ It is not deployed this sprint.
 
 ### GitHub mode (confidential OAuth BFF, opt-in, fail-closed)
 
-GitHub mode lets a future self-serve frontend (Sprint 3) sign in with GitHub
+GitHub mode lets a self-serve frontend sign in with GitHub
 without exposing a GitHub provider token to the browser. It is additive and
 fail-closed, and the **live deployment artifacts stay Entra** (proven by
-deployment-contract tests). It is **not deployed** this sprint.
+deployment-contract tests). It is **not deployed**.
 
 - **Confidential backend-for-frontend (BFF).** GitHub OAuth Apps **do not support
   PKCE**, so a browser-only exchange is impossible without leaking the client
@@ -508,7 +538,7 @@ deployment-contract tests). It is **not deployed** this sprint.
   inspect ACA topology, hosted GitHub requires an explicit
   `AcknowledgeSingleReplica=true` fail-closed acknowledgement of that pin.
 
-### Frontend build mode & session-token lifecycle (Sprint 3)
+### Frontend build mode & session-token lifecycle
 
 The SPA renders exactly **one** provider's sign-in UX, selected at build time by
 `VITE_AUTH_MODE` (`Entra` / `GitHub` / `Anonymous`), which mirrors the backend
@@ -576,13 +606,15 @@ attack surface. The live build stays `Entra`.
 By default the API accepts only **delegated** (user) tokens — a token bearing the
 `RetailPulse.User` app role AND the `access_as_user` scope. An **app-only**
 (client-credentials) token — which carries `roles` but no `scp` — is rejected
-`403`. This is the pre-#163 behaviour and is preserved bit-for-bit for every
-unset deployment. It matches the ADR-005 / epic #27 guardrails: **"Live
+`403`. That is the default posture and is preserved bit-for-bit for every
+unset deployment. It matches the ADR-005 guardrails: **"Live
 production stays Entra only and fails closed"**, **"No silent downgrade"**.
 
-Machine callers (for example the optional synthetic monitor in `#57`) need an
-app-only token, so the Entra boundary now supports an **opt-in** app-only path.
-It is additive, narrow, and fail-closed:
+Machine callers — for example the optional authenticated synthetic chat monitor
+described in
+[`testing/authenticated-synthetic-monitor.md`](testing/authenticated-synthetic-monitor.md)
+— need an app-only token, so the Entra boundary supports an **opt-in** app-only
+path. It is additive, narrow, and fail-closed:
 
 - **Disabled by default.** Unset configuration behaves exactly as it did
   before this feature existed.
@@ -609,7 +641,7 @@ All keys live in the `MicrosoftEntra` section (env-var form
 
 | Key | Type | Default | Purpose |
 |-----|------|---------|---------|
-| `MicrosoftEntra:AllowAppOnlyTokens` | bool | **`false`** | Master opt-in. When `false`, every app-only token is rejected `403` (this matches the shipped Bicep and preserves pre-#163 behaviour). When `true`, an app-only token bearing the required app role is accepted — subject to the optional allow-list below. |
+| `MicrosoftEntra:AllowAppOnlyTokens` | bool | **`false`** | Master opt-in. When `false`, every app-only token is rejected `403` (this matches the shipped Bicep and is the default posture). When `true`, an app-only token bearing the required app role is accepted — subject to the optional allow-list below. |
 | `MicrosoftEntra:AllowedAppClientIds` | string[] (config-array) | **empty** | Optional allow-list of application (client) IDs (Entra service-principal client IDs) permitted to authenticate via app-only tokens. Empty means the app role alone gates access. When populated, the token's `azp` (v2) or `appid` (v1) claim MUST match one of the listed GUIDs. |
 | `MicrosoftEntra:AppRole` | string | `RetailPulse.User` | The role required on **every** authenticated request. In the app-only path this is the primary gate — a blank or placeholder value fails startup when the opt-in is on. |
 
@@ -637,14 +669,14 @@ The dual-mode assertion (`AuthenticationSetup.IsAuthorizedPrincipal`) is a
 strict branch on token type — there is no fallback and no "or":
 
 - Token carries `scp` (delegated) → require the configured API scope
-  (`HasRequiredScope`). Behaviour is byte-for-byte identical to pre-#163.
+  (`HasRequiredScope`). This branch is unaffected by the app-only opt-in.
 - Token carries `roles` and NO `scp` (app-only) → require
   `AllowAppOnlyTokens=true` AND, if the allow-list is populated, the token's
   `azp`/`appid` matches an allow-listed GUID. The `RequireRole` requirement
   on the policy handles the role check for both branches.
 - Token carries neither `scp` nor `roles` → deny.
 
-#### Client-ID / object-ID allow-list decision (recorded per #163)
+#### Client-ID / object-ID allow-list decision
 
 **Decision:** support an **optional** `MicrosoftEntra:AllowedAppClientIds`
 allow-list keyed on the token's `azp` (v2) / `appid` (v1) claim, with an empty
@@ -665,7 +697,7 @@ considered and deliberately not adopted.
 - Making the list optional preserves the single-tenant default (role assignment
   + admin consent is already tenant-admin-gated), while giving deployments
   defense-in-depth when they want it — critical because the `RetailPulse.User`
-  app role now allows `Users/Groups,Applications` and any admin-consented app in
+  app role allows `Users/Groups,Applications` and any admin-consented app in
   the tenant could otherwise gain API access silently.
 - Any entry that is not a valid GUID fails startup, so a typo can never silently
   disable the restriction. Comparison is GUID-normalized so case/format
@@ -675,7 +707,9 @@ considered and deliberately not adopted.
 
 ## Rate Limiting
 
-Four tiers of rate limiting (ASP.NET Core Rate Limiter):
+Four general tiers apply to the always-on API surface (ASP.NET Core Rate
+Limiter, fixed window, `QueueLimit = 0` so an over-limit request is rejected
+immediately rather than queued):
 
 | Policy | Limit | Applies To |
 |--------|-------|-----------|
@@ -684,7 +718,17 @@ Four tiers of rate limiting (ASP.NET Core Rate Limiter):
 | `relaxed` | 100 req/min | Read-only reporting endpoints (health, margin, observability lists, planogram gets) |
 | `upload` | 5 req/min | `POST /api/knowledge/upload` — file / large-body upload endpoint |
 
-Rate limit responses include `Retry-After` header. Policy names are declared in
+Three further policies exist for the opt-in providers. They are always
+registered so the limiter graph stays stable and testable, but they only bind to
+routes when the matching provider mode is active:
+
+| Policy | Default | Config key |
+|--------|---------|-----------|
+| `anonymous-bootstrap` | 5 req/min, **global per replica** (not per IP — see the ACA proxy note above) | `Anonymous:Bootstrap:GlobalPerMinute` |
+| `github-start` | 10 req/min | `GitHub:RateLimits:StartPerMinute` |
+| `github-exchange` | 20 req/min | `GitHub:RateLimits:ExchangePerMinute` |
+
+Rejections return `429` with a `Retry-After` header. Policy names are declared in
 `src/RetailPulse.Api/Program.cs` and referenced by `RequireRateLimiting(...)` on
 each endpoint group in `src/RetailPulse.Api/Endpoints/`.
 
@@ -692,23 +736,39 @@ each endpoint group in `src/RetailPulse.Api/Endpoints/`.
 
 ## OWASP Coverage
 
-The test suite includes OWASP Top 10 validation:
+The test suite pins OWASP Top 10 behaviour in
+[`tests/RetailPulse.Tests/Security/OwaspTests.cs`](../tests/RetailPulse.Tests/Security/OwaspTests.cs).
+Each test carries an `[Trait("OWASP", ...)]` tag, so a category can be run in
+isolation with `dotnet test --filter "OWASP=A01-BrokenAccessControl"`.
 
-| OWASP | Category | Test Coverage |
-|-------|----------|---------------|
-| A01 | Broken Access Control | API key validation, auth bypass prevention |
-| A03 | Injection | XSS detection, input sanitization |
-| A05 | Security Misconfiguration | Header validation, default credentials check |
-| A07 | Authentication Failures | Token validation, session management |
+| OWASP | Category | What is actually asserted |
+|-------|----------|---------------------------|
+| A01 | Broken Access Control | Admin and chat endpoints are registered with an authorization requirement in the endpoint graph — a route added without auth metadata fails the build-out test. |
+| A03 | Injection | Oversized messages and malformed session IDs are rejected; XSS/SQL payloads in the message body are *accepted* by the validator and deferred to guardrails (see [What this layer does *not* do](#what-this-layer-does-not-do)). |
+| A05 | Security Misconfiguration | The security headers above are present on a real response, and HSTS appears on HTTPS responses. |
+| A07 | Authentication Failures | Rate limiting is configured, and the chat endpoints are bound to the `strict` policy. |
 
-See `tests/RetailPulse.Tests/Security/Owasp*.cs` for test implementations.
+This table describes the automated coverage only. It is not a claim of complete
+OWASP Top 10 compliance — A02, A04, A06, A08, A09 and A10 have no dedicated
+tests in this suite.
 
 ---
 
 ## Secrets Management
 
-- **Never** committed to source control
-- User secrets (`dotnet user-secrets`) for local development
-- Azure Key Vault references for production deployments
-- Managed Identity preferred over connection strings
-- `.gitignore` excludes all secret files
+- **Never** committed to source control; `.gitignore` excludes all secret files.
+- **Local development:** user secrets (`dotnet user-secrets`).
+- **Azure resources** (Azure OpenAI via APIM, Content Safety, ACR pulls): a
+  **system-assigned managed identity** per container app, with role assignments
+  granted by the azd postprovision hook. No connection strings, no client secrets.
+- **The one unavoidable shared secret** — the APIM subscription key — is stored as
+  a **Container Apps secret** and injected by `secretRef` in
+  `infra/modules/container-apps.bicep`. It is never baked into an image or a
+  plain environment variable.
+
+There is **no Azure Key Vault** in this deployment. The Container Apps secret
+store plus managed identity covers the current secret surface, so a Key Vault
+would add a resource, a network dependency, and a second access-control plane
+without removing a secret. If a future secret cannot be replaced by managed
+identity, revisit this — but do not document Key Vault as present until a module
+actually provisions it.
