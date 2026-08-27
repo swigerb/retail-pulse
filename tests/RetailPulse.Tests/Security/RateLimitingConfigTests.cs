@@ -147,10 +147,8 @@ public sealed class RateLimitingConfigTests
 
     [Fact]
     [Trait("OWASP", "A07-AuthFailures")]
-    public void EveryPolicy_UsesAOneMinuteWindow()
-    {
+    public void EveryPolicy_UsesAOneMinuteWindow() =>
         RateLimitingSetup.Window.Should().Be(TimeSpan.FromMinutes(1));
-    }
 
     // ── Anonymous bootstrap (mode-conditional, global per replica) ─────────────
 
