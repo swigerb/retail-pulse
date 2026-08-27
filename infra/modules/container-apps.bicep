@@ -47,9 +47,9 @@ param entraAppRole string = 'RetailPulse.User'
 @description('ACR login server for the private registry that hosts the service images. When set, containers pull via system-assigned identity so `azd provision` re-asserts the registry auth binding declaratively.')
 param containerRegistryLoginServer string = ''
 
-@description('Shared secret the API presents to the MCP server as X-Api-Key. Stored as an ACA secret on both apps. Defaults to a value generated per deployment.')
+@description('Shared secret the API presents to the MCP server as X-Api-Key. Stored as an ACA secret on both apps. Defaults to a value derived deterministically from the resource group so repeat provisions are idempotent — supply an explicit value to rotate it.')
 @secure()
-param mcpApiKey string = newGuid()
+param mcpApiKey string = '${uniqueString(resourceGroup().id, 'mcp-api-key')}${uniqueString(subscription().subscriptionId, 'retail-pulse-mcp')}'
 
 var apimSubscriptionKeySecretName = 'apim-sub-key'
 var mcpApiKeySecretName = 'mcp-api-key'

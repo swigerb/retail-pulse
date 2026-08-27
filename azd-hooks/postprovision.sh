@@ -28,6 +28,7 @@ require_env() {
     fi
 }
 
+require_env AZURE_SUBSCRIPTION_ID
 require_env AZURE_RESOURCE_GROUP
 require_env AZURE_CONTAINER_REGISTRY_NAME
 require_env AZURE_CONTAINER_REGISTRY_ENDPOINT
@@ -42,6 +43,14 @@ resource_group="$AZURE_RESOURCE_GROUP"
 registry_name="$AZURE_CONTAINER_REGISTRY_NAME"
 registry_server="$AZURE_CONTAINER_REGISTRY_ENDPOINT"
 registry_id="$AZURE_CONTAINER_REGISTRY_RESOURCE_ID"
+subscription_id="$AZURE_SUBSCRIPTION_ID"
+
+# Pin every Azure CLI call in this hook to the azd environment's subscription.
+# Without this the CLI silently targets whatever `az account show` currently
+# defaults to, which is frequently a different tenant/subscription on a
+# developer machine — producing an AuthorizationFailed on a resource that
+# exists, in a subscription that has nothing to do with this deployment.
+az() { command az "$@" --subscription "$subscription_id"; }
 
 echo "Configuring ACR pull via system-assigned identity on registry '$registry_name'..."
 
