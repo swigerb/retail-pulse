@@ -136,6 +136,8 @@ public sealed class EndpointAuthorizationCoverageTests
     }
 
     [Fact]
+
+    [Trait("OWASP", "A01-BrokenAccessControl")]
     public async Task EveryApiAndHubRoute_CarriesAuthorizationMetadata()
     {
         await using WebApplication app = BuildRealEndpointGraph();
@@ -156,6 +158,8 @@ public sealed class EndpointAuthorizationCoverageTests
     }
 
     [Fact]
+
+    [Trait("OWASP", "A01-BrokenAccessControl")]
     public async Task NoApiOrHubRoute_IsAnonymous_OutsideTheAllowlist()
     {
         await using WebApplication app = BuildRealEndpointGraph();
@@ -169,6 +173,8 @@ public sealed class EndpointAuthorizationCoverageTests
     }
 
     [Fact]
+
+    [Trait("OWASP", "A01-BrokenAccessControl")]
     public async Task FallbackPolicy_IsDenyByDefault_RequiringAuthRoleAndScope()
     {
         await using WebApplication app = BuildRealEndpointGraph();
@@ -183,6 +189,8 @@ public sealed class EndpointAuthorizationCoverageTests
     }
 
     [Fact]
+
+    [Trait("OWASP", "A01-BrokenAccessControl")]
     public async Task Detector_FlagsAnUnannotatedApiEndpoint_RegressionFixture()
     {
         // Proves the coverage check has teeth: an /api endpoint WITHOUT RequireAuthorization
@@ -202,6 +210,8 @@ public sealed class EndpointAuthorizationCoverageTests
     }
 
     [Fact]
+
+    [Trait("OWASP", "A01-BrokenAccessControl")]
     public async Task AnonymousCapabilityGraph_AllowsOnlyBootstrapAndChat()
     {
         await using WebApplication app = BuildRealEndpointGraph();
