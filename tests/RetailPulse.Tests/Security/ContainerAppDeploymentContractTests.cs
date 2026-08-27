@@ -219,4 +219,24 @@ public sealed partial class ContainerAppDeploymentContractTests
             "the API must enable plan persistence, or /api/plans/* is unmapped and the "
             + "Plan execution path silently falls back to the single-specialist route");
     }
+
+    /// <summary>
+    /// This environment is a full-capability demo. The human-in-the-loop plan review gate
+    /// and durable session history are both opt-in and both default OFF, so they must be
+    /// asserted explicitly or a future re-provision could quietly drop the demo back to a
+    /// reduced surface.
+    /// </summary>
+    [Fact]
+    public void Api_EnablesTheHumanApprovalGateAndSessionHistory()
+    {
+        (_, string body) = BlockFor("ca-retailpulse-api");
+
+        body.Should().MatchRegex(
+            @"name:\s*'PlanReview__Enabled'\s*value:\s*'true'",
+            "the plan review approval gate must be on for the full demo");
+
+        body.Should().MatchRegex(
+            @"name:\s*'SessionPersistence__Enabled'\s*value:\s*'true'",
+            "durable session history must be on for the full demo");
+    }
 }
