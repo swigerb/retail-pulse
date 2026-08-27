@@ -83,6 +83,20 @@ interface ChatPanelProps {
   planController?: PlanController;
   /** Live SignalR connection status for the plan view banner. */
   planConnected?: boolean;
+  /**
+   * Whether the Real-Time Telemetry drawer is open.
+   *
+   * The composer's ConnectionStatusIndicator and the drawer header's badge report
+   * the SAME SignalR connection, so showing both at once states one fact twice.
+   * The composer pill exists so a dropped channel is visible next to the message
+   * you are about to send rather than buried in a drawer (issue #92) — that
+   * reasoning only holds while the drawer is CLOSED. When it is open the drawer
+   * badge is the canonical indicator and the composer pill is suppressed.
+   *
+   * Defaults to `false` so ChatPanel mounted in isolation (and every existing
+   * test) keeps showing the pill exactly as before.
+   */
+  telemetryOpen?: boolean;
 }
 
 const SPAN_ICONS: Record<string, string> = {
@@ -474,6 +488,7 @@ export function ChatPanel({
   promptCategories = PROMPT_CATEGORIES,
   planController,
   planConnected,
+  telemetryOpen = false,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -1016,7 +1031,9 @@ export function ChatPanel({
         <label htmlFor="chat-input" className="visually-hidden">
           Ask about retail performance
         </label>
-        <ConnectionStatusIndicator status={hubStatus} stalled={hubStalled} />
+        {!telemetryOpen && (
+          <ConnectionStatusIndicator status={hubStatus} stalled={hubStalled} />
+        )}
         <PromptLibrary
           categories={promptCategories}
           onSelect={handleSuggestedClick}
