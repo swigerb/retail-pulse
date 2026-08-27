@@ -180,8 +180,10 @@ export async function fetchStockoutRisks(): Promise<StockoutRisk[]> {
 // ── Portfolio scorecard ────────────────────────────────────────────────────
 
 interface WireDimension {
+  readonly dimension?: string;
   readonly score?: number;
   readonly assessment?: string;
+  readonly agentKey?: string;
 }
 
 interface WireBrandScore {
@@ -198,17 +200,25 @@ interface WireScorecard {
 }
 
 /**
- * The orchestrator keys dimensions by agent domain and scores 0-100 as a double.
- * The panel wants a fixed four-slot record of integers, so unknown dimensions are
- * dropped rather than guessed at.
+ * The orchestrator keys the dimension map by DISPLAY NAME ("Demand Momentum") and
+ * carries the stable identifier in each entry's `agentKey` ("demand-forecasting").
+ * Indexing the map by the panel's own slot names returns undefined for every slot,
+ * so match on `agentKey` instead — that is the field guaranteed not to change when
+ * a dimension is retitled.
+ *
+ * Scores are reported 0-10; the panel renders 0-100.
  */
 function toDimensions(wire: Record<string, WireDimension> | undefined): BrandScore['dimensions'] {
-  const pick = (key: string) => Math.round(wire?.[key]?.score ?? 0);
+  const byAgent = new Map<string, number>();
+  for (const entry of Object.values(wire ?? {})) {
+    if (entry?.agentKey) byAgent.set(entry.agentKey, (entry.score ?? 0) * 10);
+  }
+  const pick = (agentKey: string) => Math.round(byAgent.get(agentKey) ?? 0);
   return {
-    demand: pick('demand'),
-    margin: pick('margin'),
-    competitive: pick('competitive'),
-    supply: pick('supply'),
+    demand: pick('demand-forecasting'),
+    margin: pick('margin-analysis'),
+    competitive: pick('competitive-intel'),
+    supply: pick('supply-chain'),
   };
 }
 
@@ -222,7 +232,8 @@ export function toBrandScores(wire: WireScorecard | null): BrandScore[] {
     const weakest = entries.reduce((a, b2) => (b2[1] < a[1] ? b2 : a));
     const strongest = entries.reduce((a, b2) => (b2[1] > a[1] ? b2 : a));
     const actions = b.actionItems ?? [];
-    const score = b.overallScore ?? 0;
+    // overallScore is reported 0-10; the panel's health score is 0-100.
+    const score = (b.overallScore ?? 0) * 10;
 
     return {
       brandName: b.brand ?? '',
