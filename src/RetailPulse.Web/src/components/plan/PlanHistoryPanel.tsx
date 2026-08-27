@@ -7,6 +7,12 @@ export interface PlanHistoryPanelProps {
   plans: PlanSummary[];
   loading?: boolean;
   error?: string;
+  /**
+   * True when the deployment exposes no plan surface at all
+   * (`PlanPersistence:Enabled=false`, so `/api/plans/` is unmapped). Renders an
+   * explanatory note instead of an alert — this is configuration, not failure.
+   */
+  unavailable?: boolean;
   activePlanId?: string | null;
   onRefresh: () => void;
   onOpen: (planId: string) => void;
@@ -114,6 +120,7 @@ export function PlanHistoryPanel({
   plans,
   loading,
   error,
+  unavailable,
   activePlanId,
   onRefresh,
   onOpen,
@@ -129,15 +136,19 @@ export function PlanHistoryPanel({
           appearance="subtle"
           icon={loading ? <Spinner size="tiny" /> : <ArrowClockwise20Regular />}
           onClick={onRefresh}
-          disabled={loading}
+          disabled={loading || unavailable}
           aria-label="Refresh plan history"
           data-testid="plan-history-refresh"
         >
           Refresh
         </Button>
       </div>
-      {error && <Text className={styles.error} role="alert">{error}</Text>}
-      {!loading && plans.length === 0 ? (
+      {error && !unavailable && <Text className={styles.error} role="alert">{error}</Text>}
+      {unavailable ? (
+        <div className={styles.empty} data-testid="plan-history-unavailable">
+          Plan history isn&apos;t enabled in this environment.
+        </div>
+      ) : !loading && plans.length === 0 ? (
         <div className={styles.empty} data-testid="plan-history-empty">
           No plans yet. Ask a multi-domain question to generate one.
         </div>
