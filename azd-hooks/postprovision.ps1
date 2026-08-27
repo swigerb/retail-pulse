@@ -41,13 +41,19 @@ function Get-RequiredEnv {
 function Invoke-Az {
     param([Parameter(Mandatory)][string[]] $Arguments, [Parameter(Mandatory)][string] $FailureMessage)
 
-    $result = & az @Arguments
+    # Every call is pinned to the azd environment's subscription. Without this the
+    # Azure CLI silently targets whatever `az account show` currently defaults to,
+    # which is frequently a different tenant/subscription on a developer machine.
+    # That produced an AuthorizationFailed on a resource that exists, in a
+    # subscription that has nothing to do with this deployment.
+    $result = & az @Arguments --subscription $script:subscriptionId
     if ($LASTEXITCODE -ne 0) {
         throw "$FailureMessage (az exited $LASTEXITCODE)."
     }
     return $result
 }
 
+$subscriptionId = Get-RequiredEnv 'AZURE_SUBSCRIPTION_ID'
 $resourceGroup  = Get-RequiredEnv 'AZURE_RESOURCE_GROUP'
 $registryName   = Get-RequiredEnv 'AZURE_CONTAINER_REGISTRY_NAME'
 $registryServer = Get-RequiredEnv 'AZURE_CONTAINER_REGISTRY_ENDPOINT'
