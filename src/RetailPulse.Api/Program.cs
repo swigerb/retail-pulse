@@ -1340,6 +1340,10 @@ app.MapAlertEndpoints();
 app.MapApprovalEndpoints();
 app.MapObservabilityEndpoints();
 app.MapKnowledgeEndpoints();
+// Competitive-intelligence reads for the SPA dashboard. These proxy the MCP
+// server (which is internal-only and unreachable from a browser) and reshape
+// its envelopes into the flat arrays the SPA contracts declare.
+app.MapCompetitiveEndpoints();
 app.MapPackEndpoints();
 app.MapCardEndpoints();
 app.MapGuardrailEndpoints();

@@ -16,6 +16,7 @@ import { PromoTaskModule } from './promo';
 import { CompetitiveDashboard } from './competitive';
 import { KnowledgeBasePanel } from './knowledge';
 import { CouncilPanel } from './council';
+import { PanelErrorBoundary } from './PanelErrorBoundary';
 import { GuardrailsDashboard, GuardrailsConfig } from './guardrails';
 import { AdaptiveCardPanel } from './cards';
 import { ObservabilityPanel } from './observability';
@@ -137,6 +138,24 @@ const useStyles = makeStyles({
 const MAX_RETAINED_SPANS = 500;
 const MAX_ALERTS = 100;
 const MAX_TRACES = 50;
+
+/**
+ * Human-readable label per dashboard view. Used by the per-panel error boundary
+ * so a contained failure names the panel that failed.
+ */
+const VIEW_LABELS: Readonly<Record<string, string>> = {
+  chat: 'Chat',
+  promo: 'Campaign Planner',
+  competitive: 'Competitive',
+  knowledge: 'Knowledge Base',
+  council: 'Health Council',
+  security: 'Security',
+  cards: 'Cards',
+  observability: 'Observability',
+  stores: 'Store Operations',
+  financials: 'Financials',
+  portfolio: 'Portfolio',
+};
 
 // CSS custom properties overridden from the active pack's theme block.
 // We intentionally stop at the two primary brand tokens; App.css already
@@ -713,6 +732,12 @@ export function Dashboard() {
               telemetryOpen={telemetryOpen}
             />
           </div>
+          {/* Secondary views are wrapped in a per-panel boundary keyed by the
+              active view: an uncaught render error is contained to that panel
+              instead of replacing the entire dashboard via the app-level
+              boundary. Keying on activeView resets the boundary when the
+              operator navigates, so a failed panel does not stay broken. */}
+          <PanelErrorBoundary key={activeView} name={VIEW_LABELS[activeView] ?? 'This view'}>
           {capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner ? (
             <div style={{ overflow: 'auto', height: '100%' }}>
               <PromoTaskModule />
@@ -780,6 +805,7 @@ export function Dashboard() {
               <ExplanationPanel explanation={explanationData} open={explanationOpen} onClose={() => setExplanationOpen(false)} />
             </div>
           ) : null}
+          </PanelErrorBoundary>
         </div>
 
         {capabilities.telemetryPanel && (
