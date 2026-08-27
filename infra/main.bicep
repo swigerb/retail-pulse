@@ -46,7 +46,7 @@ param mcpServerImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Fully-qualified image reference for the Teams bot container app.')
 param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
 
-@description('Enable the optional Azure AI Content Safety second layer. Disabled by default; no Content Safety account is provisioned when false.')
+@description('Enable the optional Azure AI Content Safety second layer. Ships DISABLED so a clean `azd up` never silently provisions a paid Cognitive Services account. Enable per environment with `azd env set AZURE_CONTENT_SAFETY_ENABLED true` (read by main.bicepparam); the API is then wired to the account endpoint with managed identity and no keys.')
 param contentSafetyEnabled bool = false
 
 @description('Enable the optional Azure AI Search knowledge provider. Disabled by default; no Search resource is provisioned when false.')
@@ -153,6 +153,7 @@ module containerApps './modules/container-apps.bicep' = {
     entraClientId: entraClientId
     entraApiScope: entraApiScope
     containerRegistryLoginServer: containerRegistry.outputs.loginServer
+    contentSafetyEndpoint: contentSafetyEnabled ? contentSafety!.outputs.endpoint : ''
   }
 }
 

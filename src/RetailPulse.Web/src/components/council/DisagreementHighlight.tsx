@@ -120,30 +120,36 @@ export default function DisagreementHighlight({ disagreements }: DisagreementHig
             <span>{d.topic}</span>
           </div>
 
-          <div className={styles.positionsRow}>
-            {d.agents.map((agent, j) => (
-              <div key={j}>
-                {j > 0 && <div className={styles.connector}>⇄</div>}
-                <div className={styles.positionCard}>
-                  <div className={styles.positionAgent}>
-                    <span>{getAgentEmoji(agent.agentName)}</span>
-                    <span style={{ color: 'var(--color-text)' }}>{agent.agentName}</span>
+          {d.agents.length > 0 && (
+            <div className={styles.positionsRow}>
+              {d.agents.map((agent, j) => (
+                <div key={j}>
+                  {j > 0 && <div className={styles.connector}>⇄</div>}
+                  <div className={styles.positionCard}>
+                    <div className={styles.positionAgent}>
+                      <span>{getAgentEmoji(agent.agentName)}</span>
+                      <span style={{ color: 'var(--color-text)' }}>{agent.agentName}</span>
+                    </div>
+                    <div className={styles.positionText}>{agent.position}</div>
                   </div>
-                  <div className={styles.positionText}>{agent.position}</div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
-          <div className={styles.resolution}>
-            <span className={styles.resolutionLabel}>🔑 Resolution</span>
-            <span className={styles.resolutionText}>{d.resolution}</span>
-          </div>
+          {d.resolution && (
+            <div className={styles.resolution}>
+              <span className={styles.resolutionLabel}>🔑 Resolution</span>
+              <span className={styles.resolutionText}>{d.resolution}</span>
+            </div>
+          )}
 
-          <div className={styles.dominant}>
-            <span className={styles.dominantLabel}>Weight:</span>
-            <span>{d.dominantAgent} — {d.dominantReason}</span>
-          </div>
+          {d.dominantAgent && (
+            <div className={styles.dominant}>
+              <span className={styles.dominantLabel}>Weight:</span>
+              <span>{d.dominantAgent} — {d.dominantReason}</span>
+            </div>
+          )}
         </div>
       ))}
     </div>
