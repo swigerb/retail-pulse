@@ -15,19 +15,19 @@
 ## Sizzle reel
 
 <div align="center">
-  <video
-    src="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4"
-    poster="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle-poster.png"
-    width="880" controls muted playsinline></video>
+  <a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">
+    <img src="docs/media/retail-pulse-sizzle-poster.png" width="880"
+         alt="Retail Pulse sizzle reel - click to play" />
+  </a>
 </div>
 
 <div align="center">
-  <sub><strong>2 min 45 s</strong> — a plain-English question routed to a specialist agent, charts
-  generated live from real tool calls, real-time agent telemetry (routing, memory, traces),
-  APIM as the AI Gateway enforcing token limits and cost accountability, and tenants configured in YAML.<br />
-  Player not loading? <a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">Download the MP4</a>
-  (16 MB) or see the <a href="docs/demo-walkthrough.md">full demo script</a>.<br />
-  Everything shown runs against the <code>default</code> content pack — Apex Retail Group, a fictional sample tenant.</sub>
+  <sub><strong><a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">Watch the 2 min 45 s reel</a></strong> &nbsp;·&nbsp; 1080p60, 16 MB<br />
+  A plain-English question routed to a specialist agent, charts generated live from real tool calls,
+  real-time agent telemetry (routing, memory, traces), APIM as the AI Gateway enforcing token limits
+  and cost accountability, and tenants configured in YAML.<br />
+  Everything shown runs against the <code>default</code> content pack - Apex Retail Group, a fictional
+  sample tenant. See the <a href="docs/demo-walkthrough.md">full demo script</a> for the long version.</sub>
 </div>
 
 ## Overview
