@@ -47,7 +47,7 @@ public static class CompetitiveEndpoints
 
             return root is null
                 ? Results.Ok(Array.Empty<object>())
-                : Results.Ok(Project(root.Value, "pricing_data", row => new
+                : Results.Ok(Project(root.Value, "pricing", row => new
                 {
                     competitor = GetString(row, "competitor"),
                     sku = GetString(row, "brand"),
