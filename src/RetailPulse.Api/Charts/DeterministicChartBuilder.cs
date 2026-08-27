@@ -186,7 +186,9 @@ internal static class DeterministicChartBuilder
                 // fail-closed contract via the chart-unavailable diagnostic.
                 "horizontalbar" => TryBuildGrowthRanking(payloads),
                 "groupedbar" or "stackedbar" => TryBuildGroupedRegionBar(payloads, requestedType)
-                    ?? TryBuildDemandBar(payloads, requestedType),
+                    ?? TryBuildDepletionStatsGrouped(payloads, requestedType)
+                    ?? TryBuildDemandBar(payloads, requestedType)
+                    ?? TryBuildDepletionStatsBar(payloads, requestedType),
                 "line" => TryBuildDemandLine(payloads)
                     ?? TryBuildDemandBar(payloads, "line"),
                 // Pie/donut and table are their own structural families (share/mix
@@ -198,7 +200,9 @@ internal static class DeterministicChartBuilder
                 // instead, exactly as the horizontalBar ranking above does.
                 "pie" or "donut" => TryBuildShareOrMixPie(payloads, requestedType ?? "pie"),
                 "table" => TryBuildDepletionStatsTable(payloads),
-                _ => TryBuildDemandBar(payloads, requestedType) ?? TryBuildGauge(payloads),
+                _ => TryBuildDemandBar(payloads, requestedType)
+                    ?? TryBuildDepletionStatsBar(payloads, requestedType)
+                    ?? TryBuildGauge(payloads),
             };
     }
 
@@ -298,6 +302,141 @@ internal static class DeterministicChartBuilder
             [
                 new ChartSeries { Legend = "Avg Weekly Depletion Velocity", Values = points }
             ]
+        };
+    }
+
+    /// <summary>
+    /// Build a per-brand bar from <c>GetDepletionStats</c> payloads — the shape
+    /// <c>{ brand, region, metrics: { depletions_yoy, … } }</c>.
+    ///
+    /// <para>
+    /// A brand comparison is answerable from either demand history or depletion stats, and
+    /// which one the model reaches for varies between runs. When it picks depletion stats
+    /// the historical-demand builders find no <c>summary.total_volume</c>/<c>by_region</c>
+    /// fingerprint and produce nothing, so a perfectly answerable comparison failed closed.
+    /// This reads the payload the turn actually produced instead.
+    /// </para>
+    /// </summary>
+    private static ChartSpec? TryBuildDepletionStatsBar(IReadOnlyList<JsonElement> payloads, string? requestedType)
+    {
+        var points = new List<ChartDataPoint>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var regions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (JsonElement payload in payloads)
+        {
+            if (payload.ValueKind != JsonValueKind.Object)
+                continue;
+
+            string? brand = ReadBrand(payload);
+            if (string.IsNullOrWhiteSpace(brand))
+                continue;
+
+            JsonElement source = payload;
+            if (payload.TryGetProperty("metrics", out JsonElement metrics)
+                && metrics.ValueKind == JsonValueKind.Object)
+            {
+                source = metrics;
+            }
+
+            if (!TryReadPercent(source, "depletions_yoy", out double yoy) || !double.IsFinite(yoy))
+                continue;
+
+            string? rowRegion = ReadRegion(payload);
+            if (!string.IsNullOrWhiteSpace(rowRegion))
+                regions.Add(rowRegion);
+
+            // One bar per brand+region, so a per-region fan-out does not collapse
+            // several distinct facts onto a single label.
+            string label = regions.Count > 1 && !string.IsNullOrWhiteSpace(rowRegion)
+                ? $"{brand} — {rowRegion}"
+                : brand;
+
+            if (!seen.Add(label))
+                continue;
+
+            points.Add(new ChartDataPoint { X = label, Y = Math.Round(yoy, 1) });
+        }
+
+        if (points.Count < 2)
+            return null;
+
+        string suffix = regions.Count == 1 ? $" — {regions.First()}" : string.Empty;
+        return new ChartSpec
+        {
+            Type = NormalizeBarType(requestedType),
+            Title = $"Depletions YoY by Brand{suffix}",
+            XAxisTitle = "Brand",
+            YAxisTitle = "Depletions YoY %",
+            Data = [new ChartSeries { Legend = "Depletions YoY %", Values = points }],
+        };
+    }
+
+    /// <summary>
+    /// Grouped counterpart to <see cref="TryBuildDepletionStatsBar"/>: one series per brand,
+    /// one mark per region, read from <c>GetDepletionStats</c> payloads.
+    /// </summary>
+    private static ChartSpec? TryBuildDepletionStatsGrouped(IReadOnlyList<JsonElement> payloads, string? requestedType)
+    {
+        var byBrand = new Dictionary<string, List<ChartDataPoint>>(StringComparer.OrdinalIgnoreCase);
+        var seenPerBrand = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<string>();
+
+        foreach (JsonElement payload in payloads)
+        {
+            if (payload.ValueKind != JsonValueKind.Object)
+                continue;
+
+            string? brand = ReadBrand(payload);
+            string? region = ReadRegion(payload);
+            if (string.IsNullOrWhiteSpace(brand) || string.IsNullOrWhiteSpace(region))
+                continue;
+
+            JsonElement source = payload;
+            if (payload.TryGetProperty("metrics", out JsonElement metrics)
+                && metrics.ValueKind == JsonValueKind.Object)
+            {
+                source = metrics;
+            }
+
+            if (!TryReadPercent(source, "depletions_yoy", out double yoy) || !double.IsFinite(yoy))
+                continue;
+
+            if (!byBrand.TryGetValue(brand, out List<ChartDataPoint>? pts))
+            {
+                pts = [];
+                byBrand[brand] = pts;
+                seenPerBrand[brand] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                order.Add(brand);
+            }
+
+            if (!seenPerBrand[brand].Add(region))
+                continue;
+
+            pts.Add(new ChartDataPoint { X = region, Y = Math.Round(yoy, 1) });
+        }
+
+        var series = new List<ChartSeries>();
+        foreach (string brand in order)
+        {
+            if (byBrand[brand].Count > 0)
+                series.Add(new ChartSeries { Legend = brand, Values = byBrand[brand] });
+        }
+
+        if (series.Count < 2)
+            return null;
+
+        string type = string.Equals(requestedType, "stackedBar", StringComparison.OrdinalIgnoreCase)
+            ? "stackedBar"
+            : "groupedBar";
+
+        return new ChartSpec
+        {
+            Type = type,
+            Title = $"{string.Join(" vs ", series.Select(s => s.Legend))} — Depletions YoY by Region",
+            XAxisTitle = "Region",
+            YAxisTitle = "Depletions YoY %",
+            Data = series,
         };
     }
 
