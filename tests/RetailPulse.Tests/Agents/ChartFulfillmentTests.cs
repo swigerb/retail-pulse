@@ -386,6 +386,53 @@ public sealed class ChartFulfillmentTests
             .Should().Be(4, "the richer valid model chart is kept over a thinner rebuild");
     }
 
+    [Fact]
+    public void EnforceChartFulfillment_MergesPerRegionPayloads_IntoOneSeriesPerBrand()
+    {
+        // Issue #59: a turn may fan out region by region rather than fetching one
+        // whole-country rollup per brand. Keeping only the first payload per brand threw
+        // the rest away, so a two-brand comparison could collapse below the two-series
+        // minimum and produce no chart at all despite ample data.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactedDemand("FreshMart", "Northeast", 900.0),
+            CompactedDemand("FreshMart", "Midwest", 850.0),
+            CompactedDemand("FreshMart", "West Coast", 810.0),
+            CompactedDemand("Harvest Table", "Northeast", 700.0),
+            CompactedDemand("Harvest Table", "Midwest", 660.0),
+            CompactedDemand("Harvest Table", "West Coast", 640.0));
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show a grouped bar chart comparing FreshMart and Harvest Table across all regions",
+            response, [], "Here you go.");
+
+        result.Charts.Should().ContainSingle();
+        ChartSpec chart = result.Charts[0];
+        chart.Type.Should().Be("groupedBar");
+        chart.Data.Should().HaveCount(2, "one series per brand");
+        chart.Data.Sum(s => s.Values.Count).Should().Be(6, "three regions for each of two brands");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_DoesNotDoubleCountARegionRepeatedForTheSameBrand()
+    {
+        // The same region reported twice for a brand is one fact, not two bars.
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactedDemand("FreshMart", "Northeast", 900.0),
+            CompactedDemand("FreshMart", "Northeast", 900.0),
+            CompactedDemand("FreshMart", "Midwest", 850.0),
+            CompactedDemand("Harvest Table", "Northeast", 700.0),
+            CompactedDemand("Harvest Table", "Midwest", 660.0));
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Show a grouped bar chart comparing FreshMart and Harvest Table across all regions",
+            response, [], "Here you go.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Data.Sum(s => s.Values.Count).Should().Be(4);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static AgentExecutionPipeline CreatePipeline()
