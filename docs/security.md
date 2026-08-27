@@ -591,13 +591,15 @@ attack surface. The live build stays `Entra`.
   [ADR-005](adr/005-provider-neutral-authentication.md) for the full flow.
 - **JWT Bearer (Teams bot channel):** Teams-to-bot activity is validated by `TeamsSsoHandler`
   in the bot pipeline (independent of the SPA/API auth above).
-- **Optional API key gate (MCP profile):** `ApiKeyAuthMiddleware` remains available as a pre-auth
-  header check (`ApiKey:Enabled=true` + `ApiKey:Value=<secret>`, header name defaults to
-  `X-Api-Key`). It is **disabled by default** on the API and is **not** enabled by the shipped
-  Bicep — Entra bearer + `Security:RequireAuth=true` is the Production gate for the REST/SPA
-  surface. The middleware exists specifically for the MCP server profile (`src/RetailPulse.McpServer`),
-  where server-to-server callers pin a rotating shared secret in front of the tool endpoints; do
-  not enable it on the public API.
+- **API key gate (MCP profile only):** `ApiKeyAuthMiddleware` is a pre-auth header check
+  (`ApiKey:Enabled=true` + `ApiKey:Value=<secret>`, header name defaults to `X-Api-Key`).
+  It is **disabled by default on the API** and is **not** enabled there by the shipped
+  Bicep — Entra bearer + `Security:RequireAuth=true` is the Production gate for the
+  REST/SPA surface. Do not enable it on the public API.
+
+  It **is** enabled on the MCP server (`src/RetailPulse.McpServer`), where
+  server-to-server callers present a shared secret in front of the tool endpoints.
+  See [MCP server boundary](#mcp-server-boundary) below.
 - **Managed Identity:** For Azure OpenAI (via APIM) and other Azure resources — no client
   secrets in code.
 
@@ -728,29 +730,79 @@ routes when the matching provider mode is active:
 | `github-start` | 10 req/min | `GitHub:RateLimits:StartPerMinute` |
 | `github-exchange` | 20 req/min | `GitHub:RateLimits:ExchangePerMinute` |
 
-Rejections return `429` with a `Retry-After` header. Policy names are declared in
-`src/RetailPulse.Api/Program.cs` and referenced by `RequireRateLimiting(...)` on
-each endpoint group in `src/RetailPulse.Api/Endpoints/`.
+Rejections return `429` with a `Retry-After` header. Policies are declared in
+`src/RetailPulse.Api/Security/RateLimitingSetup.cs` and referenced by
+`RequireRateLimiting(...)` on each endpoint group in
+`src/RetailPulse.Api/Endpoints/`. They live in that setup class rather than inline
+in `Program.cs` specifically so `RateLimitingConfigTests` can exercise the real
+limits — do not inline them back.
 
 ---
 
 ## OWASP Coverage
 
-The test suite pins OWASP Top 10 behaviour in
-[`tests/RetailPulse.Tests/Security/OwaspTests.cs`](../tests/RetailPulse.Tests/Security/OwaspTests.cs).
-Each test carries an `[Trait("OWASP", ...)]` tag, so a category can be run in
-isolation with `dotnet test --filter "OWASP=A01-BrokenAccessControl"`.
+OWASP behaviour is pinned by tests tagged `[Trait("OWASP", ...)]`, so a category can
+be run in isolation with `dotnet test --filter "OWASP=A01-BrokenAccessControl"`.
+The tags sit on the suite that genuinely exercises each control rather than on a
+single summary file, so the filter runs real coverage:
 
-| OWASP | Category | What is actually asserted |
-|-------|----------|---------------------------|
-| A01 | Broken Access Control | Admin and chat endpoints are registered with an authorization requirement in the endpoint graph — a route added without auth metadata fails the build-out test. |
-| A03 | Injection | Oversized messages and malformed session IDs are rejected; XSS/SQL payloads in the message body are *accepted* by the validator and deferred to guardrails (see [What this layer does *not* do](#what-this-layer-does-not-do)). |
-| A05 | Security Misconfiguration | The security headers above are present on a real response, and HSTS appears on HTTPS responses. |
-| A07 | Authentication Failures | Rate limiting is configured, and the chat endpoints are bound to the `strict` policy. |
+| OWASP | Category | What is actually asserted | Where |
+|-------|----------|---------------------------|-------|
+| A01 | Broken Access Control | The real `EndpointDataSource` is walked and every `/api` and `/hubs` route must carry authorization metadata, with a deny-by-default fallback policy and a fixture proving the detector catches an unannotated endpoint. Deployment-side: the MCP server must not be publicly exposed and its API-key gate must be on. | `EndpointAuthorizationCoverageTests`, `ContainerAppDeploymentContractTests` |
+| A02 | Cryptographic Failures | Shared secrets are `@secure()` Bicep parameters delivered by `secretRef`, never literals. | `ContainerAppDeploymentContractTests` |
+| A03 | Injection | Oversized messages and malformed session IDs are rejected; XSS/SQL payloads in the message body are *accepted* by the validator and deferred to guardrails (see [What this layer does *not* do](#what-this-layer-does-not-do)). | `OwaspTests` |
+| A05 | Security Misconfiguration | The security headers above are present on a real response and HSTS appears only on HTTPS. No container app runs as `Development`, and no ingress accepts plaintext HTTP. | `OwaspTests`, `ContainerAppDeploymentContractTests` |
+| A07 | Authentication Failures | Real traffic is driven through the production rate-limiter registration: each policy admits exactly its permit limit and then returns `429`. The `anonymous-bootstrap` and `github-start` windows are proven global — rotating a forged `X-Forwarded-For` grants no extra capacity. | `RateLimitingConfigTests` |
 
-This table describes the automated coverage only. It is not a claim of complete
-OWASP Top 10 compliance — A02, A04, A06, A08, A09 and A10 have no dedicated
-tests in this suite.
+### Why the tags moved
+
+The A01 and A07 entries previously pointed at tests that asserted over locally
+declared literals — one reduced to `10 <= 20` — and therefore passed no matter how
+the application behaved. Raising the chat rate limit from 10/min to 999,999/min
+left the entire suite green. Those tests were removed and the tags moved to the
+suites above, which fail on that mutation.
+
+A test that restates its own expectations is worse than no test: it advertises
+coverage that does not exist. Any new OWASP-tagged test must exercise production
+code or a real deployment artifact.
+
+### Not covered
+
+A04, A06, A08, A09 and A10 have no dedicated automated tests. They were assessed
+manually in a full-repository security review and found clean — parameterised SQL
+throughout, no vulnerable NuGet packages, CI workflows free of
+`pull_request_target` and script injection, no secrets or PII reaching logs or
+span tags, and no user-controlled outbound hosts — but that assessment is a
+point-in-time judgement, not a regression gate.
+
+---
+
+## MCP server boundary
+
+The MCP server hosts the tool transport (`/mcp`) and the REST data endpoints the
+API's tools call. It is a **server-to-server dependency of the API and never a
+browser-facing surface**. Three controls keep it that way, and all three are
+asserted by `ContainerAppDeploymentContractTests`:
+
+| Control | Where | Effect |
+|---------|-------|--------|
+| Internal ingress | `external: false` in `infra/modules/container-apps.bicep` | Addressable only from inside the Container Apps environment. Not resolvable or reachable from the public internet. |
+| Production environment | `ASPNETCORE_ENVIRONMENT=Production` | Enables the API-key gate and suppresses the OpenAPI document. |
+| API-key gate | `ApiKey__Enabled=true` + `ApiKey__Value` via `secretRef` | Every `/api` and `/mcp` request must present a matching `X-Api-Key`, compared with `CryptographicOperations.FixedTimeEquals`. |
+
+The API presents the key on its named `McpServer` `HttpClient` and **fails closed at
+startup** outside Development if `McpServer:ApiKey` is missing, so a
+misconfiguration surfaces as a boot failure rather than as `401`s at request time.
+
+> **Do not set the MCP server's `ASPNETCORE_ENVIRONMENT` to `Development` in any
+> deployed environment.** Its gate is written as
+> `apiKeyRequired = !IsDevelopment() || ApiKey:Enabled`, so Development silently
+> disables authentication entirely. The same pattern applies to the Teams bot, whose
+> messaging endpoints are mapped with
+> `MapAgentApplicationEndpoints(requireAuth: !IsDevelopment())`. Both were once
+> deployed as `Development` behind a public ingress, which left the full MCP REST and
+> tool surface callable from the internet with no credential. That is the specific
+> regression the deployment-contract tests exist to prevent.
 
 ---
 
@@ -761,10 +813,10 @@ tests in this suite.
 - **Azure resources** (Azure OpenAI via APIM, Content Safety, ACR pulls): a
   **system-assigned managed identity** per container app, with role assignments
   granted by the azd postprovision hook. No connection strings, no client secrets.
-- **The one unavoidable shared secret** — the APIM subscription key — is stored as
-  a **Container Apps secret** and injected by `secretRef` in
-  `infra/modules/container-apps.bicep`. It is never baked into an image or a
-  plain environment variable.
+- **The shared secrets** — the APIM subscription key, and the key the API presents
+  to the MCP server as `X-Api-Key` — are stored as **Container Apps secrets** and
+  injected by `secretRef` in `infra/modules/container-apps.bicep`. Neither is baked
+  into an image or a plain environment variable.
 
 There is **no Azure Key Vault** in this deployment. The Container Apps secret
 store plus managed identity covers the current secret surface, so a Key Vault
