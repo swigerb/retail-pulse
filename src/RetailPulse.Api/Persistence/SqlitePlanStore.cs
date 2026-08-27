@@ -210,15 +210,19 @@ public sealed class SqlitePlanStore : IPlanStore
         // Terminal-transition orphan sweep (issue #149). Once a plan reaches
         // any terminal state, no step row for that plan may remain Pending or
         // Running — the persisted history must honestly reflect "the plan is
-        // over; this step was never executed". The initial `{planId}-s{i}` rows
-        // that PlanOrchestrator.SuspendForReviewAsync writes at review-open
-        // time are the canonical case: reviewer-approved execution writes a
-        // parallel `{planId}-r{round}-s{i}` set and the initial rows would
-        // otherwise linger as Pending forever, over-counting anything that
-        // reads plan state directly (audit, /api/plans/{id}/reconcile,
-        // reporting, and the #91 / #141 recovery surfaces). Doing the sweep
-        // inside the same transaction guarantees atomicity — a status write
-        // that succeeds cannot leave stale Pending step rows behind.
+        // over; this step was never executed". This catches genuinely abandoned
+        // steps: a plan that failed or was cancelled part-way, or a review that
+        // timed out before any step ran. Doing the sweep inside the same
+        // transaction guarantees atomicity — a status write that succeeds
+        // cannot leave stale Pending step rows behind.
+        //
+        // NOTE: this sweep used to also fire on the ordinary approve-and-run
+        // path. The resume wrote its updates against round-scoped step ids
+        // (`{planId}-r{round}-s{i}`) that were never persisted, so the canonical
+        // `{planId}-s{i}` rows stayed Pending and got swept to Skipped even
+        // though the plan really executed. PlanReviewCompletionService now
+        // drives the canonical ids, so an approved run leaves its rows
+        // Completed and this sweep correctly finds nothing to do.
         if (isTerminal)
         {
             await using SqliteCommand sweep = conn.CreateCommand();
