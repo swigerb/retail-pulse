@@ -838,6 +838,7 @@ export function Dashboard() {
                   plans={planController.state.history}
                   loading={planController.state.historyLoading}
                   error={planController.state.historyError}
+                  unavailable={planController.state.historyUnavailable}
                   activePlanId={planController.active?.planId ?? null}
                   onRefresh={() => { void planController.reloadHistory(); }}
                   onOpen={id => { void planController.openHistoryPlan(id); }}

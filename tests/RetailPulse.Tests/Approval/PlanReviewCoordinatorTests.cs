@@ -465,8 +465,14 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
         PlanReviewCoordinator coord = CreateCoordinator(gate, options, TimeProvider.System);
 
         PlanReviewCoordinationInput input = SampleInput() with { Subject = "alice" };
-        _backgroundTasks.Add(coord.CoordinateAsync(input, _backgroundCts.Token));
-        ApprovalRequest aliceRow = await WaitForPending(gate, input.Subject);
+        Task<PlanReviewOutcome> coordination = coord.CoordinateAsync(input, _backgroundCts.Token);
+        _backgroundTasks.Add(coordination);
+
+        // Pass the background task in so a wait timeout can report WHY the row never
+        // arrived. This test has been intermittently flaky under full parallel load and
+        // a bare "timed out" told us nothing; if the coordinator faulted, the exception
+        // is now surfaced instead of being swallowed by the fixture's Dispose.
+        ApprovalRequest aliceRow = await WaitForPending(gate, input.Subject, coordination);
 
         // Guard the arrange step explicitly: prove alice's row really is present before
         // concluding anything from bob's empty result. Without this, a scheduling timeout
@@ -582,15 +588,34 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
     /// </summary>
     private static readonly TimeSpan PendingRowTimeout = TimeSpan.FromSeconds(30);
 
-    private static async Task<ApprovalRequest> WaitForPending(SqliteApprovalGate gate, string subject)
+    private static async Task<ApprovalRequest> WaitForPending(
+        SqliteApprovalGate gate,
+        string subject,
+        Task? producer = null)
     {
-        ApprovalRequest? row = await PollForPendingAsync(
-            gate, subject, static _ => true);
+        ApprovalRequest? row = await PollForPendingAsync(gate, subject, static _ => true);
 
         return row ?? throw new InvalidOperationException(
             $"Timed out after {PendingRowTimeout.TotalSeconds:N0}s waiting for a pending approval row "
-            + $"for subject '{subject}'. This is an arrange-step failure, not an assertion failure.");
+            + $"for subject '{subject}'. This is an arrange-step failure, not an assertion failure."
+            + DescribeProducer(producer));
     }
+
+    /// <summary>
+    /// Renders the state of the background task that was supposed to write the row. A
+    /// faulted producer is the difference between "the thread pool was slow" and "the
+    /// coordinator threw", which a bare timeout message cannot distinguish.
+    /// </summary>
+    private static string DescribeProducer(Task? producer) =>
+        producer is null
+            ? string.Empty
+            : producer.IsFaulted
+                ? $" The coordinator task FAULTED: {producer.Exception?.GetBaseException()}"
+                : producer.IsCanceled
+                    ? " The coordinator task was CANCELLED before it wrote a row."
+                    : producer.IsCompletedSuccessfully
+                        ? " The coordinator task completed without ever writing a pending row."
+                        : $" The coordinator task is still {producer.Status} — it never reached the write.";
 
     private static async Task<ApprovalRequest> WaitForPendingRound(
         SqliteApprovalGate gate, string subject, int expectedRound)
