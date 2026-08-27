@@ -264,6 +264,25 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE'
               value: 'true'
             }
+            // Plan-first orchestration (issue #93). Enabling this registers
+            // IPlanStore, which in turn maps /api/plans/* and wires the
+            // PlanOrchestrator. With it off the "Plan" execution-path option is
+            // an inert control and the Plans panel gets a 404 from a route that
+            // was never mapped.
+            //
+            // DURABILITY: the plan store shares the ephemeral per-replica temp
+            // directory described below, so plans survive within a warm replica
+            // but reset on revision change, replica replacement, or scale-to-
+            // zero. That is acceptable for this demo — plan history is a live
+            // view of the current session, not a system of record.
+            //
+            // The human-in-the-loop review gate (PlanReview, issue #94) is a
+            // SEPARATE opt-in and stays off: with it enabled every plan pauses
+            // for approval. Plans here generate and execute straight through.
+            {
+              name: 'PlanPersistence__Enabled'
+              value: 'true'
+            }
             {
               name: 'ASPNETCORE_ENVIRONMENT'
               value: 'Production'
