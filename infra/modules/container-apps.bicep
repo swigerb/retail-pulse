@@ -283,6 +283,30 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'PlanPersistence__Enabled'
               value: 'true'
             }
+            // Human-in-the-loop plan review (issue #94). With this on, a plan-first
+            // request pauses and surfaces an approval card the reviewer can approve,
+            // edit, or reject with feedback (bounded replan rounds) before any step
+            // executes. This is the headline demo of the approval gate, so it is on
+            // here — note it makes every plan-path turn interactive by design.
+            //
+            // Timeouts are bounded (30m review / 15m clarification) and the replan
+            // cap is finite, so the coordinator cannot hang waiting on a human.
+            {
+              name: 'PlanReview__Enabled'
+              value: 'true'
+            }
+            // Durable server-side conversation history (issue #90). Enabled for the
+            // full-capability demo so /api/sessions/* is mapped and chats survive a
+            // reload. Anonymous callers still never persist, and PII redaction on
+            // write stays on — those are hard gates, not config.
+            //
+            // Same ephemeral-storage caveat as the plan store: session rows live in
+            // the per-replica temp directory and reset on revision change, replica
+            // replacement, or scale-to-zero.
+            {
+              name: 'SessionPersistence__Enabled'
+              value: 'true'
+            }
             {
               name: 'ASPNETCORE_ENVIRONMENT'
               value: 'Production'
