@@ -47,7 +47,12 @@ param entraAppRole string = 'RetailPulse.User'
 @description('ACR login server for the private registry that hosts the service images. When set, containers pull via system-assigned identity so `azd provision` re-asserts the registry auth binding declaratively.')
 param containerRegistryLoginServer string = ''
 
+@description('Shared secret the API presents to the MCP server as X-Api-Key. Stored as an ACA secret on both apps. Defaults to a value generated per deployment.')
+@secure()
+param mcpApiKey string = newGuid()
+
 var apimSubscriptionKeySecretName = 'apim-sub-key'
+var mcpApiKeySecretName = 'mcp-api-key'
 
 // The `registries` block binds a container app's image-pull auth to its own
 // system-assigned identity, with no admin credentials. It is only emitted when
@@ -86,8 +91,18 @@ resource mcpServer 'Microsoft.App/containerApps@2024-03-01' = {
     configuration: {
       activeRevisionsMode: 'Single'
       registries: mcpUsesPrivateRegistry ? privateRegistryBlock : []
+      secrets: [
+        {
+          name: mcpApiKeySecretName
+          value: mcpApiKey
+        }
+      ]
+      // The MCP server is a server-to-server dependency of the API, never a
+      // browser-facing surface. `external: false` keeps it addressable only from
+      // inside the Container Apps environment, so the tool transport and the REST
+      // data endpoints are unreachable from the public internet.
       ingress: {
-        external: true
+        external: false
         targetPort: 8080
         transport: 'auto'
         allowInsecure: false
@@ -102,10 +117,21 @@ resource mcpServer 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
+          // Production (not Development) so the API-key gate is enforced and the
+          // OpenAPI document is not published. Running this app as Development is
+          // what previously disabled the gate entirely.
           env: [
             {
               name: 'ASPNETCORE_ENVIRONMENT'
-              value: 'Development'
+              value: 'Production'
+            }
+            {
+              name: 'ApiKey__Enabled'
+              value: 'true'
+            }
+            {
+              name: 'ApiKey__Value'
+              secretRef: mcpApiKeySecretName
             }
           ]
         }
@@ -147,6 +173,10 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: apimSubscriptionKeySecretName
           value: apimSubscriptionKey
+        }
+        {
+          name: mcpApiKeySecretName
+          value: mcpApiKey
         }
       ]
       ingress: {
@@ -197,6 +227,10 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'McpServer__BaseUrl'
               value: effectiveMcpBaseUrl
+            }
+            {
+              name: 'McpServer__ApiKey'
+              secretRef: mcpApiKeySecretName
             }
             {
               name: 'Security__RequireAuth'
@@ -298,10 +332,15 @@ resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
+          // Production (not Development) so the M365 Agents SDK maps the messaging
+          // endpoints with requireAuth: true and inbound Activities are validated
+          // against the Bot Framework channel. Running this app as Development is
+          // what previously disabled inbound channel authentication on a publicly
+          // exposed endpoint.
           env: [
             {
               name: 'ASPNETCORE_ENVIRONMENT'
-              value: 'Development'
+              value: 'Production'
             }
             {
               name: 'TeamsBot__ApiBaseUrl'
