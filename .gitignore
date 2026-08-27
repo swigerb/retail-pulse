@@ -54,6 +54,17 @@ appsettings.*.local.json
 .squad-workstream
 # Squad: ignore runtime state (logs, inbox, sessions)
 .squad/.scratch/
+# Squad: per-run evidence captures (API policy dumps, diagnostics, run logs).
+# Useful while investigating; never part of the source of truth.
+.squad/evidence/
+# Squad: local backups an agent takes before rewriting its own charter/agent file
+*.local-backup
+
+# Agent scratch space: transcripts, doc dumps, URL lists gathered during a run
+.scratch/
+
+# Ad-hoc verification output kept while chasing a live issue
+prod-verify*.json
 
 # Azure Developer CLI
 .azure/
