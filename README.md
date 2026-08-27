@@ -12,6 +12,24 @@
 [![CI](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+## Sizzle reel
+
+<div align="center">
+  <video
+    src="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4"
+    poster="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle-poster.png"
+    width="880" controls muted playsinline></video>
+</div>
+
+<div align="center">
+  <sub><strong>2 min 45 s</strong> — a plain-English question routed to a specialist agent, charts
+  generated live from real tool calls, real-time agent telemetry (routing, memory, traces),
+  APIM as the AI Gateway enforcing token limits and cost accountability, and tenants configured in YAML.<br />
+  Player not loading? <a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">Download the MP4</a>
+  (16 MB) or see the <a href="docs/demo-walkthrough.md">full demo script</a>.<br />
+  Everything shown runs against the <code>default</code> content pack — Apex Retail Group, a fictional sample tenant.</sub>
+</div>
+
 ## Overview
 
 Retail Pulse is an AI-powered brand intelligence platform that analyses depletion trends, shipment dynamics, and field sentiment for retail & CPG brands. The API is built on the **Microsoft Agent Framework** (`Microsoft.Agents.AI` 1.18.0). Every LLM call — router, specialists, planner, and consensus council — runs through the shared `MafAgentInvoker` seam, which materialises a per-invocation `ChatClientAgent` with `UseProvidedChatClientAsIs = true` so the DI-registered `IChatClient` decorator stack (function invocation cap, OpenTelemetry, MCP HTTP resilience) is preserved end-to-end. Multi-domain turns are lifted onto the plan-first orchestrator, which is a real `Microsoft.Agents.AI.Workflows.InProcessExecution` with framework checkpoints for suspend/resume, review, edit, replan, and mid-plan clarification.
@@ -420,7 +438,8 @@ Retail Pulse implements enterprise-grade patterns:
 
 ## Demo Walkthrough
 
-See the [complete demo script](docs/demo-walkthrough.md) for a step-by-step presentation guide (~10 minutes).
+Watch the [2 min 45 s sizzle reel](#sizzle-reel) for the short version, or see the
+[complete demo script](docs/demo-walkthrough.md) for a step-by-step presentation guide (~10 minutes).
 
 ---
 
