@@ -428,22 +428,35 @@ public sealed class PlanReviewCompletionService
             })],
         };
 
+        // Reuse the CANONICAL step ids the plan was created with
+        // (`{planId}-s{index}`) rather than minting a round-scoped
+        // `{planId}-r{round}-s{index}` set.
+        //
+        // The round-scoped scheme assumed the resume path would persist a
+        // parallel set of step rows, but it never did — the writes were built
+        // and dropped. The executor therefore issued UpdateStepAsync against
+        // ids with no matching row (a silent no-op, since the UPDATE matches on
+        // StepId AND PlanId), the original rows stayed Pending, and the
+        // terminal-status sweep in SqlitePlanStore swept them to Skipped. Net
+        // effect: an approved plan that really ran — real tool calls, real
+        // tokens, real answer — reported 0/N progress with every step "skipped".
+        //
+        // Reusing the canonical ids makes the executor drive the rows that
+        // actually exist: Pending -> Running -> Completed. The sweep then finds
+        // nothing Pending/Running at terminal time and leaves them alone.
+        //
+        // Per-round step history is not lost by this: only the final approved
+        // round ever executes. Earlier rejected rounds never advance a step
+        // beyond Pending, so there is no per-round result to preserve.
+        //
+        // Limitation: if a reviewer EDITS the plan to have more steps than the
+        // original, ids past the original count have no row and those updates
+        // still no-op. That was already true before this change.
         var stepIds = new List<string>(effectivePlan.Steps.Count);
-        var stepWrites = new List<PlanStepWrite>(effectivePlan.Steps.Count);
         int offset = resumeCompletedSteps?.Count ?? 0;
         for (int i = 0; i < effectivePlan.Steps.Count; i++)
         {
-            string stepId = $"{plan.PlanId}-r{state.RoundNumber}-s{offset + i}";
-            stepIds.Add(stepId);
-            stepWrites.Add(new PlanStepWrite
-            {
-                StepId = stepId,
-                StepIndex = offset + i,
-                SpecialistKey = effectivePlan.Steps[i].SpecialistKey,
-                Intent = effectivePlan.Steps[i].Intent,
-                Action = effectivePlan.Steps[i].Action,
-                Status = PlanStepStatus.Pending,
-            });
+            stepIds.Add($"{plan.PlanId}-s{offset + i}");
         }
 
         // Persist the resolved (edited/approved) plan onto the same row.
