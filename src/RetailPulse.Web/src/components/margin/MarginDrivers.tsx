@@ -29,7 +29,9 @@ const useStyles = makeStyles({
     '&:last-child': { borderBottom: 'none' },
   },
   name: {
-    width: '140px',
+    // API-sourced driver categories are longer than the demo strings this was
+    // sized for, so they collided with the bars. Widen and keep the ellipsis.
+    width: '180px',
     flexShrink: 0,
     fontSize: '13px',
     color: '#e2e8f0',
@@ -63,7 +65,7 @@ const useStyles = makeStyles({
     top: '2px',
   },
   impactLabel: {
-    width: '70px',
+    width: '78px',
     textAlign: 'right',
     fontSize: '13px',
     fontWeight: '600',

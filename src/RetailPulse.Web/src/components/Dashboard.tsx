@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton } from '@fluentui/react-components';
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
+import { fetchFinancials, fetchScorecard, fetchStores, fetchStockoutRisks } from '../services/operationsApi';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
 import { MemoryPanel } from './MemoryPanel';
@@ -250,50 +251,66 @@ export function Dashboard() {
   }, [telemetryOpen]);
 
   // Demo data for Phase 4 views
-  const demoStores: StorePerformance[] = [
-    { storeId: 's1', storeName: 'Flagship Downtown', region: 'Northeast', revenue: 2450000, target: 2200000, performanceIndex: 111, issues: [], recommendations: ['Expand premium shelf space'] },
-    { storeId: 's2', storeName: 'Mall Central', region: 'Northeast', revenue: 1800000, target: 2000000, performanceIndex: 90, issues: ['Low foot traffic weekdays'], recommendations: ['Increase weekday promotions'] },
-    { storeId: 's3', storeName: 'Suburb Plaza', region: 'Southeast', revenue: 950000, target: 1400000, performanceIndex: 68, issues: ['Stockout on top SKUs', 'Staff turnover'], recommendations: ['Urgent restock needed', 'Retention program'] },
-    { storeId: 's4', storeName: 'Harbor View', region: 'West Coast', revenue: 1650000, target: 1500000, performanceIndex: 110, issues: [], recommendations: ['Expand beverage section'] },
-    { storeId: 's5', storeName: 'Tech District', region: 'West Coast', revenue: 1200000, target: 1300000, performanceIndex: 92, issues: ['Display compliance low'], recommendations: ['Audit display compliance'] },
-    { storeId: 's6', storeName: 'Lakeside', region: 'Midwest', revenue: 780000, target: 1100000, performanceIndex: 71, issues: ['Competitor opened nearby'], recommendations: ['Price match key SKUs'] },
-    { storeId: 's7', storeName: 'Desert Springs', region: 'Southwest', revenue: 1100000, target: 1250000, performanceIndex: 88, issues: ['High shrinkage rate'], recommendations: ['Loss prevention audit'] },
-    { storeId: 's8', storeName: 'Mesa Grande', region: 'Southwest', revenue: 920000, target: 1050000, performanceIndex: 87, issues: [], recommendations: ['Increase local brand assortment'] },
-    { storeId: 's9', storeName: 'Rainier Square', region: 'Pacific Northwest', revenue: 1380000, target: 1400000, performanceIndex: 99, issues: [], recommendations: ['Launch loyalty program pilot'] },
-    { storeId: 's10', storeName: 'Emerald Market', region: 'Pacific Northwest', revenue: 1050000, target: 1200000, performanceIndex: 88, issues: ['Weekend staffing gaps'], recommendations: ['Adjust weekend scheduling'] },
-  ];
+  // Live operational data. These panels previously rendered hardcoded arrays
+  // declared right here, so Financials, Store Operations and Portfolio showed
+  // fabricated numbers that reconciled with nothing the system knew. They now
+  // load from the API on first view of their panel.
+  const [stores, setStores] = useState<StorePerformance[]>([]);
+  const [stockouts, setStockouts] = useState<StockoutRisk[]>([]);
+  const [waterfall, setWaterfall] = useState<MarginWaterfallStep[]>([]);
+  const [drivers, setDrivers] = useState<MarginDriver[]>([]);
+  const [financialsPeriod, setFinancialsPeriod] = useState<string>('');
+  const [brands, setBrands] = useState<BrandScore[]>([]);
+  const [brandsDurationMs, setBrandsDurationMs] = useState(0);
+  const [brandsLoading, setBrandsLoading] = useState(false);
 
-  const demoStockouts: StockoutRisk[] = [
-    { skuId: 'sku1', skuName: 'Premium Blend 12pk', brand: 'Apex Grill', currentVelocity: 45, daysRemaining: 2, recommendedReorder: 500, region: 'Northeast' },
-    { skuId: 'sku2', skuName: 'Classic Lager 6pk', brand: 'Summit Brew', currentVelocity: 32, daysRemaining: 5, recommendedReorder: 300, region: 'Southeast' },
-    { skuId: 'sku3', skuName: 'Light Seltzer Variety', brand: 'Wave Drinks', currentVelocity: 28, daysRemaining: 6, recommendedReorder: 250, region: 'West Coast' },
-  ];
+  // The scorecard fans out real agent assessments per brand, so it is genuinely slow.
+  // Load it on demand and show progress rather than blocking behind an empty grid.
+  useEffect(() => {
+    if (activeView !== 'portfolio' || brands.length > 0 || brandsLoading) return;
+    let cancelled = false;
+    setBrandsLoading(true);
+    void (async () => {
+      const packBrands = activePack.pack?.tenant.brands?.map(b => b.name) ?? [];
+      const target = packBrands.length > 0 ? packBrands : ['Apex Grill', 'Summit Brew', 'Wave Drinks'];
+      const result = await fetchScorecard(target);
+      if (cancelled) return;
+      setBrands(result.brands);
+      setBrandsDurationMs(result.durationMs);
+      setBrandsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [activeView, activePack.pack, brands.length, brandsLoading]);
 
-  const demoWaterfall: MarginWaterfallStep[] = [
-    { label: 'Revenue', value: 12500000, isSubtotal: true },
-    { label: 'COGS', value: -7200000 },
-    { label: 'Gross Margin', value: 5300000, isSubtotal: true },
-    { label: 'Marketing', value: -1800000 },
-    { label: 'Distribution', value: -950000 },
-    { label: 'Net Margin', value: 2550000, isSubtotal: true },
-  ];
+  // Load operational data lazily, when its panel is first opened, so the chat path
+  // does not pay for reads it will not render.
+  useEffect(() => {
+    if (activeView !== 'stores') return;
+    let cancelled = false;
+    void (async () => {
+      const [s, r] = await Promise.all([fetchStores(), fetchStockoutRisks()]);
+      if (cancelled) return;
+      setStores(s);
+      setStockouts(r);
+    })();
+    return () => { cancelled = true; };
+  }, [activeView]);
 
-  const demoDrivers: MarginDriver[] = [
-    { name: 'Premium Mix Shift', impact: 3.2, trend: 'improving', isRisk: false },
-    { name: 'Raw Material Costs', impact: -2.1, trend: 'worsening', isRisk: true },
-    { name: 'Distribution Efficiency', impact: 1.5, trend: 'stable', isRisk: false },
-    { name: 'Promotional Depth', impact: -1.8, trend: 'worsening', isRisk: true },
-    { name: 'Channel Mix', impact: 0.9, trend: 'improving', isRisk: false },
-  ];
-
-  const demoBrands: BrandScore[] = [
-    { brandName: 'Apex Grill', healthScore: 82, trend: 'up', dimensions: { demand: 88, margin: 75, competitive: 80, supply: 85 }, topRisk: 'Competitor pricing pressure', topOpportunity: 'Expand to Midwest' },
-    { brandName: 'Summit Brew', healthScore: 65, trend: 'down', dimensions: { demand: 70, margin: 55, competitive: 68, supply: 72 }, topRisk: 'Margin erosion from COGS', topOpportunity: 'New seasonal SKU launch' },
-    { brandName: 'Wave Drinks', healthScore: 91, trend: 'up', dimensions: { demand: 95, margin: 88, competitive: 90, supply: 92 }, topRisk: 'Supply chain capacity', topOpportunity: 'Premium tier expansion' },
-    { brandName: 'Coastal Foods', healthScore: 45, trend: 'down', dimensions: { demand: 40, margin: 48, competitive: 42, supply: 50 }, topRisk: 'Market share loss to new entrants', topOpportunity: 'Rebrand + relaunch' },
-    { brandName: 'Peak Snacks', healthScore: 73, trend: 'stable', dimensions: { demand: 78, margin: 70, competitive: 72, supply: 74 }, topRisk: 'Flat growth in core region', topOpportunity: 'E-commerce expansion' },
-    { brandName: 'Valley Organics', healthScore: 58, trend: 'up', dimensions: { demand: 62, margin: 52, competitive: 55, supply: 64 }, topRisk: 'Low brand awareness', topOpportunity: 'Health trend tailwind' },
-  ];
+  useEffect(() => {
+    if (activeView !== 'financials') return;
+    let cancelled = false;
+    void (async () => {
+      // Anchor on the pack's lead brand so the panel reports a real book of business
+      // rather than an arbitrary one.
+      const brand = activePack.pack?.tenant.brands?.[0]?.name ?? 'Apex Grill';
+      const f = await fetchFinancials(brand);
+      if (cancelled) return;
+      setWaterfall(f.waterfall);
+      setDrivers(f.drivers);
+      setFinancialsPeriod(f.period ? `${f.period} P&L Waterfall` : 'P&L Waterfall');
+    })();
+    return () => { cancelled = true; };
+  }, [activeView, activePack.pack]);
 
   const handleWhyClick = () => {
     setExplanationData({
@@ -751,23 +768,23 @@ export function Dashboard() {
           ) : activeView === 'stores' && featureFlags.stores ? (
             <div style={{ overflow: 'auto', height: '100%', padding: '20px' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '16px', fontSize: '20px' }}>🏪 Store Operations</h2>
-              <StoreHeatmap stores={demoStores} onStoreClick={(id) => setSelectedStore(demoStores.find(s => s.storeId === id) ?? null)} />
+              <StoreHeatmap stores={stores} onStoreClick={(id) => setSelectedStore(stores.find(s => s.storeId === id) ?? null)} />
               <div style={{ marginTop: '16px' }}>
-                <StorePerformanceTable stores={demoStores} onStoreClick={(id) => setSelectedStore(demoStores.find(s => s.storeId === id) ?? null)} />
+                <StorePerformanceTable stores={stores} onStoreClick={(id) => setSelectedStore(stores.find(s => s.storeId === id) ?? null)} />
               </div>
               <div style={{ marginTop: '16px' }}>
                 <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '8px', fontSize: '14px' }}>📦 Stockout Risks</h3>
-                <StockoutAlert risks={demoStockouts} />
+                <StockoutAlert risks={stockouts} />
               </div>
               <StoreDetailDialog store={selectedStore} open={!!selectedStore} onClose={() => setSelectedStore(null)} />
             </div>
           ) : activeView === 'financials' && featureFlags.financials ? (
             <div style={{ overflow: 'auto', height: '100%', padding: '24px' }}>
               <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>💰 Financials</h2>
-              <MarginWaterfall steps={demoWaterfall} title="Q1 2026 P&L Waterfall" />
+              <MarginWaterfall steps={waterfall} title={financialsPeriod} />
               <div style={{ marginTop: '24px' }}>
                 <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>📈 Margin Drivers</h3>
-                <MarginDrivers drivers={demoDrivers} />
+                <MarginDrivers drivers={drivers} />
               </div>
             </div>
           ) : activeView === 'portfolio' && featureFlags.portfolio ? (
@@ -780,10 +797,10 @@ export function Dashboard() {
                 </div>
               ) : (
                 <PortfolioScorecard
-                  brands={demoBrands}
-                  generationTimeMs={3200}
+                  brands={brands}
+                  generationTimeMs={brandsDurationMs}
                   onBrandClick={(name) => {
-                    const brand = demoBrands.find(b => b.brandName === name);
+                    const brand = brands.find(b => b.brandName === name);
                     if (brand) setSelectedBrand(brand);
                   }}
                   onWhyClick={handleWhyClick}
