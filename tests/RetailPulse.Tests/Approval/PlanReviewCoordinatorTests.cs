@@ -384,6 +384,79 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
 
     // ── Cross-subject denial (at the persistence layer) ─────────────────
 
+    /// <summary>
+    /// Subject scoping asserted with NO dependency on background scheduling.
+    ///
+    /// <para>
+    /// The coordinator-driven variant below exercises the real path, but it has to wait for
+    /// a background task to write its row first — which makes a security assertion hostage
+    /// to the thread pool. This test seeds the rows directly through the gate, so it is
+    /// fully deterministic: if it ever fails, subject scoping is genuinely broken.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Pending_rows_are_subject_scoped_at_sql()
+    {
+        SqliteApprovalGate gate = CreateSystemGate();
+
+        ApprovalRequest aliceRow = await gate.RequestApprovalAsync(
+            new ApprovalContext("planner", "alice", "act", "impact", "low", "why",
+                Kind: ApprovalKind.PlanReview, PlanId: "plan-alice"));
+        ApprovalRequest bobRow = await gate.RequestApprovalAsync(
+            new ApprovalContext("planner", "bob", "act", "impact", "low", "why",
+                Kind: ApprovalKind.PlanReview, PlanId: "plan-bob"));
+
+        IReadOnlyList<ApprovalRequest> alicePending = await gate.GetPendingAsync("alice");
+        IReadOnlyList<ApprovalRequest> bobPending = await gate.GetPendingAsync("bob");
+
+        alicePending.Select(r => r.RequestId).Should().ContainSingle()
+            .Which.Should().Be(aliceRow.RequestId, "alice must see exactly her own row");
+        bobPending.Select(r => r.RequestId).Should().ContainSingle()
+            .Which.Should().Be(bobRow.RequestId, "bob must see exactly his own row");
+
+        alicePending.Should().NotContain(r => r.Context.UserId == "bob");
+        bobPending.Should().NotContain(r => r.Context.UserId == "alice");
+    }
+
+    /// <summary>
+    /// An unknown subject must resolve to an empty list rather than leaking every row —
+    /// i.e. the WHERE clause must not be bypassable by an unmatched value.
+    /// </summary>
+    [Fact]
+    public async Task Pending_query_for_an_unknown_subject_returns_empty()
+    {
+        SqliteApprovalGate gate = CreateSystemGate();
+
+        await gate.RequestApprovalAsync(
+            new ApprovalContext("planner", "alice", "act", "impact", "low", "why",
+                Kind: ApprovalKind.PlanReview, PlanId: "plan-alice"));
+
+        (await gate.GetPendingAsync("nobody")).Should().BeEmpty();
+        (await gate.GetPendingAsync("")).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The subject is matched as a literal, not interpreted — a SQL wildcard or injection
+    /// payload in the subject position must return nothing rather than matching every row.
+    /// </summary>
+    [Theory]
+    [InlineData("%")]
+    [InlineData("_")]
+    [InlineData("' OR '1'='1")]
+    [InlineData("alice' --")]
+    [InlineData("ALICE")]
+    public async Task Pending_query_does_not_match_wildcards_or_injection_in_the_subject(string probe)
+    {
+        SqliteApprovalGate gate = CreateSystemGate();
+
+        await gate.RequestApprovalAsync(
+            new ApprovalContext("planner", "alice", "act", "impact", "low", "why",
+                Kind: ApprovalKind.PlanReview, PlanId: "plan-alice"));
+
+        (await gate.GetPendingAsync(probe)).Should().BeEmpty(
+            $"'{probe}' is not the literal subject 'alice' and must not match it");
+    }
+
     [Fact]
     public async Task Cross_subject_pending_query_does_not_expose_another_subject_row()
     {
@@ -393,7 +466,12 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
 
         PlanReviewCoordinationInput input = SampleInput() with { Subject = "alice" };
         _backgroundTasks.Add(coord.CoordinateAsync(input, _backgroundCts.Token));
-        _ = await WaitForPending(gate, input.Subject);
+        ApprovalRequest aliceRow = await WaitForPending(gate, input.Subject);
+
+        // Guard the arrange step explicitly: prove alice's row really is present before
+        // concluding anything from bob's empty result. Without this, a scheduling timeout
+        // that produced no rows at all would look like a passing security assertion.
+        aliceRow.Context.UserId.Should().Be("alice");
 
         (await gate.GetPendingAsync("bob")).Should().BeEmpty(
             "GetPendingAsync is subject-scoped at SQL — bob must never see alice's plan review.");
@@ -481,28 +559,78 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
 
     // ── Helpers ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// How long the pending-row polls below will wait before failing.
+    ///
+    /// <para>
+    /// These waits are an ARRANGE step: the coordinator writes its pending row from a
+    /// background task, and the test cannot proceed until that row exists. The budget was
+    /// previously expressed as a fixed 400 iterations of <c>Task.Delay(10)</c>. Under a full
+    /// parallel run the thread pool is saturated, the background task is queued behind
+    /// thousands of others, and that budget expired before the row appeared — so this class
+    /// failed intermittently. The worst of it was
+    /// <c>Cross_subject_pending_query_does_not_expose_another_subject_row</c>, whose name
+    /// made a scheduling timeout look like a cross-subject data leak.
+    /// </para>
+    ///
+    /// <para>
+    /// A wall-clock deadline is the right shape: it absorbs scheduling delay without
+    /// capping the number of observations, and it still fails in bounded time when the row
+    /// genuinely never arrives. It is deliberately generous — this budget is only ever
+    /// consumed in full on the path to a failure.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan PendingRowTimeout = TimeSpan.FromSeconds(30);
+
     private static async Task<ApprovalRequest> WaitForPending(SqliteApprovalGate gate, string subject)
     {
-        for (int i = 0; i < 400; i++)
-        {
-            IReadOnlyList<ApprovalRequest> pending = await gate.GetPendingAsync(subject);
-            if (pending.Count > 0) return pending[^1];
-            await Task.Delay(10);
-        }
-        throw new InvalidOperationException("Timed out waiting for pending approval row.");
+        ApprovalRequest? row = await PollForPendingAsync(
+            gate, subject, static _ => true);
+
+        return row ?? throw new InvalidOperationException(
+            $"Timed out after {PendingRowTimeout.TotalSeconds:N0}s waiting for a pending approval row "
+            + $"for subject '{subject}'. This is an arrange-step failure, not an assertion failure.");
     }
 
     private static async Task<ApprovalRequest> WaitForPendingRound(
         SqliteApprovalGate gate, string subject, int expectedRound)
     {
-        for (int i = 0; i < 400; i++)
+        ApprovalRequest? row = await PollForPendingAsync(
+            gate, subject, r => r.Context.RoundNumber == expectedRound);
+
+        return row ?? throw new InvalidOperationException(
+            $"Timed out after {PendingRowTimeout.TotalSeconds:N0}s waiting for pending round {expectedRound} "
+            + $"for subject '{subject}'. This is an arrange-step failure, not an assertion failure.");
+    }
+
+    /// <summary>
+    /// Polls <see cref="SqliteApprovalGate.GetPendingAsync"/> until a row matching
+    /// <paramref name="predicate"/> appears or <see cref="PendingRowTimeout"/> elapses.
+    /// Returns the most recent match, or <c>null</c> on timeout.
+    /// </summary>
+    private static async Task<ApprovalRequest?> PollForPendingAsync(
+        SqliteApprovalGate gate,
+        string subject,
+        Func<ApprovalRequest, bool> predicate)
+    {
+        long deadline = Environment.TickCount64 + (long)PendingRowTimeout.TotalMilliseconds;
+
+        while (true)
         {
             IReadOnlyList<ApprovalRequest> pending = await gate.GetPendingAsync(subject);
-            ApprovalRequest? hit = pending.FirstOrDefault(r => r.Context.RoundNumber == expectedRound);
-            if (hit is not null) return hit;
+            ApprovalRequest? hit = pending.LastOrDefault(predicate);
+            if (hit is not null)
+            {
+                return hit;
+            }
+
+            if (Environment.TickCount64 >= deadline)
+            {
+                return null;
+            }
+
             await Task.Delay(10);
         }
-        throw new InvalidOperationException($"Timed out waiting for round {expectedRound}.");
     }
 
     private static Task Approve(SqliteApprovalGate gate, string requestId)
