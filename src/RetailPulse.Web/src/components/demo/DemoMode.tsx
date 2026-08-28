@@ -205,8 +205,28 @@ export function DemoMode({
       if (!target) return;
 
       if (step.kind === 'click') {
+        // A bare element.click() dispatches only a click event. React components that key
+        // off pointer or mouse events, as Fluent buttons do, can ignore it entirely, which
+        // is why the council never actually convened. Send the sequence a real pointer
+        // produces, tolerating environments where PointerEvent is absent or stricter about
+        // its init members.
+        const base = { bubbles: true, cancelable: true, composed: true };
+        const fire = (Ctor: typeof MouseEvent, type: string) => {
+          try {
+            target.dispatchEvent(new Ctor(type, base));
+          } catch {
+            // Never let a synthetic event stop the run; the plain click below still fires.
+          }
+        };
+
+        const Pointer = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+        fire(Pointer as typeof MouseEvent, 'pointerdown');
+        fire(MouseEvent, 'mousedown');
+        target.focus?.();
+        fire(Pointer as typeof MouseEvent, 'pointerup');
+        fire(MouseEvent, 'mouseup');
         target.click();
-        await pause(400);
+        await pause(600);
         return;
       }
 
