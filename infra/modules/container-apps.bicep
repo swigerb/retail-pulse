@@ -64,6 +64,9 @@ param botAppSecret string = ''
 @description('Tenant that owns the bot app registration. Defaults to the deploying tenant.')
 param botTenantId string = tenant().tenantId
 
+@description('Keep one replica of the API and MCP server always running. Scale-to-zero saves money while idle, but the first request after an idle period pays a cold start during which SignalR cannot connect and chat appears to hang — indistinguishable from an outage to anyone looking at the screen. Set false for a cost-optimised environment that is not customer-facing.')
+param alwaysWarm bool = true
+
 var apimSubscriptionKeySecretName = 'apim-sub-key'
 var mcpApiKeySecretName = 'mcp-api-key'
 var botAppSecretName = 'bot-app-secret'
@@ -157,7 +160,10 @@ resource mcpServer 'Microsoft.App/containerApps@2024-03-01' = {
         }
       ]
       scale: {
-        minReplicas: 0
+        // A cold start blocks SignalR and stalls the first chat, which reads as an
+        // outage rather than a scale event. The MCP server matters as much as the API:
+        // a warm API still stalls on its first tool call if MCP is cold.
+        minReplicas: alwaysWarm ? 1 : 0
         maxReplicas: 1
       }
     }
@@ -384,7 +390,10 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
       // GitHub:AcknowledgeSingleReplica=true fail-closed acknowledgement of this pin. See
       // docs/adr/005 and docs/security.md.
       scale: {
-        minReplicas: 0
+        // A cold start blocks SignalR and stalls the first chat, which reads as an
+        // outage rather than a scale event. The MCP server matters as much as the API:
+        // a warm API still stalls on its first tool call if MCP is cold.
+        minReplicas: alwaysWarm ? 1 : 0
         maxReplicas: 1
       }
     }

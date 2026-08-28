@@ -55,6 +55,9 @@ param botAppId string = ''
 @description('Client secret for the bot app registration. Set with `azd env set AZURE_BOT_APP_SECRET <secret>`; stored as a Container Apps secret, never in the template.')
 @secure()
 param botAppSecret string = ''
+
+@description('Keep one replica of the API and MCP server always running. Scale-to-zero makes the first request after an idle period look like an outage. Set false with `azd env set AZURE_ALWAYS_WARM false` for a cost-optimised, non-customer-facing environment.')
+param alwaysWarm bool = true
 @description('Enable the optional Azure AI Search knowledge provider. Disabled by default; no Search resource is provisioned when false.')
 param aiSearchEnabled bool = false
 
@@ -162,6 +165,7 @@ module containerApps './modules/container-apps.bicep' = {
     contentSafetyEndpoint: contentSafetyEnabled ? contentSafety!.outputs.endpoint : ''
     botAppId: botAppId
     botAppSecret: botAppSecret
+    alwaysWarm: alwaysWarm
   }
 }
 
