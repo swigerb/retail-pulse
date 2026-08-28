@@ -290,6 +290,7 @@ export default function KnowledgeBasePanel() {
           icon={<Search16Regular />}
           onClick={handleSearch}
           disabled={searching}
+          data-testid="kb-search-button"
           style={{ backgroundColor: KB_COLORS.primary }}
         >
           {searching ? 'Searching...' : 'Search'}

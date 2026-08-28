@@ -8,7 +8,7 @@ import { DEMO_STEPS, type DemoStep, type DemoView } from './demoSteps';
  *
  * The tour drives the dashboard rather than describing it from the side: each step can
  * switch view and open the telemetry drawer, so the operator is always looking at the
- * thing being described. Advancing is manual — nothing auto-plays, because a demo that
+ * thing being described. Advancing is manual, nothing auto-plays, because a demo that
  * moves on its own cannot be paused to answer a question.
  */
 
@@ -127,7 +127,7 @@ const useStyles = makeStyles({
 /**
  * Reads the on-screen box of a step's target.
  *
- * Returns null when the step has no target or the element is not present — a step whose
+ * Returns null when the step has no target or the element is not present, a step whose
  * target is missing degrades to a centred card rather than pointing at the top-left
  * corner, which is what an unchecked getBoundingClientRect would do.
  */
@@ -193,7 +193,7 @@ function positionCard(rect: Rect | null, placement: DemoStep['placement']): { to
 /**
  * True when the flyout would sit on top of the element it is describing.
  *
- * Clamping a card back inside the viewport can push it over its own spotlight — which is
+ * Clamping a card back inside the viewport can push it over its own spotlight, which is
  * exactly what happened against the telemetry drawer, whose 560px panel is flush with the
  * right edge. When that happens the caller falls back to centring, which is never wrong.
  */
@@ -231,7 +231,7 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
 
   // Measure after the view switch has painted. A layout effect alone is too early: the
   // panel being pointed at may not exist yet on the frame the step changes, and the
-  // telemetry drawer slides in over roughly 250ms — measuring it mid-animation captures
+  // telemetry drawer slides in over roughly 250ms, measuring it mid-animation captures
   // its off-screen starting position and parks the flyout on top of it.
   useLayoutEffect(() => {
     if (!open || !step) return;
@@ -311,7 +311,7 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
 
   // The highlight is a ring and glow, not a dimming mask. An earlier version dimmed
   // everything outside the cutout, which made the panel being described the one thing you
-  // could not read properly — the opposite of the point. The narration card carries the
+  // could not read properly, the opposite of the point. The narration card carries the
   // explanation; the app stays fully legible behind it.
   const spotlight = rect
     ? {

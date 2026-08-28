@@ -3,14 +3,26 @@ import type { DemoView } from './demoSteps';
 /**
  * Script for the automated Demo Mode run.
  *
- * Unlike the Tour — which narrates a static surface and waits for a click — this drives
- * the product: it submits real prompts through the same path a person typing would take,
- * waits for the answer to actually arrive, and moves through the views while the results
- * are on screen.
+ * Unlike the Tour, which narrates a static surface and waits for a click, this drives the
+ * product. It submits real prompts through the same path a person typing would take, runs
+ * real interactions inside each panel, and waits for the work to finish before narrating
+ * the result.
  *
- * Nothing here is faked. `prompt` steps hit the live API, so the tokens, cost and latency
- * shown in the telemetry drawer during the run are the real numbers for that request.
+ * Nothing here is faked. Prompts hit the live API and interactions click the same controls
+ * an operator would, so the tokens, cost and latency shown during a run are that run's
+ * real numbers.
  */
+
+/**
+ * One scripted interaction inside a panel.
+ *
+ * Declarative rather than a callback, so the script stays inspectable and testable and a
+ * missing target degrades to a skipped step instead of throwing part way through a demo.
+ */
+export type DemoInteraction =
+  | { readonly kind: 'click'; readonly selector: string; readonly note: string }
+  | { readonly kind: 'type'; readonly selector: string; readonly text: string; readonly note: string }
+  | { readonly kind: 'wait'; readonly ms: number; readonly note: string };
 
 export interface DemoAct {
   readonly id: string;
@@ -22,19 +34,18 @@ export interface DemoAct {
   /** Whether the telemetry drawer should be open. */
   readonly telemetry?: boolean;
   /**
-   * A prompt to submit for real. The act does not advance until the response lands, so
-   * the narration never runs ahead of the system.
+   * A prompt to submit for real. The act does not advance until the response lands, so the
+   * narration never runs ahead of the system.
    */
   readonly prompt?: string;
-  /**
-   * How long to hold this act once its work is done, in milliseconds. Long enough to read
-   * the card and look at the result; short enough that the run keeps moving.
-   */
+  /** Controls to drive inside the panel once it is on screen. */
+  readonly interactions?: readonly DemoInteraction[];
+  /** How long to hold once the work is done, so the result can be read. */
   readonly holdMs?: number;
 }
 
-const READ = 7_000;
-const GLANCE = 5_000;
+const READ = 8_000;
+const GLANCE = 6_000;
 
 export const DEMO_ACTS: readonly DemoAct[] = [
   {
@@ -42,10 +53,11 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     chapter: 'Live demo',
     title: 'This is the real system',
     body:
-      'Everything from here runs live against Azure — real prompts, real agents, real tool '
-      + 'calls, real token costs. Nothing is scripted or pre-recorded. Sit back; it drives '
-      + 'itself, and you can stop at any point.',
+      'Everything from here runs live against Azure. Real prompts, real agents, real tool '
+      + 'calls, real token costs. Nothing is scripted or pre-recorded. It drives itself, and '
+      + 'you can pause or step back at any point.',
     view: 'chat',
+    telemetry: false,
     holdMs: GLANCE,
   },
   {
@@ -53,9 +65,9 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     chapter: 'Routing',
     title: 'Asking a demand question',
     body:
-      'Submitting a real question now. Watch the router pick the demand-forecasting '
-      + 'specialist, call its tools, and answer from live data — the whole turn is streaming '
-      + 'into the telemetry drawer as it happens.',
+      'Submitting a real question now. The router picks the demand specialist, it calls its '
+      + 'tools, and the answer comes back from live data. The whole turn streams into the '
+      + 'telemetry drawer as it happens.',
     view: 'chat',
     telemetry: true,
     prompt: 'How are FreshMart depletions trending in the Northeast this quarter?',
@@ -67,10 +79,9 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     title: 'What that answer cost',
     body:
       'Live Spans now holds the real numbers for the request you just watched: total tokens, '
-      + 'span count, tool calls, wall-clock duration and dollar cost. Every one of those model '
-      + 'calls went through the API Management AI Gateway, which meters tokens per '
-      + 'subscription and authenticates to Foundry with managed identity — no model keys exist '
-      + 'anywhere in the system.',
+      + 'span count, tool calls, duration and dollar cost. Every model call went through the '
+      + 'API Management AI Gateway, which meters tokens per subscription and authenticates to '
+      + 'Foundry with managed identity. No model keys exist anywhere in the system.',
     telemetry: true,
     holdMs: READ + 2_000,
   },
@@ -80,8 +91,8 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     title: 'Asking for a visualisation',
     body:
       'The same pipeline builds charts. This one is drawn deterministically from the tool '
-      + 'payload rather than improvised by the model, so the numbers on the axis are the '
-      + 'numbers the tools returned.',
+      + 'payload rather than improvised by the model, so the values on the axis are exactly '
+      + 'what the tools returned.',
     view: 'chat',
     telemetry: true,
     prompt: 'Show a horizontal bar chart ranking all brands by depletion growth rate',
@@ -92,42 +103,60 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     chapter: 'Multi-agent',
     title: 'Convening the Health Council',
     body:
-      'Several specialists assess one brand independently, each grounded in its own tool '
-      + 'data and reporting its own confidence. Disagreement is surfaced rather than averaged '
-      + 'away — and the verdict is published as a collaborative card to vote on.',
+      'Clicking Convene now. Several specialists assess one brand independently, each '
+      + 'grounded in its own tool data and reporting its own confidence. Watch where they '
+      + 'disagree: the split is surfaced rather than averaged away.',
     view: 'council',
     telemetry: false,
-    holdMs: READ,
+    interactions: [
+      { kind: 'click', selector: '[data-testid="convene-button"]', note: 'Convening the council' },
+      { kind: 'wait', ms: 25_000, note: 'Specialists are voting' },
+    ],
+    holdMs: READ + 4_000,
   },
   {
     id: 'portfolio',
     chapter: 'Multi-agent',
     title: 'Scoring the whole portfolio',
     body:
-      'Every brand scored across five specialist dimensions — demand, margin, competitive, '
-      + 'supply and store execution — by fanning out to the specialists in parallel. Results '
-      + 'are cached, so this is instant on a second visit.',
+      'Every brand scored across five specialist dimensions: demand, margin, competitive, '
+      + 'supply and store execution. The specialists run in parallel and the scores are '
+      + 'cached, so a second visit is instant.',
     view: 'portfolio',
+    interactions: [
+      { kind: 'wait', ms: 14_000, note: 'Scoring brands' },
+    ],
     holdMs: READ,
   },
   {
     id: 'competitive',
     chapter: 'Analytics',
-    title: 'Competitive intelligence',
+    title: 'Filtering competitive intelligence',
     body:
       'Market share, competitor pricing moves and detected threats with recommended '
-      + 'responses. The price drops here are what raise the alerts in the telemetry drawer.',
+      + 'responses. Opening the category filter now. The list is derived from the data, so '
+      + 'every option returns rows rather than an empty grid.',
     view: 'competitive',
-    holdMs: GLANCE,
+    interactions: [
+      { kind: 'wait', ms: 3_500, note: 'Loading competitive data' },
+      { kind: 'click', selector: '[data-testid="category-filter"] button', note: 'Opening the category filter' },
+      { kind: 'wait', ms: 1_200, note: '' },
+      { kind: 'click', selector: '[role="option"]', note: 'Choosing a category' },
+      { kind: 'wait', ms: 3_000, note: 'Refiltering' },
+    ],
+    holdMs: READ,
   },
   {
     id: 'financials',
     chapter: 'Analytics',
     title: 'Financials',
     body:
-      'A P&L waterfall from revenue to net margin with the drivers moving it — read live '
-      + 'from the margin service.',
+      'A P and L waterfall from revenue through to net margin, with the drivers moving it. '
+      + 'Every figure is read live from the margin service rather than a fixture.',
     view: 'financials',
+    interactions: [
+      { kind: 'wait', ms: 3_000, note: 'Loading margin data' },
+    ],
     holdMs: GLANCE,
   },
   {
@@ -135,30 +164,44 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     chapter: 'Analytics',
     title: 'Store operations',
     body:
-      'Every store against target, a regional heatmap, and the SKUs at genuine stockout '
-      + 'risk ranked by urgency with recommended reorder quantities.',
+      'Every store against target, a regional heatmap, and the SKUs at genuine stockout risk '
+      + 'ranked by urgency with recommended reorder quantities.',
     view: 'stores',
+    interactions: [
+      { kind: 'wait', ms: 3_000, note: 'Loading store performance' },
+    ],
     holdMs: GLANCE,
   },
   {
     id: 'knowledge',
     chapter: 'Grounding',
-    title: 'What the agents read',
+    title: 'Searching what the agents read',
     body:
-      'The corpus answers are grounded in, with per-agent bindings showing exactly which '
-      + 'source each specialist is scoped to. Providers are pluggable — in-memory BM25 here, '
-      + 'with Azure AI Search and Foundry IQ available.',
+      'This is the corpus answers are grounded in. Running a real search now. The results '
+      + 'carry BM25 relevance, and the panel on the right shows exactly which source each '
+      + 'specialist is scoped to.',
     view: 'knowledge',
-    holdMs: GLANCE,
+    interactions: [
+      { kind: 'wait', ms: 2_500, note: 'Loading the corpus' },
+      { kind: 'type', selector: '[data-testid="kb-search-input"]', text: 'supplier fill rate service level', note: 'Typing a search' },
+      { kind: 'wait', ms: 800, note: '' },
+      { kind: 'click', selector: '[data-testid="kb-search-button"]', note: 'Searching' },
+      { kind: 'wait', ms: 3_000, note: 'Retrieving' },
+    ],
+    holdMs: READ,
   },
   {
     id: 'promo',
     chapter: 'Planning',
     title: 'Campaign Planner',
     body:
-      'Model a promotion before running it: expected ROI with confidence bounds, break-even '
-      + 'weeks, seasonality fit and the risks worth knowing — grounded in historical outcomes.',
+      'Model a promotion before running it. Expected ROI with confidence bounds, break even '
+      + 'weeks, seasonality fit and the risks worth knowing, all grounded in historical '
+      + 'campaign outcomes.',
     view: 'promo',
+    interactions: [
+      { kind: 'wait', ms: 2_500, note: 'Loading campaign history' },
+    ],
     holdMs: GLANCE,
   },
   {
@@ -166,9 +209,13 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     chapter: 'Collaboration',
     title: 'Adaptive Cards',
     body:
-      'Council verdicts are published here as interactive cards. Teammates vote, comment and '
-      + 'escalate; a split vote escalates automatically. The same format the Teams bot sends.',
+      'The council verdict from earlier was published here as an interactive card. '
+      + 'Teammates vote, comment and escalate, and a split vote escalates automatically. This '
+      + 'is the same card format the Teams bot sends.',
     view: 'cards',
+    interactions: [
+      { kind: 'wait', ms: 2_500, note: 'Loading cards' },
+    ],
     holdMs: GLANCE,
   },
   {
@@ -176,9 +223,9 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     chapter: 'Trust',
     title: 'Guardrails',
     body:
-      'Prompt-injection defence, PII redaction on input and output, and Azure AI Content '
-      + 'Safety scanning every prompt and response. Entra-only sign-in, every endpoint '
-      + 'deny-by-default.',
+      'Prompt injection defence, PII redaction on input and output, and Azure AI Content '
+      + 'Safety scanning every prompt and response. Sign in is Entra only in production and '
+      + 'every endpoint is deny by default.',
     view: 'security',
     holdMs: GLANCE,
   },
@@ -187,10 +234,13 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     chapter: 'AI Gateway',
     title: 'The bill',
     body:
-      'Total tokens, total cost, request count and average cost per request — including the '
-      + 'requests this demo just made. This is what makes the economics of a multi-agent '
-      + 'system visible rather than a surprise on the invoice.',
+      'Total tokens, total cost, request count and average cost per request, broken down per '
+      + 'agent. That includes the requests this demo just made. This is what makes the '
+      + 'economics of a multi-agent system visible rather than a surprise on the invoice.',
     view: 'observability',
+    interactions: [
+      { kind: 'wait', ms: 3_000, note: 'Loading cost data' },
+    ],
     holdMs: READ,
   },
   {
@@ -199,8 +249,8 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     title: 'All of that was live',
     body:
       'Every answer, chart and cost figure came from services running on Azure during this '
-      + 'run. Ask it something of your own — or press Tour for the guided version you can '
-      + 'step through at your own pace.',
+      + 'run. Ask it something of your own, or press Tour for the guided version you can step '
+      + 'through at your own pace.',
     view: 'chat',
     holdMs: GLANCE,
   },

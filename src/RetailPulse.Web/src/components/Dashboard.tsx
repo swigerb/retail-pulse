@@ -1015,6 +1015,7 @@ export function Dashboard() {
         onNavigate={view => setActiveView(view)}
         onTelemetry={setTelemetryOpen}
         sendPrompt={sendPrompt}
+        telemetryOpen={telemetryOpen}
       />
     </div>
   );

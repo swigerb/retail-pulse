@@ -221,6 +221,13 @@ describe('demo script', () => {
     }
   });
 
+  it('uses no em dashes anywhere in the script', () => {
+    for (const s of DEMO_STEPS) {
+      expect(s.title).not.toContain('\u2014');
+      expect(s.body).not.toContain('\u2014');
+    }
+  });
+
   it('keeps body copy short enough for a flyout', () => {
     for (const step of DEMO_STEPS) {
       expect(step.body.length).toBeLessThanOrEqual(400);
