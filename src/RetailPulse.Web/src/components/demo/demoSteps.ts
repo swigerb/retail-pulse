@@ -1,7 +1,7 @@
 /**
  * Declarative script for the guided Demo Mode walkthrough.
  *
- * Every claim here is deliberately grounded in shipped behaviour — the gateway policy
+ * Every claim here is deliberately grounded in shipped behaviour, the gateway policy
  * really does meter tokens, the telemetry drawer really does show per-request cost, the
  * council really does convene specialists. A guided tour that overstates the product is
  * worse than none, because the person following it will click the thing and see the gap.
@@ -15,7 +15,7 @@ export type DemoView =
 export interface DemoStep {
   readonly id: string;
   readonly title: string;
-  /** Body copy. Kept to a few sentences — this is a tooltip, not documentation. */
+  /** Body copy. Kept to a few sentences, this is a tooltip, not documentation. */
   readonly body: string;
   /**
    * CSS selector for the element to spotlight. When absent, or when the element is not
@@ -40,7 +40,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     body:
       'A multi-agent retail intelligence platform. A router picks the right specialist for each '
       + 'question, specialists call real tools over MCP, and every model call is metered through an '
-      + 'Azure API Management AI Gateway. This tour walks the whole surface — about two minutes.',
+      + 'Azure API Management AI Gateway. This tour walks the whole surface, about two minutes.',
     view: 'chat',
     placement: 'center',
   },
@@ -49,7 +49,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     chapter: 'Chat',
     title: 'Ask in plain language',
     body:
-      'Questions route to a specialist automatically — demand forecasting, competitive intelligence, '
+      'Questions route to a specialist automatically, demand forecasting, competitive intelligence, '
       + 'supply chain, margin analysis, store operations and more. The curated prompts below are a '
       + 'starting point; anything in natural language works.',
     target: '[data-testid="chat-host"]',
@@ -73,7 +73,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     chapter: 'Cost & Telemetry',
     title: 'Real-time telemetry',
     body:
-      'Every run streams over SignalR as it happens. Open this drawer to watch the agent work — '
+      'Every run streams over SignalR as it happens. Open this drawer to watch the agent work, '
       + 'no polling, no refresh.',
     target: '[aria-controls="telemetry-drawer"]',
     view: 'chat',
@@ -97,7 +97,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     title: 'Why that agent answered',
     body:
       'Agent Routing shows which specialist was selected and how confident the router was. Plans, '
-      + 'Memory and Alerts sit alongside it — the whole execution story in one drawer.',
+      + 'Memory and Alerts sit alongside it, the whole execution story in one drawer.',
     target: '#telemetry-drawer',
     telemetry: true,
     placement: 'left',
@@ -108,7 +108,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     title: 'Every model call goes through APIM',
     body:
       'No component talks to Azure OpenAI directly. An API Management AI Gateway fronts every '
-      + 'inference call, authenticating to Azure AI Foundry with managed identity — there are no '
+      + 'inference call, authenticating to Azure AI Foundry with managed identity, there are no '
       + 'model keys anywhere in the system.',
     view: 'observability',
     placement: 'center',
@@ -130,7 +130,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     chapter: 'AI Gateway',
     title: 'Cost tracking',
     body:
-      'Total tokens, total cost, request count and average cost per request — by day, week or '
+      'Total tokens, total cost, request count and average cost per request, by day, week or '
       + 'month, broken down per agent. This is what makes the economics of a multi-agent system '
       + 'visible rather than a surprise on the invoice.',
     view: 'observability',
@@ -141,7 +141,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     chapter: 'Multi-agent',
     title: 'Portfolio Health Council',
     body:
-      'Convene several specialists on one brand and watch them vote independently — each grounded '
+      'Convene several specialists on one brand and watch them vote independently, each grounded '
       + 'in its own tool data, each reporting a confidence score. Disagreement is surfaced rather '
       + 'than averaged away, and the verdict is published as a collaborative card to vote on.',
     view: 'council',
@@ -152,8 +152,8 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     chapter: 'Multi-agent',
     title: 'Portfolio scorecard',
     body:
-      'Each brand is scored across five specialist dimensions — demand, margin, competitive, supply '
-      + 'and store execution — by fanning out to the specialists in parallel. Scores are cached so '
+      'Each brand is scored across five specialist dimensions, demand, margin, competitive, supply '
+      + 'and store execution, by fanning out to the specialists in parallel. Scores are cached so '
       + 'revisiting is instant.',
     view: 'portfolio',
     placement: 'center',
@@ -164,7 +164,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     title: 'Knowledge Base and RAG',
     body:
       'The corpus the agents ground answers in. Search it, upload to it, and see exactly which '
-      + 'source each agent is bound to. Providers are pluggable — in-memory BM25 by default, with '
+      + 'source each agent is bound to. Providers are pluggable, in-memory BM25 by default, with '
       + 'Azure AI Search and Foundry IQ available.',
     view: 'knowledge',
     placement: 'center',
@@ -184,7 +184,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     chapter: 'Analytics',
     title: 'Financials',
     body:
-      'A P&L waterfall from revenue through to net margin, plus the drivers moving it — each one '
+      'A P&L waterfall from revenue through to net margin, plus the drivers moving it, each one '
       + 'read live from the margin service, not a fixture.',
     view: 'financials',
     placement: 'center',
@@ -194,7 +194,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     chapter: 'Analytics',
     title: 'Store operations',
     body:
-      'Every store against target, with a regional heatmap and the SKUs at genuine stockout risk — '
+      'Every store against target, with a regional heatmap and the SKUs at genuine stockout risk, '
       + 'ranked by urgency, with recommended reorder quantities.',
     view: 'stores',
     placement: 'center',
@@ -205,7 +205,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     title: 'Campaign Planner',
     body:
       'Model a promotion before you run it: expected ROI with confidence bounds, break-even weeks, '
-      + 'seasonality fit and the risks worth knowing — grounded in historical campaign outcomes.',
+      + 'seasonality fit and the risks worth knowing, grounded in historical campaign outcomes.',
     view: 'promo',
     placement: 'center',
   },
@@ -235,7 +235,7 @@ export const DEMO_STEPS: readonly DemoStep[] = [
     chapter: 'Done',
     title: "That's the tour",
     body:
-      'Everything shown here runs against live services on Azure — no scripted responses. Ask it '
+      'Everything shown here runs against live services on Azure, no scripted responses. Ask it '
       + 'something of your own, or restart the tour any time from the Demo Mode button.',
     view: 'chat',
     placement: 'center',
