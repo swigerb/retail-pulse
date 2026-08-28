@@ -23,6 +23,16 @@ builder.AddAgent<RetailPulseAgent>();
 builder.Services.AddSingleton<IStorage, MemoryStorage>();
 builder.Services.AddControllers();
 
+// Inbound channel authentication. MapAgentApplicationEndpoints(requireAuth: true) below
+// requires an authenticated principal, so without a registered scheme every Activity
+// from Teams fails with "No authenticationScheme was specified" — a 500 where the
+// channel expects a 401. Development skips it to keep the local loop keyless, matching
+// the requireAuth flag on the endpoint mapping.
+if (!builder.Environment.IsDevelopment())
+{
+    builder.AddAgentAspNetAuthentication();
+}
+
 string apiBaseUrl = builder.Configuration["services:api:https:0"]
     ?? builder.Configuration["services:api:http:0"]
     ?? builder.Configuration["TeamsBot:ApiBaseUrl"]
