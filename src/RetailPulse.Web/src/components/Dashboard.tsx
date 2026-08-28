@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactElement } from 'react';
 import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton, Spinner } from '@fluentui/react-components';
-import { Add24Regular, Play24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
+import { Add24Regular, Play24Regular, BookInformation24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { fetchFinancials, fetchScorecardBatched, fetchStores, fetchStockoutRisks } from '../services/operationsApi';
 import { toAlert, fetchAlerts } from '../services/alertsApi';
 import { DemoTour } from './demo/DemoTour';
+import { DemoMode } from './demo/DemoMode';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
 import { MemoryPanel } from './MemoryPanel';
@@ -293,7 +294,14 @@ export function Dashboard() {
   const [brandsDurationMs, setBrandsDurationMs] = useState(0);
   const [brandsLoading, setBrandsLoading] = useState(false);
   const [brandsError, setBrandsError] = useState<string | null>(null);
+  const [tourOpen, setTourOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
+  // Published by ChatPanel so Demo Mode can submit through the real send path.
+  const [sendPrompt, setSendPrompt] = useState<((m: string) => Promise<void>) | null>(null);
+  const registerSender = useCallback((send: (m: string) => Promise<void>) => {
+    // Stored via the functional form: a bare setState would invoke the function.
+    setSendPrompt(() => send);
+  }, []);
 
   // The scorecard fans out real agent assessments per brand, so it is genuinely slow.
   // Load it on demand and show progress rather than blocking behind an empty grid.
@@ -738,11 +746,20 @@ export function Dashboard() {
             New Chat
           </Button>
           <Button
+            appearance={tourOpen ? 'primary' : 'subtle'}
+            icon={<BookInformation24Regular />}
+            onClick={() => { setDemoOpen(false); setTourOpen(true); }}
+            data-testid="tour-button"
+            title="Step through every capability at your own pace"
+          >
+            Tour
+          </Button>
+          <Button
             appearance={demoOpen ? 'primary' : 'subtle'}
             icon={<Play24Regular />}
-            onClick={() => setDemoOpen(true)}
+            onClick={() => { setTourOpen(false); setDemoOpen(true); }}
             data-testid="demo-mode-button"
-            title="Guided walkthrough of every shipped capability"
+            title="Run a live, self-driving demo against the real system"
           >
             Demo Mode
           </Button>
@@ -787,6 +804,7 @@ export function Dashboard() {
               planController={planController}
               planConnected={connected}
               telemetryOpen={telemetryOpen}
+              registerSender={registerSender}
             />
           </div>
           {/* Secondary views are wrapped in a per-panel boundary keyed by the
@@ -986,10 +1004,17 @@ export function Dashboard() {
       {/* Rendered last so the overlay sits above the header, panels and drawer without
           needing to out-bid every nested z-index in the app. */}
       <DemoTour
+        open={tourOpen}
+        onClose={() => setTourOpen(false)}
+        onNavigate={view => setActiveView(view)}
+        onTelemetry={setTelemetryOpen}
+      />
+      <DemoMode
         open={demoOpen}
         onClose={() => setDemoOpen(false)}
         onNavigate={view => setActiveView(view)}
         onTelemetry={setTelemetryOpen}
+        sendPrompt={sendPrompt}
       />
     </div>
   );

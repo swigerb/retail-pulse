@@ -84,6 +84,13 @@ interface ChatPanelProps {
   /** Live SignalR connection status for the plan view banner. */
   planConnected?: boolean;
   /**
+   * Hands the panel's send function to the host once it is available, so Demo Mode can
+   * submit a real prompt through exactly the same path a person typing would take —
+   * same session, same routing, same telemetry. Driving the DOM instead would exercise
+   * a different code path than the one being demonstrated.
+   */
+  registerSender?: (send: (message: string) => Promise<void>) => void;
+  /**
    * Whether the Real-Time Telemetry drawer is open.
    *
    * The composer's ConnectionStatusIndicator and the drawer header's badge report
@@ -489,6 +496,7 @@ export function ChatPanel({
   planController,
   planConnected,
   telemetryOpen = false,
+  registerSender,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -782,6 +790,11 @@ export function ChatPanel({
       setLoading(false);
     }
   }, []);
+
+  // Publish the send function once it is stable so Demo Mode can drive a real turn.
+  useEffect(() => {
+    registerSender?.(sendChatMessage);
+  }, [registerSender, sendChatMessage]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || loading) return;

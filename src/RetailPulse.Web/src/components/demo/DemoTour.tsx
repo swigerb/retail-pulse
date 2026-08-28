@@ -54,9 +54,9 @@ const useStyles = makeStyles({
     position: 'fixed',
     inset: '0',
     zIndex: 9000,
-    // Pointer events are enabled so a stray click cannot interact with the app mid-tour,
-    // which would desynchronise the narration from what is on screen.
-    pointerEvents: 'auto',
+    // Clicks pass straight through: with no dimming mask there is nothing to block, and
+    // the operator can still interact with the product while the narration is up.
+    pointerEvents: 'none',
   },
   card: {
     position: 'fixed',
@@ -309,9 +309,10 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
 
   if (!open || !step) return null;
 
-  // The cutout is drawn with a huge spread box-shadow rather than an SVG mask: it dims
-  // everything outside the highlighted box while leaving the element itself untouched and
-  // fully legible.
+  // The highlight is a ring and glow, not a dimming mask. An earlier version dimmed
+  // everything outside the cutout, which made the panel being described the one thing you
+  // could not read properly — the opposite of the point. The narration card carries the
+  // explanation; the app stays fully legible behind it.
   const spotlight = rect
     ? {
       position: 'fixed' as const,
@@ -320,8 +321,8 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
       width: `${rect.width + SPOTLIGHT_PADDING * 2}px`,
       height: `${rect.height + SPOTLIGHT_PADDING * 2}px`,
       borderRadius: '10px',
-      boxShadow: '0 0 0 9999px rgba(2, 6, 23, 0.72)',
       border: '2px solid var(--brand-accent, #3b82f6)',
+      boxShadow: '0 0 0 1px rgba(59,130,246,0.35), 0 0 24px 4px rgba(59,130,246,0.35)',
       pointerEvents: 'none' as const,
       transition: 'top 180ms ease, left 180ms ease, width 180ms ease, height 180ms ease',
     }
@@ -329,13 +330,12 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
 
   return (
     <>
+      {/* No backdrop fill: the point is to show the product, not to grey it out. The
+          layer exists only to host the highlight ring. */}
       <div
         className={styles.overlay}
         data-testid="demo-tour-overlay"
-        // Clicking the backdrop does NOT advance or close: an accidental click during a
-        // presentation should do nothing rather than skip a step.
         onClick={e => e.stopPropagation()}
-        style={rect ? undefined : { backgroundColor: 'rgba(2, 6, 23, 0.72)' }}
       >
         {spotlight && <div style={spotlight} data-testid="demo-tour-spotlight" />}
       </div>
