@@ -122,9 +122,13 @@ app.MapGet("/api/depletion-stats", (string brand, string region, RetailPulseDb d
 })
 .WithName("GetDepletionStats");
 
-app.MapGet("/api/portfolio-depletion-stats", (string region, RetailPulseDb data, string period = "YTD") =>
+// `region` is optional: a portfolio-wide ranking ("rank all brands by growth rate") has
+// no natural region qualifier, and the data layer already resolves a missing or
+// portfolio-wide region to the National aggregate. Declaring it required made the tool
+// call fail outright for exactly the prompt the endpoint exists to serve.
+app.MapGet("/api/portfolio-depletion-stats", (RetailPulseDb data, string? region = null, string period = "YTD") =>
 {
-    object result = data.GetPortfolioDepletionStats(region, period);
+    object result = data.GetPortfolioDepletionStats(region ?? string.Empty, period);
     return Results.Ok(result);
 })
 .WithName("GetPortfolioDepletionStats");
