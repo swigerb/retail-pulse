@@ -88,12 +88,30 @@ describe('CompetitiveDashboard', () => {
     vi.clearAllMocks();
   });
 
-  it('renders the competitive dashboard with title and filters', async () => {
+  it('renders the competitive dashboard with a category filter derived from the data', async () => {
     render(wrap(<CompetitiveDashboard />));
     expect(screen.getByTestId('competitive-dashboard')).toBeInTheDocument();
     expect(screen.getByText(/Competitive Intelligence/)).toBeInTheDocument();
     expect(screen.getByTestId('category-filter')).toBeInTheDocument();
-    expect(screen.getByTestId('region-filter')).toBeInTheDocument();
+    // There is deliberately no region filter: pricing, market share and threats
+    // carry no region dimension, so the dropdown could only return an empty grid.
+    expect(screen.queryByTestId('region-filter')).not.toBeInTheDocument();
+  });
+
+  it('offers only categories that exist in the loaded data', async () => {
+    render(wrap(<CompetitiveDashboard />));
+    await waitFor(() => expect(mockFetchPricing).toHaveBeenCalled());
+
+    // The fixtures declare Sauces and Accessories; nothing outside that set should
+    // be offered, which is what the old hardcoded barbecue list got wrong.
+    const filter = screen.getByTestId('category-filter');
+    fireEvent.click(filter.querySelector('button') ?? filter);
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'Sauces' })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('option', { name: 'Accessories' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Rubs & Seasonings' })).not.toBeInTheDocument();
   });
 
   it('loads data on mount and shows overview tab', async () => {

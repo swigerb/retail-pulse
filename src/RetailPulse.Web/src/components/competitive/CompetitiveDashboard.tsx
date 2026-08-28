@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { makeStyles, Tab, TabList, Dropdown, Option, Spinner, tokens } from '@fluentui/react-components';
 import type { CompetitorPricing, MarketShareEntry, CompetitiveThreat, CompetitorOverview } from '../../types';
 import { fetchCompetitorPricing, fetchMarketShare, fetchThreats, fetchCompetitorProfile } from '../../services/competitiveApi';
@@ -7,8 +7,34 @@ import MarketShareChart from './MarketShareChart';
 import ThreatCards from './ThreatCards';
 import CompetitorProfile from './CompetitorProfile';
 
-const CATEGORIES = ['All Categories', 'Grills', 'Sauces', 'Accessories', 'Rubs & Seasonings'];
-const REGIONS = ['All Regions', 'Northeast', 'Southeast', 'Midwest', 'Southwest', 'West'];
+const ALL_CATEGORIES = 'All Categories';
+
+/**
+ * Category options are derived from the data rather than hardcoded.
+ *
+ * They used to be a fixed list left over from a barbecue-themed demo ('Grills',
+ * 'Sauces', 'Rubs & Seasonings'). None of those exist in the active content pack,
+ * so every selection filtered the feed down to nothing and the panel looked broken.
+ * Deriving them guarantees every option returns rows and keeps the filter correct
+ * when the pack changes.
+ *
+ * There is deliberately no region filter: the competitive feed carries no region
+ * dimension on pricing, market share or threats, so the region dropdown this
+ * replaced could only ever return an empty grid.
+ */
+function deriveCategories(
+  pricing: readonly CompetitorPricing[],
+  threats: readonly CompetitiveThreat[],
+): string[] {
+  const categories = new Set<string>();
+  for (const row of pricing) {
+    if (row.category) categories.add(row.category);
+  }
+  for (const t of threats) {
+    if (t.category) categories.add(t.category);
+  }
+  return [ALL_CATEGORIES, ...[...categories].sort((a, b) => a.localeCompare(b))];
+}
 
 type TabKey = 'overview' | 'pricing' | 'market-share' | 'threats';
 
@@ -85,8 +111,7 @@ const useStyles = makeStyles({
 
 export default function CompetitiveDashboard() {
   const styles = useStyles();
-  const [category, setCategory] = useState('All Categories');
-  const [region, setRegion] = useState('All Regions');
+  const [category, setCategory] = useState(ALL_CATEGORIES);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,9 +119,21 @@ export default function CompetitiveDashboard() {
   const [marketShare, setMarketShare] = useState<MarketShareEntry[]>([]);
   const [threats, setThreats] = useState<CompetitiveThreat[]>([]);
   const [selectedCompetitor, setSelectedCompetitor] = useState<CompetitorOverview | null>(null);
+  // Filter options are derived from an UNFILTERED snapshot taken once. Deriving them
+  // from the currently displayed rows would collapse the list to whatever is already
+  // selected, making it impossible to switch back.
+  const [optionSource, setOptionSource] = useState<{
+    pricing: CompetitorPricing[];
+    threats: CompetitiveThreat[];
+  }>({ pricing: [], threats: [] });
 
-  const catParam = category === 'All Categories' ? undefined : category;
-  const regParam = region === 'All Regions' ? undefined : region;
+  const categories = useMemo(
+    () => deriveCategories(optionSource.pricing, optionSource.threats),
+    [optionSource],
+  );
+
+  const catParam = category === ALL_CATEGORIES ? undefined : category;
+  const regParam = undefined;
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -110,6 +147,8 @@ export default function CompetitiveDashboard() {
       setPricing(p);
       setMarketShare(m);
       setThreats(t);
+      // The first unfiltered load doubles as the source for the filter options.
+      if (!catParam && !regParam) setOptionSource({ pricing: p, threats: t });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load competitive data');
     } finally {
@@ -140,19 +179,10 @@ export default function CompetitiveDashboard() {
             data-testid="category-filter"
             value={category}
             selectedOptions={[category]}
-            onOptionSelect={(_, data) => setCategory(data.optionValue ?? 'All Categories')}
+            onOptionSelect={(_, data) => setCategory(data.optionValue ?? ALL_CATEGORIES)}
             size="small"
           >
-            {CATEGORIES.map(c => <Option key={c} value={c}>{c}</Option>)}
-          </Dropdown>
-          <Dropdown
-            data-testid="region-filter"
-            value={region}
-            selectedOptions={[region]}
-            onOptionSelect={(_, data) => setRegion(data.optionValue ?? 'All Regions')}
-            size="small"
-          >
-            {REGIONS.map(r => <Option key={r} value={r}>{r}</Option>)}
+            {categories.map(c => <Option key={c} value={c}>{c}</Option>)}
           </Dropdown>
         </div>
       </div>
