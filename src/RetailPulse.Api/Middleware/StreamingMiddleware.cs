@@ -211,4 +211,34 @@ public static partial class CacheHelpers
         string lower = query.ToLowerInvariant();
         return !_nonDeterministicKeywords.Any(kw => lower.Contains(kw));
     }
+
+    /// <summary>
+    /// Returns true when a produced answer is good enough to serve to somebody else.
+    /// </summary>
+    /// <remarks>
+    /// A cacheable QUESTION is not the same thing as a cacheable ANSWER. Responses were
+    /// stored unconditionally, so a degraded reply was replayed for the full TTL and one
+    /// transient model wobble became a prompt that failed identically for every later
+    /// visitor. Observed live: a curated chart prompt returning "Chart unavailable" on a
+    /// <c>cache.hit</c> span with no tool calls at all.
+    ///
+    /// Two things disqualify an answer:
+    /// <list type="bullet">
+    ///   <item>The pipeline flagged it as an error (a ⏳ or ⚠️ prefixed reply).</item>
+    ///   <item>The reply narrates a chart it did not actually produce. A request that
+    ///     asked for a chart and came back with none is a failure worth retrying, not a
+    ///     result worth keeping.</item>
+    /// </list>
+    /// </remarks>
+    public static bool IsCacheableOutcome(string reply, int chartCount, bool isErrorResponse, bool chartWasRequested)
+    {
+        if (isErrorResponse) return false;
+        if (string.IsNullOrWhiteSpace(reply)) return false;
+
+        // The pipeline's own fail-closed diagnostics. These are legitimate, honest
+        // responses — they just must not be the permanent answer to that prompt.
+        return !reply.Contains("Chart unavailable", StringComparison.OrdinalIgnoreCase)
+            && !reply.Contains("wasn't able to generate a response", StringComparison.OrdinalIgnoreCase)
+            && (!chartWasRequested || chartCount > 0);
+    }
 }
