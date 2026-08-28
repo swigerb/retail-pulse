@@ -4,6 +4,7 @@ import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHead
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { fetchFinancials, fetchScorecardBatched, fetchStores, fetchStockoutRisks } from '../services/operationsApi';
+import { toAlert } from '../services/alertsApi';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
 import { MemoryPanel } from './MemoryPanel';
@@ -212,6 +213,8 @@ export function Dashboard() {
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRequest[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [traces, setTraces] = useState<Trace[]>([]);
+  // Surfaced in the collapsed section title so a fired alert is still noticeable.
+  const activeAlertCount = useMemo(() => alerts.filter(a => a.status === 'active').length, [alerts]);
   const [activeView, setActiveView] = useState<ActiveView>('chat');
   const [selectedBrand, setSelectedBrand] = useState<BrandScore | null>(null);
   const [selectedStore, setSelectedStore] = useState<StorePerformance | null>(null);
@@ -393,12 +396,15 @@ export function Dashboard() {
       });
     });
 
-    // Alert events (Sprint 1.5)
+    // Alert events
     conn.off('alert_fired');
-    conn.on('alert_fired', (alert: Alert) => {
+    conn.on('alert_fired', (raw: unknown) => {
+      // Normalised at the edge: the server sends `detectedAt` and no `status`, while the
+      // panels read `firedAt` and branch on status.
+      const alert = toAlert(raw as Parameters<typeof toAlert>[0]);
       setAlerts(prev => {
         if (prev.some(a => a.id === alert.id)) return prev;
-        const next = [{ ...alert, status: alert.status || 'active' as const }, ...prev];
+        const next = [alert, ...prev];
         return next.length > MAX_ALERTS ? next.slice(0, MAX_ALERTS) : next;
       });
     });
@@ -879,21 +885,18 @@ export function Dashboard() {
             </DrawerHeaderTitle>
           </DrawerHeader>
           <DrawerBody>
-            {alerts.length > 0 && (
-              <div style={{ marginBottom: '16px' }}>
-                <AlertFeed
-                  alerts={alerts}
-                  onDismiss={handleAlertDismiss}
-                  onSnooze={handleAlertSnooze}
-                  onClearAll={handleClearAllAlerts}
-                />
-              </div>
-            )}
-            {alerts.some(a => a.status !== 'active') && (
-              <div style={{ marginBottom: '16px' }}>
-                <AlertHistoryPanel alerts={alerts} />
-              </div>
-            )}
+            {/* Live Spans leads: token counts, span counts, tool calls, duration and cost
+                are what this drawer exists to show. It was previously last, below alerts
+                that were neither collapsible nor execution telemetry. */}
+            <CollapsibleSection title="Live Spans" defaultExpanded>
+              <TelemetryPanel
+                connected={connected}
+                liveSpans={liveSpans}
+                totalDurationMs={totalDurationMs}
+                totalTokenUsage={totalTokenUsage}
+                onClear={handleClearSpans}
+              />
+            </CollapsibleSection>
             <CollapsibleSection title="Agent Routing">
               <AgentRoutingPanel routingHistory={routingHistory} />
             </CollapsibleSection>
@@ -926,15 +929,25 @@ export function Dashboard() {
                 <TraceDashboard traces={traces} />
               </CollapsibleSection>
             )}
-            <CollapsibleSection title="Live Spans" defaultExpanded>
-              <TelemetryPanel
-                connected={connected}
-                liveSpans={liveSpans}
-                totalDurationMs={totalDurationMs}
-                totalTokenUsage={totalTokenUsage}
-                onClear={handleClearSpans}
-              />
-            </CollapsibleSection>
+            {/* Alerts are business anomaly notifications, not agent execution telemetry.
+                They arrive on the same hub, so they belong in this drawer, but they sit
+                below the execution sections and start collapsed — the count in the title
+                is enough to draw attention when something fires. */}
+            {alerts.length > 0 && (
+              <CollapsibleSection title={`Alerts (${activeAlertCount})`}>
+                <AlertFeed
+                  alerts={alerts}
+                  onDismiss={handleAlertDismiss}
+                  onSnooze={handleAlertSnooze}
+                  onClearAll={handleClearAllAlerts}
+                />
+              </CollapsibleSection>
+            )}
+            {alerts.some(a => a.status !== 'active') && (
+              <CollapsibleSection title="Alert History">
+                <AlertHistoryPanel alerts={alerts} />
+              </CollapsibleSection>
+            )}
           </DrawerBody>
         </Drawer>
         )}
