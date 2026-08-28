@@ -255,7 +255,9 @@ export async function fetchScorecard(brands: readonly string[]): Promise<{
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ brands }),
   });
-  if (!res.ok) return { brands: [], durationMs: 0 };
+  // Surface the failure. Returning an empty batch silently left the panel spinning
+  // with no indication that anything had gone wrong.
+  if (!res.ok) throw new Error(`Scorecard request failed: ${res.status}`);
   const wire = (await res.json()) as WireScorecard;
   return { brands: toBrandScores(wire), durationMs: wire.totalDurationMs ?? 0 };
 }
