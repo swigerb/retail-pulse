@@ -42,11 +42,20 @@ string apiBaseUrl = builder.Configuration["services:api:https:0"]
         "Configure 'TeamsBot:ApiBaseUrl' or run under Aspire.");
 
 // HttpClient for calling RetailPulse API via Aspire service discovery or explicit deployment URL
-builder.Services.AddHttpClient("RetailPulseApi", client =>
+IHttpClientBuilder apiClientBuilder = builder.Services.AddHttpClient("RetailPulseApi", client =>
 {
     client.BaseAddress = new Uri(apiBaseUrl);
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
+
+// The API is deny-by-default, so an unauthenticated call returns 401 and the user sees a
+// generic error card. Attach an app-only token whenever the bot is configured to have one.
+// Development keeps the bare client so the local loop still works against a dev-auth API.
+if (!string.IsNullOrEmpty(builder.Configuration["TeamsBot:ApiScope"]))
+{
+    builder.Services.AddTransient<ApiTokenHandler>();
+    apiClientBuilder.AddHttpMessageHandler<ApiTokenHandler>();
+}
 
 // SignalR client for telemetry hub via Aspire service discovery
 builder.Services.AddSingleton(sp =>
