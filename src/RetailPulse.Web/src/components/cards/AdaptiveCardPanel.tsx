@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { makeStyles } from '@fluentui/react-components';
 import * as signalR from '@microsoft/signalr';
 import { CARD_COLORS, CARD_TYPE_CONFIG, CARD_LIFECYCLE_CONFIG } from '../../constants/agentRouting';
-import { fetchActiveCards, submitVote } from '../../services/cardsApi';
+import { fetchActiveCards, submitVote, toCard } from '../../services/cardsApi';
 import { resolveTelemetryHubUrl } from '../../config/telemetryHubUrl';
 import { getHubAccessToken } from '../../auth/tokenService';
 import type { AdaptiveCard, VoteChoice, DrillDownLevel } from '../../types';
@@ -206,7 +206,10 @@ export default function AdaptiveCardPanel() {
   useEffect(() => {
     let connection: signalR.HubConnection | null = null;
 
-    const applyUpdate = (updatedCard: AdaptiveCard) => {
+    const applyUpdate = (raw: unknown) => {
+      // Hub payloads are the same wire shape as the REST response, so they need the
+      // same normalisation — integer enums and 'lifecycle' rather than 'state'.
+      const updatedCard = toCard(raw as Parameters<typeof toCard>[0]);
       setCards((prev) =>
         prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)),
       );
@@ -225,7 +228,8 @@ export default function AdaptiveCardPanel() {
         .withAutomaticReconnect()
         .build();
 
-      connection.on('card:created', (newCard: AdaptiveCard) => {
+      connection.on('card:created', (raw: unknown) => {
+        const newCard = toCard(raw as Parameters<typeof toCard>[0]);
         // The server has always broadcast card:created, but the panel only listened
         // for updates — and both update handlers work by mapping over the existing
         // list, so a brand new card could never appear. Convening a council published
