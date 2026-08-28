@@ -67,10 +67,16 @@ export function toAlert(wire: WireAlert): Alert {
  * by which endpoint answers — so the status is set from the source here.
  */
 async function getAlerts(path: string, status: Alert['status']): Promise<Alert[]> {
-  const res = await fetch(resolveApiUrl(path));
-  if (!res.ok) return [];
-  const wire = (await res.json()) as WireAlert[];
-  return wire.map(w => ({ ...toAlert(w), status }));
+  try {
+    const res = await fetch(resolveApiUrl(path));
+    if (!res.ok) return [];
+    const wire = (await res.json()) as WireAlert[];
+    return wire.map(w => ({ ...toAlert(w), status }));
+  } catch {
+    // Seeding is best-effort. A failed snapshot must not break the drawer or suppress
+    // the live hub events, which are the primary source.
+    return [];
+  }
 }
 
 export async function fetchAlerts(historyLimit = 50): Promise<Alert[]> {
@@ -78,7 +84,6 @@ export async function fetchAlerts(historyLimit = 50): Promise<Alert[]> {
     getAlerts('/api/alerts/active', 'active'),
     getAlerts(`/api/alerts/history?limit=${historyLimit}`, 'dismissed'),
   ]);
-
   // An alert can appear in both responses; the active reading wins so a live alert is
   // never demoted into history by the order the two requests happen to resolve in.
   const byId = new Map<string, Alert>();
