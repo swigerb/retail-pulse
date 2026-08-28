@@ -54,8 +54,25 @@ param mcpApiKey string = '${uniqueString(resourceGroup().id, 'mcp-api-key')}${un
 @description('Azure AI Content Safety endpoint. Empty disables the optional second guardrail layer, leaving the regex-only baseline in place.')
 param contentSafetyEndpoint string = ''
 
+@description('Entra application (client) ID of the Azure Bot Service registration. Empty leaves the Teams bot unconfigured, which is the correct state for an environment that has not registered a bot.')
+param botAppId string = ''
+
+@description('Client secret for the bot app registration. Supplied per-environment; never checked in.')
+@secure()
+param botAppSecret string = ''
+
+@description('Tenant that owns the bot app registration. Defaults to the deploying tenant.')
+param botTenantId string = tenant().tenantId
+
 var apimSubscriptionKeySecretName = 'apim-sub-key'
 var mcpApiKeySecretName = 'mcp-api-key'
+var botAppSecretName = 'bot-app-secret'
+
+// The Teams bot is only wired up when a bot registration exists. Without an app id
+// the Microsoft 365 Agents SDK has no identity to authenticate outbound calls with
+// and no audience to validate inbound Activities against, so emitting half the
+// configuration would leave the bot failing in a way that looks like a code fault.
+var botConfigured = !empty(botAppId)
 
 // The `registries` block binds a container app's image-pull auth to its own
 // system-assigned identity, with no admin credentials. It is only emitted when
@@ -376,6 +393,12 @@ resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
     configuration: {
       activeRevisionsMode: 'Single'
       registries: teamsBotUsesPrivateRegistry ? privateRegistryBlock : []
+      secrets: botConfigured ? [
+        {
+          name: botAppSecretName
+          value: botAppSecret
+        }
+      ] : []
       ingress: {
         external: true
         targetPort: 8080
@@ -397,7 +420,7 @@ resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
           // against the Bot Framework channel. Running this app as Development is
           // what previously disabled inbound channel authentication on a publicly
           // exposed endpoint.
-          env: [
+          env: concat([
             {
               name: 'ASPNETCORE_ENVIRONMENT'
               value: 'Production'
@@ -406,11 +429,51 @@ resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'TeamsBot__ApiBaseUrl'
               value: 'https://${api.properties.configuration.ingress.fqdn}'
             }
-          ]
+          ], botConfigured ? [
+            // Outbound: MSAL client-credentials against the Bot Framework, so the bot
+            // can post Activities back to the channel.
+            {
+              name: 'Connections__BotServiceConnection__Settings__AuthType'
+              value: 'ClientSecret'
+            }
+            {
+              name: 'Connections__BotServiceConnection__Settings__AuthorityEndpoint'
+              value: '${environment().authentication.loginEndpoint}${botTenantId}'
+            }
+            {
+              name: 'Connections__BotServiceConnection__Settings__TenantId'
+              value: botTenantId
+            }
+            {
+              name: 'Connections__BotServiceConnection__Settings__ClientId'
+              value: botAppId
+            }
+            {
+              name: 'Connections__BotServiceConnection__Settings__ClientSecret'
+              secretRef: botAppSecretName
+            }
+            {
+              name: 'Connections__BotServiceConnection__Settings__Scopes__0'
+              value: 'https://api.botframework.com/.default'
+            }
+            // Inbound: the audience an incoming Activity's token must carry. Without
+            // it there is nothing to validate a channel request against.
+            {
+              name: 'TokenValidation__Audiences__0'
+              value: botAppId
+            }
+            {
+              name: 'TokenValidation__TenantId'
+              value: botTenantId
+            }
+          ] : [])
         }
       ]
       scale: {
-        minReplicas: 0
+        // The Bot Framework retries a cold-start timeout, but a scale-to-zero bot
+        // drops the first message of a conversation often enough to look broken in a
+        // demo. One warm replica is the honest cost of a responsive bot.
+        minReplicas: botConfigured ? 1 : 0
         maxReplicas: 1
       }
     }

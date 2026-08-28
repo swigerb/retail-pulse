@@ -26,12 +26,19 @@ param apiImageName = readEnvironmentVariable('SERVICE_API_IMAGE_NAME', 'mcr.micr
 param mcpServerImageName = readEnvironmentVariable('SERVICE_MCPSERVER_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
 param teamsBotImageName = readEnvironmentVariable('SERVICE_TEAMSBOT_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
 
-// Optional Azure AI Content Safety second layer (issue #100). Disabled by
+// Optional Azure AI Content Safety second layer. Disabled by
 // default so `azd up` keeps working unchanged. Enable per environment with
 // `azd env set AZURE_CONTENT_SAFETY_ENABLED true`.
 param contentSafetyEnabled = toLower(readEnvironmentVariable('AZURE_CONTENT_SAFETY_ENABLED', 'false')) == 'true'
 
-// Optional Azure AI Search knowledge provider (issue #103). Disabled by
+// Optional Azure AI Search knowledge provider. Disabled by
 // default so `azd up` keeps working unchanged (no Search resource, no cost).
 // Enable per environment with `azd env set AZURE_AI_SEARCH_ENABLED true`.
 param aiSearchEnabled = toLower(readEnvironmentVariable('AZURE_AI_SEARCH_ENABLED', 'false')) == 'true'
+
+// Azure Bot Service registration backing the Teams bot. Empty by default so a
+// clean zd up does not claim to have a bot it never registered. Set both with:
+//   azd env set AZURE_BOT_APP_ID <appId>
+//   azd env set AZURE_BOT_APP_SECRET <secret>
+param botAppId = readEnvironmentVariable('AZURE_BOT_APP_ID', '')
+param botAppSecret = readEnvironmentVariable('AZURE_BOT_APP_SECRET', '')
