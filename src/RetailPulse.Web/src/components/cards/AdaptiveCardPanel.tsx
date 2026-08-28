@@ -225,6 +225,15 @@ export default function AdaptiveCardPanel() {
         .withAutomaticReconnect()
         .build();
 
+      connection.on('card:created', (newCard: AdaptiveCard) => {
+        // The server has always broadcast card:created, but the panel only listened
+        // for updates — and both update handlers work by mapping over the existing
+        // list, so a brand new card could never appear. Convening a council published
+        // a card that stayed invisible until a full page reload.
+        setCards((prev) =>
+          prev.some((c) => c.id === newCard.id) ? prev : [newCard, ...prev],
+        );
+      });
       connection.on('card:action', applyUpdate);
       connection.on('card:lifecycle', applyUpdate);
 
