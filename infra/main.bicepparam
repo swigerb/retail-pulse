@@ -42,3 +42,7 @@ param aiSearchEnabled = toLower(readEnvironmentVariable('AZURE_AI_SEARCH_ENABLED
 //   azd env set AZURE_BOT_APP_SECRET <secret>
 param botAppId = readEnvironmentVariable('AZURE_BOT_APP_ID', '')
 param botAppSecret = readEnvironmentVariable('AZURE_BOT_APP_SECRET', '')
+
+// Keep the API and MCP server warm. Defaults true so the demo never greets a
+// visitor with a cold start. Set false to save money on a non-demo environment.
+param alwaysWarm = toLower(readEnvironmentVariable('AZURE_ALWAYS_WARM', 'true')) == 'true'
