@@ -191,6 +191,25 @@ export function DemoMode({
       timer = window.setTimeout(resolve, ms);
     });
 
+    /**
+     * Waits for a control to appear before acting on it.
+     *
+     * Switching view only schedules a React render, so querying the DOM on the very next
+     * line finds nothing: the panel has not mounted yet. Every interaction was therefore
+     * skipped silently, which is why the council never convened even though the click
+     * itself worked perfectly when tested against a mounted panel.
+     */
+    const waitFor = async (selector: string, timeoutMs = 12_000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const found = document.querySelector<HTMLElement>(selector);
+        if (found) return found;
+        if (!live()) return null;
+        await pause(200);
+      }
+      return null;
+    };
+
     const runInteraction = async (step: DemoInteraction) => {
       if (step.note) setWorking(step.note);
 
@@ -199,11 +218,10 @@ export function DemoMode({
         return;
       }
 
-      const target = document.querySelector<HTMLElement>(step.selector);
-      // A missing control is skipped rather than thrown: a panel that has not finished
-      // loading must not take the whole run down in front of an audience.
+      const target = await waitFor(step.selector);
+      // A control that never appears is skipped rather than thrown: a panel that failed to
+      // load must not take the whole run down in front of an audience.
       if (!target) return;
-
       if (step.kind === 'click') {
         // A bare element.click() dispatches only a click event. React components that key
         // off pointer or mouse events, as Fluent buttons do, can ignore it entirely, which
