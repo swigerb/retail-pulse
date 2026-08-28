@@ -35,6 +35,19 @@ const FLYOUT_GAP = 16;
 const FLYOUT_WIDTH = 380;
 /** Enough for the tallest body copy in the script; the card scrolls beyond this. */
 const FLYOUT_MAX_HEIGHT = 340;
+/**
+ * How long to keep re-measuring the target after a step change. The telemetry drawer
+ * animates in over roughly 250ms, so a single post-paint measurement catches it partway
+ * through its slide and positions the flyout against a box that no longer exists.
+ */
+const SETTLE_MS = 700;
+const SETTLE_TICK_MS = 80;
+
+/** Rect equality, so the settle loop only re-renders when the target actually moved. */
+function sameRect(a: Rect | null, b: Rect | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
+}
 
 const useStyles = makeStyles({
   overlay: {
@@ -177,6 +190,22 @@ function positionCard(rect: Rect | null, placement: DemoStep['placement']): { to
   };
 }
 
+/**
+ * True when the flyout would sit on top of the element it is describing.
+ *
+ * Clamping a card back inside the viewport can push it over its own spotlight — which is
+ * exactly what happened against the telemetry drawer, whose 560px panel is flush with the
+ * right edge. When that happens the caller falls back to centring, which is never wrong.
+ */
+function overlaps(card: { top: number; left: number }, rect: Rect | null): boolean {
+  if (!rect) return false;
+
+  return card.left < rect.left + rect.width
+    && card.left + FLYOUT_WIDTH > rect.left
+    && card.top < rect.top + rect.height
+    && card.top + FLYOUT_MAX_HEIGHT > rect.top;
+}
+
 export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourProps) {
   const styles = useStyles();
   const [index, setIndex] = useState(0);
@@ -201,24 +230,33 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
   }, [open, step, onNavigate, onTelemetry]);
 
   // Measure after the view switch has painted. A layout effect alone is too early: the
-  // panel being pointed at may not exist yet on the frame the step changes.
+  // panel being pointed at may not exist yet on the frame the step changes, and the
+  // telemetry drawer slides in over roughly 250ms — measuring it mid-animation captures
+  // its off-screen starting position and parks the flyout on top of it.
   useLayoutEffect(() => {
     if (!open || !step) return;
 
-    let frame = 0;
     let cancelled = false;
+    let frame = 0;
+    let settle = 0;
 
     const remeasure = () => {
       if (cancelled) return;
-      setRect(measure(step.target));
+      const next = measure(step.target);
+      // Only re-render when the box actually moved, so the settle loop does not thrash.
+      setRect(prev => (sameRect(prev, next) ? prev : next));
     };
 
     remeasure();
-    // Re-measure on the next couple of frames to catch the post-navigation layout.
-    frame = window.requestAnimationFrame(() => {
+    frame = window.requestAnimationFrame(remeasure);
+
+    // Keep re-measuring briefly so the final position reflects the settled layout
+    // rather than whatever was on screen the instant the step changed.
+    const started = Date.now();
+    settle = window.setInterval(() => {
       remeasure();
-      frame = window.requestAnimationFrame(remeasure);
-    });
+      if (Date.now() - started >= SETTLE_MS) window.clearInterval(settle);
+    }, SETTLE_TICK_MS);
 
     window.addEventListener('resize', remeasure);
     window.addEventListener('scroll', remeasure, true);
@@ -226,6 +264,7 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(frame);
+      window.clearInterval(settle);
       window.removeEventListener('resize', remeasure);
       window.removeEventListener('scroll', remeasure, true);
     };
@@ -260,10 +299,13 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
     if (open) cardRef.current?.focus();
   }, [open, index]);
 
-  const position = useMemo(
-    () => (open ? positionCard(rect, step?.placement) : { top: 0, left: 0 }),
-    [open, rect, step?.placement],
-  );
+  const position = useMemo(() => {
+    if (!open) return { top: 0, left: 0 };
+
+    const placed = positionCard(rect, step?.placement);
+    // Never cover the thing being pointed at; centring is the safe fallback.
+    return overlaps(placed, rect) ? positionCard(null, 'center') : placed;
+  }, [open, rect, step?.placement]);
 
   if (!open || !step) return null;
 

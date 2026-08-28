@@ -162,6 +162,35 @@ describe('DemoTour', () => {
     expect(screen.queryByTestId('demo-tour-spotlight')).not.toBeInTheDocument();
     expect(screen.getByTestId('demo-tour-card')).toBeInTheDocument();
   });
+
+  it('never parks the flyout on top of the element it is describing', () => {
+    // The telemetry drawer is a 560px panel flush with the right edge. Clamping a
+    // right-placed card back inside the viewport pushed it directly over its own
+    // spotlight, so the narration was invisible behind the thing it pointed at.
+    const drawer = document.createElement('div');
+    drawer.id = 'telemetry-drawer';
+    document.body.appendChild(drawer);
+
+    const rect = { top: 0, left: 1992, width: 560, height: 1261, right: 2552, bottom: 1261, x: 1992, y: 0 };
+    vi.spyOn(drawer, 'getBoundingClientRect').mockReturnValue({ ...rect, toJSON: () => ({}) } as DOMRect);
+
+    try {
+      renderTour();
+      // Advance to the first step that spotlights the drawer.
+      const drawerStep = DEMO_STEPS.findIndex(s => s.telemetry);
+      for (let i = 0; i < drawerStep; i++) {
+        fireEvent.click(screen.getByTestId('demo-tour-next'));
+      }
+
+      const card = screen.getByTestId('demo-tour-card');
+      const left = Number.parseFloat(card.style.left);
+
+      // Either clear of the drawer, or centred — never sitting on top of it.
+      expect(left + 380).toBeLessThanOrEqual(rect.left + 1);
+    } finally {
+      drawer.remove();
+    }
+  });
 });
 
 describe('demo script', () => {
