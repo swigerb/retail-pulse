@@ -28,6 +28,13 @@ public class ScorecardOrchestrator
     // reporting that every brand was mediocre.
     private static readonly TimeSpan _agentTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Caps how many specialist assessments run at once across the whole scorecard.
+    /// Six brands times five dimensions is thirty simultaneous model calls, which
+    /// throttle each other into timeouts; six at a time completes reliably.
+    /// </summary>
+    private static readonly SemaphoreSlim _assessmentSlots = new(6, 6);
+
     /// <summary>Default dimensions — kept as a fallback so tests and legacy composition
     /// roots that don't supply a configuration list continue to work.</summary>
     internal static readonly IReadOnlyList<ScorecardDimensionConfig> DefaultScoringDimensions =
@@ -127,14 +134,27 @@ public class ScorecardOrchestrator
 
             try
             {
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(_agentTimeout);
+                // Wait for a slot BEFORE starting the clock. A portfolio of six brands
+                // fans out thirty concurrent model calls, which throttled each other
+                // badly enough that most assessments burned their whole budget queueing
+                // and returned a neutral 5.0. Bounding the fan-out — and only timing the
+                // call once it can actually run — is what makes the scores real.
+                await _assessmentSlots.WaitAsync(ct);
+                try
+                {
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    cts.CancelAfter(_agentTimeout);
 
-                string prompt = BuildDimensionPrompt(brand, region, dim.Dimension);
-                var request = new ChatRequest(prompt, $"scorecard-{Guid.NewGuid():N}");
-                ChatResponse response = await agent.HandleAsync(request, cts.Token);
+                    string prompt = BuildDimensionPrompt(brand, region, dim.Dimension);
+                    var request = new ChatRequest(prompt, $"scorecard-{Guid.NewGuid():N}");
+                    ChatResponse response = await agent.HandleAsync(request, cts.Token);
 
-                return ParseDimensionScore(dim.Dimension, dim.Weight, dim.AgentKey, response.Reply);
+                    return ParseDimensionScore(dim.Dimension, dim.Weight, dim.AgentKey, response.Reply);
+                }
+                finally
+                {
+                    _assessmentSlots.Release();
+                }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
