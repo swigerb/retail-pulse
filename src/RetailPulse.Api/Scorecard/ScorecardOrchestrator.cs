@@ -103,7 +103,7 @@ public class ScorecardOrchestrator
     /// Generate a scorecard for the specified brands. Fans out assessments in parallel.
     /// </summary>
     public async Task<PortfolioScorecard> GenerateAsync(
-        string[] brands, string? region = null, CancellationToken ct = default)
+        string[] brands, string? region = null, bool includeSummary = true, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         _logger.LogInformation("Generating scorecard for {Count} brands", brands.Length);
@@ -115,8 +115,11 @@ public class ScorecardOrchestrator
         // Sort by overall score descending
         BrandScore[] sorted = [.. brandScores.OrderByDescending(b => b.OverallScore)];
 
-        // Generate executive summary
-        string execSummary = await GenerateExecSummaryAsync(sorted, region, ct);
+        // The summary is an extra model call. Callers that render per-brand cards and
+        // discard it should not pay for it on every request.
+        string execSummary = includeSummary
+            ? await GenerateExecSummaryAsync(sorted, region, ct)
+            : string.Empty;
 
         string[] topActions = [.. sorted
             .SelectMany(b => b.ActionItems)
