@@ -8,6 +8,7 @@ using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Planning;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Auth;
+using RetailPulse.Api.Cards;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Consensus;
 using RetailPulse.Api.Guardrails;
@@ -1204,7 +1205,7 @@ public static class ChatEndpoints
         .RequireRateLimiting("relaxed");
 
         // ── Council endpoints ────────────────────────────────────────────────
-        app.MapPost("/api/council/convene", async (CouncilConveneRequest body, ILogger<Program> logger, CancellationToken ct, IConsensusCouncil? council = null, [FromServices] CouncilHistoryStore? history = null) =>
+        app.MapPost("/api/council/convene", async (CouncilConveneRequest body, ILogger<Program> logger, CancellationToken ct, IConsensusCouncil? council = null, [FromServices] CouncilHistoryStore? history = null, [FromServices] IAdaptiveCardState? cardState = null) =>
         {
             if (string.IsNullOrWhiteSpace(body.Brand))
                 return Results.BadRequest(new { error = "Field 'brand' is required." });
@@ -1221,6 +1222,24 @@ public static class ChatEndpoints
             CouncilVerdict verdict = await council.ConveneAsync(body.Brand, body.Region, ct);
             // Optional so hosts that map these routes without the store still start.
             history?.Record(verdict);
+
+            // Publish the verdict as a collaborative voting card. The demo walkthrough has
+            // always described this step ("a Collaborative Adaptive Card is auto-created
+            // with the council's verdict") and CreateFromVerdictAsync was written for it,
+            // but nothing ever called it — which is why the Cards panel was always empty.
+            if (cardState is InMemoryAdaptiveCardState cards)
+            {
+                try
+                {
+                    await cards.CreateFromVerdictAsync(verdict, ct);
+                }
+                catch (Exception ex)
+                {
+                    // A card is a side effect of the verdict, never a precondition for
+                    // returning it.
+                    logger.LogWarning(ex, "Failed to publish a card for the {Brand} council verdict", body.Brand);
+                }
+            }
 
             return Results.Ok(new
             {
