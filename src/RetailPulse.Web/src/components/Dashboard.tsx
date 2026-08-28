@@ -263,12 +263,19 @@ export function Dashboard() {
   const [brands, setBrands] = useState<BrandScore[]>([]);
   const [brandsDurationMs, setBrandsDurationMs] = useState(0);
   const [brandsLoading, setBrandsLoading] = useState(false);
+  const [brandsError, setBrandsError] = useState<string | null>(null);
 
   // The scorecard fans out real agent assessments per brand, so it is genuinely slow.
   // Load it on demand and show progress rather than blocking behind an empty grid.
+  // Guarded with a ref, not state: putting the loading flag in the dependency array
+  // made the effect re-run the moment it set the flag, whose cleanup then cancelled
+  // the fetch it had just started. Batches came back 200 and were thrown away, and
+  // the panel span forever.
+  const scorecardRequested = useRef(false);
+
   useEffect(() => {
-    if (activeView !== 'portfolio' || brands.length > 0 || brandsLoading) return;
-    let cancelled = false;
+    if (activeView !== 'portfolio' || scorecardRequested.current) return;
+    scorecardRequested.current = true;
     setBrandsLoading(true);
     void (async () => {
       const packBrands = activePack.pack?.tenant.brands?.map(b => b.name) ?? [];
@@ -276,15 +283,15 @@ export function Dashboard() {
       // brands) would be 55 agent calls. Cap the panel at a portfolio-sized slice.
       const target = (packBrands.length > 0 ? packBrands : ['Apex Grill', 'Summit Vodka', 'FreshMart']).slice(0, 6);
       await fetchScorecardBatched(target, (scored, elapsedMs) => {
-        if (cancelled) return;
         // Render each batch as it lands rather than waiting for the whole portfolio.
         setBrands(scored);
         setBrandsDurationMs(elapsedMs);
+      }).catch((e: unknown) => {
+        setBrandsError(e instanceof Error ? e.message : 'Portfolio assessment failed.');
       });
-      if (!cancelled) setBrandsLoading(false);
+      setBrandsLoading(false);
     })();
-    return () => { cancelled = true; };
-  }, [activeView, activePack.pack, brands.length, brandsLoading]);
+  }, [activeView, activePack.pack]);
 
   // Load operational data lazily, when its panel is first opened, so the chat path
   // does not pay for reads it will not render.
@@ -799,6 +806,8 @@ export function Dashboard() {
                   <Button appearance="subtle" onClick={() => setSelectedBrand(null)} style={{ marginBottom: '16px' }}>← Back to all brands</Button>
                   <BrandScoreCard brand={selectedBrand} onWhyClick={handleWhyClick} />
                 </div>
+              ) : brandsError && brands.length === 0 ? (
+                <div style={{ padding: '32px', color: 'var(--color-danger, #ef4444)' }}>{brandsError}</div>
               ) : brandsLoading && brands.length === 0 ? (
                 /* Each brand fans out five specialist assessments, so this genuinely
                    takes a while. Say so, rather than showing an empty grid that reads
