@@ -699,6 +699,35 @@ public class RetailPulseDb
 
     // ── Query Methods (public API — matches SimulatedMetricsData surface) ─
 
+    /// <summary>
+    /// True when a region argument means "the whole portfolio" rather than one region.
+    /// </summary>
+    /// <remarks>
+    /// Region is matched with SQL <c>LIKE</c>, so an unrecognised portfolio-wide phrasing
+    /// does not fail loudly — it simply matches no row and returns "No data found" for
+    /// every brand. The curated ranking prompt ("rank all brands by depletion growth
+    /// rate") drove the model to pass "all regions", which only the exact strings "all",
+    /// "aggregate" and "portfolio" were normalised for. Every brand came back an error,
+    /// the ranking chart could not be built, and the coverage guard correctly reported all
+    /// twelve brands missing — a data-shape problem presenting as a chart failure.
+    ///
+    /// "across all regions" is the phrasing used throughout the shipped prompt library,
+    /// so these variants are the expected input, not an edge case.
+    /// </remarks>
+    internal static bool IsPortfolioWideRegion(string? region)
+    {
+        if (string.IsNullOrWhiteSpace(region)) return true;
+
+        string normalized = region.Trim().TrimEnd('.').ToLowerInvariant();
+        normalized = normalized.StartsWith("across ", StringComparison.Ordinal)
+            ? normalized["across ".Length..].Trim()
+            : normalized;
+
+        return normalized is "national" or "all" or "aggregate" or "portfolio"
+            or "all regions" or "the portfolio" or "nationwide" or "overall"
+            or "total" or "everywhere";
+    }
+
     public object GetDepletionStats(string brand, string region, string period)
     {
         if (string.IsNullOrWhiteSpace(brand))
@@ -706,8 +735,7 @@ public class RetailPulseDb
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
 
-        if (region.Trim().Equals("National", StringComparison.OrdinalIgnoreCase) ||
-            region.Trim().Equals("All", StringComparison.OrdinalIgnoreCase))
+        if (IsPortfolioWideRegion(region))
         {
             return GetNationalDepletionStats(brand.Trim(), period);
         }
@@ -761,13 +789,9 @@ public class RetailPulseDb
         // missing/blank/"all"/"aggregate" region as the National aggregate. This is what
         // the horizontal-bar "rank all brands by depletion growth rate" prompt drives
         // through the tool: one call, per-brand YoY answered from complete seeded data.
-        string normalizedRegion = string.IsNullOrWhiteSpace(region) ? "National" : region.Trim();
-        if (normalizedRegion.Equals("all", StringComparison.OrdinalIgnoreCase)
-            || normalizedRegion.Equals("aggregate", StringComparison.OrdinalIgnoreCase)
-            || normalizedRegion.Equals("portfolio", StringComparison.OrdinalIgnoreCase))
-        {
-            normalizedRegion = "National";
-        }
+        // Share one definition of "the whole portfolio" with GetDepletionStats, so a
+        // phrasing accepted here cannot be rejected one call deeper.
+        string normalizedRegion = IsPortfolioWideRegion(region) ? "National" : region.Trim();
 
         string normalizedPeriod = string.IsNullOrWhiteSpace(period) ? "YTD" : period.Trim();
 
