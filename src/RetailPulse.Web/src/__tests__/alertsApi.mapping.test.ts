@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { toAlert } from '../services/alertsApi';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { toAlert, fetchAlerts } from '../services/alertsApi';
 
 /**
  * Every Alert History row rendered the literal text "Invalid Date".
@@ -88,5 +88,70 @@ describe('alert wire mapping', () => {
     expect(alert.status).toBe('active');
     expect(alert.severity).toBe('medium');
     expect(Number.isNaN(Date.parse(alert.firedAt))).toBe(false);
+  });
+});
+
+describe('alert seeding from the server', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('returns an empty list rather than rejecting when the request fails', async () => {
+    // Seeding is best-effort: a failed snapshot must not break the drawer or suppress
+    // the live hub events, which are the primary source. An unhandled rejection here
+    // took the whole panel down.
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to parse URL'));
+
+    await expect(fetchAlerts()).resolves.toEqual([]);
+  });
+
+  it('returns an empty list on a non-OK response', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 } as Response);
+
+    await expect(fetchAlerts()).resolves.toEqual([]);
+  });
+
+  it('marks active and historical alerts from the endpoint that answered', async () => {
+    // The server's Alert record has no status field at all.
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(
+        String(url).includes('/active')
+          ? [{ id: 'live', title: 'Live', detectedAt: '2026-08-27T10:00:00.000Z' }]
+          : [{ id: 'old', title: 'Old', detectedAt: '2026-08-01T10:00:00.000Z' }],
+      ),
+    } as Response));
+
+    const alerts = await fetchAlerts();
+    expect(alerts.find(a => a.id === 'live')?.status).toBe('active');
+    expect(alerts.find(a => a.id === 'old')?.status).toBe('dismissed');
+  });
+
+  it('keeps the active reading when an alert appears in both responses', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve([{ id: 'dup', title: 'Dup', detectedAt: '2026-08-27T10:00:00.000Z' }]),
+    } as Response));
+
+    const alerts = await fetchAlerts();
+    expect(alerts).toHaveLength(1);
+    // Otherwise request ordering could demote a live alert into history.
+    expect(alerts[0].status).toBe('active');
+  });
+
+  it('returns newest first', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(
+        String(url).includes('/active')
+          ? [{ id: 'newer', detectedAt: '2026-08-27T10:00:00.000Z' }]
+          : [{ id: 'older', detectedAt: '2026-08-01T10:00:00.000Z' }],
+      ),
+    } as Response));
+
+    expect((await fetchAlerts()).map(a => a.id)).toEqual(['newer', 'older']);
   });
 });
