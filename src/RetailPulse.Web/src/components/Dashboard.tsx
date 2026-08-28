@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton, Spinner } from '@fluentui/react-components';
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
-import { fetchFinancials, fetchScorecard, fetchStores, fetchStockoutRisks } from '../services/operationsApi';
+import { fetchFinancials, fetchScorecardBatched, fetchStores, fetchStockoutRisks } from '../services/operationsApi';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
 import { MemoryPanel } from './MemoryPanel';
@@ -273,14 +273,15 @@ export function Dashboard() {
     void (async () => {
       const packBrands = activePack.pack?.tenant.brands?.map(b => b.name) ?? [];
       // Each brand fans out five specialist assessments, so the whole pack (11+
-      // brands) would be 55 agent calls and minutes of latency. Cap the panel at a
-      // portfolio-sized slice that still returns in a demo-reasonable time.
+      // brands) would be 55 agent calls. Cap the panel at a portfolio-sized slice.
       const target = (packBrands.length > 0 ? packBrands : ['Apex Grill', 'Summit Vodka', 'FreshMart']).slice(0, 6);
-      const result = await fetchScorecard(target);
-      if (cancelled) return;
-      setBrands(result.brands);
-      setBrandsDurationMs(result.durationMs);
-      setBrandsLoading(false);
+      await fetchScorecardBatched(target, (scored, elapsedMs) => {
+        if (cancelled) return;
+        // Render each batch as it lands rather than waiting for the whole portfolio.
+        setBrands(scored);
+        setBrandsDurationMs(elapsedMs);
+      });
+      if (!cancelled) setBrandsLoading(false);
     })();
     return () => { cancelled = true; };
   }, [activeView, activePack.pack, brands.length, brandsLoading]);
@@ -798,7 +799,7 @@ export function Dashboard() {
                   <Button appearance="subtle" onClick={() => setSelectedBrand(null)} style={{ marginBottom: '16px' }}>← Back to all brands</Button>
                   <BrandScoreCard brand={selectedBrand} onWhyClick={handleWhyClick} />
                 </div>
-              ) : brandsLoading ? (
+              ) : brandsLoading && brands.length === 0 ? (
                 /* Each brand fans out five specialist assessments, so this genuinely
                    takes a while. Say so, rather than showing an empty grid that reads
                    as a broken panel. */
@@ -807,15 +808,23 @@ export function Dashboard() {
                   <span>Assessing the portfolio — each brand is scored across five specialist dimensions.</span>
                 </div>
               ) : (
-                <PortfolioScorecard
-                  brands={brands}
-                  generationTimeMs={brandsDurationMs}
-                  onBrandClick={(name) => {
-                    const brand = brands.find(b => b.brandName === name);
-                    if (brand) setSelectedBrand(brand);
-                  }}
-                  onWhyClick={handleWhyClick}
-                />
+                <>
+                  {brandsLoading && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', color: 'var(--color-text-secondary)', fontSize: '13px' }}>
+                      <Spinner size="tiny" />
+                      <span>Scoring the rest of the portfolio…</span>
+                    </div>
+                  )}
+                  <PortfolioScorecard
+                    brands={brands}
+                    generationTimeMs={brandsDurationMs}
+                    onBrandClick={(name) => {
+                      const brand = brands.find(b => b.brandName === name);
+                      if (brand) setSelectedBrand(brand);
+                    }}
+                    onWhyClick={handleWhyClick}
+                  />
+                </>
               )}
               <ExplanationPanel explanation={explanationData} open={explanationOpen} onClose={() => setExplanationOpen(false)} />
             </div>
