@@ -77,8 +77,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
             return ContentSafetyResult.Passed;
         }
 
-        ContentSafetyConfig config = _guardrails.ContentSafety;
-        using Activity? activity = AgentTelemetry.Source.StartActivity(
+        ContentSafetyConfig config = _guardrails.ContentSafety; using Activity? activity = AgentTelemetry.Source.StartActivity(
             SpanName(stage),
             ActivityKind.Client);
         activity?.SetTag("guardrails.contentsafety.stage", stage.ToString());
@@ -102,17 +101,39 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
                 correlation = shield.CorrelationId;
             }
 
-            AnalyzeTextResult analysis = await _client.AnalyzeTextAsync(
-                new AnalyzeTextOptions(text),
-                cts.Token).ConfigureAwait(false);
+            // Azure Content Safety rejects any single AnalyzeText request over 10,000
+            // characters with a 400. Sending the whole text meant the largest tool
+            // results — a twelve-brand portfolio payload is ~14,000 characters — threw,
+            // the tool invocation failed, and the caller silently lost every brand. The
+            // curated portfolio-ranking prompt could therefore never draw its chart, and
+            // the failure looked like a charting bug rather than a guardrail one.
+            //
+            // Scanning a truncated prefix would have been a hole in the guardrail, so the
+            // text is segmented and every segment is analysed. Severity is the maximum
+            // across segments: any segment tripping a category trips the whole text.
+            Dictionary<string, int> maxByCategory = new(StringComparer.OrdinalIgnoreCase);
 
-            foreach (TextCategoriesAnalysis categoryAnalysis in analysis.CategoriesAnalysis)
+            foreach (string segment in SegmentForAnalysis(text))
             {
-                int severity = categoryAnalysis.Severity ?? 0;
-                if (severity > 0)
+                AnalyzeTextResult analysis = await _client.AnalyzeTextAsync(
+                    new AnalyzeTextOptions(segment),
+                    cts.Token).ConfigureAwait(false);
+
+                foreach (TextCategoriesAnalysis categoryAnalysis in analysis.CategoriesAnalysis)
                 {
-                    hits.Add(new ContentSafetyCategoryHit(categoryAnalysis.Category.ToString(), severity));
+                    int severity = categoryAnalysis.Severity ?? 0;
+                    if (severity <= 0) continue;
+
+                    string category = categoryAnalysis.Category.ToString();
+                    maxByCategory[category] = maxByCategory.TryGetValue(category, out int existing)
+                        ? Math.Max(existing, severity)
+                        : severity;
                 }
+            }
+
+            foreach ((string category, int severity) in maxByCategory)
+            {
+                hits.Add(new ContentSafetyCategoryHit(category, severity));
             }
 
             ContentSafetyResult result = Decide(config, hits, jailbreak, indirect, startTicks, correlation);
@@ -281,6 +302,51 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
     private static ContentSafetyResult WithLatency(ContentSafetyResult template, long startTicks) =>
         template with { Latency = Stopwatch.GetElapsedTime(startTicks) };
+
+    /// <summary>
+    /// Splits text into segments the Content Safety AnalyzeText API will accept.
+    /// </summary>
+    /// <remarks>
+    /// The service rejects any single request over 10,000 characters with a 400, and the
+    /// exception propagated out of the tool-invocation path — so an oversized tool result
+    /// did not merely skip scanning, it destroyed the result. A twelve-brand portfolio
+    /// payload (~14,000 characters) failed every time.
+    ///
+    /// Every segment is analysed rather than a truncated prefix, because scanning only the
+    /// first 10,000 characters would leave the remainder unscanned — a hole in the
+    /// guardrail rather than a fix for it. Segments overlap slightly so content straddling
+    /// a boundary is still seen whole by at least one call.
+    /// </remarks>
+    internal static IEnumerable<string> SegmentForAnalysis(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= _maxAnalyzeChars)
+        {
+            yield return text;
+            yield break;
+        }
+
+        int start = 0;
+        while (start < text.Length)
+        {
+            int length = Math.Min(_maxAnalyzeChars, text.Length - start);
+            yield return text.Substring(start, length);
+
+            if (start + length >= text.Length) yield break;
+
+            // Step forward by less than a full segment so a phrase spanning the cut is
+            // present in its entirety in the following segment.
+            start += _maxAnalyzeChars - _segmentOverlapChars;
+        }
+    }
+
+    /// <summary>
+    /// Segment size, held below the service's 10,000-character request limit so a
+    /// multi-byte boundary or future header cannot push a request over it.
+    /// </summary>
+    private const int _maxAnalyzeChars = 9_000;
+
+    /// <summary>Overlap between consecutive segments, so a boundary cannot hide content.</summary>
+    private const int _segmentOverlapChars = 500;
 
     private static bool IsServiceUnavailable(RequestFailedException ex) =>
         ex.Status is 0 or 408 or 429 or 500 or 502 or 503 or 504;
