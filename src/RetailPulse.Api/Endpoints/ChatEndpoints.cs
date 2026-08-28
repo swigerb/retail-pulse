@@ -9,6 +9,7 @@ using RetailPulse.Api.Agents.Planning;
 using RetailPulse.Api.Agents.Routing;
 using RetailPulse.Api.Auth;
 using RetailPulse.Api.Cards;
+using RetailPulse.Api.Charts;
 using RetailPulse.Api.Configuration;
 using RetailPulse.Api.Consensus;
 using RetailPulse.Api.Guardrails;
@@ -909,7 +910,21 @@ public static class ChatEndpoints
                 response = response with { Routing = isErrorResponse ? null : routingInfo };
 
                 // ── Cache: store response for deterministic queries ──────────────
-                if (!cacheDisabled && CacheHelpers.IsCacheable(request.Message))
+                //
+                // Only a response that actually satisfied the request is cacheable. A
+                // degraded answer used to be stored and replayed for the full TTL, which
+                // turned one transient model wobble into a prompt that failed identically
+                // for every subsequent visitor — observed live as a curated chart prompt
+                // returning "Chart unavailable" on a cache.hit span with no tool calls at
+                // all. Failing once is a model problem; failing repeatably from cache is
+                // ours.
+                if (!cacheDisabled
+                    && CacheHelpers.IsCacheable(request.Message)
+                    && CacheHelpers.IsCacheableOutcome(
+                        response.Reply,
+                        response.Charts?.Count ?? 0,
+                        isErrorResponse,
+                        ChartRequestDetector.Detect(request.Message).IsExplicitChartRequest))
                 {
                     string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                     await responseCache.SetAsync(cacheKey,
@@ -919,8 +934,8 @@ public static class ChatEndpoints
                             DateTime.UtcNow,
                             cacheKey,
                             // Charts and routing travel with the reply so a hit replays the
-                            // whole answer (issue #170). Copy the list — the cache must not
-                            // alias a collection the pipeline may still mutate.
+                            // whole answer. Copy the list — the cache must not alias a
+                            // collection the pipeline may still mutate.
                             response.Charts is { Count: > 0 } c ? [.. c] : null,
                             response.Routing),
                         TimeSpan.FromMinutes(5), ct);
