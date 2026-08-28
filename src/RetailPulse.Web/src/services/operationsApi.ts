@@ -259,3 +259,38 @@ export async function fetchScorecard(brands: readonly string[]): Promise<{
   const wire = (await res.json()) as WireScorecard;
   return { brands: toBrandScores(wire), durationMs: wire.totalDurationMs ?? 0 };
 }
+
+/**
+ * Number of brands scored per request.
+ *
+ * There is a hard 45s ceiling on the request path: two brands complete in ~24s
+ * with every dimension scored, while three or more fail at exactly 45.1s with
+ * "Backend call failure". Each brand costs five specialist assessments, so the
+ * only way to score a real portfolio is to send it in batches that each fit
+ * inside the ceiling.
+ */
+const SCORECARD_BATCH_SIZE = 2;
+
+/**
+ * Scores a portfolio in ceiling-safe batches, reporting each batch as it lands so
+ * the panel fills in progressively instead of showing nothing until the last
+ * brand is done.
+ */
+export async function fetchScorecardBatched(
+  brands: readonly string[],
+  onBatch: (scored: BrandScore[], elapsedMs: number) => void,
+): Promise<void> {
+  const started = Date.now();
+  const accumulated: BrandScore[] = [];
+
+  for (let i = 0; i < brands.length; i += SCORECARD_BATCH_SIZE) {
+    const batch = brands.slice(i, i + SCORECARD_BATCH_SIZE);
+    const { brands: scored } = await fetchScorecard(batch);
+    accumulated.push(...scored);
+    // Highest health first, so the ranking stays meaningful as batches arrive.
+    onBatch(
+      [...accumulated].sort((a, b) => b.healthScore - a.healthScore),
+      Date.now() - started,
+    );
+  }
+}
