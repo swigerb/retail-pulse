@@ -35,6 +35,20 @@ public class ScorecardOrchestrator
     /// </summary>
     private static readonly SemaphoreSlim _assessmentSlots = new(6, 6);
 
+    /// <summary>
+    /// How long a brand's score stays fresh. Long enough that navigating away and back is
+    /// instant, short enough that the demo still reflects changes within a session.
+    /// </summary>
+    private static readonly TimeSpan _cacheTtl = TimeSpan.FromMinutes(15);
+
+    private sealed record CachedBrandScore(BrandScore Score, DateTime ScoredAt);
+
+    /// <summary>
+    /// Process-wide so every replica request benefits, and static so it survives the
+    /// scoped lifetime the orchestrator is registered with.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CachedBrandScore> _brandCache = new();
+
     /// <summary>Default dimensions — kept as a fallback so tests and legacy composition
     /// roots that don't supply a configuration list continue to work.</summary>
     internal static readonly IReadOnlyList<ScorecardDimensionConfig> DefaultScoringDimensions =
@@ -117,6 +131,41 @@ public class ScorecardOrchestrator
     }
 
     private async Task<BrandScore> ScoreBrandAsync(
+        string brand, string? region, CancellationToken ct)
+    {
+        // Scoring one brand costs five tool-using specialist calls — measured at 7-33s
+        // against the deployed backend. A brand's health does not move minute to minute,
+        // so serve a recent result instead of paying that again. Without this, revisiting
+        // the panel re-ran the entire portfolio (~130s) every single time.
+        string cacheKey = $"{brand}|{region ?? "*"}";
+        if (_brandCache.TryGetValue(cacheKey, out CachedBrandScore? cached)
+            && cached is not null
+            && DateTime.UtcNow - cached.ScoredAt < _cacheTtl)
+        {
+            _logger.LogInformation("Scorecard cache hit for {Brand}", brand);
+            return cached.Score;
+        }
+
+        BrandScore score = await ScoreBrandUncachedAsync(brand, region, ct);
+
+        // Only cache a genuinely grounded result. Caching a degraded all-neutral scorecard
+        // would pin the panel to "every brand is mediocre" for the whole TTL.
+        if (!IsDegraded(score))
+        {
+            _brandCache[cacheKey] = new CachedBrandScore(score, DateTime.UtcNow);
+        }
+
+        return score;
+    }
+
+    /// <summary>A score is degraded when no dimension produced a real assessment.</summary>
+    private static bool IsDegraded(BrandScore score) =>
+        score.Dimensions.Values.All(d =>
+            d.Assessment.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+            || d.Assessment.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+            || d.Assessment.Contains("failed", StringComparison.OrdinalIgnoreCase));
+
+    private async Task<BrandScore> ScoreBrandUncachedAsync(
         string brand, string? region, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
