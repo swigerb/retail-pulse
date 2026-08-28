@@ -3,6 +3,9 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -72,8 +75,28 @@ export default function MarketShareChart({ data, compact }: MarketShareChartProp
       return row;
     });
 
-    return { chartData: rows, brands: brandSet };
+    return { chartData: rows, brands: brandSet, quarters };
   }, [data]);
+
+  /**
+   * A trend needs at least two periods and a readable number of series.
+   *
+   * The live feed carries a single quarter across 41 brands, which an area chart draws as
+   * one vertical stripe of 41 overlapping points: technically correct, completely
+   * unreadable. When there is nothing to trend, rank instead, which is the honest view of
+   * a single-period snapshot.
+   */
+  const { isSnapshot, snapshotRows } = useMemo(() => {
+    const periods = new Set(data.map(d => d.quarter)).size;
+    if (periods > 1) return { isSnapshot: false, snapshotRows: [] };
+
+    const rows = [...data]
+      .sort((a, b) => b.share - a.share)
+      .slice(0, compact ? 8 : 12)
+      .map(d => ({ brand: d.brand, share: d.share, isOurBrand: d.isOurBrand }));
+
+    return { isSnapshot: true, snapshotRows: rows };
+  }, [data, compact]);
 
   const ourBrands = useMemo(() => {
     const set = new Set(data.filter(d => d.isOurBrand).map(d => d.brand));
@@ -96,13 +119,40 @@ export default function MarketShareChart({ data, compact }: MarketShareChartProp
   return (
     <div className={styles.wrapper} data-testid="market-share-chart">
       <div className={styles.titleRow}>
-        <span className={styles.title}>📈 Market Share Trends</span>
+        <span className={styles.title}>
+          {isSnapshot ? '📊 Market Share by Brand' : '📈 Market Share Trends'}
+        </span>
         <Badge appearance="filled" style={{ background: 'rgba(59,130,246,0.15)', color: '#93c5fd' }}>
-          {brands.length} brands
+          {isSnapshot ? `Top ${snapshotRows.length} of ${brands.length}` : `${brands.length} brands`}
         </Badge>
       </div>
 
-      <ResponsiveContainer width="100%" height={compact ? 220 : 360}>
+      {isSnapshot ? (
+        <ResponsiveContainer width="100%" height={compact ? 240 : 380}>
+          <BarChart
+            data={snapshotRows}
+            layout="vertical"
+            margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke={COMPETITIVE_COLORS.gridLine} horizontal={false} />
+            <XAxis type="number" tick={AXIS_TICK} unit="%" />
+            <YAxis type="category" dataKey="brand" tick={AXIS_TICK} width={130} />
+            <Tooltip
+              contentStyle={tooltipContentStyle}
+              formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Share']}
+            />
+            <Bar dataKey="share" radius={[0, 4, 4, 0]}>
+              {snapshotRows.map(row => (
+                <Cell
+                  key={row.brand}
+                  fill={row.isOurBrand ? COMPETITIVE_COLORS.ourBrand : COMPETITOR_PALETTE[0]}
+                />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      ) : (
+        <ResponsiveContainer width="100%" height={compact ? 220 : 360}>
         <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 24, left: 10 }}>
           <defs>
             {brands.map(b => {
@@ -142,6 +192,7 @@ export default function MarketShareChart({ data, compact }: MarketShareChartProp
           })}
         </AreaChart>
       </ResponsiveContainer>
+      )}
     </div>
   );
 }
