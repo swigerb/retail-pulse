@@ -280,6 +280,18 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'MicrosoftEntra__AppRole'
               value: entraAppRole
             }
+            // The Teams bot is a service caller with no user token to exchange, so it
+            // presents an app-only token bearing the app role. Accepted only when a bot is
+            // configured, and only from that bot's client id — the allow-list is what keeps
+            // this from widening the API to any app-only token in the tenant.
+            {
+              name: 'MicrosoftEntra__AllowAppOnlyTokens'
+              value: botConfigured ? 'true' : 'false'
+            }
+            {
+              name: 'MicrosoftEntra__AllowedAppClientIds__0'
+              value: botAppId
+            }
             {
               name: 'RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE'
               value: 'true'
@@ -465,6 +477,24 @@ resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'TokenValidation__TenantId'
               value: botTenantId
+            }
+            // The Teams SSO handler validates the *user* token carried inside an
+            // Activity, which is a separate concern from the channel token above. It
+            // fails closed outside Development, so without these the bot authenticates
+            // the channel correctly and then throws on the first turn.
+            {
+              name: 'MicrosoftEntra__TenantId'
+              value: botTenantId
+            }
+            {
+              name: 'MicrosoftEntra__ClientId'
+              value: botAppId
+            }
+            // Scope the bot requests for the API. ".default" asks for every application
+            // permission already consented, which is the RetailPulse.User app role.
+            {
+              name: 'TeamsBot__ApiScope'
+              value: empty(entraClientId) ? '' : 'api://${entraClientId}/.default'
             }
           ] : [])
         }
