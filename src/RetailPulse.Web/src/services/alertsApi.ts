@@ -1,3 +1,4 @@
+import { resolveApiUrl } from '../config/apiOrigin';
 import type { Alert, AlertSeverity } from '../types';
 
 /**
@@ -53,4 +54,38 @@ export function toAlert(wire: WireAlert): Alert {
     firedAt: firedAt && !Number.isNaN(Date.parse(firedAt)) ? firedAt : new Date().toISOString(),
     status: wire.status === 'dismissed' || wire.status === 'snoozed' ? wire.status : 'active',
   };
+}
+
+/**
+ * Loads the alerts the server already knows about.
+ *
+ * The SPA only ever populated alerts from the live hub event, so refreshing the page
+ * discarded every alert even though the server still held it, and Alert History could
+ * only show what happened to fire while that browser tab was open.
+ *
+ * The server's Alert record carries no status field — active and historical are decided
+ * by which endpoint answers — so the status is set from the source here.
+ */
+async function getAlerts(path: string, status: Alert['status']): Promise<Alert[]> {
+  const res = await fetch(resolveApiUrl(path));
+  if (!res.ok) return [];
+  const wire = (await res.json()) as WireAlert[];
+  return wire.map(w => ({ ...toAlert(w), status }));
+}
+
+export async function fetchAlerts(historyLimit = 50): Promise<Alert[]> {
+  const [active, history] = await Promise.all([
+    getAlerts('/api/alerts/active', 'active'),
+    getAlerts(`/api/alerts/history?limit=${historyLimit}`, 'dismissed'),
+  ]);
+
+  // An alert can appear in both responses; the active reading wins so a live alert is
+  // never demoted into history by the order the two requests happen to resolve in.
+  const byId = new Map<string, Alert>();
+  for (const alert of history) byId.set(alert.id, alert);
+  for (const alert of active) byId.set(alert.id, alert);
+
+  return [...byId.values()].sort(
+    (a, b) => new Date(b.firedAt).getTime() - new Date(a.firedAt).getTime(),
+  );
 }

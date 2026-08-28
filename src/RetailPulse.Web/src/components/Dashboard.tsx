@@ -4,7 +4,7 @@ import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHead
 import { Add24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { fetchFinancials, fetchScorecardBatched, fetchStores, fetchStockoutRisks } from '../services/operationsApi';
-import { toAlert } from '../services/alertsApi';
+import { toAlert, fetchAlerts } from '../services/alertsApi';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
 import { MemoryPanel } from './MemoryPanel';
@@ -215,6 +215,25 @@ export function Dashboard() {
   const [traces, setTraces] = useState<Trace[]>([]);
   // Surfaced in the collapsed section title so a fired alert is still noticeable.
   const activeAlertCount = useMemo(() => alerts.filter(a => a.status === 'active').length, [alerts]);
+
+  // Seed from the server. Alerts previously existed only in this tab's memory, so a
+  // refresh discarded every one of them and Alert History could only ever show what
+  // fired while the tab happened to be open. Live hub events merge on top of this.
+  useEffect(() => {
+    if (!capabilities.alternateViews) return;
+    let cancelled = false;
+    void (async () => {
+      const loaded = await fetchAlerts();
+      if (cancelled || loaded.length === 0) return;
+      setAlerts(prev => {
+        const byId = new Map(loaded.map(a => [a.id, a]));
+        // Anything already held from a live event is more current than the snapshot.
+        for (const alert of prev) byId.set(alert.id, alert);
+        return [...byId.values()].slice(0, MAX_ALERTS);
+      });
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [activeView, setActiveView] = useState<ActiveView>('chat');
   const [selectedBrand, setSelectedBrand] = useState<BrandScore | null>(null);
   const [selectedStore, setSelectedStore] = useState<StorePerformance | null>(null);
