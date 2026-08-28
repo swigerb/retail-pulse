@@ -253,7 +253,7 @@ export async function fetchScorecard(brands: readonly string[]): Promise<{
   const res = await fetch(resolveApiUrl('/api/scorecard'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ brands }),
+    body: JSON.stringify({ brands, includeSummary: false }),
   });
   // Surface the failure. Returning an empty batch silently left the panel spinning
   // with no indication that anything had gone wrong.
@@ -265,13 +265,13 @@ export async function fetchScorecard(brands: readonly string[]): Promise<{
 /**
  * Number of brands scored per request.
  *
- * There is a hard 45s ceiling on the request path: two brands complete in ~24s
- * with every dimension scored, while three or more fail at exactly 45.1s with
- * "Backend call failure". Each brand costs five specialist assessments, so the
- * only way to score a real portfolio is to send it in batches that each fit
- * inside the ceiling.
+ * There is a hard 45s ceiling on the request path and per-brand latency is highly
+ * variable (measured 4s-33s for a single brand against the deployed backend). Two
+ * brands in one request has been observed to breach the ceiling outright, so the
+ * portfolio is sent one brand at a time. The server caches each brand's score, so
+ * the cost is paid once and revisits are near-instant.
  */
-const SCORECARD_BATCH_SIZE = 2;
+const SCORECARD_BATCH_SIZE = 1;
 
 /**
  * Scores a portfolio in ceiling-safe batches, reporting each batch as it lands so
