@@ -77,6 +77,10 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: '16px',
+    // Never let the brand block wrap or squeeze the nav. Without this the tagline
+    // broke onto three lines and the tenant pill overlapped the nav buttons.
+    flexShrink: 0,
+    minWidth: 0,
   },
   headerTagline: {
     fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
@@ -84,7 +88,8 @@ const useStyles = makeStyles({
     color: 'var(--color-text-muted)',
     letterSpacing: '0.5px',
     textTransform: 'uppercase',
-    '@media (max-width: 600px)': {
+    whiteSpace: 'nowrap',
+    '@media (max-width: 1500px)': {
       display: 'none',
     },
   },
@@ -99,7 +104,8 @@ const useStyles = makeStyles({
     color: 'var(--brand-accent-light)',
     background: 'var(--brand-accent-soft)',
     border: '1px solid var(--brand-accent-border)',
-    '@media (max-width: 600px)': {
+    whiteSpace: 'nowrap',
+    '@media (max-width: 1250px)': {
       display: 'none',
     },
   },

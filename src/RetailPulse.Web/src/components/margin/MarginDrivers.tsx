@@ -45,6 +45,9 @@ const useStyles = makeStyles({
     position: 'relative',
     display: 'flex',
     alignItems: 'center',
+    // Belt and braces: nothing in this track may escape into the label columns.
+    overflow: 'hidden',
+    minWidth: 0,
   },
   barTrack: {
     position: 'absolute',
@@ -130,7 +133,11 @@ export function MarginDrivers({ drivers }: MarginDriversProps) {
       <div className={styles.title}>Margin Drivers</div>
       {sorted.map((d) => {
         const isPositive = d.impact >= 0;
-        const widthPct = (Math.abs(d.impact) / maxAbsImpact) * 100;
+        // Each bar grows from the centre line, so it can only ever occupy half the
+        // track. Sizing it as a percentage of the FULL container made the largest
+        // driver span an entire container width from the middle — overrunning the
+        // name column on the left and the impact labels on the right.
+        const widthPct = (Math.abs(d.impact) / maxAbsImpact) * 50;
         const barColor = isPositive ? MARGIN_COLORS.positiveImpact : MARGIN_COLORS.negativeImpact;
         const trend = TREND_MAP[d.trend];
 
