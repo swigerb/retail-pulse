@@ -24,11 +24,16 @@ public interface ISuspiciousRequestLog
 
 /// <summary>
 /// A single suspicious request event captured by the guardrails pipeline.
-/// The <see cref="Category"/>, <see cref="Severity"/>, and <see cref="Decision"/>
-/// fields are additive and default to <c>null</c> — existing pattern-layer
-/// callers keep their positional constructor and fixtures unchanged, and the
-/// Content Safety layer populates them on every block path so severity is
-/// never buried inside free-text.
+/// Every field after <see cref="Action"/> is additive and defaults to
+/// <c>null</c> so existing positional callers and fixtures keep compiling.
+///
+/// This record is the single source of truth for what an audit row MEANS.
+/// The guardrails dashboard renders <see cref="Reason"/> and
+/// <see cref="Subject"/> directly and must never reverse-engineer them by
+/// pattern-matching <see cref="RequestText"/>: that prose is user-supplied or
+/// diagnostic and its wording is not a contract. Every call site is therefore
+/// required to populate <see cref="Stage"/>, <see cref="Reason"/>, and, where
+/// the event concerns a named thing, <see cref="Subject"/>.
 /// </summary>
 public record SuspiciousRequest(
     string Id,
@@ -42,7 +47,8 @@ public record SuspiciousRequest(
     string? Decision = null,
     string? Stage = null,
     int? Threshold = null,
-    string? Reason = null);
+    string? Reason = null,
+    string? Subject = null);
 
 /// <summary>
 /// Aggregated guardrails activity metrics.

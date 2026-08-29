@@ -71,8 +71,8 @@ public sealed class ContentSafetyToolResultInspector
                     // Tool-result stage does not run Prompt Shields, so a
                     // block without a category is never a prompt-shield hit.
                     string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
-                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
-                    int? threshold = ContentSafetyAuditFields.ThresholdFor(cfg, category);
+                    (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
+                    int? threshold = GuardrailAuditFields.ThresholdFor(cfg, category);
 
                     await _log.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),
@@ -86,13 +86,14 @@ public sealed class ContentSafetyToolResultInspector
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.ToolResult.ToString(),
                         Threshold: threshold,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.ToolResult,
                             detectionType,
                             category,
                             severity,
-                            threshold)), cancellationToken).ConfigureAwait(false);
+                            threshold),
+                        Subject: $"Tool result from '{toolName}'"), cancellationToken).ConfigureAwait(false);
 
                     _logger.LogWarning(
                         "Content Safety blocked tool result from '{Tool}' (decision={Decision}, categories={CategoryCount})",
@@ -119,13 +120,14 @@ public sealed class ContentSafetyToolResultInspector
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.ToolResult.ToString(),
                         Threshold: null,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.ToolResult,
                             ContentSafetyDetectionTypes.Unavailable,
                             category: null,
                             severity: null,
-                            threshold: null)), cancellationToken).ConfigureAwait(false);
+                            threshold: null),
+                        Subject: $"Tool result from '{toolName}'"), cancellationToken).ConfigureAwait(false);
 
                     if (cfg.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
                     {
@@ -140,9 +142,9 @@ public sealed class ContentSafetyToolResultInspector
                 }
             case ContentSafetyDecision.Flagged:
                 {
-                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
+                    (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
                     string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
-                    int? threshold = ContentSafetyAuditFields.ThresholdFor(cfg, category);
+                    int? threshold = GuardrailAuditFields.ThresholdFor(cfg, category);
                     await _log.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),
                         DateTime.UtcNow,
@@ -155,13 +157,14 @@ public sealed class ContentSafetyToolResultInspector
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.ToolResult.ToString(),
                         Threshold: threshold,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.ToolResult,
                             detectionType,
                             category,
                             severity,
-                            threshold)), cancellationToken).ConfigureAwait(false);
+                            threshold),
+                        Subject: $"Tool result from '{toolName}'"), cancellationToken).ConfigureAwait(false);
                     return ContentSafetyToolResultOutcome.PassThrough(toolResultJson);
                 }
 
