@@ -44,6 +44,29 @@ const mockLog: BlockedRequest[] = [
   { id: 'l1', timestamp: '2026-05-13T14:00:00Z', requestPreview: 'log-preview-1', detectionType: 'jailbreak', reason: '', actionTaken: 'Blocked' },
   { id: 'l2', timestamp: '2026-05-13T13:30:00Z', requestPreview: 'log-preview-2', detectionType: 'content-safety-hate', reason: '', actionTaken: 'Blocked', category: 'Hate', severity: 4, decision: 'Blocked' },
   { id: 'l3', timestamp: '2026-05-13T13:15:00Z', requestPreview: 'log-preview-3', detectionType: 'content-safety-violence', reason: '', actionTaken: 'Blocked', category: 'Violence', severity: 6, decision: 'Blocked' },
+  {
+    id: 'l4',
+    timestamp: '2026-05-13T13:10:00Z',
+    requestPreview: "Tool result from 'GetStorePerformance' blocked by Content Safety",
+    detectionType: 'content-safety-selfharm',
+    reason: '',
+    actionTaken: 'blocked',
+    category: 'SelfHarm',
+    severity: 6,
+    decision: 'Blocked',
+    stage: 'ToolResult',
+    threshold: 4,
+  },
+  {
+    id: 'l5',
+    timestamp: '2026-05-13T13:05:00Z',
+    requestPreview: 'agent=general field=SystemPrompt rule=safety.content-safety-unavailable',
+    detectionType: 'agent-definition-content-safety-unavailable',
+    reason: '',
+    actionTaken: 'failopen-passed',
+    decision: 'ServiceUnavailable',
+    stage: 'AgentDefinition',
+  },
 ];
 
 const mockConfig: { contentSafety: GuardrailsConfigData['contentSafety'] } = {
@@ -229,5 +252,24 @@ describe('GuardrailsDashboard', () => {
     // No `content-safety-*` slug should appear in the rendered UI text.
     expect(rendered).not.toMatch(/content-safety-hate\b|content-safety-violence\b|content-safety-sexual\b|content-safety-selfharm\b|content-safety-prompt-shield\b|content-safety-indirect-injection\b|content-safety-unavailable\b/);
     expect(rendered).not.toMatch(/RULE_ID_|THRESHOLD_|SENSITIVE_PATTERN_/i);
+  });
+
+  it('explains content-safety category, severity, threshold, stage, and action', async () => {
+    installFetchMock();
+    renderWithTheme(<GuardrailsDashboard />);
+    expect(await screen.findByText('Tool result from GetStorePerformance was blocked by Content Safety.')).toBeInTheDocument();
+    expect(screen.getByText(/Tool result triggered Self-harm content at severe severity \(6\), which met threshold 4\./)).toBeInTheDocument();
+    expect(screen.getByText(/The system withheld the tool result from the model\./)).toBeInTheDocument();
+    expect(screen.getByText('Tool result withheld')).toBeInTheDocument();
+  });
+
+  it('renders fail-open passes as plain operator wording', async () => {
+    installFetchMock();
+    renderWithTheme(<GuardrailsDashboard />);
+    const dashboard = await screen.findByTestId('guardrails-dashboard');
+    expect(screen.getByText('Content Safety was unreachable while checking SystemPrompt for general.')).toBeInTheDocument();
+    expect(screen.getByText(/The system allowed the request through because fail-open policy is active\./)).toBeInTheDocument();
+    expect(screen.getByText('Allowed through')).toBeInTheDocument();
+    expect(dashboard.textContent ?? '').not.toContain('agent=general field=SystemPrompt rule=safety.content-safety-unavailable');
   });
 });

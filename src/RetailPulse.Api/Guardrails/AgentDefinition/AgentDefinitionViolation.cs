@@ -12,4 +12,8 @@ public sealed record AgentDefinitionViolation(
     string Field,
     string RuleId,
     string Message,
-    string DetectionType);
+    string DetectionType,
+    string? Category = null,
+    int? Severity = null,
+    string? Decision = null,
+    int? Threshold = null);

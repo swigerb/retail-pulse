@@ -39,7 +39,10 @@ public record SuspiciousRequest(
     string Action,
     string? Category = null,
     int? Severity = null,
-    string? Decision = null);
+    string? Decision = null,
+    string? Stage = null,
+    int? Threshold = null,
+    string? Reason = null);
 
 /// <summary>
 /// Aggregated guardrails activity metrics.

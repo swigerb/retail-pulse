@@ -48,6 +48,8 @@ export async function fetchGuardrailsLog(count = 50): Promise<BlockedRequest[]> 
       category: typeof entry.category === 'string' ? entry.category : undefined,
       severity: typeof entry.severity === 'number' ? entry.severity : undefined,
       decision: typeof entry.decision === 'string' ? entry.decision : undefined,
+      stage: typeof entry.stage === 'string' ? entry.stage : undefined,
+      threshold: typeof entry.threshold === 'number' ? entry.threshold : undefined,
     }));
 }
 

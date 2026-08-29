@@ -22,7 +22,10 @@ public static class GuardrailEndpoints
                 action = r.Action,
                 category = r.Category,
                 severity = r.Severity,
-                decision = r.Decision
+                decision = r.Decision,
+                stage = r.Stage,
+                threshold = r.Threshold,
+                reason = r.Reason
             }));
         })
         .WithName("GetGuardrailsLog").RequireAuthorization().RequireRateLimiting("relaxed");

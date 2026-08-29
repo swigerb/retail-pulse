@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { updateGuardrailsConfig } from '../services/guardrailsApi';
+import { fetchGuardrailsLog, updateGuardrailsConfig } from '../services/guardrailsApi';
 import type { GuardrailsConfigData } from '../types';
 
 function baseConfig(overrides?: Partial<GuardrailsConfigData>): GuardrailsConfigData {
@@ -65,5 +65,39 @@ describe('guardrailsApi config contract', () => {
 
     await expect(updateGuardrailsConfig(baseConfig({ jailbreakDetectionEnabled: false })))
       .rejects.toThrow(/jailbreakDetectionEnabled/);
+  });
+
+  it('maps audit row detail fields from the log endpoint', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          id: 'row-1',
+          timestamp: '2026-08-29T18:19:24Z',
+          requestText: "Tool result from 'GetStorePerformance' blocked by Content Safety",
+          detectionType: 'content-safety-sexual',
+          action: 'blocked',
+          reason: 'Content Safety classified the tool result as Sexual content at severity 4, which met threshold 4.',
+          category: 'Sexual',
+          severity: 4,
+          decision: 'Blocked',
+          stage: 'ToolResult',
+          threshold: 4,
+        },
+      ],
+    } as Response);
+
+    await expect(fetchGuardrailsLog(1)).resolves.toEqual([
+      expect.objectContaining({
+        requestPreview: "Tool result from 'GetStorePerformance' blocked by Content Safety",
+        actionTaken: 'blocked',
+        reason: 'Content Safety classified the tool result as Sexual content at severity 4, which met threshold 4.',
+        category: 'Sexual',
+        severity: 4,
+        decision: 'Blocked',
+        stage: 'ToolResult',
+        threshold: 4,
+      }),
+    ]);
   });
 });
