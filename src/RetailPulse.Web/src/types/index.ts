@@ -858,16 +858,28 @@ export interface EscalationStep {
 
 // --- Portfolio Scorecard & Explainability types (Sprint 4.3) ---
 
+export type ScorecardDimensionKey = 'demand' | 'competitive' | 'supply' | 'store' | 'margin';
+
+export interface BrandScoreDimensionDetail {
+  key: ScorecardDimensionKey;
+  label: string;
+  shortLabel: string;
+  score: number;
+  weight: number;
+  weightedScore: number;
+  assessment?: string;
+  agentKey: string;
+}
+
 export interface BrandScore {
   brandName: string;
   healthScore: number;
   trend: 'up' | 'down' | 'stable';
-  dimensions: {
-    demand: number;
-    margin: number;
-    competitive: number;
-    supply: number;
-  };
+  dimensions: Record<ScorecardDimensionKey, number>;
+  dimensionDetails?: Partial<Record<ScorecardDimensionKey, BrandScoreDimensionDetail>>;
+  summary?: string;
+  actionItems?: string[];
+  durationMs?: number;
   topRisk: string;
   topOpportunity: string;
 }
@@ -880,13 +892,13 @@ export interface ExplanationStep {
 }
 
 export interface ExplanationData {
-  traceId: string;
+  traceId?: string;
   question: string;
   answer: string;
-  steps: ExplanationStep[];
-  confidence: number;
-  dataSources: Array<{ name: string; url?: string }>;
-  generatedAt: string;
+  steps?: ExplanationStep[];
+  confidence?: number;
+  dataSources?: Array<{ name: string; url?: string }>;
+  generatedAt?: string;
 }
 
 // --- Plan types (issue #96) --------------------------------------------------

@@ -6,6 +6,7 @@ interface WhyButtonProps {
   onClick?: () => void;
   loading?: boolean;
   size?: 'small' | 'medium';
+  ariaLabel?: string;
 }
 
 const useStyles = makeStyles({
@@ -52,7 +53,7 @@ const useStyles = makeStyles({
   },
 });
 
-export function WhyButton({ onClick, loading = false, size = 'small' }: WhyButtonProps) {
+export function WhyButton({ onClick, loading = false, size = 'small', ariaLabel = 'Explain this recommendation' }: WhyButtonProps) {
   const styles = useStyles();
 
   return (
@@ -66,8 +67,8 @@ export function WhyButton({ onClick, loading = false, size = 'small' }: WhyButto
         e.stopPropagation();
         onClick?.();
       }}
-      title="Explain this recommendation"
-      aria-label="Explain this recommendation"
+      title={ariaLabel}
+      aria-label={ariaLabel}
     >
       ?
     </button>
