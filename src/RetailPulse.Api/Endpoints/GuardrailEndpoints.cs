@@ -46,36 +46,71 @@ public static class GuardrailEndpoints
         app.MapGet("/api/guardrails/config", (GuardrailsConfig config) => Results.Ok(ProjectConfig(config)))
         .WithName("GetGuardrailsConfig").RequireAuthorization().RequireRateLimiting("relaxed");
 
-        app.MapPut("/api/guardrails/config", (GuardrailsConfigUpdateDto body, GuardrailsConfig config) =>
+        app.MapPut("/api/guardrails/config", IResult (GuardrailsConfigUpdateDto body, GuardrailsConfig config) =>
         {
+            bool applied = false;
             if (body.PiiDetectionEnabled.HasValue)
+            {
                 config.PiiDetectionEnabled = body.PiiDetectionEnabled.Value;
+                applied = true;
+            }
             if (body.JailbreakDetectionEnabled.HasValue)
+            {
                 config.JailbreakDetectionEnabled = body.JailbreakDetectionEnabled.Value;
+                applied = true;
+            }
             if (body.AutoRedactPii.HasValue)
+            {
                 config.AutoRedactPii = body.AutoRedactPii.Value;
+                applied = true;
+            }
             if (body.MaxInputLength.HasValue)
+            {
                 config.MaxInputLength = body.MaxInputLength.Value;
+                applied = true;
+            }
 
-            // Content Safety runtime toggles — the endpoint URL and any
+            // Content Safety runtime toggles - the endpoint URL and any
             // credentials are deliberately server-side only. Thresholds and
             // fail-policy are safe to mutate at runtime because the evaluator
             // reads the live GuardrailsConfig on every call.
             if (body.ContentSafety is { } cs)
             {
                 if (cs.FailPolicy is not null && Enum.TryParse(cs.FailPolicy, ignoreCase: true, out ContentSafetyFailPolicy policy))
+                {
                     config.ContentSafety.OnUnavailable = policy;
+                    applied = true;
+                }
                 if (cs.HateThreshold.HasValue)
+                {
                     config.ContentSafety.Thresholds.Hate = cs.HateThreshold.Value;
+                    applied = true;
+                }
                 if (cs.SexualThreshold.HasValue)
+                {
                     config.ContentSafety.Thresholds.Sexual = cs.SexualThreshold.Value;
+                    applied = true;
+                }
                 if (cs.ViolenceThreshold.HasValue)
+                {
                     config.ContentSafety.Thresholds.Violence = cs.ViolenceThreshold.Value;
+                    applied = true;
+                }
                 if (cs.SelfHarmThreshold.HasValue)
+                {
                     config.ContentSafety.Thresholds.SelfHarm = cs.SelfHarmThreshold.Value;
+                    applied = true;
+                }
             }
 
-            return Results.Ok(ProjectConfig(config) with { Status = "updated" });
+            GuardrailsConfigResponse current = ProjectConfig(config);
+            return !applied
+                ? Results.BadRequest(new
+                {
+                    error = "No supported guardrails configuration fields were provided.",
+                    config = current
+                })
+                : Results.Ok(current with { Status = "updated" });
         })
         .WithName("UpdateGuardrailsConfig").RequireAuthorization().RequireRateLimiting("moderate");
 
@@ -152,7 +187,7 @@ internal record ContentSafetyConfigResponse(
 
 /// <summary>
 /// Public projection of the agent-definition load-time policy. Only surfaces
-/// operator-facing fields — <c>AllowedModels</c>, <c>AllowedTools</c>, and
+/// operator-facing fields - <c>AllowedModels</c>, <c>AllowedTools</c>, and
 /// <c>PrivilegedTools</c> are deployment configuration and are never returned.
 /// </summary>
 internal record AgentDefinitionPolicyResponse(
