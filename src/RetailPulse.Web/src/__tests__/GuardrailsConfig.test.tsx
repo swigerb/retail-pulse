@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import { GuardrailsConfig } from '../components/guardrails/GuardrailsConfig';
 import type { GuardrailsConfigData } from '../types';
@@ -10,10 +11,12 @@ function renderWithTheme(ui: React.ReactElement) {
 
 function baseConfig(overrides?: Partial<GuardrailsConfigData>): GuardrailsConfigData {
   return {
-    jailbreakEnabled: true,
-    piiEnabled: true,
-    accessControlEnabled: true,
-    blockedPatterns: 'ignore all previous instructions\nyou are now DAN',
+    piiDetectionEnabled: true,
+    jailbreakDetectionEnabled: true,
+    autoRedactPii: true,
+    maxInputLength: 10000,
+    piiPatterns: ['SSN', 'Email', 'Phone', 'CreditCard'],
+    jailbreakPatterns: ['IgnoreInstructions', 'RolePlay'],
     contentSafety: {
       enabled: true,
       failPolicy: 'FailClosed',
@@ -69,5 +72,67 @@ describe('GuardrailsConfig content-safety runtime panel', () => {
     // Read-only rows are hidden when disabled so users can't infer runtime
     // config that isn't in effect.
     expect(screen.queryByTestId('cs-check-input')).not.toBeInTheDocument();
+  });
+
+  it('renders protection toggles from the backend config contract', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: async () => baseConfig({
+        piiDetectionEnabled: true,
+        jailbreakDetectionEnabled: true,
+        autoRedactPii: false,
+      }),
+    } as Response);
+
+    renderWithTheme(<GuardrailsConfig />);
+
+    expect(await screen.findByLabelText('Toggle jailbreak detection')).toBeChecked();
+    expect(screen.getByLabelText('Toggle PII detection')).toBeChecked();
+    expect(screen.getByLabelText('Toggle auto-redact PII')).not.toBeChecked();
+    expect(screen.queryByLabelText('Toggle access control')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Blocked patterns')).not.toBeInTheDocument();
+  });
+
+  it('saves with the backend contract and reloads the changed state', async () => {
+    const user = userEvent.setup();
+    let serverConfig = baseConfig({ jailbreakDetectionEnabled: true });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === '/api/guardrails/config' && init?.method === 'PUT') {
+        const payload = JSON.parse(String(init.body)) as Partial<GuardrailsConfigData> & {
+          jailbreakEnabled?: boolean;
+          piiEnabled?: boolean;
+        };
+        expect(payload).toHaveProperty('jailbreakDetectionEnabled', false);
+        expect(payload).not.toHaveProperty('jailbreakEnabled');
+        expect(payload).not.toHaveProperty('piiEnabled');
+        serverConfig = { ...serverConfig, ...payload, status: 'updated' };
+        return {
+          ok: true,
+          json: async () => serverConfig,
+        } as Response;
+      }
+      if (url === '/api/guardrails/config') {
+        return {
+          ok: true,
+          json: async () => serverConfig,
+        } as Response;
+      }
+      throw new Error(`Unmocked fetch: ${url}`);
+    });
+
+    const first = renderWithTheme(<GuardrailsConfig />);
+    const jailbreakSwitch = await screen.findByLabelText('Toggle jailbreak detection');
+    expect(jailbreakSwitch).toBeChecked();
+
+    await user.click(jailbreakSwitch);
+    await user.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/guardrails/config', expect.objectContaining({ method: 'PUT' })));
+    first.unmount();
+
+    renderWithTheme(<GuardrailsConfig />);
+
+    expect(await screen.findByLabelText('Toggle jailbreak detection')).not.toBeChecked();
   });
 });

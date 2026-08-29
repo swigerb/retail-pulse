@@ -133,7 +133,8 @@ export function GuardrailsConfig() {
     setSuccess(false);
     setError(null);
     try {
-      await updateGuardrailsConfig(config);
+      const saved = await updateGuardrailsConfig(config);
+      setConfig(saved);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
@@ -244,8 +245,8 @@ export function GuardrailsConfig() {
             <span className={styles.toggleDescription}>Block prompt injection and jailbreak attempts</span>
           </div>
           <Switch
-            checked={config.jailbreakEnabled}
-            onChange={(_e, data) => setConfig(prev => prev ? { ...prev, jailbreakEnabled: data.checked } : prev)}
+            checked={config.jailbreakDetectionEnabled}
+            onChange={(_e, data) => setConfig(prev => prev ? { ...prev, jailbreakDetectionEnabled: data.checked } : prev)}
             aria-label="Toggle jailbreak detection"
           />
         </div>
@@ -256,37 +257,47 @@ export function GuardrailsConfig() {
             <span className={styles.toggleDescription}>Automatically redact personal identifiable information</span>
           </div>
           <Switch
-            checked={config.piiEnabled}
-            onChange={(_e, data) => setConfig(prev => prev ? { ...prev, piiEnabled: data.checked } : prev)}
+            checked={config.piiDetectionEnabled}
+            onChange={(_e, data) => setConfig(prev => prev ? { ...prev, piiDetectionEnabled: data.checked } : prev)}
             aria-label="Toggle PII detection"
           />
         </div>
 
         <div className={styles.toggleRow}>
           <div className={styles.toggleLabel}>
-            <Text weight="semibold">🔒 Access Control</Text>
-            <span className={styles.toggleDescription}>Enforce role-based access restrictions on data queries</span>
+            <Text weight="semibold">🧹 Auto-redact PII</Text>
+            <span className={styles.toggleDescription}>Redact detected PII in responses instead of leaving it unchanged</span>
           </div>
           <Switch
-            checked={config.accessControlEnabled}
-            onChange={(_e, data) => setConfig(prev => prev ? { ...prev, accessControlEnabled: data.checked } : prev)}
-            aria-label="Toggle access control"
+            checked={config.autoRedactPii}
+            onChange={(_e, data) => setConfig(prev => prev ? { ...prev, autoRedactPii: data.checked } : prev)}
+            aria-label="Toggle auto-redact PII"
           />
         </div>
       </div>
 
       <div className={styles.section}>
-        <span className={styles.sectionTitle}>Blocked Patterns</span>
+        <span className={styles.sectionTitle}>Input Limits</span>
         <Text size={200} style={{ color: 'var(--color-text-muted)' }}>
-          One pattern per line. Regex supported.
+          Requests longer than this value are rejected by the guardrails middleware.
         </Text>
-        <textarea
+        <input
+          type="number"
+          min={1}
           className={styles.textarea}
-          value={config.blockedPatterns}
-          onChange={e => setConfig(prev => prev ? { ...prev, blockedPatterns: e.target.value } : prev)}
-          placeholder="Enter blocked patterns, one per line..."
-          aria-label="Blocked patterns"
+          value={config.maxInputLength}
+          onChange={e => setConfig(prev => prev ? { ...prev, maxInputLength: Number(e.target.value) } : prev)}
+          aria-label="Maximum input length"
         />
+      </div>
+
+      <div className={styles.section}>
+        <span className={styles.sectionTitle}>Pattern Catalog</span>
+        <Text size={200} style={{ color: 'var(--color-text-muted)' }}>
+          Custom blocked patterns are not runtime-configurable. The API exposes the active built-in pattern families as read-only metadata.
+        </Text>
+        <Text size={200}>PII: {config.piiPatterns.join(', ') || 'None'}</Text>
+        <Text size={200}>Jailbreak: {config.jailbreakPatterns.join(', ') || 'None'}</Text>
       </div>
 
       {error && (
