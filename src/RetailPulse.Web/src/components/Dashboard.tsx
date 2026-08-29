@@ -7,6 +7,7 @@ import { fetchFinancials, fetchScorecardBatched, fetchStores, fetchStockoutRisks
 import { toAlert, fetchAlerts } from '../services/alertsApi';
 import { DemoTour } from './demo/DemoTour';
 import { DemoMode } from './demo/DemoMode';
+import type { DemoPrewarm } from './demo/demoActs';
 import { TelemetryPanel } from './TelemetryPanel';
 import { AgentRoutingPanel } from './AgentRoutingPanel';
 import { MemoryPanel } from './MemoryPanel';
@@ -321,12 +322,22 @@ export function Dashboard() {
   // the panel span forever.
   const scorecardRequested = useRef(false);
 
+  // Set by Demo Mode when it reaches the act that should start each fetch. Kept separate so
+  // a panel warms exactly once, whichever of the two triggers it first.
+  const [prewarmPortfolio, setPrewarmPortfolio] = useState(false);
+  const [prewarmCards, setPrewarmCards] = useState(false);
+  const handlePrewarm = useCallback((targets: readonly DemoPrewarm[]) => {
+    if (targets.includes('portfolio')) setPrewarmPortfolio(true);
+    if (targets.includes('cards')) setPrewarmCards(true);
+  }, []);
+
   useEffect(() => {
-    // Prewarm on Demo Mode as well as on the panel itself. Scoring six brands fans out
+    // Warm on the demo's signal as well as on the panel itself. Scoring six brands fans out
     // thirty specialist assessments, so a run that navigates here and immediately starts
-    // narrating arrives before the grid has anything in it. Starting at demo open gives
-    // the fan-out the ninety seconds of earlier acts to finish in.
-    if ((activeView !== 'portfolio' && !demoOpen) || scorecardRequested.current) return;
+    // narrating arrives before the grid has anything in it. Demo Mode schedules the signal
+    // several acts early, and deliberately not while a chat prompt is in flight: the two
+    // compete for the same gateway token budget and the prompt is the one that loses.
+    if ((activeView !== 'portfolio' && !prewarmPortfolio) || scorecardRequested.current) return;
     scorecardRequested.current = true;
     setBrandsLoading(true);
     void (async () => {
@@ -343,15 +354,15 @@ export function Dashboard() {
       });
       setBrandsLoading(false);
     })();
-  }, [activeView, activePack.pack, demoOpen]);
+  }, [activeView, activePack.pack, prewarmPortfolio]);
 
   // Same reason as the scorecard above: the cards panel only mounts with its view, so a
-  // demo that pans to it starts a cold fetch and narrates a spinner. Fetch once when Demo
-  // Mode opens and hand the result to the panel so it paints populated.
+  // demo that pans to it starts a cold fetch and narrates a spinner. This one is a plain
+  // read with no agent behind it, so the demo asks for it in its opening act.
   const [prewarmedCards, setPrewarmedCards] = useState<AdaptiveCard[]>([]);
   const cardsRequested = useRef(false);
   useEffect(() => {
-    if (!demoOpen || cardsRequested.current) return;
+    if (!prewarmCards || cardsRequested.current) return;
     cardsRequested.current = true;
     let cancelled = false;
     void (async () => {
@@ -361,7 +372,7 @@ export function Dashboard() {
       if (!cancelled) setPrewarmedCards(cards);
     })();
     return () => { cancelled = true; };
-  }, [demoOpen]);
+  }, [prewarmCards]);
 
   // Load operational data lazily, when its panel is first opened, so the chat path
   // does not pay for reads it will not render.
@@ -1066,6 +1077,7 @@ export function Dashboard() {
         onTelemetry={setTelemetryOpen}
         sendPrompt={sendPrompt}
         telemetryOpen={telemetryOpen}
+        onPrewarm={handlePrewarm}
       />
     </div>
   );

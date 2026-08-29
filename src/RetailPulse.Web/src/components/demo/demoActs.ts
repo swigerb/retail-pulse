@@ -25,6 +25,17 @@ export type DemoInteraction =
   | { readonly kind: 'scroll'; readonly selector: string; readonly note: string }
   | { readonly kind: 'wait'; readonly ms: number; readonly note: string };
 
+/**
+ * A panel whose data can be fetched ahead of the act that shows it.
+ *
+ * Both mount their own fetch with their view, which meant a run arrived and narrated a
+ * spinner. Warming them is not free, though: the portfolio fans out five specialist
+ * assessments per brand, and firing that while a chat prompt is in flight spends the
+ * gateway's token budget on the wrong thing and gets the prompt throttled. So warming is
+ * scheduled against a specific act rather than started with the run.
+ */
+export type DemoPrewarm = 'portfolio' | 'cards';
+
 export interface DemoAct {
   readonly id: string;
   readonly chapter: string;
@@ -41,6 +52,8 @@ export interface DemoAct {
   readonly prompt?: string;
   /** Controls to drive inside the panel once it is on screen. */
   readonly interactions?: readonly DemoInteraction[];
+  /** Panels to start fetching when this act begins, so a later act finds them populated. */
+  readonly prewarm?: readonly DemoPrewarm[];
   /** How long to hold once the work is done, so the result can be read. */
   readonly holdMs?: number;
 }
@@ -59,6 +72,8 @@ export const DEMO_ACTS: readonly DemoAct[] = [
       + 'you can pause or step back at any point.',
     view: 'chat',
     telemetry: false,
+    // Free to warm immediately: the cards panel is a plain read with no agent behind it.
+    prewarm: ['cards'],
     holdMs: GLANCE,
   },
   {
@@ -121,20 +136,6 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     holdMs: READ + 4_000,
   },
   {
-    id: 'portfolio',
-    chapter: 'Multi-agent',
-    title: 'Scoring the whole portfolio',
-    body:
-      'Every brand scored across five specialist dimensions: demand, margin, competitive, '
-      + 'supply and store execution. The specialists run in parallel and the scores are '
-      + 'cached, so a second visit is instant.',
-    view: 'portfolio',
-    interactions: [
-      { kind: 'wait', ms: 14_000, note: 'Scoring brands' },
-    ],
-    holdMs: READ,
-  },
-  {
     id: 'competitive',
     chapter: 'Analytics',
     title: 'Filtering competitive intelligence',
@@ -143,6 +144,11 @@ export const DEMO_ACTS: readonly DemoAct[] = [
       + 'responses. Opening the category filter now. The list is derived from the data, so '
       + 'every option returns rows rather than an empty grid.',
     view: 'competitive',
+    // Start scoring the portfolio here, three acts before it is shown. It is thirty agent
+    // calls, so it needs the head start, but it must not run while a chat prompt is in
+    // flight or the gateway throttles the prompt. Everything between here and the
+    // scorecard is a plain data read, so this is the first safe moment.
+    prewarm: ['portfolio'],
     interactions: [
       { kind: 'wait', ms: 3_500, note: 'Loading competitive data' },
       { kind: 'click', selector: '[data-testid="category-filter"] button', note: 'Opening the category filter' },
@@ -184,6 +190,21 @@ export const DEMO_ACTS: readonly DemoAct[] = [
       { kind: 'wait', ms: 3_000, note: 'Loading store performance' },
     ],
     holdMs: GLANCE,
+  },
+  {
+    id: 'portfolio',
+    chapter: 'Multi-agent',
+    title: 'Scoring the whole portfolio',
+    body:
+      'The council idea, scaled. Every brand scored across the same five specialist '
+      + 'dimensions: demand, margin, competitive, supply and store execution. These have '
+      + 'been scoring in the background since the competitive panel, and the results are '
+      + 'cached, so a second visit is instant.',
+    view: 'portfolio',
+    interactions: [
+      { kind: 'wait', ms: 4_000, note: 'Loading the scorecard' },
+    ],
+    holdMs: READ,
   },
   {
     id: 'knowledge',
