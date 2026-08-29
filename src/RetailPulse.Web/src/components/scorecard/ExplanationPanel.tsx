@@ -232,6 +232,9 @@ function LoadingSkeleton() {
 
 export function ExplanationPanel({ explanation, open, onClose }: ExplanationPanelProps) {
   const styles = useStyles();
+  const steps = explanation?.steps ?? [];
+  const dataSources = explanation?.dataSources ?? [];
+  const grounding = Math.max(0, Math.min(100, explanation?.confidence ?? 0));
 
   const stepRevealKeyframes = `
     @keyframes stepReveal {
@@ -251,7 +254,12 @@ export function ExplanationPanel({ explanation, open, onClose }: ExplanationPane
       />
 
       {/* Panel */}
-      <div className={`${styles.panel} ${open ? styles.panelOpen : styles.panelClosed}`}>
+      <div
+        className={`${styles.panel} ${open ? styles.panelOpen : styles.panelClosed}`}
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={!open}
+      >
         <div className={styles.header}>
           <span className={styles.headerTitle}>How did we get this answer?</span>
           <button className={styles.closeBtn} onClick={onClose} aria-label="Close">
@@ -266,23 +274,27 @@ export function ExplanationPanel({ explanation, open, onClose }: ExplanationPane
             <>
               <div className={styles.question}>{explanation.question}</div>
               <div className={styles.answer}>{explanation.answer}</div>
-              <div className={styles.stepsTitle}>Reasoning Steps</div>
-              {explanation.steps.map((step, i) => (
-                <div
-                  key={i}
-                  className={styles.step}
-                  style={{
-                    opacity: 0,
-                    animation: `stepReveal 0.4s ease forwards`,
-                    animationDelay: `${i * 0.15}s`,
-                  }}
-                >
-                  <span className={styles.stepBadge}>{step.toolName}</span>
-                  <div className={styles.stepInput}>↳ {step.inputSummary}</div>
-                  <div className={styles.stepOutput}>→ {step.outputSummary}</div>
-                  <div className={styles.stepReasoning}>{step.reasoning}</div>
-                </div>
-              ))}
+              <div className={styles.stepsTitle}>Grounded score inputs</div>
+              {steps.length > 0 ? (
+                steps.map((step, i) => (
+                  <div
+                    key={i}
+                    className={styles.step}
+                    style={{
+                      opacity: 0,
+                      animation: `stepReveal 0.4s ease forwards`,
+                      animationDelay: `${i * 0.15}s`,
+                    }}
+                  >
+                    <span className={styles.stepBadge}>{step.toolName}</span>
+                    <div className={styles.stepInput}>↳ {step.inputSummary}</div>
+                    <div className={styles.stepOutput}>→ {step.outputSummary}</div>
+                    <div className={styles.stepReasoning}>{step.reasoning}</div>
+                  </div>
+                ))
+              ) : (
+                <div className={styles.stepReasoning}>No grounded reasoning steps were returned for this score.</div>
+              )}
             </>
           )}
         </div>
@@ -290,30 +302,30 @@ export function ExplanationPanel({ explanation, open, onClose }: ExplanationPane
         {explanation && (
           <div className={styles.footer}>
             <div className={styles.confidenceRow}>
-              <span className={styles.confidenceLabel}>Confidence</span>
+              <span className={styles.confidenceLabel}>Grounding</span>
               <div className={styles.confidenceTrack}>
                 <div
                   style={{
-                    width: `${explanation.confidence}%`,
+                    width: `${grounding}%`,
                     height: '100%',
                     borderRadius: '3px',
-                    backgroundColor: getConfidenceColor(explanation.confidence),
+                    backgroundColor: getConfidenceColor(grounding),
                     transition: 'width 0.6s ease',
                   }}
                 />
               </div>
               <span
                 className={styles.confidenceValue}
-                style={{ color: getConfidenceColor(explanation.confidence) }}
+                style={{ color: getConfidenceColor(grounding) }}
               >
-                {explanation.confidence}%
+                {grounding}%
               </span>
             </div>
 
-            {explanation.dataSources.length > 0 && (
+            {dataSources.length > 0 && (
               <>
                 <div className={styles.sourcesTitle}>Data Sources</div>
-                {explanation.dataSources.map((src, i) => (
+                {dataSources.map((src, i) => (
                   <div key={i} className={styles.sourceItem}>
                     {src.url ? (
                       <a

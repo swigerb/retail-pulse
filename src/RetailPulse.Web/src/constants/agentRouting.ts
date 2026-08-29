@@ -244,6 +244,7 @@ export const SCORECARD_COLORS = {
   dimensionMargin: '#22c55e',
   dimensionCompetitive: '#ef4444',
   dimensionSupply: '#f97316',
+  dimensionStore: '#06b6d4',
   skeletonBg: 'rgba(255,255,255,0.06)',
   skeletonShimmer: 'rgba(255,255,255,0.1)',
   whyButton: '#8b5cf6',

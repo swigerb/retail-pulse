@@ -40,6 +40,7 @@ import { AnonymousSessionBanner } from '../auth/gates/AnonymousAuthGate';
 import type { AnonymousSessionProvider } from '../auth/providers/anonymousProvider';
 import { useActivePack } from '../hooks/useActivePack';
 import type { PackTheme } from '../types/pack';
+import { buildScorecardExplanation } from '../scorecardModel';
 
 const DRAWER_WIDTH_PX = 560;
 const DRAWER_BREAKPOINT_PX = 768;
@@ -407,26 +408,13 @@ export function Dashboard() {
     return () => { cancelled = true; };
   }, [activeView, activePack.pack, financialsBrand]);
 
-  const handleWhyClick = () => {
-    setExplanationData({
-      traceId: 'trace-demo-001',
-      question: 'Why is this brand scored this way?',
-      answer: 'The health score reflects a composite of demand, margin, competitive, and supply metrics weighted by recent performance trends.',
-      steps: [
-        { toolName: 'GetPortfolioDepletionStats', inputSummary: 'brand=all, period=Q1', outputSummary: '6 brands analyzed, 24 data points', reasoning: 'Queried depletion data to establish demand baseline across all regions.' },
-        { toolName: 'GetMarginAnalysis', inputSummary: 'brand=all', outputSummary: 'Margin range: 22-41%', reasoning: 'Calculated gross margin for each brand to assess financial health dimension.' },
-        { toolName: 'GetCompetitiveLandscape', inputSummary: 'category=all', outputSummary: '12 competitors tracked', reasoning: 'Assessed competitive positioning and recent market share movements.' },
-      ],
-      confidence: 87,
-      dataSources: [
-        { name: 'Q1 Depletion Report', url: '#' },
-        { name: 'Margin Analysis Dashboard' },
-        { name: 'Nielsen Competitive Data', url: '#' },
-      ],
-      generatedAt: new Date().toISOString(),
-    });
+  const handleWhyClick = useCallback((target?: string) => {
+    const brand = selectedBrand ?? brands.find(b => b.brandName === target);
+    if (!brand) return;
+    const dimension = selectedBrand ? target : undefined;
+    setExplanationData(buildScorecardExplanation(brand, dimension));
     setExplanationOpen(true);
-  };
+  }, [brands, selectedBrand]);
 
   // SignalR connection lives at Dashboard level so spans persist across drawer open/close.
   // We intentionally do NOT disconnect on unmount — the connection is a module-level
