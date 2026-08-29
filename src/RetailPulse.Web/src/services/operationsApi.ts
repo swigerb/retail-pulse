@@ -1,11 +1,14 @@
 import { resolveApiUrl } from '../config/apiOrigin';
 import type {
   BrandScore,
+  BrandScoreDimensionDetail,
   MarginDriver,
   MarginWaterfallStep,
+  ScorecardDimensionKey,
   StockoutRisk,
   StorePerformance,
 } from '../types';
+import { dimensionKeyFromAgent, SCORECARD_DIMENSION_CONFIG, SCORECARD_DIMENSION_ORDER } from '../scorecardModel';
 
 /**
  * Financials and Store Operations reads.
@@ -182,6 +185,8 @@ export async function fetchStockoutRisks(): Promise<StockoutRisk[]> {
 interface WireDimension {
   readonly dimension?: string;
   readonly score?: number;
+  readonly weight?: number;
+  readonly weightedScore?: number;
   readonly assessment?: string;
   readonly agentKey?: string;
 }
@@ -192,6 +197,7 @@ interface WireBrandScore {
   readonly dimensions?: Record<string, WireDimension>;
   readonly summary?: string;
   readonly actionItems?: readonly string[];
+  readonly durationMs?: number;
 }
 
 interface WireScorecard {
@@ -199,38 +205,51 @@ interface WireScorecard {
   readonly totalDurationMs?: number;
 }
 
-/**
- * The orchestrator keys the dimension map by DISPLAY NAME ("Demand Momentum") and
- * carries the stable identifier in each entry's `agentKey` ("demand-forecasting").
- * Indexing the map by the panel's own slot names returns undefined for every slot,
- * so match on `agentKey` instead — that is the field guaranteed not to change when
- * a dimension is retitled.
- *
- * Scores are reported 0-10; the panel renders 0-100.
- */
-function toDimensions(wire: Record<string, WireDimension> | undefined): BrandScore['dimensions'] {
-  const byAgent = new Map<string, number>();
+function toDimensionDetails(wire: Record<string, WireDimension> | undefined): Partial<Record<ScorecardDimensionKey, BrandScoreDimensionDetail>> {
+  const byKey: Partial<Record<ScorecardDimensionKey, BrandScoreDimensionDetail>> = {};
   for (const entry of Object.values(wire ?? {})) {
-    if (entry?.agentKey) byAgent.set(entry.agentKey, (entry.score ?? 0) * 10);
+    const key = dimensionKeyFromAgent(entry?.agentKey);
+    if (!key) continue;
+    const config = SCORECARD_DIMENSION_CONFIG[key];
+    const score = Math.round((entry.score ?? 0) * 10);
+    const weight = entry.weight ?? config.weight;
+    byKey[key] = {
+      key,
+      label: entry.dimension ?? config.label,
+      shortLabel: config.shortLabel,
+      score,
+      weight,
+      weightedScore: (entry.weightedScore ?? ((entry.score ?? 0) * weight)) * 10,
+      assessment: entry.assessment,
+      agentKey: entry.agentKey ?? config.agentKey,
+    };
   }
-  const pick = (agentKey: string) => Math.round(byAgent.get(agentKey) ?? 0);
-  return {
-    demand: pick('demand-forecasting'),
-    margin: pick('margin-analysis'),
-    competitive: pick('competitive-intel'),
-    supply: pick('supply-chain'),
-  };
+  return byKey;
+}
+
+function toDimensions(details: Partial<Record<ScorecardDimensionKey, BrandScoreDimensionDetail>>): BrandScore['dimensions'] {
+  return SCORECARD_DIMENSION_ORDER.reduce((acc, key) => {
+    acc[key] = Math.round(details[key]?.score ?? 0);
+    return acc;
+  }, {} as BrandScore['dimensions']);
 }
 
 export function toBrandScores(wire: WireScorecard | null): BrandScore[] {
   return (wire?.brands ?? []).map(b => {
-    const dims = toDimensions(b.dimensions);
-    const entries = Object.entries(dims) as [keyof typeof dims, number][];
+    const dimensionDetails = toDimensionDetails(b.dimensions);
+    const dims = toDimensions(dimensionDetails);
+    const entries = Object.values(dimensionDetails).map(d => [d.key, d.score] as const);
     // The orchestrator returns a summary and actions, not an explicit risk/opportunity
     // pair. Derive them from the weakest and strongest dimensions so the card reports
     // something traceable to the scores it is showing.
-    const weakest = entries.reduce((a, b2) => (b2[1] < a[1] ? b2 : a));
-    const strongest = entries.reduce((a, b2) => (b2[1] > a[1] ? b2 : a));
+    const weakest = entries.reduce<typeof entries[number] | undefined>(
+      (a, b2) => (!a || b2[1] < a[1] ? b2 : a),
+      undefined,
+    );
+    const strongest = entries.reduce<typeof entries[number] | undefined>(
+      (a, b2) => (!a || b2[1] > a[1] ? b2 : a),
+      undefined,
+    );
     const actions = b.actionItems ?? [];
     // overallScore is reported 0-10; the panel's health score is 0-100.
     const score = (b.overallScore ?? 0) * 10;
@@ -240,8 +259,12 @@ export function toBrandScores(wire: WireScorecard | null): BrandScore[] {
       healthScore: Math.round(score),
       trend: score >= 70 ? 'up' : score >= 50 ? 'stable' : 'down',
       dimensions: dims,
-      topRisk: actions[0] ?? `${weakest[0]} is the weakest dimension (${weakest[1]})`,
-      topOpportunity: actions[1] ?? `Build on ${strongest[0]} strength (${strongest[1]})`,
+      dimensionDetails,
+      summary: b.summary,
+      actionItems: [...actions],
+      durationMs: b.durationMs,
+      topRisk: actions[0] ?? `${weakest ? SCORECARD_DIMENSION_CONFIG[weakest[0]].shortLabel : 'Scorecard'} is the weakest dimension (${weakest?.[1] ?? 0})`,
+      topOpportunity: actions[1] ?? `Build on ${strongest ? SCORECARD_DIMENSION_CONFIG[strongest[0]].shortLabel : 'scorecard'} strength (${strongest?.[1] ?? 0})`,
     } satisfies BrandScore;
   });
 }
