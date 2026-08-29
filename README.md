@@ -12,17 +12,17 @@
 [![CI](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Sizzle reel
+## Quick tour
 
 <div align="center">
   <a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">
     <img src="docs/media/retail-pulse-sizzle-poster.png" width="880"
-         alt="Retail Pulse sizzle reel - click to play" />
+         alt="Retail Pulse quick tour - click to play" />
   </a>
 </div>
 
 <div align="center">
-  <sub><strong><a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">Watch the 2 min 45 s reel</a></strong> &nbsp;·&nbsp; 1080p60, 16 MB<br />
+  <sub><strong><a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">Watch the 2 min 45 s tour</a></strong> &nbsp;·&nbsp; 1080p60, 16 MB<br />
   A plain-English question routed to a specialist agent, charts generated live from real tool calls,
   real-time agent telemetry (routing, memory, traces), APIM as the AI Gateway enforcing token limits
   and cost accountability, and tenants configured in YAML.<br />
@@ -463,9 +463,9 @@ Retail Pulse implements enterprise-grade patterns:
 
 ## Demo Walkthrough
 
-Watch the [2 min 45 s sizzle reel](#sizzle-reel) for the short version, the
-[4 min 23 s narrated walkthrough](#guided-walkthrough) for a tour of every panel, or see the
-[complete demo script](docs/demo-walkthrough.md) for a step-by-step presentation guide (~10 minutes).
+Watch the [2 min 45 s quick tour](#quick-tour) for the short version, or the
+[4 min 23 s narrated walkthrough](#guided-walkthrough) to see every panel. The
+[complete demo script](docs/demo-walkthrough.md) is a step-by-step presentation guide (~10 minutes).
 
 ---
 
