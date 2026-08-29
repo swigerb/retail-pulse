@@ -286,7 +286,7 @@ supply:
       - Regional event driving above-forecast consumption
 
 stores:
-  types: [Flagship, Mall, Strip Center, Downtown, Outlet]
+  types: [Flagship, Mall, Shopping Center, Downtown, Outlet]
 
 margin:
   driverCategories: [Raw Materials, Labor, Logistics, Marketing, Packaging, Overhead]
