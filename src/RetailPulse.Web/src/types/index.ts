@@ -516,7 +516,14 @@ export type GuardrailDetectionType =
   | 'content-safety-selfharm'
   | 'content-safety-prompt-shield'
   | 'content-safety-indirect-injection'
-  | 'content-safety-unavailable';
+  | 'content-safety-unavailable'
+  | 'content-safety-block'
+  | 'agent-definition-structural'
+  | 'agent-definition-policy'
+  | 'agent-definition-jailbreak'
+  | 'agent-definition-content-safety'
+  | 'agent-definition-privileged-grant'
+  | 'agent-definition-content-safety-unavailable';
 
 export interface BlockedRequest {
   id: string;
@@ -542,6 +549,10 @@ export interface BlockedRequest {
    * the dashboard to split the pattern-family and model-family aggregates.
    */
   decision?: string;
+  /** Content Safety pipeline stage supplied by the API. */
+  stage?: string;
+  /** Category threshold in effect when the audit row was written. */
+  threshold?: number;
 }
 
 export interface GuardrailsStats {

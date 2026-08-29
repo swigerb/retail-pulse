@@ -270,7 +270,8 @@ public class RagContextProvider
                         // user-prompt jailbreak flag when both are set.
                         string detectionType = ContentSafetyDetectionTypes.ForResultWithShield(
                             evaluation, preferIndirect: true);
-                        (string? category, int? severity) = PickCategoryAndSeverity(evaluation);
+                        (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
+                        int? threshold = ContentSafetyAuditFields.ThresholdFor(cs, category);
                         await LogAsync(new SuspiciousRequest(
                             Guid.NewGuid().ToString("N"),
                             DateTime.UtcNow,
@@ -280,7 +281,16 @@ public class RagContextProvider
                             ContentSafetyActions.Dropped,
                             Category: category,
                             Severity: severity,
-                            Decision: evaluation.Decision.ToString()), ct).ConfigureAwait(false);
+                            Decision: evaluation.Decision.ToString(),
+                            Stage: ContentSafetyStage.RetrievedKnowledge.ToString(),
+                            Threshold: threshold,
+                            Reason: ContentSafetyAuditFields.BuildReason(
+                                evaluation,
+                                ContentSafetyStage.RetrievedKnowledge,
+                                detectionType,
+                                category,
+                                severity,
+                                threshold)), ct).ConfigureAwait(false);
                         _logger.LogWarning(
                             "Content Safety dropped RAG chunk '{Title}#{Chunk}' (type={Detection})",
                             chunk.Title, chunk.ChunkIndex, detectionType);
@@ -300,7 +310,16 @@ public class RagContextProvider
                             action,
                             Category: null,
                             Severity: null,
-                            Decision: evaluation.Decision.ToString()), ct).ConfigureAwait(false);
+                            Decision: evaluation.Decision.ToString(),
+                            Stage: ContentSafetyStage.RetrievedKnowledge.ToString(),
+                            Threshold: null,
+                            Reason: ContentSafetyAuditFields.BuildReason(
+                                evaluation,
+                                ContentSafetyStage.RetrievedKnowledge,
+                                ContentSafetyDetectionTypes.Unavailable,
+                                category: null,
+                                severity: null,
+                                threshold: null)), ct).ConfigureAwait(false);
                         if (cs.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
                         {
                             _logger.LogWarning(
@@ -313,17 +332,28 @@ public class RagContextProvider
                     }
                 case ContentSafetyDecision.Flagged:
                     {
-                        (string? category, int? severity) = PickCategoryAndSeverity(evaluation);
+                        (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
+                        string detectionType = ContentSafetyDetectionTypes.ForResultWithShield(evaluation, preferIndirect: true);
+                        int? threshold = ContentSafetyAuditFields.ThresholdFor(cs, category);
                         await LogAsync(new SuspiciousRequest(
                             Guid.NewGuid().ToString("N"),
                             DateTime.UtcNow,
                             $"Retrieved-knowledge chunk '{chunk.Title}#{chunk.ChunkIndex}' flagged by Content Safety",
-                            ContentSafetyDetectionTypes.ForResultWithShield(evaluation, preferIndirect: true),
+                            detectionType,
                             userId,
                             ContentSafetyActions.Flagged,
                             Category: category,
                             Severity: severity,
-                            Decision: evaluation.Decision.ToString()), ct).ConfigureAwait(false);
+                            Decision: evaluation.Decision.ToString(),
+                            Stage: ContentSafetyStage.RetrievedKnowledge.ToString(),
+                            Threshold: threshold,
+                            Reason: ContentSafetyAuditFields.BuildReason(
+                                evaluation,
+                                ContentSafetyStage.RetrievedKnowledge,
+                                detectionType,
+                                category,
+                                severity,
+                                threshold)), ct).ConfigureAwait(false);
                         survivors.Add(chunk);
                         break;
                     }
@@ -339,15 +369,4 @@ public class RagContextProvider
     private Task LogAsync(SuspiciousRequest request, CancellationToken ct) =>
         _suspiciousLog?.LogAsync(request, ct) ?? Task.CompletedTask;
 
-    private static (string? Category, int? Severity) PickCategoryAndSeverity(ContentSafetyResult evaluation)
-    {
-        if (evaluation.Categories.Count == 0) return (null, null);
-        ContentSafetyCategoryHit top = evaluation.Categories[0];
-        for (int i = 1; i < evaluation.Categories.Count; i++)
-        {
-            if (evaluation.Categories[i].Severity > top.Severity)
-                top = evaluation.Categories[i];
-        }
-        return (top.Category, top.Severity);
-    }
 }

@@ -71,7 +71,8 @@ public sealed class ContentSafetyToolResultInspector
                     // Tool-result stage does not run Prompt Shields, so a
                     // block without a category is never a prompt-shield hit.
                     string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
-                    (string? category, int? severity) = PickCategoryAndSeverity(evaluation);
+                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
+                    int? threshold = ContentSafetyAuditFields.ThresholdFor(cfg, category);
 
                     await _log.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),
@@ -82,7 +83,16 @@ public sealed class ContentSafetyToolResultInspector
                         ContentSafetyActions.Blocked,
                         Category: category,
                         Severity: severity,
-                        Decision: evaluation.Decision.ToString()), cancellationToken).ConfigureAwait(false);
+                        Decision: evaluation.Decision.ToString(),
+                        Stage: ContentSafetyStage.ToolResult.ToString(),
+                        Threshold: threshold,
+                        Reason: ContentSafetyAuditFields.BuildReason(
+                            evaluation,
+                            ContentSafetyStage.ToolResult,
+                            detectionType,
+                            category,
+                            severity,
+                            threshold)), cancellationToken).ConfigureAwait(false);
 
                     _logger.LogWarning(
                         "Content Safety blocked tool result from '{Tool}' (decision={Decision}, categories={CategoryCount})",
@@ -106,7 +116,16 @@ public sealed class ContentSafetyToolResultInspector
                         action,
                         Category: null,
                         Severity: null,
-                        Decision: evaluation.Decision.ToString()), cancellationToken).ConfigureAwait(false);
+                        Decision: evaluation.Decision.ToString(),
+                        Stage: ContentSafetyStage.ToolResult.ToString(),
+                        Threshold: null,
+                        Reason: ContentSafetyAuditFields.BuildReason(
+                            evaluation,
+                            ContentSafetyStage.ToolResult,
+                            ContentSafetyDetectionTypes.Unavailable,
+                            category: null,
+                            severity: null,
+                            threshold: null)), cancellationToken).ConfigureAwait(false);
 
                     if (cfg.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
                     {
@@ -121,17 +140,28 @@ public sealed class ContentSafetyToolResultInspector
                 }
             case ContentSafetyDecision.Flagged:
                 {
-                    (string? category, int? severity) = PickCategoryAndSeverity(evaluation);
+                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
+                    string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
+                    int? threshold = ContentSafetyAuditFields.ThresholdFor(cfg, category);
                     await _log.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),
                         DateTime.UtcNow,
                         $"Tool result from '{toolName}' flagged by Content Safety",
-                        ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation),
+                        detectionType,
                         userId,
                         ContentSafetyActions.Flagged,
                         Category: category,
                         Severity: severity,
-                        Decision: evaluation.Decision.ToString()), cancellationToken).ConfigureAwait(false);
+                        Decision: evaluation.Decision.ToString(),
+                        Stage: ContentSafetyStage.ToolResult.ToString(),
+                        Threshold: threshold,
+                        Reason: ContentSafetyAuditFields.BuildReason(
+                            evaluation,
+                            ContentSafetyStage.ToolResult,
+                            detectionType,
+                            category,
+                            severity,
+                            threshold)), cancellationToken).ConfigureAwait(false);
                     return ContentSafetyToolResultOutcome.PassThrough(toolResultJson);
                 }
 
@@ -192,17 +222,6 @@ public sealed class ContentSafetyToolResultInspector
         _ => "severe",
     };
 
-    private static (string? Category, int? Severity) PickCategoryAndSeverity(ContentSafetyResult evaluation)
-    {
-        if (evaluation.Categories.Count == 0) return (null, null);
-        ContentSafetyCategoryHit top = evaluation.Categories[0];
-        for (int i = 1; i < evaluation.Categories.Count; i++)
-        {
-            if (evaluation.Categories[i].Severity > top.Severity)
-                top = evaluation.Categories[i];
-        }
-        return (top.Category, top.Severity);
-    }
 }
 
 /// <summary>Outcome returned by <see cref="ContentSafetyToolResultInspector.InspectAsync"/>.</summary>
