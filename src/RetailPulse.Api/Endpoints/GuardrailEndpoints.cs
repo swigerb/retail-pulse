@@ -25,7 +25,8 @@ public static class GuardrailEndpoints
                 decision = r.Decision,
                 stage = r.Stage,
                 threshold = r.Threshold,
-                reason = r.Reason
+                reason = r.Reason,
+                subject = r.Subject
             }));
         })
         .WithName("GetGuardrailsLog").RequireAuthorization().RequireRateLimiting("relaxed");

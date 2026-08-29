@@ -508,6 +508,7 @@ export interface CacheInfo {
 
 export type GuardrailDetectionType =
   | 'jailbreak'
+  | 'injection'
   | 'pii'
   | 'access'
   | 'content-safety-hate'
@@ -553,6 +554,13 @@ export interface BlockedRequest {
   stage?: string;
   /** Category threshold in effect when the audit row was written. */
   threshold?: number;
+  /**
+   * The named artifact the guardrail was checking (tool name, knowledge chunk,
+   * agent definition field). Supplied structurally by the API so the dashboard
+   * never has to pattern-match `requestPreview` prose to recover it. Absent on
+   * rows where `requestPreview` is itself the evidence, such as a chat request.
+   */
+  subject?: string;
 }
 
 export interface GuardrailsStats {
