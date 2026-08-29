@@ -111,6 +111,8 @@ function HistoryItem({ session }: { session: CouncilSession }) {
   const styles = useStyles();
   const [expanded, setExpanded] = useState(false);
   const v = session.verdict;
+  const date = new Date(session.convenedAt);
+  const displayDate = Number.isNaN(date.getTime()) ? 'Unknown date' : date.toLocaleString();
 
   return (
     <div>
@@ -131,7 +133,7 @@ function HistoryItem({ session }: { session: CouncilSession }) {
             {RATING_EMOJIS[v.overallRating]} {session.brand}
             {session.region && ` · ${session.region}`}
           </span>
-          <span className={styles.date}>{new Date(session.convenedAt).toLocaleString()}</span>
+          <span className={styles.date}>{displayDate}</span>
         </div>
         <div className={styles.badges}>
           <Badge
@@ -171,15 +173,18 @@ export default function CouncilHistory() {
   const [sessions, setSessions] = useState<CouncilSession[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const handleLoad = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await fetchCouncilHistory();
       setSessions(data);
       setLoaded(true);
     } catch {
       setSessions([]);
+      setLoadError('Unable to load previous council sessions. Please try again.');
       setLoaded(true);
     } finally {
       setLoading(false);
@@ -201,6 +206,18 @@ export default function CouncilHistory() {
         >
           {loading ? '⏳ Loading...' : 'Load History'}
         </Button>
+      ) : loadError ? (
+        <div className={styles.empty} data-testid="history-error">
+          <div>{loadError}</div>
+          <Button
+            className={styles.loadBtn}
+            appearance="subtle"
+            onClick={handleLoad}
+            disabled={loading}
+          >
+            {loading ? '⏳ Loading...' : 'Try again'}
+          </Button>
+        </div>
       ) : sessions.length === 0 ? (
         <div className={styles.empty} data-testid="history-empty">
           No previous council sessions found

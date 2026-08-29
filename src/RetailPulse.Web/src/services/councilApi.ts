@@ -8,77 +8,105 @@ import type {
   HealthRating,
 } from '../types';
 
+const HEALTH_RATINGS: readonly HealthRating[] = ['green', 'yellow', 'red'];
+
 /**
- * Wire shapes returned by `POST /api/council/convene`.
+ * Wire shapes returned by the council endpoints.
  *
- * The API answers in flat snake_case (see ChatEndpoints) while the UI models a
- * nested camelCase `{ votes, verdict }`. Nothing translated between them, so
- * `response.verdict` was always `undefined` — the executive verdict never
- * rendered — and every vote arrived without a `domain`, which is the key
- * CouncilVoting matches its three cards on, so all three sat on
- * "DELIBERATING…" forever even though the council had already reported.
+ * The API answers in flat snake_case while the UI models a nested camelCase
+ * `{ votes, verdict }`. Nothing translated the history response, so
+ * `session.verdict` was undefined and the history panel threw as soon as it
+ * rendered a real row.
  *
  * The mapping lives here, at the edge, so components keep consuming one stable
  * view model.
  */
 interface WireVote {
-  readonly agent_id?: string;
-  readonly agent_name?: string;
-  readonly rating?: string;
-  readonly reasoning?: string;
-  readonly confidence?: number;
-  readonly key_metrics?: readonly string[];
-  readonly response_time_ms?: number;
+  readonly agent_id?: unknown;
+  readonly agent_name?: unknown;
+  readonly rating?: unknown;
+  readonly reasoning?: unknown;
+  readonly confidence?: unknown;
+  readonly key_metrics?: unknown;
+  readonly response_time_ms?: unknown;
 }
 
-interface WireConveneResponse {
-  readonly brand?: string;
-  readonly region?: string;
-  readonly overall_rating?: string;
-  readonly synthesis?: string;
-  readonly is_unanimous?: boolean;
-  readonly disagreements?: readonly string[];
-  readonly action_items?: readonly string[];
-  readonly convened_at?: string;
-  readonly total_duration_ms?: number;
-  readonly votes?: readonly WireVote[];
+interface WireCouncilResponse {
+  readonly id?: unknown;
+  readonly brand?: unknown;
+  readonly region?: unknown;
+  readonly overall_rating?: unknown;
+  readonly synthesis?: unknown;
+  readonly is_unanimous?: unknown;
+  readonly disagreements?: unknown;
+  readonly action_items?: unknown;
+  readonly convened_at?: unknown;
+  readonly total_duration_ms?: unknown;
+  readonly votes?: unknown;
 }
 
-/** `HealthRating` is lowercase in the UI; the API sends the C# enum name ("Yellow"). */
-function toRating(value: string | undefined): HealthRating {
-  switch ((value ?? '').trim().toLowerCase()) {
-    case 'green':
-      return 'green';
-    case 'red':
-      return 'red';
-    default:
-      return 'yellow';
+function toStringValue(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function toOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function toNumberValue(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function toArray(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function toWireVote(value: unknown): WireVote {
+  return value && typeof value === 'object' ? value as WireVote : {};
+}
+
+function toWireCouncilResponse(value: unknown): WireCouncilResponse {
+  return value && typeof value === 'object' ? value as WireCouncilResponse : {};
+}
+
+/**
+ * Accept both the C# enum name and its numeric ordinal so a serializer change
+ * cannot break style-map lookups again.
+ */
+function toRating(value: unknown): HealthRating {
+  if (typeof value === 'number') return HEALTH_RATINGS[value] ?? 'yellow';
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    const match = HEALTH_RATINGS.find((rating) => rating === normalized);
+    if (match) return match;
   }
+  return 'yellow';
 }
 
 /**
  * CouncilVoting keys its three cards on `domain`, which the wire format does not
  * carry. Derive it from the agent id (falling back to the display name) so a vote
  * binds to its card. Unknown agents fall back to 'demand' rather than being
- * dropped — a rendered card with a real rating beats one stuck deliberating.
+ * dropped. A rendered card with a real rating beats one stuck deliberating.
  */
 function toDomain(vote: WireVote): CouncilAgentVote['domain'] {
-  const key = `${vote.agent_id ?? ''} ${vote.agent_name ?? ''}`.toLowerCase();
+  const key = `${toStringValue(vote.agent_id)} ${toStringValue(vote.agent_name)}`.toLowerCase();
   if (key.includes('supply')) return 'supply';
   if (key.includes('competitive')) return 'competitive';
   return 'demand';
 }
 
-function toVote(vote: WireVote): CouncilAgentVote {
+function toVote(value: unknown): CouncilAgentVote {
+  const vote = toWireVote(value);
   return {
-    agentId: vote.agent_id ?? '',
-    agentName: vote.agent_name ?? 'Specialist',
+    agentId: toStringValue(vote.agent_id),
+    agentName: toStringValue(vote.agent_name, 'Specialist'),
     domain: toDomain(vote),
     rating: toRating(vote.rating),
-    confidence: vote.confidence ?? 0,
-    reasoning: vote.reasoning ?? '',
-    keyMetrics: [...(vote.key_metrics ?? [])],
-    responseTimeMs: vote.response_time_ms ?? 0,
+    confidence: toNumberValue(vote.confidence),
+    reasoning: toStringValue(vote.reasoning),
+    keyMetrics: toArray(vote.key_metrics).map((metric) => toStringValue(metric)).filter(Boolean),
+    responseTimeMs: toNumberValue(vote.response_time_ms),
   };
 }
 
@@ -105,7 +133,18 @@ function toDisagreement(text: string): CouncilDisagreement {
  * Lift the ordinal into `priority` so the badge shows a number and the text is
  * not duplicated.
  */
-function toActionItem(text: string, index: number): { priority: number; text: string } {
+function toDisagreementItem(value: unknown): CouncilDisagreement {
+  return toDisagreement(toStringValue(value, 'Unspecified disagreement.'));
+}
+
+function toActionItem(value: unknown, index: number): { priority: number; text: string } {
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const text = toStringValue(record['text'], 'Review this council action.');
+    return { priority: toNumberValue(record['priority'], index + 1), text };
+  }
+
+  const text = toStringValue(value, 'Review this council action.');
   const match = /^\s*(\d+)[.)]\s*([\s\S]*)$/.exec(text);
   if (match) {
     return { priority: Number(match[1]), text: match[2].trim() };
@@ -113,23 +152,37 @@ function toActionItem(text: string, index: number): { priority: number; text: st
   return { priority: index + 1, text: text.trim() };
 }
 
-function toVerdict(wire: WireConveneResponse): CouncilVerdict {
+function toVerdict(wire: WireCouncilResponse): CouncilVerdict {
   return {
     overallRating: toRating(wire.overall_rating),
-    unanimous: wire.is_unanimous ?? false,
-    synthesisText: wire.synthesis ?? '',
-    disagreements: (wire.disagreements ?? []).map(toDisagreement),
-    actionItems: (wire.action_items ?? []).map(toActionItem),
-    totalConveneTimeMs: wire.total_duration_ms ?? 0,
+    unanimous: wire.is_unanimous === true,
+    synthesisText: toStringValue(wire.synthesis, 'No synthesis is available for this council session.'),
+    disagreements: toArray(wire.disagreements).map(toDisagreementItem),
+    actionItems: toArray(wire.action_items).map(toActionItem),
+    totalConveneTimeMs: toNumberValue(wire.total_duration_ms),
   };
 }
 
-export function mapConveneResponse(wire: WireConveneResponse): CouncilConveneResponse {
+export function mapConveneResponse(value: unknown): CouncilConveneResponse {
+  const wire = toWireCouncilResponse(value);
   return {
-    sessionId: wire.convened_at ?? '',
-    brand: wire.brand ?? '',
-    region: wire.region,
-    votes: (wire.votes ?? []).map(toVote),
+    sessionId: toStringValue(wire.convened_at),
+    brand: toStringValue(wire.brand),
+    region: toOptionalString(wire.region),
+    votes: toArray(wire.votes).map(toVote),
+    verdict: toVerdict(wire),
+  };
+}
+
+export function toCouncilSession(value: unknown): CouncilSession {
+  const wire = toWireCouncilResponse(value);
+  const convenedAt = toStringValue(wire.convened_at);
+  return {
+    id: toStringValue(wire.id, convenedAt || 'unknown-council-session'),
+    brand: toStringValue(wire.brand, 'Unknown brand'),
+    region: toOptionalString(wire.region),
+    convenedAt,
+    votes: toArray(wire.votes).map(toVote),
     verdict: toVerdict(wire),
   };
 }
@@ -141,7 +194,7 @@ export async function conveneCouncil(brand: string, region?: string): Promise<Co
     body: JSON.stringify({ brand, region }),
   });
   if (!res.ok) throw new Error(`Council convene failed: ${res.status}`);
-  return mapConveneResponse((await res.json()) as WireConveneResponse);
+  return mapConveneResponse(await res.json());
 }
 
 export async function fetchCouncilHistory(limit = 20): Promise<CouncilSession[]> {
@@ -150,5 +203,6 @@ export async function fetchCouncilHistory(limit = 20): Promise<CouncilSession[]>
   // empty history rather than surfacing a raw 404 inside the panel.
   if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Failed to fetch council history: ${res.status}`);
-  return res.json();
+  const wire = await res.json();
+  return toArray(wire).map(toCouncilSession);
 }
