@@ -200,6 +200,12 @@ const METRIC_CARDS = [
   { key: 'avgCostPerRequest', label: 'Avg Cost / Req', icon: '📊', color: OBSERVABILITY_COLORS.avgCost, fmt: (v: number) => `$${v.toFixed(4)}` },
 ] as const;
 
+/** Sub-second tools are common, so seconds only once the total is worth reading in seconds. */
+function formatToolDuration(ms: number): string {
+  if (ms >= 1_000) return `${(ms / 1_000).toFixed(1)}s`;
+  return `${Math.round(ms).toLocaleString()}ms`;
+}
+
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: React.ReactNode }) {
   if (!active || !payload?.length) return null;
   return (
@@ -409,7 +415,7 @@ export default function CostDashboard() {
                   <tr>
                     <th className={styles.tableHead}>Tool</th>
                     <th className={styles.tableHead}>Calls</th>
-                    <th className={styles.tableHead}>Total Tokens</th>
+                    <th className={styles.tableHead}>Total Time</th>
                     <th className={styles.tableHead}>Avg Duration</th>
                   </tr>
                 </thead>
@@ -418,7 +424,7 @@ export default function CostDashboard() {
                     <tr key={tool.toolName}>
                       <td className={styles.tableCell} style={{ fontWeight: 600 }}>{tool.toolName}</td>
                       <td className={styles.tableCellMuted}>{tool.callCount.toLocaleString()}</td>
-                      <td className={styles.tableCellMuted}>{tool.totalTokens.toLocaleString()}</td>
+                      <td className={styles.tableCellMuted}>{formatToolDuration(tool.totalDurationMs)}</td>
                       <td className={styles.tableCellMuted}>{tool.avgDurationMs.toFixed(0)}ms</td>
                     </tr>
                   ))}

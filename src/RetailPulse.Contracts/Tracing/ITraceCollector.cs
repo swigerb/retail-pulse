@@ -20,7 +20,13 @@ public record TraceSpan(
 /// <summary>
 /// Aggregated usage statistics for a tool across captured trace spans.
 /// </summary>
-public record ToolUsageStat(string ToolName, int CallCount, int TotalTokens, double AvgDurationMs);
+/// <remarks>
+/// Deliberately reports time rather than tokens. Tool spans are MCP round trips to the tool
+/// host, so they never carry model tokens: those belong to the LLM span that decided to call
+/// the tool. A per-tool token total could therefore only ever be zero, which is what the cost
+/// dashboard used to show.
+/// </remarks>
+public record ToolUsageStat(string ToolName, int CallCount, double TotalDurationMs, double AvgDurationMs);
 
 /// <summary>
 /// Summary of a complete trace including all spans and aggregated metrics.

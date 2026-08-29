@@ -207,10 +207,10 @@ public class InMemoryTraceCollector : ITraceCollector
             .Select(group => new ToolUsageStat(
                 group.Key,
                 group.Count(),
-                group.Sum(span => span.InputTokens + span.OutputTokens),
+                group.Sum(span => span.DurationMs),
                 group.Average(span => span.DurationMs)))
             .OrderByDescending(stat => stat.CallCount)
-            .ThenByDescending(stat => stat.TotalTokens)
+            .ThenByDescending(stat => stat.TotalDurationMs)
             .ThenBy(stat => stat.ToolName, StringComparer.OrdinalIgnoreCase)
             .Take(top)];
     }

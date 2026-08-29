@@ -77,7 +77,7 @@ export async function fetchCostDashboard(
     ? toolsRaw.map(tool => ({
       toolName: tool?.toolName ?? '',
       callCount: tool?.callCount ?? 0,
-      totalTokens: tool?.totalTokens ?? 0,
+      totalDurationMs: tool?.totalDurationMs ?? 0,
       avgDurationMs: tool?.avgDurationMs ?? 0,
     }))
     : [];

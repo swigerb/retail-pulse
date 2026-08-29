@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactElement } from 'react';
-import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton, Spinner } from '@fluentui/react-components';
+import { Button, Badge, makeStyles, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle, Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, MenuButton, Spinner, Dropdown, Option } from '@fluentui/react-components';
 import { Add24Regular, Play24Regular, BookInformation24Regular, DataUsage24Regular, Dismiss24Regular, TargetArrow24Regular, Shield24Regular, Library24Regular, HeartPulse24Regular, ShieldCheckmark24Regular, CardUi24Regular, Eye24Regular, Building24Regular, Money24Regular, Star24Regular } from '@fluentui/react-icons';
 import { ChatPanel } from './ChatPanel';
 import { fetchFinancials, fetchScorecardBatched, fetchStores, fetchStockoutRisks } from '../services/operationsApi';
@@ -28,7 +28,8 @@ import { ObservabilityPanel } from './observability';
 import { StoreHeatmap, StockoutAlert, StorePerformanceTable, StoreDetailDialog } from './stores';
 import { MarginWaterfall, MarginDrivers } from './margin';
 import { PortfolioScorecard, BrandScoreCard, ExplanationPanel } from './scorecard';
-import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData } from '../types';
+import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData, AdaptiveCard } from '../types';
+import { fetchActiveCards } from '../services/cardsApi';
 import { connectTelemetryHub, subscribeHubEvent } from '../services/telemetryHub';
 import { usePlanController } from '../state/usePlanController';
 import { PlanHistoryPanel } from './plan';
@@ -290,6 +291,15 @@ export function Dashboard() {
   const [waterfall, setWaterfall] = useState<MarginWaterfallStep[]>([]);
   const [drivers, setDrivers] = useState<MarginDriver[]>([]);
   const [financialsPeriod, setFinancialsPeriod] = useState<string>('');
+  // Which brand's P&L is on screen. Empty until the pack resolves, at which point the
+  // effect below anchors on the pack's lead brand.
+  const [financialsBrand, setFinancialsBrand] = useState<string>('');
+  // Brands the P&L can be switched between. Sourced from the pack rather than hardcoded,
+  // so a tenant swap changes the picker with everything else.
+  const financialsBrands = useMemo(
+    () => activePack.pack?.tenant.brands?.map(b => b.name) ?? [],
+    [activePack.pack],
+  );
   const [brands, setBrands] = useState<BrandScore[]>([]);
   const [brandsDurationMs, setBrandsDurationMs] = useState(0);
   const [brandsLoading, setBrandsLoading] = useState(false);
@@ -312,7 +322,11 @@ export function Dashboard() {
   const scorecardRequested = useRef(false);
 
   useEffect(() => {
-    if (activeView !== 'portfolio' || scorecardRequested.current) return;
+    // Prewarm on Demo Mode as well as on the panel itself. Scoring six brands fans out
+    // thirty specialist assessments, so a run that navigates here and immediately starts
+    // narrating arrives before the grid has anything in it. Starting at demo open gives
+    // the fan-out the ninety seconds of earlier acts to finish in.
+    if ((activeView !== 'portfolio' && !demoOpen) || scorecardRequested.current) return;
     scorecardRequested.current = true;
     setBrandsLoading(true);
     void (async () => {
@@ -329,7 +343,25 @@ export function Dashboard() {
       });
       setBrandsLoading(false);
     })();
-  }, [activeView, activePack.pack]);
+  }, [activeView, activePack.pack, demoOpen]);
+
+  // Same reason as the scorecard above: the cards panel only mounts with its view, so a
+  // demo that pans to it starts a cold fetch and narrates a spinner. Fetch once when Demo
+  // Mode opens and hand the result to the panel so it paints populated.
+  const [prewarmedCards, setPrewarmedCards] = useState<AdaptiveCard[]>([]);
+  const cardsRequested = useRef(false);
+  useEffect(() => {
+    if (!demoOpen || cardsRequested.current) return;
+    cardsRequested.current = true;
+    let cancelled = false;
+    void (async () => {
+      // A failed prewarm is not worth surfacing here: the panel runs its own load on
+      // mount and reports its own error.
+      const cards = await fetchActiveCards().catch(() => []);
+      if (!cancelled) setPrewarmedCards(cards);
+    })();
+    return () => { cancelled = true; };
+  }, [demoOpen]);
 
   // Load operational data lazily, when its panel is first opened, so the chat path
   // does not pay for reads it will not render.
@@ -350,16 +382,19 @@ export function Dashboard() {
     let cancelled = false;
     void (async () => {
       // Anchor on the pack's lead brand so the panel reports a real book of business
-      // rather than an arbitrary one.
-      const brand = activePack.pack?.tenant.brands?.[0]?.name ?? 'Apex Grill';
+      // rather than an arbitrary one, until the operator picks a different one.
+      const brand = financialsBrand
+        || activePack.pack?.tenant.brands?.[0]?.name
+        || 'Apex Grill';
       const f = await fetchFinancials(brand);
       if (cancelled) return;
       setWaterfall(f.waterfall);
       setDrivers(f.drivers);
       setFinancialsPeriod(f.period ? `${f.period} P&L Waterfall` : 'P&L Waterfall');
+      setFinancialsBrand(brand);
     })();
     return () => { cancelled = true; };
-  }, [activeView, activePack.pack]);
+  }, [activeView, activePack.pack, financialsBrand]);
 
   const handleWhyClick = () => {
     setExplanationData({
@@ -830,7 +865,7 @@ export function Dashboard() {
             </div>
           ) : activeView === 'cards' && featureFlags.cards ? (
             <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
-              <AdaptiveCardPanel />
+              <AdaptiveCardPanel initialCards={prewarmedCards} />
             </div>
           ) : capabilities.observability && activeView === 'observability' && featureFlags.observability ? (
             <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
@@ -851,7 +886,22 @@ export function Dashboard() {
             </div>
           ) : activeView === 'financials' && featureFlags.financials ? (
             <div style={{ overflow: 'auto', height: '100%', padding: '24px', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
-              <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '20px', fontSize: '20px' }}>💰 Financials</h2>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '20px' }}>
+                <h2 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", margin: 0, fontSize: '20px' }}>💰 Financials</h2>
+                {financialsBrands.length > 1 && (
+                  <Dropdown
+                    data-testid="financials-brand-filter"
+                    value={financialsBrand}
+                    selectedOptions={[financialsBrand]}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) setFinancialsBrand(data.optionValue);
+                    }}
+                    size="small"
+                  >
+                    {financialsBrands.map(b => <Option key={b} value={b}>{b}</Option>)}
+                  </Dropdown>
+                )}
+              </div>
               <MarginWaterfall steps={waterfall} title={financialsPeriod} />
               <div style={{ marginTop: '24px' }}>
                 <h3 style={{ color: 'var(--color-text)', fontFamily: "'Inter', system-ui, sans-serif", marginBottom: '12px', fontSize: '16px' }}>📈 Margin Drivers</h3>

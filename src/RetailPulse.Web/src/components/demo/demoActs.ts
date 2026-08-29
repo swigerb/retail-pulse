@@ -22,6 +22,7 @@ import type { DemoView } from './demoSteps';
 export type DemoInteraction =
   | { readonly kind: 'click'; readonly selector: string; readonly note: string }
   | { readonly kind: 'type'; readonly selector: string; readonly text: string; readonly note: string }
+  | { readonly kind: 'scroll'; readonly selector: string; readonly note: string }
   | { readonly kind: 'wait'; readonly ms: number; readonly note: string };
 
 export interface DemoAct {
@@ -96,6 +97,11 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     view: 'chat',
     telemetry: true,
     prompt: 'Show a horizontal bar chart ranking all brands by depletion growth rate',
+    interactions: [
+      // A long answer pushes its chart below the fold, so bring it into view before the
+      // narration starts describing it.
+      { kind: 'scroll', selector: '[data-testid="chart-card"]', note: 'Scrolling to the chart' },
+    ],
     holdMs: READ + 2_000,
   },
   {
@@ -152,12 +158,19 @@ export const DEMO_ACTS: readonly DemoAct[] = [
     title: 'Financials',
     body:
       'A P and L waterfall from revenue through to net margin, with the drivers moving it. '
-      + 'Every figure is read live from the margin service rather than a fixture.',
+      + 'Switching to another brand now: every figure is read live from the margin service '
+      + 'rather than a fixture, so the whole panel redraws against that brand\u2019s book.',
     view: 'financials',
     interactions: [
       { kind: 'wait', ms: 3_000, note: 'Loading margin data' },
+      { kind: 'click', selector: '[data-testid="financials-brand-filter"] button', note: 'Opening the brand picker' },
+      { kind: 'wait', ms: 1_200, note: '' },
+      // The picker opens with the current brand selected, so take the first option that
+      // is not, which is guaranteed to actually change the panel.
+      { kind: 'click', selector: '[role="option"][aria-selected="false"]', note: 'Choosing another brand' },
+      { kind: 'wait', ms: 3_500, note: 'Recalculating the P and L' },
     ],
-    holdMs: GLANCE,
+    holdMs: READ,
   },
   {
     id: 'stores',
