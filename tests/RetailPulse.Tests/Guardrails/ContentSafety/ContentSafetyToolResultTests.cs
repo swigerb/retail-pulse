@@ -67,6 +67,9 @@ public class ContentSafetyToolResultTests
         outcome.WasBlocked.Should().BeTrue();
         outcome.Payload.Should().NotContain("blocked content");
         outcome.Payload.Should().Contain("_content_safety");
+        outcome.Payload.Should().Contain("Violence");
+        outcome.Payload.Should().Contain("severe severity");
+        outcome.Payload.Should().Contain("withheld");
         (await log.GetRecentAsync(10)).Should().Contain(r =>
             r.DetectionType == ContentSafetyDetectionTypes.Violence
             && r.Action == ContentSafetyActions.Blocked);

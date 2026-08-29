@@ -68,7 +68,7 @@ public sealed class DefaultPackSeedGoldenTests : IDisposable
 
         // Store types.
         seed.Stores.Types.Should().Equal(
-            "Flagship", "Mall", "Strip Center", "Downtown", "Outlet");
+            "Flagship", "Mall", "Shopping Center", "Downtown", "Outlet");
 
         // Margin driver vocabulary.
         seed.Margin.DriverCategories.Should().Equal(
