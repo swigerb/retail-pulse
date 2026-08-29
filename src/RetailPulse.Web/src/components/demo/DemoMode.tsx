@@ -198,12 +198,16 @@ export function DemoMode({
      * line finds nothing: the panel has not mounted yet. Every interaction was therefore
      * skipped silently, which is why the council never convened even though the click
      * itself worked perfectly when tested against a mounted panel.
+     *
+     * `last` picks the final match rather than the first. The chat appends, so the answer
+     * this act just produced is the last one on the page and the first match belongs to an
+     * earlier turn.
      */
-    const waitFor = async (selector: string, timeoutMs = 12_000) => {
+    const waitFor = async (selector: string, last = false, timeoutMs = 12_000) => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        const found = document.querySelector<HTMLElement>(selector);
-        if (found) return found;
+        const found = document.querySelectorAll<HTMLElement>(selector);
+        if (found.length > 0) return last ? found[found.length - 1] : found[0];
         if (!live()) return null;
         await pause(200);
       }
@@ -218,10 +222,24 @@ export function DemoMode({
         return;
       }
 
-      const target = await waitFor(step.selector);
+      const target = await waitFor(step.selector, step.kind === 'scroll');
       // A control that never appears is skipped rather than thrown: a panel that failed to
       // load must not take the whole run down in front of an audience.
       if (!target) return;
+
+      if (step.kind === 'scroll') {
+        // Long answers push their chart below the fold, so narrating one without this
+        // describes something the viewer cannot see. Guarded because jsdom, and some
+        // older engines, do not implement scrollIntoView options.
+        try {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch {
+          target.scrollIntoView?.();
+        }
+        await pause(1_400);   // let the smooth scroll settle before the act is narrated
+        return;
+      }
+
       if (step.kind === 'click') {
         // A bare element.click() dispatches only a click event. React components that key
         // off pointer or mouse events, as Fluent buttons do, can ignore it entirely, which
