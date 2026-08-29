@@ -13,6 +13,7 @@ const RECOMMENDATION_CONFIG: Record<PromoRecommendationLevel, { emoji: string; l
   recommended: { emoji: '✅', label: 'Recommended', color: '#22c55e', bgColor: 'rgba(34,197,94,0.08)', badge: 'success' },
   cautious: { emoji: '⚠️', label: 'Cautious', color: '#eab308', bgColor: 'rgba(234,179,8,0.08)', badge: 'warning' },
   not_recommended: { emoji: '❌', label: 'Not Recommended', color: '#ef4444', bgColor: 'rgba(239,68,68,0.08)', badge: 'danger' },
+  insufficient_history: { emoji: 'ℹ️', label: 'Not Enough History', color: '#eab308', bgColor: 'rgba(234,179,8,0.08)', badge: 'warning' },
 };
 
 const SEVERITY_ICONS: Record<string, string> = { high: '🔴', medium: '🟡', low: '🟢' };
@@ -180,11 +181,19 @@ function RiskCard({ risk }: { risk: PromoRisk }) {
 export default function PromoRecommendation({ evaluation, budget, onSubmitForApproval }: PromoRecommendationProps) {
   const styles = useStyles();
   const config = RECOMMENDATION_CONFIG[evaluation.recommendation];
-  const isHighSpend = budget >= HIGH_SPEND_THRESHOLD;
+  const hasModeledRoi = !evaluation.insufficientHistory
+    && evaluation.roi !== null
+    && evaluation.roiLower !== null
+    && evaluation.roiUpper !== null;
+  const isHighSpend = hasModeledRoi && budget >= HIGH_SPEND_THRESHOLD;
   const sortedRisks = [...evaluation.risks].sort(
     (a, b) => (SEVERITY_ORDER[a.severity] ?? 3) - (SEVERITY_ORDER[b.severity] ?? 3),
   );
-  const roiColor = evaluation.roi >= 1 ? PROMO_COLORS.recommended : PROMO_COLORS.notRecommended;
+  const roiColor = !hasModeledRoi
+    ? config.color
+    : evaluation.roi !== null && evaluation.roi >= 1
+      ? PROMO_COLORS.recommended
+      : PROMO_COLORS.notRecommended;
 
   return (
     <div
@@ -198,11 +207,15 @@ export default function PromoRecommendation({ evaluation, budget, onSubmitForApp
         </Badge>
         <div className={styles.roiDisplay}>
           <span className={styles.roiValue} style={{ color: roiColor }} data-testid="roi-value">
-            {evaluation.roi.toFixed(1)}x ROI
+            {hasModeledRoi && evaluation.roi !== null
+              ? `${evaluation.roi.toFixed(1)}x ROI`
+              : 'Not enough history'}
           </span>
-          <span className={styles.roiRange} data-testid="roi-range">
-            ({evaluation.roiLower.toFixed(1)}x — {evaluation.roiUpper.toFixed(1)}x)
-          </span>
+          {hasModeledRoi && evaluation.roiLower !== null && evaluation.roiUpper !== null && (
+            <span className={styles.roiRange} data-testid="roi-range">
+              ({evaluation.roiLower.toFixed(1)}x to {evaluation.roiUpper.toFixed(1)}x)
+            </span>
+          )}
         </div>
       </div>
 
@@ -215,8 +228,12 @@ export default function PromoRecommendation({ evaluation, budget, onSubmitForApp
         <span className={styles.sectionLabel}>Timing Assessment</span>
         <div className={styles.timingRow}>
           <span className={styles.timingChip}>🗓️ {evaluation.seasonalityFit}</span>
-          <span className={styles.timingChip}>⏱️ Break-even: {evaluation.breakEvenDays} days</span>
-          <span className={styles.timingChip}>📊 Hist. Avg: {evaluation.historicalAvgRoi.toFixed(1)}x</span>
+          {evaluation.breakEvenDays !== null && (
+            <span className={styles.timingChip}>⏱️ Break-even: {evaluation.breakEvenDays} days</span>
+          )}
+          {evaluation.historicalAvgRoi !== null && (
+            <span className={styles.timingChip}>📊 Hist. Avg: {evaluation.historicalAvgRoi.toFixed(1)}x</span>
+          )}
         </div>
         {evaluation.conflicts.length > 0 && (
           <div className={styles.timingRow} style={{ marginTop: '6px' }}>
@@ -248,7 +265,9 @@ export default function PromoRecommendation({ evaluation, budget, onSubmitForApp
       )}
 
       <div className={styles.credibility} data-testid="credibility-note">
-        Based on {evaluation.similarCampaigns} similar campaigns
+        {evaluation.similarCampaigns > 0
+          ? `Based on ${evaluation.similarCampaigns} similar campaigns${evaluation.dataBasis ? ` (${evaluation.dataBasis})` : ''}`
+          : 'No comparable campaigns found'}
       </div>
     </div>
   );

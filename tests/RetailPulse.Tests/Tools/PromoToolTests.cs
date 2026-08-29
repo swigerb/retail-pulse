@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using RetailPulse.Contracts;
 using RetailPulse.McpServer.Data;
 using RetailPulse.Tests.TestInfrastructure;
@@ -34,6 +35,19 @@ public class PromoToolTests : IDisposable
 
     private static JsonElement Parse(object obj) =>
         JsonDocument.Parse(JsonSerializer.Serialize(obj)).RootElement;
+
+    private SqliteConnection OpenWritableConnection()
+    {
+        var conn = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Cache = SqliteCacheMode.Shared,
+            Pooling = false
+        }.ToString());
+        conn.Open();
+        return conn;
+    }
 
     #region GetPromoHistory
 
@@ -259,10 +273,16 @@ public class PromoToolTests : IDisposable
     [Fact]
     public void EstimateROI_ValidInputs_ReturnsRoiEstimate()
     {
-        JsonElement result = Parse(_db.EstimateROI("Sierra Gold Tequila", "Northeast", "BOGO", 100000, 4));
+        JsonElement result = Parse(_db.EstimateROI("Sierra Gold Tequila", "Northeast", "BOGO", 25000, 4));
 
         result.TryGetProperty("error", out _).Should().BeFalse();
         result.TryGetProperty("roi", out _).Should().BeTrue();
+        result.GetProperty("roi").GetProperty("expected").GetDouble().Should().BeGreaterThan(0);
+        result.GetProperty("roi").GetProperty("lower_bound").GetDouble().Should().BeGreaterThan(0);
+        result.GetProperty("roi").GetProperty("upper_bound").GetDouble().Should().BeGreaterThan(0);
+        result.GetProperty("break_even_days").GetInt32().Should().BeGreaterThan(0);
+        result.GetProperty("similar_campaigns").GetInt32().Should().BeGreaterThan(0);
+        result.GetProperty("historical_avg_roi").GetDouble().Should().BeGreaterThan(0);
     }
 
     [Fact]
@@ -283,11 +303,41 @@ public class PromoToolTests : IDisposable
     }
 
     [Fact]
-    public void EstimateROI_InvalidDuration_Over12_ReturnsError()
+    public void EstimateROI_QuarterDuration_ReturnsRoiEstimate()
     {
         JsonElement result = Parse(_db.EstimateROI("Sierra Gold Tequila", "Northeast", "BOGO", 100000, 15));
 
-        result.TryGetProperty("error", out _).Should().BeTrue();
+        result.TryGetProperty("error", out _).Should().BeFalse();
+        result.GetProperty("roi").GetProperty("expected").GetDouble().Should().BeGreaterThan(0);
+        result.GetProperty("break_even_days").GetInt32().Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void EstimateROI_TargetLift_ChangesExpectedRoi()
+    {
+        JsonElement lowTarget = Parse(_db.EstimateROI("Sierra Gold Tequila", "Northeast", "BOGO", 25000, 4, 5));
+        JsonElement highTarget = Parse(_db.EstimateROI("Sierra Gold Tequila", "Northeast", "BOGO", 25000, 4, 40));
+
+        lowTarget.TryGetProperty("error", out _).Should().BeFalse();
+        highTarget.TryGetProperty("error", out _).Should().BeFalse();
+        highTarget.GetProperty("roi").GetProperty("expected").GetDouble()
+            .Should().BeGreaterThan(lowTarget.GetProperty("roi").GetProperty("expected").GetDouble());
+    }
+
+    [Fact]
+    public void EstimateROI_NoHistory_ReturnsInsufficientHistory()
+    {
+        using SqliteConnection conn = OpenWritableConnection();
+        using SqliteCommand cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM PromoHistory";
+        cmd.ExecuteNonQuery();
+
+        JsonElement result = Parse(_db.EstimateROI("Sierra Gold Tequila", "Northeast", "BOGO", 25000, 4));
+
+        result.TryGetProperty("error", out _).Should().BeFalse();
+        result.GetProperty("insufficient_history").GetBoolean().Should().BeTrue();
+        result.GetProperty("similar_campaigns").GetInt32().Should().Be(0);
+        result.TryGetProperty("roi", out _).Should().BeFalse();
     }
 
     [Fact]

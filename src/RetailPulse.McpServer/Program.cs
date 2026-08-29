@@ -249,9 +249,9 @@ app.MapGet("/api/promo/evaluate-timing", (string brand, string region, string st
 })
 .WithName("EvaluateTiming");
 
-app.MapGet("/api/promo/estimate-roi", (string brand, string region, string promoType, double spend, int durationWeeks, RetailPulseDb data) =>
+app.MapGet("/api/promo/estimate-roi", (string brand, string region, string promoType, double spend, int durationWeeks, double? targetLiftPercent, RetailPulseDb data) =>
 {
-    object result = data.EstimateROI(brand, region, promoType, spend, durationWeeks);
+    object result = data.EstimateROI(brand, region, promoType, spend, durationWeeks, targetLiftPercent);
     return Results.Ok(result);
 })
 .WithName("EstimateROI");

@@ -239,7 +239,7 @@ export interface Trace {
 // --- Promotion Planning types (Sprint 2.1) ---
 
 export type PromoType = 'Discount' | 'BOGO' | 'Display' | 'Digital' | 'Bundle';
-export type PromoRecommendationLevel = 'recommended' | 'cautious' | 'not_recommended';
+export type PromoRecommendationLevel = 'recommended' | 'cautious' | 'not_recommended' | 'insufficient_history';
 
 export interface PromoRisk {
   type: string;
@@ -249,17 +249,20 @@ export interface PromoRisk {
 
 export interface PromoEvaluation {
   recommendation: PromoRecommendationLevel;
-  roi: number;
-  roiLower: number;
-  roiUpper: number;
+  roi: number | null;
+  roiLower: number | null;
+  roiUpper: number | null;
   reasoning: string;
   timingAssessment: string;
   conflicts: string[];
   seasonalityFit: string;
   risks: PromoRisk[];
   similarCampaigns: number;
-  breakEvenDays: number;
-  historicalAvgRoi: number;
+  breakEvenDays: number | null;
+  historicalAvgRoi: number | null;
+  insufficientHistory?: boolean;
+  historyMessage?: string;
+  dataBasis?: string;
 }
 
 export interface PromoCampaign {

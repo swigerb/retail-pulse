@@ -458,9 +458,8 @@ public class RetailPulseDb
     // to force a re-seed even if tenant.yaml hasn't changed.
     // Issue #108: v8 folds the pack's seed/scenario.yaml manifest into
     // the fingerprint so a scenario edit alone forces reseed. Upgrades
-    // from v7 stores always miss a v8 hash lookup and re-seed on first
-    // boot.
-    private const int SchemaVersion = 8;
+    // to v9 also reseed because promo ROI now stores multipliers.
+    private const int SchemaVersion = 9;
 
     private string ComputeTenantHash()
     {
@@ -1936,9 +1935,71 @@ public class RetailPulseDb
         }
     }
 
+    private static double GetRevenuePerUnit(string category) => category switch
+    {
+        "Spirits" => 12.0,
+        "Grocery" => 5.0,
+        "Quick-Serve Restaurant" => 4.0,
+        "Home Improvement" => 8.0,
+        "Office Supply" => 6.0,
+        "Furniture" => 18.0,
+        _ => 12.0
+    };
+
+    private static double GetPromoTypeRoiBenchmark(string promoType) => promoType switch
+    {
+        "BOGO" => 3.1,
+        "Discount" => 2.4,
+        "Display" => 1.8,
+        "Digital" => 2.9,
+        "Bundle" => 2.2,
+        _ => 1.5
+    };
+
+    private static bool IsNationalRegion(string region) =>
+        region.Trim().Equals("National", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record PromoHistoryRow(
+        string Brand,
+        string Region,
+        string PromoType,
+        string CampaignName,
+        string StartDate,
+        string EndDate,
+        double Spend,
+        double BaselineVolume,
+        double ActualVolume,
+        double LiftPercent,
+        double Roi,
+        string SuccessRating)
+    {
+        public object ToDto() => new
+        {
+            brand = Brand,
+            region = Region,
+            promo_type = PromoType,
+            campaign_name = CampaignName,
+            start_date = StartDate,
+            end_date = EndDate,
+            spend = Spend,
+            baseline_volume = BaselineVolume,
+            actual_volume = ActualVolume,
+            lift_percent = LiftPercent,
+            roi = Roi,
+            success_rating = SuccessRating
+        };
+    }
+
+    private sealed record PromoBasis(
+        int Count,
+        double AverageRoi,
+        double StdDevRoi,
+        double AverageBaselineVolume,
+        string Basis);
+
     // ── Promo Seeding ────────────────────────────────────────────────────
     // Promo type names, success rating labels, and per-type lift/coef
-    // coefficients originate in the pack's seed/scenario.yaml — see
+    // coefficients originate in the pack's seed/scenario.yaml; see
     // _promoTypeNames, _successRatings, and the _seed.Promos.Types
     // lookup below.
 
@@ -1980,22 +2041,23 @@ public class RetailPulseDb
                     int durationDays = rng.Next(7, 45);
                     DateOnly campaignEnd = campaignStart.AddDays(durationDays);
 
-                    double spend = Math.Round(5000 + (rng.NextDouble() * 195000), 2);
                     double baselineVolume = Math.Round(1000 + (rng.NextDouble() * 9000), 0);
 
                     double baseLift = promoTypeConfig.LiftBase + (rng.NextDouble() * promoTypeConfig.LiftRange);
 
                     double liftPercent = Math.Round(baseLift, 1);
                     double actualVolume = Math.Round(baselineVolume * (1.0 + (liftPercent / 100.0)), 0);
-                    double incrementalRevenue = (actualVolume - baselineVolume) * (5.0 + (rng.NextDouble() * 15.0));
-                    double roi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 1);
+                    double incrementalRevenue = (actualVolume - baselineVolume) * GetRevenuePerUnit(brand.Category);
+                    double targetRoi = GetPromoTypeRoiBenchmark(promoType) * (0.75 + (rng.NextDouble() * 0.50));
+                    double spend = Math.Round(Math.Max(1000.0, incrementalRevenue / targetRoi), 2);
+                    double roi = Math.Round(incrementalRevenue / spend, 2);
 
                     int ratingIndex = roi switch
                     {
-                        > 100 => 0,
-                        > 50 => 1,
-                        > 0 => 2,
-                        > -30 => 3,
+                        >= 3.0 => 0,
+                        >= 2.0 => 1,
+                        >= 1.0 => 2,
+                        >= 0.7 => 3,
                         _ => 4
                     };
                     // Clamp to the number of success ratings the pack ships. The
@@ -2290,16 +2352,51 @@ public class RetailPulseDb
         using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        var where = new List<string> { "StartDate >= @cutoff" };
+        List<PromoHistoryRow> campaigns = LoadPromoHistoryRows(conn, brand, region, promoType, cutoff);
+        string historyWindow = $"{months} months";
+        if (campaigns.Count == 0)
+        {
+            campaigns = LoadPromoHistoryRows(conn, brand, region, promoType, null);
+            historyWindow = "all available history";
+        }
+
+        double? avgRoi = campaigns.Count > 0
+            ? Math.Round(campaigns.Average(c => c.Roi), 2)
+            : null;
+
+        return new
+        {
+            filters = new { brand = brand ?? "all", region = region ?? "all", promo_type = promoType ?? "all", months },
+            history_window = historyWindow,
+            total_campaigns = campaigns.Count,
+            avg_roi = avgRoi,
+            message = campaigns.Count == 0 ? "Not enough comparable campaign history for these filters." : null,
+            campaigns = campaigns.Select(c => c.ToDto()).ToList()
+        };
+    }
+
+    private static List<PromoHistoryRow> LoadPromoHistoryRows(
+        SqliteConnection conn,
+        string? brand,
+        string? region,
+        string? promoType,
+        DateOnly? cutoff)
+    {
+        var where = new List<string>();
         using SqliteCommand cmd = conn.CreateCommand();
-        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
+
+        if (cutoff is not null)
+        {
+            where.Add("StartDate >= @cutoff");
+            cmd.Parameters.AddWithValue("@cutoff", cutoff.Value.ToString("yyyy-MM-dd"));
+        }
 
         if (!string.IsNullOrWhiteSpace(brand))
         {
             where.Add("Brand LIKE @brand");
             cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
         }
-        if (!string.IsNullOrWhiteSpace(region))
+        if (!string.IsNullOrWhiteSpace(region) && !IsNationalRegion(region))
         {
             where.Add("Region LIKE @region");
             cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
@@ -2310,41 +2407,36 @@ public class RetailPulseDb
             cmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
         }
 
+        string predicate = where.Count == 0 ? "1 = 1" : string.Join(" AND ", where);
+
         cmd.CommandText = $"""
             SELECT Brand, Region, PromoType, CampaignName, StartDate, EndDate,
                    Spend, BaselineVolume, ActualVolume, LiftPercent, ROI, SuccessRating
             FROM PromoHistory
-            WHERE {string.Join(" AND ", where)}
+            WHERE {predicate}
             ORDER BY StartDate DESC
             """;
 
-        var campaigns = new List<object>();
+        var campaigns = new List<PromoHistoryRow>();
         using SqliteDataReader reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            campaigns.Add(new
-            {
-                brand = reader.GetString(0),
-                region = reader.GetString(1),
-                promo_type = reader.GetString(2),
-                campaign_name = reader.GetString(3),
-                start_date = reader.GetString(4),
-                end_date = reader.GetString(5),
-                spend = reader.GetDouble(6),
-                baseline_volume = reader.GetDouble(7),
-                actual_volume = reader.GetDouble(8),
-                lift_percent = reader.GetDouble(9),
-                roi = reader.GetDouble(10),
-                success_rating = reader.GetString(11)
-            });
+            campaigns.Add(new PromoHistoryRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetDouble(6),
+                reader.GetDouble(7),
+                reader.GetDouble(8),
+                reader.GetDouble(9),
+                reader.GetDouble(10),
+                reader.GetString(11)));
         }
 
-        return new
-        {
-            filters = new { brand = brand ?? "all", region = region ?? "all", promo_type = promoType ?? "all", months },
-            total_campaigns = campaigns.Count,
-            campaigns
-        };
+        return campaigns;
     }
 
     public object CalculateLift(string brand, string region, string promoType, double spend)
@@ -2385,12 +2477,14 @@ public class RetailPulseDb
         reader.Close();
 
         using SqliteCommand countCmd = conn.CreateCommand();
-        countCmd.CommandText = """
+        string regionPredicate = IsNationalRegion(region) ? string.Empty : " AND Region LIKE @region";
+        countCmd.CommandText = $"""
             SELECT COUNT(*) FROM PromoHistory
-            WHERE Brand LIKE @brand AND Region LIKE @region AND PromoType LIKE @type
+            WHERE Brand LIKE @brand{regionPredicate} AND PromoType LIKE @type
             """;
         countCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
-        countCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        if (!IsNationalRegion(region))
+            countCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
         countCmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
         int similarCount = Convert.ToInt32(countCmd.ExecuteScalar());
 
@@ -2422,20 +2516,26 @@ public class RetailPulseDb
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
         if (end <= start)
             return new { error = "End date must be after start date." };
+        BrandConfig? brandConfig = _tenant.Brands.FirstOrDefault(b =>
+            b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (brandConfig == null)
+            return new { error = $"Unknown brand '{brand}'.", available_brands = GetAvailableBrands() };
 
         using SqliteConnection conn = OpenConnection();
         conn.Open();
 
         using SqliteCommand overlapCmd = conn.CreateCommand();
-        overlapCmd.CommandText = """
+        string regionPredicate = IsNationalRegion(region) ? string.Empty : " AND Region LIKE @region";
+        overlapCmd.CommandText = $"""
             SELECT CampaignName, PromoType, StartDate, EndDate
             FROM PromoHistory
-            WHERE Brand LIKE @brand AND Region LIKE @region
+            WHERE Brand LIKE @brand{regionPredicate}
             AND StartDate <= @end AND EndDate >= @start
             ORDER BY StartDate
             """;
         overlapCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
-        overlapCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        if (!IsNationalRegion(region))
+            overlapCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
         overlapCmd.Parameters.AddWithValue("@start", start.ToString("yyyy-MM-dd"));
         overlapCmd.Parameters.AddWithValue("@end", end.ToString("yyyy-MM-dd"));
 
@@ -2448,15 +2548,16 @@ public class RetailPulseDb
 
         using SqliteCommand recentCmd = conn.CreateCommand();
         DateOnly lookbackStart = start.AddDays(-60);
-        recentCmd.CommandText = """
+        recentCmd.CommandText = $"""
             SELECT CampaignName, PromoType, EndDate
             FROM PromoHistory
-            WHERE Brand LIKE @brand AND Region LIKE @region
+            WHERE Brand LIKE @brand{regionPredicate}
             AND EndDate >= @lookback AND EndDate < @start
             ORDER BY EndDate DESC
             """;
         recentCmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
-        recentCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+        if (!IsNationalRegion(region))
+            recentCmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
         recentCmd.Parameters.AddWithValue("@lookback", lookbackStart.ToString("yyyy-MM-dd"));
         recentCmd.Parameters.AddWithValue("@start", start.ToString("yyyy-MM-dd"));
 
@@ -2467,8 +2568,6 @@ public class RetailPulseDb
                 recentPromos.Add(new { campaign = reader.GetString(0), promo_type = reader.GetString(1), ended = reader.GetString(2) });
         }
 
-        BrandConfig? brandConfig = _tenant.Brands.FirstOrDefault(b =>
-            b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
         double seasonalityScore = GetSeasonalityScore(conn, brandConfig?.Category, start.Month);
 
         double proximityPenalty = recentPromos.Count > 0 ? Math.Min(recentPromos.Count * 0.15, 0.50) : 0.0;
@@ -2500,16 +2599,18 @@ public class RetailPulseDb
         return result is null or DBNull ? 0.6 : Math.Min(1.0, Math.Max(0.2, Convert.ToDouble(result) / 1.5));
     }
 
-    public object EstimateROI(string brand, string region, string promoType, double spend, int durationWeeks)
+    public object EstimateROI(string brand, string region, string promoType, double spend, int durationWeeks, double? targetLiftPercent = null)
     {
         if (string.IsNullOrWhiteSpace(brand))
             return new { error = "Parameter 'brand' is required.", available_brands = GetAvailableBrands() };
         if (string.IsNullOrWhiteSpace(region))
             return new { error = "Parameter 'region' is required.", available_regions = GetAvailableRegions() };
+        if (string.IsNullOrWhiteSpace(promoType))
+            return new { error = "Parameter 'promoType' is required.", available_types = _promoTypeNames };
         if (spend <= 0)
             return new { error = "Parameter 'spend' must be positive." };
-        if (durationWeeks is < 1 or > 12)
-            return new { error = "Parameter 'durationWeeks' must be between 1 and 12." };
+        if (durationWeeks is < 1 or > 52)
+            return new { error = "Parameter 'durationWeeks' must be between 1 and 52." };
 
         BrandConfig? brandConfig = _tenant.Brands.FirstOrDefault(b =>
             b.Name.Contains(brand.Trim(), StringComparison.OrdinalIgnoreCase));
@@ -2519,46 +2620,64 @@ public class RetailPulseDb
         using SqliteConnection conn = OpenConnection();
         conn.Open();
 
-        double avgLift = 10.0, stdDev = 5.0;
+        double avgLift;
+        double stdDev;
+        double minSpend;
+        double maxEffective;
         using (SqliteCommand cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT AvgLiftPercent, StdDev FROM LiftCoefficients WHERE Category = @cat AND PromoType LIKE @type LIMIT 1";
+            cmd.CommandText = "SELECT AvgLiftPercent, StdDev, MinSpend, MaxEffectiveSpend FROM LiftCoefficients WHERE Category = @cat AND PromoType LIKE @type LIMIT 1";
             cmd.Parameters.AddWithValue("@cat", brandConfig.Category);
             cmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
             using SqliteDataReader reader = cmd.ExecuteReader();
-            if (reader.Read())
-            {
-                avgLift = reader.GetDouble(0);
-                stdDev = reader.GetDouble(1);
-            }
+            if (!reader.Read())
+                return new { error = $"No lift data for category '{brandConfig.Category}' and promo type '{promoType}'.", available_types = _promoTypeNames };
+
+            avgLift = reader.GetDouble(0);
+            stdDev = reader.GetDouble(1);
+            minSpend = reader.GetDouble(2);
+            maxEffective = reader.GetDouble(3);
         }
 
-        double baselineVolume = 5000;
-        using (SqliteCommand cmd = conn.CreateCommand())
+        PromoBasis? basis = FindPromoBasis(conn, brandConfig, region, promoType);
+        if (basis == null)
         {
-            cmd.CommandText = "SELECT AVG(BaselineVolume) FROM PromoHistory WHERE Brand LIKE @brand AND Region LIKE @region";
-            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
-            cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
-            object? result = cmd.ExecuteScalar();
-            if (result is not null and not DBNull)
-                baselineVolume = Convert.ToDouble(result);
+            return new
+            {
+                brand = brandConfig.Name,
+                region,
+                promo_type = promoType.Trim(),
+                duration_weeks = durationWeeks,
+                insufficient_history = true,
+                similar_campaigns = 0,
+                message = "Not enough comparable campaign history to model ROI for these inputs."
+            };
         }
 
-        double weeklyBaseline = baselineVolume / 4.0;
-        double totalBaseline = weeklyBaseline * durationWeeks;
+        double effectiveLift = targetLiftPercent is > 0
+            ? Math.Round((avgLift * 0.70) + (targetLiftPercent.Value * 0.30), 2)
+            : avgLift;
 
-        double incrementalUnits = totalBaseline * (avgLift / 100.0);
-        double revenuePerUnit = 8.0 + (brandConfig.Category == "Spirits" ? 12.0 : brandConfig.Category == "Grocery" ? 2.0 : 5.0);
+        double spendEfficiency = spend <= maxEffective ? 1.0 : Math.Sqrt(maxEffective / spend);
+        double durationEfficiency = durationWeeks <= 13 ? 1.0 : Math.Max(0.75, 1.0 - ((durationWeeks - 13) * 0.01));
+        double totalBaseline = basis.AverageBaselineVolume * durationWeeks;
+        double incrementalUnits = totalBaseline * (effectiveLift / 100.0) * spendEfficiency * durationEfficiency;
+        double revenuePerUnit = GetRevenuePerUnit(brandConfig.Category);
         double incrementalRevenue = incrementalUnits * revenuePerUnit;
-        double expectedRoi = Math.Round((incrementalRevenue - spend) / spend * 100.0, 2);
+        double modeledRoi = incrementalRevenue / spend;
+        double expectedRoi = Math.Round((modeledRoi * 0.65) + (basis.AverageRoi * 0.35), 2);
 
-        double lowerLift = Math.Max(0, avgLift - (1.96 * stdDev));
-        double upperLift = avgLift + (1.96 * stdDev);
+        double lowerLift = Math.Max(0.1, effectiveLift - (1.96 * stdDev));
+        double upperLift = effectiveLift + (1.96 * stdDev);
 
-        double lowerRoi = Math.Round(((totalBaseline * (lowerLift / 100.0) * revenuePerUnit) - spend) / spend * 100.0, 2);
-        double upperRoi = Math.Round(((totalBaseline * (upperLift / 100.0) * revenuePerUnit) - spend) / spend * 100.0, 2);
+        double lowerModeledRoi = totalBaseline * (lowerLift / 100.0) * spendEfficiency * durationEfficiency * revenuePerUnit / spend;
+        double upperModeledRoi = totalBaseline * (upperLift / 100.0) * spendEfficiency * durationEfficiency * revenuePerUnit / spend;
+        double historySpread = Math.Max(0.15, basis.StdDevRoi);
+        double lowerRoi = Math.Round(Math.Max(0.1, Math.Min(expectedRoi, (lowerModeledRoi * 0.65) + ((basis.AverageRoi - historySpread) * 0.35))), 2);
+        double upperRoi = Math.Round(Math.Max(expectedRoi + 0.1, (upperModeledRoi * 0.65) + ((basis.AverageRoi + historySpread) * 0.35)), 2);
 
-        double breakeven = Math.Round(spend / revenuePerUnit, 0);
+        double dailyIncrementalRevenue = incrementalRevenue / Math.Max(1, durationWeeks * 7);
+        int breakEvenDays = Math.Max(1, (int)Math.Ceiling(spend / Math.Max(1.0, dailyIncrementalRevenue)));
         double varianceFactor = Math.Round(stdDev / Math.Max(avgLift, 1.0), 2);
 
         return new
@@ -2567,15 +2686,99 @@ public class RetailPulseDb
             region,
             promo_type = promoType.Trim(),
             duration_weeks = durationWeeks,
-            inputs = new { spend, expected_lift_percent = avgLift, baseline_volume = totalBaseline, revenue_per_unit = revenuePerUnit },
+            inputs = new { spend, expected_lift_percent = effectiveLift, target_lift_percent = targetLiftPercent, baseline_volume = totalBaseline, revenue_per_unit = revenuePerUnit, min_spend = minSpend, max_effective_spend = maxEffective },
             roi = new { expected = expectedRoi, lower_bound = lowerRoi, upper_bound = upperRoi, confidence_interval_width = Math.Round(upperRoi - lowerRoi, 2) },
             incremental = new { units = Math.Round(incrementalUnits, 0), revenue = Math.Round(incrementalRevenue, 2) },
-            breakeven_units = breakeven,
+            break_even_days = breakEvenDays,
+            historical_avg_roi = basis.AverageRoi,
+            similar_campaigns = basis.Count,
+            basis = basis.Basis,
             variance_factor = varianceFactor,
-            is_positive_roi = expectedRoi > 0,
+            is_positive_roi = expectedRoi >= 0.95,
             requires_approval = spend > 500000,
             risk_level = varianceFactor > 0.5 ? "high" : varianceFactor > 0.3 ? "medium" : "low"
         };
+    }
+
+    private PromoBasis? FindPromoBasis(SqliteConnection conn, BrandConfig brand, string region, string promoType)
+    {
+        PromoBasis? exact = LoadPromoBasis(
+            conn,
+            "Brand LIKE @brand AND PromoType LIKE @type" + (IsNationalRegion(region) ? "" : " AND Region LIKE @region"),
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@brand", $"%{brand.Name}%");
+                cmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
+                if (!IsNationalRegion(region))
+                    cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+            },
+            IsNationalRegion(region) ? "brand plus promotion type across all regions" : "brand, region and promotion type");
+        if (exact is not null) return exact;
+
+        PromoBasis? brandRegion = LoadPromoBasis(
+            conn,
+            "Brand LIKE @brand" + (IsNationalRegion(region) ? "" : " AND Region LIKE @region"),
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("@brand", $"%{brand.Name}%");
+                if (!IsNationalRegion(region))
+                    cmd.Parameters.AddWithValue("@region", $"%{region.Trim()}%");
+            },
+            IsNationalRegion(region) ? "brand across all promotion types and regions" : "brand and region across all promotion types");
+        if (brandRegion is not null) return brandRegion;
+
+        string[] categoryBrands = [.. _tenant.Brands
+            .Where(b => b.Category.Equals(brand.Category, StringComparison.OrdinalIgnoreCase))
+            .Select(b => b.Name)];
+        if (categoryBrands.Length == 0) return null;
+
+        string brandList = string.Join(", ", categoryBrands.Select((_, i) => $"@categoryBrand{i}"));
+        return LoadPromoBasis(
+            conn,
+            $"Brand IN ({brandList}) AND PromoType LIKE @type",
+            cmd =>
+            {
+                for (int i = 0; i < categoryBrands.Length; i++)
+                    cmd.Parameters.AddWithValue($"@categoryBrand{i}", categoryBrands[i]);
+                cmd.Parameters.AddWithValue("@type", $"%{promoType.Trim()}%");
+            },
+            "category and promotion type");
+    }
+
+    private static PromoBasis? LoadPromoBasis(
+        SqliteConnection conn,
+        string predicate,
+        Action<SqliteCommand> bind,
+        string basis)
+    {
+        using SqliteCommand cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT ROI, BaselineVolume
+            FROM PromoHistory
+            WHERE {predicate}
+            """;
+        bind(cmd);
+
+        var rois = new List<double>();
+        var baselines = new List<double>();
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            rois.Add(reader.GetDouble(0));
+            baselines.Add(reader.GetDouble(1));
+        }
+
+        if (rois.Count == 0) return null;
+
+        double averageRoi = rois.Average();
+        double variance = rois.Sum(r => Math.Pow(r - averageRoi, 2)) / rois.Count;
+        double stdDev = Math.Sqrt(variance);
+        return new PromoBasis(
+            rois.Count,
+            Math.Round(averageRoi, 2),
+            Math.Round(stdDev, 2),
+            Math.Round(baselines.Average(), 0),
+            basis);
     }
 
     public object GetPromoCalendar(string? brand = null, string? region = null, int months = 6)

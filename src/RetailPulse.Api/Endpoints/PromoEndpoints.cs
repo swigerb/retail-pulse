@@ -28,7 +28,7 @@ public static class PromoEndpoints
 
         // Existing campaigns for the Campaign Planner panel.
         //
-        // The SPA has always called GET /api/campaigns, which was never mapped —
+        // The SPA has always called GET /api/campaigns, which was never mapped,
         // it 404'd, promoApi.fetchExistingCampaigns threw on the non-OK status,
         // and the uncaught error took the whole dashboard down through the
         // app-level ErrorBoundary. The data it wants is the promo calendar, so
@@ -113,18 +113,25 @@ public static class PromoEndpoints
                 return Results.BadRequest(new { error = "startDate and endDate must be valid ISO dates (yyyy-MM-dd)." });
             }
 
-            int durationWeeks = Math.Max(1, (endDate.DayNumber - startDate.DayNumber) / 7);
-            HttpClient client = httpFactory.CreateClient("McpServer");
+            if (endDate <= startDate)
+            {
+                return Results.BadRequest(new { error = "endDate must be after startDate." });
+            }
 
-            // Orchestrate: call all promo tools in parallel
+            int durationWeeks = Math.Max(1, (int)Math.Ceiling((endDate.DayNumber - startDate.DayNumber) / 7.0));
+            HttpClient client = httpFactory.CreateClient("McpServer");
+            string roiUrl = $"/api/promo/estimate-roi?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&promoType={Uri.EscapeDataString(request.PromoType)}&spend={request.Budget}&durationWeeks={durationWeeks}";
+            if (request.TargetLiftPercent is > 0)
+                roiUrl += $"&targetLiftPercent={request.TargetLiftPercent.Value}";
+
+            // Call all promo tools in parallel so the planner stays responsive.
             Task<string> historyTask = client.GetStringAsync(
-                $"/api/promo/history?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&promoType={Uri.EscapeDataString(request.PromoType)}&months=12", ct);
+                $"/api/promo/history?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&promoType={Uri.EscapeDataString(request.PromoType)}&months=24", ct);
             Task<string> liftTask = client.GetStringAsync(
                 $"/api/promo/calculate-lift?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&promoType={Uri.EscapeDataString(request.PromoType)}&spend={request.Budget}", ct);
             Task<string> timingTask = client.GetStringAsync(
                 $"/api/promo/evaluate-timing?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&startDate={Uri.EscapeDataString(request.StartDate)}&endDate={Uri.EscapeDataString(request.EndDate)}", ct);
-            Task<string> roiTask = client.GetStringAsync(
-                $"/api/promo/estimate-roi?brand={Uri.EscapeDataString(request.Brand)}&region={Uri.EscapeDataString(request.Region)}&promoType={Uri.EscapeDataString(request.PromoType)}&spend={request.Budget}&durationWeeks={durationWeeks}", ct);
+            Task<string> roiTask = client.GetStringAsync(roiUrl, ct);
 
             await Task.WhenAll(historyTask, liftTask, timingTask, roiTask);
 
@@ -133,16 +140,22 @@ public static class PromoEndpoints
             string timingJson = await timingTask;
             string roiJson = await roiTask;
 
-            // Parse ROI for approval gate decision
+            // Parse ROI for approval gate decision.
             using var roiDoc = JsonDocument.Parse(roiJson);
-            double expectedRoi = roiDoc.RootElement.TryGetProperty("expected_roi", out JsonElement roiProp) ? roiProp.GetDouble() : 0;
+            if (TryReadError(roiDoc.RootElement, out string? roiError))
+            {
+                return Results.UnprocessableEntity(new { error = roiError });
+            }
+
+            double? expectedRoi = ReadExpectedRoi(roiDoc.RootElement);
+            bool insufficientHistory = ReadBoolean(roiDoc.RootElement, "insufficient_history") || expectedRoi is null;
 
             // Determine recommendation
-            string recommendation = expectedRoi switch
+            string recommendation = insufficientHistory ? "insufficient_history" : expectedRoi!.Value switch
             {
                 >= 3.0 => "strongly_recommended",
                 >= 2.0 => "recommended",
-                >= 1.0 => "proceed_with_caution",
+                >= 0.95 => "proceed_with_caution",
                 _ => "not_recommended"
             };
 
@@ -159,25 +172,25 @@ public static class PromoEndpoints
                         riskFactors.Add(detail.GetString() ?? "Unknown risk");
                 }
             }
-            if (expectedRoi < 1.0)
+            if (!insufficientHistory && expectedRoi!.Value < 0.95)
                 riskFactors.Add("Expected ROI below breakeven (1.0x)");
             if (request.Budget > 500000)
-                riskFactors.Add("High-budget campaign (>$500K) — requires executive approval");
+                riskFactors.Add("High-budget campaign (>$500K) requires executive approval");
 
             // Check approval gate trigger
             string? approvalRequestId = null;
-            bool requiresApproval = request.Budget > 500000 || (expectedRoi < 2.0 && request.Budget > 100000);
+            bool requiresApproval = !insufficientHistory && (request.Budget > 500000 || (expectedRoi!.Value < 2.0 && request.Budget > 100000));
             if (requiresApproval)
             {
                 string reason = request.Budget > 500000
                     ? $"High-budget promo: ${request.Budget:N0} for {request.Brand} in {request.Region}"
-                    : $"Low-ROI risk: {expectedRoi:F2}x ROI with ${request.Budget:N0} budget for {request.Brand}";
+                    : $"Low-ROI risk: {expectedRoi!.Value:F2}x ROI with ${request.Budget:N0} budget for {request.Brand}";
 
                 ApprovalRequest approvalRequest = await approvalGate.RequestApprovalAsync(new ApprovalContext(
                     AgentId: "promo-planning",
                     UserId: "taskmodule",
                     Action: $"Execute {request.PromoType} promotion for {request.Brand} in {request.Region}",
-                    Impact: $"Budget: ${request.Budget:N0}, Expected ROI: {expectedRoi:F2}x, Duration: {durationWeeks} weeks",
+                    Impact: $"Budget: ${request.Budget:N0}, Expected ROI: {expectedRoi!.Value:F2}x, Duration: {durationWeeks} weeks",
                     Urgency: request.Budget > 500000 ? "high" : "medium",
                     Reasoning: reason
                 ), ct);
@@ -194,7 +207,7 @@ public static class PromoEndpoints
                 promo_type = request.PromoType,
                 budget = request.Budget,
                 period = new { start = request.StartDate, end = request.EndDate, duration_weeks = durationWeeks },
-                target_lift = request.TargetLift,
+                target_lift = request.TargetLiftPercent,
                 roi_estimate = JsonSerializer.Deserialize<object>(roiJson),
                 timing_assessment = JsonSerializer.Deserialize<object>(timingJson),
                 lift_analysis = JsonSerializer.Deserialize<object>(liftJson),
@@ -230,6 +243,35 @@ public static class PromoEndpoints
             ? parsed
             : 0d;
 
+    private static bool TryReadError(JsonElement root, out string? error)
+    {
+        if (root.TryGetProperty("error", out JsonElement value) && value.ValueKind == JsonValueKind.String)
+        {
+            error = value.GetString();
+            return !string.IsNullOrWhiteSpace(error);
+        }
+
+        error = null;
+        return false;
+    }
+
+    private static bool ReadBoolean(JsonElement root, string name) =>
+        root.TryGetProperty(name, out JsonElement value)
+        && value.ValueKind == JsonValueKind.True;
+
+    private static double? ReadExpectedRoi(JsonElement root)
+    {
+        return root.TryGetProperty("roi", out JsonElement roi)
+            && roi.ValueKind == JsonValueKind.Object
+            && roi.TryGetProperty("expected", out JsonElement nestedExpected)
+            && nestedExpected.TryGetDouble(out double nestedValue)
+            ? nestedValue
+            : root.TryGetProperty("expected_roi", out JsonElement flatExpected)
+                && flatExpected.TryGetDouble(out double flatValue)
+                ? flatValue
+                : null;
+    }
+
     /// <summary>
     /// The promo calendar carries dates but no lifecycle state, while the planner's
     /// PromoCampaign contract requires one. Derive it from the window so the panel can
@@ -254,5 +296,5 @@ record PromoEvaluationRequest(
     double Budget,
     string StartDate,
     string EndDate,
-    double? TargetLift = null
+    double? TargetLiftPercent = null
 );
