@@ -200,9 +200,17 @@ const METRIC_CARDS = [
   { key: 'avgCostPerRequest', label: 'Avg Cost / Req', icon: '📊', color: OBSERVABILITY_COLORS.avgCost, fmt: (v: number) => `$${v.toFixed(4)}` },
 ] as const;
 
-/** Sub-second tools are common, so seconds only once the total is worth reading in seconds. */
+/**
+ * Tool timings span four orders of magnitude, so the unit follows the value.
+ *
+ * A measured but sub-millisecond figure renders as "<1ms" rather than "0ms". Several of
+ * these tools genuinely run in well under a millisecond, and a row reading "2 calls, 0ms"
+ * is indistinguishable from the dead column this one replaced, where every tool reported
+ * zero tokens because tool spans never carry any. Zero is reserved for a real zero.
+ */
 function formatToolDuration(ms: number): string {
   if (ms >= 1_000) return `${(ms / 1_000).toFixed(1)}s`;
+  if (ms > 0 && ms < 1) return '<1ms';
   return `${Math.round(ms).toLocaleString()}ms`;
 }
 
@@ -425,7 +433,7 @@ export default function CostDashboard() {
                       <td className={styles.tableCell} style={{ fontWeight: 600 }}>{tool.toolName}</td>
                       <td className={styles.tableCellMuted}>{tool.callCount.toLocaleString()}</td>
                       <td className={styles.tableCellMuted}>{formatToolDuration(tool.totalDurationMs)}</td>
-                      <td className={styles.tableCellMuted}>{tool.avgDurationMs.toFixed(0)}ms</td>
+                      <td className={styles.tableCellMuted}>{formatToolDuration(tool.avgDurationMs)}</td>
                     </tr>
                   ))}
                 </tbody>

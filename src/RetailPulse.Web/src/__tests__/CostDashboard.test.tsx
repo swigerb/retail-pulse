@@ -41,6 +41,7 @@ const mockData: CostDashboardData = {
   topTools: [
     { toolName: 'GetDepletionStats', callCount: 42, totalDurationMs: 35700, avgDurationMs: 850 },
     { toolName: 'CreateChart', callCount: 28, totalDurationMs: 840, avgDurationMs: 30 },
+    { toolName: 'GetMarketShare', callCount: 4, totalDurationMs: 0.4, avgDurationMs: 0.1 },
   ],
 };
 
@@ -107,6 +108,17 @@ describe('CostDashboard', () => {
       .toEqual(['Tool', 'Calls', 'Total Time', 'Avg Duration']);
     expect(within(table).getByText('35.7s')).toBeInTheDocument();
     expect(within(table).getByText('840ms')).toBeInTheDocument();
+  });
+
+  // A tool that ran four times cannot honestly report 0ms, and a row reading "4 calls,
+  // 0ms" is indistinguishable from the dead token column this one replaced.
+  it('shows sub-millisecond timings as <1ms rather than rounding them to zero', async () => {
+    render(wrap(<CostDashboard />));
+    const table = await screen.findByTestId('tools-table');
+    const row = within(table).getByText('GetMarketShare').closest('tr')!;
+
+    expect(within(row).getAllByText('<1ms')).toHaveLength(2);
+    expect(within(row).queryByText('0ms')).not.toBeInTheDocument();
   });
 
   it('renders friendly empty states for idle chart sections', async () => {
