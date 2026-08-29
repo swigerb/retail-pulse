@@ -100,7 +100,7 @@ vi.mock('../services/councilApi', () => ({
   fetchCouncilHistory: vi.fn(),
 }));
 
-import { conveneCouncil } from '../services/councilApi';
+import { conveneCouncil, fetchCouncilHistory } from '../services/councilApi';
 import VoteCard from '../components/council/VoteCard';
 import CouncilVerdictView from '../components/council/CouncilVerdict';
 import CouncilPanel from '../components/council/CouncilPanel';
@@ -287,5 +287,17 @@ describe('CouncilPanel', () => {
     expect(screen.getByTestId('brand-selector')).toBeDisabled();
     expect(screen.getByTestId('region-selector')).toBeDisabled();
     expect(screen.getByTestId('convene-button')).toBeDisabled();
+  });
+
+  it('distinguishes a failed history load from an empty history', async () => {
+    vi.mocked(fetchCouncilHistory).mockRejectedValue(new Error('Network error'));
+    render(<CouncilPanel />, { wrapper });
+
+    fireEvent.click(screen.getByText('Load History'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('history-error')).toHaveTextContent('Unable to load previous council sessions');
+      expect(screen.queryByTestId('history-empty')).not.toBeInTheDocument();
+    });
   });
 });
