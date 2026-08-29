@@ -153,15 +153,17 @@ public static class PromoEndpoints
             int durationDays = durationWeeks * 7;
             bool breaksEvenWithinWindow = breakEvenDays is not null && breakEvenDays.Value <= durationDays;
 
-            string recommendation = insufficientHistory ? "insufficient_history"
-                : !breaksEvenWithinWindow ? "not_recommended"
-                : expectedRoi!.Value switch
-            {
-                >= 3.0 => "strongly_recommended",
-                >= 2.0 => "recommended",
-                >= 1.0 => "proceed_with_caution",
-                _ => "not_recommended"
-            };
+            string recommendation = insufficientHistory
+                ? "insufficient_history"
+                : !breaksEvenWithinWindow
+                    ? "not_recommended"
+                    : expectedRoi!.Value switch
+                    {
+                        >= 3.0 => "strongly_recommended",
+                        >= 2.0 => "recommended",
+                        >= 1.0 => "proceed_with_caution",
+                        _ => "not_recommended"
+                    };
 
             // Build risk factors
             var riskFactors = new List<string>();
