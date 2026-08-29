@@ -48,6 +48,23 @@ describe('ExplanationPanel', () => {
     ).toBeInTheDocument();
   });
 
+  it('keeps rendering core content when optional arrays are absent', () => {
+    renderWithProvider(
+      <ExplanationPanel
+        explanation={{
+          question: 'Why is the score low?',
+          answer: 'The scorecard returned no grounded reasoning steps for this dimension.',
+        }}
+        open={true}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Why is the score low?')).toBeInTheDocument();
+    expect(screen.getByText('The scorecard returned no grounded reasoning steps for this dimension.')).toBeInTheDocument();
+    expect(screen.getByText('No grounded reasoning steps were returned for this score.')).toBeInTheDocument();
+  });
+
   it('shows tool name badges for each step', () => {
     renderWithProvider(
       <ExplanationPanel explanation={mockExplanation} open={true} onClose={vi.fn()} />,
@@ -63,7 +80,7 @@ describe('ExplanationPanel', () => {
     );
 
     expect(screen.getByText('87%')).toBeInTheDocument();
-    expect(screen.getByText('Confidence')).toBeInTheDocument();
+    expect(screen.getByText('Grounding')).toBeInTheDocument();
   });
 
   it('shows data source names', () => {

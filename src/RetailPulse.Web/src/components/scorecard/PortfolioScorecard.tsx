@@ -230,6 +230,7 @@ export function PortfolioScorecard({
                   <WhyButton
                     size="small"
                     onClick={() => onWhyClick?.(brand.brandName)}
+                    ariaLabel={`Explain ${brand.brandName} score`}
                   />
                 </div>
 
