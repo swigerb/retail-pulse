@@ -1,5 +1,18 @@
 import type { BlockedRequest, GuardrailsStats, GuardrailsConfigData } from '../types';
 
+type GuardrailsConfigUpdatePayload = Pick<
+  GuardrailsConfigData,
+  'piiDetectionEnabled' | 'jailbreakDetectionEnabled' | 'autoRedactPii' | 'maxInputLength'
+> & {
+  contentSafety?: {
+    failPolicy: NonNullable<GuardrailsConfigData['contentSafety']>['failPolicy'];
+    hateThreshold: number;
+    sexualThreshold: number;
+    violenceThreshold: number;
+    selfHarmThreshold: number;
+  };
+};
+
 export async function fetchGuardrailsStats(): Promise<GuardrailsStats> {
   const res = await fetch('/api/guardrails/stats');
   if (!res.ok) throw new Error(`Failed to fetch guardrails stats: ${res.status}`);
@@ -14,7 +27,7 @@ export async function fetchGuardrailsStats(): Promise<GuardrailsStats> {
 /**
  * Fetches the raw suspicious-request audit log so the dashboard can render
  * category / severity / decision per entry. The `/api/guardrails/stats`
- * endpoint only returns aggregate counters — the per-entry fields required
+ * endpoint only returns aggregate counters - the per-entry fields required
  * for the pattern-vs-model split live behind `/api/guardrails/log`.
  */
 export async function fetchGuardrailsLog(count = 50): Promise<BlockedRequest[]> {
@@ -40,22 +53,79 @@ export async function fetchGuardrailsLog(count = 50): Promise<BlockedRequest[]> 
 
 export async function fetchGuardrailsConfig(): Promise<GuardrailsConfigData> {
   const res = await fetch('/api/guardrails/config');
-  if (res.status === 404) return { jailbreakEnabled: false, piiEnabled: false, accessControlEnabled: false, blockedPatterns: '' };
+  if (res.status === 404) return defaultGuardrailsConfig();
   if (!res.ok) throw new Error(`Failed to fetch guardrails config: ${res.status}`);
   return res.json();
 }
 
-export async function updateGuardrailsConfig(config: GuardrailsConfigData): Promise<void> {
+export async function updateGuardrailsConfig(config: GuardrailsConfigData): Promise<GuardrailsConfigData> {
+  const body = toUpdatePayload(config);
   const res = await fetch('/api/guardrails/config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Failed to update guardrails config: ${res.status}`);
+  const saved = await res.json() as GuardrailsConfigData;
+  assertAppliedConfig(body, saved);
+  return saved;
 }
 
 export async function resetGuardrailsConfig(): Promise<GuardrailsConfigData> {
   const res = await fetch('/api/guardrails/config/reset', { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to reset guardrails config: ${res.status}`);
   return res.json();
+}
+
+function defaultGuardrailsConfig(): GuardrailsConfigData {
+  return {
+    piiDetectionEnabled: false,
+    jailbreakDetectionEnabled: false,
+    autoRedactPii: false,
+    maxInputLength: 0,
+    piiPatterns: [],
+    jailbreakPatterns: [],
+  };
+}
+
+function toUpdatePayload(config: GuardrailsConfigData): GuardrailsConfigUpdatePayload {
+  const payload: GuardrailsConfigUpdatePayload = {
+    piiDetectionEnabled: config.piiDetectionEnabled,
+    jailbreakDetectionEnabled: config.jailbreakDetectionEnabled,
+    autoRedactPii: config.autoRedactPii,
+    maxInputLength: config.maxInputLength,
+  };
+  if (config.contentSafety) {
+    payload.contentSafety = {
+      failPolicy: config.contentSafety.failPolicy,
+      hateThreshold: config.contentSafety.hateThreshold,
+      sexualThreshold: config.contentSafety.sexualThreshold,
+      violenceThreshold: config.contentSafety.violenceThreshold,
+      selfHarmThreshold: config.contentSafety.selfHarmThreshold,
+    };
+  }
+  return payload;
+}
+
+function assertAppliedConfig(requested: GuardrailsConfigUpdatePayload, saved: GuardrailsConfigData): void {
+  const expected: Array<[keyof GuardrailsConfigUpdatePayload, unknown]> = [
+    ['piiDetectionEnabled', requested.piiDetectionEnabled],
+    ['jailbreakDetectionEnabled', requested.jailbreakDetectionEnabled],
+    ['autoRedactPii', requested.autoRedactPii],
+    ['maxInputLength', requested.maxInputLength],
+  ];
+  const mismatch = expected.find(([key, value]) => saved[key] !== value);
+  if (mismatch) {
+    throw new Error(`Guardrails config update was not applied for ${String(mismatch[0])}`);
+  }
+  if (requested.contentSafety && !saved.contentSafety) {
+    throw new Error('Guardrails config update was not applied for contentSafety');
+  }
+  if (requested.contentSafety && saved.contentSafety) {
+    const contentSafetyMismatch = Object.entries(requested.contentSafety)
+      .find(([key, value]) => saved.contentSafety?.[key as keyof typeof requested.contentSafety] !== value);
+    if (contentSafetyMismatch) {
+      throw new Error(`Guardrails config update was not applied for contentSafety.${contentSafetyMismatch[0]}`);
+    }
+  }
 }
