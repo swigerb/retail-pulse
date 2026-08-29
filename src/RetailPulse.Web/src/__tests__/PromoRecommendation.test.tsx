@@ -42,6 +42,7 @@ const notRecommendedEval: PromoEvaluation = {
   roi: 0.6,
   roiLower: 0.3,
   roiUpper: 0.9,
+  breakEvenDays: null,
 };
 
 const insufficientEval: PromoEvaluation = {
@@ -74,6 +75,12 @@ describe('PromoRecommendation', () => {
   it('renders not recommended state', () => {
     render(wrap(<PromoRecommendation evaluation={notRecommendedEval} budget={25000} />));
     expect(screen.getByTestId('recommendation-badge')).toHaveTextContent('Not Recommended');
+    expect(screen.getByTestId('roi-value')).toHaveTextContent('0.60x ROI');
+  });
+
+  it('shows that sub-breakeven campaigns do not break even', () => {
+    render(wrap(<PromoRecommendation evaluation={notRecommendedEval} budget={25000} />));
+    expect(screen.getByText(/Break-even: Does not break even/)).toBeInTheDocument();
   });
 
   it('displays ROI with confidence range', () => {

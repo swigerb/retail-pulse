@@ -149,13 +149,17 @@ public static class PromoEndpoints
 
             double? expectedRoi = ReadExpectedRoi(roiDoc.RootElement);
             bool insufficientHistory = ReadBoolean(roiDoc.RootElement, "insufficient_history") || expectedRoi is null;
+            int? breakEvenDays = ReadNullableInt(roiDoc.RootElement, "break_even_days");
+            int durationDays = durationWeeks * 7;
+            bool breaksEvenWithinWindow = breakEvenDays is not null && breakEvenDays.Value <= durationDays;
 
-            // Determine recommendation
-            string recommendation = insufficientHistory ? "insufficient_history" : expectedRoi!.Value switch
+            string recommendation = insufficientHistory ? "insufficient_history"
+                : !breaksEvenWithinWindow ? "not_recommended"
+                : expectedRoi!.Value switch
             {
                 >= 3.0 => "strongly_recommended",
                 >= 2.0 => "recommended",
-                >= 0.95 => "proceed_with_caution",
+                >= 1.0 => "proceed_with_caution",
                 _ => "not_recommended"
             };
 
@@ -172,14 +176,14 @@ public static class PromoEndpoints
                         riskFactors.Add(detail.GetString() ?? "Unknown risk");
                 }
             }
-            if (!insufficientHistory && expectedRoi!.Value < 0.95)
-                riskFactors.Add("Expected ROI below breakeven (1.0x)");
+            if (!insufficientHistory && !breaksEvenWithinWindow)
+                riskFactors.Add("Campaign does not recoup planned spend within the proposed window");
             if (request.Budget > 500000)
                 riskFactors.Add("High-budget campaign (>$500K) requires executive approval");
 
             // Check approval gate trigger
             string? approvalRequestId = null;
-            bool requiresApproval = !insufficientHistory && (request.Budget > 500000 || (expectedRoi!.Value < 2.0 && request.Budget > 100000));
+            bool requiresApproval = !insufficientHistory && (request.Budget > 500000 || (!breaksEvenWithinWindow && request.Budget > 100000) || (expectedRoi!.Value < 2.0 && request.Budget > 100000));
             if (requiresApproval)
             {
                 string reason = request.Budget > 500000
@@ -258,6 +262,13 @@ public static class PromoEndpoints
     private static bool ReadBoolean(JsonElement root, string name) =>
         root.TryGetProperty(name, out JsonElement value)
         && value.ValueKind == JsonValueKind.True;
+
+    private static int? ReadNullableInt(JsonElement root, string name) =>
+        root.TryGetProperty(name, out JsonElement value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetInt32(out int parsed)
+            ? parsed
+            : null;
 
     private static double? ReadExpectedRoi(JsonElement root)
     {

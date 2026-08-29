@@ -21,6 +21,10 @@ const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 const HIGH_SPEND_THRESHOLD = 50_000;
 
+function formatRoi(value: number): string {
+  return value >= 1 ? value.toFixed(1) : value.toFixed(2);
+}
+
 const useStyles = makeStyles({
   container: {
     display: 'flex',
@@ -208,12 +212,12 @@ export default function PromoRecommendation({ evaluation, budget, onSubmitForApp
         <div className={styles.roiDisplay}>
           <span className={styles.roiValue} style={{ color: roiColor }} data-testid="roi-value">
             {hasModeledRoi && evaluation.roi !== null
-              ? `${evaluation.roi.toFixed(1)}x ROI`
+              ? `${formatRoi(evaluation.roi)}x ROI`
               : 'Not enough history'}
           </span>
           {hasModeledRoi && evaluation.roiLower !== null && evaluation.roiUpper !== null && (
             <span className={styles.roiRange} data-testid="roi-range">
-              ({evaluation.roiLower.toFixed(1)}x to {evaluation.roiUpper.toFixed(1)}x)
+              ({formatRoi(evaluation.roiLower)}x to {formatRoi(evaluation.roiUpper)}x)
             </span>
           )}
         </div>
@@ -230,6 +234,9 @@ export default function PromoRecommendation({ evaluation, budget, onSubmitForApp
           <span className={styles.timingChip}>🗓️ {evaluation.seasonalityFit}</span>
           {evaluation.breakEvenDays !== null && (
             <span className={styles.timingChip}>⏱️ Break-even: {evaluation.breakEvenDays} days</span>
+          )}
+          {hasModeledRoi && evaluation.breakEvenDays === null && (
+            <span className={styles.timingChip}>⏱️ Break-even: Does not break even</span>
           )}
           {evaluation.historicalAvgRoi !== null && (
             <span className={styles.timingChip}>📊 Hist. Avg: {evaluation.historicalAvgRoi.toFixed(1)}x</span>

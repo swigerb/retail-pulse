@@ -325,6 +325,16 @@ public class PromoToolTests : IDisposable
     }
 
     [Fact]
+    public void EstimateROI_SubBreakeven_HasNoFiniteBreakEven()
+    {
+        JsonElement result = Parse(_db.EstimateROI("Ridgeline Bourbon", "Southeast", "Digital", 1_000_000, 1, 40));
+
+        result.TryGetProperty("error", out _).Should().BeFalse();
+        result.GetProperty("roi").GetProperty("expected").GetDouble().Should().BeLessThan(1.0);
+        result.GetProperty("break_even_days").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
     public void EstimateROI_NoHistory_ReturnsInsufficientHistory()
     {
         using SqliteConnection conn = OpenWritableConnection();

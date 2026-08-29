@@ -2665,19 +2665,24 @@ public class RetailPulseDb
         double revenuePerUnit = GetRevenuePerUnit(brandConfig.Category);
         double incrementalRevenue = incrementalUnits * revenuePerUnit;
         double modeledRoi = incrementalRevenue / spend;
-        double expectedRoi = Math.Round((modeledRoi * 0.65) + (basis.AverageRoi * 0.35), 2);
+        double historicalPriorRoi = basis.AverageRoi * spendEfficiency * durationEfficiency;
+        double expectedRoi = Math.Round((modeledRoi * 0.70) + (historicalPriorRoi * 0.30), 2);
 
         double lowerLift = Math.Max(0.1, effectiveLift - (1.96 * stdDev));
         double upperLift = effectiveLift + (1.96 * stdDev);
 
         double lowerModeledRoi = totalBaseline * (lowerLift / 100.0) * spendEfficiency * durationEfficiency * revenuePerUnit / spend;
         double upperModeledRoi = totalBaseline * (upperLift / 100.0) * spendEfficiency * durationEfficiency * revenuePerUnit / spend;
-        double historySpread = Math.Max(0.15, basis.StdDevRoi);
-        double lowerRoi = Math.Round(Math.Max(0.1, Math.Min(expectedRoi, (lowerModeledRoi * 0.65) + ((basis.AverageRoi - historySpread) * 0.35))), 2);
-        double upperRoi = Math.Round(Math.Max(expectedRoi + 0.1, (upperModeledRoi * 0.65) + ((basis.AverageRoi + historySpread) * 0.35)), 2);
+        double historySpread = Math.Max(0.15, basis.StdDevRoi * spendEfficiency * durationEfficiency);
+        double lowerHistoricalPrior = Math.Max(0.1, historicalPriorRoi - historySpread);
+        double upperHistoricalPrior = historicalPriorRoi + historySpread;
+        double lowerRoi = Math.Round(Math.Max(0.1, Math.Min(expectedRoi, (lowerModeledRoi * 0.70) + (lowerHistoricalPrior * 0.30))), 2);
+        double upperRoi = Math.Round(Math.Max(expectedRoi + 0.1, (upperModeledRoi * 0.70) + (upperHistoricalPrior * 0.30)), 2);
 
-        double dailyIncrementalRevenue = incrementalRevenue / Math.Max(1, durationWeeks * 7);
-        int breakEvenDays = Math.Max(1, (int)Math.Ceiling(spend / Math.Max(1.0, dailyIncrementalRevenue)));
+        int durationDays = Math.Max(1, durationWeeks * 7);
+        int? breakEvenDays = expectedRoi >= 1.0
+            ? Math.Max(1, (int)Math.Ceiling(durationDays / expectedRoi))
+            : null;
         double varianceFactor = Math.Round(stdDev / Math.Max(avgLift, 1.0), 2);
 
         return new
@@ -2694,7 +2699,7 @@ public class RetailPulseDb
             similar_campaigns = basis.Count,
             basis = basis.Basis,
             variance_factor = varianceFactor,
-            is_positive_roi = expectedRoi >= 0.95,
+            is_positive_roi = expectedRoi >= 1.0,
             requires_approval = spend > 500000,
             risk_level = varianceFactor > 0.5 ? "high" : varianceFactor > 0.3 ? "medium" : "low"
         };
