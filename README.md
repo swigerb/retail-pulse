@@ -40,12 +40,13 @@
 </div>
 
 <div align="center">
-  <sub><strong><a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-demo-walkthrough.mp4">Watch the 4 min 23 s narrated walkthrough</a></strong> &nbsp;·&nbsp; 1080p60, 33 MB<br />
+  <sub><strong><a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-demo-walkthrough.mp4">Watch the 4 min 43 s narrated walkthrough</a></strong> &nbsp;·&nbsp; 1080p60, 35 MB<br />
   One continuous recording of the app's built-in Demo Mode driving itself, with commentary on
   every step: a plain-English question and the token and cost readout for the answer, a chart
-  rebuilt from the tool payload, the Health Council returning a split verdict, portfolio scoring,
-  competitive intelligence, the P&amp;L waterfall, store operations, knowledge search, the campaign
-  planner, the guardrails dashboard, and the running bill.<br />
+  rebuilt from the tool payload, the Health Council returning a split verdict, competitive
+  intelligence, a P&amp;L waterfall recalculating as the brand changes, store operations, every
+  brand scored across five specialist dimensions, knowledge search, the campaign planner, the
+  guardrails dashboard, published Adaptive Cards, and the running bill.<br />
   Every prompt is submitted live against the deployed app, so the pauses are real API latency -
   some are trimmed and some are slowed so the commentary keeps pace.</sub>
 </div>
@@ -464,7 +465,7 @@ Retail Pulse implements enterprise-grade patterns:
 ## Demo Walkthrough
 
 Watch the [2 min 45 s quick tour](#quick-tour) for the short version, or the
-[4 min 23 s narrated walkthrough](#guided-walkthrough) to see every panel. The
+[4 min 43 s narrated walkthrough](#guided-walkthrough) to see every panel. The
 [complete demo script](docs/demo-walkthrough.md) is a step-by-step presentation guide (~10 minutes).
 
 ---
