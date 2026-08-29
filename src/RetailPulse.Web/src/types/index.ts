@@ -718,7 +718,12 @@ export interface AgentCostBreakdown {
 export interface ToolUsageEntry {
   toolName: string;
   callCount: number;
-  totalTokens: number;
+  /**
+   * Wall-clock time spent in this tool across all calls. Deliberately not tokens: tool
+   * spans are MCP round trips and never carry model tokens, so a per-tool token figure
+   * could only ever be zero.
+   */
+  totalDurationMs: number;
   avgDurationMs: number;
 }
 

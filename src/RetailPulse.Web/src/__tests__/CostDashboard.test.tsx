@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import CostDashboard from '../components/observability/CostDashboard';
 import { fetchCostDashboard } from '../services/observabilityApi';
@@ -39,8 +39,8 @@ const mockData: CostDashboardData = {
     { agentName: 'General Agent', totalTokens: 40000, totalCost: 1.50, requestCount: 27 },
   ],
   topTools: [
-    { toolName: 'GetDepletionStats', callCount: 42, totalTokens: 30000, avgDurationMs: 850 },
-    { toolName: 'CreateChart', callCount: 28, totalTokens: 20000, avgDurationMs: 1200 },
+    { toolName: 'GetDepletionStats', callCount: 42, totalDurationMs: 35700, avgDurationMs: 850 },
+    { toolName: 'CreateChart', callCount: 28, totalDurationMs: 840, avgDurationMs: 30 },
   ],
 };
 
@@ -96,6 +96,17 @@ describe('CostDashboard', () => {
       expect(screen.getByText('GetDepletionStats')).toBeInTheDocument();
       expect(screen.getByText('CreateChart')).toBeInTheDocument();
     });
+  });
+
+  // Tool spans are MCP round trips and carry no model tokens, so the table reports time in
+  // tool. A token column here could only ever read zero.
+  it('reports time in tool rather than tokens', async () => {
+    render(wrap(<CostDashboard />));
+    const table = await screen.findByTestId('tools-table');
+    expect(within(table).getAllByRole('columnheader').map(h => h.textContent))
+      .toEqual(['Tool', 'Calls', 'Total Time', 'Avg Duration']);
+    expect(within(table).getByText('35.7s')).toBeInTheDocument();
+    expect(within(table).getByText('840ms')).toBeInTheDocument();
   });
 
   it('renders friendly empty states for idle chart sections', async () => {

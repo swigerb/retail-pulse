@@ -218,6 +218,45 @@ describe('DemoMode', () => {
     }
   });
 
+  it('scrolls the newest match into view, not the first', async () => {
+    // A long answer pushes its chart below the fold, so the chart act narrates something
+    // off screen unless it scrolls. It must scroll to the chart this act just produced,
+    // which in an appending chat is the LAST match, not the first.
+    const older = document.createElement('div');
+    const newer = document.createElement('div');
+    const scrolledOlder = vi.fn();
+    const scrolledNewer = vi.fn();
+    for (const [el, spy] of [[older, scrolledOlder], [newer, scrolledNewer]] as const) {
+      el.setAttribute('data-testid', 'chart-card');
+      (el as HTMLElement).scrollIntoView = spy;
+      document.body.appendChild(el);
+    }
+
+    try {
+      renderDemo();
+      const chartIndex = DEMO_ACTS.findIndex(a => a.id === 'ask-chart');
+      for (let i = 0; i < chartIndex; i++) {
+        await act(async () => { screen.getByTestId('demo-mode-next').click(); });
+      }
+      await act(async () => { vi.advanceTimersByTime(1_000); });
+
+      await waitFor(() => expect(scrolledNewer).toHaveBeenCalled());
+      expect(scrolledOlder).not.toHaveBeenCalled();
+    } finally {
+      older.remove();
+      newer.remove();
+    }
+  });
+
+  it('scrolls to the chart it just produced rather than an earlier one', () => {
+    // A long answer pushes its chart below the fold, so the chart act would narrate
+    // something off screen without this step.
+    const chartAct = DEMO_ACTS.find(a => a.id === 'ask-chart');
+    const scrolls = (chartAct?.interactions ?? []).filter(i => i.kind === 'scroll');
+    expect(scrolls).toHaveLength(1);
+    expect(scrolls[0]).toMatchObject({ selector: '[data-testid="chart-card"]' });
+  });
+
   it('waits for a control that mounts after the view switches', async () => {
     // Switching view only schedules a render, so a control queried on the next line does
     // not exist yet. Every interaction was silently skipped because of this, which is why

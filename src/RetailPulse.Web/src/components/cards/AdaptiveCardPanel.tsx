@@ -168,12 +168,25 @@ const useStyles = makeStyles({
   },
 });
 
-export default function AdaptiveCardPanel() {
+export interface AdaptiveCardPanelProps {
+  /**
+   * Cards already fetched by the host, so the panel paints populated on first render.
+   * The panel is only mounted when its view is active, so without this it always starts
+   * from an empty fetch — which is why a demo that pans straight to it showed nothing but
+   * a spinner. A refresh still runs, quietly, behind whatever is already on screen.
+   */
+  readonly initialCards?: readonly AdaptiveCard[];
+}
+
+export default function AdaptiveCardPanel({ initialCards }: AdaptiveCardPanelProps = {}) {
   const styles = useStyles();
-  const [cards, setCards] = useState<AdaptiveCard[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [cards, setCards] = useState<AdaptiveCard[]>(() => [...(initialCards ?? [])]);
+  const [loading, setLoading] = useState((initialCards?.length ?? 0) === 0);
   const [error, setError] = useState<string | null>(null);
   const [selectedCard, setSelectedCard] = useState<AdaptiveCard | null>(null);
+
+  /** Whether the first load can refresh silently, because the host already supplied cards. */
+  const prewarmed = useRef((initialCards?.length ?? 0) > 0);
 
   // Mirror selectedCard into a ref so the SignalR effect can read the latest
   // selection without re-subscribing (which would tear the hub connection
@@ -183,9 +196,9 @@ export default function AdaptiveCardPanel() {
     selectedCardIdRef.current = selectedCard?.id ?? null;
   }, [selectedCard]);
 
-  const loadCards = useCallback(async () => {
+  const loadCards = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
       const data = await fetchActiveCards();
       setCards(data);
@@ -197,7 +210,7 @@ export default function AdaptiveCardPanel() {
   }, []);
 
   useEffect(() => {
-    loadCards();
+    void loadCards(prewarmed.current);
   }, [loadCards]);
 
   // SignalR real-time updates — connection lifecycle is bound to the

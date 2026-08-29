@@ -72,7 +72,7 @@ describe('observabilityApi.fetchCostDashboard', () => {
       }
       if (url === '/api/observability/costs/tools?period=week') {
         return Promise.resolve(new Response(JSON.stringify([
-          { toolName: 'SearchInventory', callCount: 5, totalTokens: 300, avgDurationMs: 42 },
+          { toolName: 'SearchInventory', callCount: 5, totalDurationMs: 210, avgDurationMs: 42 },
         ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       }
       return Promise.resolve(new Response(null, { status: 404 }));
@@ -102,7 +102,7 @@ describe('observabilityApi.fetchCostDashboard', () => {
       topTools: [{
         toolName: 'SearchInventory',
         callCount: 5,
-        totalTokens: 300,
+        totalDurationMs: 210,
         avgDurationMs: 42,
       }],
     });
