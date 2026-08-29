@@ -31,10 +31,15 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
         // Track stats by type
         switch (request.DetectionType.ToLowerInvariant())
         {
-            case "jailbreak":
+            // Injection shares the jailbreak toggle and the jailbreak counter.
+            // It previously matched no case and no Content Safety prefix, so a
+            // blocked injection incremented nothing and never reached
+            // TotalBlocked.
+            case PatternDetectionTypes.Jailbreak:
+            case PatternDetectionTypes.Injection:
                 Interlocked.Increment(ref _jailbreakCount);
                 break;
-            case "pii":
+            case PatternDetectionTypes.Pii:
                 Interlocked.Increment(ref _piiCount);
                 break;
             case "access_denial":

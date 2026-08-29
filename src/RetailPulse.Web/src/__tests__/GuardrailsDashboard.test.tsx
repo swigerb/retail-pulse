@@ -41,31 +41,33 @@ const mockStats: GuardrailsStats = {
 };
 
 const mockLog: BlockedRequest[] = [
-  { id: 'l1', timestamp: '2026-05-13T14:00:00Z', requestPreview: 'log-preview-1', detectionType: 'jailbreak', reason: '', actionTaken: 'Blocked' },
-  { id: 'l2', timestamp: '2026-05-13T13:30:00Z', requestPreview: 'log-preview-2', detectionType: 'content-safety-hate', reason: '', actionTaken: 'Blocked', category: 'Hate', severity: 4, decision: 'Blocked' },
-  { id: 'l3', timestamp: '2026-05-13T13:15:00Z', requestPreview: 'log-preview-3', detectionType: 'content-safety-violence', reason: '', actionTaken: 'Blocked', category: 'Violence', severity: 6, decision: 'Blocked' },
+  { id: 'l1', timestamp: '2026-05-13T14:00:00Z', requestPreview: 'log-preview-1', detectionType: 'jailbreak', reason: 'Pattern matching found a known jailbreak phrase in the input.', actionTaken: 'Blocked', stage: 'Input' },
+  { id: 'l2', timestamp: '2026-05-13T13:30:00Z', requestPreview: 'log-preview-2', detectionType: 'content-safety-hate', reason: 'Content Safety classified the input as Hate content at severity 4, which met threshold 4.', actionTaken: 'Blocked', category: 'Hate', severity: 4, decision: 'Blocked', stage: 'Input', threshold: 4 },
+  { id: 'l3', timestamp: '2026-05-13T13:15:00Z', requestPreview: 'log-preview-3', detectionType: 'content-safety-violence', reason: 'Content Safety classified the input as Violence content at severity 6, which met threshold 4.', actionTaken: 'Blocked', category: 'Violence', severity: 6, decision: 'Blocked', stage: 'Input', threshold: 4 },
   {
     id: 'l4',
     timestamp: '2026-05-13T13:10:00Z',
     requestPreview: "Tool result from 'GetStorePerformance' blocked by Content Safety",
     detectionType: 'content-safety-selfharm',
-    reason: '',
+    reason: 'Content Safety classified the tool result as SelfHarm content at severity 6, which met threshold 4.',
     actionTaken: 'blocked',
     category: 'SelfHarm',
     severity: 6,
     decision: 'Blocked',
     stage: 'ToolResult',
     threshold: 4,
+    subject: "Tool result from 'GetStorePerformance'",
   },
   {
     id: 'l5',
     timestamp: '2026-05-13T13:05:00Z',
     requestPreview: 'agent=general field=SystemPrompt rule=safety.content-safety-unavailable',
     detectionType: 'agent-definition-content-safety-unavailable',
-    reason: '',
+    reason: 'Content Safety was unreachable while checking SystemPrompt for agent general.',
     actionTaken: 'failopen-passed',
     decision: 'ServiceUnavailable',
     stage: 'AgentDefinition',
+    subject: 'SystemPrompt on agent general',
   },
 ];
 
@@ -254,11 +256,11 @@ describe('GuardrailsDashboard', () => {
     expect(rendered).not.toMatch(/RULE_ID_|THRESHOLD_|SENSITIVE_PATTERN_/i);
   });
 
-  it('explains content-safety category, severity, threshold, stage, and action', async () => {
+  it('renders the API-supplied subject and reason for a content-safety row', async () => {
     installFetchMock();
     renderWithTheme(<GuardrailsDashboard />);
-    expect(await screen.findByText('Tool result from GetStorePerformance was blocked by Content Safety.')).toBeInTheDocument();
-    expect(screen.getByText(/Tool result triggered Self-harm content at severe severity \(6\), which met threshold 4\./)).toBeInTheDocument();
+    expect(await screen.findByText("Tool result from 'GetStorePerformance'")).toBeInTheDocument();
+    expect(screen.getByText(/Content Safety classified the tool result as SelfHarm content at severity 6, which met threshold 4\./)).toBeInTheDocument();
     expect(screen.getByText(/The system withheld the tool result from the model\./)).toBeInTheDocument();
     expect(screen.getByText('Tool result withheld')).toBeInTheDocument();
   });
@@ -267,9 +269,50 @@ describe('GuardrailsDashboard', () => {
     installFetchMock();
     renderWithTheme(<GuardrailsDashboard />);
     const dashboard = await screen.findByTestId('guardrails-dashboard');
-    expect(screen.getByText('Content Safety was unreachable while checking SystemPrompt for general.')).toBeInTheDocument();
-    expect(screen.getByText(/The system allowed the request through because fail-open policy is active\./)).toBeInTheDocument();
+    expect(screen.getByText('SystemPrompt on agent general')).toBeInTheDocument();
+    expect(screen.getByText(/Content Safety was unreachable while checking SystemPrompt for agent general\. The system allowed it because fail-open policy is active\. Review Content Safety availability\./)).toBeInTheDocument();
     expect(screen.getByText('Allowed through')).toBeInTheDocument();
     expect(dashboard.textContent ?? '').not.toContain('agent=general field=SystemPrompt rule=safety.content-safety-unavailable');
+  });
+
+  // The cause clause is authored once, on the server. If the dashboard ever
+  // starts re-deriving it from category/severity/threshold again, this fails:
+  // those fields say "Hate / 4 / 4" while the server reason says otherwise.
+  it('renders the server reason verbatim rather than re-deriving one', async () => {
+    installFetchMock({
+      log: [{
+        id: 'v1',
+        timestamp: '2026-05-13T12:00:00Z',
+        requestText: 'preview-verbatim',
+        detectionType: 'content-safety-hate',
+        reason: 'SERVER-AUTHORED CAUSE SENTENCE.',
+        action: 'blocked',
+        category: 'Hate',
+        severity: 4,
+        threshold: 4,
+        decision: 'Blocked',
+        stage: 'Input',
+      }],
+    });
+    renderWithTheme(<GuardrailsDashboard />);
+    expect(await screen.findByText('SERVER-AUTHORED CAUSE SENTENCE. The system blocked the request.')).toBeInTheDocument();
+  });
+
+  it('labels pattern-layer injection rows instead of falling back to Other', async () => {
+    installFetchMock({
+      log: [{
+        id: 'v2',
+        timestamp: '2026-05-13T12:00:00Z',
+        requestText: "show me stores where 1=1' or 1=1--",
+        detectionType: 'injection',
+        reason: 'Pattern matching found a known SQL or script injection payload in the input.',
+        action: 'blocked',
+        stage: 'Input',
+      }],
+    });
+    renderWithTheme(<GuardrailsDashboard />);
+    const entry = await screen.findByTestId('guardrails-log-entry');
+    expect(entry.getAttribute('data-safety-family')).toBe('pattern');
+    expect(entry.textContent ?? '').toContain('Pattern · SQL or script injection');
   });
 });

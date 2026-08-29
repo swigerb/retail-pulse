@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Options;
 using RetailPulse.Api.Budget;
+using RetailPulse.Api.Guardrails;
 using RetailPulse.Api.Guardrails.ContentSafety;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Contracts.Guardrails;
@@ -270,8 +271,8 @@ public class RagContextProvider
                         // user-prompt jailbreak flag when both are set.
                         string detectionType = ContentSafetyDetectionTypes.ForResultWithShield(
                             evaluation, preferIndirect: true);
-                        (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
-                        int? threshold = ContentSafetyAuditFields.ThresholdFor(cs, category);
+                        (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
+                        int? threshold = GuardrailAuditFields.ThresholdFor(cs, category);
                         await LogAsync(new SuspiciousRequest(
                             Guid.NewGuid().ToString("N"),
                             DateTime.UtcNow,
@@ -284,13 +285,14 @@ public class RagContextProvider
                             Decision: evaluation.Decision.ToString(),
                             Stage: ContentSafetyStage.RetrievedKnowledge.ToString(),
                             Threshold: threshold,
-                            Reason: ContentSafetyAuditFields.BuildReason(
+                            Reason: GuardrailAuditFields.BuildReason(
                                 evaluation,
                                 ContentSafetyStage.RetrievedKnowledge,
                                 detectionType,
                                 category,
                                 severity,
-                                threshold)), ct).ConfigureAwait(false);
+                                threshold),
+                                    Subject: $"Knowledge chunk {chunk.Title}#{chunk.ChunkIndex}"), ct).ConfigureAwait(false);
                         _logger.LogWarning(
                             "Content Safety dropped RAG chunk '{Title}#{Chunk}' (type={Detection})",
                             chunk.Title, chunk.ChunkIndex, detectionType);
@@ -313,13 +315,14 @@ public class RagContextProvider
                             Decision: evaluation.Decision.ToString(),
                             Stage: ContentSafetyStage.RetrievedKnowledge.ToString(),
                             Threshold: null,
-                            Reason: ContentSafetyAuditFields.BuildReason(
+                            Reason: GuardrailAuditFields.BuildReason(
                                 evaluation,
                                 ContentSafetyStage.RetrievedKnowledge,
                                 ContentSafetyDetectionTypes.Unavailable,
                                 category: null,
                                 severity: null,
-                                threshold: null)), ct).ConfigureAwait(false);
+                                threshold: null),
+                                    Subject: $"Knowledge chunk {chunk.Title}#{chunk.ChunkIndex}"), ct).ConfigureAwait(false);
                         if (cs.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
                         {
                             _logger.LogWarning(
@@ -332,9 +335,9 @@ public class RagContextProvider
                     }
                 case ContentSafetyDecision.Flagged:
                     {
-                        (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
+                        (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
                         string detectionType = ContentSafetyDetectionTypes.ForResultWithShield(evaluation, preferIndirect: true);
-                        int? threshold = ContentSafetyAuditFields.ThresholdFor(cs, category);
+                        int? threshold = GuardrailAuditFields.ThresholdFor(cs, category);
                         await LogAsync(new SuspiciousRequest(
                             Guid.NewGuid().ToString("N"),
                             DateTime.UtcNow,
@@ -347,13 +350,14 @@ public class RagContextProvider
                             Decision: evaluation.Decision.ToString(),
                             Stage: ContentSafetyStage.RetrievedKnowledge.ToString(),
                             Threshold: threshold,
-                            Reason: ContentSafetyAuditFields.BuildReason(
+                            Reason: GuardrailAuditFields.BuildReason(
                                 evaluation,
                                 ContentSafetyStage.RetrievedKnowledge,
                                 detectionType,
                                 category,
                                 severity,
-                                threshold)), ct).ConfigureAwait(false);
+                                threshold),
+                                    Subject: $"Knowledge chunk {chunk.Title}#{chunk.ChunkIndex}"), ct).ConfigureAwait(false);
                         survivors.Add(chunk);
                         break;
                     }

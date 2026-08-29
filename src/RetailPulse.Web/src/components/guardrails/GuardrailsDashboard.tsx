@@ -10,7 +10,6 @@ import {
   classifyBlockFamily,
   describeCategory,
   describeSeverity,
-  normaliseCategoryName,
 } from '../../utils/safetyDisplay';
 import { ContentSafetyStatusBadge } from './ContentSafetyStatusBadge';
 
@@ -189,6 +188,7 @@ const useStyles = makeStyles({
 
 const TYPE_ICONS: Record<GuardrailDetectionType, string> = {
   jailbreak: '🚫',
+  injection: '💉',
   pii: '🔐',
   access: '🔒',
   'content-safety-hate': '⚠️',
@@ -210,6 +210,7 @@ const TYPE_ICONS: Record<GuardrailDetectionType, string> = {
 /** Plain-language labels used in the filter chip row. */
 const TYPE_LABELS: Record<GuardrailDetectionType, string> = {
   jailbreak: 'Jailbreak',
+  injection: 'Injection payload',
   pii: 'PII',
   access: 'Access',
   'content-safety-hate': 'Hate',
@@ -255,52 +256,20 @@ function normaliseStage(entry: BlockedRequest): AuditStage {
   if (stage === 'retrievedknowledge' || stage === 'retrieved-knowledge' || stage === 'retrieved knowledge') return 'retrieved-knowledge';
   if (stage === 'agentdefinition' || stage === 'agent-definition' || stage === 'agent definition') return 'agent-definition';
 
+  // Every API log site sets Stage. This only catches rows written by an older
+  // build still sitting in the in-memory ring buffer, and keys off the
+  // detection type rather than the preview prose, which is not a contract.
   if (entry.detectionType.startsWith('agent-definition-')) return 'agent-definition';
-  if (entry.requestPreview.startsWith('Tool result from ')) return 'tool-result';
-  if (entry.requestPreview.startsWith('Retrieved-knowledge chunk ')) return 'retrieved-knowledge';
-  if (entry.requestPreview.startsWith('PII redacted from output')) return 'output';
-  return 'input';
+  return 'unknown';
 }
 
-function thresholdFromConfig(category: string | undefined, contentSafety: ContentSafetyConfigData | null): number | undefined {
-  const normalised = normaliseCategoryName(category);
-  if (!normalised || !contentSafety) return undefined;
-  if (normalised === 'Hate') return contentSafety.hateThreshold;
-  if (normalised === 'Sexual') return contentSafety.sexualThreshold;
-  if (normalised === 'Violence') return contentSafety.violenceThreshold;
-  return contentSafety.selfHarmThreshold;
-}
-
-function parseAgentDefinitionPreview(preview: string): { agent?: string; field?: string } {
-  return {
-    agent: preview.match(/(?:^|\s)agent=([^\s]+)/)?.[1],
-    field: preview.match(/(?:^|\s)field=([^\s]+)/)?.[1],
-  };
-}
-
+/**
+ * The row's headline. `subject` is the API's structured name for the thing that
+ * was checked; when it is absent the preview is itself the evidence and is
+ * shown verbatim. Nothing here parses the preview.
+ */
 function summarizeAuditEvent(entry: BlockedRequest, stage: AuditStage): string {
-  const agentDefinition = parseAgentDefinitionPreview(entry.requestPreview);
-  const action = entry.actionTaken.toLowerCase();
-
-  if (stage === 'agent-definition' && (agentDefinition.agent || agentDefinition.field)) {
-    const field = agentDefinition.field ?? 'a field';
-    const agent = agentDefinition.agent ? ` for ${agentDefinition.agent}` : '';
-    if (action === 'failopen-passed') {
-      return `Content Safety was unreachable while checking ${field}${agent}.`;
-    }
-    return `Agent definition ${field}${agent} triggered a guardrail.`;
-  }
-
-  const tool = entry.requestPreview.match(/^Tool result from '([^']+)' (blocked|flagged) by Content Safety$/i);
-  if (tool) {
-    return `Tool result from ${tool[1]} was ${tool[2].toLowerCase()} by Content Safety.`;
-  }
-
-  const retrieved = entry.requestPreview.match(/^Retrieved-knowledge chunk '([^']+)' (dropped|flagged) by Content Safety$/i);
-  if (retrieved) {
-    return `Retrieved knowledge ${retrieved[1]} was ${retrieved[2].toLowerCase()} by Content Safety.`;
-  }
-
+  if (entry.subject?.trim()) return entry.subject.trim();
   if (entry.requestPreview.trim().length > 0) return entry.requestPreview;
   return `${STAGE_LABELS[stage]} guardrail event`;
 }
@@ -340,39 +309,25 @@ function formatActionLabel(entry: BlockedRequest, stage: AuditStage): string {
   return entry.actionTaken;
 }
 
-function explainAuditDecision(
-  entry: BlockedRequest,
-  stage: AuditStage,
-  contentSafety: ContentSafetyConfigData | null,
-): string {
-  const action = entry.actionTaken.toLowerCase();
-  if (action === 'failopen-passed') {
-    return 'The system allowed the request through because fail-open policy is active. Review Content Safety availability.';
-  }
-  if (entry.decision?.toLowerCase() === 'serviceunavailable'
-    || entry.detectionType.endsWith('content-safety-unavailable')) {
-    return `Content Safety was unreachable while checking ${STAGE_LABELS[stage].toLowerCase()}. The system ${describeSystemAction(entry, stage)}.`;
-  }
+/**
+ * Renders the audit row's meaning. The CAUSE clause is authored once, on the
+ * server, by GuardrailAuditFields: only that layer holds the evaluation, the
+ * configured threshold, and the stage together. It is rendered verbatim here.
+ * The CONSEQUENCE clause is authored once, here, by describeSystemAction,
+ * because it is presentation and the action pill needs it standalone.
+ *
+ * Do not reintroduce a client-side reason ladder. The previous one silently
+ * shadowed the server string on every Content Safety row, so the two wordings
+ * could drift with nothing to catch it.
+ */
+function explainAuditDecision(entry: BlockedRequest, stage: AuditStage): string {
+  const cause = entry.reason?.trim()
+    || `${STAGE_LABELS[stage]} triggered a configured guardrail.`;
+  const consequence = `The system ${describeSystemAction(entry, stage)}.`;
 
-  const categoryLabel = describeCategory(entry.category, entry.detectionType);
-  const severityLabel = describeSeverity(entry.severity);
-  const threshold = entry.threshold ?? thresholdFromConfig(entry.category, contentSafety);
-
-  let reason: string;
-  if (categoryLabel && entry.severity !== undefined && threshold !== undefined) {
-    const comparison = entry.severity >= threshold ? 'met' : 'did not meet';
-    reason = `${STAGE_LABELS[stage]} triggered ${categoryLabel} at ${severityLabel ?? 'recorded'} severity (${entry.severity}), which ${comparison} threshold ${threshold}.`;
-  } else if (categoryLabel && entry.severity !== undefined) {
-    reason = `${STAGE_LABELS[stage]} triggered ${categoryLabel} at ${severityLabel ?? 'recorded'} severity (${entry.severity}).`;
-  } else if (categoryLabel) {
-    reason = `${STAGE_LABELS[stage]} triggered ${categoryLabel}.`;
-  } else if (entry.reason) {
-    reason = entry.reason;
-  } else {
-    reason = `${STAGE_LABELS[stage]} triggered a configured guardrail.`;
-  }
-
-  return `${reason} The system ${describeSystemAction(entry, stage)}.`;
+  return entry.actionTaken.toLowerCase() === 'failopen-passed'
+    ? `${cause} ${consequence} Review Content Safety availability.`
+    : `${cause} ${consequence}`;
 }
 
 function buildBadgeText(entry: BlockedRequest): string {
@@ -646,7 +601,7 @@ export function GuardrailsDashboard() {
             const family = classifyBlockFamily(req.detectionType);
             const stage = normaliseStage(req);
             const summary = summarizeAuditEvent(req, stage);
-            const explanation = explainAuditDecision(req, stage, contentSafety);
+            const explanation = explainAuditDecision(req, stage);
             const badgeText = buildBadgeText(req);
             const actionLabel = formatActionLabel(req, stage);
             return (
