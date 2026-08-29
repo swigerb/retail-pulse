@@ -1,0 +1,69 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { updateGuardrailsConfig } from '../services/guardrailsApi';
+import type { GuardrailsConfigData } from '../types';
+
+function baseConfig(overrides?: Partial<GuardrailsConfigData>): GuardrailsConfigData {
+  return {
+    piiDetectionEnabled: true,
+    jailbreakDetectionEnabled: true,
+    autoRedactPii: true,
+    maxInputLength: 10000,
+    piiPatterns: ['SSN', 'Email'],
+    jailbreakPatterns: ['IgnoreInstructions'],
+    contentSafety: {
+      enabled: true,
+      failPolicy: 'FailClosed',
+      promptShieldsEnabled: true,
+      checkInput: true,
+      checkOutput: true,
+      checkRetrievedKnowledge: true,
+      checkToolResults: true,
+      hateThreshold: 4,
+      sexualThreshold: 4,
+      violenceThreshold: 4,
+      selfHarmThreshold: 4,
+    },
+    ...overrides,
+  };
+}
+
+describe('guardrailsApi config contract', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends only backend config fields on update', async () => {
+    const nextConfig = baseConfig({ jailbreakDetectionEnabled: false });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body).toMatchObject({
+        piiDetectionEnabled: true,
+        jailbreakDetectionEnabled: false,
+        autoRedactPii: true,
+        maxInputLength: 10000,
+      });
+      expect(body).not.toHaveProperty('jailbreakEnabled');
+      expect(body).not.toHaveProperty('piiEnabled');
+      expect(body).not.toHaveProperty('accessControlEnabled');
+      expect(body).not.toHaveProperty('blockedPatterns');
+      return {
+        ok: true,
+        json: async () => nextConfig,
+      } as Response;
+    });
+
+    await expect(updateGuardrailsConfig(nextConfig)).resolves.toMatchObject({
+      jailbreakDetectionEnabled: false,
+    });
+  });
+
+  it('rejects a save when the returned config does not match the requested value', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => baseConfig({ jailbreakDetectionEnabled: true }),
+    } as Response);
+
+    await expect(updateGuardrailsConfig(baseConfig({ jailbreakDetectionEnabled: false })))
+      .rejects.toThrow(/jailbreakDetectionEnabled/);
+  });
+});

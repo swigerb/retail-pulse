@@ -6,16 +6,16 @@ export interface ChatHistoryMessage {
 /**
  * Hybrid execution decision (issue #95). Mirrors the stable UI + telemetry
  * contract values in `RetailPulse.Contracts.Routing.ExecutionPath`:
- *   - `fast`    — single-specialist single-shot path (today's default)
- *   - `plan`    — plan-first workflow path (issue #93)
- *   - `council` — dedicated portfolio-health council interception
+ *   - `fast`    - single-specialist single-shot path (today's default)
+ *   - `plan`    - plan-first workflow path (issue #93)
+ *   - `council` - dedicated portfolio-health council interception
  */
 export type ExecutionPath = 'fast' | 'plan' | 'council';
 
 /**
  * Paths the UI is allowed to force via the composer. Council is a
  * router-controlled destination with its own dedicated trigger and is never
- * a user override — the backend validator rejects it with a 400.
+ * a user override - the backend validator rejects it with a 400.
  */
 export type ForceableExecutionPath = 'fast' | 'plan';
 
@@ -433,7 +433,7 @@ export interface Citation {
 
 // --- Knowledge provider snapshot (issue #106) ---
 // Aligned with GET /api/knowledge/provider, backed by the KnowledgeBaseCapabilities
-// record on the backend. Scores are provider-local — the frontend never compares
+// record on the backend. Scores are provider-local - the frontend never compares
 // them across providers, and `scoreSemantics` MUST be surfaced verbatim so the
 // user reads honest, provider-specific relevance meaning.
 
@@ -525,17 +525,17 @@ export interface BlockedRequest {
   /**
    * Content-safety category (Hate/Sexual/Violence/SelfHarm) when the block
    * originated from the model-based Content Safety layer. Populated by the
-   * backend `SuspiciousRequest.Category` field — see
+   * backend `SuspiciousRequest.Category` field - see
    * `RetailPulse.Contracts.Guardrails.SuspiciousRequest`.
    */
   category?: string;
   /**
    * Severity on the Content Safety 0/2/4/6 axis when a category hit is present.
-   * Never a raw threshold value — this is the hit severity only.
+   * Never a raw threshold value - this is the hit severity only.
    */
   severity?: number;
   /**
-   * Decision label — one of `Blocked`, `Flagged`, `ServiceUnavailable`. Used by
+   * Decision label - one of `Blocked`, `Flagged`, `ServiceUnavailable`. Used by
    * the dashboard to split the pattern-family and model-family aggregates.
    */
   decision?: string;
@@ -553,17 +553,28 @@ export interface GuardrailsStats {
 }
 
 export interface GuardrailsConfigData {
-  jailbreakEnabled: boolean;
-  piiEnabled: boolean;
-  accessControlEnabled: boolean;
-  blockedPatterns: string;
+  piiDetectionEnabled: boolean;
+  jailbreakDetectionEnabled: boolean;
+  autoRedactPii: boolean;
+  maxInputLength: number;
+  piiPatterns: string[];
+  jailbreakPatterns: string[];
   contentSafety?: ContentSafetyConfigData;
+  agentDefinition?: AgentDefinitionPolicyData;
+  status?: string | null;
+}
+
+export interface AgentDefinitionPolicyData {
+  onValidationFailure: string;
+  safetyChecksEnabled: boolean;
+  temperatureMin: number;
+  temperatureMax: number;
 }
 
 export type ContentSafetyFailPolicy = 'FailOpen' | 'FailClosed';
 
 // Aligned with `ContentSafetyConfigResponse` in
-// src/RetailPulse.Api/Endpoints/GuardrailEndpoints.cs — thresholds are
+// src/RetailPulse.Api/Endpoints/GuardrailEndpoints.cs - thresholds are
 // serialised as flat fields (`hateThreshold`, `sexualThreshold`, etc.), not a
 // nested object.
 export interface ContentSafetyConfigData {
@@ -621,7 +632,7 @@ export type SafetyBlockFamily = 'pattern' | 'model' | 'unknown';
 /**
  * Whitelisted display model used by every safety-related component. The
  * fields on this shape are the ONLY things the UI is allowed to render for a
- * safety decision — no raw pattern, threshold, rule ID, or provider payload
+ * safety decision - no raw pattern, threshold, rule ID, or provider payload
  * may ever be added here.
  */
 export interface SafetyBlockDisplayModel {
@@ -633,11 +644,11 @@ export interface SafetyBlockDisplayModel {
   suggestion?: string;
   /** Plain-language category label, e.g. "Hateful content". */
   categoryLabel?: string;
-  /** Original category name for testids / analytics — never a rule name. */
+  /** Original category name for testids / analytics - never a rule name. */
   categoryName?: SafetyCategoryName;
   /** Plain-language severity descriptor, e.g. "high". */
   severityLabel?: 'low' | 'medium' | 'high' | 'severe';
-  /** Original decision label — Blocked / Flagged / ServiceUnavailable. */
+  /** Original decision label - Blocked / Flagged / ServiceUnavailable. */
   decision?: SafetyDecisionKind;
   /**
    * When true, the block came from the model-based Content Safety layer.
@@ -879,7 +890,7 @@ export interface ExplanationData {
 // Mirrors backend contracts in RetailPulse.Contracts.Persistence.PlanDtos and
 // RetailPulse.Contracts.Approval.PlanReview. Every terminal/lifecycle string is
 // kept as a discriminated union so the reducer, UI, and tests share one source
-// of truth. New backend states are additive — the union widens rather than
+// of truth. New backend states are additive - the union widens rather than
 // silently accepting `string`.
 
 export type PlanStatus =
@@ -983,7 +994,7 @@ export interface PlanReviewDecisionResponse {
   round: number;
 }
 
-/** Shape returned by GET /api/plans/{planId}/reviews — one open review. */
+/** Shape returned by GET /api/plans/{planId}/reviews - one open review. */
 export interface PlanReviewOpen {
   requestId: string;
   planId: string;
