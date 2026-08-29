@@ -222,6 +222,64 @@ public class GuardrailAuditFieldsTests
         stats.JailbreakAttempts.Should().Be(1);
     }
 
+    // The dashboard derives its family and severity charts from the audit feed
+    // on the client, while the header cards come from these counters. If any
+    // detection type falls through to no counter, the same screen shows rows in
+    // the charts and zero in the header. This pins every known type.
+    [Theory]
+    [InlineData("jailbreak")]
+    [InlineData("injection")]
+    [InlineData("pii")]
+    [InlineData("access_denial")]
+    [InlineData("content-safety-hate")]
+    [InlineData("content-safety-sexual")]
+    [InlineData("content-safety-violence")]
+    [InlineData("content-safety-selfharm")]
+    [InlineData("content-safety-prompt-shield")]
+    [InlineData("content-safety-indirect-injection")]
+    [InlineData("content-safety-unavailable")]
+    [InlineData("content-safety-block")]
+    [InlineData("agent-definition-structural")]
+    [InlineData("agent-definition-policy")]
+    [InlineData("agent-definition-jailbreak")]
+    [InlineData("agent-definition-content-safety")]
+    [InlineData("agent-definition-privileged-grant")]
+    [InlineData("agent-definition-content-safety-unavailable")]
+    public async Task EveryDetectionType_LandsInTotalBlocked(string detectionType)
+    {
+        var log = new InMemorySuspiciousRequestLog();
+
+        await log.LogAsync(new SuspiciousRequest(
+            Id: "1",
+            Timestamp: DateTime.UtcNow,
+            RequestText: "payload",
+            DetectionType: detectionType,
+            UserContext: "u",
+            Action: "blocked"));
+
+        GuardrailsStats stats = await log.GetStatsAsync();
+        stats.TotalBlocked.Should().Be(1, "detection type '{0}' must increment a counter", detectionType);
+    }
+
+    [Fact]
+    public async Task FlaggedContentSafety_CountsAsFlagNotBlock()
+    {
+        var log = new InMemorySuspiciousRequestLog();
+
+        await log.LogAsync(new SuspiciousRequest(
+            Id: "1",
+            Timestamp: DateTime.UtcNow,
+            RequestText: "payload",
+            DetectionType: ContentSafetyDetectionTypes.Hate,
+            UserContext: "u",
+            Action: ContentSafetyActions.Flagged));
+
+        GuardrailsStats stats = await log.GetStatsAsync();
+        stats.ContentSafetyFlags.Should().Be(1);
+        stats.ContentSafetyBlocks.Should().Be(0);
+        stats.TotalBlocked.Should().Be(0);
+    }
+
     private static (GuardrailsMiddleware mw, InMemorySuspiciousRequestLog log) PatternMiddleware(bool redactPii = false)
     {
         var log = new InMemorySuspiciousRequestLog();
