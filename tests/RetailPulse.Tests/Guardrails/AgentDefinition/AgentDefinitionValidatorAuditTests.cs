@@ -74,7 +74,10 @@ public class AgentDefinitionValidatorAuditTests
         rows.Should().OnlyContain(r =>
             r.DetectionType == AgentDefinitionDetectionTypes.ContentSafetyUnavailable
             && r.Action == AgentDefinitionDetectionTypes.ActionFailOpenPassed
-            && r.UserContext == AgentDefinitionDetectionTypes.StartupValidatorContext);
+            && r.UserContext == AgentDefinitionDetectionTypes.StartupValidatorContext
+            && r.Stage == ContentSafetyStage.AgentDefinition.ToString()
+            && r.Reason != null
+            && r.Reason.Contains("unreachable"));
         rows.Count.Should().BeGreaterThan(0,
             "every fail-open pass must be visible in the audit feed.");
     }

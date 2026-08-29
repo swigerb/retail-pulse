@@ -19,6 +19,7 @@ const PATTERN_DETECTION_TYPES: ReadonlySet<GuardrailDetectionType> = new Set([
   'jailbreak',
   'pii',
   'access',
+  'agent-definition-jailbreak',
 ]);
 
 const MODEL_DETECTION_TYPES: ReadonlySet<GuardrailDetectionType> = new Set([
@@ -29,6 +30,9 @@ const MODEL_DETECTION_TYPES: ReadonlySet<GuardrailDetectionType> = new Set([
   'content-safety-prompt-shield',
   'content-safety-indirect-injection',
   'content-safety-unavailable',
+  'content-safety-block',
+  'agent-definition-content-safety',
+  'agent-definition-content-safety-unavailable',
 ]);
 
 /** Detection types the frontend recognises. Unknown types render as a
@@ -72,6 +76,13 @@ const DETECTION_LABELS: Partial<Record<GuardrailDetectionType, string>> = {
   'content-safety-prompt-shield': 'Prompt-shield safety',
   'content-safety-indirect-injection': 'Indirect injection',
   'content-safety-unavailable': 'Safety service unavailable',
+  'content-safety-block': 'Content Safety',
+  'agent-definition-content-safety': 'Agent definition safety',
+  'agent-definition-content-safety-unavailable': 'Safety service unavailable',
+  'agent-definition-jailbreak': 'Prompt jailbreak',
+  'agent-definition-structural': 'Agent definition structure',
+  'agent-definition-policy': 'Agent definition policy',
+  'agent-definition-privileged-grant': 'Privileged tool grant',
   jailbreak: 'Prompt jailbreak',
   pii: 'Personal information',
   access: 'Restricted data',

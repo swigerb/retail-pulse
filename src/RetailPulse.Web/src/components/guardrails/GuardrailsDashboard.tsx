@@ -10,6 +10,7 @@ import {
   classifyBlockFamily,
   describeCategory,
   describeSeverity,
+  normaliseCategoryName,
 } from '../../utils/safetyDisplay';
 import { ContentSafetyStatusBadge } from './ContentSafetyStatusBadge';
 
@@ -94,7 +95,7 @@ const useStyles = makeStyles({
   },
   entry: {
     display: 'grid',
-    gridTemplateColumns: '140px 1fr 100px 120px',
+    gridTemplateColumns: 'max-content minmax(220px, 1fr) minmax(220px, 320px) max-content',
     gap: '12px',
     alignItems: 'center',
     padding: '10px 14px',
@@ -102,34 +103,69 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     fontSize: '13px',
-    '@media (max-width: 640px)': {
+    '@media (max-width: 900px)': {
       gridTemplateColumns: '1fr',
-      gap: '4px',
+      gap: '8px',
     },
   },
   timestamp: {
     color: tokens.colorNeutralForeground3,
     fontSize: '12px',
     fontFamily: "'Courier New', monospace",
+    whiteSpace: 'nowrap',
   },
-  preview: {
+  entrySummary: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '3px',
+    minWidth: 0,
+  },
+  entryPrimary: {
     color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
+  entryDetail: {
+    color: tokens.colorNeutralForeground2,
+    fontSize: '12px',
+    lineHeight: '1.4',
+  },
   typeBadge: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
+    justifySelf: 'end',
+    maxWidth: '100%',
+    minWidth: 0,
     padding: '2px 8px',
     borderRadius: tokens.borderRadiusCircular,
     fontSize: '11px',
     fontWeight: '600',
     textTransform: 'uppercase',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground2,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
+    '@media (max-width: 900px)': {
+      justifySelf: 'start',
+    },
+  },
+  typeBadgeText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  actionPill: {
+    justifySelf: 'end',
+    color: tokens.colorNeutralForeground3,
+    fontSize: '12px',
+    whiteSpace: 'nowrap',
+    '@media (max-width: 900px)': {
+      justifySelf: 'start',
+    },
   },
   chartSection: {
     borderRadius: tokens.borderRadiusLarge,
@@ -162,6 +198,13 @@ const TYPE_ICONS: Record<GuardrailDetectionType, string> = {
   'content-safety-prompt-shield': '🛡️',
   'content-safety-indirect-injection': '🎯',
   'content-safety-unavailable': '⏱️',
+  'content-safety-block': '⚠️',
+  'agent-definition-structural': '⚙️',
+  'agent-definition-policy': '⚙️',
+  'agent-definition-jailbreak': '🚫',
+  'agent-definition-content-safety': '⚠️',
+  'agent-definition-privileged-grant': '🔒',
+  'agent-definition-content-safety-unavailable': '⏱️',
 };
 
 /** Plain-language labels used in the filter chip row. */
@@ -176,6 +219,13 @@ const TYPE_LABELS: Record<GuardrailDetectionType, string> = {
   'content-safety-prompt-shield': 'Prompt shield',
   'content-safety-indirect-injection': 'Indirect injection',
   'content-safety-unavailable': 'Unavailable',
+  'content-safety-block': 'Content Safety',
+  'agent-definition-structural': 'Definition structure',
+  'agent-definition-policy': 'Definition policy',
+  'agent-definition-jailbreak': 'Definition jailbreak',
+  'agent-definition-content-safety': 'Definition safety',
+  'agent-definition-privileged-grant': 'Privileged grant',
+  'agent-definition-content-safety-unavailable': 'Definition safety unavailable',
 };
 
 /** Bar-chart accents. Uses semantic Fluent tokens so they follow tenant theme. */
@@ -184,6 +234,155 @@ function familyStrokes() {
     pattern: tokens.colorBrandBackground,
     model: tokens.colorPaletteRedBackground3,
   };
+}
+
+type AuditStage = 'input' | 'output' | 'tool-result' | 'retrieved-knowledge' | 'agent-definition' | 'unknown';
+
+const STAGE_LABELS: Record<AuditStage, string> = {
+  input: 'Input',
+  output: 'Output',
+  'tool-result': 'Tool result',
+  'retrieved-knowledge': 'Retrieved knowledge',
+  'agent-definition': 'Agent definition',
+  unknown: 'Content',
+};
+
+function normaliseStage(entry: BlockedRequest): AuditStage {
+  const stage = entry.stage?.trim().toLowerCase();
+  if (stage === 'input') return 'input';
+  if (stage === 'output') return 'output';
+  if (stage === 'toolresult' || stage === 'tool-result' || stage === 'tool result') return 'tool-result';
+  if (stage === 'retrievedknowledge' || stage === 'retrieved-knowledge' || stage === 'retrieved knowledge') return 'retrieved-knowledge';
+  if (stage === 'agentdefinition' || stage === 'agent-definition' || stage === 'agent definition') return 'agent-definition';
+
+  if (entry.detectionType.startsWith('agent-definition-')) return 'agent-definition';
+  if (entry.requestPreview.startsWith('Tool result from ')) return 'tool-result';
+  if (entry.requestPreview.startsWith('Retrieved-knowledge chunk ')) return 'retrieved-knowledge';
+  if (entry.requestPreview.startsWith('PII redacted from output')) return 'output';
+  return 'input';
+}
+
+function thresholdFromConfig(category: string | undefined, contentSafety: ContentSafetyConfigData | null): number | undefined {
+  const normalised = normaliseCategoryName(category);
+  if (!normalised || !contentSafety) return undefined;
+  if (normalised === 'Hate') return contentSafety.hateThreshold;
+  if (normalised === 'Sexual') return contentSafety.sexualThreshold;
+  if (normalised === 'Violence') return contentSafety.violenceThreshold;
+  return contentSafety.selfHarmThreshold;
+}
+
+function parseAgentDefinitionPreview(preview: string): { agent?: string; field?: string } {
+  return {
+    agent: preview.match(/(?:^|\s)agent=([^\s]+)/)?.[1],
+    field: preview.match(/(?:^|\s)field=([^\s]+)/)?.[1],
+  };
+}
+
+function summarizeAuditEvent(entry: BlockedRequest, stage: AuditStage): string {
+  const agentDefinition = parseAgentDefinitionPreview(entry.requestPreview);
+  const action = entry.actionTaken.toLowerCase();
+
+  if (stage === 'agent-definition' && (agentDefinition.agent || agentDefinition.field)) {
+    const field = agentDefinition.field ?? 'a field';
+    const agent = agentDefinition.agent ? ` for ${agentDefinition.agent}` : '';
+    if (action === 'failopen-passed') {
+      return `Content Safety was unreachable while checking ${field}${agent}.`;
+    }
+    return `Agent definition ${field}${agent} triggered a guardrail.`;
+  }
+
+  const tool = entry.requestPreview.match(/^Tool result from '([^']+)' (blocked|flagged) by Content Safety$/i);
+  if (tool) {
+    return `Tool result from ${tool[1]} was ${tool[2].toLowerCase()} by Content Safety.`;
+  }
+
+  const retrieved = entry.requestPreview.match(/^Retrieved-knowledge chunk '([^']+)' (dropped|flagged) by Content Safety$/i);
+  if (retrieved) {
+    return `Retrieved knowledge ${retrieved[1]} was ${retrieved[2].toLowerCase()} by Content Safety.`;
+  }
+
+  if (entry.requestPreview.trim().length > 0) return entry.requestPreview;
+  return `${STAGE_LABELS[stage]} guardrail event`;
+}
+
+function describeSystemAction(entry: BlockedRequest, stage: AuditStage): string {
+  const action = entry.actionTaken.toLowerCase();
+  if (action === 'failopen-passed') return 'allowed it because fail-open policy is active';
+  if (action === 'failclosed-blocked') return 'blocked it because fail-closed policy is active';
+  if (action === 'dropped') return 'dropped the retrieved knowledge before it reached the model';
+  if (action === 'flagged') return 'allowed it and recorded a flag for review';
+  if (action === 'redacted') return 'redacted sensitive values before continuing';
+  if (action === 'quarantined') return 'quarantined the affected agent definition';
+  if (action === 'blocked') {
+    if (stage === 'output') return 'withheld the model output';
+    if (stage === 'tool-result') return 'withheld the tool result from the model';
+    if (stage === 'retrieved-knowledge') return 'withheld the retrieved knowledge';
+    if (stage === 'agent-definition') return 'blocked the affected agent definition';
+    return 'blocked the request';
+  }
+  return `recorded action ${entry.actionTaken}`;
+}
+
+function formatActionLabel(entry: BlockedRequest, stage: AuditStage): string {
+  const action = entry.actionTaken.toLowerCase();
+  if (action === 'failopen-passed') return 'Allowed through';
+  if (action === 'failclosed-blocked') return 'Fail-closed block';
+  if (action === 'flagged') return 'Flagged';
+  if (action === 'dropped') return 'Dropped';
+  if (action === 'redacted') return 'Redacted';
+  if (action === 'quarantined') return 'Quarantined';
+  if (action === 'blocked') {
+    if (stage === 'output') return 'Output withheld';
+    if (stage === 'tool-result') return 'Tool result withheld';
+    if (stage === 'retrieved-knowledge') return 'Knowledge withheld';
+    return 'Blocked';
+  }
+  return entry.actionTaken;
+}
+
+function explainAuditDecision(
+  entry: BlockedRequest,
+  stage: AuditStage,
+  contentSafety: ContentSafetyConfigData | null,
+): string {
+  const action = entry.actionTaken.toLowerCase();
+  if (action === 'failopen-passed') {
+    return 'The system allowed the request through because fail-open policy is active. Review Content Safety availability.';
+  }
+  if (entry.decision?.toLowerCase() === 'serviceunavailable'
+    || entry.detectionType.endsWith('content-safety-unavailable')) {
+    return `Content Safety was unreachable while checking ${STAGE_LABELS[stage].toLowerCase()}. The system ${describeSystemAction(entry, stage)}.`;
+  }
+
+  const categoryLabel = describeCategory(entry.category, entry.detectionType);
+  const severityLabel = describeSeverity(entry.severity);
+  const threshold = entry.threshold ?? thresholdFromConfig(entry.category, contentSafety);
+
+  let reason: string;
+  if (categoryLabel && entry.severity !== undefined && threshold !== undefined) {
+    const comparison = entry.severity >= threshold ? 'met' : 'did not meet';
+    reason = `${STAGE_LABELS[stage]} triggered ${categoryLabel} at ${severityLabel ?? 'recorded'} severity (${entry.severity}), which ${comparison} threshold ${threshold}.`;
+  } else if (categoryLabel && entry.severity !== undefined) {
+    reason = `${STAGE_LABELS[stage]} triggered ${categoryLabel} at ${severityLabel ?? 'recorded'} severity (${entry.severity}).`;
+  } else if (categoryLabel) {
+    reason = `${STAGE_LABELS[stage]} triggered ${categoryLabel}.`;
+  } else if (entry.reason) {
+    reason = entry.reason;
+  } else {
+    reason = `${STAGE_LABELS[stage]} triggered a configured guardrail.`;
+  }
+
+  return `${reason} The system ${describeSystemAction(entry, stage)}.`;
+}
+
+function buildBadgeText(entry: BlockedRequest): string {
+  const family = classifyBlockFamily(entry.detectionType);
+  const categoryLabel = describeCategory(entry.category, entry.detectionType)
+    ?? TYPE_LABELS[entry.detectionType]
+    ?? 'Guardrail';
+  const severityLabel = describeSeverity(entry.severity);
+  const familyLabel = family === 'model' ? 'Model' : family === 'pattern' ? 'Pattern' : 'Other';
+  return [familyLabel, categoryLabel, severityLabel].filter(Boolean).join(' · ');
 }
 
 export function GuardrailsDashboard() {
@@ -425,6 +624,7 @@ export function GuardrailsDashboard() {
           'content-safety-hate', 'content-safety-sexual', 'content-safety-violence',
           'content-safety-selfharm', 'content-safety-prompt-shield',
           'content-safety-indirect-injection', 'content-safety-unavailable',
+          'content-safety-block', 'agent-definition-content-safety-unavailable',
         ] as const).map(type => (
           <button
             key={type}
@@ -444,8 +644,11 @@ export function GuardrailsDashboard() {
         ) : (
           filteredRequests.map((req: BlockedRequest) => {
             const family = classifyBlockFamily(req.detectionType);
-            const categoryLabel = describeCategory(req.category, req.detectionType);
-            const severityLabel = describeSeverity(req.severity);
+            const stage = normaliseStage(req);
+            const summary = summarizeAuditEvent(req, stage);
+            const explanation = explainAuditDecision(req, stage, contentSafety);
+            const badgeText = buildBadgeText(req);
+            const actionLabel = formatActionLabel(req, stage);
             return (
               <div
                 key={req.id}
@@ -456,21 +659,26 @@ export function GuardrailsDashboard() {
                 <span className={styles.timestamp}>
                   {new Date(req.timestamp).toLocaleString()}
                 </span>
-                <span className={styles.preview} title={req.requestPreview}>
-                  {req.requestPreview}
+                <span className={styles.entrySummary}>
+                  <span className={styles.entryPrimary} title={summary}>
+                    {summary}
+                  </span>
+                  <span className={styles.entryDetail}>
+                    {explanation}
+                  </span>
                 </span>
                 <span
                   className={styles.typeBadge}
                   data-testid="log-entry-type"
                   data-safety-family={family}
+                  title={badgeText}
                 >
                   {TYPE_ICONS[req.detectionType] ?? '⚠️'}{' '}
-                  {family === 'model' ? 'Model' : family === 'pattern' ? 'Pattern' : 'Other'}
-                  {' · '}
-                  {categoryLabel ?? TYPE_LABELS[req.detectionType] ?? req.detectionType}
-                  {severityLabel ? ` · ${severityLabel}` : ''}
+                  <span className={styles.typeBadgeText}>{badgeText}</span>
                 </span>
-                <span className={styles.timestamp}>{req.actionTaken}</span>
+                <span className={styles.actionPill} title={`System action: ${describeSystemAction(req, stage)}`}>
+                  {actionLabel}
+                </span>
               </div>
             );
           })

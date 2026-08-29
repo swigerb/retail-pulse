@@ -400,6 +400,9 @@ public sealed class AgentDefinitionValidator
 
             case ContentSafetyDecision.Blocked:
                 {
+                    string detectionType = ContentSafetyDetectionTypes.ForResultWithShield(result);
+                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(result);
+                    int? threshold = ContentSafetyAuditFields.ThresholdFor(_guardrails.ContentSafety, category);
                     string primary = result.PrimaryCategory
                         ?? (result.Categories.Count > 0 ? result.Categories[0].Category : "unknown");
                     string message = result.PromptShieldJailbreakDetected
@@ -407,10 +410,21 @@ public sealed class AgentDefinitionValidator
                         : result.PromptShieldIndirectInjectionDetected
                             ? $"Prompt Shields detected indirect-injection in {field}."
                             : $"Content Safety blocked {field} on category '{primary}'.";
+                    string reason = ContentSafetyAuditFields.BuildReason(
+                        result,
+                        ContentSafetyStage.AgentDefinition,
+                        detectionType,
+                        category,
+                        severity,
+                        threshold);
                     violations.Add(new AgentDefinitionViolation(
                         agentKey, field, "safety.content-safety-blocked",
-                        message,
-                        AgentDefinitionDetectionTypes.ContentSafety));
+                        $"{message} {reason}",
+                        AgentDefinitionDetectionTypes.ContentSafety,
+                        Category: category,
+                        Severity: severity,
+                        Decision: result.Decision.ToString(),
+                        Threshold: threshold));
                     break;
                 }
 
@@ -421,7 +435,8 @@ public sealed class AgentDefinitionValidator
                         violations.Add(new AgentDefinitionViolation(
                             agentKey, field, "safety.content-safety-unavailable",
                             $"Content Safety unavailable and FailClosed policy is active; refusing {field}.",
-                            AgentDefinitionDetectionTypes.ContentSafety));
+                            AgentDefinitionDetectionTypes.ContentSafety,
+                            Decision: result.Decision.ToString()));
                     }
                     else
                     {
@@ -430,13 +445,16 @@ public sealed class AgentDefinitionValidator
                         await _audit.LogAsync(new SuspiciousRequest(
                             Id: Guid.NewGuid().ToString("N"),
                             Timestamp: DateTime.UtcNow,
-                            RequestText: Truncate($"agent={agentKey} field={field} rule=safety.content-safety-unavailable"),
+                            RequestText: Truncate($"Content Safety unavailable while checking {field} for agent {agentKey}."),
                             DetectionType: AgentDefinitionDetectionTypes.ContentSafetyUnavailable,
                             UserContext: AgentDefinitionDetectionTypes.StartupValidatorContext,
                             Action: AgentDefinitionDetectionTypes.ActionFailOpenPassed,
                             Category: null,
                             Severity: null,
-                            Decision: ContentSafetyDecision.ServiceUnavailable.ToString()),
+                            Decision: ContentSafetyDecision.ServiceUnavailable.ToString(),
+                            Stage: ContentSafetyStage.AgentDefinition.ToString(),
+                            Threshold: null,
+                            Reason: $"Content Safety was unreachable while checking {field} for agent {agentKey}."),
                             cancellationToken).ConfigureAwait(false);
                     }
 
@@ -491,9 +509,12 @@ public sealed class AgentDefinitionValidator
             DetectionType: violation.DetectionType,
             UserContext: AgentDefinitionDetectionTypes.StartupValidatorContext,
             Action: action,
-            Category: null,
-            Severity: null,
-            Decision: null),
+            Category: violation.Category,
+            Severity: violation.Severity,
+            Decision: violation.Decision,
+            Stage: ContentSafetyStage.AgentDefinition.ToString(),
+            Threshold: violation.Threshold,
+            Reason: violation.Message),
             cancellationToken);
     }
 

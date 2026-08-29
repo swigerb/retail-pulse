@@ -41,6 +41,10 @@ public class ContentSafetyAuditFieldsTests
         row.Category.Should().Be("Hate");
         row.Severity.Should().Be(6);
         row.Decision.Should().Be(ContentSafetyDecision.Blocked.ToString());
+        row.Stage.Should().Be(ContentSafetyStage.Input.ToString());
+        row.Threshold.Should().Be(4);
+        row.Reason.Should().Contain("severity 6");
+        row.Reason.Should().Contain("threshold 4");
     }
 
     [Fact]
@@ -63,6 +67,9 @@ public class ContentSafetyAuditFieldsTests
         row.Category.Should().Be("Sexual");
         row.Severity.Should().Be(4);
         row.Decision.Should().Be(ContentSafetyDecision.Blocked.ToString());
+        row.Stage.Should().Be(ContentSafetyStage.Output.ToString());
+        row.Threshold.Should().Be(4);
+        row.Reason.Should().Contain("the output");
     }
 
     [Fact]
@@ -110,6 +117,9 @@ public class ContentSafetyAuditFieldsTests
         row.Severity.Should().Be(4);
         row.Decision.Should().Be(ContentSafetyDecision.Blocked.ToString());
         row.DetectionType.Should().Be(ContentSafetyDetectionTypes.IndirectInjection);
+        row.Stage.Should().Be(ContentSafetyStage.RetrievedKnowledge.ToString());
+        row.Threshold.Should().Be(4);
+        row.Reason.Should().Contain("retrieved knowledge");
     }
 
     [Fact]
@@ -145,6 +155,9 @@ public class ContentSafetyAuditFieldsTests
         row.Category.Should().Be("SelfHarm");
         row.Severity.Should().Be(6);
         row.Decision.Should().Be(ContentSafetyDecision.Blocked.ToString());
+        row.Stage.Should().Be(ContentSafetyStage.ToolResult.ToString());
+        row.Threshold.Should().Be(4);
+        row.Reason.Should().Contain("the tool result");
     }
 
     [Fact]
@@ -160,6 +173,9 @@ public class ContentSafetyAuditFieldsTests
         row.Decision.Should().Be(ContentSafetyDecision.ServiceUnavailable.ToString());
         row.Category.Should().BeNull();
         row.Severity.Should().BeNull();
+        row.Stage.Should().Be(ContentSafetyStage.Input.ToString());
+        row.Threshold.Should().BeNull();
+        row.Reason.Should().Contain("unreachable");
     }
 
     private static (GuardrailsMiddleware mw, InMemorySuspiciousRequestLog log) Middleware(IContentSafetyEvaluator evaluator)
