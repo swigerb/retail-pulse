@@ -59,6 +59,11 @@ appsettings.*.local.json
 .squad/evidence/
 # Squad: local backups an agent takes before rewriting its own charter/agent file
 *.local-backup
+# Squad: `squad triage --execute` runtime state. Both are per-machine bookkeeping for the
+# watch loop (spawned child PIDs, and the failure/rate-limit breaker), so committing either
+# would push one machine's transient state onto everyone else's.
+.squad/.watch-pids
+.squad/ralph-circuit-breaker.json
 
 # Agent scratch space: transcripts, doc dumps, URL lists gathered during a run
 .scratch/
