@@ -18,9 +18,13 @@ import ROIChart from './ROIChart';
 import { evaluatePromo, submitForApproval, fetchExistingCampaigns } from '../../services/promoApi';
 import { useEffect } from 'react';
 
-// Tenant-level defaults — would come from config in production
-const TENANT_BRANDS = ['Apex Grill', 'Coastal Catch', 'Mountain Roast', 'Prairie Farms', 'Urban Bites'];
-const TENANT_REGIONS = ['Northeast', 'Southeast', 'Midwest', 'Southwest', 'West Coast', 'National'];
+const FALLBACK_BRANDS = ['Sierra Gold Tequila', 'Ridgeline Bourbon', 'Summit Vodka', 'FreshMart', 'Harvest Table', 'Apex Grill', 'Coastline Tacos', 'Pinnacle Hardware', 'Summit Outdoor', 'ClearDesk', 'Urban Living', 'Foundry Home'];
+const FALLBACK_REGIONS = ['Northeast', 'Southeast', 'Midwest', 'Southwest', 'West Coast', 'Pacific Northwest'];
+
+interface PromoTaskModuleProps {
+  brands?: readonly string[];
+  regions?: readonly string[];
+}
 
 const useStyles = makeStyles({
   container: {
@@ -140,15 +144,17 @@ const useStyles = makeStyles({
   },
 });
 
-export default function PromoTaskModule() {
+export default function PromoTaskModule({ brands = FALLBACK_BRANDS, regions = FALLBACK_REGIONS }: PromoTaskModuleProps) {
   const styles = useStyles();
+  const brandOptions = brands.length > 0 ? brands : FALLBACK_BRANDS;
+  const regionOptions = regions.length > 0 ? regions : FALLBACK_REGIONS;
   const [brand, setBrand] = useState('');
   const [region, setRegion] = useState('');
   const [promoType, setPromoType] = useState<PromoType | ''>('');
   const [budget, setBudget] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [targetLift, setTargetLift] = useState(10);
+  const [targetLift, setTargetLift] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [evaluation, setEvaluation] = useState<PromoEvaluation | null>(null);
@@ -158,7 +164,7 @@ export default function PromoTaskModule() {
   // Fetch existing campaigns on mount
   useEffect(() => {
     fetchExistingCampaigns().then(setCampaigns).catch(() => {
-      // Silently fail — calendar will be empty
+      // Silently fail, calendar will be empty.
     });
   }, []);
 
@@ -188,7 +194,7 @@ export default function PromoTaskModule() {
       budget: Number(budget),
       startDate,
       endDate,
-      targetLiftPercent: targetLift,
+      targetLiftPercent: targetLift > 0 ? targetLift : undefined,
     };
 
     try {
@@ -206,7 +212,7 @@ export default function PromoTaskModule() {
     setSubmitting(true);
     try {
       await submitForApproval(
-        { brand, region, promoType: promoType as PromoType, budget: Number(budget), startDate, endDate, targetLiftPercent: targetLift },
+        { brand, region, promoType: promoType as PromoType, budget: Number(budget), startDate, endDate, targetLiftPercent: targetLift > 0 ? targetLift : undefined },
         evaluation,
       );
     } catch {
@@ -217,14 +223,14 @@ export default function PromoTaskModule() {
   }, [evaluation, brand, region, promoType, budget, startDate, endDate, targetLift]);
 
   const proposedCampaign = (brand && region && promoType && startDate && endDate) ? {
-    name: `${promoType} — ${brand}`,
+    name: `${promoType} - ${brand}`,
     brand,
     region,
     promoType: promoType as PromoType,
     budget: Number(budget) || 0,
     startDate,
     endDate,
-    roi: evaluation?.roi,
+    roi: evaluation?.roi ?? undefined,
   } : undefined;
 
   return (
@@ -257,7 +263,7 @@ export default function PromoTaskModule() {
               data-testid="brand-select"
               size="medium"
             >
-              {TENANT_BRANDS.map(b => (
+              {brandOptions.map(b => (
                 <Option key={b} value={b}>{b}</Option>
               ))}
             </Dropdown>
@@ -273,7 +279,7 @@ export default function PromoTaskModule() {
               data-testid="region-select"
               size="medium"
             >
-              {TENANT_REGIONS.map(r => (
+              {regionOptions.map(r => (
                 <Option key={r} value={r}>{r}</Option>
               ))}
             </Dropdown>
@@ -302,7 +308,7 @@ export default function PromoTaskModule() {
                 style={{ flex: 1 }}
                 data-testid="target-lift-slider"
               />
-              <span className={styles.sliderValue}>{targetLift}%</span>
+              <span className={styles.sliderValue}>{targetLift > 0 ? `${targetLift}%` : 'Not set'}</span>
             </div>
           </div>
 
@@ -370,13 +376,19 @@ export default function PromoTaskModule() {
             onSubmitForApproval={handleSubmitApproval}
           />
 
-          <ROIChart
-            proposedRoi={evaluation.roi}
-            proposedRoiLower={evaluation.roiLower}
-            proposedRoiUpper={evaluation.roiUpper}
-            historicalAvgRoi={evaluation.historicalAvgRoi}
-            promoType={promoType as string}
-          />
+          {!evaluation.insufficientHistory
+            && evaluation.roi !== null
+            && evaluation.roiLower !== null
+            && evaluation.roiUpper !== null
+            && evaluation.historicalAvgRoi !== null && (
+              <ROIChart
+                proposedRoi={evaluation.roi}
+                proposedRoiLower={evaluation.roiLower}
+                proposedRoiUpper={evaluation.roiUpper}
+                historicalAvgRoi={evaluation.historicalAvgRoi}
+                promoType={promoType as string}
+              />
+            )}
         </>
       )}
 

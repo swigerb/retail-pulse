@@ -42,6 +42,20 @@ const notRecommendedEval: PromoEvaluation = {
   roi: 0.6,
   roiLower: 0.3,
   roiUpper: 0.9,
+  breakEvenDays: null,
+};
+
+const insufficientEval: PromoEvaluation = {
+  ...recommendedEval,
+  recommendation: 'insufficient_history',
+  roi: null,
+  roiLower: null,
+  roiUpper: null,
+  similarCampaigns: 0,
+  breakEvenDays: null,
+  historicalAvgRoi: null,
+  insufficientHistory: true,
+  reasoning: 'Not enough comparable campaign history to model ROI for these inputs.',
 };
 
 describe('PromoRecommendation', () => {
@@ -61,12 +75,28 @@ describe('PromoRecommendation', () => {
   it('renders not recommended state', () => {
     render(wrap(<PromoRecommendation evaluation={notRecommendedEval} budget={25000} />));
     expect(screen.getByTestId('recommendation-badge')).toHaveTextContent('Not Recommended');
+    expect(screen.getByTestId('roi-value')).toHaveTextContent('0.60x ROI');
+  });
+
+  it('shows that sub-breakeven campaigns do not break even', () => {
+    render(wrap(<PromoRecommendation evaluation={notRecommendedEval} budget={25000} />));
+    expect(screen.getByText(/Break-even: Does not break even/)).toBeInTheDocument();
   });
 
   it('displays ROI with confidence range', () => {
     render(wrap(<PromoRecommendation evaluation={recommendedEval} budget={25000} />));
     expect(screen.getByTestId('roi-value')).toHaveTextContent('3.2x ROI');
-    expect(screen.getByTestId('roi-range')).toHaveTextContent('(2.1x — 4.5x)');
+    expect(screen.getByTestId('roi-range')).toHaveTextContent('(2.1x to 4.5x)');
+  });
+
+  it('renders insufficient history without zero ROI placeholders', () => {
+    render(wrap(<PromoRecommendation evaluation={insufficientEval} budget={25000} />));
+    expect(screen.getByTestId('recommendation-badge')).toHaveTextContent('Not Enough History');
+    expect(screen.getByTestId('roi-value')).toHaveTextContent('Not enough history');
+    expect(screen.queryByTestId('roi-range')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Break-even:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Hist\. Avg:/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('credibility-note')).toHaveTextContent('No comparable campaigns found');
   });
 
   it('displays timing assessment details', () => {

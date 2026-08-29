@@ -62,7 +62,8 @@ public static class PromoTools
         [Description("Region (required)")] string region,
         [Description("Promotion type (required: 'discount', 'bogo', 'display', 'digital', 'bundle')")] string promoType,
         [Description("Planned spend in dollars (required)")] double spend,
-        [Description("Duration in weeks (required, 1-12)")] int durationWeeks)
+        [Description("Duration in weeks (required, 1-52)")] int durationWeeks,
+        [Description("Optional target lift percent supplied by the planner.")] double? targetLiftPercent = null)
     {
         if (string.IsNullOrWhiteSpace(brand))
             return new { error = "Parameter 'brand' is required." };
@@ -72,8 +73,8 @@ public static class PromoTools
             return new { error = "Parameter 'promoType' is required." };
         if (spend <= 0)
             return new { error = "Parameter 'spend' must be greater than 0." };
-        return durationWeeks is < 1 or > 12
-            ? (new { error = "Parameter 'durationWeeks' must be between 1 and 12." })
-            : data.EstimateROI(brand, region, promoType, spend, durationWeeks);
+        return durationWeeks is < 1 or > 52
+            ? (new { error = "Parameter 'durationWeeks' must be between 1 and 52." })
+            : data.EstimateROI(brand, region, promoType, spend, durationWeeks, targetLiftPercent);
     }
 }

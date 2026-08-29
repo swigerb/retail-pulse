@@ -476,7 +476,7 @@ Full promotional evaluation task module. Orchestrates all four promo MCP tools i
   "budget": 150000,
   "startDate": "2026-06-01",
   "endDate": "2026-06-28",
-  "targetLift": 15.0
+  "targetLiftPercent": 15.0
 }
 ```
 
@@ -488,7 +488,7 @@ Full promotional evaluation task module. Orchestrates all four promo MCP tools i
 | `budget` | double | ✅ | Budget in dollars (must be > 0) |
 | `startDate` | string | ✅ | ISO date (yyyy-MM-dd) |
 | `endDate` | string | ✅ | ISO date (yyyy-MM-dd) |
-| `targetLift` | double | | Target lift percentage (optional) |
+| `targetLiftPercent` | double | | Target lift percentage (optional) |
 
 **Approval Triggers:**
 - Budget > $500,000 → always requires approval
@@ -504,10 +504,17 @@ Full promotional evaluation task module. Orchestrates all four promo MCP tools i
   "promo_type": "discount",
   "budget": 150000,
   "period": { "start": "2026-06-01", "end": "2026-06-28", "duration_weeks": 4 },
-  "roi_estimate": { "expected_roi": 2.85, "upper_bound": 3.4, "lower_bound": 2.1 },
+  "target_lift": 12,
+  "roi_estimate": {
+    "roi": { "expected": 2.85, "upper_bound": 3.4, "lower_bound": 2.1 },
+    "break_even_days": 18,
+    "similar_campaigns": 8,
+    "historical_avg_roi": 2.42,
+    "basis": "brand, region and promotion type"
+  },
   "timing_assessment": { "timing_score": 0.82, "conflicts": [], "risks": [] },
   "lift_analysis": { "expected_lift_pct": 12.5, "confidence": "high" },
-  "historical_context": { "campaigns": [...] },
+  "historical_context": { "total_campaigns": 8, "avg_roi": 2.42, "campaigns": [...] },
   "risk_factors": [],
   "approval": { "required": false, "request_id": null, "reason": null }
 }

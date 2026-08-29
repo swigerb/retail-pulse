@@ -10,7 +10,7 @@ const mockEvaluation: PromoEvaluation = {
   roiLower: 2.1,
   roiUpper: 4.5,
   reasoning: 'Strong historical performance for this brand-region pair.',
-  timingAssessment: 'Good timing — no major conflicts.',
+  timingAssessment: 'Good timing, no major conflicts.',
   conflicts: [],
   seasonalityFit: 'Peak season',
   risks: [{ type: 'Competition', detail: 'Rival promo active nearby', severity: 'medium' }],
@@ -57,6 +57,23 @@ describe('PromoTaskModule', () => {
     expect(screen.getByTestId('promo-type-display')).toBeInTheDocument();
     expect(screen.getByTestId('promo-type-digital')).toBeInTheDocument();
     expect(screen.getByTestId('promo-type-bundle')).toBeInTheDocument();
+  });
+
+  it('uses active pack brands and regions instead of stale planner defaults', async () => {
+    const user = userEvent.setup();
+    render(wrap(
+      <PromoTaskModule
+        brands={['Apex Grill', 'Coastline Tacos']}
+        regions={['Northeast', 'Southeast']}
+      />,
+    ));
+
+    await user.click(screen.getByTestId('brand-select'));
+    expect(screen.getByText('Coastline Tacos')).toBeInTheDocument();
+    expect(screen.queryByText('Coastal Catch')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('region-select'));
+    expect(screen.queryByText('National')).not.toBeInTheDocument();
   });
 
   // Helper to fill the entire form
