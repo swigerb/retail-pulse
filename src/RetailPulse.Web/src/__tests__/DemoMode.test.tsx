@@ -218,6 +218,34 @@ describe('DemoMode', () => {
     }
   });
 
+  it('waits for a control that mounts after the view switches', async () => {
+    // Switching view only schedules a render, so a control queried on the next line does
+    // not exist yet. Every interaction was silently skipped because of this, which is why
+    // the council never convened even though the click itself worked.
+    const clicked = vi.fn();
+
+    renderDemo();
+    const councilIndex = DEMO_ACTS.findIndex(a => a.id === 'council');
+    for (let i = 0; i < councilIndex; i++) {
+      await act(async () => { screen.getByTestId('demo-mode-next').click(); });
+    }
+
+    // Mount the target only AFTER the act has already started looking for it.
+    await act(async () => { vi.advanceTimersByTime(600); });
+
+    const button = document.createElement('button');
+    button.setAttribute('data-testid', 'convene-button');
+    button.addEventListener('click', clicked);
+    document.body.appendChild(button);
+
+    try {
+      await act(async () => { vi.advanceTimersByTime(1_500); });
+      await waitFor(() => expect(clicked).toHaveBeenCalled());
+    } finally {
+      button.remove();
+    }
+  });
+
   it('skips a missing control instead of throwing', async () => {
     // A panel that has not finished loading must not take the whole run down.
     renderDemo();
