@@ -3,7 +3,7 @@ import { Button, makeStyles, Spinner } from '@fluentui/react-components';
 import {
   ChevronLeft24Regular, ChevronRight24Regular, Dismiss24Regular, Pause24Regular, Play24Regular,
 } from '@fluentui/react-icons';
-import { DEMO_ACTS, type DemoAct, type DemoInteraction } from './demoActs';
+import { DEMO_ACTS, type DemoAct, type DemoInteraction, type DemoPrewarm } from './demoActs';
 import type { DemoView } from './demoSteps';
 
 /**
@@ -30,6 +30,12 @@ interface DemoModeProps {
   readonly sendPrompt: ((message: string) => Promise<void>) | null;
   /** Whether the telemetry drawer is open, so the card can stay clear of it. */
   readonly telemetryOpen: boolean;
+  /**
+   * Asks the host to start fetching panels a later act will show. Scheduled per act rather
+   * than at open so an expensive warm-up never competes with a live prompt for gateway
+   * tokens.
+   */
+  readonly onPrewarm?: (targets: readonly DemoPrewarm[]) => void;
 }
 
 /** Width of the telemetry drawer, so the card sits beside it rather than behind it. */
@@ -127,7 +133,7 @@ function setNativeValue(element: HTMLElement, value: string): void {
 }
 
 export function DemoMode({
-  open, onClose, onNavigate, onTelemetry, sendPrompt, telemetryOpen,
+  open, onClose, onNavigate, onTelemetry, sendPrompt, telemetryOpen, onPrewarm,
 }: DemoModeProps) {
   const styles = useStyles();
   const [index, setIndex] = useState(0);
@@ -141,10 +147,12 @@ export function DemoMode({
   const telemetryRef = useRef(onTelemetry);
   const sendRef = useRef(sendPrompt);
   const closeRef = useRef(onClose);
+  const prewarmRef = useRef(onPrewarm);
   navigateRef.current = onNavigate;
   telemetryRef.current = onTelemetry;
   sendRef.current = sendPrompt;
   closeRef.current = onClose;
+  prewarmRef.current = onPrewarm;
 
   /** Bumped whenever the run jumps, so an in-flight act abandons its remaining work. */
   const runToken = useRef(0);
@@ -273,6 +281,10 @@ export function DemoMode({
     void (async () => {
       if (act.view) navigateRef.current(act.view);
       if (act.telemetry !== undefined) telemetryRef.current(act.telemetry);
+      // Fire before the act's own work so the fetch gets the whole act as head start.
+      // Optional, and called defensively: a host that does not warm panels must still get
+      // a working run rather than an act that dies before it submits its prompt.
+      if (act.prewarm) prewarmRef.current?.(act.prewarm);
 
       // When the sender is unavailable the honest message must survive to the hold, so
       // the post-interaction reset below is suppressed for that case. Clearing it there
