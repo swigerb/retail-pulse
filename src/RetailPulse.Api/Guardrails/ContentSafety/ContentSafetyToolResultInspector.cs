@@ -88,7 +88,7 @@ public sealed class ContentSafetyToolResultInspector
                         "Content Safety blocked tool result from '{Tool}' (decision={Decision}, categories={CategoryCount})",
                         toolName, evaluation.Decision, evaluation.Categories.Count);
 
-                    string substitute = BuildBlockedSubstitute(toolName, detectionType);
+                    string substitute = BuildBlockedSubstitute(toolName, detectionType, category, severity);
                     return ContentSafetyToolResultOutcome.Blocked(substitute, detectionType);
                 }
             case ContentSafetyDecision.ServiceUnavailable:
@@ -110,7 +110,11 @@ public sealed class ContentSafetyToolResultInspector
 
                     if (cfg.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
                     {
-                        string substitute = BuildBlockedSubstitute(toolName, ContentSafetyDetectionTypes.Unavailable);
+                        string substitute = BuildBlockedSubstitute(
+                            toolName,
+                            ContentSafetyDetectionTypes.Unavailable,
+                            category: null,
+                            severity: null);
                         return ContentSafetyToolResultOutcome.Blocked(substitute, ContentSafetyDetectionTypes.Unavailable);
                     }
                     return ContentSafetyToolResultOutcome.PassThrough(toolResultJson);
@@ -137,8 +141,13 @@ public sealed class ContentSafetyToolResultInspector
         }
     }
 
-    private static string BuildBlockedSubstitute(string toolName, string detectionType)
+    private static string BuildBlockedSubstitute(
+        string toolName,
+        string detectionType,
+        string? category,
+        int? severity)
     {
+        string reason = BuildBlockedReason(category, severity, detectionType);
         var envelope = new JsonObject
         {
             ["_content_safety"] = new JsonObject
@@ -146,12 +155,42 @@ public sealed class ContentSafetyToolResultInspector
                 ["blocked"] = true,
                 ["tool"] = toolName,
                 ["detection_type"] = detectionType,
+                ["category"] = category,
+                ["severity"] = severity,
+                ["reason"] = reason,
+                ["message_for_user"] = $"The result from {toolName} was withheld because {reason}.",
                 ["note"] = "The tool result was blocked by the Content Safety layer. Do not re-issue the "
-                    + "same call. Explain to the user that the requested data cannot be included.",
+                    + "same call. Tell the user that the requested data was withheld and why.",
             }
         };
         return envelope.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
     }
+
+    private static string BuildBlockedReason(string? category, int? severity, string detectionType)
+    {
+        if (string.Equals(detectionType, ContentSafetyDetectionTypes.Unavailable, StringComparison.Ordinal))
+        {
+            return "the Content Safety service was unavailable and this deployment is configured to fail closed";
+        }
+
+        string categoryText = string.IsNullOrWhiteSpace(category)
+            ? "a configured Content Safety category"
+            : $"{category} content";
+
+        string severityText = severity.HasValue
+            ? $" at {DescribeSeverity(severity.Value)} severity"
+            : string.Empty;
+
+        return $"Content Safety classified it as {categoryText}{severityText}";
+    }
+
+    private static string DescribeSeverity(int severity) => severity switch
+    {
+        <= 0 => "low",
+        <= 2 => "medium",
+        <= 4 => "high",
+        _ => "severe",
+    };
 
     private static (string? Category, int? Severity) PickCategoryAndSeverity(ContentSafetyResult evaluation)
     {
