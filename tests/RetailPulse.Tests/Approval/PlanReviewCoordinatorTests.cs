@@ -385,13 +385,14 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
     // ── Cross-subject denial (at the persistence layer) ─────────────────
 
     /// <summary>
-    /// Subject scoping asserted with NO dependency on background scheduling.
+    /// Subject scoping at the gate is the primary security guard because it has
+    /// no dependency on background scheduling.
     ///
     /// <para>
-    /// The coordinator-driven variant below exercises the real path, but it has to wait for
-    /// a background task to write its row first — which makes a security assertion hostage
-    /// to the thread pool. This test seeds the rows directly through the gate, so it is
-    /// fully deterministic: if it ever fails, subject scoping is genuinely broken.
+    /// This test seeds the rows directly, so it is fully deterministic: if it ever fails,
+    /// subject scoping is genuinely broken. The later coordinator-loop variant keeps
+    /// integration coverage for the blocking path, but it is intentionally secondary
+    /// because it still pays a scheduler cost.
     /// </para>
     /// </summary>
     [Fact]
@@ -465,22 +466,57 @@ public sealed class PlanReviewCoordinatorTests : IDisposable
         PlanReviewCoordinator coord = CreateCoordinator(gate, options, TimeProvider.System);
 
         PlanReviewCoordinationInput input = SampleInput() with { Subject = "alice" };
-        Task<PlanReviewOutcome> coordination = coord.CoordinateAsync(input, _backgroundCts.Token);
-        _backgroundTasks.Add(coordination);
+        PlanReviewRoundHandle handle = await coord.OpenRoundAsync(new PlanReviewOpenInput
+        {
+            PlanId = input.PlanId,
+            Subject = input.Subject,
+            SessionId = input.SessionId,
+            Request = input.Request,
+            CurrentSteps = input.InitialSteps,
+            SpecialistKeys = input.SpecialistKeys,
+            DetectedIntents = input.DetectedIntents,
+            RoundNumber = 0,
+            TenantId = input.TenantId,
+            TraceId = input.TraceId,
+            ParentSpanId = input.ParentSpanId,
+            PrincipalKey = input.PrincipalKey,
+        });
 
-        // Pass the background task in so a wait timeout can report WHY the row never
-        // arrived. This test has been intermittently flaky under full parallel load and
-        // a bare "timed out" told us nothing; if the coordinator faulted, the exception
-        // is now surfaced instead of being swallowed by the fixture's Dispose.
-        ApprovalRequest aliceRow = await WaitForPending(gate, input.Subject, coordination);
-
-        // Guard the arrange step explicitly: prove alice's row really is present before
-        // concluding anything from bob's empty result. Without this, a scheduling timeout
-        // that produced no rows at all would look like a passing security assertion.
+        // Await the production row-opening seam directly. This keeps the subject-isolation
+        // assertion independent from the blocking coordinator loop's background waiter.
+        ApprovalRequest aliceRow = (await gate.GetPendingAsync(input.Subject)).Should()
+            .ContainSingle("the coordinator must write exactly one pending row for alice before bob is queried")
+            .Which;
+        aliceRow.RequestId.Should().Be(handle.RequestId);
         aliceRow.Context.UserId.Should().Be("alice");
 
         (await gate.GetPendingAsync("bob")).Should().BeEmpty(
-            "GetPendingAsync is subject-scoped at SQL — bob must never see alice's plan review.");
+            "GetPendingAsync is subject-scoped at SQL; bob must never see alice's plan review.");
+    }
+
+    [Fact]
+    public async Task CoordinateAsync_pending_query_does_not_expose_another_subject_row()
+    {
+        SqliteApprovalGate gate = CreateSystemGate();
+        var options = new PlanReviewOptions();
+        PlanReviewCoordinator coord = CreateCoordinator(gate, options, TimeProvider.System);
+
+        PlanReviewCoordinationInput input = SampleInput() with { Subject = "alice" };
+        Task<PlanReviewOutcome> coordination = coord.CoordinateAsync(input, _backgroundCts.Token);
+        _backgroundTasks.Add(coordination);
+
+        // This integration check intentionally covers the blocking coordinator loop. The
+        // deterministic tests above are the primary guard because this arrange step still
+        // depends on the background waiter being scheduled under full-suite load.
+        ApprovalRequest aliceRow = await WaitForPending(gate, input.Subject, coordination);
+        aliceRow.Context.UserId.Should().Be("alice");
+
+        (await gate.GetPendingAsync("bob")).Should().BeEmpty(
+            "the blocking coordinator loop must not widen pending-row visibility.");
+
+        await Approve(gate, aliceRow.RequestId);
+        PlanReviewOutcome outcome = await coordination;
+        outcome.IsApproved.Should().BeTrue();
     }
 
     // ── Audit trail across paths ────────────────────────────────────────
