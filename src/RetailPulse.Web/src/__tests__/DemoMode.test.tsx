@@ -15,6 +15,7 @@ function renderDemo(overrides: Partial<Parameters<typeof DemoMode>[0]> = {}) {
     onTelemetry: vi.fn(),
     sendPrompt: vi.fn().mockResolvedValue(undefined),
     telemetryOpen: false,
+    onPrewarm: vi.fn(),
     ...overrides,
   };
   render(wrap(<DemoMode {...props} />));
@@ -255,6 +256,34 @@ describe('DemoMode', () => {
     const scrolls = (chartAct?.interactions ?? []).filter(i => i.kind === 'scroll');
     expect(scrolls).toHaveLength(1);
     expect(scrolls[0]).toMatchObject({ selector: '[data-testid="chart-card"]' });
+  });
+
+  it('asks for the portfolio warm-up before it is shown, and never during a prompt', async () => {
+    // Scoring the portfolio is thirty agent calls. Run it while a chat prompt is in flight
+    // and the gateway throttles the prompt, which is exactly what took the chart out of an
+    // earlier recording. It must be scheduled after the last prompt act and before the
+    // scorecard act.
+    const trigger = DEMO_ACTS.findIndex(a => a.prewarm?.includes('portfolio'));
+    const shown = DEMO_ACTS.findIndex(a => a.id === 'portfolio');
+    const lastPrompt = DEMO_ACTS.map(a => !!a.prompt).lastIndexOf(true);
+
+    expect(trigger).toBeGreaterThan(lastPrompt);
+    expect(trigger).toBeLessThan(shown);
+    // Enough acts in between for thirty agent calls to land.
+    expect(shown - trigger).toBeGreaterThanOrEqual(3);
+  });
+
+  it('signals the host when an act asks for a warm-up', async () => {
+    const props = renderDemo();
+    const triggerIndex = DEMO_ACTS.findIndex(a => a.prewarm?.includes('portfolio'));
+
+    for (let i = 0; i < triggerIndex; i++) {
+      await act(async () => { screen.getByTestId('demo-mode-next').click(); });
+    }
+
+    await waitFor(() => expect(props.onPrewarm).toHaveBeenCalledWith(
+      expect.arrayContaining(['portfolio']),
+    ));
   });
 
   it('waits for a control that mounts after the view switches', async () => {
