@@ -258,7 +258,8 @@ Full ROI estimation combining lift, timing, and spend effectiveness.
 | `region` | string | ✅ | | Region |
 | `promoType` | string | ✅ | | Promo type |
 | `spend` | double | ✅ | | Planned spend |
-| `durationWeeks` | int | ✅ | | Duration (1–12 weeks) |
+| `durationWeeks` | int | ✅ | | Duration (1 to 52 weeks) |
+| `targetLiftPercent` | double | | | Optional planner target lift |
 
 **Returns:** Expected ROI with confidence bounds and breakeven analysis.
 
@@ -266,12 +267,12 @@ Full ROI estimation combining lift, timing, and spend effectiveness.
 
 ```json
 {
-  "expected_roi": 2.85,
-  "upper_bound": 3.40,
-  "lower_bound": 2.10,
-  "confidence": "high",
-  "breakeven_spend": 52000,
-  "incremental_revenue": 427500
+  "roi": { "expected": 2.85, "lower_bound": 2.10, "upper_bound": 3.40 },
+  "break_even_days": 18,
+  "similar_campaigns": 8,
+  "historical_avg_roi": 2.42,
+  "basis": "brand, region and promotion type",
+  "incremental": { "revenue": 427500 }
 }
 ```
 

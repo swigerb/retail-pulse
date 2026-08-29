@@ -5,7 +5,7 @@ import { mapPromoEvaluation } from '../services/promoApi';
  * `POST /api/taskmodule/promo` answers in flat snake_case; the planner UI models a
  * flattened camelCase `PromoEvaluation`. Nothing translated between them, so
  * `evaluation.risks` was `undefined` and `[...evaluation.risks]` in
- * PromoRecommendation threw "risks is not iterable" — which killed the Campaign
+ * PromoRecommendation threw "risks is not iterable", which killed the Campaign
  * Planner the moment an evaluation returned.
  *
  * These pin the mapping, and specifically that every array the component spreads or
@@ -84,6 +84,25 @@ describe('promo evaluation mapping', () => {
 
   it('falls back to a safe recommendation level for an unknown value', () => {
     expect(mapPromoEvaluation({ recommendation: 'nonsense' }).recommendation)
-      .toBe('proceed_with_caution');
+      .toBe('insufficient_history');
+  });
+
+  it('marks missing ROI as insufficient history instead of rendering a confident zero', () => {
+    const e = mapPromoEvaluation({
+      recommendation: 'not_recommended',
+      roi_estimate: {
+        insufficient_history: true,
+        message: 'Not enough comparable campaign history to model ROI for these inputs.',
+      },
+      historical_context: { total_campaigns: 0, campaigns: [] },
+    });
+
+    expect(e.recommendation).toBe('insufficient_history');
+    expect(e.insufficientHistory).toBe(true);
+    expect(e.roi).toBeNull();
+    expect(e.roiLower).toBeNull();
+    expect(e.roiUpper).toBeNull();
+    expect(e.breakEvenDays).toBeNull();
+    expect(e.historicalAvgRoi).toBeNull();
   });
 });

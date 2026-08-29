@@ -861,7 +861,10 @@ export function Dashboard() {
           <PanelErrorBoundary key={activeView} name={VIEW_LABELS[activeView] ?? 'This view'}>
           {capabilities.alternateViews && activeView === 'promo' && featureFlags.campaignPlanner ? (
             <div style={{ overflow: 'auto', height: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
-              <PromoTaskModule />
+              <PromoTaskModule
+                brands={activePack.pack?.tenant.brands?.map(b => b.name)}
+                regions={activePack.pack?.tenant.regions}
+              />
             </div>
           ) : activeView === 'competitive' && featureFlags.competitive ? (
             <CompetitiveDashboard />
