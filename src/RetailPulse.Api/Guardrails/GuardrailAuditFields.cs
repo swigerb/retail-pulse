@@ -1,8 +1,22 @@
+using RetailPulse.Api.Guardrails.ContentSafety;
 using RetailPulse.Contracts.Guardrails;
 
-namespace RetailPulse.Api.Guardrails.ContentSafety;
+namespace RetailPulse.Api.Guardrails;
 
-internal static class ContentSafetyAuditFields
+/// <summary>
+/// The single authority for the human-readable <see cref="SuspiciousRequest.Reason"/>
+/// written to the guardrails audit log, across every detection family.
+///
+/// The reason is authored here, on the server, because this is the only layer
+/// that holds the evaluation, the configured threshold, and the stage at once.
+/// The dashboard renders the resulting string verbatim. Nothing downstream may
+/// re-derive it: a second author drifts from this one and there is no test that
+/// would catch the divergence.
+///
+/// Everything produced here is constructed from enums, configured thresholds,
+/// and detection-type constants. Request payload text is never interpolated in.
+/// </summary>
+internal static class GuardrailAuditFields
 {
     public static (string? Category, int? Severity) PickCategoryAndSeverity(ContentSafetyResult evaluation)
     {
@@ -78,6 +92,35 @@ internal static class ContentSafetyAuditFields
             : $"Content Safety classified {target} as {categoryText}.";
     }
 
+    /// <summary>
+    /// Reason for the pattern-matching layer, which runs before Content Safety
+    /// and has no severity axis or threshold to report.
+    /// </summary>
+    public static string BuildPatternReason(string detectionType, ContentSafetyStage stage)
+    {
+        string target = FormatStageTarget(stage);
+        return detectionType switch
+        {
+            PatternDetectionTypes.Jailbreak =>
+                $"Pattern matching found a known jailbreak phrase in {target}.",
+            PatternDetectionTypes.Injection =>
+                $"Pattern matching found a known SQL or script injection payload in {target}.",
+            PatternDetectionTypes.Pii =>
+                $"Pattern matching found personal information in {target}.",
+            _ => $"A configured pattern rule matched {target}.",
+        };
+    }
+
+    /// <summary>
+    /// Reason for the output PII sweep. The count is the operator-actionable
+    /// part, so it is reported rather than left to be inferred from the preview.
+    /// </summary>
+    public static string BuildPiiRedactionReason(int redactionCount)
+    {
+        string items = redactionCount == 1 ? "1 value" : $"{redactionCount} values";
+        return $"Pattern matching found {items} matching a personal-information rule in the output.";
+    }
+
     private static string FormatStageTarget(ContentSafetyStage stage) => stage switch
     {
         ContentSafetyStage.Input => "the input",
@@ -96,4 +139,20 @@ internal static class ContentSafetyAuditFields
         ContentSafetyDetectionTypes.SelfHarm => "SelfHarm",
         _ => null,
     };
+}
+
+/// <summary>
+/// Detection-type identifiers for the pattern-matching guardrail layer. These
+/// were previously bare string literals at each call site, which is how
+/// <c>"injection"</c> came to be emitted by the API without ever being added to
+/// the frontend's detection-type union.
+/// </summary>
+public static class PatternDetectionTypes
+{
+    public const string Jailbreak = "jailbreak";
+    public const string Injection = "injection";
+    public const string Pii = "pii";
+
+    public const string ActionBlocked = "blocked";
+    public const string ActionRedacted = "redacted";
 }

@@ -17,6 +17,7 @@ import type {
 
 const PATTERN_DETECTION_TYPES: ReadonlySet<GuardrailDetectionType> = new Set([
   'jailbreak',
+  'injection',
   'pii',
   'access',
   'agent-definition-jailbreak',
@@ -84,6 +85,7 @@ const DETECTION_LABELS: Partial<Record<GuardrailDetectionType, string>> = {
   'agent-definition-policy': 'Agent definition policy',
   'agent-definition-privileged-grant': 'Privileged tool grant',
   jailbreak: 'Prompt jailbreak',
+  injection: 'SQL or script injection',
   pii: 'Personal information',
   access: 'Restricted data',
 };

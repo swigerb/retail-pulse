@@ -82,16 +82,20 @@ public class GuardrailsMiddleware
             if (jailbreakHits.Count > 0)
             {
                 activity?.SetTag("guardrails.blocked", true);
-                activity?.SetTag("guardrails.type", "jailbreak");
+                activity?.SetTag("guardrails.type", PatternDetectionTypes.Jailbreak);
                 activity?.SetTag("guardrails.patterns", string.Join(",", jailbreakHits));
 
                 await _suspiciousLog.LogAsync(new SuspiciousRequest(
                     Guid.NewGuid().ToString("N"),
                     DateTime.UtcNow,
                     Truncate(message, 200),
-                    "jailbreak",
+                    PatternDetectionTypes.Jailbreak,
                     userId,
-                    "blocked"), ct);
+                    PatternDetectionTypes.ActionBlocked,
+                    Stage: ContentSafetyStage.Input.ToString(),
+                    Reason: GuardrailAuditFields.BuildPatternReason(
+                        PatternDetectionTypes.Jailbreak,
+                        ContentSafetyStage.Input)), ct);
 
                 _logger.LogWarning("Jailbreak attempt blocked from user {UserId}: patterns [{Patterns}]",
                     userId, string.Join(", ", jailbreakHits));
@@ -108,15 +112,19 @@ public class GuardrailsMiddleware
             if (injectionMatch is not null)
             {
                 activity?.SetTag("guardrails.blocked", true);
-                activity?.SetTag("guardrails.type", "injection");
+                activity?.SetTag("guardrails.type", PatternDetectionTypes.Injection);
 
                 await _suspiciousLog.LogAsync(new SuspiciousRequest(
                     Guid.NewGuid().ToString("N"),
                     DateTime.UtcNow,
                     Truncate(message, 200),
-                    "injection",
+                    PatternDetectionTypes.Injection,
                     userId,
-                    "blocked"), ct);
+                    PatternDetectionTypes.ActionBlocked,
+                    Stage: ContentSafetyStage.Input.ToString(),
+                    Reason: GuardrailAuditFields.BuildPatternReason(
+                        PatternDetectionTypes.Injection,
+                        ContentSafetyStage.Input)), ct);
 
                 _logger.LogWarning("Injection attempt blocked from user {UserId}: matched '{Pattern}'",
                     userId, injectionMatch);
@@ -202,9 +210,11 @@ public class GuardrailsMiddleware
                 Guid.NewGuid().ToString("N"),
                 DateTime.UtcNow,
                 $"PII redacted from output ({redactionCount} items)",
-                "pii",
+                PatternDetectionTypes.Pii,
                 userId,
-                "redacted"), ct);
+                PatternDetectionTypes.ActionRedacted,
+                Stage: ContentSafetyStage.Output.ToString(),
+                Reason: GuardrailAuditFields.BuildPiiRedactionReason(redactionCount)), ct);
 
             _logger.LogInformation("Redacted {Count} PII items from response for user {UserId}",
                 redactionCount, userId);
@@ -243,8 +253,8 @@ public class GuardrailsMiddleware
                 {
                     string detectionType =
                         ContentSafetyDetectionTypes.ForResultWithShield(evaluation);
-                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
-                    int? threshold = ContentSafetyAuditFields.ThresholdFor(cs, category);
+                    (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
+                    int? threshold = GuardrailAuditFields.ThresholdFor(cs, category);
 
                     activity?.SetTag("guardrails.blocked", true);
                     activity?.SetTag("guardrails.type", detectionType);
@@ -261,7 +271,7 @@ public class GuardrailsMiddleware
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.Input.ToString(),
                         Threshold: threshold,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.Input,
                             detectionType,
@@ -293,7 +303,7 @@ public class GuardrailsMiddleware
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.Input.ToString(),
                         Threshold: null,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.Input,
                             ContentSafetyDetectionTypes.Unavailable,
@@ -318,8 +328,8 @@ public class GuardrailsMiddleware
                 }
             case ContentSafetyDecision.Flagged:
                 {
-                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
-                    int? threshold = ContentSafetyAuditFields.ThresholdFor(cs, category);
+                    (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
+                    int? threshold = GuardrailAuditFields.ThresholdFor(cs, category);
                     await _suspiciousLog.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),
                         DateTime.UtcNow,
@@ -332,7 +342,7 @@ public class GuardrailsMiddleware
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.Input.ToString(),
                         Threshold: threshold,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.Input,
                             ContentSafetyDetectionTypes.ForResultWithShield(evaluation),
@@ -363,8 +373,8 @@ public class GuardrailsMiddleware
                     // Output stage never runs Prompt Shields, so an output-only
                     // block without a category must NEVER be labeled prompt-shield.
                     string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
-                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
-                    int? threshold = ContentSafetyAuditFields.ThresholdFor(cs, category);
+                    (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
+                    int? threshold = GuardrailAuditFields.ThresholdFor(cs, category);
                     activity?.SetTag("guardrails.output_blocked", true);
                     activity?.SetTag("guardrails.type", detectionType);
 
@@ -380,7 +390,7 @@ public class GuardrailsMiddleware
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.Output.ToString(),
                         Threshold: threshold,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.Output,
                             detectionType,
@@ -412,7 +422,7 @@ public class GuardrailsMiddleware
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.Output.ToString(),
                         Threshold: null,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.Output,
                             ContentSafetyDetectionTypes.Unavailable,
@@ -426,9 +436,9 @@ public class GuardrailsMiddleware
                 }
             case ContentSafetyDecision.Flagged:
                 {
-                    (string? category, int? severity) = ContentSafetyAuditFields.PickCategoryAndSeverity(evaluation);
+                    (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
                     string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
-                    int? threshold = ContentSafetyAuditFields.ThresholdFor(cs, category);
+                    int? threshold = GuardrailAuditFields.ThresholdFor(cs, category);
                     await _suspiciousLog.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),
                         DateTime.UtcNow,
@@ -441,7 +451,7 @@ public class GuardrailsMiddleware
                         Decision: evaluation.Decision.ToString(),
                         Stage: ContentSafetyStage.Output.ToString(),
                         Threshold: threshold,
-                        Reason: ContentSafetyAuditFields.BuildReason(
+                        Reason: GuardrailAuditFields.BuildReason(
                             evaluation,
                             ContentSafetyStage.Output,
                             detectionType,
