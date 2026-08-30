@@ -2,9 +2,15 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
+
+# Without this, a push to dev and its promotion PR to main run the same suite twice,
+# and superseded runs keep burning minutes after a force-push.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   DOTNET_VERSION: '10.0.x'
@@ -13,9 +19,34 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # Structural guard for the dev-first model. `main` is release-only, so the only
+  # legitimate sources for a PR into it are `dev` and an urgent `hotfix/*`.
+  # Without this, `gh pr create` silently defaults to the repo default branch and
+  # feature work lands on `main`, which is exactly how dev fell 51 commits behind.
+  branch-policy:
+    name: Branch policy (dev-first)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    steps:
+      - name: Reject non-promotion PRs into main
+        run: |
+          head='${{ github.head_ref }}'
+          echo "PR head branch: $head -> main"
+          case "$head" in
+            dev|hotfix/*)
+              echo "Allowed: '$head' is a promotion or hotfix branch."
+              exit 0
+              ;;
+          esac
+          echo "::error::PR into 'main' from '$head' is not allowed. Feature work targets 'dev'."
+          echo "Retarget with: gh pr edit ${{ github.event.pull_request.number }} --base dev"
+          exit 1
+
   build:
     name: Build & Test (.NET)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -126,6 +157,7 @@ jobs:
   frontend:
     name: Frontend (React/Vite)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: src/RetailPulse.Web
@@ -165,6 +197,7 @@ jobs:
   security:
     name: Security (Vulnerable Packages)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -196,6 +229,7 @@ jobs:
   provider-matrix:
     name: Auth Provider Matrix (Entra/GitHub/Anonymous)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -255,6 +289,7 @@ jobs:
   lint:
     name: Lint (dotnet format)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -272,6 +307,7 @@ jobs:
   bicep:
     name: Bicep (compile + lint)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -296,6 +332,7 @@ jobs:
   verify-script-selftest:
     name: Verify-ApimAiGateway offline self-test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -310,6 +347,7 @@ jobs:
   synthetic-monitor-selftest:
     name: Invoke-SyntheticChatMonitor offline self-test (#57)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
