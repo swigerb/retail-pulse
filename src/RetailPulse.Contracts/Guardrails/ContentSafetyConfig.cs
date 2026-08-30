@@ -44,8 +44,10 @@ public class ContentSafetyConfig
     public bool CheckToolResults { get; set; } = true;
 
     /// <summary>
-    /// When <c>true</c>, runs Prompt Shields for user input and indirect-injection
-    /// checks against retrieved knowledge chunks.
+    /// When <c>true</c>, runs Prompt Shields: jailbreak detection for user
+    /// input, and indirect-injection detection for retrieved knowledge chunks
+    /// and tool results. Tool results are submitted as documents because the
+    /// threat they carry is data instructing the model, not a user jailbreak.
     /// </summary>
     public bool PromptShieldsEnabled { get; set; } = true;
 
