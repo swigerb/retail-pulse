@@ -39,6 +39,28 @@ Every CI job also carries an explicit `timeout-minutes`. A `Build & Test (.NET)`
 run once hung for six hours before GitHub's own job cap cancelled it, which
 consumed the runner budget and produced no signal.
 
+## Type-checking the frontend
+
+Use `npm run typecheck` from `src/RetailPulse.Web`.
+
+Do **not** use `npx tsc --noEmit -p tsconfig.json`. It looks like a type-check
+gate, passes instantly, and checks nothing:
+
+```
+> npx tsc --noEmit -p tsconfig.json --listFiles
+(no output)
+exit: 0
+```
+
+`tsconfig.json` is a solution-style config: it declares `"files": []` and
+delegates to project references. `tsc -p` does not follow project references,
+so it resolves zero files and cannot fail. Only `tsc -b` honours them, which is
+what both `npm run typecheck` and `npm run build` use.
+
+CI was never exposed to this, because the `Frontend (React/Vite)` job runs
+`npm run build` (`tsc -b && vite build`). The gap was local: a "type-check
+passed" claim made with the `-p` form carries no information at all.
+
 ## Pre-commit and pre-push formatting hooks
 
 Retail Pulse ships two versioned Git hooks under

@@ -12,6 +12,7 @@
     "test:provider-matrix:gate": "node scripts/provider-build-matrix.mjs --gate-only",
     "prebuild": "node scripts/validate-auth-config.mjs",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
