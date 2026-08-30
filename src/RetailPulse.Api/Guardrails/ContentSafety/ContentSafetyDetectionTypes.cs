@@ -45,10 +45,9 @@ public static class ContentSafetyDetectionTypes
 
     /// <summary>
     /// Picks the most specific detection type for an evaluator result on a
-    /// stage that <em>does not</em> run Prompt Shields (Output, ToolResult).
-    /// Falls back to <see cref="Block"/> when no category information is
-    /// available so an output-only block is never mislabeled as a prompt
-    /// shield hit.
+    /// stage that <em>does not</em> run Prompt Shields (Output). Falls back to
+    /// <see cref="Block"/> when no category information is available so an
+    /// output-only block is never mislabeled as a prompt shield hit.
     /// </summary>
     public static string ForResultWithoutShield(ContentSafetyResult result)
     {
@@ -61,8 +60,8 @@ public static class ContentSafetyDetectionTypes
 
     /// <summary>
     /// Picks the most specific detection type for an evaluator result on a
-    /// stage that runs Prompt Shields (Input, RetrievedKnowledge). Prompt
-    /// Shields detections take precedence, then category, then a generic
+    /// stage that runs Prompt Shields (Input, RetrievedKnowledge, ToolResult).
+    /// Prompt Shields detections take precedence, then category, then a generic
     /// <see cref="Block"/>.
     /// </summary>
     public static string ForResultWithShield(ContentSafetyResult result, bool preferIndirect = false)
