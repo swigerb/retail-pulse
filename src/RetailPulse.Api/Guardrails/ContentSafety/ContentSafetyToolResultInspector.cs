@@ -53,13 +53,23 @@ public sealed class ContentSafetyToolResultInspector
             return ContentSafetyToolResultOutcome.PassThrough(toolResultJson);
         }
 
+        // Structured output is rendered as prose before scanning. This changes
+        // how the payload is presented to the classifier, never which checks it
+        // faces: the full all-categories harm scan still applies to every tool
+        // result, and no tool is trusted into a weaker policy. See #248.
+        string scanText = ToolResultTextNormalizer.Normalize(toolResultJson);
+
         var ctx = new ContentSafetyEvaluationContext(
             UserId: userId,
             SourceId: toolName,
-            CheckPromptShield: false);
+            // A tool result is data the model is about to read, so the threat it
+            // carries is a document instructing the model, not a user jailbreak.
+            // The evaluator submits this stage to Prompt Shields as a document
+            // so indirect-injection detection is the one that fires.
+            CheckPromptShield: true);
 
         ContentSafetyResult evaluation = await _evaluator.EvaluateAsync(
-            toolResultJson,
+            scanText,
             ContentSafetyStage.ToolResult,
             ctx,
             cancellationToken).ConfigureAwait(false);
@@ -68,9 +78,9 @@ public sealed class ContentSafetyToolResultInspector
         {
             case ContentSafetyDecision.Blocked:
                 {
-                    // Tool-result stage does not run Prompt Shields, so a
-                    // block without a category is never a prompt-shield hit.
-                    string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
+                    string detectionType = ContentSafetyDetectionTypes.ForResultWithShield(
+                        evaluation,
+                        preferIndirect: true);
                     (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
                     int? threshold = GuardrailAuditFields.ThresholdFor(cfg, category);
 
@@ -143,7 +153,9 @@ public sealed class ContentSafetyToolResultInspector
             case ContentSafetyDecision.Flagged:
                 {
                     (string? category, int? severity) = GuardrailAuditFields.PickCategoryAndSeverity(evaluation);
-                    string detectionType = ContentSafetyDetectionTypes.ForResultWithoutShield(evaluation);
+                    string detectionType = ContentSafetyDetectionTypes.ForResultWithShield(
+                        evaluation,
+                        preferIndirect: true);
                     int? threshold = GuardrailAuditFields.ThresholdFor(cfg, category);
                     await _log.LogAsync(new SuspiciousRequest(
                         Guid.NewGuid().ToString("N"),

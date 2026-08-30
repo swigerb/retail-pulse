@@ -5,6 +5,62 @@ the repo. The [README](../README.md#quick-start) covers the runtime
 prerequisites (.NET 10 SDK, Node.js 20+, OpenAI credentials); this doc covers
 the developer ergonomics that keep pull requests healthy.
 
+## Branching model (dev-first)
+
+All feature work branches from `dev` and targets `dev`. `main` carries released
+code only, and the sole route into it is a promotion PR from `dev` (or an urgent
+`hotfix/*`).
+
+| Branch | Purpose | Accepts PRs from |
+| --- | --- | --- |
+| `main` | Released code | `dev`, `hotfix/*` |
+| `dev` | Integration branch, where all feature work lands | any `squad/*` branch |
+
+```bash
+git checkout dev
+git pull origin dev
+git checkout -b squad/{issue-number}-{slug}
+# work, commit, push
+gh pr create --base dev --title "..." --body "Closes #{issue-number}"
+```
+
+Two mechanisms enforce this, because documentation alone did not:
+
+1. **CI runs on `dev`.** [`ci.yml`](../.github/workflows/ci.yml) triggers on both
+   `main` and `dev` for `push` and `pull_request`. Previously it ran on `main`
+   only, so a PR into `dev` got no signal at all and every branch was pushed to
+   `main` instead to obtain one. That single gap is how `dev` fell 51 commits
+   behind.
+2. **The `branch-policy` job fails PRs into `main`** whose head branch is not
+   `dev` or `hotfix/*`. `gh pr create` defaults to the repository default branch,
+   so without this guard the wrong base is one forgotten flag away.
+
+Every CI job also carries an explicit `timeout-minutes`. A `Build & Test (.NET)`
+run once hung for six hours before GitHub's own job cap cancelled it, which
+consumed the runner budget and produced no signal.
+
+## Type-checking the frontend
+
+Use `npm run typecheck` from `src/RetailPulse.Web`.
+
+Do **not** use `npx tsc --noEmit -p tsconfig.json`. It looks like a type-check
+gate, passes instantly, and checks nothing:
+
+```
+> npx tsc --noEmit -p tsconfig.json --listFiles
+(no output)
+exit: 0
+```
+
+`tsconfig.json` is a solution-style config: it declares `"files": []` and
+delegates to project references. `tsc -p` does not follow project references,
+so it resolves zero files and cannot fail. Only `tsc -b` honours them, which is
+what both `npm run typecheck` and `npm run build` use.
+
+CI was never exposed to this, because the `Frontend (React/Vite)` job runs
+`npm run build` (`tsc -b && vite build`). The gap was local: a "type-check
+passed" claim made with the `-p` form carries no information at all.
+
 ## Pre-commit and pre-push formatting hooks
 
 Retail Pulse ships two versioned Git hooks under
