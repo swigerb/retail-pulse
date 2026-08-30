@@ -253,9 +253,12 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         ContentSafetyStage stage,
         CancellationToken ct)
     {
-        // For Input we treat the text as the user prompt; for RetrievedKnowledge
-        // we treat it as a document so indirect-injection detection fires.
-        PromptShieldRequest body = stage == ContentSafetyStage.RetrievedKnowledge
+        // Input is the user speaking, so it is submitted as a user prompt and
+        // jailbreak detection applies. Retrieved knowledge and tool results are
+        // data the model is about to read, so they are submitted as documents
+        // and indirect-injection detection applies. Submitting a tool result as
+        // a user prompt would look for the wrong attack entirely.
+        PromptShieldRequest body = stage is ContentSafetyStage.RetrievedKnowledge or ContentSafetyStage.ToolResult
             ? new PromptShieldRequest(UserPrompt: null, Documents: [text])
             : new PromptShieldRequest(UserPrompt: text, Documents: null);
 
