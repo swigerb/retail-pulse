@@ -99,7 +99,16 @@ All four trust boundaries are covered:
 | Input                | `GuardrailsMiddleware.CheckInputAsync`     | Yes (user)     | Yes        |
 | Output               | `GuardrailsMiddleware.FilterOutputAsync`   | No             | Yes        |
 | Retrieved knowledge  | `RagContextProvider.FilterByContentSafety` | Yes (document) | Yes        |
-| Tool result          | `Budget/BudgetedAIFunction` (ambient hook) | No             | Yes        |
+| Tool result          | `Budget/BudgetedAIFunction` (ambient hook) | Yes (document) | Yes        |
+
+Tool results are submitted to Prompt Shields as documents rather than as user
+prompts, because the threat a tool result carries is data instructing the model
+rather than a user jailbreak. No tool is classified as trusted, and no tool
+receives a reduced set of harm categories. Structured payloads are rendered as
+prose before scanning so the conversational classifier is not asked to score raw
+JSON syntax; every value and property name survives that rendering, so coverage
+is unchanged. See
+[ADR-015](adr/015-tool-result-content-safety-policy.md).
 
 PII redaction runs before Content Safety on the output path so raw PII is
 never included in a moderation call.
