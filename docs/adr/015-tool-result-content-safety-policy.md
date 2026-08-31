@@ -62,8 +62,10 @@ Concretely:
    `ToolResultTextNormalizer` walks the payload and emits one readable
    `Label: value` line per scalar.
 
-The third point is the substantive fix for #244, and it is deliberately a
-**presentation** change rather than a **coverage** change:
+The third point was intended as the substantive fix for #244. Measurement later
+showed it is not (see *Measured against the live service* below), but it stands
+on its own merits as a deliberate **presentation** change rather than a
+**coverage** change:
 
 * Every scalar is preserved, including numbers and identifiers.
 * Every property name is preserved, because an attacker-controlled key is
@@ -93,16 +95,39 @@ evaluation including segmented moderation calls. On a timeout the stage returns
 exactly as before. Operators running large tool payloads with a tight timeout
 should review `content-safety-unavailable` rows after enabling this.
 
-**What is not proven.** We cannot measure a false-positive rate without a live
-Content Safety resource, and neither could PR #247. What is proven by test is
-that coverage is unchanged, that the scanned text is prose rather than JSON,
-and that Prompt Shields runs. Whether the observed `GetStorePerformance` block
-disappears is a live-deployment observation, not a unit-test result, and #244
-should be verified against the deployed Security dashboard.
+**Measured against the live service.** The hedge above has since been resolved
+by measurement rather than deployment observation. Running the payloads directly
+against the project's own Azure Content Safety resource
+(`text:analyze`, `FourSeverityLevels`) gives:
 
-**The *Shopping Center* rename stays.** Reverting it would be a second
-unmeasured guess in the opposite direction. It costs nothing to keep, and
-*Shopping Center* is an ordinary retail term.
+| Text submitted | Sexual |
+| --- | --- |
+| Raw JSON containing `Strip Center #11` | 4 |
+| Prose rendering containing `Strip Center #11` | 4 |
+| Raw JSON containing `Shopping Center #11` | 0 |
+| Prose rendering containing `Shopping Center #11` | 0 |
+| The bare phrase `Strip Center` | 0 |
+| `Store Format: Strip Center` | 2 |
+| `Strip Center` in an explicit real-estate sentence | 0 |
+| `Strip Mall #11`, `Power Center #11` | 0 |
+
+This disproves the raw-JSON theory. The classifier is responding to the phrase
+in the generated store-name context, not to the JSON framing, and prose
+rendering does not change the score. It also shows the trigger is contextual and
+fragile: the same phrase alone scores 0, while adding a brand prefix and a store
+number takes it to 4. No framing we control reliably clears it.
+
+Therefore **the *Shopping Center* rename is the fix for #244, not a workaround.**
+Keeping harmful vocabulary out of generated demo data is the only remedy
+available to us that does not weaken the control, since the alternatives are
+raising the tool-result threshold or allow-listing a term, both of which trade
+real safety coverage for a cosmetic win. `SeedVocabulary_AvoidsTheTermTheLive
+ClassifierScoresAsSexualSeverityFour` pins the seed so the term cannot be
+reintroduced on the mistaken belief that normalization covers it.
+
+Normalization is retained regardless. It is sound hygiene, it demonstrably does
+not reduce coverage, and it removes JSON punctuation noise from the scanned
+text. It is simply not what fixed #244.
 
 ## Alternatives rejected
 
