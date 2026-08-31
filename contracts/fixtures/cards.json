@@ -1,0 +1,32 @@
+[
+  {
+    "id": "card-council-42",
+    "title": "Contoso council verdict",
+    "type": 0,
+    "lifecycle": 1,
+    "createdBy": "system",
+    "createdAt": "2026-08-30T17:05:24Z",
+    "votes": [
+      {
+        "userId": "user-7",
+        "userName": "Ada Lovelace",
+        "vote": "Red",
+        "timestamp": "2026-08-30T17:05:24Z"
+      }
+    ],
+    "comments": [
+      {
+        "userId": "user-9",
+        "userName": "Alan Turing",
+        "text": "Agree with the downgrade.",
+        "timestamp": "2026-08-30T17:05:24Z"
+      }
+    ],
+    "data": {
+      "brand": "Contoso",
+      "overall_rating": "Red",
+      "synthesis": "Demand is softening faster than supply can adjust."
+    },
+    "escalationReason": "Two specialists rated Red."
+  }
+]
