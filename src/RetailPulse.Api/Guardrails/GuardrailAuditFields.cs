@@ -64,7 +64,7 @@ internal static class GuardrailAuditFields
         if (evaluation.Decision == ContentSafetyDecision.ServiceUnavailable
             || string.Equals(detectionType, ContentSafetyDetectionTypes.Unavailable, StringComparison.Ordinal))
         {
-            return $"Content Safety was unreachable while checking {target}.";
+            return UnavailableReason(evaluation.FailureReason, target);
         }
 
         if (string.Equals(detectionType, ContentSafetyDetectionTypes.PromptShield, StringComparison.Ordinal))
@@ -91,6 +91,25 @@ internal static class GuardrailAuditFields
             ? $"Content Safety classified {target} as {categoryText} at severity {severity.Value}."
             : $"Content Safety classified {target} as {categoryText}.";
     }
+
+    /// <summary>
+    /// Reason text for a service-unavailable outcome, named by failure class so
+    /// an operator can tell a cold-start timeout from an auth or transport
+    /// failure. The unclassified case keeps the original wording so existing
+    /// audit consumers see no change.
+    /// </summary>
+    public static string UnavailableReason(ContentSafetyFailureReason? reason, string target) => reason switch
+    {
+        ContentSafetyFailureReason.Timeout =>
+            $"Content Safety was unreachable while checking {target}: the call timed out before the service responded.",
+        ContentSafetyFailureReason.Authentication =>
+            $"Content Safety was unreachable while checking {target}: managed-identity authentication was rejected.",
+        ContentSafetyFailureReason.Transport =>
+            $"Content Safety was unreachable while checking {target}: the connection failed before a response.",
+        ContentSafetyFailureReason.CircuitOpen =>
+            $"Content Safety was unreachable while checking {target}: the circuit breaker was open.",
+        _ => $"Content Safety was unreachable while checking {target}.",
+    };
 
     /// <summary>
     /// Reason for the pattern-matching layer, which runs before Content Safety

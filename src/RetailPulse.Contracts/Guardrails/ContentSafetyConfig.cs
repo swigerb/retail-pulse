@@ -31,6 +31,23 @@ public class ContentSafetyConfig
     /// <summary>Bounded per-call timeout in milliseconds for a single Content Safety call.</summary>
     public int TimeoutMs { get; set; } = 1500;
 
+    /// <summary>
+    /// Budget for managed-identity token acquisition, kept separate from
+    /// <see cref="TimeoutMs"/>. The first token fetch after start is unprimed and
+    /// must reach AAD/IMDS, which routinely takes several seconds; folding that
+    /// into the per-scan timeout is what makes the very first scans fail open on a
+    /// cold start. The scan timeout only covers the moderation call once a bearer
+    /// is in hand.
+    /// </summary>
+    public int TokenTimeoutMs { get; set; } = 5000;
+
+    /// <summary>
+    /// Overall time box for the startup warm-up that pre-acquires the token
+    /// before any real scan runs. Bounded so a slow or unreachable credential
+    /// endpoint can never stall host startup.
+    /// </summary>
+    public int WarmUpTimeoutMs { get; set; } = 5000;
+
     /// <summary>When <c>true</c>, evaluates user input.</summary>
     public bool CheckInput { get; set; } = true;
 
