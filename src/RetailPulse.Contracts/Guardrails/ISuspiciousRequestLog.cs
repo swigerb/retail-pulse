@@ -60,4 +60,10 @@ public record GuardrailsStats(
     int AccessDenials,
     DateTime Since,
     int ContentSafetyBlocks = 0,
-    int ContentSafetyFlags = 0);
+    int ContentSafetyFlags = 0,
+    // A fail-open pass is a request the system ALLOWED THROUGH because Content
+    // Safety was unreachable. It is the opposite of a block, so it must never
+    // fold into TotalBlocked. Surfaced as its own figure so an operator can see
+    // the system degraded to fail-open rather than having a silent outage hide
+    // inside an inflated block count.
+    int FailOpenPasses = 0);

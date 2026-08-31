@@ -1,0 +1,10 @@
+{
+  "totalBlocked": 128,
+  "jailbreakAttempts": 37,
+  "piiDetections": 52,
+  "accessDenials": 14,
+  "since": "2026-08-30T17:05:24Z",
+  "contentSafetyBlocks": 19,
+  "contentSafetyFlags": 8,
+  "failOpenPasses": 5
+}
