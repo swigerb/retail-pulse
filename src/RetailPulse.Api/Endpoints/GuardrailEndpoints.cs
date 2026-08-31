@@ -42,6 +42,7 @@ public static class GuardrailEndpoints
                 accessDenials = stats.AccessDenials,
                 contentSafetyBlocks = stats.ContentSafetyBlocks,
                 contentSafetyFlags = stats.ContentSafetyFlags,
+                failOpenPasses = stats.FailOpenPasses,
                 since = stats.Since
             });
         })

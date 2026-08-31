@@ -19,6 +19,7 @@ export async function fetchGuardrailsStats(): Promise<GuardrailsStats> {
   const data = await res.json();
   return {
     ...data,
+    failOpenPasses: data.failOpenPasses ?? 0,
     recentBlocked: data.recentBlocked ?? [],
     blocksPerHour: data.blocksPerHour ?? [],
   };

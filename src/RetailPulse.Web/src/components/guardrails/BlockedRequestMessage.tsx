@@ -46,10 +46,14 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
+    // Sit next to a flex-shrink:0 icon, so claim a shrinkable track that lets
+    // long reason sentences wrap instead of widening the alert.
+    minWidth: 0,
   },
   reason: {
     color: tokens.colorNeutralForeground1,
     fontWeight: 500,
+    overflowWrap: 'anywhere',
   },
   metaRow: {
     display: 'flex',
