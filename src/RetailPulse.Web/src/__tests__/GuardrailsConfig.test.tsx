@@ -205,3 +205,50 @@ describe('GuardrailsConfig two-layer injection clarity', () => {
     expect(note.textContent).toMatch(/can still be blocked/i);
   });
 });
+
+/**
+ * Issue #272: the Save button rendered white text on amber #f59e0b, a measured
+ * 2.15:1 against the WCAG AA minimum of 4.5:1. The assertion is on the ratio
+ * rather than on a literal hex so any future restyle is judged by whether it is
+ * readable, not by whether it matches the colour that happened to fix it.
+ */
+describe('GuardrailsConfig save button contrast', () => {
+  function relativeLuminance(hex: string): number {
+    const channels = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const [r, g, b] = channels.map((c) =>
+      c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4),
+    );
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  function contrastRatio(foreground: string, background: string): number {
+    const a = relativeLuminance(foreground);
+    const b = relativeLuminance(background);
+    const [lighter, darker] = a > b ? [a, b] : [b, a];
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+
+  it('computes a known ratio, so a passing contrast assertion means something', () => {
+    // The exact failure recorded in issue #272, kept as the helper's own check.
+    expect(contrastRatio('#ffffff', '#f59e0b')).toBeCloseTo(2.15, 2);
+  });
+
+  it('renders the Save button at WCAG AA contrast against its white label', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: async () => baseConfig(),
+    } as Response);
+
+    renderWithTheme(<GuardrailsConfig />);
+
+    const save = await screen.findByTestId('guardrails-save-button');
+    const background = (save as HTMLElement).style.backgroundColor;
+
+    // jsdom normalises the inline hex to rgb(), so convert back before measuring.
+    const rgb = background.match(/\d+/g);
+    expect(rgb).toHaveLength(3);
+    const hex = `#${rgb!.map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`;
+
+    expect(contrastRatio('#ffffff', hex)).toBeGreaterThanOrEqual(4.5);
+  });
+});
