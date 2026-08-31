@@ -300,6 +300,23 @@ using (ILoggerFactory validatorLoggerFactory = LoggerFactory.Create(lb =>
             evaluatorScope = evaluatorServices.BuildServiceProvider();
 #pragma warning restore ASP0000
             validatorEvaluator = evaluatorScope.GetRequiredService<IContentSafetyEvaluator>();
+
+            // Pre-acquire the managed-identity token before the agent-definition
+            // scan runs. That scan is the very first caller on a cold start, and
+            // without a primed token its four checks race an unprimed AAD/IMDS
+            // round-trip inside the per-scan timeout and fail open. Time-boxed and
+            // best-effort so a slow or unreachable credential endpoint can never
+            // block startup.
+            ContentSafetyTokenProvider validatorTokens =
+                evaluatorScope.GetRequiredService<ContentSafetyTokenProvider>();
+            var warmUpBudget = TimeSpan.FromMilliseconds(
+                Math.Max(200, guardrailsConfig.ContentSafety.WarmUpTimeoutMs));
+            ContentSafetyWarmUpResult warmUp = validatorTokens
+                .WarmUpAsync(warmUpBudget, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+            validatorLogger.LogInformation(
+                "Content Safety startup warm-up before agent-definition scan: {Result}.", warmUp);
         }
         else
         {
