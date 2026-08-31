@@ -410,8 +410,9 @@ export function GuardrailsDashboard() {
     () => [
       { label: 'Pattern', count: familyAggregate.pattern },
       { label: 'Model', count: familyAggregate.model },
+      { label: 'Fail-open', count: familyAggregate.failOpen },
     ],
-    [familyAggregate.pattern, familyAggregate.model],
+    [familyAggregate.pattern, familyAggregate.model, familyAggregate.failOpen],
   );
 
   const categoryChartData = useMemo(
@@ -517,7 +518,7 @@ export function GuardrailsDashboard() {
 
       {/* Pattern vs Model breakdown */}
       <div className={styles.chartSection} data-testid="chart-family-split">
-        <div className={styles.chartTitle}>Pattern-based vs Model-based blocks</div>
+        <div className={styles.chartTitle}>Blocks by family, with fail-open passes</div>
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={familyChartData}>
             <CartesianGrid strokeDasharray="3 3" stroke={tokens.colorNeutralStroke2} />
