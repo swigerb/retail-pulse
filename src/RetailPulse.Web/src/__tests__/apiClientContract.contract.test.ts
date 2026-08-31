@@ -21,6 +21,9 @@ import { fetchScorecard } from '../services/operationsApi';
  *  - API stops sending a field -> the C# fixture changes -> the C# snapshot test
  *    fails until the fixture is regenerated; once it is, the mapper below produces
  *    an empty/undefined value and this test fails until the client is updated.
+ *    Where a mapper substitutes a default for a missing field, assert the value
+ *    against the fixture rather than only its type: a default turns a dropped
+ *    field into a plausible zero, which is the failure a type check cannot see.
  *  - Client starts reading a different wire field -> the mapper reads something the
  *    fixture (the real API shape) does not contain -> this test fails here.
  *
@@ -85,6 +88,13 @@ describe('contract: GET /api/guardrails/stats -> GuardrailsStats', () => {
     ] as const;
     for (const field of counters) {
       expect(typeof stats[field], `guardrails/stats.${field} must be a number the client can read`).toBe('number');
+      // Assert the value carried through, not merely that it is numeric. The mapper
+      // defaults failOpenPasses to 0 when absent, so a type-only assertion would still
+      // pass after the API renamed or dropped the field and the counter would silently
+      // read zero on the Security page. Comparing against the fixture value is what
+      // makes the default visible instead of protective.
+      expect(stats[field], `guardrails/stats.${field} must carry the API value, not a client default`)
+        .toBe(fixture[field] as number);
     }
     expect(Array.isArray(stats.recentBlocked)).toBe(true);
     expect(Array.isArray(stats.blocksPerHour)).toBe(true);
