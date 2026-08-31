@@ -117,13 +117,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ steps.open.outputs.pr }}
         run: |
-          set -euo pipefail
+          # Also not `set -e`. Auto-merge is what lands the pull request; this step
+          # only watches, so a transient API blip must not fail the release sync.
+          set -uo pipefail
 
-          # Auto-merge is what actually lands the pull request; this job only watches.
           # Watching matters because the empty runs described in the next step cannot
           # be deleted until they have settled, which happens at the merge.
           for _ in $(seq 1 90); do
-            state=$(gh pr view "$PR" --json state --jq .state)
+            state=$(gh pr view "$PR" --json state --jq .state) || state="UNKNOWN"
             case "$state" in
               MERGED) echo "Sync PR #${PR} merged."; exit 0 ;;
               CLOSED) echo "Sync PR #${PR} was closed without merging."; exit 0 ;;
@@ -141,7 +142,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SYNC_BRANCH: sync/main-to-dev
         run: |
-          set -euo pipefail
+          # Deliberately not `set -e`. This step is cosmetic housekeeping, and a
+          # transient API error here must not fail the release sync, which would
+          # create precisely the kind of red run it exists to remove.
+          set -uo pipefail
 
           # Opening this pull request with GITHUB_TOKEN makes GitHub record a workflow
           # run for the pull_request event and then never dispatch it: measured on runs
@@ -158,17 +162,25 @@ jobs:
           # has at least one job and is never touched, so this cannot delete evidence
           # of a real failure.
           deleted=0
-          for id in $(gh api \
+          ids=$(gh api \
                 "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${SYNC_BRANCH}&event=pull_request&per_page=100" \
-                --jq '.workflow_runs[] | select(.status == "completed") | .id'); do
-            jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/jobs" --jq '.total_count')
-            if [ "$jobs" -eq 0 ]; then
-              if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${id}"; then
-                deleted=$((deleted + 1))
-                echo "Deleted empty run ${id}"
-              else
-                echo "::warning::Could not delete empty run ${id}"
-              fi
+                --jq '.workflow_runs[] | select(.status == "completed") | .id') || ids=""
+
+          for id in $ids; do
+            jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/jobs" --jq '.total_count') || jobs=""
+
+            # Anything other than a confirmed zero is left alone. An unreadable job
+            # count is not evidence that a run is empty.
+            case "$jobs" in
+              0) ;;
+              *) continue ;;
+            esac
+
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${id}"; then
+              deleted=$((deleted + 1))
+              echo "Deleted empty run ${id}"
+            else
+              echo "::warning::Could not delete empty run ${id}"
             fi
           done
           echo "Removed ${deleted} empty run(s)."
