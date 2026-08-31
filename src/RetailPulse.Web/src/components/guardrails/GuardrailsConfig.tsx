@@ -57,17 +57,22 @@ const useStyles = makeStyles({
     gap: '2px',
     fontSize: '12px',
     color: tokens.colorNeutralForeground2,
+    // Break any unbroken token in the explainer sentences (added by #264) so
+    // it wraps inside the callout instead of widening it at narrow widths.
+    overflowWrap: 'anywhere',
   },
   layerRowHead: {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
     flexWrap: 'wrap',
+    minWidth: 0,
   },
   layerRowName: {
     fontSize: '12px',
     fontWeight: 600,
     color: 'var(--color-text, #e2e8f0)',
+    overflowWrap: 'anywhere',
   },
   layerNoteStrong: {
     fontSize: '12px',
@@ -78,6 +83,7 @@ const useStyles = makeStyles({
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: '12px',
     padding: '8px 0',
     borderBottom: '1px solid var(--color-border, #334155)',
     ':last-child': {
@@ -88,13 +94,19 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
+    // Let the label column shrink so the longer #264 descriptions wrap here
+    // rather than pushing the switch off the row at narrow widths.
+    minWidth: 0,
   },
   toggleDescription: {
     fontSize: '12px',
     color: 'var(--color-text-muted, #94a3b8)',
+    overflowWrap: 'anywhere',
   },
   textarea: {
     width: '100%',
+    boxSizing: 'border-box',
+    minWidth: 0,
     minHeight: '120px',
     padding: '12px',
     borderRadius: '8px',
@@ -133,6 +145,8 @@ const useStyles = makeStyles({
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '8px',
     padding: '6px 0',
     fontSize: '13px',
     color: tokens.colorNeutralForeground2,
@@ -141,6 +155,11 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
+    maxWidth: '100%',
+    // The read-only badges carry long labels such as
+    // "MODEL · PROMPT-SHIELD SAFETY"; wrap them within the pill instead of
+    // letting them overflow a non-wrapping row.
+    overflowWrap: 'anywhere',
     padding: '2px 8px',
     borderRadius: tokens.borderRadiusCircular,
     fontSize: '11px',
