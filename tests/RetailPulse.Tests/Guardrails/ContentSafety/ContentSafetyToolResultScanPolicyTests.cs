@@ -200,6 +200,97 @@ public class ContentSafetyToolResultScanPolicyTests
         text.Should().Contain("Intimate Apparel", "no term is skipped, the payload is only presented as prose");
     }
 
+    /// <summary>
+    /// #244 root cause, established against the live Azure Content Safety
+    /// service rather than assumed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The original theory was that raw JSON put the conversational classifier
+    /// out of distribution, so rendering tool results as prose would clear the
+    /// false positive. Measured against the live service, that theory is wrong.
+    /// The generated store-name pattern scores Sexual severity 4 in both
+    /// framings, and no amount of surrounding context reliably clears it:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>raw JSON containing "Strip Center #11": Sexual 4</description></item>
+    /// <item><description>prose containing "Strip Center #11": Sexual 4</description></item>
+    /// <item><description>the bare phrase "Strip Center" on its own: Sexual 0</description></item>
+    /// <item><description>"Store Name: Apex Retail Group Shopping Center #11": Sexual 0</description></item>
+    /// </list>
+    /// <para>
+    /// So the trigger is the phrase in the generated store-name context, and the
+    /// only robust remedy is to keep that vocabulary out of the seed data. The
+    /// rename is the fix, not a workaround. This test pins the seed so the term
+    /// cannot be reintroduced on the mistaken belief that normalization covers it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void SeedVocabulary_AvoidsTheTermTheLiveClassifierScoresAsSexualSeverityFour()
+    {
+        string scenario = Path.Combine(FindRepoRoot(), "packs", "default", "seed", "scenario.yaml");
+
+        File.Exists(scenario).Should().BeTrue($"the default pack seed should exist at {scenario}");
+
+        string text = File.ReadAllText(scenario);
+        text.Should().NotContain(
+            "Strip Center",
+            "the live classifier scores the generated store-name pattern as Sexual severity 4, "
+            + "and prose normalization does not change that, so the term stays out of the seed");
+        text.Should().Contain("Shopping Center", "the safe replacement vocabulary must remain in place");
+    }
+
+    /// <summary>
+    /// #244, point 5: a representative GetStorePerformance payload reaches the
+    /// classifier as prose with every value intact. Normalization is not the
+    /// fix for #244, but it is still the shape the scanner sees, so the coverage
+    /// guarantee is worth pinning here.
+    /// </summary>
+    [Fact]
+    public async Task StorePerformancePayload_ReachesTheClassifierAsProseWithEveryValueIntact()
+    {
+        var fake = new FakeContentSafetyEvaluator();
+        ContentSafetyToolResultInspector inspector = BuildInspector(fake, new InMemorySuspiciousRequestLog());
+
+        const string payload = /*lang=json,strict*/ """
+            {"stores":[{"storeName":"Apex Retail Group Shopping Center #11","region":"Southwest","revenue":1835988.67,"target":1997181.15,"performanceIndex":0.919,"issues":"Below target"}],"count":1}
+            """;
+
+        ContentSafetyToolResultOutcome outcome = await inspector.InspectAsync(
+            "GetStorePerformance",
+            payload,
+            "user-244",
+            CancellationToken.None);
+
+        (string text, ContentSafetyStage stage, ContentSafetyEvaluationContext _) =
+            fake.Calls.Should().ContainSingle().Subject;
+
+        stage.Should().Be(ContentSafetyStage.ToolResult);
+        text.Should().NotContain("{", "the scanner sees prose, not raw JSON");
+        text.Should().Contain("Store Name: Apex Retail Group Shopping Center #11");
+        text.Should().Contain("Region: Southwest");
+        text.Should().Contain("1835988.67", "normalization is presentation only and must not drop values");
+        outcome.WasBlocked.Should().BeFalse();
+        outcome.Payload.Should().Be(payload, "the model receives the original payload, never the prose rendering");
+    }
+
+    private static string FindRepoRoot()
+    {
+        DirectoryInfo? dir = new(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "RetailPulse.slnx")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException(
+            "Could not locate repo root (RetailPulse.slnx) walking up from " + AppContext.BaseDirectory);
+    }
+
     private static ContentSafetyToolResultInspector BuildInspector(
         FakeContentSafetyEvaluator evaluator,
         ISuspiciousRequestLog log) =>
