@@ -136,3 +136,72 @@ describe('GuardrailsConfig content-safety runtime panel', () => {
     expect(await screen.findByLabelText('Toggle jailbreak detection')).not.toBeChecked();
   });
 });
+
+describe('GuardrailsConfig two-layer injection clarity', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockConfig(overrides?: Partial<GuardrailsConfigData>) {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: async () => baseConfig(overrides),
+    } as Response);
+  }
+
+  it('reworded jailbreak toggle scopes itself to the pattern layer only', async () => {
+    mockConfig();
+    renderWithTheme(<GuardrailsConfig />);
+
+    // The visible label names the pattern layer explicitly, matching the
+    // audit trail's PATTERN family so a user can connect toggle to rows.
+    expect(await screen.findByText('🚫 Pattern-based jailbreak detection')).toBeInTheDocument();
+
+    // The old copy claimed the toggle blocked all injection. It must not.
+    expect(screen.queryByText('Block prompt injection and jailbreak attempts')).not.toBeInTheDocument();
+
+    expect(screen.getByText(/this is only the pattern layer/i)).toBeInTheDocument();
+    expect(screen.getByText(/not the whole injection defence/i)).toBeInTheDocument();
+  });
+
+  it('separates settings you control from deployment-managed runtime protections', async () => {
+    mockConfig();
+    renderWithTheme(<GuardrailsConfig />);
+
+    const userSettings = await screen.findByTestId('user-configurable-settings');
+    const runtimePanel = screen.getByTestId('content-safety-runtime-panel');
+
+    // Two distinct containers: one the user controls, one the deployment owns.
+    expect(userSettings).toBeInTheDocument();
+    expect(runtimePanel).toBeInTheDocument();
+    expect(userSettings).not.toContainElement(runtimePanel);
+
+    expect(screen.getByTestId('deployment-managed-note').textContent)
+      .toMatch(/managed by the deployment/i);
+
+    // The user-controlled group holds the jailbreak toggle; the runtime panel does not.
+    expect(userSettings).toContainElement(screen.getByLabelText('Toggle jailbreak detection'));
+    expect(runtimePanel).toContainElement(screen.getByTestId('cs-prompt-shields'));
+  });
+
+  it('explains that both injection layers exist and names them like the audit trail', async () => {
+    mockConfig();
+    renderWithTheme(<GuardrailsConfig />);
+
+    const explainer = await screen.findByTestId('injection-defense-explainer');
+    // Vocabulary must match the audit rows (PATTERN, MODEL · PROMPT-SHIELD SAFETY).
+    expect(screen.getByTestId('explainer-pattern-label')).toHaveTextContent('PATTERN');
+    expect(screen.getByTestId('explainer-model-label')).toHaveTextContent('MODEL · PROMPT-SHIELD SAFETY');
+    expect(explainer.textContent).toMatch(/prompt shields/i);
+    expect(explainer.textContent).toMatch(/managed by the deployment/i);
+  });
+
+  it('states plainly that turning pattern detection off leaves Prompt Shields on', async () => {
+    mockConfig();
+    renderWithTheme(<GuardrailsConfig />);
+
+    const note = await screen.findByTestId('pattern-off-still-shielded-note');
+    expect(note.textContent).toMatch(/does not turn off prompt shields/i);
+    expect(note.textContent).toMatch(/can still be blocked/i);
+  });
+});
