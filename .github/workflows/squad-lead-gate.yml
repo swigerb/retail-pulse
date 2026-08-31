@@ -1,0 +1,122 @@
+name: Squad Lead Gate
+
+# Every agent and every orchestration run pushes with the same `swigerb` token, so
+# GitHub sees a single human and `required_approving_review_count` would deadlock
+# rather than protect: no second identity exists that could ever satisfy it. On
+# 2026-08-31 five PRs merged themselves inside 31 minutes with no review and the
+# attribution was unrecoverable for exactly that reason.
+#
+# This gate replaces the identity barrier with a deliberate, logged act. It reports
+# a commit status named `Squad lead sign-off`, red until a reviewer posts a comment
+# pinning their approval to the PR's current head SHA:
+#
+#     Squad-Lead-Approved: <head-sha>
+#     Reviewer: <agent or person>
+#     Evidence: <test run or verification link>
+#
+# The SHA pin is the load-bearing part. Push a new commit and the recorded SHA no
+# longer matches the head, so the check flips back to red on its own and code can
+# never be amended in behind an approval that was granted earlier.
+#
+# This is a governance gate, not a security gate. Anyone holding the repo token
+# could post the comment. Its value is that a silent self-merge becomes a permanent,
+# SHA-pinned entry in the PR timeline that a human chose to write.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+
+concurrency:
+  group: lead-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    name: Evaluate lead sign-off
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # `issue_comment` also fires for plain issues, which have no head SHA to pin.
+    if: github.event_name == 'pull_request' || github.event.issue.pull_request != null
+    steps:
+      - name: Publish sign-off status
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b #v7
+        with:
+          script: |
+            const STATUS_CONTEXT = 'Squad lead sign-off';
+            const MARKER = /Squad-Lead-Approved:\s*([0-9a-f]{7,40})/i;
+
+            // A commit status is used rather than a job name because `issue_comment`
+            // events carry no PR head SHA of their own. A job-name check run would
+            // only ever attach to the push that opened the PR, so posting the
+            // approval comment would never turn the check green.
+            const prNumber = context.eventName === 'pull_request'
+              ? context.payload.pull_request.number
+              : context.payload.issue.number;
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const head = pr.head.sha.toLowerCase();
+
+            // OWNER, MEMBER and COLLABORATOR all imply push access. Anything weaker
+            // is a drive-by comment and must not be able to unblock a merge.
+            const ALLOWED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            let approval = null;
+            for (const comment of comments) {
+              if (comment.user?.type === 'Bot') continue;
+              if (!ALLOWED.has(comment.author_association)) continue;
+              const match = MARKER.exec(comment.body || '');
+              // Last match wins so a superseded sign-off can be corrected by posting
+              // a newer one, rather than forcing the reviewer to edit history.
+              if (match) {
+                approval = {
+                  sha: match[1].toLowerCase(),
+                  user: comment.user.login,
+                  url: comment.html_url,
+                };
+              }
+            }
+
+            let state;
+            let description;
+            if (!approval) {
+              state = 'failure';
+              description = `Awaiting sign-off. Comment: Squad-Lead-Approved: ${head.slice(0, 7)}`;
+            } else if (!head.startsWith(approval.sha)) {
+              state = 'failure';
+              description = `Sign-off pins ${approval.sha.slice(0, 7)} but head is ${head.slice(0, 7)}.`;
+            } else {
+              state = 'success';
+              description = `Signed off by @${approval.user} for ${head.slice(0, 7)}.`;
+            }
+
+            const params = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: head,
+              state,
+              context: STATUS_CONTEXT,
+              description: description.slice(0, 140),
+            };
+            if (approval) params.target_url = approval.url;
+
+            await github.rest.repos.createCommitStatus(params);
+            core.info(`${STATUS_CONTEXT} = ${state}: ${description}`);
