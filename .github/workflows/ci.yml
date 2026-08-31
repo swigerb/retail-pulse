@@ -104,6 +104,20 @@ jobs:
             --configuration Release \
             --filter "FullyQualifiedName~RetailPulse.Tests.Eval"
 
+      # Explicit fail-fast gate for the client/API contract layer. The round-trip
+      # fixtures under contracts/fixtures/ are serialised from the real response DTOs;
+      # this step reasserts them against the committed snapshots so an API-side rename,
+      # removal, or type change trips CI with the endpoint and field named, instead of
+      # reaching the deployed UI as an empty page or a zeroed value. Regenerating a
+      # fixture is deliberate (UPDATE_CONTRACT_FIXTURES=1), so this never rubber-stamps
+      # itself. The matching consumer assertions run in the frontend job.
+      - name: Client/API contract fixtures (backend)
+        run: |
+          dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
+            --no-build \
+            --configuration Release \
+            --filter "FullyQualifiedName~ApiClientContractFixtureTests"
+
       - name: Upload eval harness report
         uses: actions/upload-artifact@v4
         if: always()
@@ -193,6 +207,13 @@ jobs:
       # a targeted, easy-to-diagnose failure.
       - name: Chart acceptance matrix (frontend)
         run: npx vitest run src/__tests__/chartAcceptance.contract.test.ts src/__tests__/chartAcceptance.matrix.test.tsx
+
+      # Explicit fail-fast gate for the consumer side of the client/API contract. The
+      # same committed fixtures the backend produced are fed through the real client
+      # services/mappers here, so a client that starts reading a field the API does not
+      # send (or under a different name) trips CI with the endpoint and field named.
+      - name: Client/API contract fixtures (frontend)
+        run: npx vitest run src/__tests__/apiClientContract.contract.test.ts
 
   security:
     name: Security (Vulnerable Packages)
