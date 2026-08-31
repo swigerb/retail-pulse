@@ -1,0 +1,17 @@
+[
+  {
+    "id": "req-1024",
+    "timestamp": "2026-08-30T17:05:24Z",
+    "requestText": "Tool result from \u0027GetStorePerformance\u0027 blocked by Content Safety",
+    "detectionType": "content-safety-sexual",
+    "userContext": "analyst@contoso.com",
+    "action": "blocked",
+    "category": "Sexual",
+    "severity": 4,
+    "decision": "Blocked",
+    "stage": "ToolResult",
+    "threshold": 4,
+    "reason": "Content Safety classified the tool result as Sexual content at severity 4, which met threshold 4.",
+    "subject": "GetStorePerformance"
+  }
+]
