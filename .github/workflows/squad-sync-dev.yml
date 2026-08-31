@@ -1,0 +1,67 @@
+name: Sync dev with main
+
+# Promoting dev to main creates a merge commit on main that dev never receives, so
+# dev silently falls behind every release. It reached 51 commits behind once. The
+# fix was a manual `git push origin origin/main:refs/heads/dev` run straight after
+# each promotion, which only holds for as long as someone remembers to run it.
+#
+# Protecting dev takes that manual push away, so the sync moves here. This workflow
+# runs as github-actions[bot], which is the only actor granted a bypass on the dev
+# ruleset. No human or agent needs direct push access to dev for the sync to work.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-dev
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync dev with main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 #v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync dev with main
+        run: |
+          set -euo pipefail
+          git fetch origin main dev
+
+          main_sha=$(git rev-parse origin/main)
+          dev_sha=$(git rev-parse origin/dev)
+
+          if [ "$main_sha" = "$dev_sha" ]; then
+            echo "dev already matches main at ${main_sha}"
+            exit 0
+          fi
+
+          # After a normal promotion, dev is an ancestor of the merge commit on main,
+          # so a fast-forward is both possible and lossless.
+          if git merge-base --is-ancestor "$dev_sha" "$main_sha"; then
+            git push origin "${main_sha}:refs/heads/dev"
+            echo "Fast-forwarded dev to ${main_sha}"
+            exit 0
+          fi
+
+          # dev picked up work after the promotion branched. Merging preserves it;
+          # fast-forwarding would discard it.
+          echo "::notice::dev has diverged from main, merging instead of fast-forwarding"
+          git checkout -B dev "$dev_sha"
+          git merge --no-edit origin/main
+          git push origin dev
+          echo "Merged main into dev"
