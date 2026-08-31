@@ -68,6 +68,30 @@ jobs:
             });
             const head = pr.head.sha.toLowerCase();
 
+            // A PR whose head is already contained in the release branch introduces
+            // no new code: every commit in it passed this same gate on the way into
+            // main. The automated dev resync is exactly that shape, so it clears
+            // itself instead of waiting on a human to re-approve released code.
+            //
+            // This is a statement about content, not about who opened the PR or what
+            // the branch is called, so it cannot be borrowed by a PR that actually
+            // changes something. Releases are excluded: a PR into main always needs a
+            // real sign-off, even a no-op one.
+            let alreadyOnMain = false;
+            if (pr.base.ref !== 'main') {
+              try {
+                const { data: cmp } = await github.rest.repos.compareCommitsWithBasehead({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  basehead: `main...${head}`,
+                });
+                alreadyOnMain = cmp.status === 'identical' || cmp.status === 'behind';
+              } catch (error) {
+                // Fail closed: an unreadable comparison must not hand out a free pass.
+                core.warning(`Could not compare against main, requiring sign-off: ${error.message}`);
+              }
+            }
+
             // OWNER, MEMBER and COLLABORATOR all imply push access. Anything weaker
             // is a drive-by comment and must not be able to unblock a merge.
             const ALLOWED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -97,7 +121,10 @@ jobs:
 
             let state;
             let description;
-            if (!approval) {
+            if (alreadyOnMain) {
+              state = 'success';
+              description = 'Already released on main, so there is no new code to review.';
+            } else if (!approval) {
               state = 'failure';
               description = `Awaiting sign-off. Comment: Squad-Lead-Approved: ${head.slice(0, 7)}`;
             } else if (!head.startsWith(approval.sha)) {

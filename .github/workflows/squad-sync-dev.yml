@@ -2,12 +2,21 @@ name: Sync dev with main
 
 # Promoting dev to main creates a merge commit on main that dev never receives, so
 # dev silently falls behind every release. It reached 51 commits behind once. The
-# fix was a manual `git push origin origin/main:refs/heads/dev` run straight after
-# each promotion, which only holds for as long as someone remembers to run it.
+# old fix was a manual `git push origin origin/main:refs/heads/dev` after each
+# promotion, which only holds for as long as someone remembers to run it.
 #
-# Protecting dev takes that manual push away, so the sync moves here. This workflow
-# runs as github-actions[bot], which is the only actor granted a bypass on the dev
-# ruleset. No human or agent needs direct push access to dev for the sync to work.
+# Protecting dev removes that manual push, and a direct push cannot be restored:
+# GitHub refuses the Actions integration as a ruleset bypass actor outside an
+# organization ("must be part of the ruleset source or owner organization"), and the
+# only bypasses a personal repo accepts are the admin and maintain roles, which is
+# precisely the access every agent already holds. A bypass there would protect
+# nothing.
+#
+# So the sync goes through the protection instead of around it: push main to a sync
+# branch, open a PR into dev, and let auto-merge land it once CI passes. The lead
+# gate clears it automatically because its commits are already on main, which means
+# they already passed the gate on the way in. No bypass actor and no standing
+# credential exist on dev as a result.
 
 on:
   push:
@@ -16,6 +25,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: sync-dev
@@ -30,38 +40,42 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 #v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Sync dev with main
+      - name: Open sync pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SYNC_BRANCH: sync/main-to-dev
         run: |
           set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main dev
 
+          # "dev is behind main" is the only state worth acting on. dev being ahead is
+          # normal in-flight work, not drift.
+          if git merge-base --is-ancestor origin/main origin/dev; then
+            echo "dev already contains main, nothing to sync"
+            exit 0
+          fi
+
           main_sha=$(git rev-parse origin/main)
-          dev_sha=$(git rev-parse origin/dev)
+          git push --force origin "${main_sha}:refs/heads/${SYNC_BRANCH}"
 
-          if [ "$main_sha" = "$dev_sha" ]; then
-            echo "dev already matches main at ${main_sha}"
-            exit 0
+          pr=$(gh pr list --base dev --head "$SYNC_BRANCH" --state open \
+                 --json number --jq '.[0].number // empty')
+
+          if [ -z "$pr" ]; then
+            body='Automated resync so dev does not fall behind main. Every commit here is already on main, so the Squad lead gate clears this PR on its own: the code passed the gate on its way into the release branch and there is nothing new to review. Opened by squad-sync-dev.yml, auto-merges once CI passes.'
+            pr=$(gh pr create --base dev --head "$SYNC_BRANCH" \
+                   --title "chore: sync dev with main" \
+                   --body "$body" | grep -oE '[0-9]+$')
+            echo "Opened sync PR #${pr}"
+          else
+            echo "Sync PR #${pr} already open, reusing it"
           fi
 
-          # After a normal promotion, dev is an ancestor of the merge commit on main,
-          # so a fast-forward is both possible and lossless.
-          if git merge-base --is-ancestor "$dev_sha" "$main_sha"; then
-            git push origin "${main_sha}:refs/heads/dev"
-            echo "Fast-forwarded dev to ${main_sha}"
-            exit 0
-          fi
-
-          # dev picked up work after the promotion branched. Merging preserves it;
-          # fast-forwarding would discard it.
-          echo "::notice::dev has diverged from main, merging instead of fast-forwarding"
-          git checkout -B dev "$dev_sha"
-          git merge --no-edit origin/main
-          git push origin dev
-          echo "Merged main into dev"
+          # Auto-merge still honours every required check, including the lead gate, so
+          # this waits for CI rather than short-circuiting it.
+          gh pr merge "$pr" --merge --auto
+          echo "Auto-merge armed on #${pr}"
