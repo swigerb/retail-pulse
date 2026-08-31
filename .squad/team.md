@@ -48,10 +48,24 @@ to red on its own, so nothing can be amended in behind an approval.
 | Decides whether a PR merges | Brian, or Kroger acting as Lead |
 | Posts the sign-off comment | Only on Brian's explicit instruction |
 | Runs `gh pr merge` | Only after the sign-off check is green |
-| Pushes directly to `dev` | Nobody. `squad-sync-dev.yml` holds the only bypass. |
+| Pushes directly to `dev` or `main` | Nobody. Neither branch has a bypass actor. |
 
 The orchestrator never posts a sign-off comment on its own initiative and never
 merges unprompted. Reviewing a PR and approving it are separate acts.
+
+### The one automatic exemption
+
+The gate passes itself when a PR's commits are **already on `main`**. Such a PR
+introduces no new code, because everything in it cleared this same gate on the way
+into the release branch. This is a statement about content rather than about who
+opened the PR or what the branch is called, so a PR that actually changes something
+can never borrow it. PRs into `main` are excluded and always need a real sign-off.
+
+That exemption is what lets `squad-sync-dev.yml` keep `dev` level with `main` without
+a bypass. GitHub refuses the Actions integration as a bypass actor outside an
+organization, and the only bypasses a personal repo accepts are the admin and
+maintain roles, which is exactly the access every agent already holds through the
+shared token. Granting one would have protected nothing.
 
 ## Coding Agent
 
