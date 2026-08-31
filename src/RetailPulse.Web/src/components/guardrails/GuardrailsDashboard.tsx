@@ -10,6 +10,7 @@ import {
   classifyBlockFamily,
   describeCategory,
   describeSeverity,
+  isFailOpenPass,
 } from '../../utils/safetyDisplay';
 import { ContentSafetyStatusBadge } from './ContentSafetyStatusBadge';
 
@@ -336,7 +337,7 @@ function explainAuditDecision(entry: BlockedRequest, stage: AuditStage): string 
     || `${STAGE_LABELS[stage]} triggered a configured guardrail.`;
   const consequence = `The system ${describeSystemAction(entry, stage)}.`;
 
-  return entry.actionTaken.toLowerCase() === 'failopen-passed'
+  return isFailOpenPass(entry)
     ? `${cause} ${consequence} Review Content Safety availability.`
     : `${cause} ${consequence}`;
 }
