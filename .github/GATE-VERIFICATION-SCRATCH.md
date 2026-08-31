@@ -1,0 +1,1 @@
+Throwaway file used to verify the Squad lead sign-off gate. This PR is never merged.
