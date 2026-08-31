@@ -474,7 +474,7 @@ export function GuardrailsDashboard() {
         </Card>
         <Card className={styles.statCard} appearance="subtle" data-testid="stat-model-total">
           <span className={styles.statValue}>
-            {(stats.contentSafetyBlocks ?? 0) + (stats.contentSafetyFlags ?? 0)}
+            {stats.contentSafetyBlocks ?? 0}
           </span>
           <span className={styles.statLabel}>Model-based Blocks</span>
         </Card>
@@ -497,6 +497,10 @@ export function GuardrailsDashboard() {
         <Card className={styles.statCard} appearance="subtle">
           <span className={styles.statValue}>{stats.contentSafetyFlags ?? 0}</span>
           <span className={styles.statLabel}>Content Safety Flags</span>
+        </Card>
+        <Card className={styles.statCard} appearance="subtle" data-testid="stat-failopen-total">
+          <span className={styles.statValue}>{stats.failOpenPasses ?? 0}</span>
+          <span className={styles.statLabel}>Fail-open Passes</span>
         </Card>
       </div>
 

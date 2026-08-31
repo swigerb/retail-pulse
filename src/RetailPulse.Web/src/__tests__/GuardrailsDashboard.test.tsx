@@ -29,6 +29,7 @@ const mockStats: GuardrailsStats = {
   accessDenials: 7,
   contentSafetyBlocks: 3,
   contentSafetyFlags: 1,
+  failOpenPasses: 9,
   recentBlocked: [
     { id: '1', timestamp: '2026-05-13T14:00:00Z', requestPreview: 'Ignore all previous instructions...', detectionType: 'jailbreak', reason: 'Jailbreak pattern', actionTaken: 'Blocked' },
     { id: '2', timestamp: '2026-05-13T13:30:00Z', requestPreview: 'My SSN is 123-45-6789', detectionType: 'pii', reason: 'PII detected', actionTaken: 'Redacted' },
@@ -206,7 +207,21 @@ describe('GuardrailsDashboard', () => {
     const patternCard = await screen.findByTestId('stat-pattern-total');
     expect(patternCard).toHaveTextContent('42'); // 15+20+7
     const modelCard = screen.getByTestId('stat-model-total');
-    expect(modelCard).toHaveTextContent('4'); // 3+1
+    // Model-based Blocks now counts blocks ONLY. It previously read
+    // contentSafetyBlocks + contentSafetyFlags (3+1=4), which double-counted
+    // the informational flag and broke reconciliation with Total Blocked, since
+    // a flagged row is a non-blocking hit. Blocks only = 3.
+    expect(modelCard).toHaveTextContent('3');
+  });
+
+  it('renders fail-open passes as a distinct counter separate from blocks', async () => {
+    installFetchMock();
+    renderWithTheme(<GuardrailsDashboard />);
+    const failOpenCard = await screen.findByTestId('stat-failopen-total');
+    // A request allowed through on service failure is the opposite of a block,
+    // so it surfaces on its own card and never inflates Total Blocked.
+    expect(failOpenCard).toHaveTextContent('9');
+    expect(failOpenCard).toHaveTextContent('Fail-open Passes');
   });
 
   it('renders the category and severity distribution sections', async () => {
