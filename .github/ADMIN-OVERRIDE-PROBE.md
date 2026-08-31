@@ -1,0 +1,1 @@
+Throwaway probe testing whether admin privileges can bypass the ruleset. Never merged.
