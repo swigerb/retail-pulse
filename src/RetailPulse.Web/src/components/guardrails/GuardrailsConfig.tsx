@@ -33,10 +33,57 @@ const useStyles = makeStyles({
     fontWeight: '600',
     color: 'var(--color-text, #e2e8f0)',
   },
+  sectionSubtitle: {
+    fontSize: '12px',
+    color: 'var(--color-text-muted, #94a3b8)',
+  },
+  layerCallout: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    padding: '12px 14px',
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  layerCalloutTitle: {
+    fontSize: '13px',
+    fontWeight: 600,
+    color: 'var(--color-text, #e2e8f0)',
+  },
+  layerRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    fontSize: '12px',
+    color: tokens.colorNeutralForeground2,
+    // Break any unbroken token in the explainer sentences (added by #264) so
+    // it wraps inside the callout instead of widening it at narrow widths.
+    overflowWrap: 'anywhere',
+  },
+  layerRowHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+    minWidth: 0,
+  },
+  layerRowName: {
+    fontSize: '12px',
+    fontWeight: 600,
+    color: 'var(--color-text, #e2e8f0)',
+    overflowWrap: 'anywhere',
+  },
+  layerNoteStrong: {
+    fontSize: '12px',
+    fontWeight: 600,
+    color: 'var(--color-text, #e2e8f0)',
+  },
   toggleRow: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: '12px',
     padding: '8px 0',
     borderBottom: '1px solid var(--color-border, #334155)',
     ':last-child': {
@@ -47,13 +94,19 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
+    // Let the label column shrink so the longer #264 descriptions wrap here
+    // rather than pushing the switch off the row at narrow widths.
+    minWidth: 0,
   },
   toggleDescription: {
     fontSize: '12px',
     color: 'var(--color-text-muted, #94a3b8)',
+    overflowWrap: 'anywhere',
   },
   textarea: {
     width: '100%',
+    boxSizing: 'border-box',
+    minWidth: 0,
     minHeight: '120px',
     padding: '12px',
     borderRadius: '8px',
@@ -92,6 +145,8 @@ const useStyles = makeStyles({
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '8px',
     padding: '6px 0',
     fontSize: '13px',
     color: tokens.colorNeutralForeground2,
@@ -100,6 +155,11 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
     gap: '4px',
+    maxWidth: '100%',
+    // The read-only badges carry long labels such as
+    // "MODEL · PROMPT-SHIELD SAFETY"; wrap them within the pill instead of
+    // letting them overflow a non-wrapping row.
+    overflowWrap: 'anywhere',
     padding: '2px 8px',
     borderRadius: tokens.borderRadiusCircular,
     fontSize: '11px',
@@ -183,6 +243,9 @@ export function GuardrailsConfig() {
       {config.contentSafety && (
         <div className={styles.section} data-testid="content-safety-runtime-panel">
           <span className={styles.sectionTitle}>🛡️ Content Safety (model-based)</span>
+          <span className={styles.sectionSubtitle} data-testid="deployment-managed-note">
+            Runtime protections managed by the deployment. You cannot change these here.
+          </span>
           <div className={styles.contentSafetyBanner}>
             <ContentSafetyStatusBadge
               enabled={config.contentSafety.enabled}
@@ -236,13 +299,41 @@ export function GuardrailsConfig() {
         </div>
       )}
 
-      <div className={styles.section}>
-        <span className={styles.sectionTitle}>Protection Toggles</span>
+      <div className={styles.section} data-testid="user-configurable-settings">
+        <span className={styles.sectionTitle}>Settings you control</span>
+        <span className={styles.sectionSubtitle}>
+          These toggles change guardrail behaviour for this deployment.
+        </span>
+
+        <div className={styles.layerCallout} data-testid="injection-defense-explainer">
+          <span className={styles.layerCalloutTitle}>Two layers block prompt injection</span>
+          <div className={styles.layerRow}>
+            <span className={styles.layerRowHead}>
+              <span className={styles.layerRowName}>Pattern detection (this setting)</span>
+              <span className={styles.readOnlyValue} data-testid="explainer-pattern-label">PATTERN</span>
+            </span>
+            <span>
+              Matches known injection phrasings, such as "ignore previous instructions". You control it with the toggle below. In the audit trail these blocks are labelled PATTERN.
+            </span>
+          </div>
+          <div className={styles.layerRow}>
+            <span className={styles.layerRowHead}>
+              <span className={styles.layerRowName}>Prompt Shields (managed by the deployment)</span>
+              <span className={styles.readOnlyValue} data-testid="explainer-model-label">MODEL · PROMPT-SHIELD SAFETY</span>
+            </span>
+            <span>
+              An AI model that spots injection attempts. You cannot turn it off on this page. In the audit trail these blocks are labelled MODEL · PROMPT-SHIELD SAFETY.
+            </span>
+          </div>
+          <span className={styles.layerNoteStrong} data-testid="pattern-off-still-shielded-note">
+            Turning pattern detection off does not turn off Prompt Shields. A request can still be blocked by that layer.
+          </span>
+        </div>
 
         <div className={styles.toggleRow}>
           <div className={styles.toggleLabel}>
-            <Text weight="semibold">🚫 Jailbreak Detection</Text>
-            <span className={styles.toggleDescription}>Block prompt injection and jailbreak attempts</span>
+            <Text weight="semibold">🚫 Pattern-based jailbreak detection</Text>
+            <span className={styles.toggleDescription}>Blocks messages that contain known injection phrasings. This is only the pattern layer, not the whole injection defence.</span>
           </div>
           <Switch
             checked={config.jailbreakDetectionEnabled}

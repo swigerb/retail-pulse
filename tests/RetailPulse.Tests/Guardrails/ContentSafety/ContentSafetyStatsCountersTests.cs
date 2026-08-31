@@ -40,16 +40,44 @@ public class ContentSafetyStatsCountersTests
     }
 
     [Fact]
-    public async Task FailOpen_IsCountedAsBlock_ForOperatorVisibility()
+    public async Task FailOpen_DoesNotCountAsBlock_AndIncrementsFailOpenCounter()
     {
         var log = new InMemorySuspiciousRequestLog();
         await LogAsync(log, ContentSafetyDetectionTypes.Unavailable, ContentSafetyActions.FailOpenPassed);
 
         GuardrailsStats stats = await log.GetStatsAsync();
-        // Fail-open still lands in the block counter so a persistent outage is
-        // visible on the dashboard even though the request itself continued.
-        stats.ContentSafetyBlocks.Should().Be(1);
+        // A fail-open pass ALLOWED the request through; it is the opposite of a
+        // block. It must not touch any block counter and must surface on its own
+        // FailOpenPasses figure so a degraded safety service is visible.
+        stats.FailOpenPasses.Should().Be(1);
+        stats.ContentSafetyBlocks.Should().Be(0);
         stats.ContentSafetyFlags.Should().Be(0);
+        stats.TotalBlocked.Should().Be(0, "a request allowed through on service failure was not blocked");
+    }
+
+    [Fact]
+    public async Task LiveScenario_FourFailOpenPassesPlusOneBlock_ReconcilesCounters()
+    {
+        // Reproduces the exact five audit rows measured on the deployed app: one
+        // genuine prompt-shield block and four cold-start fail-open passes.
+        var log = new InMemorySuspiciousRequestLog();
+        await LogAsync(log, ContentSafetyDetectionTypes.IndirectInjection, ContentSafetyActions.Blocked);
+        for (int i = 0; i < 4; i++)
+        {
+            await LogAsync(log, ContentSafetyDetectionTypes.Unavailable, ContentSafetyActions.FailOpenPassed);
+        }
+
+        GuardrailsStats stats = await log.GetStatsAsync();
+        stats.TotalBlocked.Should().Be(1, "only one of the five rows was actually blocked");
+        stats.ContentSafetyBlocks.Should().Be(1);
+        stats.FailOpenPasses.Should().Be(4, "the four cold-start rows were allowed through, not blocked");
+        stats.ContentSafetyFlags.Should().Be(0);
+        stats.JailbreakAttempts.Should().Be(0);
+
+        // Pattern-based blocks plus model-based blocks must reconcile with the
+        // total (structural "other" rejections are zero in this scenario).
+        int patternBlocks = stats.JailbreakAttempts + stats.PiiDetections + stats.AccessDenials;
+        (patternBlocks + stats.ContentSafetyBlocks).Should().Be(stats.TotalBlocked);
     }
 
     private static Task LogAsync(InMemorySuspiciousRequestLog log, string detection, string action) =>

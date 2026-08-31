@@ -70,6 +70,27 @@ public enum ContentSafetyDecision
     ServiceUnavailable,
 }
 
+/// <summary>
+/// Why a <see cref="ContentSafetyDecision.ServiceUnavailable"/> outcome happened.
+/// The evaluator previously collapsed every failure into one generic outcome, so
+/// an operator reading the audit trail could not tell a cold-start timeout from a
+/// 401 or a dropped connection. Carrying the class lets the audit reason name it.
+/// </summary>
+public enum ContentSafetyFailureReason
+{
+    /// <summary>The call did not complete inside its time budget.</summary>
+    Timeout,
+
+    /// <summary>Managed-identity authentication was rejected (for example 401/403).</summary>
+    Authentication,
+
+    /// <summary>The connection failed before a response (DNS, TLS, socket, 5xx).</summary>
+    Transport,
+
+    /// <summary>The resilience circuit breaker was open and short-circuited the call.</summary>
+    CircuitOpen,
+}
+
 /// <summary>Structured decision + evidence used for auditing and telemetry.</summary>
 public sealed record ContentSafetyResult(
     ContentSafetyDecision Decision,
@@ -78,7 +99,8 @@ public sealed record ContentSafetyResult(
     bool PromptShieldIndirectInjectionDetected,
     TimeSpan Latency,
     string? CorrelationId,
-    string? PrimaryCategory = null)
+    string? PrimaryCategory = null,
+    ContentSafetyFailureReason? FailureReason = null)
 {
     /// <summary>Cached passed-with-no-hits singleton returned by the no-op evaluator.</summary>
     public static readonly ContentSafetyResult Passed = new(
@@ -97,6 +119,20 @@ public sealed record ContentSafetyResult(
         PromptShieldIndirectInjectionDetected: false,
         Latency: TimeSpan.Zero,
         CorrelationId: null);
+
+    /// <summary>
+    /// Service-unavailable result carrying the failure class so the audit reason
+    /// can distinguish a timeout from an auth or transport failure.
+    /// </summary>
+    public static ContentSafetyResult Unavailable(ContentSafetyFailureReason reason) => new(
+        ContentSafetyDecision.ServiceUnavailable,
+        [],
+        PromptShieldJailbreakDetected: false,
+        PromptShieldIndirectInjectionDetected: false,
+        Latency: TimeSpan.Zero,
+        CorrelationId: null,
+        PrimaryCategory: null,
+        FailureReason: reason);
 }
 
 /// <summary>A single category hit from text moderation.</summary>

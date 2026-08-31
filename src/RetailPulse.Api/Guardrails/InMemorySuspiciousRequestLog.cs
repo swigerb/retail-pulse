@@ -18,6 +18,7 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
     private int _accessDenialCount;
     private int _contentSafetyBlocks;
     private int _contentSafetyFlags;
+    private int _failOpenPasses;
     private int _otherCount;
     private readonly DateTime _since = DateTime.UtcNow;
 
@@ -56,14 +57,22 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
             default:
                 if (IsModelBasedSafety(request.DetectionType))
                 {
-                    // A "flagged" action is a non-blocking Content Safety hit that
-                    // must still increment the audit feed; every other content-safety
-                    // action (block, dropped chunk, fail-open pass, fail-closed block)
-                    // counts against the block counter so the dashboard reflects the
-                    // safety-critical decisions.
+                    // A model-based safety row carries an Action that says what the
+                    // system actually DID, and the counter must match that verb:
+                    //  - Flagged: a non-blocking hit. Informational only.
+                    //  - FailOpenPassed: the request was ALLOWED THROUGH because the
+                    //    safety service was unreachable. This is the opposite of a
+                    //    block; counting it as one inflated TotalBlocked and hid the
+                    //    outage. It gets its own fail-open counter instead.
+                    //  - everything else (block, dropped chunk, fail-closed block):
+                    //    the request was stopped, so it counts against blocks.
                     if (string.Equals(request.Action, ContentSafetyActions.Flagged, StringComparison.OrdinalIgnoreCase))
                     {
                         Interlocked.Increment(ref _contentSafetyFlags);
+                    }
+                    else if (string.Equals(request.Action, ContentSafetyActions.FailOpenPassed, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Interlocked.Increment(ref _failOpenPasses);
                     }
                     else
                     {
@@ -110,9 +119,11 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
 
     public Task<GuardrailsStats> GetStatsAsync(CancellationToken ct = default)
     {
-        // Flags are excluded because a flag is explicitly a non-blocking hit.
-        // Everything else that was logged is counted, so TotalBlocked can never
-        // read lower than the number of blocking rows the audit feed is showing.
+        // Flags are excluded because a flag is explicitly a non-blocking hit,
+        // and fail-open passes are excluded because they were ALLOWED THROUGH,
+        // not blocked. Everything else that stopped a request is counted, so
+        // TotalBlocked can never read lower than the number of blocking rows the
+        // audit feed is showing, nor higher by counting passes it let through.
         int total = _jailbreakCount + _piiCount + _accessDenialCount + _contentSafetyBlocks + _otherCount;
         return Task.FromResult(new GuardrailsStats(
             TotalBlocked: total,
@@ -121,6 +132,7 @@ public class InMemorySuspiciousRequestLog : ISuspiciousRequestLog
             AccessDenials: _accessDenialCount,
             Since: _since,
             ContentSafetyBlocks: _contentSafetyBlocks,
-            ContentSafetyFlags: _contentSafetyFlags));
+            ContentSafetyFlags: _contentSafetyFlags,
+            FailOpenPasses: _failOpenPasses));
     }
 }

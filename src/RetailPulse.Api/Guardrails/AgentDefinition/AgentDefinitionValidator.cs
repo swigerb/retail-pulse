@@ -454,7 +454,7 @@ public sealed class AgentDefinitionValidator
                             Decision: ContentSafetyDecision.ServiceUnavailable.ToString(),
                             Stage: ContentSafetyStage.AgentDefinition.ToString(),
                             Threshold: null,
-                            Reason: $"Content Safety was unreachable while checking {field} for agent {agentKey}.",
+                            Reason: BuildUnavailableReason(result.FailureReason, field, agentKey),
                             Subject: $"{field} on agent {agentKey}"),
                             cancellationToken).ConfigureAwait(false);
                     }
@@ -467,6 +467,27 @@ public sealed class AgentDefinitionValidator
         }
 
         return 1;
+    }
+
+    /// <summary>
+    /// Cold-start fail-open rows used to all read the same "was unreachable"
+    /// sentence, so an operator could not tell a first-call timeout from a 401.
+    /// The classification (when known) is appended while the base wording is
+    /// preserved for existing audit consumers.
+    /// </summary>
+    private static string BuildUnavailableReason(ContentSafetyFailureReason? reason, string field, string agentKey)
+    {
+        string baseReason = $"Content Safety was unreachable while checking {field} for agent {agentKey}.";
+        string? classification = reason switch
+        {
+            ContentSafetyFailureReason.Timeout => "The call timed out before the service responded.",
+            ContentSafetyFailureReason.Authentication => "Managed-identity authentication was rejected.",
+            ContentSafetyFailureReason.Transport => "The connection failed before a response.",
+            ContentSafetyFailureReason.CircuitOpen => "The circuit breaker was open.",
+            _ => null,
+        };
+
+        return classification is null ? baseReason : $"{baseReason} {classification}";
     }
 
     private static void AddDuplicateNameViolations(
