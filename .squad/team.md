@@ -19,6 +19,40 @@
 | Scribe | Session Logger | `.squad/agents/scribe/charter.md` | 📋 Silent |
 | Ralph | Work Monitor | `.squad/agents/ralph/charter.md` | 🔄 Monitor |
 
+## Merge Authority
+
+Every agent, and the orchestrator, pushes with the same `swigerb` token. GitHub
+therefore sees one human, and a `required_approving_review_count` rule would
+deadlock every PR instead of protecting anything. Authority is enforced by a
+deliberate, logged act instead.
+
+**No agent may merge its own pull request.** On 2026-08-31 five PRs merged
+themselves inside 31 minutes with no review, and attribution was unrecoverable
+because `mergedBy` read `swigerb` for all of them.
+
+`dev` and `main` both require the `Squad lead sign-off` status check, published by
+`.github/workflows/squad-lead-gate.yml`. It stays red until a reviewer with push
+access posts a comment on the PR:
+
+```
+Squad-Lead-Approved: <head-sha>
+Reviewer: <agent or person>
+Evidence: <test run or verification link>
+```
+
+The SHA pin is what makes this real. Push another commit and the check flips back
+to red on its own, so nothing can be amended in behind an approval.
+
+| Rule | Who |
+|------|-----|
+| Decides whether a PR merges | Brian, or Kroger acting as Lead |
+| Posts the sign-off comment | Only on Brian's explicit instruction |
+| Runs `gh pr merge` | Only after the sign-off check is green |
+| Pushes directly to `dev` | Nobody. `squad-sync-dev.yml` holds the only bypass. |
+
+The orchestrator never posts a sign-off comment on its own initiative and never
+merges unprompted. Reviewing a PR and approving it are separate acts.
+
 ## Coding Agent
 
 <!-- copilot-auto-assign: false -->
