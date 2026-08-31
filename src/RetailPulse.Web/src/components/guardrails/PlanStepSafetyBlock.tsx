@@ -60,9 +60,11 @@ const useStyles = makeStyles({
   action: {
     color: tokens.colorNeutralForeground2,
     fontSize: '13px',
+    overflowWrap: 'anywhere',
   },
   reason: {
     color: tokens.colorNeutralForeground1,
+    overflowWrap: 'anywhere',
   },
   metaRow: {
     display: 'flex',
