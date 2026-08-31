@@ -123,8 +123,9 @@ public class ContentSafetyWarmUpServiceTests
 
         await service.WarmAsync(CancellationToken.None);
 
-        // One deadline covers the whole warm-up. Overrunning it to squeeze in a
-        // handshake would break the time-box that keeps startup safe.
+        // One deadline covers the whole warm-up, and a handshake needs a viable
+        // slice of it. Starting one on the remnant of a budget the token already
+        // spent would cancel mid-flight and leave nothing pooled for the first scan.
         factory.Handler.CallCount.Should().Be(0);
     }
 
