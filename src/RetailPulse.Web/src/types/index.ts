@@ -570,6 +570,12 @@ export interface GuardrailsStats {
   accessDenials: number;
   contentSafetyBlocks: number;
   contentSafetyFlags: number;
+  /**
+   * Requests ALLOWED THROUGH because Content Safety was unreachable and the
+   * deployment fails open. Reported on its own so a degraded safety service is
+   * visible to operators and is never folded into a block count.
+   */
+  failOpenPasses: number;
   recentBlocked: BlockedRequest[];
   blocksPerHour: Array<{ hour: string; count: number }>;
 }
