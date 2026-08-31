@@ -38,6 +38,21 @@ internal sealed class ContentSafetyWarmUpService : IHostedService
     // or timed-out connection is not rate limited: there is nothing to wait for.
     private const int _maxTransportAttempts = 2;
 
+    // A cold handshake is DNS plus TCP plus TLS, so it needs tens of milliseconds
+    // at minimum. Starting one on whatever slice of budget happens to survive the
+    // token warm-up is guaranteed to cancel mid-flight: it burns a socket, leaves a
+    // half-open connection the first scan cannot reuse, and logs a warning that
+    // reads like a real transport fault. Below this floor, skipping is the honest
+    // outcome.
+    //
+    // The floor also removes a sub-millisecond race. When the credential hangs, the
+    // token warm-up is meant to consume this whole budget and leave nothing. But it
+    // stops itself with CancellationTokenSource.CancelAfter(TimeSpan), which
+    // truncates to whole milliseconds, so it can return up to a millisecond before
+    // the shared deadline. A real endpoint could do nothing with that sliver, but a
+    // test double answers instantly, which made the "budget fully spent" case flake.
+    private static readonly TimeSpan _minHandshakeBudget = TimeSpan.FromMilliseconds(100);
+
     private readonly ContentSafetyTokenProvider _tokens;
     private readonly IHttpClientFactory _httpFactory;
     private readonly GuardrailsConfig _guardrails;
@@ -132,10 +147,23 @@ internal sealed class ContentSafetyWarmUpService : IHostedService
         for (int attempt = 1; attempt <= _maxTransportAttempts; attempt++)
         {
             TimeSpan remaining = RemainingBudget(deadline);
-            if (remaining <= TimeSpan.Zero)
+            if (remaining < _minHandshakeBudget)
             {
-                _logger.LogWarning(
-                    "Content Safety transport warm-up skipped: the warm-up budget was spent acquiring the token.");
+                if (attempt == 1)
+                {
+                    _logger.LogWarning(
+                        "Content Safety transport warm-up skipped: {Remaining}ms of the warm-up budget survived the token acquisition, below the {Floor}ms a handshake needs.",
+                        (int)remaining.TotalMilliseconds,
+                        (int)_minHandshakeBudget.TotalMilliseconds);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Content Safety transport warm-up not retried: {Remaining}ms of the warm-up budget is left, below the {Floor}ms a handshake needs.",
+                        (int)remaining.TotalMilliseconds,
+                        (int)_minHandshakeBudget.TotalMilliseconds);
+                }
+
                 return;
             }
 
