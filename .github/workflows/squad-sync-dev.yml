@@ -26,6 +26,13 @@ name: Sync dev with main
 # would put a human approval back in the loop on every release. This job posts the gate
 # status itself instead, on main's head commit, under the same containment reasoning the
 # gate applies: the commit is already on main, so it has already been signed off.
+#
+# The same GITHUB_TOKEN authorship has a cosmetic side effect: GitHub records a workflow
+# run for the sync pull request and then never dispatches it, so it ends as a zero-job
+# "failure" the moment the pull request merges. Those shells publish no check runs and
+# gate nothing, but they make a healthy Actions tab read as a failing one. The last step
+# deletes them, guarded on a run having zero jobs so a real failure can never be caught
+# by it.
 
 on:
   push:
@@ -33,6 +40,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
   statuses: write
@@ -45,13 +53,16 @@ jobs:
   sync:
     name: Sync dev with main
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Covers the wait for CI on the sync pull request, which is bounded by the
+    # slowest required check rather than by anything this job does.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 #v4
         with:
           fetch-depth: 0
 
       - name: Open sync pull request
+        id: open
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SYNC_BRANCH: sync/main-to-dev
@@ -66,6 +77,7 @@ jobs:
           # normal in-flight work, not drift.
           if git merge-base --is-ancestor origin/main origin/dev; then
             echo "dev already contains main, nothing to sync"
+            echo "pr=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -97,3 +109,66 @@ jobs:
           # this waits for CI rather than short-circuiting it.
           gh pr merge "$pr" --merge --auto
           echo "Auto-merge armed on #${pr}"
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the sync pull request to merge
+        if: steps.open.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.open.outputs.pr }}
+        run: |
+          set -euo pipefail
+
+          # Auto-merge is what actually lands the pull request; this job only watches.
+          # Watching matters because the empty runs described in the next step cannot
+          # be deleted until they have settled, which happens at the merge.
+          for _ in $(seq 1 90); do
+            state=$(gh pr view "$PR" --json state --jq .state)
+            case "$state" in
+              MERGED) echo "Sync PR #${PR} merged."; exit 0 ;;
+              CLOSED) echo "Sync PR #${PR} was closed without merging."; exit 0 ;;
+            esac
+            sleep 10
+          done
+
+          echo "::warning::Sync PR #${PR} has not merged yet. Auto-merge stays armed, so it will land when its checks finish."
+
+      - name: Delete the empty runs GitHub leaves on bot pull requests
+        # always() so the sweep still runs when the wait above timed out or the
+        # pull request was closed rather than merged.
+        if: always() && steps.open.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SYNC_BRANCH: sync/main-to-dev
+        run: |
+          set -euo pipefail
+
+          # Opening this pull request with GITHUB_TOKEN makes GitHub record a workflow
+          # run for the pull_request event and then never dispatch it: measured on runs
+          # 33421887474/532/550, every one had zero jobs, published zero check runs, and
+          # was resolved as "failure" the second the pull request merged. Proven by
+          # re-running one by hand, which executed normally under a human actor.
+          #
+          # Nothing reads them. The sync branch head is main's head, so the required
+          # checks are already satisfied by the runs from the push to main. These
+          # shells are pure noise, and three red entries per release make a healthy
+          # Actions tab unreadable.
+          #
+          # The zero-job test is the safety property: a run that dispatched anything
+          # has at least one job and is never touched, so this cannot delete evidence
+          # of a real failure.
+          deleted=0
+          for id in $(gh api \
+                "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${SYNC_BRANCH}&event=pull_request&per_page=100" \
+                --jq '.workflow_runs[] | select(.status == "completed") | .id'); do
+            jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/jobs" --jq '.total_count')
+            if [ "$jobs" -eq 0 ]; then
+              if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${id}"; then
+                deleted=$((deleted + 1))
+                echo "Deleted empty run ${id}"
+              else
+                echo "::warning::Could not delete empty run ${id}"
+              fi
+            fi
+          done
+          echo "Removed ${deleted} empty run(s)."
