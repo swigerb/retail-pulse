@@ -301,22 +301,18 @@ using (ILoggerFactory validatorLoggerFactory = LoggerFactory.Create(lb =>
 #pragma warning restore ASP0000
             validatorEvaluator = evaluatorScope.GetRequiredService<IContentSafetyEvaluator>();
 
-            // Pre-acquire the managed-identity token before the agent-definition
-            // scan runs. That scan is the very first caller on a cold start, and
-            // without a primed token its four checks race an unprimed AAD/IMDS
-            // round-trip inside the per-scan timeout and fail open. Time-boxed and
-            // best-effort so a slow or unreachable credential endpoint can never
-            // block startup.
-            ContentSafetyTokenProvider validatorTokens =
-                evaluatorScope.GetRequiredService<ContentSafetyTokenProvider>();
-            var warmUpBudget = TimeSpan.FromMilliseconds(
-                Math.Max(200, guardrailsConfig.ContentSafety.WarmUpTimeoutMs));
-            ContentSafetyWarmUpResult warmUp = validatorTokens
-                .WarmUpAsync(warmUpBudget, CancellationToken.None)
+            // Prime the managed-identity token AND the HTTPS connection before the
+            // agent-definition scan runs. That scan is the very first caller on a
+            // cold start, and unprimed its checks race an AAD/IMDS round-trip and an
+            // unopened TLS connection inside the per-scan timeout, then fail open.
+            // Reusing the hosted service's warm-up rather than re-priming here keeps
+            // the startup and runtime paths identical instead of letting them drift.
+            ContentSafetyWarmUpService validatorWarmUp =
+                evaluatorScope.GetRequiredService<ContentSafetyWarmUpService>();
+            validatorWarmUp
+                .WarmAsync(CancellationToken.None)
                 .GetAwaiter()
                 .GetResult();
-            validatorLogger.LogInformation(
-                "Content Safety startup warm-up before agent-definition scan: {Result}.", warmUp);
         }
         else
         {

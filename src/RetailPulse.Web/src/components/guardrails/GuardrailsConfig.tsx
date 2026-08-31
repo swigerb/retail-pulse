@@ -406,11 +406,18 @@ export function GuardrailsConfig() {
         <Button appearance="subtle" onClick={handleReset} disabled={saving}>
           Reset to Defaults
         </Button>
+        {/*
+          The Security page's amber accent (#f59e0b) measures 2.15:1 under white
+          button text, well below the 4.5:1 WCAG AA minimum (issue #272). Amber-700
+          keeps the page identity and measures 5.02:1, so the accent survives and
+          the text becomes legible.
+        */}
         <Button
           appearance="primary"
           onClick={handleSave}
           disabled={saving}
-          style={{ backgroundColor: '#f59e0b', borderColor: '#f59e0b' }}
+          data-testid="guardrails-save-button"
+          style={{ backgroundColor: '#b45309', borderColor: '#b45309' }}
         >
           {saving ? <Spinner size="tiny" /> : 'Save Configuration'}
         </Button>

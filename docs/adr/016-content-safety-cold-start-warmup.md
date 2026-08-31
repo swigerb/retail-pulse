@@ -134,3 +134,48 @@ unscanned payloads on every cold start. If the owner wants that class of content
 guaranteed scanned, the warm-up narrows the window but does not eliminate it, and
 only a fail-closed policy for that stage would close it. That decision is left to
 the policy owner.
+
+## Follow-up: warming the transport as well as the token (issue #273)
+
+The warm-up above was deployed and measured. The cold-start burst fell from four
+fail-open rows to one. The survivor was:
+
+```
+SystemPrompt on agent general
+"The connection failed before a response."
+```
+
+That reason is the `Transport` classification added by decision 3, and it names the
+residual precisely: the token was warm, so the first scan no longer paid the AAD
+round-trip, but it was still the call opening the connection. DNS, the TCP connect
+and the TLS handshake all landed inside the 1500 ms scan budget, leaving too little
+of it for the scan itself.
+
+Of the two options this ADR left open, retrying was rejected. The Content Safety
+resilience handler documents "no retries" as a deliberate choice, so that the caller
+applies its fail-open policy on the first failure rather than multiplying the
+per-call latency budget. Adding a retry to the runtime path would contradict a
+standing decision to fix a startup-only problem.
+
+So the handshake moves into the warm-up, alongside the token:
+
+* `ContentSafetyWarmUpService` now issues one throwaway request to the endpoint root
+  through the shared named `HttpClient` after priming the token. Any response
+  establishes the pooled connection; the status is not inspected, because this is a
+  handshake and not a health check. Both evaluator paths are registered against that
+  same client, so one warm-up primes both.
+* Two attempts are allowed. The resilience handler caps every attempt at `TimeoutMs`,
+  so extra budget only converts into a better chance of success by re-attempting.
+  There is no backoff, because a refused connection is not rate limited.
+* Token and transport share one deadline, `WarmUpTimeoutMs`. If the token consumes
+  the whole budget the handshake is skipped rather than overrunning the time box,
+  because that time box is what keeps warm-up unable to stall startup.
+* The startup agent-definition scan calls the same `WarmAsync` the hosted service
+  calls. It previously re-implemented the budget and the token call inline, which
+  meant the startup path (the one actually producing the fail-open row) could drift
+  from the runtime path.
+
+Retrying was not the only thing rejected. Suppressing the fail-open row was too: a
+row means content passed unscanned, and hiding it would trade a visible security
+signal for a tidy dashboard. The policy remains fail-open and the row remains
+visible if the warm-up does not win the race.
