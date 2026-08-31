@@ -43,6 +43,7 @@ const useStyles = makeStyles({
   reason: {
     color: tokens.colorNeutralForeground2,
     fontSize: '13px',
+    overflowWrap: 'anywhere',
   },
   docTitle: {
     color: tokens.colorNeutralForeground3,
