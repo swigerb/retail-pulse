@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure;
 using Azure.AI.ContentSafety;
+using Azure.Identity;
 using Polly.CircuitBreaker;
 using Polly.Timeout;
 using RetailPulse.Api.Middleware;
@@ -20,7 +22,7 @@ namespace RetailPulse.Api.Guardrails.ContentSafety;
 /// timeout + circuit breaker guard both paths.
 /// </summary>
 /// <remarks>
-/// Authentication is <see cref="Azure.Identity.DefaultAzureCredential"/>-based.
+/// Authentication is <see cref="DefaultAzureCredential"/>-based.
 /// The evaluator resolves the current
 /// <see cref="ContentSafetyConfig"/> on every call from the DI-registered
 /// <see cref="GuardrailsConfig"/> so runtime toggles (fail policy, thresholds,
@@ -83,6 +85,35 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         activity?.SetTag("guardrails.contentsafety.stage", stage.ToString());
 
         long startTicks = Stopwatch.GetTimestamp();
+
+        // Acquire the managed-identity bearer on its own budget, separate from the
+        // scan timeout. The first token fetch after start is unprimed and must
+        // reach AAD/IMDS, which routinely takes seconds; folding that into the
+        // per-scan timeout is what made the very first cold-start scans fail open.
+        // Priming the shared credential here also warms the SDK moderation path,
+        // which fetches its token through the same credential singleton, so its
+        // own fetch is a cache hit and stays out of the scan budget.
+        string bearer;
+        try
+        {
+            bearer = await AcquireBearerAsync(config, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Content Safety token acquisition timed out at {Stage} (limit {TokenTimeoutMs}ms).",
+                stage, config.TokenTimeoutMs);
+            return Unavailable(activity, ContentSafetyFailureReason.Timeout, startTicks);
+        }
+        catch (AuthenticationFailedException ex)
+        {
+            _logger.LogWarning(ex, "Content Safety managed-identity authentication failed at {Stage}.", stage);
+            return Unavailable(activity, ContentSafetyFailureReason.Authentication, startTicks);
+        }
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(200, config.TimeoutMs)));
 
@@ -95,7 +126,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
             if (context.CheckPromptShield && config.PromptShieldsEnabled)
             {
-                PromptShieldResult shield = await CallPromptShieldAsync(text, stage, cts.Token).ConfigureAwait(false);
+                PromptShieldResult shield = await CallPromptShieldAsync(text, stage, bearer, cts.Token).ConfigureAwait(false);
                 jailbreak = shield.UserPromptAttackDetected;
                 indirect = shield.DocumentAttackDetected;
                 correlation = shield.CorrelationId;
@@ -149,16 +180,25 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         {
             _logger.LogWarning("Content Safety call timed out at {Stage} (limit {TimeoutMs}ms).",
                 stage, config.TimeoutMs);
-            activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
-            activity?.SetTag("guardrails.contentsafety.timeout", true);
-            return WithLatency(ContentSafetyResult.ServiceUnavailable, startTicks);
+            return Unavailable(activity, ContentSafetyFailureReason.Timeout, startTicks);
+        }
+        catch (AuthenticationFailedException ex)
+        {
+            // The SDK moderation path fetches its token through the same
+            // credential; a rejection here is an auth failure, not a transient
+            // outage, and retrying it would be pointless.
+            _logger.LogWarning(ex, "Content Safety authentication failed at {Stage}.", stage);
+            return Unavailable(activity, ContentSafetyFailureReason.Authentication, startTicks);
+        }
+        catch (RequestFailedException ex) when (IsAuthFailure(ex))
+        {
+            _logger.LogWarning(ex, "Content Safety rejected authentication at {Stage} (status {Status}).", stage, ex.Status);
+            return Unavailable(activity, ContentSafetyFailureReason.Authentication, startTicks);
         }
         catch (RequestFailedException ex) when (IsServiceUnavailable(ex))
         {
             _logger.LogWarning(ex, "Content Safety service returned unavailable status at {Stage}.", stage);
-            activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
-            activity?.SetTag("guardrails.contentsafety.transport_error", true);
-            return WithLatency(ContentSafetyResult.ServiceUnavailable, startTicks);
+            return Unavailable(activity, ContentSafetyFailureReason.Transport, startTicks);
         }
         catch (BrokenCircuitException ex)
         {
@@ -167,25 +207,61 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
             // ServiceUnavailable so the middleware's fail-open / fail-closed
             // policy decides the request outcome and the audit row is written.
             _logger.LogWarning(ex, "Content Safety circuit breaker open at {Stage}.", stage);
-            activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
-            activity?.SetTag("guardrails.contentsafety.breaker_open", true);
-            return WithLatency(ContentSafetyResult.ServiceUnavailable, startTicks);
+            return Unavailable(activity, ContentSafetyFailureReason.CircuitOpen, startTicks);
         }
         catch (TimeoutRejectedException ex)
         {
             _logger.LogWarning(ex, "Content Safety Polly timeout rejected at {Stage} (limit {TimeoutMs}ms).",
                 stage, config.TimeoutMs);
-            activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
-            activity?.SetTag("guardrails.contentsafety.timeout", true);
-            return WithLatency(ContentSafetyResult.ServiceUnavailable, startTicks);
+            return Unavailable(activity, ContentSafetyFailureReason.Timeout, startTicks);
+        }
+        catch (HttpRequestException ex) when (IsAuthStatus(ex.StatusCode))
+        {
+            _logger.LogWarning(ex, "Content Safety rejected authentication at {Stage} (status {Status}).", stage, ex.StatusCode);
+            return Unavailable(activity, ContentSafetyFailureReason.Authentication, startTicks);
         }
         catch (HttpRequestException ex)
         {
             _logger.LogWarning(ex, "Content Safety transport error at {Stage}.", stage);
-            activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
-            activity?.SetTag("guardrails.contentsafety.transport_error", true);
-            return WithLatency(ContentSafetyResult.ServiceUnavailable, startTicks);
+            return Unavailable(activity, ContentSafetyFailureReason.Transport, startTicks);
         }
+    }
+
+    /// <summary>
+    /// Acquires the managed-identity bearer under a budget that is independent of
+    /// the scan timeout, so a slow first-token fetch cannot consume the moderation
+    /// call's time.
+    /// </summary>
+    private async Task<string> AcquireBearerAsync(ContentSafetyConfig config, CancellationToken cancellationToken)
+    {
+        using var tokenCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        tokenCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(200, config.TokenTimeoutMs)));
+        return await _tokens.GetBearerAsync(tokenCts.Token).ConfigureAwait(false);
+    }
+
+    private static ContentSafetyResult Unavailable(Activity? activity, ContentSafetyFailureReason reason, long startTicks)
+    {
+        activity?.SetTag("guardrails.contentsafety.decision", ContentSafetyDecision.ServiceUnavailable.ToString());
+        activity?.SetTag("guardrails.contentsafety.failure_reason", reason.ToString());
+        switch (reason)
+        {
+            case ContentSafetyFailureReason.Timeout:
+                activity?.SetTag("guardrails.contentsafety.timeout", true);
+                break;
+            case ContentSafetyFailureReason.Authentication:
+                activity?.SetTag("guardrails.contentsafety.auth_error", true);
+                break;
+            case ContentSafetyFailureReason.Transport:
+                activity?.SetTag("guardrails.contentsafety.transport_error", true);
+                break;
+            case ContentSafetyFailureReason.CircuitOpen:
+                activity?.SetTag("guardrails.contentsafety.breaker_open", true);
+                break;
+            default:
+                break;
+        }
+
+        return WithLatency(ContentSafetyResult.Unavailable(reason), startTicks);
     }
 
     private static ContentSafetyResult Decide(
@@ -251,6 +327,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
     private async Task<PromptShieldResult> CallPromptShieldAsync(
         string text,
         ContentSafetyStage stage,
+        string bearer,
         CancellationToken ct)
     {
         // Input is the user speaking, so it is submitted as a user prompt and
@@ -264,10 +341,9 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
         using HttpContent content = JsonContent.Create(body, options: _jsonOptions);
         using HttpRequestMessage request = new(HttpMethod.Post, _promptShieldPath) { Content = content };
-        // Managed-identity bearer — matches Bicep's disableLocalAuth=true.
-        // The token provider caches under a semaphore so this call is
-        // synchronous once per rotation and never issues a per-request login.
-        string bearer = await _tokens.GetBearerAsync(ct).ConfigureAwait(false);
+        // Managed-identity bearer, matching Bicep's disableLocalAuth=true. The
+        // token is pre-acquired on a separate budget by the caller so this path
+        // never pays an AAD login round-trip inside the scan timeout.
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         using HttpResponseMessage response = await _http.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
@@ -353,6 +429,12 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
     private static bool IsServiceUnavailable(RequestFailedException ex) =>
         ex.Status is 0 or 408 or 429 or 500 or 502 or 503 or 504;
+
+    private static bool IsAuthFailure(RequestFailedException ex) =>
+        ex.Status is 401 or 403;
+
+    private static bool IsAuthStatus(HttpStatusCode? status) =>
+        status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
     private static string SpanName(ContentSafetyStage stage) => stage switch
     {
