@@ -102,9 +102,10 @@ public static class ContentSafetyServiceCollectionExtensions
                 sp.GetRequiredService<ILogger<AzureContentSafetyEvaluator>>());
         });
 
-        // Pre-acquire the managed-identity token at host start so the first
-        // runtime scan does not pay the cold AAD/IMDS round-trip inside its own
-        // timeout. Time-boxed and fire-and-forget, so it cannot delay startup.
+        // Prime the managed-identity token and the HTTPS connection at host start so
+        // the first runtime scan pays neither the cold AAD/IMDS round-trip nor the
+        // TLS handshake inside its own timeout. Time-boxed and fire-and-forget, so it
+        // cannot delay startup.
         services.TryAddSingleton<ContentSafetyWarmUpService>();
         services.AddHostedService(sp => sp.GetRequiredService<ContentSafetyWarmUpService>());
 
