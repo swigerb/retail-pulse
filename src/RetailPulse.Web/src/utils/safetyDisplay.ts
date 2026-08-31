@@ -260,9 +260,29 @@ export function detectSafetyRefusal(reply: string): SafetyBlockDisplayModel | nu
 
 // ── Family aggregation for the dashboard ──────────────────────────────────
 
+/**
+ * True when the audit row was ALLOWED THROUGH because Content Safety was
+ * unreachable and the deployment fails open. Keyed off the precise
+ * `actionTaken` string the API exposes verbatim (`failopen-passed`), NOT the
+ * `decision` field: a fail-CLOSED block also carries decision
+ * `ServiceUnavailable` but action `failclosed-blocked`, and it must still count
+ * as a block. See the backend `ContentSafetyActions.FailOpenPassed` /
+ * `AgentDefinitionDetectionTypes.ActionFailOpenPassed` constants, both the
+ * literal `failopen-passed`.
+ */
+export function isFailOpenPass(entry: BlockedRequest): boolean {
+  return entry.actionTaken?.toLowerCase() === 'failopen-passed';
+}
+
 export interface SafetyFamilyAggregate {
   pattern: number;
   model: number;
+  /**
+   * Rows the system allowed through when the safety service was unavailable.
+   * Surfaced separately so a degraded service stays visible on the family
+   * chart instead of vanishing, and never inflates the block bars.
+   */
+  failOpen: number;
 }
 
 /**
@@ -270,16 +290,26 @@ export interface SafetyFamilyAggregate {
  * Deliberately re-classifies from `detectionType` rather than trusting the
  * caller to have pre-tagged the family, so a rogue future entry cannot show
  * up in the wrong bucket.
+ *
+ * A fail-open pass is a model-family row by detection type, but it was allowed
+ * through, so it is tallied under `failOpen` rather than the model block bar.
+ * This keeps the chart (titled with "blocks") reconciled with the corrected
+ * header cards, which count only genuine blocks.
  */
 export function aggregateByFamily(entries: readonly BlockedRequest[]): SafetyFamilyAggregate {
   let pattern = 0;
   let model = 0;
+  let failOpen = 0;
   for (const entry of entries) {
+    if (isFailOpenPass(entry)) {
+      failOpen += 1;
+      continue;
+    }
     const family = classifyBlockFamily(entry.detectionType);
     if (family === 'model') model += 1;
     else if (family === 'pattern') pattern += 1;
   }
-  return { pattern, model };
+  return { pattern, model, failOpen };
 }
 
 export interface CategoryAggregate {
@@ -292,6 +322,9 @@ export interface CategoryAggregate {
 export function aggregateByCategory(entries: readonly BlockedRequest[]): CategoryAggregate[] {
   const counts: Record<SafetyCategoryName, number> = { Hate: 0, Sexual: 0, Violence: 0, SelfHarm: 0 };
   for (const entry of entries) {
+    // A fail-open pass is model-family by detection type but was allowed
+    // through, so it belongs in no "blocks by category" bar.
+    if (isFailOpenPass(entry)) continue;
     if (classifyBlockFamily(entry.detectionType) !== 'model') continue;
     const name = normaliseCategoryName(entry.category)
       ?? deriveCategoryFromDetectionType(entry.detectionType);
@@ -343,6 +376,10 @@ const SEVERITY_LABELS: Record<SeverityBucket, string> = {
 export function aggregateBySeverity(entries: readonly BlockedRequest[]): SeverityAggregate[] {
   const counts: Record<SeverityBucket, number> = { low: 0, medium: 0, high: 0, severe: 0 };
   for (const entry of entries) {
+    // A fail-open pass carries no severity and was allowed through; bucketing
+    // its null severity as "low" would draw phantom low-severity blocks in a
+    // chart titled "blocks by severity", so exclude it here.
+    if (isFailOpenPass(entry)) continue;
     if (classifyBlockFamily(entry.detectionType) !== 'model') continue;
     const bucket = describeSeverity(entry.severity ?? undefined) ?? 'low';
     counts[bucket] += 1;
