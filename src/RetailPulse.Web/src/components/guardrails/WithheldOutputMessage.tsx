@@ -36,6 +36,7 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
+    minWidth: 0,
   },
   title: {
     color: tokens.colorNeutralForeground1,
@@ -44,6 +45,7 @@ const useStyles = makeStyles({
   reason: {
     color: tokens.colorNeutralForeground2,
     fontSize: '13px',
+    overflowWrap: 'anywhere',
   },
   metaRow: {
     display: 'flex',
