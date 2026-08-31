@@ -67,6 +67,30 @@ organization, and the only bypasses a personal repo accepts are the admin and
 maintain roles, which is exactly the access every agent already holds through the
 shared token. Granting one would have protected nothing.
 
+The exemption is not the only thing holding the sync open, and on PR #283 it was not
+what fired. A sync PR shares its head SHA with `main`, so it inherits every check run
+`main` already earned, and the gate's own PR-triggered run can be starved of a runner
+and killed the moment the PR merges. `squad-sync-dev.yml` therefore publishes the
+`Squad lead sign-off` status directly against that SHA rather than waiting to be
+evaluated. Both paths reach the same verdict from the same fact, that the commit is
+already on `main`, so neither one widens what can merge.
+
+Expect the sync PR's own `CI`, `Squad CI` and `Squad Lead Gate` runs to end as
+`failure` with zero jobs. Those are the starved duplicates described above, not a
+broken build. The checks that satisfied the ruleset are the ones attached to the SHA.
+
+## Squad upgrades
+
+`squad upgrade` rewrites `.github/skills/` from the built-in copies and will silently
+strip local edits. On 2026-08-31 it deleted the merge gate rules from
+`.github/skills/reviewer-protocol/SKILL.md`, which is the section describing why
+verdicts are comments under the shared `swigerb` identity. Nothing upstream replaced
+them, so the change was a pure loss.
+
+After any upgrade, diff before committing and keep only files whose content actually
+changed. `git diff --numstat` is the quickest filter, because the run also rewrites
+line endings across roughly seventy files that are otherwise untouched.
+
 ## Coding Agent
 
 <!-- copilot-auto-assign: false -->
