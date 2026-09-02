@@ -77,3 +77,13 @@ prod-verify*.json
 
 # Local CI log dumps
 ci-*.log
+
+# Demo video is hosted as a GitHub attachment, never committed. Video is
+# permanent weight in git: it is never delta-compressed, it is fetched by every
+# clone forever, and deleting it later from the tip refunds nothing. The README
+# embeds attachment URLs instead, which is also the only form GitHub renders as
+# a real inline player. See the "Demo media hosting" issue for the URLs and the
+# full-quality originals.
+*.mp4
+*.mov
+*.webm
