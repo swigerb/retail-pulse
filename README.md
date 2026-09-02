@@ -15,14 +15,13 @@
 ## Quick tour
 
 <div align="center">
-  <a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">
-    <img src="docs/media/retail-pulse-sizzle-poster.png" width="880"
-         alt="Retail Pulse quick tour - click to play" />
-  </a>
+
+https://github.com/user-attachments/assets/741d0081-7631-4a04-8e51-3635c79290c2
+
 </div>
 
 <div align="center">
-  <sub><strong><a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-sizzle.mp4">Watch the 2 min 45 s tour</a></strong> &nbsp;·&nbsp; 1080p60, 16 MB<br />
+  <sub><strong>2 min 45 s</strong> &nbsp;·&nbsp; plays inline above &nbsp;·&nbsp; <a href="https://github.com/swigerb/retail-pulse/releases/download/media-v1/retail-pulse-sizzle.mp4">1080p60 original</a><br />
   A plain-English question routed to a specialist agent, charts generated live from real tool calls,
   real-time agent telemetry (routing, memory, traces), APIM as the AI Gateway enforcing token limits
   and cost accountability, and tenants configured in YAML.<br />
@@ -33,14 +32,13 @@
 ## Guided walkthrough
 
 <div align="center">
-  <a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-demo-walkthrough.mp4">
-    <img src="docs/media/retail-pulse-demo-walkthrough-poster.png" width="880"
-         alt="Retail Pulse narrated demo walkthrough - click to play" />
-  </a>
+
+https://github.com/user-attachments/assets/7ddea518-926e-4c13-9c4b-62482a7d6675
+
 </div>
 
 <div align="center">
-  <sub><strong><a href="https://github.com/swigerb/retail-pulse/raw/main/docs/media/retail-pulse-demo-walkthrough.mp4">Watch the 4 min 43 s narrated walkthrough</a></strong> &nbsp;·&nbsp; 1080p60, 35 MB<br />
+  <sub><strong>4 min 43 s</strong> &nbsp;·&nbsp; plays inline above &nbsp;·&nbsp; <a href="https://github.com/swigerb/retail-pulse/releases/download/media-v1/retail-pulse-demo-walkthrough.mp4">1080p60 original</a><br />
   One continuous recording of the app's built-in Demo Mode driving itself, with commentary on
   every step: a plain-English question and the token and cost readout for the answer, a chart
   rebuilt from the tool payload, the Health Council returning a split verdict, competitive
