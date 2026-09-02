@@ -208,3 +208,28 @@ Decisions, entry "Production hardening session — final outcomes"):
 No implementation files were modified by Scribe. No secrets, tokens,
 `.auth/me` payloads, screenshots, or raw azd/deployment output committed to
 tracked state.
+
+---
+
+### 2026-08-26T18:14:32Z — Issue #57 Implementation: Optional Synthetic Monitor
+
+**Status:** ✅ COMPLETE — Commit c477613, PR #162 opened, all CI green.
+
+**What:** Implemented optional synthetic monitor for backend API observability. Enables continuous health checks and synthetic trace collection.
+
+**Branch:** `squad/57-optional-synthetic-monitor`  
+**Commit:** c477613  
+**PR:** #162  
+
+**Review:** Publix independently approved. All 9 checks green.
+
+**Team Impact:** PR ready for merge; synthetic monitoring capability now available for backend observability stack.
+
+## 2026-08-26 — Issue #165: Doc Accuracy Monitor (Lead, sync)
+
+- Implemented on `squad/165-monitor-doc-accuracy`; commit `6a7517f8a026716f3f07e1bffb72dd89a307669a`; PR [#166](https://github.com/swigerb/retail-pulse/pull/166) opened.
+- All 9 CI checks green (Build & Test, Frontend, Auth matrix, dotnet format, vulnerable-package scan, Bicep, Squad CI, APIM offline self-test, synthetic-monitor offline self-test).
+- Publix reviewed at exact head SHA and posted **APPROVE**: https://github.com/swigerb/retail-pulse/pull/166#issuecomment-5430053534
+- No live endpoint monitor run occurred or was claimed.
+
+
