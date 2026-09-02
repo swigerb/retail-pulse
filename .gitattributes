@@ -11,7 +11,9 @@
 
 # Explicit binary markers so `text=auto` cannot mis-classify these formats and
 # corrupt them on Windows checkout. Covers every binary asset actually
-# committed to the repo today (see docs/, infra/, src/**/wwwroot/).
+# committed to the repo today (see docs/, infra/, src/**/wwwroot/), plus video
+# formats that are deliberately gitignored and hosted as GitHub attachments -
+# the marker stays as a safety net in case one is ever force-added.
 *.png         binary
 *.jpg         binary
 *.jpeg        binary
@@ -27,6 +29,8 @@
 *.ttf         binary
 *.otf         binary
 *.mp4         binary
+*.mov         binary
+*.webm        binary
 
 # Squad: union merge for append-only team state files
 .squad/decisions.md merge=union
