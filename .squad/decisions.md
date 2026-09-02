@@ -773,3 +773,51 @@ Additionally, the "Show a horizontal bar chart ranking all brands by depletion g
 - **Kroger (Lead):** PR #65 (26-prompt production acceptance sweep) is **HELD from merge** pending #67 (P0 APIM hardening gate incident) live verification — must not merge until 24/24 live invariants pass per Brian's directive.
 
 **Status note (2026-08-11, P0 incident #67):** PR #65's live production sweep and Publix's independent verification are explicitly on hold until Costco's #67 remediation PR passes `Verify-ApimAiGateway.ps1` at 24/24. Not an omission — a deliberate sequencing decision to avoid validating against a known-broken gateway.
+
+
+### 2026-08-10: Promote APIM AI gateway into primary azd IaC
+**By:** Kroger
+**What:** Split APIM provisioning into `infra/modules/apim.bicep` (Developer-tier APIM instance, system-assigned identity, service diagnostic settings, Application Insights logger, Azure Monitor logger) and `infra/modules/apim-openai-api.bicep` (Azure OpenAI backend, API, policy, API diagnostics, subscription, and cross-resource-group OpenAI User role assignment via `apim-openai-role-assignment.bicep`).
+**Why:** The demo environment has no pre-existing APIM, so the gateway must be first-class IaC in the main `azd` deployment. Developer SKU keeps demo cost reasonable while still supporting AI gateway policies and diagnostics. The role assignment remains a dedicated module scoped to the AI Foundry resource group so APIM's managed identity can be granted `Cognitive Services OpenAI User` across resource groups without assuming co-location. The old `deploy/apim-ai-gateway` inference deployment files were removed because they encoded a stale personal-sandbox APIM assumption; only the optional existing-APIM MCP/A2A attach-ons remain, with explicit comments and a README clarifying they are no longer part of primary azd provisioning.
+
+### 2026-08-10: Route API OpenAI traffic through APIM with a Container Apps secret reference
+**By:** Costco
+**What:** The azd postprovision hooks now read `AZURE_APIM_NAME`, `AZURE_APIM_INFERENCE_ENDPOINT`, and `AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME`, retrieve the APIM inference subscription's `primaryKey` live via `az rest .../listSecrets`, store that key on `ca-retailpulse-api` as the Container Apps secret `apim-sub-key`, and set `OpenAI__ApimSubscriptionKey=secretref:apim-sub-key` alongside `OpenAI__Endpoint=<APIM inference endpoint>` and `OpenAI__UseManagedIdentity=false`. In the API, OpenAI client wiring is now conditional: managed identity still uses `DefaultAzureCredential`, while non-managed-identity mode prefers `OpenAI:ApimSubscriptionKey` and falls back to `OpenAI:ApiKey`, both through `ApiKeyCredential` so requests carry the `api-key` header expected by the APIM inference API.
+**Why:** The demo deployment must stop bypassing APIM and instead traverse the AI gateway so subscription-based caller auth, rate limiting, diagnostics, and APIM-managed backend identity all stay in one place. Using a Container Apps secret reference keeps the APIM subscription key out of azd outputs and out of plain runtime env values while preserving idempotent postprovision automation.
+
+# Publix decision note — APIM AI gateway live-test prep
+
+## Status
+
+Prep only; **not executed yet**.
+
+## Decision
+
+I wrote a concrete live test plan at:
+
+- `docs/testing/apim-ai-gateway-live-test-plan.md`
+
+The plan covers:
+
+1. `azd provision` / `azd up` success
+2. APIM Developer SKU + system-assigned identity + cross-RG `Cognitive Services OpenAI User` role assignment
+3. Direct APIM inference call with subscription key
+4. APIM→AOAI managed-identity backend auth verification
+5. Token-per-minute throttling (`429` + `Retry-After`)
+6. Token metrics in Application Insights `customMetrics`
+7. LLM diagnostics in `ApiManagementGatewayLlmLog`
+8. End-to-end app traffic proving the deployed API/frontend path traverses APIM
+
+## Important testing stance
+
+For end-to-end proof, I will treat **APIM telemetry presence + app endpoint config pointing at APIM** as the primary signal. I will **not** use “absence of AOAI logs” as the primary assertion because APIM legitimately forwards requests to AOAI, so downstream service logs may still exist even on a correct APIM path.
+
+## Follow-up owner
+
+I (Publix) will execute this plan live once:
+
+- Kroger lands the final APIM IaC in `infra\`
+- Costco lands the app/container-app/azd wiring
+
+At that point I will update any placeholder child-resource names if needed, run the plan against `retailpulse-demo-eus-001`, and report PASS/FAIL with evidence.
+
