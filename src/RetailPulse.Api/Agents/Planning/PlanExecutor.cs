@@ -7,6 +7,7 @@ using RetailPulse.Api.Budget;
 using RetailPulse.Api.Charts;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
+using RetailPulse.Api.Observability;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Approval;
@@ -47,9 +48,17 @@ public sealed class PlanExecutor
     private readonly ITraceCollector _traceCollector;
     private readonly PlanPersistenceOptions _options;
     private readonly ILogger<PlanExecutor> _logger;
+    private readonly TokenPricing _pricing;
     private readonly PlanClarifier? _clarifier;
     private readonly PlanReviewCoordinator? _reviewCoordinator;
     private readonly IExecutionCancellationRegistry? _cancellationRegistry;
+
+    // Fallback used when a caller (typically a test) does not supply a
+    // TokenPricing instance. In production DI always resolves the singleton
+    // built from IConfiguration, so this only applies to construction paths
+    // that opt out of cost math.
+    private static readonly TokenPricing _emptyPricing =
+        TokenPricing.FromConfiguration(new ConfigurationBuilder().Build());
 
     public PlanExecutor(
         IPlanStore planStore,
@@ -59,13 +68,15 @@ public sealed class PlanExecutor
         ILogger<PlanExecutor> logger,
         PlanClarifier? clarifier = null,
         PlanReviewCoordinator? reviewCoordinator = null,
-        IExecutionCancellationRegistry? cancellationRegistry = null)
+        IExecutionCancellationRegistry? cancellationRegistry = null,
+        TokenPricing? pricing = null)
     {
         _planStore = planStore ?? throw new ArgumentNullException(nameof(planStore));
         _costTracker = costTracker ?? throw new ArgumentNullException(nameof(costTracker));
         _traceCollector = traceCollector ?? throw new ArgumentNullException(nameof(traceCollector));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _pricing = pricing ?? _emptyPricing;
         _clarifier = clarifier;
         _reviewCoordinator = reviewCoordinator;
         _cancellationRegistry = cancellationRegistry;
@@ -101,6 +112,7 @@ public sealed class PlanExecutor
         ArgumentNullException.ThrowIfNull(execution);
 
         var stepResults = new List<PlanStepResult>(execution.Plan.Steps.Count);
+        var stepCosts = new ConcurrentBag<decimal>();
         var planSw = Stopwatch.StartNew();
         DateTimeOffset planStart = DateTimeOffset.UtcNow;
 
@@ -145,7 +157,7 @@ public sealed class PlanExecutor
                 handlerAsync: async (message, context, stepCt) =>
                 {
                     PlanStepResult result = await RunOneStepAsync(
-                        execution, planned, stepIndex, stepId, message, suspension, stepCt).ConfigureAwait(false);
+                        execution, planned, stepIndex, stepId, message, suspension, stepCosts, stepCt).ConfigureAwait(false);
                     stepResults.Add(result);
 
                     bool shouldContinue = string.Equals(result.Status, PlanStepStatus.Completed, StringComparison.Ordinal);
@@ -325,7 +337,7 @@ public sealed class PlanExecutor
                 UpdatedAt = DateTimeOffset.UtcNow,
             }, CancellationToken.None).ConfigureAwait(false);
 
-            EmitPlanSpan(execution, planStart, planSw, terminalStatus, totalTokens);
+            EmitPlanSpan(execution, planStart, planSw, terminalStatus, totalTokens, stepCosts.Sum());
             planActivity?.SetTag("plan.status", terminalStatus);
             planActivity?.Dispose();
         }
@@ -349,6 +361,7 @@ public sealed class PlanExecutor
         string stepId,
         PlanStepMessage message,
         PlanExecutorSuspensionSink suspension,
+        ConcurrentBag<decimal> stepCosts,
         CancellationToken workflowCt)
     {
         DateTimeOffset stepStart = DateTimeOffset.UtcNow;
@@ -485,6 +498,21 @@ public sealed class PlanExecutor
         int output = response?.TokenUsage?.OutputTokens ?? 0;
         int total = response?.TokenUsage?.TotalTokens ?? (input + output);
 
+        // Step cost — model-aware, sourced from the same TokenPricing table
+        // ICostTracker uses, so the plan-step and plan spans agree with the
+        // /api/costs dashboard for the exact same UsageEvent (#300).
+        decimal stepCost = _pricing.Calculate(new UsageEvent(
+            AgentId: specialist.Key,
+            Model: specialist.Model,
+            InputTokens: input,
+            OutputTokens: output,
+            ToolName: null,
+            Timestamp: DateTime.UtcNow,
+            CacheHit: false,
+            PlanId: execution.PlanId,
+            PlanStepId: stepId));
+        stepCosts.Add(stepCost);
+
         await _planStore.UpdateStepAsync(new PlanStepUpdate
         {
             StepId = stepId,
@@ -519,7 +547,7 @@ public sealed class PlanExecutor
             _logger.LogWarning(ex, "Failed to record cost for plan {PlanId} step {StepIndex}.", execution.PlanId, stepIndex);
         }
 
-        EmitStepSpan(execution, reportedIndex, stepId, planned, status, stepStart, sw, input, output);
+        EmitStepSpan(execution, reportedIndex, stepId, planned, status, stepStart, sw, input, output, stepCost);
 
         // Forward the specialist's Charts verbatim (see PlanStepResult.Charts):
         // the plan-first path must not silently drop specialist charts.
@@ -538,7 +566,8 @@ public sealed class PlanExecutor
         DateTimeOffset planStart,
         Stopwatch planSw,
         string status,
-        int totalTokens)
+        int totalTokens,
+        decimal totalCostUsd)
     {
         var tags = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -558,7 +587,7 @@ public sealed class PlanExecutor
             DurationMs: planSw.Elapsed.TotalMilliseconds,
             InputTokens: 0,
             OutputTokens: totalTokens,
-            EstimatedCostUsd: 0m,
+            EstimatedCostUsd: totalCostUsd,
             Tags: tags));
     }
 
@@ -571,7 +600,8 @@ public sealed class PlanExecutor
         DateTimeOffset stepStart,
         Stopwatch sw,
         int input,
-        int output)
+        int output,
+        decimal estimatedCostUsd)
     {
         var tags = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -594,7 +624,7 @@ public sealed class PlanExecutor
             DurationMs: sw.Elapsed.TotalMilliseconds,
             InputTokens: input,
             OutputTokens: output,
-            EstimatedCostUsd: 0m,
+            EstimatedCostUsd: estimatedCostUsd,
             Tags: tags));
     }
 
