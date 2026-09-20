@@ -12,10 +12,12 @@ import { describe, it, expect } from 'vitest';
  * lockfile to `sha512` so no future dependency can sneak in with a weaker hash.
  *
  * It also protects the Linux CI install graph. npm 11.6.2 on Windows rewrites this lockfile
- * by marking `@azure/msal-browser` as a peer edge and pruning the top-level optional peer
- * `@emnapi/*` entries that Linux `npm ci` requires. The MSAL peer marker is harmless by
- * itself when the root dependency remains, but in this npm rewrite it is a reliable signal
+ * by marking `@azure/msal-browser` as a peer edge; the MSAL peer marker is a reliable signal
  * that the lockfile was regenerated on Windows and is no longer cross-platform.
+ *
+ * Note: rolldown >= 1.2.x no longer ships the `@rolldown/binding-wasm32-wasi` optional
+ * binding, so `@napi-rs/wasm-runtime` and its `@emnapi/*` peers are no longer pulled into
+ * the tree. The previous `@emnapi/*` cross-platform guard has been retired accordingly.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -44,12 +46,6 @@ const AUTH_PACKAGES = [
   'node_modules/@azure/msal-browser',
   'node_modules/@azure/msal-common',
   'node_modules/@azure/msal-react',
-] as const;
-
-/** Top-level optional peer packages that Linux `npm ci` requires to validate the lockfile. */
-const CROSS_PLATFORM_OPTIONAL_PEERS = [
-  'node_modules/@emnapi/core',
-  'node_modules/@emnapi/runtime',
 ] as const;
 
 const CANONICAL_REGISTRY = 'https://registry.npmjs.org/';
@@ -86,16 +82,6 @@ describe('package-lock.json auth supply-chain integrity', () => {
       browser.peer,
       '@azure/msal-browser peer metadata indicates this lockfile was rewritten on Windows',
     ).not.toBe(true);
-  });
-
-  it.each(CROSS_PLATFORM_OPTIONAL_PEERS)('%s stays in the cross-platform lockfile', (key) => {
-    const pkg = lock.packages[key];
-    expect(
-      pkg,
-      `${key} must stay in package-lock.json because Linux npm ci validates it`,
-    ).toBeDefined();
-    expect(pkg.optional, `${key} must remain an optional dependency entry`).toBe(true);
-    expect(pkg.peer, `${key} must remain a peer dependency entry`).toBe(true);
   });
 
   it('rejects any non-sha512 integrity anywhere in the lockfile', () => {
