@@ -49,6 +49,8 @@ public class ApiVersioningTests : IAsyncDisposable
                 {
                     services.AddRouting();
                     // Mirror Program.cs lines 188-195 exactly.
+                    // AV0011: mirrors the production default; see Program.cs suppression.
+#pragma warning disable AV0011
                     services.AddApiVersioning(options =>
                     {
                         options.DefaultApiVersion = new ApiVersion(1, 0);
@@ -56,6 +58,7 @@ public class ApiVersioningTests : IAsyncDisposable
                         options.ReportApiVersions = true;
                         options.ApiVersionReader = new UrlSegmentApiVersionReader();
                     });
+#pragma warning restore AV0011
                 });
                 webHost.Configure(app =>
                 {
