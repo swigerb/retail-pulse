@@ -40,8 +40,19 @@ For each tool result, in order:
    - **Generic array truncation** as fallback — trims the largest JSON array to
      `MaxArrayItems` and attaches explicit `_truncation` metadata (`truncated`,
      `original_count`, `returned_count`, drill-down `hint`).
-   - **Hard clip** as last resort — a guaranteed-valid JSON envelope with a bounded
-     preview and explicit `_budget` metadata. Never malformed JSON, never silent loss.
+   - **Hard clip** as last resort — a guaranteed-valid **structured degradation envelope**
+     with an unambiguous top-level `status: "degraded"`, an `error:
+     "tool_result_over_budget"` marker, an explicit `complete: false` /
+     `truncated: true` pair, a `budget: { original_chars, retained_chars, dropped_chars }`
+     breakdown, and structured `retry.strategies` describing concrete narrower-filter /
+     split-and-aggregate / prefer-summary-tool actions the caller (or the model) can
+     dispatch on. **No top-level field ever contains a raw JSON prefix of the original
+     payload** — the previous `preview` field caused issue #302, where a leading prefix
+     of a multi-region payload kept only the regions that serialized first and the model
+     described the gap as a data limitation instead of retrying with a narrower filter.
+     A tiny (`≤256 char`) opaque `diagnostic_preview.excerpt` may appear for debugging
+     only when the per-result budget leaves headroom, and is clearly labeled as
+     non-parseable. Always valid JSON, never silent loss, never a partial-looking result.
 4. **Cumulative per-request budget** (`MaxCumulativeChars`) — once the running total of
    returned characters would exceed the cap, further results are replaced by a compact
    diagnostic that tells the model to synthesize from what it already has.
