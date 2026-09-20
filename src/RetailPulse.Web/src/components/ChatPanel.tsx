@@ -64,6 +64,14 @@ interface ChatMessage {
 
 interface ChatPanelProps {
   onResponseReceived?: (response: { totalDurationMs?: number; tokenUsage?: TokenUsage; routing?: RoutingInfo }) => void;
+  /**
+   * Fires the moment the user submits a prompt, before the network call
+   * starts (issue #303). The Dashboard uses this to open a new telemetry
+   * turn so incoming spans can be visibly grouped under the prompt that
+   * caused them, instead of piling into a single flat "Live Spans" list
+   * where earlier turns are indistinguishable from the current answer.
+   */
+  onUserPrompt?: (prompt: string) => void;
   approvals?: ApprovalRequest[];
   onApprovalResolved?: (id: string, decision: ApprovalDecision) => void;
   /**
@@ -490,6 +498,7 @@ const useChatStyles = makeStyles({
 
 export function ChatPanel({
   onResponseReceived,
+  onUserPrompt,
   approvals,
   onApprovalResolved,
   promptCategories = PROMPT_CATEGORIES,
@@ -550,6 +559,13 @@ export function ChatPanel({
     onResponseReceivedRef.current = onResponseReceived;
   }, [onResponseReceived]);
 
+  // Mirror onUserPrompt (issue #303) for the same reason as
+  // onResponseReceived — the Dashboard rebinds it on every render.
+  const onUserPromptRef = useRef(onUserPrompt);
+  useEffect(() => {
+    onUserPromptRef.current = onUserPrompt;
+  }, [onUserPrompt]);
+
   useEffect(() => {
     isMountedRef.current = true;
     // Pre-join the SignalR session group so real-time telemetry works from the first message
@@ -593,6 +609,10 @@ export function ChatPanel({
       setTimeoutInfo(null);
 
       setMessages(prev => [...prev, { role: 'user', content: trimmed }]);
+      // Open a new telemetry turn (issue #303) BEFORE the response-received
+      // "start" signal so any spans that race in during the request are
+      // attributed to this turn and not the previous one.
+      onUserPromptRef.current?.(trimmed);
       onResponseReceivedRef.current?.({ totalDurationMs: undefined });
       setLoading(true);
       setLoadingText('Thinking...');

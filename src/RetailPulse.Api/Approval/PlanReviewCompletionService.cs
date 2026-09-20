@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
@@ -610,33 +609,23 @@ public sealed class PlanReviewCompletionService
         IReadOnlyList<PlanReviewCompletedStep>? resumeCompletedSteps,
         PlanExecutionOutcome outcome)
     {
-        var sb = new StringBuilder();
-        if (resumeCompletedSteps is not null)
-        {
-            foreach (PlanReviewCompletedStep step in resumeCompletedSteps)
-            {
-                if (string.IsNullOrWhiteSpace(step.Result)) continue;
-                if (sb.Length > 0) sb.AppendLine().AppendLine("---").AppendLine();
-                sb.Append(step.Result);
-            }
-        }
-        foreach (PlanStepResult step in outcome.Steps)
-        {
-            if (string.IsNullOrWhiteSpace(step.Result)) continue;
-            if (sb.Length > 0) sb.AppendLine().AppendLine("---").AppendLine();
-            sb.Append(step.Result);
-        }
-        if (sb.Length == 0)
-        {
-            sb.Append(outcome.Status switch
+        // #301: two-step plans used to concatenate raw specialist replies with
+        // a bare `---`, producing two independently-written whole answers —
+        // each with its own "Bottom line" and follow-up pitch — that read as
+        // the assistant answering twice and contradicting itself. Composition
+        // now goes through PlanAnswerComposer, which attributes each step,
+        // strips trailing "If you want, I can also…" offers, and keeps a
+        // single-step reply natural and unattributed.
+        string composed = PlanAnswerComposer.Compose(resumeCompletedSteps, outcome);
+        return composed.Length > 0
+            ? composed
+            : outcome.Status switch
             {
                 PlanStatus.Failed => "The plan-first orchestrator was unable to produce a reply. " +
                     (outcome.FailureReason ?? "One or more steps failed."),
                 PlanStatus.Cancelled => "The plan-first orchestrator was cancelled before producing a reply.",
                 _ => "The plan-first orchestrator produced no output.",
-            });
-        }
-        return sb.ToString();
+            };
     }
 
     private static string BuildTerminalReply(string terminalReason) => terminalReason switch

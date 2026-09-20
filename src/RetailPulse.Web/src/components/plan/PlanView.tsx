@@ -1,13 +1,17 @@
 import { lazy, Suspense, useMemo } from 'react';
 import { Badge, Button, ProgressBar, Text, makeStyles } from '@fluentui/react-components';
 import { Dismiss20Regular } from '@fluentui/react-icons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { ActivePlanState } from '../../state/planReducer';
+import { isFailureTerminalReason } from '../../state/planReducer';
 import type { PlanReviewStep } from '../../types';
 import { PLAN_STATUS_META, formatElapsed, progressCounts } from './statusMeta';
 import { PlanStepRow } from './PlanStepRow';
 import { PlanReviewCard } from './PlanReviewCard';
 import { PlanClarificationCard } from './PlanClarificationCard';
 import { ErrorBoundary } from '../ErrorBoundary';
+import { sanitizeMessage } from '../../utils';
 
 // Lazy-load the chart renderer to keep the plan surface from pulling Recharts
 // into the initial bundle. Matches how ChatPanel and PlanStepRow load it.
@@ -130,7 +134,6 @@ const useStyles = makeStyles({
     fontSize: '13px',
     lineHeight: 1.6,
     color: 'var(--color-text)',
-    whiteSpace: 'pre-wrap',
   },
   '@media (max-width: 768px)': {
     panel: {
@@ -298,11 +301,19 @@ export function PlanView({
       {active.finalReply && (
         <div className={styles.section}>
           <span className={styles.sectionLabel}>Final answer</span>
-          <div className={styles.finalReply} data-testid="plan-final-reply">
-            {active.finalReply}
+          <div
+            className={`${styles.finalReply} markdown-body`}
+            data-testid="plan-final-reply"
+          >
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {sanitizeMessage(active.finalReply)}
+            </ReactMarkdown>
           </div>
-          {active.terminalReason && (
-            <Text style={{ fontSize: '11px', color: 'var(--color-text-subtle)' }}>
+          {isFailureTerminalReason(active.terminalReason) && (
+            <Text
+              data-testid="plan-terminal-reason"
+              style={{ fontSize: '11px', color: 'var(--color-text-subtle)' }}
+            >
               Terminal reason: {active.terminalReason}
             </Text>
           )}

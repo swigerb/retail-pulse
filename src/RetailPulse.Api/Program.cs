@@ -221,6 +221,9 @@ if (entraAuthOptions is not null)
 builder.Services.AddRetailPulseRateLimiting(builder.Configuration);
 
 // ── API Versioning ──────────────────────────────────────────────────────
+// AV0011: v1.0 is the intentional public default for RetailPulse's URL-segment
+// versioning scheme; suppression is scoped to this configuration block.
+#pragma warning disable AV0011
 builder.Services.AddApiVersioning(options =>
 {
     options.DefaultApiVersion = new ApiVersion(1, 0);
@@ -228,6 +231,7 @@ builder.Services.AddApiVersioning(options =>
     options.ReportApiVersions = true;
     options.ApiVersionReader = new UrlSegmentApiVersionReader();
 });
+#pragma warning restore AV0011
 
 // Load prompts from the active content pack's agent roster and resolve
 // tenant placeholders via PromptTemplateEngine. The pack is the single
@@ -834,6 +838,8 @@ builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<In
 // (deployed ACA) history survives replica replacement and scale-to-zero; locally
 // it is an ephemeral temp directory. Single-writer only (API runs maxReplicas: 1).
 string costDbPath = Path.Combine(dataDirectory, "costs.db");
+builder.Services.AddSingleton(sp =>
+    TokenPricing.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton(sp => new DurableCostTracker(
     costDbPath,
     sp.GetRequiredService<IOptions<ObservabilityOptions>>(),
@@ -1163,7 +1169,8 @@ if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
             sp.GetRequiredService<ILogger<PlanExecutor>>(),
             sp.GetService<PlanClarifier>(),
             sp.GetService<PlanReviewCoordinator>(),
-            sp.GetService<IExecutionCancellationRegistry>());
+            sp.GetService<IExecutionCancellationRegistry>(),
+            sp.GetRequiredService<TokenPricing>());
     });
     builder.Services.AddScoped(sp =>
     {

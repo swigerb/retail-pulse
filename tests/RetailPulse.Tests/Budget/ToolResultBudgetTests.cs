@@ -253,7 +253,7 @@ public sealed class ToolResultBudgetTests
     }
 
     [Fact]
-    public void PathologicalString_IsHardClipped_ToValidJson()
+    public void PathologicalString_IsHardClipped_ToValidStructuredEnvelope()
     {
         ToolResultBudget budget = CreateBudget();
         // A giant non-array, non-object JSON string value: no array to trim → hard clip.
@@ -264,9 +264,20 @@ public sealed class ToolResultBudgetTests
 
         result.Json.Length.Should().BeLessThanOrEqualTo(6000);
         result.Metrics.Truncated.Should().BeTrue();
-        // Still valid JSON with explicit metadata.
+        result.Metrics.Compacted.Should().BeTrue();
+        // Structured degradation envelope — machine-readable, unambiguous.
         using var doc = JsonDocument.Parse(result.Json);
-        doc.RootElement.GetProperty("_budget").GetProperty("truncated").GetBoolean().Should().BeTrue();
+        JsonElement root = doc.RootElement;
+        root.GetProperty("status").GetString().Should().Be("degraded");
+        root.GetProperty("error").GetString().Should().Be("tool_result_over_budget");
+        root.GetProperty("complete").GetBoolean().Should().BeFalse();
+        root.GetProperty("truncated").GetBoolean().Should().BeTrue();
+        root.GetProperty("tool_name").GetString().Should().Be("WeirdTool");
+        // Original/retained/dropped are all explicit.
+        JsonElement b = root.GetProperty("budget");
+        b.GetProperty("original_chars").GetInt32().Should().Be(raw.Length);
+        b.GetProperty("retained_chars").GetInt32().Should().Be(0);
+        b.GetProperty("dropped_chars").GetInt32().Should().Be(raw.Length);
     }
 
     [Fact]
@@ -280,6 +291,159 @@ public sealed class ToolResultBudgetTests
         // Bounded, and the envelope itself is valid JSON even though the input was not.
         result.Json.Length.Should().BeLessThanOrEqualTo(6000);
         Action parse = () => JsonDocument.Parse(result.Json).Dispose();
+        parse.Should().NotThrow();
+
+        using var doc = JsonDocument.Parse(result.Json);
+        // Even for malformed input the degradation contract holds.
+        doc.RootElement.GetProperty("status").GetString().Should().Be("degraded");
+        doc.RootElement.GetProperty("complete").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public void HardClip_ProvidesStructuredRetryGuidance()
+    {
+        // Retry strategies must be a structured list a caller/model can dispatch on —
+        // not a single free-text sentence buried in a note field (issue #302 bug: the
+        // model interpreted the vague "narrower filter" hint as a data limitation and
+        // reported the gap to the user).
+        ToolResultBudget budget = CreateBudget();
+        string raw = JsonSerializer.Serialize(new string('q', 50_000));
+
+        BudgetedResult result = budget.Apply("WeirdTool", raw, Options());
+
+        using var doc = JsonDocument.Parse(result.Json);
+        JsonElement retry = doc.RootElement.GetProperty("retry");
+        retry.GetProperty("reason").GetString().Should().NotBeNullOrWhiteSpace();
+
+        JsonElement strategies = retry.GetProperty("strategies");
+        strategies.ValueKind.Should().Be(JsonValueKind.Array);
+        strategies.GetArrayLength().Should().BeGreaterThanOrEqualTo(2);
+
+        HashSet<string> actions = [];
+        foreach (JsonElement strategy in strategies.EnumerateArray())
+        {
+            string action = strategy.GetProperty("action").GetString()!;
+            actions.Add(action);
+            strategy.GetProperty("description").GetString().Should().NotBeNullOrWhiteSpace();
+        }
+
+        actions.Should().Contain("narrow_filter");
+        actions.Should().Contain("split_and_aggregate");
+    }
+
+    [Fact]
+    public void HardClip_TopLevelHasNoMisleadingPartialObject()
+    {
+        // Regression for #302. The old envelope emitted `preview` at the top level whose
+        // value was a raw leading prefix of the original JSON — a multi-region payload
+        // that happened to serialise the first regions looked complete. The redesigned
+        // envelope must expose NO top-level field that could parse as a partial answer.
+        ToolResultBudget budget = CreateBudget();
+        var multiRegion = new
+        {
+            regions = Enumerable.Range(0, 40).Select(i => new
+            {
+                name = $"Region-{i}",
+                weekly = Enumerable.Range(0, 60).Select(w => new { w, v = w * 3.0 }).ToArray()
+            }).ToArray()
+        };
+        string raw = JsonSerializer.Serialize(multiRegion);
+        raw.Length.Should().BeGreaterThan(6000);
+
+        BudgetedResult result = budget.Apply("UnknownRegionsTool", raw, Options());
+        result.Metrics.Truncated.Should().BeTrue();
+
+        using var doc = JsonDocument.Parse(result.Json);
+        JsonElement root = doc.RootElement;
+
+        // No top-level echoed data field.
+        foreach (string bannedKey in new[] { "preview", "regions", "weekly", "weekly_data", "items", "rows", "data" })
+        {
+            root.TryGetProperty(bannedKey, out _).Should().BeFalse(
+                $"top-level '{bannedKey}' would let a caller mistake a degradation envelope for a partial result");
+        }
+
+        // Only the whitelist of degradation-contract fields at the top level.
+        HashSet<string> topKeys = [.. root.EnumerateObject().Select(p => p.Name)];
+        topKeys.Should().BeSubsetOf([
+            "status", "error", "complete", "truncated", "tool_name", "budget", "retry", "diagnostic_preview"
+        ]);
+
+        // If a diagnostic excerpt is present it is nested, opaque, and clearly labeled —
+        // never a JSON structure the model can traverse.
+        if (root.TryGetProperty("diagnostic_preview", out JsonElement diag))
+        {
+            diag.GetProperty("kind").GetString().Should().Be("text_fragment");
+            JsonElement excerpt = diag.GetProperty("excerpt");
+            excerpt.ValueKind.Should().Be(JsonValueKind.String);
+            excerpt.GetString()!.Length.Should().BeLessThanOrEqualTo(256);
+            diag.GetProperty("note").GetString()!.ToLowerInvariant()
+                .Should().Contain("not the tool result");
+        }
+    }
+
+    [Fact]
+    public void HardClip_StaysWithinBudget()
+    {
+        // The envelope, including any diagnostic excerpt, must respect MaxResultChars so
+        // it cannot re-blow the very budget it exists to enforce.
+        ToolResultBudget budget = CreateBudget();
+        string raw = new('a', 200_000);
+        // A raw string is not valid JSON so the malformed-input path is exercised.
+
+        foreach (int cap in new[] { 6000, 2000, 800 })
+        {
+            BudgetedResult result = budget.Apply("EdgeTool", raw, Options(maxResult: cap));
+            result.Json.Length.Should().BeLessThanOrEqualTo(cap,
+                $"envelope must fit maxChars={cap}");
+            using var doc = JsonDocument.Parse(result.Json);
+            doc.RootElement.GetProperty("status").GetString().Should().Be("degraded");
+        }
+    }
+
+    [Fact]
+    public void HardClip_SmallBudget_OmitsDiagnosticExcerpt_ButKeepsDegradationContract()
+    {
+        // When the per-result budget is too tight to fit even a tiny opaque excerpt, we
+        // must still emit a valid, unambiguous degradation envelope. The excerpt is a
+        // convenience for debugging — the machine-readable contract is mandatory.
+        ToolResultBudget budget = CreateBudget();
+        string raw = JsonSerializer.Serialize(new string('z', 10_000));
+
+        // 700 chars is roomy enough for the envelope itself but not the excerpt.
+        BudgetedResult result = budget.Apply("TinyBudgetTool", raw, Options(maxResult: 700));
+
+        result.Json.Length.Should().BeLessThanOrEqualTo(700);
+        using var doc = JsonDocument.Parse(result.Json);
+        JsonElement root = doc.RootElement;
+
+        // Mandatory degradation contract still present.
+        root.GetProperty("status").GetString().Should().Be("degraded");
+        root.GetProperty("truncated").GetBoolean().Should().BeTrue();
+        root.GetProperty("complete").GetBoolean().Should().BeFalse();
+        root.GetProperty("budget").GetProperty("original_chars").GetInt32().Should().Be(raw.Length);
+        root.GetProperty("retry").GetProperty("strategies").GetArrayLength()
+            .Should().BeGreaterThanOrEqualTo(2);
+
+        // Excerpt is safely omitted rather than being truncated to something meaningless
+        // or blowing the budget.
+        root.TryGetProperty("diagnostic_preview", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void HardClip_EmitsValidJson_ForEmptyAndNullPayloads()
+    {
+        ToolResultBudget budget = CreateBudget();
+
+        BudgetedResult empty = budget.Apply("EmptyTool", string.Empty, Options());
+        // Empty payloads are under budget and pass through unchanged.
+        empty.Metrics.Compacted.Should().BeFalse();
+
+        // But if we force the HardClip path via reflection-free public API on a
+        // pathological input, the envelope must still be valid JSON.
+        string raw = JsonSerializer.Serialize(new string('!', 60_000));
+        BudgetedResult forced = budget.Apply("ForceTool", raw, Options());
+        Action parse = () => JsonDocument.Parse(forced.Json).Dispose();
         parse.Should().NotThrow();
     }
 

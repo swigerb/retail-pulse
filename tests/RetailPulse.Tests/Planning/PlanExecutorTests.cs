@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using RetailPulse.Api.Agents.Planning;
 using RetailPulse.Api.Budget;
+using RetailPulse.Api.Observability;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Observability;
@@ -94,12 +96,13 @@ public sealed class PlanExecutorTests
         int outputTokens = 50,
         Action? onInvoke = null,
         TimeSpan? delay = null,
-        Exception? throwException = null)
+        Exception? throwException = null,
+        string model = "gpt-test")
     {
         var mock = new Mock<ISpecialistAgent>();
         mock.SetupGet(a => a.Key).Returns(key);
         mock.SetupGet(a => a.DisplayName).Returns(key);
-        mock.SetupGet(a => a.Model).Returns("gpt-test");
+        mock.SetupGet(a => a.Model).Returns(model);
         mock.SetupGet(a => a.SupportedIntents).Returns([key]);
         mock
             .Setup(a => a.HandleAsync(It.IsAny<ChatRequest>(), It.IsAny<CancellationToken>()))
@@ -124,12 +127,17 @@ public sealed class PlanExecutorTests
         RecordingPlanStore store,
         RecordingCostTracker cost,
         RecordingTraceCollector traces,
-        PlanPersistenceOptions? options = null)
+        PlanPersistenceOptions? options = null,
+        TokenPricing? pricing = null)
     {
         return new PlanExecutor(
             store, cost, traces,
             options ?? new PlanPersistenceOptions(),
-            NullLogger<PlanExecutor>.Instance);
+            NullLogger<PlanExecutor>.Instance,
+            clarifier: null,
+            reviewCoordinator: null,
+            cancellationRegistry: null,
+            pricing: pricing ?? TokenPricing.FromConfiguration(new ConfigurationBuilder().Build()));
     }
 
     private static PlanExecutionRequest MakeExecutionRequest(
@@ -505,5 +513,171 @@ public sealed class PlanExecutorTests
                 u.StepId == $"planZ-s{i}" && u.Status == PlanStepStatus.Completed);
         }
         store.StatusUpdates.Last().Status.Should().Be(PlanStatus.Completed);
+    }
+
+    // ── Cost attribution (issue #300) ────────────────────────────────────
+    //
+    // These tests pin that plan-step and plan spans emit non-zero cost with
+    // an EXACT value derived from the TokenPricing table for the specialist's
+    // model. They must fail against the prior behavior (hardcoded 0m) and pass
+    // once the executor calls TokenPricing.Calculate.
+
+    private static TokenPricing BuildPricing((string model, decimal inputPerM, decimal outputPerM)[] rows)
+    {
+        var kv = new Dictionary<string, string?>(StringComparer.Ordinal);
+        for (int i = 0; i < rows.Length; i++)
+        {
+            (string model, decimal inputPerM, decimal outputPerM) = rows[i];
+            kv[$"TokenPricing:{model}:InputPerMillion"] =
+                inputPerM.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            kv[$"TokenPricing:{model}:OutputPerMillion"] =
+                outputPerM.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(kv)
+            .Build();
+        return TokenPricing.FromConfiguration(config);
+    }
+
+    [Fact]
+    public async Task Plan_step_span_EstimatedCostUsd_matches_TokenPricing_for_configured_model()
+    {
+        // gpt-priced: $2 per 1M input, $10 per 1M output
+        //   input=1000  -> 1000/1_000_000 * 2  = 0.002
+        //   output=500  ->  500/1_000_000 * 10 = 0.005
+        //   step cost   = 0.007
+        var store = new RecordingPlanStore();
+        var cost = new RecordingCostTracker();
+        var traces = new RecordingTraceCollector();
+        TokenPricing pricing = BuildPricing([("gpt-priced", 2.00m, 10.00m)]);
+        PlanExecutor executor = NewExecutor(store, cost, traces, pricing: pricing);
+
+        var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["scorecard"] = MakeSpecialist(
+                "scorecard", "hello",
+                inputTokens: 1000, outputTokens: 500,
+                model: "gpt-priced"),
+        };
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
+            ("scorecard", "scorecard", "act"));
+
+        _ = await executor.ExecuteAsync(request, CancellationToken.None);
+
+        TraceSpan stepSpan = traces.Spans.Single(s => s.Tags?["span.type"] == "plan_step");
+        stepSpan.EstimatedCostUsd.Should().Be(0.007m,
+            "TokenPricing gpt-priced (2/10 per 1M) on 1000/500 tokens = 0.007 USD");
+        stepSpan.EstimatedCostUsd.Should().NotBe(0m,
+            "regression guard against the pre-#300 hardcoded zero");
+    }
+
+    [Fact]
+    public async Task Plan_span_EstimatedCostUsd_equals_sum_of_per_step_costs()
+    {
+        // step 1 (fast model, $1/$5): input=1000, output=500
+        //   = 0.001 + 0.0025 = 0.0035
+        // step 2 (heavy model, $5/$25): input=200, output=800
+        //   = 0.001 + 0.020  = 0.021
+        // plan cost = 0.0245
+        var store = new RecordingPlanStore();
+        var cost = new RecordingCostTracker();
+        var traces = new RecordingTraceCollector();
+        TokenPricing pricing = BuildPricing(
+        [
+            ("fast",  1.00m, 5.00m),
+            ("heavy", 5.00m, 25.00m),
+        ]);
+        PlanExecutor executor = NewExecutor(store, cost, traces, pricing: pricing);
+
+        var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["scorecard"] = MakeSpecialist(
+                "scorecard", "a",
+                inputTokens: 1000, outputTokens: 500, model: "fast"),
+            ["demand-forecasting"] = MakeSpecialist(
+                "demand-forecasting", "b",
+                inputTokens: 200, outputTokens: 800, model: "heavy"),
+        };
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
+            ("scorecard", "scorecard", "s"),
+            ("demand-forecasting", "demand", "d"));
+
+        _ = await executor.ExecuteAsync(request, CancellationToken.None);
+
+        TraceSpan[] stepSpans = [.. traces.Spans.Where(s => s.Tags?["span.type"] == "plan_step")];
+        stepSpans.Should().HaveCount(2);
+        stepSpans[0].EstimatedCostUsd.Should().Be(0.0035m);
+        stepSpans[1].EstimatedCostUsd.Should().Be(0.021m);
+
+        TraceSpan planSpan = traces.Spans.Single(s => s.Tags?["span.type"] == "plan");
+        planSpan.EstimatedCostUsd.Should().Be(0.0245m,
+            "plan-level cost is the sum of every step's TokenPricing cost");
+    }
+
+    [Fact]
+    public async Task Plan_step_span_EstimatedCostUsd_is_zero_when_zero_tokens_reported()
+    {
+        // Zero-token step (e.g. a specialist that returns no TokenUsage). Even
+        // with a configured pricing row the calculation must be 0 — matches the
+        // TokenPricing contract (cache hit / zero-usage short-circuit).
+        var store = new RecordingPlanStore();
+        var cost = new RecordingCostTracker();
+        var traces = new RecordingTraceCollector();
+        TokenPricing pricing = BuildPricing([("gpt-priced", 2.00m, 10.00m)]);
+        PlanExecutor executor = NewExecutor(store, cost, traces, pricing: pricing);
+
+        var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["scorecard"] = MakeSpecialist(
+                "scorecard", "hello",
+                inputTokens: 0, outputTokens: 0,
+                model: "gpt-priced"),
+        };
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
+            ("scorecard", "scorecard", "act"));
+
+        _ = await executor.ExecuteAsync(request, CancellationToken.None);
+
+        TraceSpan stepSpan = traces.Spans.Single(s => s.Tags?["span.type"] == "plan_step");
+        stepSpan.EstimatedCostUsd.Should().Be(0m);
+
+        TraceSpan planSpan = traces.Spans.Single(s => s.Tags?["span.type"] == "plan");
+        planSpan.EstimatedCostUsd.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task Plan_step_span_EstimatedCostUsd_uses_TokenPricing_default_for_unknown_model()
+    {
+        // Unknown-model behavior: TokenPricing.Calculate falls back to its
+        // built-in default of ($1 input, $5 output per 1M). This test pins
+        // that the executor invokes Calculate (rather than short-circuiting
+        // to zero) so the sanctioned pricing policy — including its default —
+        // reaches the span.
+        //
+        //   input=1000  ->  0.001
+        //   output=500  ->  0.0025
+        //   total       =  0.0035
+        var store = new RecordingPlanStore();
+        var cost = new RecordingCostTracker();
+        var traces = new RecordingTraceCollector();
+        // NB: no row for "no-price-here" — Calculate uses its default table.
+        TokenPricing pricing = BuildPricing([("some-other-model", 99m, 99m)]);
+        PlanExecutor executor = NewExecutor(store, cost, traces, pricing: pricing);
+
+        var lookup = new Dictionary<string, ISpecialistAgent>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["scorecard"] = MakeSpecialist(
+                "scorecard", "hello",
+                inputTokens: 1000, outputTokens: 500,
+                model: "no-price-here"),
+        };
+        PlanExecutionRequest request = MakeExecutionRequest(lookup,
+            ("scorecard", "scorecard", "act"));
+
+        _ = await executor.ExecuteAsync(request, CancellationToken.None);
+
+        TraceSpan stepSpan = traces.Spans.Single(s => s.Tags?["span.type"] == "plan_step");
+        stepSpan.EstimatedCostUsd.Should().Be(0.0035m,
+            "TokenPricing default (1/5 per 1M) applies when the model is not in the pricing table");
     }
 }
