@@ -88,10 +88,12 @@ public sealed class ToolResultBudget
             }
         }
 
-        // 3) Guaranteed-valid hard clip if a pathological payload is still over budget.
+        // 3) Guaranteed-valid structured degradation envelope if a pathological payload
+        //    is still over budget. This never emits a raw JSON prefix of the original
+        //    payload — see HardClip for the machine-readable contract (issue #302).
         if (current.Length > maxChars)
         {
-            current = HardClip(current, maxChars);
+            current = HardClip(current, maxChars, toolName);
             compacted = true;
             truncated = true;
         }
@@ -111,30 +113,135 @@ public sealed class ToolResultBudget
     }
 
     /// <summary>
-    /// Produces a valid-JSON diagnostic embedding a safe prefix of the original payload.
-    /// Used only when structural compaction still leaves the payload over budget.
+    /// Produces a valid-JSON <b>degradation envelope</b> when structural compaction still
+    /// leaves the payload over budget. The envelope is unambiguously machine-readable:
+    /// a top-level <c>status="degraded"</c>, an explicit <c>truncated</c>/<c>complete=false</c>
+    /// marker, an <c>original</c>/<c>retained</c>/<c>dropped</c> character breakdown, and
+    /// structured <c>retry</c> guidance describing concrete narrower-filter / split /
+    /// summary-tool strategies the caller (or model) can act on.
+    ///
+    /// Critically, no field at the top level ever contains a raw JSON prefix of the
+    /// original payload — the previous <c>preview</c> field silently returned whatever
+    /// regions/rows happened to serialize first, letting the model treat a partial result
+    /// as complete (see issue #302). A tiny, clearly-labeled <c>diagnostic_preview.excerpt</c>
+    /// string is included only when the per-result budget leaves headroom for it, and only
+    /// as an escaped opaque debugging fragment — never as structured data.
+    ///
+    /// Whether or not the excerpt fits, the envelope itself is bounded and self-describing
+    /// so the caller can detect degraded output and cannot mistake it for complete data.
     /// </summary>
-    private static string HardClip(string payload, int maxChars)
+    internal static string HardClip(string payload, int maxChars, string? toolName = null)
     {
-        // Reserve headroom for the surrounding metadata envelope.
-        int previewLen = Math.Max(0, Math.Min(payload.Length, maxChars - 512));
-        string preview = payload[..previewLen];
+        payload ??= string.Empty;
+        int originalChars = payload.Length;
 
+        // Mandatory contract first (always emit, even if maxChars is smaller than the
+        // envelope — the machine-readable degradation signal is more important than
+        // strictly honouring a pathologically small budget).
+        JsonObject envelope = BuildDegradationEnvelope(
+            toolName: toolName,
+            originalChars: originalChars,
+            retainedChars: 0);
+
+        string baseJson = envelope.ToJsonString();
+
+        // Cap the opaque diagnostic excerpt at a deliberately-tiny window so it can
+        // never be large enough to look like a substantive partial result.
+        const int diagnosticExcerptCap = 256;
+
+        // Measure the overhead of adding an empty diagnostic_preview object so we can
+        // size the excerpt against real remaining budget (JSON escaping can expand
+        // arbitrary characters, so we also verify by serialising and shrinking on
+        // overflow).
+        envelope["diagnostic_preview"] = new JsonObject
+        {
+            ["note"] = "Opaque debug fragment; NOT the tool result. Do not parse or quote.",
+            ["kind"] = "text_fragment",
+            ["excerpt_chars"] = 0,
+            ["excerpt"] = string.Empty
+        };
+        int overhead = envelope.ToJsonString().Length - baseJson.Length;
+
+        int excerptBudget = maxChars - baseJson.Length - overhead;
+        int excerptLen = Math.Min(diagnosticExcerptCap, Math.Max(0, excerptBudget));
+        excerptLen = Math.Min(excerptLen, originalChars);
+
+        if (excerptLen <= 0)
+        {
+            envelope.Remove("diagnostic_preview");
+            return envelope.ToJsonString();
+        }
+
+        // Fit-check with actual escaping: JSON string encoding can lengthen the excerpt.
+        while (excerptLen > 0)
+        {
+            envelope["diagnostic_preview"] = new JsonObject
+            {
+                ["note"] = "Opaque debug fragment; NOT the tool result. Do not parse or quote.",
+                ["kind"] = "text_fragment",
+                ["excerpt_chars"] = excerptLen,
+                ["excerpt"] = payload[..excerptLen]
+            };
+            string candidate = envelope.ToJsonString();
+            if (candidate.Length <= maxChars)
+            {
+                return candidate;
+            }
+            // Shrink and retry — a small linear step is safe because excerpt is <=256.
+            excerptLen -= Math.Max(1, candidate.Length - maxChars);
+        }
+
+        envelope.Remove("diagnostic_preview");
+        return envelope.ToJsonString();
+    }
+
+    private static JsonObject BuildDegradationEnvelope(
+        string? toolName,
+        int originalChars,
+        int retainedChars)
+    {
         var envelope = new JsonObject
         {
-            ["_budget"] = new JsonObject
+            ["status"] = "degraded",
+            ["error"] = "tool_result_over_budget",
+            ["complete"] = false,
+            ["truncated"] = true,
+            ["budget"] = new JsonObject
             {
-                ["over_budget"] = true,
-                ["truncated"] = true,
-                ["original_chars"] = payload.Length,
-                ["returned_chars"] = previewLen,
-                ["note"] = "Tool result exceeded the per-result character budget and could not be "
-                    + "structurally compacted. A leading preview is included; re-call the tool with a "
-                    + "narrower filter for complete data."
+                ["original_chars"] = originalChars,
+                ["retained_chars"] = retainedChars,
+                ["dropped_chars"] = Math.Max(0, originalChars - retainedChars)
             },
-            ["preview"] = preview
+            ["retry"] = new JsonObject
+            {
+                ["reason"] = "Budget exceeded; dropped content may be needed. Treat as failure, not partial.",
+                ["strategies"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["action"] = "narrow_filter",
+                        ["description"] = "Re-call with a narrower filter (single region/brand/channel or shorter window)."
+                    },
+                    new JsonObject
+                    {
+                        ["action"] = "split_and_aggregate",
+                        ["description"] = "Split into smaller disjoint calls and combine results."
+                    },
+                    new JsonObject
+                    {
+                        ["action"] = "prefer_summary_tool",
+                        ["description"] = "Prefer an aggregate/summary tool over raw-detail."
+                    }
+                }
+            }
         };
-        return envelope.ToJsonString();
+
+        if (!string.IsNullOrEmpty(toolName))
+        {
+            envelope["tool_name"] = toolName;
+        }
+
+        return envelope;
     }
 
     private static ToolResultMetrics Metrics(
