@@ -838,6 +838,8 @@ builder.Services.AddSingleton<IAdaptiveCardState>(sp => sp.GetRequiredService<In
 // (deployed ACA) history survives replica replacement and scale-to-zero; locally
 // it is an ephemeral temp directory. Single-writer only (API runs maxReplicas: 1).
 string costDbPath = Path.Combine(dataDirectory, "costs.db");
+builder.Services.AddSingleton(sp =>
+    TokenPricing.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton(sp => new DurableCostTracker(
     costDbPath,
     sp.GetRequiredService<IOptions<ObservabilityOptions>>(),
@@ -1167,7 +1169,8 @@ if (plannerDef is not null && planPersistenceOptsAtRegistration.Enabled)
             sp.GetRequiredService<ILogger<PlanExecutor>>(),
             sp.GetService<PlanClarifier>(),
             sp.GetService<PlanReviewCoordinator>(),
-            sp.GetService<IExecutionCancellationRegistry>());
+            sp.GetService<IExecutionCancellationRegistry>(),
+            sp.GetRequiredService<TokenPricing>());
     });
     builder.Services.AddScoped(sp =>
     {
