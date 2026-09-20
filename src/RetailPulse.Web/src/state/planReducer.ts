@@ -23,6 +23,36 @@ import type {
  * gives — the reducer must never lie about what happened.
  */
 
+/**
+ * Terminal reason strings that represent a genuine non-success outcome. These
+ * are the values `PlanReviewTerminalReason` uses for failure paths — replan
+ * exhaustion, edits that produced an empty or invalid step list, review
+ * timeouts, and invalid clarifications. `PlanReviewApproved` and
+ * `PlanReviewEdited` describe successful transitions and are deliberately
+ * absent.
+ *
+ * Exported so `PlanView` can decide whether to surface `terminalReason` to
+ * the user using the same classification the reducer uses to pick the
+ * terminal `PlanStatus` — the two cannot drift apart.
+ */
+export const PLAN_FAILURE_TERMINAL_REASONS: ReadonlySet<string> = new Set([
+  'PlanReviewReplanExhausted',
+  'PlanReviewEditedToEmpty',
+  'PlanReviewEditInvalid',
+  'PlanReviewTimedOut',
+  'PlanClarificationInvalid',
+]);
+
+/**
+ * True when `terminalReason` names a genuine failure. `null`, `undefined`,
+ * empty strings, and success reasons (approved / edited) all return `false`.
+ */
+export function isFailureTerminalReason(
+  terminalReason: string | null | undefined,
+): boolean {
+  return !!terminalReason && PLAN_FAILURE_TERMINAL_REASONS.has(terminalReason);
+}
+
 export interface ActivePlanState {
   planId: string;
   /** Session that produced the plan; used to route SignalR events. */
@@ -504,15 +534,7 @@ export function planReducer(state: PlanAppState, action: PlanAction): PlanAppSta
     case 'PLAN_FINAL': {
       if (!state.active || state.active.planId !== action.planId) return state;
       const finished = Date.now();
-      // Choose a plan status that agrees with what the terminal reason implies.
-      const failedReasons = new Set([
-        'PlanReviewReplanExhausted',
-        'PlanReviewEditedToEmpty',
-        'PlanReviewEditInvalid',
-        'PlanReviewTimedOut',
-        'PlanClarificationInvalid',
-      ]);
-      const status: PlanStatus = action.terminalReason && failedReasons.has(action.terminalReason)
+      const status: PlanStatus = isFailureTerminalReason(action.terminalReason)
         ? 'failed'
         : state.active.status === 'awaiting_review'
           ? 'completed'
