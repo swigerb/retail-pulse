@@ -4,6 +4,8 @@ import {
   isPlanRunning,
   isStepTerminal,
   planReducer,
+  isFailureTerminalReason,
+  PLAN_FAILURE_TERMINAL_REASONS,
 } from '../state/planReducer';
 import type {
   PlanClarificationPrompt,
@@ -728,3 +730,51 @@ describe('planReducer selectors', () => {
     expect(isStepTerminal('running')).toBe(false);
   });
 });
+
+describe('isFailureTerminalReason (issue #298)', () => {
+  it('classifies every reducer failure reason as a failure', () => {
+    for (const r of PLAN_FAILURE_TERMINAL_REASONS) {
+      expect(isFailureTerminalReason(r)).toBe(true);
+    }
+  });
+
+  it('does not classify approved / edited as failures', () => {
+    expect(isFailureTerminalReason('PlanReviewApproved')).toBe(false);
+    expect(isFailureTerminalReason('PlanReviewEdited')).toBe(false);
+    expect(isFailureTerminalReason('PlanReviewRejected')).toBe(false);
+  });
+
+  it('handles null, undefined, and empty strings safely', () => {
+    expect(isFailureTerminalReason(null)).toBe(false);
+    expect(isFailureTerminalReason(undefined)).toBe(false);
+    expect(isFailureTerminalReason('')).toBe(false);
+  });
+
+  it('agrees with the reducer: PLAN_FINAL uses the same set to pick failed vs completed', () => {
+    // Approved terminal reason -> completed (not failed), by the same classifier.
+    const base = planReducer(initialPlanState, {
+      type: 'PLAN_STARTED',
+      planId: 'pfr',
+      request: 'go',
+    });
+    const approved = planReducer(base, {
+      type: 'PLAN_FINAL',
+      planId: 'pfr',
+      reply: 'done',
+      terminalReason: 'PlanReviewApproved',
+    });
+    expect(approved.active?.status).toBe('completed');
+    expect(isFailureTerminalReason(approved.active?.terminalReason)).toBe(false);
+
+    // A genuine failure reason -> failed.
+    const failed = planReducer(base, {
+      type: 'PLAN_FINAL',
+      planId: 'pfr',
+      reply: 'sorry',
+      terminalReason: 'PlanReviewReplanExhausted',
+    });
+    expect(failed.active?.status).toBe('failed');
+    expect(isFailureTerminalReason(failed.active?.terminalReason)).toBe(true);
+  });
+});
+
