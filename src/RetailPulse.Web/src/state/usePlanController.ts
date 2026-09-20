@@ -403,6 +403,14 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Tracks plan ids for which a terminal-state reconciliation has already
+  // been performed. Prevents the terminal-reconcile effect from re-firing
+  // after its own hydrate settles (issue #299) and suppresses a redundant
+  // second fetch when hydrate is initially called on an already-terminal
+  // plan (e.g. openHistoryPlan). Plan ids are unique per run, so the set
+  // does not need to be cleared on CLOSE_ACTIVE.
+  const terminalReconciledRef = useRef<Set<string>>(new Set());
+
   const hydrate = useCallback(async (planId: string) => {
     try {
       const detail = await fetchPlanDetail(planId);
@@ -411,6 +419,14 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
         return;
       }
       dispatch({ type: 'PLAN_HYDRATED', detail });
+      // If hydrate already produced a terminal snapshot, mark the plan so the
+      // terminal-reconcile effect below does not fire a duplicate fetch. The
+      // effect will still fire for the bug case (issue #299): a plan that
+      // hydrated as running and later transitioned to terminal via
+      // PLAN_FINAL or aggregated STEP_STATUS_UPDATED events.
+      if (!isPlanRunning(detail.status)) {
+        terminalReconciledRef.current.add(planId);
+      }
       // If the plan is suspended for review, load the pending proposal too.
       if (detail.status === 'awaiting_review' || detail.status === 'awaiting_clarification') {
         const reviews = await fetchPlanReviews(planId);
@@ -459,6 +475,29 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
     },
     [hydrate],
   );
+
+  // Terminal-state server reconciliation (issue #299). Step status normally
+  // reaches the UI only through live `span_completed` SignalR events, but a
+  // plan can transition to a terminal status (via `plan_final_response` or
+  // aggregated STEP_STATUS_UPDATED) while individual span events are missed,
+  // dropped, filtered, or arrive out of order — leaving completed steps
+  // rendered as Pending with zero tokens even though the persisted rows are
+  // correct. When the active plan reaches a terminal status, re-hydrate once
+  // so the durable snapshot reconciles the live view. PLAN_HYDRATED already
+  // merges without regressing terminal live progress, so this is safe for
+  // the non-regression case. `terminalReconciledRef` gates against a loop:
+  // hydrate itself marks the plan as reconciled on completion.
+  useEffect(() => {
+    const active = state.active;
+    if (!active) return;
+    if (isPlanRunning(active.status)) return;
+    const planId = active.planId;
+    if (terminalReconciledRef.current.has(planId)) return;
+    // Mark BEFORE dispatching so a re-render during the in-flight fetch does
+    // not re-enter this effect.
+    terminalReconciledRef.current.add(planId);
+    void hydrate(planId);
+  }, [state.active, hydrate]);
 
   const approve = useCallback(async (comment?: string) => {
     const active = activeRef.current;
