@@ -140,6 +140,32 @@ export interface AgentSpan {
   timestamp: string;
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * Client-assigned chat-turn identity (issue #303). Stamped by the Dashboard
+   * as spans arrive so the Live Spans panel can visibly group them by the user
+   * prompt that produced them, and so spans belonging to an earlier turn are
+   * never misread as evidence for the current answer. Absent for spans that
+   * arrive before any user prompt in this session.
+   */
+  turnId?: string;
+}
+
+/**
+ * A grouped set of telemetry spans belonging to a single user prompt / answer
+ * pair in the current chat session (issue #303). Turns are opened by the
+ * Dashboard when the ChatPanel reports a user prompt was submitted, and are
+ * cleared alongside `liveSpans` when the operator hits Clear Telemetry or
+ * starts a New Chat.
+ */
+export interface TelemetryTurn {
+  /** Stable identifier used to attribute spans to this turn. */
+  id: string;
+  /** 1-based position in the current chat session, for the visible label. */
+  index: number;
+  /** Short label derived from the user's prompt (truncated for display). */
+  label: string;
+  /** ISO timestamp the turn was opened, for the visible timestamp line. */
+  startedAt: string;
 }
 
 // --- Memory types (Sprint 1.3) ---
