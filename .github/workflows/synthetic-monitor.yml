@@ -53,7 +53,7 @@ jobs:
             echo "::notice title=Synthetic monitor (issue #57) skipped::RETAIL_PULSE_SYNTHETIC_ENABLED is not 'true'. This is the expected state for any deployment that has not opted into the optional monitor. Nothing was executed, no live result was fabricated, and no credential was accessed."
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: steps.gate.outputs.enabled == 'true'
 
       # Federation-only sign-in. `client-id` and `tenant-id` are plain
