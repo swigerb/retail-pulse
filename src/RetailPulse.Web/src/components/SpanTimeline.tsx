@@ -138,7 +138,7 @@ export function SpanTimeline({ spans }: Props) {
       )}
       {validSpans.map((span, i) => (
         <div
-          key={`span-${span.name}-${span.timestamp}`}
+          key={`span-${i}-${span.name}-${span.timestamp}`}
           className={styles.item}
           style={itemStyles[i]}
         >

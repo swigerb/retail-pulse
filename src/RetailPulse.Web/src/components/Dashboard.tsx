@@ -29,7 +29,7 @@ import { ObservabilityPanel } from './observability';
 import { StoreHeatmap, StockoutAlert, StorePerformanceTable, StoreDetailDialog } from './stores';
 import { MarginWaterfall, MarginDrivers } from './margin';
 import { PortfolioScorecard, BrandScoreCard, ExplanationPanel } from './scorecard';
-import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData, AdaptiveCard } from '../types';
+import type { AgentSpan, RoutingInfo, TokenUsage, ApprovalRequest, ApprovalDecision, Alert, SnoozeDuration, Trace, TraceSpan, StorePerformance, StockoutRisk, MarginWaterfallStep, MarginDriver, BrandScore, ExplanationData, AdaptiveCard, TelemetryTurn } from '../types';
 import { fetchActiveCards } from '../services/cardsApi';
 import { connectTelemetryHub, subscribeHubEvent } from '../services/telemetryHub';
 import { usePlanController } from '../state/usePlanController';
@@ -154,6 +154,21 @@ const MAX_ALERTS = 100;
 const MAX_TRACES = 50;
 
 /**
+ * Cap on retained telemetry turn headers (issue #303). Pairs with
+ * MAX_RETAINED_SPANS so a long-lived chat session doesn't grow the panel
+ * indefinitely. Older turns beyond this window are dropped in FIFO order;
+ * their spans are also dropped from `liveSpans` by the span-window cap.
+ */
+const MAX_RETAINED_TURNS = 50;
+
+/**
+ * Maximum characters shown as the turn label in the panel header (issue #303).
+ * The full prompt is preserved in the accessible `title`/`aria-label` so
+ * screen readers and hover reveal the untruncated text.
+ */
+const TURN_LABEL_MAX_CHARS = 80;
+
+/**
  * Human-readable label per dashboard view. Used by the per-panel error boundary
  * so a contained failure names the panel that failed.
  */
@@ -210,6 +225,15 @@ export function Dashboard() {
   const [chatKey, setChatKey] = useState(0);
   const [connected, setConnected] = useState(false);
   const [liveSpans, setLiveSpans] = useState<AgentSpan[]>([]);
+  // Turn boundaries for the Live Spans panel (issue #303). One entry per user
+  // prompt that has been submitted in this chat session, in submission order.
+  // Kept in Dashboard rather than TelemetryPanel so it survives drawer close.
+  const [telemetryTurns, setTelemetryTurns] = useState<TelemetryTurn[]>([]);
+  // The id of the turn currently receiving spans. Held in a ref so the SignalR
+  // span callback — captured once inside a useEffect — always sees the most
+  // recent turn even after React re-renders. A stale closure here would
+  // reintroduce the exact cross-turn misattribution issue #303 fixes.
+  const currentTurnIdRef = useRef<string | null>(null);
   const [totalDurationMs, setTotalDurationMs] = useState<number | undefined>();
   const [totalTokenUsage, setTotalTokenUsage] = useState<TokenUsage | undefined>();
   const [routingHistory, setRoutingHistory] = useState<RoutingInfo[]>([]);
@@ -429,7 +453,15 @@ export function Dashboard() {
     }
     const conn = connectTelemetryHub(
       (span) => setLiveSpans(prev => {
-        const next = [...prev, span];
+        // Stamp every incoming span with the turn active at the moment it
+        // arrives (issue #303). If the SignalR frame already carries a
+        // turnId (unused today, but forward-compatible) we honour it;
+        // otherwise we use the currently-open turn or leave it undefined
+        // for spans that arrive before the first user prompt.
+        const stamped: AgentSpan = span?.turnId
+          ? span
+          : { ...span, turnId: currentTurnIdRef.current ?? undefined };
+        const next = [...prev, stamped];
         return next.length > MAX_RETAINED_SPANS
           ? next.slice(next.length - MAX_RETAINED_SPANS)
           : next;
@@ -590,6 +622,8 @@ export function Dashboard() {
   const handleNewChat = () => {
     setChatKey(prev => prev + 1);
     setLiveSpans([]);
+    setTelemetryTurns([]);
+    currentTurnIdRef.current = null;
     setTotalDurationMs(undefined);
     setTotalTokenUsage(undefined);
     setRoutingHistory([]);
@@ -597,9 +631,40 @@ export function Dashboard() {
 
   const handleClearSpans = useCallback(() => {
     setLiveSpans([]);
+    setTelemetryTurns([]);
+    currentTurnIdRef.current = null;
     setTotalDurationMs(undefined);
     setTotalTokenUsage(undefined);
     setRoutingHistory([]);
+  }, []);
+
+  // Open a new telemetry turn (issue #303). Called by ChatPanel the moment
+  // the user submits a prompt, before the network request starts, so spans
+  // that arrive during the request are attributed to the correct answer.
+  // A stable turnId is minted here; every span that arrives while the ref
+  // points at this id is stamped with it (see the SignalR span callback).
+  const handleUserPrompt = useCallback((prompt: string) => {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+    const id = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const label = trimmed.length > TURN_LABEL_MAX_CHARS
+      ? `${trimmed.slice(0, TURN_LABEL_MAX_CHARS - 1)}…`
+      : trimmed;
+    currentTurnIdRef.current = id;
+    setTelemetryTurns(prev => {
+      const next: TelemetryTurn = {
+        id,
+        index: prev.length + 1,
+        label,
+        startedAt: new Date().toISOString(),
+      };
+      const appended = [...prev, next];
+      return appended.length > MAX_RETAINED_TURNS
+        ? appended.slice(appended.length - MAX_RETAINED_TURNS)
+        : appended;
+    });
   }, []);
 
   const handleResponseReceived = useCallback((response: { totalDurationMs?: number; tokenUsage?: TokenUsage; routing?: RoutingInfo }) => {
@@ -832,6 +897,7 @@ export function Dashboard() {
             <ChatPanel
               key={chatKey}
               onResponseReceived={handleResponseReceived}
+              onUserPrompt={handleUserPrompt}
               approvals={pendingApprovals}
               onApprovalResolved={handleApprovalResolved}
               promptCategories={activePack.categories}
@@ -992,6 +1058,7 @@ export function Dashboard() {
               <TelemetryPanel
                 connected={connected}
                 liveSpans={liveSpans}
+                turns={telemetryTurns}
                 totalDurationMs={totalDurationMs}
                 totalTokenUsage={totalTokenUsage}
                 onClear={handleClearSpans}
