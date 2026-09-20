@@ -138,10 +138,11 @@ public sealed class PlanAnswerComposerTests
             "\n" +
             "Let me know if you want a deeper cut.";
 
+        const string json = /*lang=json,strict*/ "{ \"region\": \"midwest\", \"growth\": 0.031 }";
         const string mdB =
             "```json\n" +
-            /*lang=json,strict*/
-                                 "{ \"region\": \"midwest\", \"growth\": 0.031 }\n" +
+            json +
+            "\n" +
             "```\n" +
             "\n" +
             "**Note:** growth is quarter-over-quarter.\n" +
