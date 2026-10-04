@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-hp-retail-pul-1253",
+  "sessionId": "hp-retail-pul-1253",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-04T16:53:52.800Z",
+  "lastHeartbeatAt": "2026-10-04T16:53:52.800Z",
+  "updatedAt": "2026-10-04T16:53:52.800Z",
+  "terminalReason": null,
+  "executionRef": null
+}
