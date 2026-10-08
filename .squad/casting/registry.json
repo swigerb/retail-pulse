@@ -1,44 +1,100 @@
 {
+  "schema": "squad-agent-provenance/v1",
+  "schema_version": 1,
+  "revision": 4,
+  "generated_at": "2026-10-04T16:39:43.335Z",
   "agents": {
     "kroger": {
+      "display_name": "Kroger",
       "persistent_name": "Kroger",
-      "universe": "Retail Icons",
       "role": "Lead",
-      "created_at": "2026-04-30",
-      "legacy_named": false,
-      "status": "active"
+      "universe": "Retail Icons",
+      "status": "active",
+      "created_at": "2026-04-30T00:00:00.000Z",
+      "updated_at": "2026-04-30T00:00:00.000Z",
+      "legacy_named": false
     },
     "chick": {
+      "display_name": "Chick",
       "persistent_name": "Chick",
-      "universe": "Retail Icons",
       "role": "Frontend Dev",
-      "created_at": "2026-04-30",
-      "legacy_named": false,
-      "status": "active"
+      "universe": "Retail Icons",
+      "status": "active",
+      "created_at": "2026-04-30T00:00:00.000Z",
+      "updated_at": "2026-04-30T00:00:00.000Z",
+      "legacy_named": false
     },
     "costco": {
+      "display_name": "Costco",
       "persistent_name": "Costco",
-      "universe": "Retail Icons",
       "role": "Backend Dev",
-      "created_at": "2026-04-30",
-      "legacy_named": false,
-      "status": "active"
+      "universe": "Retail Icons",
+      "status": "active",
+      "created_at": "2026-04-30T00:00:00.000Z",
+      "updated_at": "2026-04-30T00:00:00.000Z",
+      "legacy_named": false
     },
     "target": {
+      "display_name": "Target",
       "persistent_name": "Target",
-      "universe": "Retail Icons",
       "role": "Tester",
-      "created_at": "2026-04-30",
-      "legacy_named": false,
-      "status": "retired"
+      "universe": "Retail Icons",
+      "status": "retired",
+      "created_at": "2026-04-30T00:00:00.000Z",
+      "updated_at": "2026-05-16T00:00:00.000Z",
+      "retired_at": "2026-05-16T00:00:00.000Z",
+      "legacy_named": false
     },
     "publix": {
+      "display_name": "Publix",
       "persistent_name": "Publix",
-      "universe": "Retail Icons",
       "role": "Tester",
-      "created_at": "2026-05-16",
-      "legacy_named": false,
-      "status": "active"
+      "universe": "Retail Icons",
+      "status": "active",
+      "created_at": "2026-05-16T00:00:00.000Z",
+      "updated_at": "2026-05-16T00:00:00.000Z",
+      "legacy_named": false
+    },
+    "fact-checker": {
+      "display_name": "Fact Checker",
+      "persistent_name": "Fact Checker",
+      "role": "Fact Checker",
+      "universe": "builtin",
+      "status": "active",
+      "created_at": "2026-10-04T16:39:43.060Z",
+      "updated_at": "2026-10-04T16:39:43.060Z",
+      "legacy_named": false
+    },
+    "rai": {
+      "display_name": "Rai",
+      "persistent_name": "Rai",
+      "role": "Responsible AI Reviewer",
+      "universe": "builtin",
+      "status": "active",
+      "created_at": "2026-10-04T16:39:43.335Z",
+      "updated_at": "2026-10-04T16:39:43.335Z",
+      "legacy_named": false
+    },
+    "ralph": {
+      "display_name": "Ralph",
+      "persistent_name": "Ralph",
+      "role": "Work Monitor",
+      "universe": "builtin",
+      "status": "active",
+      "created_at": "2026-10-04T16:39:43.335Z",
+      "updated_at": "2026-10-04T16:39:43.335Z",
+      "legacy_named": false
+    },
+    "scribe": {
+      "display_name": "Scribe",
+      "persistent_name": "Scribe",
+      "role": "Session Logger",
+      "universe": "builtin",
+      "status": "active",
+      "created_at": "2026-10-04T16:39:43.335Z",
+      "updated_at": "2026-10-04T16:39:43.335Z",
+      "legacy_named": false
     }
-  }
+  },
+  "transaction_id": "e3602f05-0fd5-4a9c-9171-1a94f91d4d65"
 }
