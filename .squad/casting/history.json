@@ -2,21 +2,56 @@
   "universe_usage_history": [
     {
       "universe": "Retail Icons",
-      "assigned_at": "2026-04-30",
-      "reason": "Retail & consumer goods themed team for a retail demo platform"
+      "used_at": "2026-04-30T00:00:00.000Z"
+    },
+    {
+      "universe": "Retail Icons",
+      "used_at": "2026-05-16T00:00:00.000Z"
+    },
+    {
+      "universe": "builtin",
+      "used_at": "2026-10-04T16:39:43.060Z"
+    },
+    {
+      "universe": "builtin",
+      "used_at": "2026-10-04T16:39:43.335Z"
     }
   ],
   "assignment_cast_snapshots": {
-    "initial-retail-pulse": {
-      "assignment_id": "initial-retail-pulse",
-      "date": "2026-04-30",
-      "universe": "Retail Icons",
-      "assignments": {
-        "Kroger": "Lead",
-        "Chick": "Frontend Dev",
-        "Costco": "Backend Dev",
-        "Target": "Tester"
-      }
+    "retail-icons-r1": {
+      "created_at": "2026-04-30T00:00:00.000Z",
+      "agents": [
+        "kroger",
+        "chick",
+        "costco",
+        "target"
+      ],
+      "universe": "Retail Icons"
+    },
+    "retail-icons-r2": {
+      "created_at": "2026-05-16T00:00:00.000Z",
+      "agents": [
+        "publix"
+      ],
+      "universe": "Retail Icons"
+    },
+    "builtin-r3": {
+      "created_at": "2026-10-04T16:39:43.060Z",
+      "agents": [
+        "fact-checker"
+      ],
+      "universe": "builtin"
+    },
+    "builtin-r4": {
+      "created_at": "2026-10-04T16:39:43.335Z",
+      "agents": [
+        "rai",
+        "ralph",
+        "scribe"
+      ],
+      "universe": "builtin"
     }
-  }
+  },
+  "transaction_id": "e3602f05-0fd5-4a9c-9171-1a94f91d4d65",
+  "registry_revision": 4
 }
