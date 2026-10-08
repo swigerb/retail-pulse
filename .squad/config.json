@@ -1,4 +1,8 @@
 {
   "version": 1,
-  "defaultModel": "claude-opus-4.7"
+  "defaultModel": "claude-sonnet-5.5",
+  "agentModelOverrides": {
+    "kroger": "claude-opus-5.5",
+    "scribe": "claude-haiku-5.5"
+  }
 }
