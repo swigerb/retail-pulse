@@ -89,7 +89,7 @@ async function run(cfg, mode) {
     check('caller x-rp-tenant-id is ignored (not a partition)', c.status === 200 && cache(c) === 'hit', `x-rp-gw-cache=${cache(c) || '(absent)'}`);
 
     const bypass = [
-      ['dynamic', chat('What is the price of a gift card today?'), 'dynamic-intent'],
+      ['dynamic', chat('What is the gift card price?'), 'dynamic-intent'],
       ['sensitive', chat('What is the pharmacy recall refund policy?'), 'sensitive-intent'],
       ['analytics', chat('What is the return rate by store this month?'), null],
       ['tools', chat(SAFE_A, { tools: [{ type: 'function', function: { name: 'x', parameters: { type: 'object', properties: {} } } }] }), 'tools'],
@@ -124,8 +124,9 @@ function fakeGateway(opts = {}) {
       else if (body.stream) decision = 'streaming';
       else if (body.temperature !== undefined && body.temperature !== 1) decision = 'model-params';
       else if (/pharmac|recall/i.test(user)) decision = 'sensitive-intent';
-      else if (/price|today/i.test(user)) decision = 'dynamic-intent';
-      else if (/rate|month|store/i.test(user)) decision = 'analytics';
+      else if (/rate/i.test(user)) decision = 'analytics';
+      else if (/month|store|today/i.test(user)) decision = 'scoped-intent';
+      else if (/price/i.test(user)) decision = 'dynamic-intent';
       if (decision !== 'eligible') { h['x-rp-gw-cache'] = 'bypass'; h['x-rp-gw-cache-reason'] = decision; h['x-rp-gw-backend-latency-ms'] = '5'; }
       else {
         const key = (opts.useHeaderPartition ? req.headers['x-rp-tenant-id'] || '' : '') + '|return-policy';

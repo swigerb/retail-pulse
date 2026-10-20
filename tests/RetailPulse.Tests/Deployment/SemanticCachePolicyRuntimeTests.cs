@@ -77,6 +77,7 @@ public sealed partial class SemanticCachePolicyRuntimeTests
     [InlineData("Can you email john.doe@example.com the return policy?", "sensitive-intent")]
     // dynamic / sensitive / mutation
     [InlineData("What is the return policy price for shoes?", "dynamic-intent")]
+    [InlineData("What is the gift card price?", "dynamic-intent")]
     [InlineData("Is the gift card in stock? what is the gift card policy", "dynamic-intent")]
     [InlineData("What is the pharmacy return policy?", "sensitive-intent")]
     [InlineData("What is the recall refund policy?", "sensitive-intent")]
@@ -99,7 +100,7 @@ public sealed partial class SemanticCachePolicyRuntimeTests
         root.Descendants("azure-openai-semantic-cache-lookup").Should().BeEmpty("the legacy policy name is replaced by llm-semantic-cache-lookup");
         XElement lookup = root.Descendants("llm-semantic-cache-lookup").Should().ContainSingle().Subject;
         ((string?)lookup.Attribute("embeddings-backend-auth")).Should().Be("system-assigned");
-        ((string?)lookup.Attribute("ignore-system-messages")).Should().Be("false");
+        ((string?)lookup.Attribute("ignore-system-messages")).Should().Be("true");
         string[] vary = [.. lookup.Elements("vary-by").Select(e => e.Value)];
         vary.Should().Equal(
             "@(context.Subscription.Id)",

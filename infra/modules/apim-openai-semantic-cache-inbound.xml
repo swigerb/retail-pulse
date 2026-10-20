@@ -81,7 +81,7 @@
         }" />
         <choose>
             <when condition="@(((string)context.Variables[&quot;rp-cache-decision&quot;]) == &quot;eligible&quot;)">
-                <llm-semantic-cache-lookup score-threshold="{cache-score-threshold}" embeddings-backend-id="{cache-embeddings-backend-id}" embeddings-backend-auth="system-assigned" ignore-system-messages="false" max-message-count="10">
+                <llm-semantic-cache-lookup score-threshold="{cache-score-threshold}" embeddings-backend-id="{cache-embeddings-backend-id}" embeddings-backend-auth="system-assigned" ignore-system-messages="true" max-message-count="10">
                     <vary-by>@(context.Subscription.Id)</vary-by>
                     <vary-by>@(context.Product.Id)</vary-by>
                     <vary-by>@((string)context.Variables["rp-cache-partition"])</vary-by>
