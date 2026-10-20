@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr344-kroger-rereview",
+  "sessionId": "rp-pr344-kroger-rereview",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T14:46:23.522Z",
+  "lastHeartbeatAt": "2026-10-20T14:46:23.522Z",
+  "updatedAt": "2026-10-20T14:46:23.522Z",
+  "terminalReason": null,
+  "executionRef": null
+}
