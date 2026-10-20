@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr362-cache-final-fix",
+  "sessionId": "rp-pr362-cache-final-fix",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T22:07:47.879Z",
+  "lastHeartbeatAt": "2026-10-20T22:07:47.879Z",
+  "updatedAt": "2026-10-20T22:07:47.879Z",
+  "terminalReason": null,
+  "executionRef": null
+}
