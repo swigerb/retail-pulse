@@ -44,6 +44,9 @@ public sealed partial class ApimGatewayContractTests
     private static string MainBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "main.bicep"));
 
+    private static string MainBicepParam => File.ReadAllText(
+        Path.Combine(RepoRoot, "infra", "main.bicepparam"));
+
     private static string PreprovisionPowerShell => File.ReadAllText(
         Path.Combine(RepoRoot, "azd-hooks", "preprovision.ps1"));
 
@@ -387,6 +390,31 @@ public sealed partial class ApimGatewayContractTests
         ApimOpenAiApiBicep.Should().Contain("failoverDemoActive\n  ? replace(failoverDemoBackendFragment");
         ApimOpenAiApiBicep.Should().Contain("failoverDemoActive ? loadTextContent('apim-openai-failover-demo-outbound.xml') : ''");
         ApimPolicyXml.Should().NotContain("rp-failover-demo", "the base policy carries no demo logic when disabled");
+    }
+
+    [Fact]
+    public void FailoverDemo_AzdParametersMapTheEnablementAndSecretEnvironmentVariables()
+    {
+        MainBicepParam.Should().Contain(
+            "param apimFailoverDemoEnabled = toLower(readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_ENABLED', 'false')) == 'true'");
+        MainBicepParam.Should().Contain(
+            "param apimFailoverDemoKey = readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_KEY', '')");
+    }
+
+    [Fact]
+    public void FailoverDemo_ProbeSeparatesDisabledDeploymentFromEnabledButDisarmed()
+    {
+        string probe = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "probe-failover-demo.cjs"));
+        int disabledStart = probe.IndexOf("async function runDisabledProbe", StringComparison.Ordinal);
+        int enabledStart = probe.IndexOf("async function runEnabledProbe", StringComparison.Ordinal);
+
+        disabledStart.Should().BeGreaterThan(-1);
+        enabledStart.Should().BeGreaterThan(disabledStart);
+        probe[disabledStart..enabledStart].Should().NotContain("setArmed")
+            .And.Contain("ordinary traffic succeeds")
+            .And.Contain("demo header does not change normal traffic");
+        probe.Should().Contain("FAILOVER_DEMO_DEPLOYMENT")
+            .And.Contain("deploymentMode === 'disabled'");
     }
 
     [Fact]

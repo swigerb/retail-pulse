@@ -656,7 +656,7 @@ A deterministic, operator-only demonstration of APIM backend failover (#330). It
 
 **Setup** (operator, no production resources broken):
 
-1. Deploy with `apimBackendPoolEnabled=true`, `apimFailoverDemoEnabled=true`, and `apimFailoverDemoKey` set to a random secret of at least 32 characters taken from your secret store. Without the pool or a long key the demo stays off (fails closed). The key is stored as the secret APIM named value `rp-failover-demo-key`.
+1. Enable the deployable settings with `azd env set AZURE_APIM_BACKEND_POOL_ENABLED true`, `azd env set AZURE_APIM_FAILOVER_DEMO_ENABLED true`, and `azd env set AZURE_APIM_FAILOVER_DEMO_KEY <random-secret-at-least-32-characters>`, then provision. Without the pool or a long key the demo stays off (fails closed). The key is stored as the secret APIM named value `rp-failover-demo-key`.
 2. Arm it: `az apim nv update --service-name <apim> -g <rg> --named-value-id rp-failover-demo-armed --value true`.
 3. Run once, with your APIM subscription key and the demo key (never give the demo key to end users):
 
@@ -664,11 +664,11 @@ A deterministic, operator-only demonstration of APIM backend failover (#330). It
 
 **Evidence** (real response headers; the Control Room ribbon renders the same fields as *Route* and *Failover* for any call carrying them): `x-rp-gw-primary-status` (primary's actual status), `x-rp-gw-attempts`, `x-rp-gw-fallback` (`used`/`not-used`), `x-rp-gw-backend` (the secondary id the policy chose), and `x-rp-gw-route: failover` only when attempt 2 returned success. If anything is missing the field is omitted and shown as unknown. Note the standard API client does not send the demo header, so chat traffic in the UI is never affected.
 
-**Safeguards.** Every demo-header attempt first emits the `rp.failover.demo.attempt` metric, before any rate limiter, so rate-limited calls are observable too. Attempts are limited to 10 per minute per subscription (excess → 429, attempt metric only). When evaluation continues, the `rp.failover.demo.audit` metric records `Outcome` = authorized/denied; a wrong/missing key or disarmed state returns 403 (denied). Authorized runs are limited to 3 per minute per subscription. No key material is emitted.
+**Safeguards.** Every demo-header attempt first emits the `rp.failover.demo.attempt` metric, before any rate limiter, so rate-limited calls are observable too. Attempts are limited to 10 per minute per subscription (excess → 429, attempt metric only). When the feature is deployed, evaluation continues to the `rp.failover.demo.audit` metric with `Outcome` = authorized/denied; a wrong/missing key or enabled-but-disarmed state returns 403 (denied). When the feature is not deployed, APIM strips the trigger and spoofed evidence headers and continues ordinary traffic without demo evidence. Authorized runs are limited to 3 per minute per subscription. No key material is emitted.
 
-**Live probe.** After deployment run `node scripts/probe-failover-demo.cjs` (env vars documented in the script header). It checks disarmed and unauthorized rejection, an authorized run with a real primary failure and real secondary response/evidence, spoof resistance, and disarm/reset (it always disarms at the end). `node scripts/probe-failover-demo.cjs --self-test` validates the harness offline and runs in CI.
+**Live probe.** For a deployment with the feature absent, set `FAILOVER_DEMO_DEPLOYMENT=disabled` and run `node scripts/probe-failover-demo.cjs`; this mode never reads or updates `rp-failover-demo-armed` and verifies ordinary traffic plus trigger/spoof attempts remain 2xx with no demo evidence. For a deployed feature, omit that variable (or set it to `enabled`); the probe checks enabled-but-disarmed and unauthorized rejection, an authorized run with a real primary failure and real secondary response/evidence, spoof resistance, and disarm/reset (it always disarms at the end). Environment variables are documented in the script header. `node scripts/probe-failover-demo.cjs --self-test` validates both modes offline and runs in CI.
 
-**Reset.** Disarm: `az apim nv update ... --named-value-id rp-failover-demo-armed --value false`. Redeploying also resets it to `false`. To disable entirely, redeploy with `apimFailoverDemoEnabled=false` and rotate/remove the key.
+**Reset.** Disarm: `az apim nv update ... --named-value-id rp-failover-demo-armed --value false`. Redeploying also resets it to `false`. To disable entirely, run `azd env set AZURE_APIM_FAILOVER_DEMO_ENABLED false`, rotate/remove `AZURE_APIM_FAILOVER_DEMO_KEY`, and reprovision.
 
 ---
 

@@ -24,6 +24,8 @@ public sealed class FailoverDemoProbeSelfTest
         string output = p.StandardOutput.ReadToEnd();
         p.WaitForExit(60_000).Should().BeTrue();
         p.ExitCode.Should().Be(0, output);
-        output.Should().Contain("[correct]").And.NotContain("FAIL");
+        output.Should().Contain("[enabled:correct]")
+            .And.Contain("[disabled:correct]")
+            .And.NotContain("FAIL");
     }
 }

@@ -15,6 +15,8 @@ param aiFoundryResourceGroupName = readEnvironmentVariable('AZURE_OPENAI_RESOURC
 
 // Model deployment consumed by the API through APIM. Overridable via `azd env set`.
 param apimBackendPoolEnabled = toLower(readEnvironmentVariable('AZURE_APIM_BACKEND_POOL_ENABLED', 'false')) == 'true'
+param apimFailoverDemoEnabled = toLower(readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_ENABLED', 'false')) == 'true'
+param apimFailoverDemoKey = readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_KEY', '')
 param secondaryAiFoundryAccountName = readEnvironmentVariable('AZURE_OPENAI_SECONDARY_ACCOUNT_NAME', '')
 param secondaryAiFoundryResourceGroupName = readEnvironmentVariable('AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME', readEnvironmentVariable('AZURE_OPENAI_RESOURCE_GROUP_NAME', 'rg-repodigest-agents-demo-eus-001'))
 param openAiDeployment = readEnvironmentVariable('AZURE_OPENAI_DEPLOYMENT', 'gpt-5.4-mini-2026-03-17')
