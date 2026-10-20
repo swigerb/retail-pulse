@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr350-gateway-contract-fix",
+  "sessionId": "rp-pr350-gateway-contract-fix",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T15:25:00.281Z",
+  "lastHeartbeatAt": "2026-10-20T15:25:00.281Z",
+  "updatedAt": "2026-10-20T15:25:00.281Z",
+  "terminalReason": null,
+  "executionRef": null
+}
