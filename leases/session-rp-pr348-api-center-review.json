@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr348-api-center-review",
+  "sessionId": "rp-pr348-api-center-review",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T15:17:48.092Z",
+  "lastHeartbeatAt": "2026-10-20T15:17:48.092Z",
+  "updatedAt": "2026-10-20T15:17:48.092Z",
+  "terminalReason": null,
+  "executionRef": null
+}
