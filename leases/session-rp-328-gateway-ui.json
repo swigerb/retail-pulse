@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-328-gateway-ui",
+  "sessionId": "rp-328-gateway-ui",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T16:06:30.445Z",
+  "lastHeartbeatAt": "2026-10-20T16:06:30.445Z",
+  "updatedAt": "2026-10-20T16:06:30.445Z",
+  "terminalReason": null,
+  "executionRef": null
+}
