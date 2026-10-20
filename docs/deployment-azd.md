@@ -157,9 +157,32 @@ laptop-demo path.
 |---|---|
 | `azd env set AZURE_API_CENTER_ENABLED true` (optional `AZURE_API_CENTER_LOCATION`, default `eastus` — API Center is available in a limited set of regions) | `infra/modules/api-center.bicep` — `Microsoft.ApiCenter/services` (`apic-<token>`, system identity), an `API Management Service Reader` role assignment on the APIM service, and a declarative `apiSources` link (`apim-<token>`) in the `default` workspace. No portal step is needed. |
 
-Outputs: `AZURE_API_CENTER_ENABLED`, `AZURE_API_CENTER_NAME`, `AZURE_API_CENTER_RESOURCE_ID`, `AZURE_API_CENTER_APIM_SOURCE_NAME` (names/ids are empty when disabled; disabled mode deploys nothing). Names derive from the deterministic resource token, so re-provisioning is idempotent.
+Outputs: `AZURE_API_CENTER_ENABLED`, `AZURE_API_CENTER_NAME`, `AZURE_API_CENTER_RESOURCE_ID`, `AZURE_API_CENTER_APIM_SOURCE_NAME`, `AZURE_API_CENTER_MCP_API_NAME`, `AZURE_API_CENTER_MCP_ENVIRONMENT_NAME` (names/ids are empty when disabled; disabled mode deploys nothing). Names derive from the deterministic resource token, so re-provisioning is idempotent.
 
 **Synchronization behavior:** APIM → API Center is **one-way** — APIM stays the source of truth and edits made to synchronized APIs in API Center are not written back (and may be overwritten). Sync is continuous but eventually consistent: new or changed APIM APIs typically appear in API Center within a few minutes, not instantly, so a freshly provisioned catalog can be empty briefly. Verify the link after provisioning with `./scripts/Verify-ApiCenter.ps1` (read-only; exits 0 pass/disabled, 1 failure, 2 skipped).
+
+#### Retail Pulse MCP server in API Center (issue #336)
+
+When API Center is enabled, `api-center.bicep` also declares the registration metadata that APIM synchronization does not supply, all through supported declarative types (`Microsoft.ApiCenter/...@2024-03-01`, no portal-only step, no secrets):
+
+| Resource | Value |
+|---|---|
+| API `retail-pulse-mcp-server` (same id as the APIM MCP API) | `kind: mcp`, discovery metadata `retailPulseMcp` (approved tools, per-tool input schemas, `readOnly`, runtime) via the `retailPulseMcp` metadata schema |
+| Version `v1-0` + definition `mcp-tools` | lifecycle stage (`mcpLifecycleStage`, default `production`) |
+| Environment `apim-gateway` | production, server type Azure API Management, links to the APIM management and developer portals |
+| Deployment `apim-remote-mcp` | active, linked to the environment and definition, `runtimeUri` = the APIM MCP endpoint (`AZURE_APIM_MCP_ENDPOINT`) |
+
+APIM remains the only runtime endpoint and exposes exactly four read-only tools: `get_inventory`, `get_stockout_risk`, `get_supply_disruptions`, `get_demand_forecast`. Disabled mode (`AZURE_API_CENTER_ENABLED=false`, the default) deploys none of this and the verifier skips; re-provisioning is idempotent because every name is deterministic.
+
+**Verify (read-only):** `./scripts/Verify-ApiCenter.ps1` fails with a specific message if the API is not registered as `mcp`, has no version, has no active deployment linked to an environment, its `runtimeUri` differs from the APIM endpoint (or is not credential-free https), or the metadata / APIM tool set is not exactly the four approved tools. `./scripts/Verify-ApiCenter.ps1 -SelfTest` runs the checks offline against synthetic data.
+
+**Discovery and use**
+1. *Portal discovery:* Azure portal → API Center `apic-<token>` → **Inventory → APIs** (filter kind *MCP*) → *Retail Pulse MCP Server* → versions, environment/deployment and the `retailPulseMcp` metadata (tools and schemas). The API Center portal (if enabled) lists the same entry for developers.
+2. *Registry endpoint / client flow:* API Center exposes registered MCP servers through its MCP registry data-plane endpoint (`https://<apic>.data.<region>.azure-apicenter.ms/workspaces/default/v0.1/servers`); registry-aware clients (e.g. the VS Code API Center extension or GitHub Copilot) can browse it with Entra authentication. Confirm the exact endpoint in the portal's *API Center portal / registry* blade for your region.
+3. *Developer installation:* request the APIM subscription for the approval-required **Retail Pulse MCP (read-only)** product, then add the deployment `runtimeUri` as a remote HTTP MCP server in the client, sending `Ocp-Apim-Subscription-Key` and an Entra bearer token for the gateway audience (`AZURE_MCP_GATEWAY_AUDIENCE`). Store the key in the client's secret input, never in the repo.
+4. *Test invocation:* API Center does not proxy calls. Test through APIM — the APIM developer portal / Test console for the MCP API, or an MCP client (`initialize` → `tools/list` must return exactly the four tools → `tools/call`) against the endpoint above. Calls are authenticated and metered by APIM.
+
+**Limits and timing:** APIM → API Center sync is one-way and eventually consistent (typically minutes). Registration metadata here is owned by Bicep and re-applied on provisioning; the API Center entry may briefly be missing or lack APIM-derived fields right after provisioning, and changes made in API Center are never written back to APIM. Tool *runtime* definitions come from APIM; the schemas in API Center are descriptive metadata and must be updated together with `apim-mcp-api.bicep`. The overlay assumes sync names the API Center API after the APIM API id; if a tenant's sync produces a different id, the verifier reports the API as unregistered rather than passing silently.
 
 ### azd environment aliases (Bicep outputs → azure.yaml / Vite build)
 
