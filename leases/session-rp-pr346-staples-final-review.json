@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr346-staples-final-review",
+  "sessionId": "rp-pr346-staples-final-review",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T15:38:09.775Z",
+  "lastHeartbeatAt": "2026-10-20T15:38:09.775Z",
+  "updatedAt": "2026-10-20T15:38:09.775Z",
+  "terminalReason": null,
+  "executionRef": null
+}
