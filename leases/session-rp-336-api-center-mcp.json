@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-336-api-center-mcp",
+  "sessionId": "rp-336-api-center-mcp",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T17:40:25.663Z",
+  "lastHeartbeatAt": "2026-10-20T17:40:25.663Z",
+  "updatedAt": "2026-10-20T17:40:25.663Z",
+  "terminalReason": null,
+  "executionRef": null
+}
