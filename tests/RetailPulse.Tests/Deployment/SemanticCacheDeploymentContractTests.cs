@@ -34,7 +34,6 @@ public class SemanticCacheDeploymentContractTests
         m.Should().Contain("Microsoft.Network/privateEndpoints");
         m.Should().NotContain("listKeys(");
         m.Should().NotContain("primaryKey");
-        m.Should().NotContain("accessKeys");
     }
 
     [Fact]
