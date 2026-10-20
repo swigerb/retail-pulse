@@ -22,6 +22,25 @@ param subscriptionName string = 'retail-pulse-inference-sub'
 @description('Tokens per minute limit enforced per APIM subscription')
 param tokensPerMinute int = 80000
 
+@description('Enables the two-backend priority pool. When false (default) the single primary backend is used directly, which is valid for local or constrained deployments.')
+param backendPoolEnabled bool = false
+
+@description('Name of the secondary Azure AI Foundry / Cognitive Services account. Required (and must differ from the primary) when backendPoolEnabled is true.')
+param secondaryAiFoundryAccountName string = ''
+
+@description('Resource group containing the secondary Azure AI Foundry account. Defaults to the primary resource group.')
+param secondaryAiFoundryResourceGroupName string = aiFoundryResourceGroupName
+
+@description('Pool priority of the primary backend (lower is preferred)')
+@minValue(1)
+@maxValue(5)
+param primaryBackendPriority int = 1
+
+@description('Pool priority of the secondary backend (lower is preferred)')
+@minValue(1)
+@maxValue(5)
+param secondaryBackendPriority int = 2
+
 var cognitiveServicesOpenAIUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 
 resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' existing = {
@@ -43,9 +62,42 @@ module aiFoundryRoleAssignment './apim-openai-role-assignment.bicep' = {
   }
 }
 
+var poolEnabled = backendPoolEnabled && !empty(secondaryAiFoundryAccountName) && (secondaryAiFoundryAccountName != aiFoundryAccountName)
+var primaryBackendName = 'retail-pulse-foundry'
+var secondaryBackendName = 'retail-pulse-foundry-secondary'
+var poolBackendName = 'retail-pulse-foundry-pool'
+
+// Policies address the pool when enabled; otherwise the single primary backend.
+var routeBackendId = poolEnabled ? poolBackendName : primaryBackendName
+
+var backendCircuitBreaker = {
+  rules: [
+    {
+      name: 'throttlingRule'
+      failureCondition: {
+        count: 1
+        errorReasons: []
+        interval: 'PT1M'
+        statusCodeRanges: [
+          {
+            min: 429
+            max: 429
+          }
+          {
+            min: 500
+            max: 599
+          }
+        ]
+      }
+      tripDuration: 'PT1M'
+      acceptRetryAfter: true
+    }
+  ]
+}
+
 resource backend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' = {
   parent: apim
-  name: 'retail-pulse-foundry'
+  name: primaryBackendName
   properties: {
     title: 'Retail Pulse AI Foundry Backend'
     protocol: 'http'
@@ -56,23 +108,64 @@ resource backend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' =
         resource: 'https://cognitiveservices.azure.com'
       }
     }
-    circuitBreaker: {
-      rules: [
+    circuitBreaker: backendCircuitBreaker
+  }
+}
+
+resource secondaryAiFoundry 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = if (poolEnabled) {
+  name: secondaryAiFoundryAccountName
+  scope: resourceGroup(secondaryAiFoundryResourceGroupName)
+}
+
+module secondaryRoleAssignment './apim-openai-role-assignment.bicep' = if (poolEnabled) {
+  name: 'apim-openai-user-role-assignment-secondary'
+  scope: resourceGroup(secondaryAiFoundryResourceGroupName)
+  params: {
+    aiServicesName: secondaryAiFoundryAccountName
+    principalId: apimPrincipalId
+    roleDefinitionId: cognitiveServicesOpenAIUserRoleId
+  }
+}
+
+resource secondaryBackend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' = if (poolEnabled) {
+  parent: apim
+  name: secondaryBackendName
+  properties: {
+    title: 'Retail Pulse AI Foundry Backend (secondary)'
+    protocol: 'http'
+    url: '${secondaryAiFoundry!.properties.endpoint}openai'
+    credentials: {
+      #disable-next-line BCP037
+      managedIdentity: {
+        resource: 'https://cognitiveservices.azure.com'
+      }
+    }
+    circuitBreaker: backendCircuitBreaker
+  }
+}
+
+// Priority pool: the secondary only receives traffic while the primary's
+// circuit breaker is open. The client endpoint is unchanged.
+resource backendPool 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' = if (poolEnabled) {
+  parent: apim
+  name: poolBackendName
+  properties: {
+    title: 'Retail Pulse AI Foundry Backend Pool'
+    description: 'Priority failover pool: primary then secondary Azure AI model backends'
+    #disable-next-line BCP037
+    type: 'Pool'
+    #disable-next-line BCP037
+    pool: {
+      services: [
         {
-          name: 'throttlingRule'
-          failureCondition: {
-            count: 1
-            errorReasons: []
-            interval: 'PT1M'
-            statusCodeRanges: [
-              {
-                min: 429
-                max: 429
-              }
-            ]
-          }
-          tripDuration: 'PT1M'
-          acceptRetryAfter: true
+          id: backend.id
+          priority: primaryBackendPriority
+          weight: 1
+        }
+        {
+          id: secondaryBackend.id
+          priority: secondaryBackendPriority
+          weight: 1
         }
       ]
     }
@@ -104,7 +197,13 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
   properties: {
     format: 'rawxml'
     value: replace(
-      replace(loadTextContent('apim-openai-policy.xml'), '{backend-id}', backend.name),
+      replace(
+        replace(
+          replace(
+            replace(loadTextContent('apim-openai-policy.xml'), '{backend-id}', routeBackendId),
+            '{primary-backend-id}', primaryBackendName),
+          '{secondary-backend-id}', poolEnabled ? secondaryBackendName : ''),
+        '{secondary-backend-host}', poolEnabled ? replace(replace(secondaryAiFoundry!.properties.endpoint, 'https://', ''), '/', '') : 'none.invalid'),
       '{tokens-per-minute}',
       string(tokensPerMinute))
   }
@@ -123,7 +222,7 @@ resource listModelsPolicy 'Microsoft.ApiManagement/service/apis/operations/polic
   name: 'policy'
   properties: {
     format: 'rawxml'
-    value: replace(loadTextContent('apim-openai-models-policy.xml'), '{backend-id}', backend.name)
+    value: replace(loadTextContent('apim-openai-models-policy.xml'), '{backend-id}', routeBackendId)
   }
   dependsOn: [
     apiPolicy
@@ -236,6 +335,13 @@ output inferenceApiPath string = api.properties.path
 // the API's actual registered path.
 output inferenceEndpoint string = '${apim.properties.gatewayUrl}/${inferenceApiPath}'
 output subscriptionName string = subscription.name
+
+// Non-sensitive route/failover evidence for the gateway contract (#327):
+// backend ids and pool state only — no endpoints, keys or prompt content.
+output backendPoolEnabled bool = poolEnabled
+output routeBackendId string = routeBackendId
+output primaryBackendId string = backend.name
+output secondaryBackendId string = poolEnabled ? secondaryBackendName : ''
 
 // Live APIM subscription primary key, resolved at Bicep deploy time via
 // listSecrets(). Consumed by container-apps.bicep to declaratively bind the

@@ -1,6 +1,9 @@
 <policies>
     <inbound>
         <base />
+        <!-- Evidence headers are set only by APIM; drop any client-supplied values. -->
+        <set-header name="x-rp-backend-id" exists-action="delete" />
+        <set-header name="x-rp-failover" exists-action="delete" />
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
         <azure-openai-token-limit counter-key="@(context.Subscription.Id)"
@@ -18,6 +21,14 @@
     </backend>
     <outbound>
         <base />
+        <!-- Non-sensitive route evidence: backend id and whether the secondary served the request. -->
+        <set-variable name="rpServedBySecondary" value="@(context.Request.Url.Host == &quot;{secondary-backend-host}&quot;)" />
+        <set-header name="x-rp-backend-id" exists-action="override">
+            <value>@((bool)context.Variables["rpServedBySecondary"] ? "{secondary-backend-id}" : "{primary-backend-id}")</value>
+        </set-header>
+        <set-header name="x-rp-failover" exists-action="override">
+            <value>@(((bool)context.Variables["rpServedBySecondary"]).ToString().ToLowerInvariant())</value>
+        </set-header>
     </outbound>
     <on-error>
         <base />

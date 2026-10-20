@@ -158,6 +158,77 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
             "apimSubscriptionKey must be sourced from the apimOpenAiApi deployment's outputs via listOutputsWithSecureValues, not a literal");
     }
 
+    [Fact]
+    public void CompiledArmTemplate_DeclaresConditionalTwoBackendPoolWithManagedIdentityAndCircuitBreakers()
+    {
+        JsonElement? compiled = TryCompileMainBicep();
+        if (compiled is null)
+        {
+            return;
+        }
+
+        JsonElement inner = compiled.Value
+            .GetProperty("resources")
+            .GetProperty("apimOpenAiApi")
+            .GetProperty("properties")
+            .GetProperty("template");
+        JsonElement resources = inner.GetProperty("resources");
+
+        // Single-backend compatibility: the primary is unconditional and the
+        // pool resources are gated on the same poolEnabled condition.
+        JsonElement primary = resources.GetProperty("backend");
+        primary.TryGetProperty("condition", out _).Should().BeFalse(
+            "the primary backend must always deploy so a single-backend configuration stays valid");
+
+        foreach (string name in new[] { "secondaryBackend", "backendPool", "secondaryRoleAssignment", "secondaryAiFoundry" })
+        {
+            resources.TryGetProperty(name, out JsonElement r).Should().BeTrue($"'{name}' must be compiled into the template");
+            r.GetProperty("condition").GetRawText().Should().Contain("poolEnabled",
+                $"'{name}' must only deploy when the pool is enabled");
+        }
+
+        inner.GetProperty("variables").GetProperty("poolEnabled").GetRawText().Should().Contain("backendPoolEnabled",
+            "poolEnabled must derive from the backendPoolEnabled parameter");
+        inner.GetProperty("parameters").GetProperty("backendPoolEnabled").GetProperty("defaultValue").GetBoolean()
+            .Should().BeFalse("the pool must be opt-in");
+
+        // Both backends authenticate with managed identity and carry circuit breakers.
+        foreach (string name in new[] { "backend", "secondaryBackend" })
+        {
+            JsonElement props = resources.GetProperty(name).GetProperty("properties");
+            props.GetProperty("credentials").GetProperty("managedIdentity").GetProperty("resource").GetString()
+                .Should().Be("https://cognitiveservices.azure.com");
+            props.GetProperty("circuitBreaker").GetString().Should().Contain("backendCircuitBreaker");
+        }
+
+        JsonElement breaker = inner.GetProperty("variables").GetProperty("backendCircuitBreaker")
+            .GetProperty("rules")[0];
+        breaker.GetProperty("acceptRetryAfter").GetBoolean().Should().BeTrue();
+        breaker.GetProperty("failureCondition").GetRawText().Should().Contain("429").And.Contain("500");
+
+        // Pool membership and priority failover.
+        JsonElement poolProps = resources.GetProperty("backendPool").GetProperty("properties");
+        poolProps.GetProperty("type").GetString().Should().Be("Pool");
+        JsonElement services = poolProps.GetProperty("pool").GetProperty("services");
+        services.GetArrayLength().Should().Be(2);
+        services[0].GetProperty("id").GetString().Should().Contain("primaryBackendName");
+        services[1].GetProperty("id").GetString().Should().Contain("secondaryBackendName");
+        services[0].GetProperty("priority").GetString().Should().Contain("primaryBackendPriority");
+        services[1].GetProperty("priority").GetString().Should().Contain("secondaryBackendPriority");
+
+        // RBAC for the secondary account and no model keys anywhere.
+        resources.GetProperty("secondaryRoleAssignment").GetRawText()
+            .Should().Contain("cognitiveServicesOpenAIUserRoleId");
+        string json = inner.GetRawText();
+        json.ToLowerInvariant().Should().NotContain("listkeys");
+
+        // Policies route to the pool id (or primary) and emit non-sensitive evidence.
+        json.Should().Contain("routeBackendId");
+        json.Should().Contain("x-rp-backend-id").And.Contain("x-rp-failover");
+        inner.GetProperty("outputs").TryGetProperty("backendPoolEnabled", out _).Should().BeTrue();
+        inner.GetProperty("outputs").TryGetProperty("routeBackendId", out _).Should().BeTrue();
+    }
+
     private JsonElement? TryCompileMainBicep()
     {
         string mainBicepPath = Path.Combine(_repoRoot, "infra", "main.bicep");

@@ -311,6 +311,9 @@ public sealed partial class ApimGatewayContractTests
     [InlineData("AZURE_APIM_GATEWAY_URL")]
     [InlineData("AZURE_APIM_INFERENCE_ENDPOINT")]
     [InlineData("AZURE_APIM_INFERENCE_API_NAME")]
+    [InlineData("AZURE_APIM_ROUTE_BACKEND_ID")]
+    [InlineData("AZURE_APIM_PRIMARY_BACKEND_ID")]
+    [InlineData("AZURE_APIM_SECONDARY_BACKEND_ID")]
     [InlineData("AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME")]
     public void MainBicep_EmitsApimGatewayOutput_ForOperatorAndVerificationTooling(string outputName)
     {
@@ -319,6 +322,41 @@ public sealed partial class ApimGatewayContractTests
             RegexOptions.Multiline);
         pattern.IsMatch(MainBicep).Should().BeTrue(
             $"main.bicep must emit '{outputName}' so the postprovision hook + Verify-ApimAiGateway.ps1 can locate the deployed AI Gateway");
+    }
+
+    // ── Two-backend failover pool (#329) ─────────────────────────────────────
+
+    [Fact]
+    public void ApimOpenAiApi_BackendPoolIsOptInAndSingleBackendRemainsValid()
+    {
+        ApimOpenAiApiBicep.Should().MatchRegex(@"param\s+backendPoolEnabled\s+bool\s*=\s*false");
+        ApimOpenAiApiBicep.Should().Contain("var routeBackendId = poolEnabled ? poolBackendName : primaryBackendName");
+        ApimOpenAiApiBicep.Should().Contain("secondaryAiFoundryAccountName != aiFoundryAccountName",
+            "the secondary must be a distinct account from the primary");
+        MainBicep.Should().MatchRegex(@"param\s+apimBackendPoolEnabled\s+bool\s*=\s*false");
+    }
+
+    [Fact]
+    public void ApimOpenAiApi_PoolHasPriorityMembersCircuitBreakersAndSecondaryRbac()
+    {
+        ApimOpenAiApiBicep.Should().Contain("type: 'Pool'");
+        ApimOpenAiApiBicep.Should().Contain("priority: primaryBackendPriority");
+        ApimOpenAiApiBicep.Should().Contain("priority: secondaryBackendPriority");
+        ApimOpenAiApiBicep.Should().Contain("circuitBreaker: backendCircuitBreaker");
+        ApimOpenAiApiBicep.Should().Contain("secondaryRoleAssignment",
+            "APIM's managed identity needs RBAC on the secondary account");
+        ApimOpenAiApiBicep.Should().NotContainEquivalentOf("listKeys");
+    }
+
+    [Fact]
+    public void ApimPolicy_RoutesViaConfiguredBackendAndEmitsOnlyNonSensitiveEvidence()
+    {
+        ApimPolicyXml.Should().Contain("<set-backend-service backend-id=\"{backend-id}\" />");
+        ApimPolicyXml.Should().MatchRegex("name=\"x-rp-backend-id\" exists-action=\"delete\"",
+            "client-supplied evidence headers must be stripped");
+        ApimPolicyXml.Should().MatchRegex("name=\"x-rp-failover\" exists-action=\"override\"");
+        ApimPolicyXml.Should().NotContain("context.Request.Body",
+            "evidence must never include prompt or completion text");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
