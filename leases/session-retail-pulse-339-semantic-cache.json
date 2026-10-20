@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-retail-pulse-339-semantic-cache",
+  "sessionId": "retail-pulse-339-semantic-cache",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T22:47:00.935Z",
+  "lastHeartbeatAt": "2026-10-20T22:47:00.935Z",
+  "updatedAt": "2026-10-20T22:47:00.935Z",
+  "terminalReason": null,
+  "executionRef": null
+}
