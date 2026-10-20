@@ -14,7 +14,7 @@ import {
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, GatewayEvidence, ApprovalRequest, ApprovalDecision, CacheInfo, ForceableExecutionPath } from '../types';
 import type { SendMessageOptions } from '../services/api';
-import { sendMessage, isErrorReply, isChatRequestTimeoutError, GatewayChatError } from '../services/api';
+import { sendMessage, isErrorReply, isChatRequestTimeoutError } from '../services/api';
 import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
 import { cancelChatSession, cancelPlan } from '../services/executionControlApi';
 import { useConnectionStatus } from '../hooks/useConnectionStatus';
@@ -749,9 +749,13 @@ export function ChatPanel({
           setTimeoutInfo({ prompt: trimmed, timeoutMs: err.timeoutMs });
           return;
         }
+        const gateway =
+          err instanceof Error && err.name === 'GatewayChatError' && 'gateway' in err
+            ? ((err as Error & { gateway?: GatewayEvidence | null }).gateway ?? null)
+            : null;
         setMessages(prev => [
           ...prev,
-          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`, ...(err instanceof GatewayChatError ? { gateway: err.gateway } : {}) },
+          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`, ...(gateway ? { gateway } : {}) },
         ]);
       } finally {
         if (isMountedRef.current && abortControllerRef.current === controller) {

@@ -23,17 +23,14 @@ public static class GatewayErrorShaper
             c.Status == GatewayEvidenceStatus.Blocked
             && c.StatusCode == status
             && c.GatewaySafety is { Decision: GatewaySafetyDecision.Block });
-        if (call is null)
-        {
-            return new Shaped(fallbackCode, fallbackMessage, snapshot);
-        }
-
-        return status switch
-        {
-            403 => new Shaped(Blocked, "The request was blocked by gateway content safety.", snapshot),
-            400 => new Shaped(Rejected, "The request could not be verified by gateway content safety.", snapshot),
-            503 => new Shaped(Unavailable, "Content safety could not be verified.", snapshot),
-            _ => new Shaped(fallbackCode, fallbackMessage, snapshot),
-        };
+        return call is null
+            ? new Shaped(fallbackCode, fallbackMessage, snapshot)
+            : status switch
+            {
+                403 => new Shaped(Blocked, "The request was blocked by gateway content safety.", snapshot),
+                400 => new Shaped(Rejected, "The request could not be verified by gateway content safety.", snapshot),
+                503 => new Shaped(Unavailable, "Content safety could not be verified.", snapshot),
+                _ => new Shaped(fallbackCode, fallbackMessage, snapshot),
+            };
     }
 }

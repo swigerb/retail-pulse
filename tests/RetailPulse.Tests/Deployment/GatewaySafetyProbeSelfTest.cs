@@ -13,7 +13,7 @@ public sealed class GatewaySafetyProbeSelfTest
             dir = Path.GetDirectoryName(dir);
         }
 
-        return dir.Should().NotBeNull().And.Subject!;
+        return dir ?? throw new InvalidOperationException("Repository root not found.");
     }
 
     [Fact]
