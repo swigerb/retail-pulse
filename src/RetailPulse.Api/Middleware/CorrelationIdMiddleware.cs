@@ -1,3 +1,5 @@
+using RetailPulse.Api.OpenAI.Gateway;
+
 namespace RetailPulse.Api.Middleware;
 
 /// <summary>
@@ -18,7 +20,7 @@ public class CorrelationIdMiddleware
     {
         _next = next;
         _logger = logger;
-        _maskClientVisible = configuration is not null && RetailPulse.Api.OpenAI.Gateway.RegulatedRetailProfile.Resolve(configuration).Enabled;
+        _maskClientVisible = configuration is not null && RegulatedRetailProfile.Resolve(configuration).Enabled;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -29,7 +31,7 @@ public class CorrelationIdMiddleware
         context.Items[_itemKey] = correlationId;
         // Regulated-retail mode (#337): clients see a masked id; logs keep the full value.
         context.Response.Headers[_headerName] = _maskClientVisible
-            ? RetailPulse.Api.OpenAI.Gateway.ClientIdentifierMasker.Mask(correlationId)
+            ? ClientIdentifierMasker.Mask(correlationId)
             : correlationId;
 
         using (_logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))

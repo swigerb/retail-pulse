@@ -37,6 +37,12 @@ public static class SensitiveCachePolicy
     public static IReadOnlyList<string> BypassClasses { get; } =
         ["pharmacy", "recall", "identity", "patient", "clinical", "health", "sensitive"];
 
+    /// <summary>
+    /// The chat cache has no request classifier, so regulated mode cannot prove any input is non-sensitive
+    /// (pharmacy, recall, identity, patient, clinical, health, blank/unknown, mutation) and bypasses it entirely.
+    /// </summary>
+    public static bool ShouldBypassForRequest(bool regulated, string? message) => regulated;
+
     /// <summary>Unknown/blank classification fails safe: regulated mode bypasses the cache.</summary>
     public static bool ShouldBypass(bool regulated, string? classification)
     {
@@ -66,6 +72,10 @@ public static class ClientIdentifierMasker
             return value;
         }
 
-        return value.Length <= 8 ? new string('*', value.Length) : value[..4] + "…" + value[^2..];
+        // ASCII-only output: Kestrel rejects non-Latin-1/control characters in header values.
+        static char Safe(char c) => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '*';
+
+        string safe = string.Concat(value.Select(Safe));
+        return safe.Length <= 8 ? new string('*', safe.Length) : safe[..4] + "..." + safe[^2..];
     }
 }
