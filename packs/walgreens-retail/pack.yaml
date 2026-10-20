@@ -1,0 +1,60 @@
+# Retail Pulse content pack — Walgreens (unofficial synthetic demo)
+#
+# UNOFFICIAL DEMONSTRATION. No affiliation with, endorsement by, or
+# sponsorship from Walgreens or Walgreens Boots Alliance. All operational
+# data is synthetic. Trademarks belong to their respective owners. No logos,
+# patient or customer data, non-public information, or real store results.
+
+metadata:
+  key: walgreens-retail
+  displayName: "Walgreens (Unofficial Synthetic Demo)"
+  description: >-
+    Unofficial, synthetic, non-clinical retail-pharmacy operations demo covering
+    OTC availability, recalls, cold/flu demand, and store fulfillment.
+  version: "1.0.0"
+  segment: "Retail Pharmacy"
+  attribution: "Unofficial demonstration; no affiliation with Walgreens. Synthetic operational data only. Trademarks belong to their owners."
+
+tenant:
+  company: "Walgreens (Unofficial Synthetic Demo)"
+  industry: "Retail Pharmacy"
+  description: "Unofficial demonstration tenant with synthetic, non-clinical retail operations data. Not affiliated with Walgreens; trademarks belong to their owners. Pharmacist and clinical questions always escalate to a human."
+  brands:
+    - name: "Synthetic Cold & Flu Relief"
+      category: "Cold & Flu"
+      variants: ["Daytime", "Nighttime", "Multi-Symptom", "Throat Lozenge"]
+      priceSegment: "Standard"
+    - name: "Synthetic Pain & Fever"
+      category: "Pain & Fever"
+      variants: ["Tablet", "Caplet", "Children's Liquid"]
+      priceSegment: "Standard"
+    - name: "Synthetic Allergy Care"
+      category: "Allergy & Sinus"
+      variants: ["Tablet", "Nasal Spray", "Eye Drops"]
+      priceSegment: "Premium"
+    - name: "Synthetic Digestive Care"
+      category: "Digestive Health"
+      variants: ["Chewable", "Liquid", "Fiber Powder"]
+      priceSegment: "Standard"
+    - name: "Synthetic First Aid"
+      category: "First Aid"
+      variants: ["Bandage Assortment", "Antiseptic Wipes", "Cold Pack"]
+      priceSegment: "Value"
+  regions:
+    - "Northeast Metro"
+    - "Great Lakes"
+    - "Sun Belt"
+    - "Pacific Coast"
+  channels:
+    - "Store"
+    - "Pickup"
+    - "Same-Day Delivery"
+  theme:
+    primaryColor: "#B3282D"
+    accentColor: "#F4E3E3"
+    fontFamily: "Inter, Arial, sans-serif"
+  distribution:
+    model: "Distribution Center + Store Replenishment"
+    distributorTypes:
+      - "Regional Distribution Center"
+      - "Direct Supplier"
