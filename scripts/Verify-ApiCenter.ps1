@@ -44,7 +44,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:ApprovedTools = @('get_demand_forecast', 'get_inventory', 'get_stockout_risk', 'get_supply_disruptions')
+$script:ApprovedToolBindings = [ordered]@{
+    get_demand_forecast    = '/api/demand/forecast'
+    get_inventory          = '/api/supply/inventory'
+    get_stockout_risk      = '/api/stores/stockout-risks'
+    get_supply_disruptions = '/api/supply/disruptions'
+}
+$script:ApprovedTools = @($script:ApprovedToolBindings.Keys | Sort-Object)
 
 function Get-PagedList($Get, [string]$Path) {
     $items = [System.Collections.Generic.List[object]]::new()
@@ -55,6 +61,28 @@ function Get-PagedList($Get, [string]$Path) {
         if ($r.nextLink) { $r = & $Get $r.nextLink } else { $r = $null }
     }
     return $items.ToArray()
+}
+
+function Resolve-ApiCenterResourceId([string]$Base, [string]$ResourceId) {
+    if ([string]::IsNullOrWhiteSpace($ResourceId)) { return $null }
+    if ($ResourceId.StartsWith('/subscriptions/', [StringComparison]::OrdinalIgnoreCase)) { return $ResourceId }
+    if ($ResourceId.StartsWith($Base, [StringComparison]::OrdinalIgnoreCase)) { return $ResourceId }
+    if ($ResourceId.StartsWith('/workspaces/', [StringComparison]::OrdinalIgnoreCase)) { return "$Base$ResourceId" }
+    return "$Base/$($ResourceId.TrimStart('/'))"
+}
+
+function Test-RuntimeUriEqual([string]$Actual, [string]$Expected) {
+    try {
+        $actualUri = [uri]$Actual
+        $expectedUri = [uri]$Expected
+        return [string]::IsNullOrEmpty($actualUri.UserInfo) `
+            -and $actualUri.Scheme.Equals($expectedUri.Scheme, [StringComparison]::OrdinalIgnoreCase) `
+            -and $actualUri.Host.Equals($expectedUri.Host, [StringComparison]::OrdinalIgnoreCase) `
+            -and $actualUri.Port -eq $expectedUri.Port `
+            -and $actualUri.AbsolutePath.TrimEnd('/').Equals($expectedUri.AbsolutePath.TrimEnd('/'), [StringComparison]::Ordinal) `
+            -and $actualUri.Query.Equals($expectedUri.Query, [StringComparison]::Ordinal)
+    }
+    catch { return $false }
 }
 
 # Resolves the generated synchronized MCP API (its id is not the APIM API id) and verifies it.
@@ -69,69 +97,140 @@ function Test-McpSync {
     if ([string]::IsNullOrWhiteSpace($ExpectedEndpoint)) { $fail.Add('McpEndpoint / AZURE_APIM_MCP_ENDPOINT is required to verify the APIM MCP runtime URI'); return Done }
     if ($ExpectedEndpoint -notmatch '^https://' -or $ExpectedEndpoint -match '[@?]|subscription-key') { $fail.Add('expected MCP endpoint must be https without credentials'); return Done }
 
-    $apimNames = @($ApimTools | ForEach-Object { $_.name } | Sort-Object)
-    if (($apimNames -join ',') -ne ($script:ApprovedTools -join ',')) { $fail.Add("APIM serves tools [$($apimNames -join ', ')] != exactly the approved [$($script:ApprovedTools -join ', ')]") }
+    $apimNames = @($ApimTools | ForEach-Object { $_.properties.displayName } | Sort-Object)
+    if ($ApimTools.Count -ne $script:ApprovedTools.Count) { $fail.Add("APIM exposes $($ApimTools.Count) tool resources, expected exactly $($script:ApprovedTools.Count)") }
+    if (($apimNames -join ',') -cne ($script:ApprovedTools -join ',')) { $fail.Add("APIM serves tools [$($apimNames -join ', ')] != exactly the approved [$($script:ApprovedTools -join ', ')]") }
+    foreach ($toolName in $script:ApprovedTools) {
+        $tool = @($ApimTools | Where-Object { $_.properties.displayName -ceq $toolName })
+        if ($tool.Count -ne 1) { continue }
+        $tool = $tool[0]
+        if ($tool.name -cne $toolName) { $fail.Add("tool '$toolName' resource name is '$($tool.name)', expected '$toolName'") }
+        $operationId = [string]$tool.properties.operationId
+        $expectedSuffix = "/apis/retail-pulse-mcp-backing/operations/$toolName"
+        if (-not $operationId.EndsWith($expectedSuffix, [StringComparison]::OrdinalIgnoreCase)) {
+            $fail.Add("tool '$toolName' operationId '$operationId' does not bind to '$expectedSuffix'")
+            continue
+        }
+        $operation = $tool.resolvedOperation
+        if ($null -eq $operation) {
+            $fail.Add("tool '$toolName' operation '$operationId' could not be read")
+            continue
+        }
+        if ($operation.properties.method -cne 'GET') { $fail.Add("tool '$toolName' operation method is '$($operation.properties.method)', expected GET") }
+        $expectedPath = $script:ApprovedToolBindings[$toolName]
+        if ($operation.properties.urlTemplate -cne $expectedPath) {
+            $fail.Add("tool '$toolName' operation path is '$($operation.properties.urlTemplate)', expected '$expectedPath'")
+        }
+    }
 
     $mcpApis = @(Get-PagedList $Get "$Base/workspaces/default/apis" | Where-Object { $_.properties.kind -eq 'mcp' })
     if ($mcpApis.Count -eq 0) { $pend.Add('no kind=mcp API has been synchronized into API Center yet'); return Done }
+    $targetApis = @($mcpApis | Where-Object { $_.properties.title -ceq 'Retail Pulse MCP Server' })
+    if ($targetApis.Count -eq 0) { $pend.Add("the synchronized 'Retail Pulse MCP Server' API has not appeared yet"); return Done }
 
-    $selected = $null; $selectedDeployments = @(); $anyDeployments = $false
-    foreach ($api in $mcpApis) {
+    $selected = $null; $selectedDeployments = @(); $targetHasDeployments = $false
+    foreach ($api in $targetApis) {
         $deps = @(Get-PagedList $Get "$($api.id)/deployments")
-        if ($deps.Count -gt 0) { $anyDeployments = $true }
-        if (@($deps | Where-Object { @($_.properties.server.runtimeUri) -contains $ExpectedEndpoint }).Count -gt 0) { $selected = $api; $selectedDeployments = $deps; break }
+        if ($deps.Count -gt 0) { $targetHasDeployments = $true }
+        if (@($deps | Where-Object { @($_.properties.server.runtimeUri | Where-Object { Test-RuntimeUriEqual $_ $ExpectedEndpoint }).Count -gt 0 }).Count -gt 0) { $selected = $api; $selectedDeployments = $deps; break }
     }
     if (-not $selected) {
-        if ($anyDeployments) { $fail.Add("no synchronized MCP API has a deployment whose runtimeUri is the APIM MCP endpoint '$ExpectedEndpoint'") }
-        else { $pend.Add('synchronized MCP API(s) exist but no deployment has been generated yet') }
+        if ($targetHasDeployments) { $fail.Add("the synchronized Retail Pulse MCP API has no deployment whose runtimeUri is the APIM MCP endpoint '$ExpectedEndpoint'") }
+        else { $pend.Add('the synchronized Retail Pulse MCP API exists but no deployment has been generated yet') }
         return Done
     }
     $apiName = $selected.name
 
+    $definitionIds = [System.Collections.Generic.List[string]]::new()
+    $definitionsComplete = $true
     $versions = @(Get-PagedList $Get "$($selected.id)/versions")
-    if ($versions.Count -eq 0) { $pend.Add("synchronized API '$apiName' has no version yet") }
+    if ($versions.Count -eq 0) { $pend.Add("synchronized API '$apiName' has no version yet"); return Done }
     foreach ($v in $versions) {
         if ($v.properties.lifecycleStage -ne 'production') { $fail.Add("version '$($v.name)' lifecycleStage is '$($v.properties.lifecycleStage)', expected 'production'") }
-        if (@(Get-PagedList $Get "$($v.id)/definitions").Count -eq 0) { $pend.Add("version '$($v.name)' has no definition yet") }
+        $definitions = @(Get-PagedList $Get "$($v.id)/definitions")
+        if ($definitions.Count -eq 0) { $definitionsComplete = $false; $pend.Add("version '$($v.name)' has no definition yet") }
+        foreach ($definition in $definitions) {
+            $resolved = Resolve-ApiCenterResourceId $Base $definition.id
+            if ($resolved) { $definitionIds.Add($resolved) }
+        }
     }
 
-    foreach ($d in $selectedDeployments) {
+    $activeDeployments = @($selectedDeployments | Where-Object { $_.properties.state -eq 'active' })
+    if ($activeDeployments.Count -eq 0) {
+        $fail.Add("synchronized API '$apiName' has no active deployment at the APIM MCP endpoint")
+        return Done
+    }
+    foreach ($d in $activeDeployments) {
         $uris = @($d.properties.server.runtimeUri)
-        if ($uris.Count -ne 1 -or $uris[0] -ne $ExpectedEndpoint) { $fail.Add("deployment '$($d.name)' runtimeUri [$($uris -join ', ')] != APIM endpoint '$ExpectedEndpoint'") }
-        if ($d.properties.definitionId -and $null -eq (& $Get "$Base$($d.properties.definitionId)")) { $pend.Add("deployment '$($d.name)' definitionId '$($d.properties.definitionId)' does not resolve yet") }
+        if ($uris.Count -ne 1 -or -not (Test-RuntimeUriEqual $uris[0] $ExpectedEndpoint)) { $fail.Add("deployment '$($d.name)' runtimeUri [$($uris -join ', ')] != APIM endpoint '$ExpectedEndpoint'") }
+        if (-not $d.properties.definitionId) {
+            $fail.Add("deployment '$($d.name)' has no definitionId")
+        }
+        else {
+            $definitionId = Resolve-ApiCenterResourceId $Base $d.properties.definitionId
+            if (-not $definitionId.StartsWith("$($selected.id)/versions/", [StringComparison]::OrdinalIgnoreCase)) {
+                $fail.Add("deployment '$($d.name)' definitionId '$($d.properties.definitionId)' points outside the synchronized API")
+            }
+            elseif ($definitionIds -notcontains $definitionId -and -not $definitionsComplete) {
+                $pend.Add("deployment '$($d.name)' definitionId '$($d.properties.definitionId)' is not visible in the partially synchronized definition list yet")
+            }
+            elseif ($definitionIds -notcontains $definitionId) { $fail.Add("deployment '$($d.name)' definitionId '$($d.properties.definitionId)' does not belong to the synchronized API version") }
+            elseif ($null -eq (& $Get $definitionId)) { $pend.Add("deployment '$($d.name)' definitionId '$($d.properties.definitionId)' does not resolve yet") }
+        }
         if (-not $d.properties.environmentId) { $fail.Add("deployment '$($d.name)' has no environmentId"); continue }
-        $envRes = & $Get "$Base$($d.properties.environmentId)"
+        $environmentId = Resolve-ApiCenterResourceId $Base $d.properties.environmentId
+        $envRes = & $Get $environmentId
         if ($null -eq $envRes) { $pend.Add("deployment '$($d.name)' environmentId '$($d.properties.environmentId)' does not resolve yet"); continue }
         if ($envRes.properties.server.type -ine 'Azure API Management') { $fail.Add("environment '$($envRes.name)' server type is '$($envRes.properties.server.type)', expected 'Azure API Management'") }
     }
     return Done
 }
 
-function Test-ApiSourceLinked($Sources, [string]$ApimId) {
-    return (@($Sources.value | Where-Object { $_.properties.azureApiManagementSource.resourceId -ieq $ApimId }).Count -ge 1)
+function Test-ApiSourceLink($Sources, [string]$ApimId) {
+    $matches = @($Sources | Where-Object { $_.properties.azureApiManagementSource.resourceId -ieq $ApimId })
+    if ($matches.Count -eq 0) { return [pscustomobject]@{ Status = 'Fail'; Message = "no apiSource is linked to APIM '$ApimId'" } }
+    $linkState = $matches[0].properties.linkState
+    $state = if ($linkState -is [string]) { $linkState } else { [string]$linkState.state }
+    if ($state -in @('error', 'failed', 'deleting')) { return [pscustomobject]@{ Status = 'Fail'; Message = "APIM apiSource linkState is '$state'" } }
+    if ($state -in @('initializing', 'syncing', 'pending', 'creating', 'updating')) { return [pscustomobject]@{ Status = 'Pending'; Message = "APIM apiSource linkState is '$state'" } }
+    return [pscustomobject]@{ Status = 'Pass'; Message = "apiSource linked to APIM '$ApimId'" }
 }
 
 if ($SelfTest) {
     $base = '/subscriptions/s/resourceGroups/rg/providers/Microsoft.ApiCenter/services/apic'
     $ep = 'https://apim.example.net/retail-pulse-mcp/mcp'
-    $tools = @($script:ApprovedTools | ForEach-Object { [pscustomobject]@{ name = $_ } })
+    $tools = @($script:ApprovedTools | ForEach-Object {
+        $operationId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim/apis/retail-pulse-mcp-backing/operations/$_"
+        [pscustomobject]@{
+            name = $_
+            properties = [pscustomobject]@{ displayName = $_; operationId = $operationId }
+            resolvedOperation = [pscustomobject]@{
+                name = $_
+                properties = [pscustomobject]@{ method = 'GET'; urlTemplate = $script:ApprovedToolBindings[$_] }
+            }
+        }
+    })
     $script:bad = 0
-    function New-Store([string]$Endpoint = $ep, [string]$Lifecycle = 'production', [string]$ServerType = 'Azure API Management', [bool]$Versions = $true, [bool]$Env = $true, [bool]$Mcp = $true) {
+    function New-Store([string]$Endpoint = $ep, [string]$Lifecycle = 'production', [string]$ServerType = 'Azure API Management', [bool]$Versions = $true, [bool]$Definitions = $true, [bool]$Env = $true, [bool]$Mcp = $true) {
         $w = "$base/workspaces/default"
         $api = "$w/apis/rp-mcp-9f3a1c"   # generated id, deliberately not the APIM API id
         $store = @{}
-        $items = @([pscustomobject]@{ id = "$w/apis/rp-rest-77"; name = 'rp-rest-77'; properties = [pscustomobject]@{ kind = 'rest' } })
+        $items = @(
+            [pscustomobject]@{ id = "$w/apis/rp-rest-77"; name = 'rp-rest-77'; properties = [pscustomobject]@{ kind = 'rest'; title = 'Retail Pulse REST' } }
+            [pscustomobject]@{ id = "$w/apis/decoy-mcp"; name = 'decoy-mcp'; properties = [pscustomobject]@{ kind = 'mcp'; title = 'Other MCP Server' } }
+        )
         if ($Mcp) {
-            $items += [pscustomobject]@{ id = "$w/apis/decoy-mcp"; name = 'decoy-mcp'; properties = [pscustomobject]@{ kind = 'mcp' } }
-            $items += [pscustomobject]@{ id = $api; name = 'rp-mcp-9f3a1c'; properties = [pscustomobject]@{ kind = 'mcp' } }
+            $items += [pscustomobject]@{ id = $api; name = 'rp-mcp-9f3a1c'; properties = [pscustomobject]@{ kind = 'mcp'; title = 'Retail Pulse MCP Server' } }
         }
         $store["$w/apis"] = [pscustomobject]@{ value = $items }
         $store["$w/apis/decoy-mcp/deployments"] = [pscustomobject]@{ value = @([pscustomobject]@{ name = 'x'; properties = [pscustomobject]@{ environmentId = '/workspaces/default/environments/other'; server = [pscustomobject]@{ runtimeUri = @('https://other.example.net/mcp') } } }) }
         $store["$api/deployments"] = [pscustomobject]@{ value = @([pscustomobject]@{ name = 'dep-gen-1'; properties = [pscustomobject]@{ state = 'active'; environmentId = '/workspaces/default/environments/env-gen-1'; definitionId = '/workspaces/default/apis/rp-mcp-9f3a1c/versions/ver-gen-1/definitions/def-gen-1'; server = [pscustomobject]@{ runtimeUri = @($Endpoint) } } }) }
         if ($Versions) {
             $store["$api/versions"] = [pscustomobject]@{ value = @([pscustomobject]@{ id = "$api/versions/ver-gen-1"; name = 'ver-gen-1'; properties = [pscustomobject]@{ lifecycleStage = $Lifecycle } }) }
-            $store["$api/versions/ver-gen-1/definitions"] = [pscustomobject]@{ value = @([pscustomobject]@{ name = 'def-gen-1' }) }
-            $store["$api/versions/ver-gen-1/definitions/def-gen-1"] = [pscustomobject]@{ name = 'def-gen-1' }
+            if ($Definitions) {
+                $store["$api/versions/ver-gen-1/definitions"] = [pscustomobject]@{ value = @([pscustomobject]@{ id = "$api/versions/ver-gen-1/definitions/def-gen-1"; name = 'def-gen-1' }) }
+                $store["$api/versions/ver-gen-1/definitions/def-gen-1"] = [pscustomobject]@{ id = "$api/versions/ver-gen-1/definitions/def-gen-1"; name = 'def-gen-1' }
+            }
         }
         if ($Env) { $store["$w/environments/env-gen-1"] = [pscustomobject]@{ name = 'env-gen-1'; properties = [pscustomobject]@{ server = [pscustomobject]@{ type = $ServerType } } } }
         return $store
@@ -148,23 +247,59 @@ if ($SelfTest) {
     Expect 'generated-ID synchronized graph passes' 'Pass' $ok
     if ($ok.ApiName -eq 'rp-mcp-9f3a1c' -and $ok.ApiName -ne $McpApiName) { Write-Host '[PASS] self-test: resolved generated API id, not the APIM API id' }
     else { Write-Host "[FAIL] self-test: resolved '$($ok.ApiName)'"; $script:bad++ }
-    Expect 'no synchronized MCP API is pending' 'Pending' (Invoke-Sync (New-Store -Mcp $false) $tools)
+    Expect 'unrelated MCP deployment does not fail a missing target' 'Pending' (Invoke-Sync (New-Store -Mcp $false) $tools)
     Expect 'missing versions is pending' 'Pending' (Invoke-Sync (New-Store -Versions $false) $tools)
+    Expect 'partial definition sync is pending' 'Pending' (Invoke-Sync (New-Store -Definitions $false) $tools)
     Expect 'unresolved environment is pending' 'Pending' (Invoke-Sync (New-Store -Env $false) $tools)
     Expect 'non-production lifecycle fails' 'Fail' (Invoke-Sync (New-Store -Lifecycle 'design') $tools)
     Expect 'non-APIM environment fails' 'Fail' (Invoke-Sync (New-Store -ServerType 'Azure App Service') $tools)
     Expect 'endpoint mismatch fails' 'Fail' (Invoke-Sync (New-Store -Endpoint 'https://other.example.net/x/mcp') $tools)
+    Expect 'case-changed endpoint path fails' 'Fail' (Invoke-Sync (New-Store -Endpoint 'https://apim.example.net/RETAIL-PULSE-MCP/mcp') $tools)
     Expect 'missing endpoint fails closed' 'Fail' (Invoke-Sync (New-Store) $tools '')
     Expect 'credentialed endpoint fails closed' 'Fail' (Invoke-Sync (New-Store -Endpoint 'https://a.net/mcp?subscription-key=x') $tools 'https://a.net/mcp?subscription-key=x')
     Expect 'extra APIM tool fails' 'Fail' (Invoke-Sync (New-Store) ($tools + [pscustomobject]@{ name = 'write_inventory' }))
     Expect 'missing APIM tool fails' 'Fail' (Invoke-Sync (New-Store) $tools[0..2])
     Expect 'no APIM tools fails' 'Fail' (Invoke-Sync (New-Store) @())
+    $renamed = @($tools | ForEach-Object { $_.PSObject.Copy() })
+    $renamed[0].properties = $renamed[0].properties.PSObject.Copy()
+    $renamed[0].properties.displayName = 'write_inventory'
+    Expect 'renamed APIM tool fails' 'Fail' (Invoke-Sync (New-Store) $renamed)
+    $caseChanged = @($tools | ForEach-Object { $_.PSObject.Copy() })
+    $caseChanged[0].properties = $caseChanged[0].properties.PSObject.Copy()
+    $caseChanged[0].properties.displayName = $caseChanged[0].properties.displayName.ToUpperInvariant()
+    Expect 'case-changed APIM tool fails' 'Fail' (Invoke-Sync (New-Store) $caseChanged)
+    $writeBound = @($tools | ForEach-Object { $_.PSObject.Copy() })
+    $writeBound[0].resolvedOperation = [pscustomobject]@{
+        name = $writeBound[0].name
+        properties = [pscustomobject]@{ method = 'DELETE'; urlTemplate = $script:ApprovedToolBindings[$writeBound[0].name] }
+    }
+    Expect 'write-bound APIM tool fails' 'Fail' (Invoke-Sync (New-Store) $writeBound)
+    $pathChanged = @($tools | ForEach-Object { $_.PSObject.Copy() })
+    $pathChanged[0].resolvedOperation = [pscustomobject]@{
+        name = $pathChanged[0].name
+        properties = [pscustomobject]@{ method = 'GET'; urlTemplate = $script:ApprovedToolBindings[$pathChanged[0].name].ToUpperInvariant() }
+    }
+    Expect 'case-changed operation path fails' 'Fail' (Invoke-Sync (New-Store) $pathChanged)
+    $inactive = New-Store
+    $inactive["$base/workspaces/default/apis/rp-mcp-9f3a1c/deployments"].value[0].properties.state = 'inactive'
+    Expect 'inactive deployment fails' 'Fail' (Invoke-Sync $inactive $tools)
+    $unlinked = New-Store
+    $unlinked["$base/workspaces/default/apis/rp-mcp-9f3a1c/deployments"].value[0].properties.definitionId = $null
+    Expect 'missing definition linkage fails' 'Fail' (Invoke-Sync $unlinked $tools)
     $apimId = '/subscriptions/s/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim'
-    $link = [pscustomobject]@{ value = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = $apimId } } }) }
-    $other = [pscustomobject]@{ value = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = "$apimId-x" } } }) }
-    $cases = @(@('apiSource linked to APIM passes', $link, $true), @('apiSource for another APIM fails', $other, $false), @('no apiSources fails', $null, $false))
+    $link = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = $apimId }; linkState = [pscustomobject]@{ state = 'connected' } } })
+    $other = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = "$apimId-x" } } })
+    $errorLink = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = $apimId }; linkState = [pscustomobject]@{ state = 'error' } } })
+    $syncingLink = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = $apimId }; linkState = [pscustomobject]@{ state = 'syncing' } } })
+    $cases = @(
+        @('apiSource linked to APIM passes', $link, 'Pass'),
+        @('apiSource for another APIM fails', $other, 'Fail'),
+        @('no apiSources fails', @(), 'Fail'),
+        @('apiSource error fails', $errorLink, 'Fail'),
+        @('apiSource syncing is pending', $syncingLink, 'Pending')
+    )
     foreach ($c in $cases) {
-        if ((Test-ApiSourceLinked $c[1] $apimId) -eq $c[2]) { Write-Host "[PASS] self-test: $($c[0])" } else { Write-Host "[FAIL] self-test: $($c[0])"; $script:bad++ }
+        if ((Test-ApiSourceLink $c[1] $apimId).Status -eq $c[2]) { Write-Host "[PASS] self-test: $($c[0])" } else { Write-Host "[FAIL] self-test: $($c[0])"; $script:bad++ }
     }
     if ($script:bad -gt 0) { exit 1 }
     Write-Host 'Self-test passed.'
@@ -189,13 +324,15 @@ function Invoke-ArmGet([string]$Path, [string]$ApiVersion) {
     $url = if ($Path -like 'https://*') { $Path } else { "https://management.azure.com$($Path)?api-version=$ApiVersion" }
     try { return Invoke-RestMethod -Uri $url -Headers @{ Authorization = "Bearer $token" } -Method Get }
     catch {
-        $status = $_.Exception.Response.StatusCode
-        if ($status -in @('NotFound', 'Forbidden')) { return $null }
+        $status = [int]$_.Exception.Response.StatusCode
+        if ($status -eq 404) { return $null }
+        if ($status -eq 403) { throw "ARM GET forbidden for '$Path'; verification cannot classify an authorization failure as pending synchronization." }
         throw
     }
 }
 
 $failures = [System.Collections.Generic.List[string]]::new()
+$pending = [System.Collections.Generic.List[string]]::new()
 function Assert-Check([bool]$Condition, [string]$Message) {
     if ($Condition) { Write-Host "[PASS] $Message" } else { Write-Host "[FAIL] $Message"; $failures.Add($Message) }
 }
@@ -208,13 +345,21 @@ if ($center) {
     Assert-Check ($center.identity.type -match 'SystemAssigned') 'API Center has a system-assigned identity'
 }
 
-$sources = Invoke-ArmGet "$base/workspaces/default/apiSources" '2024-06-01-preview'
+$getApiSources = { param($p) Invoke-ArmGet $p '2024-06-01-preview' }
+$sources = @(Get-PagedList $getApiSources "$base/workspaces/default/apiSources")
 $apimId = "/subscriptions/$sub/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName"
-Assert-Check (Test-ApiSourceLinked $sources $apimId) "default workspace has an apiSource linked to APIM '$ApimName' (one-way sync)"
+$sourceLink = Test-ApiSourceLink $sources $apimId
+if ($sourceLink.Status -eq 'Fail') { Assert-Check $false $sourceLink.Message }
+elseif ($sourceLink.Status -eq 'Pending') { Write-Host "[PENDING] $($sourceLink.Message)"; $pending.Add($sourceLink.Message) }
+else { Assert-Check $true "default workspace has an apiSource linked to APIM '$ApimName' (one-way sync)" }
 
 $getApic = { param($p) Invoke-ArmGet $p '2024-03-01' }
 $getApim = { param($p) Invoke-ArmGet $p '2025-09-01-preview' }
 $apimTools = @(Get-PagedList $getApim "$apimId/apis/$McpApiName/tools")
+foreach ($tool in $apimTools) {
+    $operation = if ($tool.properties.operationId) { & $getApim $tool.properties.operationId } else { $null }
+    $tool | Add-Member -NotePropertyName resolvedOperation -NotePropertyValue $operation -Force
+}
 
 $sync = $null
 for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
@@ -236,7 +381,10 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 if ($sync.Status -eq 'Pending') {
-    Write-Host "`n[PENDING] API Center synchronization has not produced the MCP graph yet: $($sync.Pending -join '; ')"
+    foreach ($message in $sync.Pending) { $pending.Add($message) }
+}
+if ($pending.Count -gt 0) {
+    Write-Host "`n[PENDING] API Center synchronization is not ready: $($pending -join '; ')"
     Write-Host 'APIM -> API Center synchronization is eventually consistent and may take up to 24 hours. Re-run later; this is not a pass.'
     exit 3
 }
