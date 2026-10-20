@@ -1,0 +1,23 @@
+<retry condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500 || (context.Variables.GetValueOrDefault&lt;bool&gt;(&quot;rp-demo-active&quot;, false) &amp;&amp; context.Variables.GetValueOrDefault&lt;int&gt;(&quot;rp-demo-attempts&quot;, 0) == 1 &amp;&amp; context.Response.StatusCode &gt;= 400)))" count="1" interval="1" first-fast-retry="true">
+            <set-variable name="rp-demo-attempts" value="@(context.Variables.GetValueOrDefault&lt;int&gt;(&quot;rp-demo-attempts&quot;, 0) + 1)" />
+            <choose>
+                <when condition="@(context.Variables.GetValueOrDefault&lt;bool&gt;(&quot;rp-demo-active&quot;, false) &amp;&amp; context.Variables.GetValueOrDefault&lt;int&gt;(&quot;rp-demo-attempts&quot;, 0) == 1)">
+                    <!-- Attempt 1: the real primary, given an unsupported api-version so it really rejects the call. -->
+                    <set-variable name="rp-demo-backend" value="{demo-primary-backend}" />
+                    <set-backend-service backend-id="{demo-primary-backend}" />
+                    <set-query-parameter name="api-version" exists-action="override">
+                        <value>1900-01-01</value>
+                    </set-query-parameter>
+                </when>
+                <when condition="@(context.Variables.GetValueOrDefault&lt;bool&gt;(&quot;rp-demo-active&quot;, false))">
+                    <!-- Attempt 2: the fixed secondary, original api-version restored. The status of attempt 1 is read from its real response. -->
+                    <set-variable name="rp-demo-primary-status" value="@(context.Response != null ? context.Response.StatusCode : 0)" />
+                    <set-variable name="rp-demo-backend" value="{demo-secondary-backend}" />
+                    <set-backend-service backend-id="{demo-secondary-backend}" />
+                    <set-query-parameter name="api-version" exists-action="override">
+                        <value>@((string)context.Variables["rp-demo-api-version"])</value>
+                    </set-query-parameter>
+                </when>
+            </choose>
+            <forward-request buffer-request-body="true" />
+        </retry>

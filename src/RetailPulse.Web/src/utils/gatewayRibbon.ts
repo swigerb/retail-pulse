@@ -109,6 +109,11 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
   const failedOver = routes.includes('failover');
   const incompleteRoute = Boolean(gateway?.truncated) || routes.length === 0 || routes.includes('unknown');
   const routeLabel = (r: string) => (r === 'failover' ? 'Failover' : r === 'primary' ? 'Primary' : UNKNOWN);
+  const demo = calls.map(c => c.failoverDemo).find(d => d);
+  const demoText = demo
+    ? ` (demo: primary ${demo.primaryStatusCode ?? 'unknown'}, fallback ${
+        demo.fallbackUsed == null ? 'unknown' : demo.fallbackUsed ? 'used' : 'not used'})`
+    : '';
   const throttled = calls.some(c => c.quota === 'throttled');
 
   const consumed = gateway?.totalTokensConsumed;
@@ -146,7 +151,7 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
     {
       key: 'failover',
       label: 'Failover',
-      value: failedOver ? 'Failed over' : incompleteRoute ? UNKNOWN : 'None',
+      value: (failedOver ? 'Failed over' : incompleteRoute ? UNKNOWN : 'None') + demoText,
       state: failedOver ? 'observed' : incompleteRoute ? 'unknown' : 'observed',
     },
     {

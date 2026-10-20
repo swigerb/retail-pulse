@@ -21,6 +21,15 @@ describe('normalizeGatewayEvidence', () => {
     expect(e?.calls[0]).toMatchObject({ route: 'failover', quota: 'allowed', cache: 'not-applicable', tokensConsumed: 15 });
   });
 
+  it('keeps only valid failover demo fields', () => {
+    const e = normalizeGatewayEvidence({
+      status: 'observed',
+      calls: [{ route: 'failover', status: 'observed', failoverDemo: { primaryStatusCode: 400, attempts: 'x', fallbackUsed: 'yes' } }],
+    });
+    expect(e?.calls[0].failoverDemo).toEqual({ primaryStatusCode: 400, attempts: null, fallbackUsed: null });
+    expect(normalizeGatewayEvidence({ status: 'observed', calls: [{ status: 'observed' }] })?.calls[0].failoverDemo).toBeNull();
+  });
+
   it('turns malformed or unsafe values into explicit unknown/null', () => {
     const e = normalizeGatewayEvidence({
       status: 'observed',

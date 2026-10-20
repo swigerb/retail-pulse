@@ -34,6 +34,16 @@ function token(v: unknown): string | null {
   return typeof v === 'string' && SAFE_TOKEN.test(v) ? v : null;
 }
 
+function normalizeDemo(v: unknown): GatewayCallEvidence['failoverDemo'] {
+  if (!v || typeof v !== 'object') return null;
+  const d = v as Record<string, unknown>;
+  return {
+    primaryStatusCode: count(d.primaryStatusCode),
+    attempts: count(d.attempts),
+    fallbackUsed: typeof d.fallbackUsed === 'boolean' ? d.fallbackUsed : null,
+  };
+}
+
 function normalizeCall(raw: unknown): GatewayCallEvidence | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
@@ -58,6 +68,7 @@ function normalizeCall(raw: unknown): GatewayCallEvidence | null {
       typeof r.transportError === 'string' && TRANSPORT_ERRORS.includes(r.transportError)
         ? r.transportError
         : null,
+    failoverDemo: normalizeDemo(r.failoverDemo),
   };
 }
 

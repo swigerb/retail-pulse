@@ -37,6 +37,13 @@ param aiFoundryResourceGroupName string = 'rg-repodigest-agents-demo-eus-001'
 @description('Enable the two-backend APIM model pool (primary + secondary Azure AI accounts). Default false keeps the single-backend topology.')
 param apimBackendPoolEnabled bool = false
 
+@description('Enables the demo-only APIM failover trigger (#330). Disabled by default; requires apimBackendPoolEnabled.')
+param apimFailoverDemoEnabled bool = false
+
+@secure()
+@description('Operator secret authorizing the APIM failover demo (>= 32 chars). Never share with ordinary callers.')
+param apimFailoverDemoKey string = ''
+
 @description('Secondary Azure AI Foundry / Cognitive Services account for the APIM backend pool. Required when apimBackendPoolEnabled is true.')
 param secondaryAiFoundryAccountName string = ''
 
@@ -157,6 +164,8 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     aiFoundryAccountName: aiFoundryAccountName
     aiFoundryResourceGroupName: aiFoundryResourceGroupName
     backendPoolEnabled: apimBackendPoolEnabled
+    failoverDemoEnabled: apimFailoverDemoEnabled
+    failoverDemoKey: apimFailoverDemoKey
     secondaryAiFoundryAccountName: secondaryAiFoundryAccountName
     secondaryAiFoundryResourceGroupName: secondaryAiFoundryResourceGroupName
   }

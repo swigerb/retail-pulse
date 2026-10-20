@@ -23,6 +23,9 @@ public sealed partial class ApimGatewayContractTests
     [GeneratedRegex(@"@description\('APIM inference endpoint[^']*'\)\s*param\s+apimInferenceEndpoint\s+(?<type>[A-Za-z]+)(?<rest>[^\r\n]*)")]
     private static partial Regex ApimInferenceEndpointParamRegex();
 
+    [GeneratedRegex(@"<when condition=""([^""]*)"">\s*<set-header name=""x-rp-gw-route""[\s\S]*?failover")]
+    private static partial Regex FailoverRouteConditionRegex();
+
     private static string ApimBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "modules", "apim.bicep"));
 
@@ -40,6 +43,9 @@ public sealed partial class ApimGatewayContractTests
 
     private static string MainBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "main.bicep"));
+
+    private static string MainBicepParam => File.ReadAllText(
+        Path.Combine(RepoRoot, "infra", "main.bicepparam"));
 
     private static string PreprovisionPowerShell => File.ReadAllText(
         Path.Combine(RepoRoot, "azd-hooks", "preprovision.ps1"));
@@ -368,6 +374,102 @@ public sealed partial class ApimGatewayContractTests
         ApimPolicyXml.Should().NotContain("x-rp-failover");
         ApimPolicyXml.Should().NotContain("context.Request.Body",
             "evidence must never include prompt or completion text");
+    }
+
+    // ── failover demo (#330) ─────────────────────────────────────────────────
+
+    private static string Module(string file) => File.ReadAllText(Path.Combine(RepoRoot, "infra", "modules", file));
+
+    [Fact]
+    public void FailoverDemo_IsDisabledByDefault_AndFailsClosed()
+    {
+        ApimOpenAiApiBicep.Should().MatchRegex(@"param\s+failoverDemoEnabled\s+bool\s*=\s*false");
+        ApimOpenAiApiBicep.Should().Contain("var failoverDemoActive = failoverDemoEnabled && poolEnabled && length(failoverDemoKey) >= 32");
+        MainBicep.Should().MatchRegex(@"param\s+apimFailoverDemoEnabled\s+bool\s*=\s*false");
+        // Disabled traffic keeps the original backend policy and only strips the demo header.
+        ApimOpenAiApiBicep.Should().Contain("failoverDemoActive\n  ? replace(failoverDemoBackendFragment");
+        ApimOpenAiApiBicep.Should().Contain("failoverDemoActive ? loadTextContent('apim-openai-failover-demo-outbound.xml') : ''");
+        ApimPolicyXml.Should().NotContain("rp-failover-demo", "the base policy carries no demo logic when disabled");
+    }
+
+    [Fact]
+    public void FailoverDemo_AzdParametersMapTheEnablementAndSecretEnvironmentVariables()
+    {
+        MainBicepParam.Should().Contain(
+            "param apimFailoverDemoEnabled = toLower(readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_ENABLED', 'false')) == 'true'");
+        MainBicepParam.Should().Contain(
+            "param apimFailoverDemoKey = readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_KEY', '')");
+    }
+
+    [Fact]
+    public void FailoverDemo_ProbeSeparatesDisabledDeploymentFromEnabledButDisarmed()
+    {
+        string probe = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "probe-failover-demo.cjs"));
+        int disabledStart = probe.IndexOf("async function runDisabledProbe", StringComparison.Ordinal);
+        int enabledStart = probe.IndexOf("async function runEnabledProbe", StringComparison.Ordinal);
+
+        disabledStart.Should().BeGreaterThan(-1);
+        enabledStart.Should().BeGreaterThan(disabledStart);
+        probe[disabledStart..enabledStart].Should().NotContain("setArmed")
+            .And.Contain("ordinary traffic succeeds")
+            .And.Contain("demo header does not change normal traffic");
+        probe.Should().Contain("FAILOVER_DEMO_DEPLOYMENT")
+            .And.Contain("deploymentMode === 'disabled'");
+    }
+
+    [Fact]
+    public void FailoverDemo_RequiresSecretKeyAndArmSwitch_AndRejectsOthers()
+    {
+        string inbound = Module("apim-openai-failover-demo-inbound.xml");
+        inbound.Should().Contain("{{rp-failover-demo-key}}");
+        inbound.Should().Contain("{{rp-failover-demo-armed}}");
+        inbound.Should().Contain("{{rp-failover-demo-key}}&quot; != &quot;&quot;", "an empty key must never authorize");
+        inbound.Should().Contain("<set-status code=\"403\"");
+        inbound.Should().Contain("<set-header name=\"x-rp-failover-demo\" exists-action=\"delete\"",
+            "the secret must never be forwarded to a backend");
+        ApimOpenAiApiBicep.Should().Contain("secret: true");
+        ApimOpenAiApiBicep.Should().MatchRegex(@"@secure\(\)\s*@description\('Operator secret[^']*'\)\s*param\s+failoverDemoKey");
+    }
+
+    [Fact]
+    public void FailoverDemo_IsRateLimitedAndAudited_WithoutCallerBackendSelection()
+    {
+        string inbound = Module("apim-openai-failover-demo-inbound.xml");
+        inbound.Should().Contain("<rate-limit-by-key calls=\"3\"");
+        inbound.Should().Contain("<rate-limit-by-key calls=\"10\"", "denied attempts are limited too");
+        inbound.Should().Contain("name=\"rp.failover.demo.audit\"");
+        int attempt = inbound.IndexOf("name=\"rp.failover.demo.attempt\"", StringComparison.Ordinal);
+        attempt.Should().BeGreaterThan(-1);
+        attempt.Should().BeLessThan(inbound.IndexOf("<rate-limit-by-key", StringComparison.Ordinal),
+            "every attempt, including rate-limited ones, must be counted before any limiter runs");
+        inbound.Should().Contain("value=\"authorized\"").And.Contain("value=\"denied\"");
+
+        string backend = Module("apim-openai-failover-demo-backend.xml");
+        backend.Should().Contain("backend-id=\"{demo-primary-backend}\"").And.Contain("backend-id=\"{demo-secondary-backend}\"");
+        (inbound + backend).Should().NotMatchRegex(@"Headers\.GetValueOrDefault\(&quot;x-rp-(backend|failover-backend)",
+            "callers must not choose a backend");
+        backend.Should().NotContain("context.Request.Headers");
+    }
+
+    [Fact]
+    public void FailoverDemo_ResetIsDocumentedAndDefaultsToDisarmedOnDeploy()
+    {
+        ApimOpenAiApiBicep.Should().MatchRegex(@"rp-failover-demo-armed'[\s\S]{0,200}value:\s*'false'");
+        File.ReadAllText(Path.Combine(RepoRoot, "docs", "demo-walkthrough.md"))
+            .Should().Contain("rp-failover-demo-armed").And.Contain("Reset");
+    }
+
+    [Fact]
+    public void FailoverDemo_EvidenceComesFromRealResponses_NeverHardCodedSuccess()
+    {
+        string outbound = Module("apim-openai-failover-demo-outbound.xml");
+        outbound.Should().Contain("context.Response.StatusCode");
+        outbound.Should().Contain("rp-demo-primary-status");
+        // failover route is only emitted behind a second attempt that really succeeded
+        FailoverRouteConditionRegex().Match(outbound)
+            .Groups[1].Value.Should().Contain("&gt; 1").And.Contain("&lt; 400");
+        outbound.Should().NotContain("x-rp-gw-quota").And.NotContain("x-rp-gw-safety").And.NotContain("x-rp-gw-cache");
+        Module("apim-openai-failover-demo-backend.xml").Should().Contain("1900-01-01");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

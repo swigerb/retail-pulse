@@ -1161,6 +1161,12 @@ export type GatewayEvidenceStatus = 'unavailable' | 'observed' | 'bypassed' | 'b
 
 export type GatewayRouteState = 'unknown' | 'primary' | 'failover';
 
+export interface GatewayFailoverDemoEvidence {
+  primaryStatusCode?: number | null;
+  attempts?: number | null;
+  fallbackUsed?: boolean | null;
+}
+
 export interface GatewayCallEvidence {
   gatewayRequestId?: string | null;
   backendAlias?: string | null;
@@ -1177,6 +1183,8 @@ export interface GatewayCallEvidence {
   status: GatewayEvidenceStatus;
   /** Fixed error class for transport failures; never exception text. */
   transportError?: string | null;
+  /** Present only for an authorized failover demonstration. */
+  failoverDemo?: GatewayFailoverDemoEvidence | null;
 }
 
 export interface GatewayEvidence {

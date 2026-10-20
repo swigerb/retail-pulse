@@ -47,6 +47,15 @@ public enum GatewayEvidenceStatus
 }
 
 /// <summary>
+/// Observed attempts of an authorized failover demonstration (#330). Present only when APIM
+/// reported <c>x-rp-gw-failover-demo: active</c>; every field is a status the gateway
+/// actually saw, and a field it did not report stays null (unknown) rather than defaulted.
+/// <see cref="PrimaryStatusCode"/> is the real primary backend response; the demo does not
+/// trip the circuit breaker, so no breaker outcome is claimed.
+/// </summary>
+public sealed record GatewayFailoverDemoEvidence(int? PrimaryStatusCode, int? Attempts, bool? FallbackUsed);
+
+/// <summary>
 /// Privacy-safe evidence of the decisions APIM made for one gateway call. Carries no
 /// subscription identifiers, secrets, prompts, completions, backend credentials, or
 /// exception text. <see cref="TransportError"/> is a fixed error class only.
@@ -65,7 +74,8 @@ public sealed record GatewayCallEvidence(
     long? BackendLatencyMs,
     int? StatusCode = null,
     GatewayEvidenceStatus Status = GatewayEvidenceStatus.Observed,
-    string? TransportError = null)
+    string? TransportError = null,
+    GatewayFailoverDemoEvidence? FailoverDemo = null)
 {
     /// <summary>True when the response carried no gateway evidence at all.</summary>
     [JsonIgnore]
