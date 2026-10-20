@@ -645,3 +645,20 @@ deploy loudly rather than proceeding with a broken registry configuration.
 | Frontend 404 after deploy | Ensure the frontend deploy ran `npm run build` after provision (`azd deploy frontend`); confirm `dist/` was produced |
 | Container Apps unhealthy | Run `azd monitor` → check container logs in Log Analytics; confirm the postprovision hook applied runtime environment values |
 | CORS errors on frontend | Confirm the postprovision hook set `Security__AllowedOrigins__0` to the SWA origin and that API ingress is external |
+
+## Optional semantic cache (Azure Managed Redis, issue #338)
+
+`infra/modules/managed-redis-cache.bicep` provisions the external vector cache APIM semantic caching requires. It is **disabled by default** (`AZURE_SEMANTIC_CACHE_ENABLED=false`), so a default `azd up` is unchanged.
+
+| Setting | Default |
+|---|---|
+| `AZURE_SEMANTIC_CACHE_SKU` | `Balanced_B0` (lowest Azure Managed Redis SKU with the RediSearch module) |
+| `AZURE_SEMANTIC_CACHE_TTL_SECONDS` | `300` (60–86400) |
+| `AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS` | `Disabled` |
+| `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` | empty (no private endpoint) |
+
+Security: TLS 1.2 only, encrypted client protocol, access keys disabled, and the APIM system identity is the only data principal. No key or connection string is emitted; outputs are `AZURE_SEMANTIC_CACHE_{ENABLED,NAME,RESOURCE_ID,HOST,TTL_SECONDS}`. With public access disabled, supply a private-endpoint subnet (and private DNS) before wiring APIM.
+
+**Cost class:** a small, continuously billed, always-on Azure Managed Redis instance (roughly tens of USD per month for Balanced_B0; confirm current regional pricing). The live deployment issue must record an explicit cost approval before enabling.
+
+**Teardown:** `azd env set AZURE_SEMANTIC_CACHE_ENABLED false && azd provision`, or delete directly: `az redisenterprise delete --name redis-<token> --resource-group rg-<env> --yes`. `azd down` also removes it.
