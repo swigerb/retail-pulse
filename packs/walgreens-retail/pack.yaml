@@ -42,7 +42,7 @@ tenant:
       priceSegment: "Value"
   regions:
     - "Northeast Metro"
-    - "Great Lakes"
+    - "Midwest Corridor"
     - "Sun Belt"
     - "Pacific Coast"
   channels:
