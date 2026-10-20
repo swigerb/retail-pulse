@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-333-api-center",
+  "sessionId": "rp-333-api-center",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T15:09:56.678Z",
+  "lastHeartbeatAt": "2026-10-20T15:09:56.678Z",
+  "updatedAt": "2026-10-20T15:09:56.678Z",
+  "terminalReason": null,
+  "executionRef": null
+}
