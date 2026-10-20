@@ -811,7 +811,7 @@ Retail Pulse API with its managed identity.
 - **Quotas per subscription:** 30 calls/min, 2,000 calls/day, 20 MB/day.
 - **API-side caps for app-only callers:** `McpGateway:MaxItems` (default 50) and `McpGateway:MaxResponseBytes`
   (default 262144, `413 {"error":"response_too_large"}`).
-- **Route allow-list:** `McpGateway:AllowedOperations` (`"GET /api/supply/inventory"`, …) is enforced by
+- **Route allow-list:** `McpGateway:Clients:{i}` (`ClientId` + its own `Operations`, e.g. `"GET /api/supply/inventory"` for APIM only, `"POST /api/chat"` for the bot) is enforced by
   `AppOnlyRouteAllowListMiddleware` after authorization; an empty list denies every app-only request. The Teams bot
   keeps `POST /api/chat` when a bot is configured.
 - **Provisioning:** `scripts/Setup-McpGatewayIdentity.ps1` (azd `postprovision`) creates the gateway app role and the

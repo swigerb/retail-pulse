@@ -14,12 +14,19 @@ public static class McpGatewayOptions
     public const int DefaultMaxItems = 50;
     public const int DefaultMaxResponseBytes = 262144;
 
-    public static IReadOnlyList<string> GetAllowedOperations(IConfiguration configuration) =>
-        configuration.GetSection($"{SectionName}:AllowedOperations").GetChildren()
-            .Select(c => c.Value?.Trim())
-            .Where(v => !string.IsNullOrEmpty(v))
-            .Select(v => v!)
-            .ToArray();
+    /// <summary>
+    /// Reads <c>McpGateway:Clients:{i}:ClientId</c> with its own <c>Operations</c> list of exact
+    /// <c>"{METHOD} {route template}"</c> entries. Clients without a GUID client id are ignored.
+    /// </summary>
+    public static IReadOnlyList<McpGatewayClient> GetClients(IConfiguration configuration) =>
+        [.. configuration.GetSection($"{SectionName}:Clients").GetChildren()
+            .Select(c => new McpGatewayClient(
+                c["ClientId"]?.Trim() ?? string.Empty,
+                [.. c.GetSection("Operations").GetChildren()
+                    .Select(o => o.Value?.Trim())
+                    .Where(v => !string.IsNullOrEmpty(v))
+                    .Select(v => v!)]))
+            .Where(c => Guid.TryParse(c.ClientId, out _))];
 
     public static int GetMaxItems(IConfiguration configuration) =>
         Math.Max(1, configuration.GetValue($"{SectionName}:MaxItems", DefaultMaxItems));
@@ -37,9 +44,12 @@ public static class McpGatewayOptions
         && AuthenticationSetup.HasRolesClaim(principal);
 }
 
+/// <summary>One allow-listed app-only client and the exact operations it may call.</summary>
+public sealed record McpGatewayClient(string ClientId, IReadOnlyList<string> Operations);
+
 /// <summary>
 /// Defense in depth for the APIM managed identity (ADR 017): app-only callers may reach only
-/// the exact <c>"{METHOD} {route template}"</c> entries in <c>McpGateway:AllowedOperations</c>.
+/// the exact <c>"{METHOD} {route template}"</c> entries listed for their own client id (azp/appid) under <c>McpGateway:Clients</c>.
 /// Runs after routing, authentication and authorization, so it can only narrow access.
 /// An empty or missing list denies every app-only request (fail closed).
 /// </summary>
@@ -69,20 +79,34 @@ public sealed class AppOnlyRouteAllowListMiddleware(RequestDelegate next, IConfi
             return false;
         }
 
-        foreach (string entry in McpGatewayOptions.GetAllowedOperations(configuration))
+        // Only the caller's own client entry applies, so one client's routes never widen another's.
+        var callerIds = context.User.FindAll("azp").Concat(context.User.FindAll("appid"))
+            .Select(c => Guid.TryParse(c.Value, out Guid id) ? id : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .ToHashSet();
+
+        foreach (McpGatewayClient client in McpGatewayOptions.GetClients(configuration))
         {
-            int space = entry.IndexOf(' ');
-            if (space <= 0)
+            if (!callerIds.Contains(Guid.Parse(client.ClientId)))
             {
                 continue;
             }
 
-            string method = entry[..space];
-            string allowedTemplate = entry[(space + 1)..].Trim();
-            if (string.Equals(method, context.Request.Method, StringComparison.Ordinal)
-                && string.Equals(allowedTemplate, template, StringComparison.OrdinalIgnoreCase))
+            foreach (string entry in client.Operations)
             {
-                return true;
+                int space = entry.IndexOf(' ');
+                if (space <= 0)
+                {
+                    continue;
+                }
+
+                string method = entry[..space];
+                string allowedTemplate = entry[(space + 1)..].Trim();
+                if (string.Equals(method, context.Request.Method, StringComparison.Ordinal)
+                    && string.Equals(allowedTemplate, template, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
         }
 
@@ -126,7 +150,7 @@ public sealed class McpGatewayResponseBudgetFilter(IConfiguration configuration)
             http.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
             http.Response.ContentType = "application/json";
             http.Response.ContentLength = null;
-            await http.Response.WriteAsync("{\"error\":\"response_too_large\"}", http.RequestAborted);
+            await http.Response.WriteAsync(/*lang=json,strict*/ "{\"error\":\"response_too_large\"}", http.RequestAborted);
             return Results.Empty;
         }
 
@@ -139,7 +163,7 @@ public sealed class McpGatewayResponseBudgetFilter(IConfiguration configuration)
                 http.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
                 http.Response.ContentType = "application/json";
                 http.Response.ContentLength = null;
-                await http.Response.WriteAsync("{\"error\":\"response_too_large\"}", http.RequestAborted);
+                await http.Response.WriteAsync(/*lang=json,strict*/ "{\"error\":\"response_too_large\"}", http.RequestAborted);
                 return Results.Empty;
             }
         }

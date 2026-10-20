@@ -18,7 +18,7 @@
     </validate-jwt>
     <!-- MCP transport verbs only; tool operations themselves are GET-only (backing API). -->
     <choose>
-      <when condition="@(context.Request.Method != "POST" &amp;&amp; context.Request.Method != "GET" &amp;&amp; context.Request.Method != "DELETE")">
+      <when condition="@(context.Request.Method != &quot;POST&quot; &amp;&amp; context.Request.Method != &quot;GET&quot; &amp;&amp; context.Request.Method != &quot;DELETE&quot;)">
         <return-response>
           <set-status code="405" reason="Method Not Allowed" />
         </return-response>
@@ -26,7 +26,7 @@
     </choose>
     <!-- Belt and braces: only the four approved read-only operations may execute. -->
     <choose>
-      <when condition="@(context.Operation != null && context.Operation.Id != "get_inventory" && context.Operation.Id != "get_stockout_risk" && context.Operation.Id != "get_supply_disruptions" && context.Operation.Id != "get_demand_forecast")">
+      <when condition="@(context.Operation != null &amp;&amp; context.Operation.Id != &quot;get_inventory&quot; &amp;&amp; context.Operation.Id != &quot;get_stockout_risk&quot; &amp;&amp; context.Operation.Id != &quot;get_supply_disruptions&quot; &amp;&amp; context.Operation.Id != &quot;get_demand_forecast&quot;)">
         <return-response>
           <set-status code="403" reason="Forbidden" />
         </return-response>
@@ -51,10 +51,10 @@
     <!-- Telemetry without payloads: server, tool, caller scope, latency, outcome. No policy reads the response body. -->
     <emit-metric name="mcp_gateway_calls" namespace="retailpulse_mcp" value="@(context.Elapsed.TotalMilliseconds)">
       <dimension name="mcp_server" value="retail-pulse-mcp-server" />
-      <dimension name="tool" value="@(context.Operation != null ? context.Operation.Id : "mcp-transport")" />
+      <dimension name="tool" value="@(context.Operation != null ? context.Operation.Id : &quot;mcp-transport&quot;)" />
       <dimension name="caller_scope" value="RetailPulse.Mcp.Invoke" />
       <dimension name="outcome" value="@(context.Response.StatusCode.ToString())" />
-      <dimension name="subscription" value="@(context.Subscription != null ? context.Subscription.Id : "none")" />
+      <dimension name="subscription" value="@(context.Subscription != null ? context.Subscription.Id : &quot;none&quot;)" />
     </emit-metric>
   </outbound>
   <on-error>

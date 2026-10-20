@@ -28,6 +28,10 @@ public sealed class McpGatewayApiTests
     private const string ShortScope = "scp";
     private const string LongScope = "http://schemas.microsoft.com/identity/claims/scope";
 
+    private const string ApimClientId = "11111111-1111-1111-1111-111111111111";
+    private const string BotClientId = "22222222-2222-2222-2222-222222222222";
+    private const string OtherClientId = "33333333-3333-3333-3333-333333333333";
+
     private static readonly string[] V1Operations =
     [
         "GET /api/supply/inventory",
@@ -66,7 +70,11 @@ public sealed class McpGatewayApiTests
             var claims = new List<Claim>();
             switch (kind)
             {
-                case "app": claims.Add(new Claim("roles", "RetailPulse.User")); break;
+                case "app": claims.Add(new Claim("roles", "RetailPulse.User")); claims.Add(new Claim("azp", ApimClientId)); break;
+                case "apim-v1": claims.Add(new Claim("roles", "RetailPulse.User")); claims.Add(new Claim("appid", ApimClientId)); break;
+                case "bot": claims.Add(new Claim("roles", "RetailPulse.User")); claims.Add(new Claim("azp", BotClientId)); break;
+                case "other": claims.Add(new Claim("roles", "RetailPulse.User")); claims.Add(new Claim("azp", OtherClientId)); break;
+                case "noazp": claims.Add(new Claim("roles", "RetailPulse.User")); break;
                 case "short": claims.Add(new Claim(ShortScope, "access_as_user")); claims.Add(new Claim("roles", "RetailPulse.User")); break;
                 case "long": claims.Add(new Claim(LongScope, "access_as_user")); claims.Add(new Claim("roles", "RetailPulse.User")); break;
                 default: claims.Add(new Claim(ShortScope, "access_as_user")); break;
@@ -102,6 +110,7 @@ public sealed class McpGatewayApiTests
         app.MapStoreEndpoints();
         app.MapDemandEndpoints();
         app.MapMarginEndpoints();
+        app.MapPost("/api/chat", () => Results.Ok()).RequireAuthorization();
         app.MapPost("/api/supply/inventory", () => Results.Ok()).RequireAuthorization();
         await app.StartAsync();
         return (app, app.GetTestClient());
@@ -110,7 +119,10 @@ public sealed class McpGatewayApiTests
     private static Dictionary<string, string?> AllowList(params string[] ops)
     {
         var d = new Dictionary<string, string?>();
-        for (int i = 0; i < ops.Length; i++) d[$"McpGateway:AllowedOperations:{i}"] = ops[i];
+        if (ops.Length > 0) d["McpGateway:Clients:0:ClientId"] = ApimClientId;
+        for (int i = 0; i < ops.Length; i++) d[$"McpGateway:Clients:0:Operations:{i}"] = ops[i];
+        d["McpGateway:Clients:1:ClientId"] = BotClientId;
+        d["McpGateway:Clients:1:Operations:0"] = "POST /api/chat";
         return d;
     }
 
@@ -128,7 +140,7 @@ public sealed class McpGatewayApiTests
     [InlineData("/api/demand/forecast?brand=Acme")]
     public async Task AppOnly_AllowedGet_Succeeds(string path)
     {
-        var handler = new StubHandler(_ => "{\"items\":[]}");
+        var handler = new StubHandler(_ => /*lang=json,strict*/ "{\"items\":[]}");
         (WebApplication app, HttpClient client) = await StartAsync(handler, AllowList(V1Operations));
         await using (app)
         {
@@ -160,7 +172,11 @@ public sealed class McpGatewayApiTests
     public async Task AppOnly_EmptyOrMissingAllowList_DeniesEverything(string? value)
     {
         var config = new Dictionary<string, string?>();
-        if (value is not null) config["McpGateway:AllowedOperations:0"] = value;
+        if (value is not null)
+        {
+            config["McpGateway:Clients:0:ClientId"] = ApimClientId;
+            config["McpGateway:Clients:0:Operations:0"] = value;
+        }
         (WebApplication app, HttpClient client) = await StartAsync(new StubHandler(_ => "{}"), config);
         await using (app)
         {
@@ -177,14 +193,14 @@ public sealed class McpGatewayApiTests
     public async Task AppOnly_MethodMatchIsOrdinalAndTemplateCaseInsensitive()
     {
         (WebApplication app, HttpClient client) = await StartAsync(
-            new StubHandler(_ => "{\"items\":[]}"), AllowList("get /api/supply/inventory"));
+            new StubHandler(_ => /*lang=json,strict*/ "{\"items\":[]}"), AllowList("get /api/supply/inventory"));
         await using (app)
         {
             (await client.SendAsync(Req(HttpMethod.Get, "/api/supply/inventory", "app"))).StatusCode
                 .Should().Be(HttpStatusCode.Forbidden, "lower-case method is not an exact entry");
         }
 
-        (app, client) = await StartAsync(new StubHandler(_ => "{\"items\":[]}"), AllowList("GET /API/Supply/Inventory"));
+        (app, client) = await StartAsync(new StubHandler(_ => /*lang=json,strict*/ "{\"items\":[]}"), AllowList("GET /API/Supply/Inventory"));
         await using (app)
         {
             (await client.SendAsync(Req(HttpMethod.Get, "/api/supply/inventory", "app"))).StatusCode
@@ -203,6 +219,56 @@ public sealed class McpGatewayApiTests
         {
             HttpResponseMessage res = await client.SendAsync(Req(HttpMethod.Get, "/api/margin/acme", caller));
             res.StatusCode.Should().Be(HttpStatusCode.OK, "tokens with scp/long scope claim plus roles are not app-only");
+        }
+    }
+
+    [Theory]
+    [InlineData("bot", "GET", "/api/supply/inventory")]
+    [InlineData("bot", "GET", "/api/stores/stockout-risks")]
+    [InlineData("bot", "GET", "/api/supply/disruptions")]
+    [InlineData("bot", "GET", "/api/demand/forecast?brand=a")]
+    [InlineData("app", "POST", "/api/chat")]
+    [InlineData("apim-v1", "POST", "/api/chat")]
+    [InlineData("other", "GET", "/api/supply/inventory")]
+    [InlineData("other", "POST", "/api/chat")]
+    [InlineData("noazp", "GET", "/api/supply/inventory")]
+    [InlineData("noazp", "POST", "/api/chat")]
+    [InlineData("app", "GET", "/api/margin/acme")]
+    [InlineData("bot", "GET", "/api/margin/acme")]
+    public async Task AppOnly_CrossClientNonV1OrUnknownCaller_Is403(string caller, string method, string path)
+    {
+        var handler = new StubHandler(_ => "{}");
+        (WebApplication app, HttpClient client) = await StartAsync(handler, AllowList(V1Operations));
+        await using (app)
+        {
+            HttpResponseMessage res = await client.SendAsync(Req(new HttpMethod(method), path, caller));
+            res.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            handler.Requests.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task AppOnly_BotMayCallOnlyItsChatRoute_AndApimV1ClaimFormIsAccepted()
+    {
+        (WebApplication app, HttpClient client) = await StartAsync(new StubHandler(_ => /*lang=json,strict*/ "{\"items\":[]}"), AllowList(V1Operations));
+        await using (app)
+        {
+            (await client.SendAsync(Req(HttpMethod.Post, "/api/chat", "bot"))).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await client.SendAsync(Req(HttpMethod.Get, "/api/supply/inventory", "apim-v1"))).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await client.SendAsync(Req(HttpMethod.Put, "/api/chat", "bot"))).StatusCode.Should().NotBe(HttpStatusCode.OK);
+        }
+    }
+
+    [Fact]
+    public async Task AppOnly_ClientEntryWithInvalidClientId_GrantsNothing()
+    {
+        Dictionary<string, string?> config = AllowList(V1Operations);
+        config["McpGateway:Clients:0:ClientId"] = "not-a-guid";
+        (WebApplication app, HttpClient client) = await StartAsync(new StubHandler(_ => "{}"), config);
+        await using (app)
+        {
+            (await client.SendAsync(Req(HttpMethod.Get, "/api/supply/inventory", "app"))).StatusCode
+                .Should().Be(HttpStatusCode.Forbidden);
         }
     }
 
@@ -290,7 +356,7 @@ public sealed class McpGatewayApiTests
         {
             HttpResponseMessage res = await client.SendAsync(Req(HttpMethod.Get, "/api/supply/disruptions", "app"));
             res.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
-            (await res.Content.ReadAsStringAsync()).Should().Be("{\"error\":\"response_too_large\"}");
+            (await res.Content.ReadAsStringAsync()).Should().Be(/*lang=json,strict*/ "{\"error\":\"response_too_large\"}");
         }
     }
 
@@ -310,7 +376,7 @@ public sealed class McpGatewayApiTests
     [Fact]
     public async Task Forecast_CallsMcpForecastWithEscapedBrandAndDefaultRegion()
     {
-        var handler = new StubHandler(_ => "{\"forecast\":[1,2]}");
+        var handler = new StubHandler(_ => /*lang=json,strict*/ "{\"forecast\":[1,2]}");
         (WebApplication app, HttpClient client) = await StartAsync(handler, AllowList(V1Operations));
         await using (app)
         {
@@ -339,7 +405,7 @@ public sealed class McpGatewayApiTests
         for (int i = 0; i < count; i++)
         {
             if (i > 0) sb.Append(',');
-            sb.Append($"{{\"sku\":\"S{i}\",\"brand\":\"B\",\"category\":\"C\",\"region\":\"R\",\"status\":\"{status}\",\"days_of_supply\":{i % 9 + 1},\"current_stock\":100,\"safety_stock\":50}}");
+            sb.Append($"{{\"sku\":\"S{i}\",\"brand\":\"B\",\"category\":\"C\",\"region\":\"R\",\"status\":\"{status}\",\"days_of_supply\":{(i % 9) + 1},\"current_stock\":100,\"safety_stock\":50}}");
         }
 
         return sb.Append("]}").ToString();

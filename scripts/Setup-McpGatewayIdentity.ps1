@@ -25,7 +25,8 @@
 
     Fail-closed: on 403 / Authorization_RequestDenied the script exits non-zero naming the missing
     permission; it never skips the assignment. Transient 429/5xx are retried 3 times with backoff;
-    a 404 from service-principal propagation delay is retried up to 5 times at 10 s intervals.
+    a 404 from service-principal propagation delay (APIM and freshly created gateway SP) is retried up to 5 times at 10 s intervals.
+    It then applies and verifies the gateway env on the API Container App so the first provision works without a second one.
 
 .PARAMETER ApimPrincipalId
     Object id of the APIM system-assigned identity (azd output AZURE_APIM_PRINCIPAL_ID).
@@ -40,6 +41,14 @@ param(
     [string]$GatewayAudience = $(if ($env:AZURE_MCP_GATEWAY_AUDIENCE) { $env:AZURE_MCP_GATEWAY_AUDIENCE } else { 'api://retailpulse-mcp-gateway' }),
     [string]$ApiAppRole = 'RetailPulse.User',
     [string]$InvokeRole = 'RetailPulse.Mcp.Invoke',
+    [string]$ResourceGroup = $env:AZURE_RESOURCE_GROUP,
+    [string]$ApiAppName = $env:AZURE_API_APP_NAME,
+    [string[]]$AllowedOperations = @(
+        'GET /api/supply/inventory',
+        'GET /api/stores/stockout-risks',
+        'GET /api/supply/disruptions',
+        'GET /api/demand/forecast'),
+    [switch]$SkipContainerAppUpdate,
     [switch]$SkipAzdEnv
 )
 
@@ -165,7 +174,9 @@ else {
 $gatewaySp = Get-FirstOrNull (Invoke-Graph -Method GET -Url "$graph/servicePrincipals?`$filter=appId eq '$($gatewayApp.appId)'&`$select=id")
 if (-not $gatewaySp) {
     Write-Host '-> creating gateway service principal'
-    Invoke-Graph -Method POST -Url "$graph/servicePrincipals" -Body @{ appId = $gatewayApp.appId } | Out-Null
+    $created = Invoke-Graph -Method POST -Url "$graph/servicePrincipals" -Body @{ appId = $gatewayApp.appId }
+    # A fresh service principal can 404 for a while; retry up to 5 times at 10 s intervals before moving on.
+    Invoke-Graph -Method GET -Url "$graph/servicePrincipals/$($created.id)?`$select=id" -RetryNotFound | Out-Null
 }
 
 # 2. Retail Pulse API service principal and its app role id.
@@ -196,6 +207,41 @@ if (-not $SkipAzdEnv) {
     if ($LASTEXITCODE -ne 0) { throw 'azd env set AZURE_MCP_GATEWAY_AUDIENCE failed.' }
     & azd env set AZURE_MCP_GATEWAY_APIM_CLIENT_ID $apimSp.appId
     if ($LASTEXITCODE -ne 0) { throw 'azd env set AZURE_MCP_GATEWAY_APIM_CLIENT_ID failed.' }
+}
+
+# 5. First-provision fix: the APIM client id did not exist when ARM ran, so the API Container App was
+# deployed with the gateway slot (McpGateway__Clients__0, AllowedAppClientIds__1) empty. Apply it here, in
+# the same idempotent flow, and verify the live configuration. Slot keys match container-apps.bicep, so a
+# later azd provision (which reads AZURE_MCP_GATEWAY_APIM_CLIENT_ID) writes identical values.
+if (-not $SkipContainerAppUpdate) {
+    if ([string]::IsNullOrWhiteSpace($ResourceGroup) -or [string]::IsNullOrWhiteSpace($ApiAppName)) {
+        throw 'Setup-McpGatewayIdentity: ResourceGroup (AZURE_RESOURCE_GROUP) and ApiAppName (AZURE_API_APP_NAME) are required to apply the gateway configuration.'
+    }
+
+    $desired = [ordered]@{
+        'MicrosoftEntra__AllowAppOnlyTokens'     = 'true'
+        'MicrosoftEntra__AllowedAppClientIds__1' = $apimSp.appId
+        'McpGateway__Clients__0__ClientId'       = $apimSp.appId
+    }
+    for ($i = 0; $i -lt $AllowedOperations.Count; $i++) {
+        $desired["McpGateway__Clients__0__Operations__$i"] = $AllowedOperations[$i]
+    }
+
+    $settings = @($desired.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
+    Write-Host '-> applying MCP gateway configuration to the API Container App'
+    & az containerapp update --name $ApiAppName --resource-group $ResourceGroup --set-env-vars @settings --only-show-errors | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "az containerapp update failed for $ApiAppName; the APIM identity is not trusted by the API." }
+
+    $liveJson = & az containerapp show --name $ApiAppName --resource-group $ResourceGroup --query 'properties.template.containers[0].env' -o json --only-show-errors | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "az containerapp show failed for $ApiAppName." }
+    $live = @{}
+    foreach ($entry in ($liveJson | ConvertFrom-Json)) { $live[$entry.name] = $entry.value }
+    foreach ($key in $desired.Keys) {
+        if ($live[$key] -ne $desired[$key]) {
+            throw "Container App $ApiAppName env '$key' was not applied (expected '$($desired[$key])'). MCP backend access is not configured."
+        }
+    }
+    Write-Host '-> verified MCP gateway configuration on the API Container App'
 }
 
 Write-Host "MCP gateway identity ready. Audience: $GatewayAudience; APIM managed identity client id: $($apimSp.appId)"

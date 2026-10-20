@@ -54,7 +54,7 @@ public sealed partial class McpGatewayDeploymentContractTests
             body.Should().Contain("method: 'GET'");
             body.Should().NotMatchRegex("method: '(POST|PUT|PATCH|DELETE)'");
             body.Should().NotContain("*");
-            ApprovedTools.Should().Contain(Regex.Match(body, @"name: '([^']+)'").Groups[1].Value);
+            ApprovedTools.Should().Contain(MyRegex().Match(body).Groups[1].Value);
         }
 
         McpBicep.Should().NotContainAny("method: 'POST'", "method: 'PUT'", "method: 'PATCH'", "method: 'DELETE'");
@@ -64,8 +64,8 @@ public sealed partial class McpGatewayDeploymentContractTests
     public void BackingApi_IsNotBoundToAnyProduct_SoItIsNotCallableAsRest()
     {
         Regex.Matches(McpBicep, @"service/products/apis@").Should().HaveCount(1);
-        Regex.Match(McpBicep, @"service/products/apis@[^']+'\s*=\s*\{[^}]*name:\s*mcpServerId").Success.Should().BeTrue();
-        BackingPolicy.Should().Contain("405").And.Contain("context.Request.Method != \"GET\"");
+        Regex.IsMatch(McpBicep, @"service/products/apis@[^']+'\s*=\s*\{[^}]*name:\s*mcpServerId").Should().BeTrue();
+        BackingPolicy.Should().Contain("405").And.Contain("context.Request.Method != &quot;GET&quot;");
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed partial class McpGatewayDeploymentContractTests
         McpPolicy.Should().Contain("context.Subscription.Id");
         foreach (string tool in ApprovedTools)
         {
-            McpPolicy.Should().Contain($"\"{tool}\"");
+            McpPolicy.Should().Contain($"&quot;{tool}&quot;");
         }
 
         McpPolicy.Should().NotContain("context.Response.Body", "MCP server policies must not buffer the response");
@@ -153,20 +153,76 @@ public sealed partial class McpGatewayDeploymentContractTests
     {
         string apps = Read("infra", "modules", "container-apps.bicep");
         apps.Should().Contain("param mcpGatewayClientId string = ''");
-        apps.Should().Contain("McpGateway__AllowedOperations__");
         apps.Should().Contain("MicrosoftEntra__AllowedAppClientIds__1");
-        apps.Should().Contain("mcpGatewayConfigured ? mcpAllowedOperations : []");
+        apps.Should().NotContain("McpGateway__AllowedOperations__", "the shared app-only list is replaced by per-client lists");
+        apps.Should().Contain("McpGateway__Clients__0__ClientId").And.Contain("McpGateway__Clients__0__Operations__");
+        apps.Should().Contain("McpGateway__Clients__1__ClientId").And.Contain("McpGateway__Clients__1__Operations__");
+        apps.Should().Contain("mcpGatewayConfigured").And.Contain("mcpAllowedOperations[i]");
+        apps.Should().Contain("'POST /api/chat'");
         foreach (string op in new[] { "GET /api/supply/inventory", "GET /api/stores/stockout-risks", "GET /api/supply/disruptions", "GET /api/demand/forecast" })
         {
             apps.Should().Contain($"'{op}'");
         }
     }
 
-    [Fact]
-    public void OldUnsafeAttachOn_IsRetired()
+    [Theory]
+    [InlineData("apim-mcp-policy.xml")]
+    [InlineData("apim-mcp-backing-policy.xml")]
+    public void PolicyXml_IsWellFormed_WithEscapedAttributeExpressions(string file)
     {
-        File.Exists(Path.Combine(Root, "deploy", "apim-ai-gateway", "mcp-api.bicep")).Should().BeFalse();
+        string xml = Read("infra", "modules", file);
+        Action parse = () => System.Xml.Linq.XDocument.Parse(xml);
+        parse.Should().NotThrow();
+
+        var doc = System.Xml.Linq.XDocument.Parse(xml);
+        string[] conditions = [.. doc.Descendants("when").Select(w => (string)w.Attribute("condition")!)];
+        conditions.Should().NotBeEmpty().And.OnlyContain(c => c.StartsWith("@(") && c.Contains('"'));
     }
+
+    [Fact]
+    public void McpPolicy_LogicalAndsAndOperationCheckSurviveParsing()
+    {
+        var doc = System.Xml.Linq.XDocument.Parse(McpPolicy);
+        string[] conditions = [.. doc.Descendants("when").Select(w => (string)w.Attribute("condition")!)];
+        conditions.Should().Contain(c => c.Contains("&&") && c.Contains("\"DELETE\""));
+        string operationGuard = conditions.Single(c => c.Contains("context.Operation"));
+        foreach (string tool in ApprovedTools)
+        {
+            operationGuard.Should().Contain($"\"{tool}\"");
+        }
+    }
+
+    [Fact]
+    public void IdentityScript_AppliesAndVerifiesContainerAppConfig_OnFirstProvision()
+    {
+        string script = Read("scripts", "Setup-McpGatewayIdentity.ps1");
+        script.Should().Contain("az containerapp update").And.Contain("--set-env-vars");
+        script.Should().Contain("McpGateway__Clients__0__ClientId").And.Contain("McpGateway__Clients__0__Operations__");
+        script.Should().Contain("MicrosoftEntra__AllowedAppClientIds__1").And.Contain("MicrosoftEntra__AllowAppOnlyTokens");
+        script.Should().Contain("az containerapp show").And.Contain("was not applied");
+        script.IndexOf("az containerapp update", StringComparison.Ordinal)
+            .Should().BeLessThan(script.IndexOf("az containerapp show", StringComparison.Ordinal));
+        foreach (string op in new[] { "GET /api/supply/inventory", "GET /api/stores/stockout-risks", "GET /api/supply/disruptions", "GET /api/demand/forecast" })
+        {
+            script.Should().Contain($"'{op}'");
+        }
+
+        script.Should().NotContain("POST /api/chat", "the APIM identity must never be granted the bot route");
+    }
+
+    [Fact]
+    public void IdentityScript_RetriesFreshGatewayServicePrincipalFiveTimes()
+    {
+        string script = Read("scripts", "Setup-McpGatewayIdentity.ps1");
+        int create = script.IndexOf("-> creating gateway service principal", StringComparison.Ordinal);
+        create.Should().BeGreaterThan(0);
+        string afterCreate = script[create..script.IndexOf("# 2. Retail Pulse API service principal", StringComparison.Ordinal)];
+        afterCreate.Should().Contain("-RetryNotFound").And.Contain("servicePrincipals/$($created.id)");
+        script.Should().Contain("$notFoundAttempts -lt 5").And.Contain("(attempt $notFoundAttempts/5)");
+    }
+
+    [Fact]
+    public void OldUnsafeAttachOn_IsRetired() => File.Exists(Path.Combine(Root, "deploy", "apim-ai-gateway", "mcp-api.bicep")).Should().BeFalse();
 
     [Theory]
     [InlineData("azd-hooks", "postprovision.ps1")]
@@ -204,4 +260,7 @@ public sealed partial class McpGatewayDeploymentContractTests
 
         throw new InvalidOperationException("Could not locate repo root (RetailPulse.slnx).");
     }
+
+    [GeneratedRegex(@"name: '([^']+)'")]
+    private static partial Regex MyRegex();
 }

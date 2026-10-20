@@ -70,7 +70,7 @@ param alwaysWarm bool = true
 @description('Application (client) ID of the APIM system-assigned managed identity, emitted by scripts/Setup-McpGatewayIdentity.ps1 as an azd env value. Empty until that hook has succeeded, which keeps app-only tokens for the gateway disabled (fail closed).')
 param mcpGatewayClientId string = ''
 
-@description('Exact "{METHOD} {route template}" operations app-only callers may reach (McpGateway:AllowedOperations). Empty denies every app-only request.')
+@description('Exact "{METHOD} {route template}" operations app-only callers may reach (McpGateway:Clients:0:Operations, APIM managed identity only).')
 param mcpAllowedOperations array = [
   'GET /api/supply/inventory'
   'GET /api/stores/stockout-risks'
@@ -92,11 +92,40 @@ var botConfigured = !empty(botAppId)
 // Setup-McpGatewayIdentity.ps1 has emitted its client id; until then no gateway operation is
 // allow-listed. The Teams bot keeps its existing app-only route (POST /api/chat) when configured.
 var mcpGatewayConfigured = !empty(mcpGatewayClientId)
-var appOnlyOperations = concat(mcpGatewayConfigured ? mcpAllowedOperations : [], botConfigured ? ['POST /api/chat'] : [])
-var mcpGatewayEnv = [for (operation, i) in appOnlyOperations: {
-  name: 'McpGateway__AllowedOperations__${i}'
-  value: operation
-}]
+var botOperations = [
+  'POST /api/chat'
+]
+
+// Fixed client slots keep the postprovision in-place update (Setup-McpGatewayIdentity.ps1) and a later
+// azd provision writing the same keys: 0 = APIM managed identity, 1 = Teams bot. Each client carries
+// its own route allow-list, so neither identity can reach the other's routes.
+var mcpGatewayEnv = concat(
+  mcpGatewayConfigured
+    ? concat(
+        [
+          {
+            name: 'McpGateway__Clients__0__ClientId'
+            value: mcpGatewayClientId
+          }
+        ],
+        map(range(0, length(mcpAllowedOperations)), i => {
+          name: 'McpGateway__Clients__0__Operations__${i}'
+          value: mcpAllowedOperations[i]
+        }))
+    : [],
+  botConfigured
+    ? concat(
+        [
+          {
+            name: 'McpGateway__Clients__1__ClientId'
+            value: botAppId
+          }
+        ],
+        map(range(0, length(botOperations)), i => {
+          name: 'McpGateway__Clients__1__Operations__${i}'
+          value: botOperations[i]
+        }))
+    : [])
 
 // The `registries` block binds a container app's image-pull auth to its own
 // system-assigned identity, with no admin credentials. It is only emitted when

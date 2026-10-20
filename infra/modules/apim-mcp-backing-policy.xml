@@ -3,7 +3,7 @@
     <base />
     <!-- Every tool operation is a read-only GET; anything else is refused before it can reach the API. -->
     <choose>
-      <when condition="@(context.Request.Method != "GET")">
+      <when condition="@(context.Request.Method != &quot;GET&quot;)">
         <return-response>
           <set-status code="405" reason="Method Not Allowed" />
         </return-response>
