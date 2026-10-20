@@ -52,7 +52,7 @@ Provision one Azure API Center (Bicep) with a system-assigned identity and an AP
 Clients authenticate to APIM (subscription key plus Entra token validation via `validate-jwt`). APIM exposes only an explicit allow-list of read-only operations as MCP tools; no tool is exposed implicitly. #334 records the IP restriction and verifies that direct calls to the MCP FQDN without the key, or from other IPs, fail.
 
 ### 2.7 Regulated-retail mode (#337)
-A policy-level mode (named value or per-channel setting) that: disables prompt/response body logging (no `log-to-eventhub` of bodies, no body capture or `largeLanguageModel` logging in APIM diagnostics, `logClientIp` off). #337 also changes the demo default so bodies are no longer captured (today 8192 bytes, §1); the demo default keeps metadata and token metrics only, bypasses semantic cache, shortens retention on retained telemetry, and tightens safety thresholds. Mode is visible via `x-rp-mode`. This is a demonstration control for synthetic pharmacy scenarios, not a compliance certification.
+A policy-level mode (named value or per-channel setting) with two values, `demo` and `regulated`. Both modes disable prompt/response body logging: no `log-to-eventhub` of bodies, no body capture or `largeLanguageModel` logging in APIM diagnostics, and both keep metadata and token metrics only. #337 therefore also changes the demo default so bodies are no longer captured (today 8192 bytes, §1). Regulated mode additionally always bypasses semantic cache, tightens safety thresholds, shortens retention on retained telemetry, and turns `logClientIp` off. Demo mode remains semantic-cache-eligible under the §2.8 rules. Mode is visible via `x-rp-mode`. This is a demonstration control for synthetic pharmacy scenarios, not a compliance certification.
 
 ### 2.8 Semantic cache (#338, #339)
 Use APIM `azure-openai-semantic-cache-lookup`/`-store` with an external Redis-compatible vector cache (Azure Managed Redis with RediSearch; #338) and an embeddings deployment. Eligibility is explicit: cache only requests with no tool calls, no per-user or per-store data, safety verdict allowed, mode demo, and a `cache-eligible` marker; everything else sets `x-rp-cache: bypass`. Cache keys are partitioned per channel/tenant, model, and system-prompt hash via `vary-by`. The cache stores embeddings and completions derived from prompt text in Redis, so it requires a short TTL, encryption at rest and in transit, access restriction, and a documented retention policy. Regulated mode always bypasses.
@@ -73,7 +73,7 @@ This table is generated from the `Blocked by` fields of the child issues. If the
 | Wave | Issues | Notes |
 | --- | --- | --- |
 | 0 | #322 | This proposal. |
-| 1 | #323, #324, #325, #326 (packs, no blockers); #327, #329, #333, #334, #338 | Blocked by #322 only. |
+| 1 | #323, #324, #325, #326 (packs); #327, #329, #333, #334, #338 | Packs have no blockers; the others are blocked by #322 only. |
 | 2 | #328 (#327); #331 (#322, #327); #332 (#322, #327); #335 (#333, #334); #339 (#327, #338) | Need wave 1. |
 | 3 | #330 (#327, #328, #329); #336 (#333, #335); #337 (#322, #331) | Need waves 1–2. |
 | 4 | #340 (#323–#326, #328, #330, #331, #332, #336, #337, #339) | Integrated acceptance and walkthrough. |
@@ -93,7 +93,7 @@ Priority mapping: P1 ribbon → #327, #328; P2 failover → #329, #330; P3 safet
 | Backend pool | Two deployments in one region. | Multi-region deployments. |
 | Quota counters | Per-gateway-instance counters, acceptable on one unit. | Account for per-gateway counters in multi-region/multi-unit deployments, or enforce a central quota. |
 | Semantic cache | Small external cache, synthetic data only; prompt text persists in Redis with short TTL. | Sized, access-controlled cache with data-classification review. |
-| Logging | Today bodies (8192 bytes) and client IPs are logged (§1); #337 changes the demo default to metadata and token metrics only; regulated mode also disables `logClientIp`. | Metadata only; bodies opt-in only with approved retention. |
+| Logging | Today bodies (8192 bytes) and client IPs are logged (§1); #337 changes the demo default to metadata and token metrics only (no body capture); regulated mode additionally disables `logClientIp`, always bypasses semantic cache, tightens thresholds and shortens retention. | Metadata only; bodies opt-in only with approved retention. |
 | MCP | Read-only allow-listed tools behind APIM; MCP ingress external but APIM-only. | Add per-tool authorization and rate limits. |
 
 Preconditions: confirm the Developer SKU supports each proposed policy (semantic cache needs an external cache; `llm-content-safety`; MCP export) in #329, #331 and #335 before relying on it, and document any limitation.
@@ -102,7 +102,7 @@ Preconditions: confirm the Developer SKU supports each proposed policy (semantic
 
 | Risk | Mitigation |
 | --- | --- |
-| Prompt-body logging leaks sensitive text | Evidence headers and diagnostics carry metadata only; existing body capture (8192 bytes) and `logClientIp` are disabled by #337 for the demo default and regulated mode; tests assert absence of body text in headers and logs. |
+| Prompt-body logging leaks sensitive text | Evidence headers and diagnostics carry metadata only; existing body capture (8192 bytes) and `logClientIp` body capture is disabled by #337 in both demo and regulated modes (`logClientIp` in regulated mode); tests assert absence of body text in headers and logs. |
 | Public APIM network posture | Keep subscription key plus JWT validation; MCP app is externally reachable but IP-restricted to APIM and key-protected; document as demo-only; no secrets in headers; production table above requires private networking. |
 | API Center synchronization delay | Treat sync as eventually consistent; #336 polls with a bounded timeout and the walkthrough waits for the sync before showing discovery; no demo step assumes instant propagation. |
 | APIM gateway-local quota counters | Token-limit counters are tracked per gateway instance, so limits are approximate across instances; demo uses a single unit and states this; production uses guidance above. |
