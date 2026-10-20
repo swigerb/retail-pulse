@@ -1,3 +1,5 @@
+using RetailPulse.Api.Security;
+
 namespace RetailPulse.Api.Endpoints;
 
 public static class SupplyEndpoints
@@ -31,7 +33,8 @@ public static class SupplyEndpoints
             string json = await response.Content.ReadAsStringAsync(ct);
             return Results.Content(json, "application/json");
         })
-        .WithName("GetSupplyInventory").RequireAuthorization().RequireRateLimiting("relaxed");
+        .WithName("GetSupplyInventory").RequireAuthorization().RequireRateLimiting("relaxed")
+        .AddEndpointFilter<McpGatewayResponseBudgetFilter>();
 
         app.MapGet("/api/supply/disruptions", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? severity = null, bool activeOnly = true) =>
         {
@@ -46,7 +49,8 @@ public static class SupplyEndpoints
             string json = await response.Content.ReadAsStringAsync(ct);
             return Results.Content(json, "application/json");
         })
-        .WithName("GetSupplyDisruptions").RequireAuthorization().RequireRateLimiting("relaxed");
+        .WithName("GetSupplyDisruptions").RequireAuthorization().RequireRateLimiting("relaxed")
+        .AddEndpointFilter<McpGatewayResponseBudgetFilter>();
 
         app.MapGet("/api/supply/fulfillment", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? period = null, int minPeriods = 6) =>
         {
