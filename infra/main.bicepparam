@@ -56,6 +56,15 @@ param aiSearchEnabled = toLower(readEnvironmentVariable('AZURE_AI_SEARCH_ENABLED
 param apiCenterEnabled = toLower(readEnvironmentVariable('AZURE_API_CENTER_ENABLED', 'false')) == 'true'
 param apiCenterLocation = readEnvironmentVariable('AZURE_API_CENTER_LOCATION', 'eastus')
 
+// Optional Azure Managed Redis semantic cache (#338). Disabled by default; paid
+// while provisioned. Enable with `azd env set AZURE_SEMANTIC_CACHE_ENABLED true`.
+param semanticCacheEnabled = toLower(readEnvironmentVariable('AZURE_SEMANTIC_CACHE_ENABLED', 'false')) == 'true'
+param semanticCacheSku = readEnvironmentVariable('AZURE_SEMANTIC_CACHE_SKU', 'Balanced_B0')
+param semanticCacheTtlSeconds = int(readEnvironmentVariable('AZURE_SEMANTIC_CACHE_TTL_SECONDS', '300'))
+param semanticCachePublicNetworkAccess = readEnvironmentVariable('AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS', 'Disabled')
+param semanticCachePrivateEndpointSubnetId = readEnvironmentVariable('AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID', '')
+param semanticCachePrivateDnsZoneId = readEnvironmentVariable('AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID', '')
+
 // Azure Bot Service registration backing the Teams bot. Empty by default so a
 // clean zd up does not claim to have a bot it never registered. Set both with:
 //   azd env set AZURE_BOT_APP_ID <appId>

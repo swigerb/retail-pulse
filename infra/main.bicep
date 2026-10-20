@@ -112,6 +112,35 @@ param aiSearchEnabled bool = false
 @description('Enable the optional Azure API Center catalog that continuously synchronizes from APIM. Disabled by default; no API Center resources are provisioned when false.')
 param apiCenterEnabled bool = false
 
+@description('Enable the optional Azure Managed Redis external vector cache for APIM semantic caching (#338). Disabled by default; billed while it exists, so see docs/deployment-azd.md for cost class and teardown.')
+param semanticCacheEnabled bool = false
+
+@allowed([
+  'Balanced_B0'
+  'Balanced_B1'
+  'Balanced_B3'
+])
+@description('Azure Managed Redis SKU for the semantic cache.')
+param semanticCacheSku string = 'Balanced_B0'
+
+@minValue(60)
+@maxValue(86400)
+@description('Advisory handoff value only: intended semantic cache TTL in seconds. Not enforced until issue #339 wires the APIM semantic-cache policy.')
+param semanticCacheTtlSeconds int = 300
+
+@allowed([
+  'Disabled'
+  'Enabled'
+])
+@description('Public network access for the semantic cache. Disabled by default.')
+param semanticCachePublicNetworkAccess string = 'Disabled'
+
+@description('Subnet resource ID for the semantic cache private endpoint. Required when semanticCachePublicNetworkAccess is Disabled.')
+param semanticCachePrivateEndpointSubnetId string = ''
+
+@description('Private DNS zone (privatelink.redis.azure.net) resource ID for the semantic cache private endpoint. Required when semanticCachePublicNetworkAccess is Disabled.')
+param semanticCachePrivateDnsZoneId string = ''
+
 @description('Location for Azure API Center (supported in a limited set of regions, so independent of the primary location).')
 param apiCenterLocation string = 'eastus'
 
@@ -312,6 +341,32 @@ output AZURE_AI_SEARCH_ENABLED bool = aiSearchEnabled
 output AZURE_AI_SEARCH_ENDPOINT string = aiSearchEnabled ? aiSearch!.outputs.endpoint : ''
 output AZURE_AI_SEARCH_NAME string = aiSearchEnabled ? aiSearch!.outputs.name : ''
 output AZURE_AI_SEARCH_RESOURCE_ID string = aiSearchEnabled ? aiSearch!.outputs.resourceId : ''
+
+// ── Optional Azure Managed Redis semantic cache (issue #338) ───────────────
+// Provisioned only when semanticCacheEnabled = true. APIM semantic caching
+// supports only access-key (connection string) auth to Redis, so keys are
+// enabled on the service but no key or connection string is ever emitted. Outputs are empty/zero when disabled.
+module semanticCache './modules/managed-redis-cache.bicep' = if (semanticCacheEnabled) {
+  name: 'semantic-cache'
+  scope: rg
+  params: {
+    location: location
+    resourceToken: resourceToken
+    tags: tags
+    skuName: semanticCacheSku
+    defaultTtlSeconds: semanticCacheTtlSeconds
+    publicNetworkAccess: semanticCachePublicNetworkAccess
+    privateEndpointSubnetId: semanticCachePrivateEndpointSubnetId
+    privateDnsZoneId: semanticCachePrivateDnsZoneId
+  }
+}
+
+output AZURE_SEMANTIC_CACHE_ENABLED bool = semanticCacheEnabled
+output AZURE_SEMANTIC_CACHE_NAME string = semanticCacheEnabled ? semanticCache!.outputs.name : ''
+output AZURE_SEMANTIC_CACHE_RESOURCE_ID string = semanticCacheEnabled ? semanticCache!.outputs.resourceId : ''
+output AZURE_SEMANTIC_CACHE_HOST string = semanticCacheEnabled ? semanticCache!.outputs.hostName : ''
+// Advisory handoff only; not enforced until issue #339 wires the APIM semantic-cache policy.
+output AZURE_SEMANTIC_CACHE_TTL_SECONDS int = semanticCacheEnabled ? semanticCache!.outputs.defaultTtlSeconds : 0
 
 // ── Optional Azure API Center (issue #333) ─────────────────────────────────
 // Provisioned only when apiCenterEnabled = true so a default `azd up` is
