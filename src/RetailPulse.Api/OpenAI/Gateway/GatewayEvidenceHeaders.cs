@@ -25,8 +25,8 @@ public static class GatewayEvidenceHeaders
     public const string LatencyMs = "x-rp-gw-latency-ms";
     public const string BackendLatencyMs = "x-rp-gw-backend-latency-ms";
 
-    private const int MaxTokenLength = 64;
-    private const long MaxCount = 1_000_000_000_000;
+    private const int _maxTokenLength = 64;
+    private const long _maxCount = 1_000_000_000_000;
 
     public static IReadOnlyList<string> AllNames { get; } =
     [
@@ -71,7 +71,7 @@ public static class GatewayEvidenceHeaders
         }
 
         string v = value.Trim();
-        if (v.Length > MaxTokenLength)
+        if (v.Length > _maxTokenLength)
         {
             return null;
         }
@@ -88,7 +88,7 @@ public static class GatewayEvidenceHeaders
     }
 
     internal static long? ParseCount(string? value) =>
-        long.TryParse(value?.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out long n) && n <= MaxCount
+        long.TryParse(value?.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out long n) && n <= _maxCount
             ? n
             : null;
 

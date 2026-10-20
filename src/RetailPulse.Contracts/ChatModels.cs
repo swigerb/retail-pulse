@@ -69,7 +69,7 @@ public record ChatResponse(
     /// </summary>
     string? PlanId = null,
     /// <summary>Privacy-safe APIM gateway evidence for this turn; see GatewayEvidence.</summary>
-    RetailPulse.Contracts.Gateway.GatewayEvidence? Gateway = null
+    Gateway.GatewayEvidence? Gateway = null
 );
 
 /// <summary>

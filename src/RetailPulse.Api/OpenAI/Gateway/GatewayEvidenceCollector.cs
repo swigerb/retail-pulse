@@ -12,18 +12,18 @@ public static class GatewayEvidenceCollector
 {
     internal const int MaxCallsPerScope = 32;
 
-    private static readonly AsyncLocal<Scope?> Current = new();
+    private static readonly AsyncLocal<Scope?> _current = new();
 
     public static Scope Begin()
     {
         var scope = new Scope();
-        Current.Value = scope;
+        _current.Value = scope;
         return scope;
     }
 
-    public static void End() => Current.Value = null;
+    public static void End() => _current.Value = null;
 
-    public static void Record(GatewayCallEvidence evidence) => Current.Value?.Add(evidence);
+    public static void Record(GatewayCallEvidence evidence) => _current.Value?.Add(evidence);
 
     public sealed class Scope
     {
