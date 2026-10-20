@@ -648,6 +648,28 @@ Forget everything
 
 ---
 
+## Optional: AI Gateway Failover Demo
+
+A deterministic, operator-only demonstration of APIM backend failover (#330). It is **disabled by default** and never alters normal traffic.
+
+**How it works.** For an authorized request only, the APIM policy sends attempt 1 to the real primary backend with an unsupported `api-version`, so the primary genuinely rejects it (HTTP 4xx). The policy then makes attempt 2 to the fixed secondary backend with the original request. Both backends are fixed in the policy; callers cannot choose or name a backend. The demo does **not** trip the circuit breaker (and claims no breaker outcome) — it exercises the pool's priority and retry path. APIM exposes no policy expression for the selected pool member, so the secondary is targeted explicitly rather than inferred from a URL.
+
+**Setup** (operator, no production resources broken):
+
+1. Deploy with `apimBackendPoolEnabled=true`, `apimFailoverDemoEnabled=true`, and `apimFailoverDemoKey` set to a random secret of at least 32 characters taken from your secret store. Without the pool or a long key the demo stays off (fails closed). The key is stored as the secret APIM named value `rp-failover-demo-key`.
+2. Arm it: `az apim nv update --service-name <apim> -g <rg> --named-value-id rp-failover-demo-armed --value true`.
+3. Run once, with your APIM subscription key and the demo key (never give the demo key to end users):
+
+   `curl -i -X POST "$APIM/inference/openai/deployments/<deployment>/chat/completions?api-version=<ver>" -H "api-key: $SUB_KEY" -H "x-rp-failover-demo: $DEMO_KEY" -H "content-type: application/json" -d '{"messages":[{"role":"user","content":"ping"}],"max_tokens":5}'`
+
+**Evidence** (real response headers; the Control Room ribbon renders the same fields as *Route* and *Failover* for any call carrying them): `x-rp-gw-primary-status` (primary's actual status), `x-rp-gw-attempts`, `x-rp-gw-fallback` (`used`/`not-used`), `x-rp-gw-backend` (the secondary id the policy chose), and `x-rp-gw-route: failover` only when attempt 2 returned success. If anything is missing the field is omitted and shown as unknown. Note the standard API client does not send the demo header, so chat traffic in the UI is never affected.
+
+**Safeguards.** Wrong/missing key or disarmed → 403 and an audit metric; authorized runs are limited to 3 per minute per subscription (all demo-header attempts to 10). Every attempt emits the `rp.failover.demo.audit` metric (`Outcome` = authorized/denied) to Application Insights.
+
+**Reset.** Disarm: `az apim nv update ... --named-value-id rp-failover-demo-armed --value false`. Redeploying also resets it to `false`. To disable entirely, redeploy with `apimFailoverDemoEnabled=false` and rotate/remove the key.
+
+---
+
 ## Talking Points
 
 ### Why .NET Aspire?

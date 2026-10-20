@@ -1,0 +1,36 @@
+        <!-- Failover demo (#330) evidence. Only reached with demo-active; values come from real responses.
+             Route "failover" requires a second attempt that really succeeded; otherwise it stays unset. -->
+        <choose>
+            <when condition="@(context.Variables.GetValueOrDefault&lt;bool&gt;(&quot;rp-demo-active&quot;, false))">
+                <set-header name="x-rp-gw-failover-demo" exists-action="override">
+                    <value>active</value>
+                </set-header>
+                <set-header name="x-rp-gw-attempts" exists-action="override">
+                    <value>@(context.Variables.GetValueOrDefault&lt;int&gt;(&quot;rp-demo-attempts&quot;, 0).ToString())</value>
+                </set-header>
+                <set-header name="x-rp-gw-fallback" exists-action="override">
+                    <value>@(context.Variables.GetValueOrDefault&lt;int&gt;(&quot;rp-demo-attempts&quot;, 0) &gt; 1 ? &quot;used&quot; : &quot;not-used&quot;)</value>
+                </set-header>
+                <choose>
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-demo-primary-status&quot;) &amp;&amp; context.Variables.GetValueOrDefault&lt;int&gt;(&quot;rp-demo-primary-status&quot;, 0) &gt; 0)">
+                        <set-header name="x-rp-gw-primary-status" exists-action="override">
+                            <value>@(context.Variables.GetValueOrDefault&lt;int&gt;(&quot;rp-demo-primary-status&quot;, 0).ToString())</value>
+                        </set-header>
+                    </when>
+                </choose>
+                <choose>
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-demo-backend&quot;))">
+                        <set-header name="x-rp-gw-backend" exists-action="override">
+                            <value>@((string)context.Variables["rp-demo-backend"])</value>
+                        </set-header>
+                    </when>
+                </choose>
+                <choose>
+                    <when condition="@(context.Variables.GetValueOrDefault&lt;int&gt;(&quot;rp-demo-attempts&quot;, 0) &gt; 1 &amp;&amp; context.Response.StatusCode &lt; 400)">
+                        <set-header name="x-rp-gw-route" exists-action="override">
+                            <value>failover</value>
+                        </set-header>
+                    </when>
+                </choose>
+            </when>
+        </choose>

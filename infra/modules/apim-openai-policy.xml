@@ -18,6 +18,11 @@
         <set-header name="x-rp-gw-policy-version" exists-action="delete" />
         <set-header name="x-rp-gw-latency-ms" exists-action="delete" />
         <set-header name="x-rp-gw-backend-latency-ms" exists-action="delete" />
+        <set-header name="x-rp-gw-failover-demo" exists-action="delete" />
+        <set-header name="x-rp-gw-primary-status" exists-action="delete" />
+        <set-header name="x-rp-gw-attempts" exists-action="delete" />
+        <set-header name="x-rp-gw-fallback" exists-action="delete" />
+{demo-inbound}
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
         <azure-openai-token-limit counter-key="@(context.Subscription.Id)"
@@ -91,6 +96,7 @@
         <set-header name="x-rp-gw-latency-ms" exists-action="override">
             <value>@(((int)context.Elapsed.TotalMilliseconds).ToString())</value>
         </set-header>
+{demo-outbound}
     </outbound>
     <on-error>
         <base />

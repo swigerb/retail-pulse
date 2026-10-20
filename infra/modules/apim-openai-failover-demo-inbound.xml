@@ -1,0 +1,32 @@
+<!-- Failover demo (#330) inbound gate. Only deployed when failoverDemoEnabled=true.
+     Authorization is a server-side secret (named value rp-failover-demo-key) that ordinary
+     callers never receive, plus an operator arm switch (rp-failover-demo-armed) used for reset.
+     The caller supplies no backend identifier; both targets are fixed in the policy. -->
+        <set-variable name="rp-demo-key" value="@(context.Request.Headers.GetValueOrDefault(&quot;x-rp-failover-demo&quot;, &quot;&quot;))" />
+        <set-header name="x-rp-failover-demo" exists-action="delete" />
+        <choose>
+            <when condition="@(((string)context.Variables[&quot;rp-demo-key&quot;]) != &quot;&quot;)">
+                <rate-limit-by-key calls="10" renewal-period="60" counter-key="@(&quot;rp-failover-demo-attempt-&quot; + context.Subscription.Id)" />
+                <choose>
+                    <when condition="@(&quot;{{rp-failover-demo-armed}}&quot; == &quot;true&quot; &amp;&amp; &quot;{{rp-failover-demo-key}}&quot; != &quot;&quot; &amp;&amp; ((string)context.Variables[&quot;rp-demo-key&quot;]) == &quot;{{rp-failover-demo-key}}&quot;)">
+                        <rate-limit-by-key calls="3" renewal-period="60" counter-key="@(&quot;rp-failover-demo-run-&quot; + context.Subscription.Id)" />
+                        <set-variable name="rp-demo-active" value="@(true)" />
+                        <set-variable name="rp-demo-api-version" value="@(context.Request.Url.Query.GetValueOrDefault(&quot;api-version&quot;, &quot;&quot;))" />
+                        <emit-metric name="rp.failover.demo.audit" namespace="RetailPulse">
+                            <dimension name="Outcome" value="authorized" />
+                            <dimension name="Subscription ID" value="@(context.Subscription.Id)" />
+                        </emit-metric>
+                    </when>
+                    <otherwise>
+                        <emit-metric name="rp.failover.demo.audit" namespace="RetailPulse">
+                            <dimension name="Outcome" value="denied" />
+                            <dimension name="Subscription ID" value="@(context.Subscription.Id)" />
+                        </emit-metric>
+                        <return-response>
+                            <set-status code="403" reason="Forbidden" />
+                            <set-body>{"error":"failover demo not authorized"}</set-body>
+                        </return-response>
+                    </otherwise>
+                </choose>
+            </when>
+        </choose>

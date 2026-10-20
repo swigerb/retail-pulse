@@ -128,6 +128,21 @@ describe('GatewayControlRoom', () => {
     expect(item('correlation')).toHaveTextContent('req-123 +1');
   });
 
+  it('shows observed failover demo attempts without inventing missing ones', () => {
+    renderRibbon(evidence({}, [call({
+      route: 'failover',
+      backendAlias: 'gpt-secondary',
+      failoverDemo: { primaryStatusCode: 400, attempts: 2, fallbackUsed: true },
+    })]));
+    expect(item('failover')).toHaveTextContent('Failed over (demo: primary 400, fallback used)');
+    expect(item('route')).toHaveTextContent('gpt-secondary (Failover)');
+  });
+
+  it('reports unknown demo fields as unknown, not success', () => {
+    renderRibbon(evidence({}, [call({ failoverDemo: { primaryStatusCode: null, attempts: null, fallbackUsed: null } })]));
+    expect(item('failover')).toHaveTextContent('None (demo: primary unknown, fallback unknown)');
+  });
+
   it('does not claim a primary route or no failover when evidence is partial', () => {
     renderRibbon(evidence({}, [call(), call({ route: 'unknown', backendAlias: null })]));
     expect(item('route')).toHaveTextContent('gpt-primary (Partial)');

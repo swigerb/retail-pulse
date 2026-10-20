@@ -25,13 +25,18 @@ public static class GatewayEvidenceHeaders
     public const string LatencyMs = "x-rp-gw-latency-ms";
     public const string BackendLatencyMs = "x-rp-gw-backend-latency-ms";
 
+    public const string FailoverDemo = "x-rp-gw-failover-demo";
+    public const string PrimaryStatus = "x-rp-gw-primary-status";
+    public const string Attempts = "x-rp-gw-attempts";
+    public const string Fallback = "x-rp-gw-fallback";
+
     private const int _maxTokenLength = 64;
     private const long _maxCount = 1_000_000_000_000;
 
     public static IReadOnlyList<string> AllNames { get; } =
     [
         RequestId, Backend, Route, TokensConsumed, TokensRemaining, Quota, Cache,
-        Safety, PolicyVersion, LatencyMs, BackendLatencyMs,
+        Safety, PolicyVersion, LatencyMs, BackendLatencyMs, FailoverDemo, PrimaryStatus, Attempts, Fallback,
     ];
 
     public static GatewayCallEvidence Parse(PipelineResponse response)
@@ -55,12 +60,35 @@ public static class GatewayEvidenceHeaders
             SafeToken(getHeader(PolicyVersion)),
             ParseCount(getHeader(LatencyMs)),
             ParseCount(getHeader(BackendLatencyMs)),
-            statusCode);
+            statusCode,
+            FailoverDemo: ParseFailoverDemo(getHeader));
 
         GatewayEvidenceStatus status = evidence.IsEmpty
             ? GatewayEvidenceStatus.Unavailable
             : evidence.Safety == GatewayOutcome.Blocked ? GatewayEvidenceStatus.Blocked : GatewayEvidenceStatus.Observed;
         return evidence with { Status = status };
+    }
+
+    // Demo fields are only trusted behind the explicit "active" marker; without it they are ignored.
+    internal static GatewayFailoverDemoEvidence? ParseFailoverDemo(Func<string, string?> getHeader)
+    {
+        if (!string.Equals(getHeader(FailoverDemo)?.Trim(), "active", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        long? primary = ParseCount(getHeader(PrimaryStatus));
+        long? attempts = ParseCount(getHeader(Attempts));
+        bool? fallback = getHeader(Fallback)?.Trim().ToLowerInvariant() switch
+        {
+            "used" => true,
+            "not-used" => false,
+            _ => null,
+        };
+        return new GatewayFailoverDemoEvidence(
+            primary is >= 100 and <= 599 ? (int)primary : null,
+            attempts is >= 1 and <= 10 ? (int)attempts : null,
+            fallback);
     }
 
     internal static string? SafeToken(string? value)

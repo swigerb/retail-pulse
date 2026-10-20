@@ -25,6 +25,13 @@ param tokensPerMinute int = 80000
 @description('Enables the two-backend priority pool. When false (default) the single primary backend is used directly, which is valid for local or constrained deployments.')
 param backendPoolEnabled bool = false
 
+@description('Enables the demo-only failover trigger (#330). Disabled by default, requires backendPoolEnabled, and fails closed unless failoverDemoKey is at least 32 characters.')
+param failoverDemoEnabled bool = false
+
+@secure()
+@description('Operator secret that authorizes the failover demo trigger. Never given to ordinary callers; store it in a secret manager.')
+param failoverDemoKey string = ''
+
 @description('Name of the secondary Azure AI Foundry / Cognitive Services account. Required (and must differ from the primary) when backendPoolEnabled is true.')
 param secondaryAiFoundryAccountName string = ''
 
@@ -59,6 +66,13 @@ var poolBackendName = 'retail-pulse-foundry-pool'
 
 // Policies address the pool when enabled; otherwise the single primary backend.
 var routeBackendId = poolEnabled ? poolBackendName : primaryBackendName
+
+var failoverDemoActive = failoverDemoEnabled && poolEnabled && length(failoverDemoKey) >= 32
+
+var failoverDemoBackendFragment = replace(
+  replace(loadTextContent('apim-openai-failover-demo-backend.xml'), '{demo-primary-backend}', primaryBackendName),
+  '{demo-secondary-backend}',
+  secondaryBackendName)
 
 var throttlingCircuitBreaker = {
   rules: [
@@ -109,7 +123,9 @@ var poolCircuitBreaker = {
 // A pool retry re-enters backend selection after the response that opens a
 // member's circuit breaker. Single-backend mode retains the existing base
 // backend behavior and never retries 5xx responses.
-var backendPolicy = poolEnabled
+var backendPolicy = failoverDemoActive
+  ? replace(failoverDemoBackendFragment, '{demo-primary-backend}', primaryBackendName)
+  : poolEnabled
   ? '<retry condition="@(context.Response != null &amp;&amp; (context.Response.StatusCode == 429 || context.Response.StatusCode &gt;= 500))" count="1" interval="1" first-fast-retry="true"><forward-request buffer-request-body="true" /></retry>'
   : '<base />'
 
@@ -209,6 +225,28 @@ resource api 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
   }
 }
 
+// Named values back the demo gate. The key is secret; "armed" defaults to false on every
+// deployment so redeploying is itself a reset. Operators flip armed with az apim nv update.
+resource demoKeyNamedValue 'Microsoft.ApiManagement/service/namedValues@2024-06-01-preview' = if (failoverDemoActive) {
+  parent: apim
+  name: 'rp-failover-demo-key'
+  properties: {
+    displayName: 'rp-failover-demo-key'
+    secret: true
+    value: failoverDemoKey
+  }
+}
+
+resource demoArmedNamedValue 'Microsoft.ApiManagement/service/namedValues@2024-06-01-preview' = if (failoverDemoActive) {
+  parent: apim
+  name: 'rp-failover-demo-armed'
+  properties: {
+    displayName: 'rp-failover-demo-armed'
+    secret: false
+    value: 'false'
+  }
+}
+
 resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-preview' = {
   parent: api
   name: 'policy'
@@ -216,7 +254,15 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
     format: 'rawxml'
     value: replace(
       replace(
-        replace(loadTextContent('apim-openai-policy.xml'), '{backend-id}', routeBackendId),
+        replace(
+          replace(
+            replace(loadTextContent('apim-openai-policy.xml'), '{backend-id}', routeBackendId),
+            '{demo-inbound}',
+            failoverDemoActive
+              ? loadTextContent('apim-openai-failover-demo-inbound.xml')
+              : '        <set-header name="x-rp-failover-demo" exists-action="delete" />'),
+          '{demo-outbound}',
+          failoverDemoActive ? loadTextContent('apim-openai-failover-demo-outbound.xml') : ''),
         '{backend-policy}',
         backendPolicy),
       '{tokens-per-minute}',
@@ -227,6 +273,8 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
     secondaryBackend
     backendPool
     secondaryRoleAssignment
+    demoKeyNamedValue
+    demoArmedNamedValue
   ] : [
     backend
   ]
@@ -363,6 +411,7 @@ output subscriptionName string = subscription.name
 // an individual request. Per-request route evidence must remain unknown until
 // APIM exposes a documented pool-member signal and a live verifier proves it.
 output backendPoolEnabled bool = poolEnabled
+output failoverDemoEnabled bool = failoverDemoActive
 output routeBackendId string = routeBackendId
 output primaryBackendId string = backend.name
 output secondaryBackendId string = poolEnabled ? secondaryBackendName : ''

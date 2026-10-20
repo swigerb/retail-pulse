@@ -240,7 +240,10 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
         string dependencies = apiPolicy.GetProperty("dependsOn").GetRawText();
         dependencies.Should().Contain("backend").And.Contain("secondaryBackend")
             .And.Contain("backendPool").And.Contain("secondaryRoleAssignment");
-        json.Should().NotContain("x-rp-backend-id").And.NotContain("x-rp-failover");
+        json.Should().NotContain("x-rp-backend-id");
+        // The only failover header is the authorized demo trigger (#330); no inferred-backend header exists.
+        System.Text.RegularExpressions.Regex.Matches(json, @"x-rp-failover[A-Za-z-]*").Select(m => m.Value)
+            .Should().OnlyContain(v => v == "x-rp-failover-demo");
         json.Should().Contain("first-fast-retry").And.Contain("forward-request");
         inner.GetProperty("outputs").TryGetProperty("backendPoolEnabled", out _).Should().BeTrue();
         inner.GetProperty("outputs").TryGetProperty("routeBackendId", out _).Should().BeTrue();

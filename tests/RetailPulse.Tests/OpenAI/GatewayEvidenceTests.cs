@@ -180,13 +180,29 @@ public sealed class GatewayEvidenceTests
         foreach (string name in GatewayEvidenceHeaders.AllNames)
         {
             xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"delete\" />", name);
-            if (name != GatewayEvidenceHeaders.Cache)
+            bool demoOnly = name is GatewayEvidenceHeaders.FailoverDemo or GatewayEvidenceHeaders.PrimaryStatus
+                or GatewayEvidenceHeaders.Attempts or GatewayEvidenceHeaders.Fallback;
+            if (name != GatewayEvidenceHeaders.Cache && !demoOnly)
             {
                 xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"override\">", name);
             }
         }
 
         xml.Should().NotContain("context.Subscription.Key").And.NotContain("Authorization");
+    }
+
+    [Fact]
+    public void ApimFailoverDemoFragment_OverridesDemoHeadersOnlyFromDemoPolicy()
+    {
+        string dir = AppContext.BaseDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml")))
+            dir = Path.GetDirectoryName(dir)!;
+        string demo = File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-failover-demo-outbound.xml"));
+
+        foreach (string name in new[] { GatewayEvidenceHeaders.FailoverDemo, GatewayEvidenceHeaders.PrimaryStatus, GatewayEvidenceHeaders.Attempts, GatewayEvidenceHeaders.Fallback })
+        {
+            demo.Should().Contain($"<set-header name=\"{name}\" exists-action=\"override\">", name);
+        }
     }
 
     private static string Policy()
@@ -239,6 +255,55 @@ public sealed class GatewayEvidenceTests
         OutboundValue(xml, GatewayEvidenceHeaders.BackendLatencyMs).Should().Contain("rp-backend-start");
         xml.Should().Contain("<set-variable name=\"rp-backend-start\"");
         OutboundValue(xml, GatewayEvidenceHeaders.Route).Should().Contain("rp-route");
+    }
+
+    [Fact]
+    public void Parse_FailoverDemo_RequiresActiveMarker_SoSpoofedFieldsAreIgnored()
+    {
+        GatewayCallEvidence spoof = Parse(new()
+        {
+            [GatewayEvidenceHeaders.PrimaryStatus] = "503",
+            [GatewayEvidenceHeaders.Attempts] = "2",
+            [GatewayEvidenceHeaders.Fallback] = "used",
+            [GatewayEvidenceHeaders.RequestId] = "r1",
+        });
+
+        spoof.FailoverDemo.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_FailoverDemo_MapsObservedAttempts()
+    {
+        GatewayCallEvidence e = Parse(new()
+        {
+            [GatewayEvidenceHeaders.FailoverDemo] = "active",
+            [GatewayEvidenceHeaders.PrimaryStatus] = "400",
+            [GatewayEvidenceHeaders.Attempts] = "2",
+            [GatewayEvidenceHeaders.Fallback] = "used",
+            [GatewayEvidenceHeaders.Route] = "failover",
+            [GatewayEvidenceHeaders.Backend] = "retail-pulse-foundry-secondary",
+        });
+
+        e.FailoverDemo.Should().Be(new GatewayFailoverDemoEvidence(400, 2, true));
+        e.Route.Should().Be(GatewayRouteState.Failover);
+        e.BackendAlias.Should().Be("retail-pulse-foundry-secondary");
+    }
+
+    [Theory]
+    [InlineData("99", "0", "maybe")]
+    [InlineData("abc", "99", "")]
+    public void Parse_FailoverDemo_DoesNotFabricateMissingOrInvalidFields(string primary, string attempts, string fallback)
+    {
+        GatewayCallEvidence e = Parse(new()
+        {
+            [GatewayEvidenceHeaders.FailoverDemo] = "active",
+            [GatewayEvidenceHeaders.PrimaryStatus] = primary,
+            [GatewayEvidenceHeaders.Attempts] = attempts,
+            [GatewayEvidenceHeaders.Fallback] = fallback,
+        });
+
+        e.FailoverDemo.Should().Be(new GatewayFailoverDemoEvidence(null, null, null));
+        e.Route.Should().Be(GatewayRouteState.Unknown);
     }
 
     [Fact]

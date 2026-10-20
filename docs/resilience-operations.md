@@ -242,7 +242,7 @@ APIM does not currently expose a documented policy expression identifying the
 selected pool member. Retail Pulse therefore does not emit a per-request
 backend or failover header from an inferred URL. Those gateway-evidence fields
 remain `unknown` until a supported signal is available and live verification
-proves it. The deterministic failure demonstration is owned by issue #330.
+proves it. The deterministic failure demonstration (#330) is documented in the [demo walkthrough](demo-walkthrough.md#optional-ai-gateway-failover-demo).
 
 ---
 
