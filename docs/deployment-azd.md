@@ -33,6 +33,7 @@ for the local-only walkthrough).
 | Foundry retrieval agent | Azure AI Foundry IQ (Azure AI Projects) | `Knowledge:Provider:Mode = FoundryIQ` + `Knowledge:FoundryIQ:ProjectEndpoint`, plus vector store id / retrieval agent name from the pack. | [ADR-013](adr/013-foundry-iq-knowledge-provider.md) |
 | Prompt injection + harmful content filtering | Azure AI Content Safety + Prompt Shields | `Security:ContentSafety:Enabled = true` + endpoint/API version. Bicep helper: `infra/modules/content-safety.bicep`. | [ADR-010](adr/010-content-safety-layering.md) |
 | Persistent Foundry shipment specialist | Azure AI Foundry Agent Service | `FoundryAgent:Enabled = true` + `FoundryAgent:ProjectEndpoint` + agent name. | — |
+| Central API catalog | Azure API Center | `azd env set AZURE_API_CENTER_ENABLED true` — one-way continuous sync from APIM; see "Azure API Center" below. | — |
 | Durable SQLite mount | Azure Files SMB mount on the API Container App | Currently **not enabled** — this tenant's governance policy forces new storage accounts to `allowSharedKeyAccess=false` and blocks key-based CIFS mounts. The API therefore ships with `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`. See the "App data storage" note below for the incident detail and the future durable path. | — |
 
 The rest of this document describes the required stack in detail — jump to
@@ -149,6 +150,16 @@ Neither feature is referenced by the default runtime path: with both
 toggles left at `false`, the API boots against the InMemory BM25
 knowledge base and the regex-only guardrails baseline — exactly the
 laptop-demo path.
+
+### Azure API Center (opt-in, synchronized from APIM)
+
+| Toggle | Provisioned when on |
+|---|---|
+| `azd env set AZURE_API_CENTER_ENABLED true` (optional `AZURE_API_CENTER_LOCATION`, default `eastus` — API Center is available in a limited set of regions) | `infra/modules/api-center.bicep` — `Microsoft.ApiCenter/services` (`apic-<token>`, system identity), an `API Management Service Reader` role assignment on the APIM service, and a declarative `apiSources` link (`apim-<token>`) in the `default` workspace. No portal step is needed. |
+
+Outputs: `AZURE_API_CENTER_ENABLED`, `AZURE_API_CENTER_NAME`, `AZURE_API_CENTER_RESOURCE_ID`, `AZURE_API_CENTER_APIM_SOURCE_NAME` (names/ids are empty when disabled; disabled mode deploys nothing). Names derive from the deterministic resource token, so re-provisioning is idempotent.
+
+**Synchronization behavior:** APIM → API Center is **one-way** — APIM stays the source of truth and edits made to synchronized APIs in API Center are not written back (and may be overwritten). Sync is continuous but eventually consistent: new or changed APIM APIs typically appear in API Center within a few minutes, not instantly, so a freshly provisioned catalog can be empty briefly. Verify the link after provisioning with `./scripts/Verify-ApiCenter.ps1` (read-only; exits 0 pass/disabled, 1 failure, 2 skipped).
 
 ### azd environment aliases (Bicep outputs → azure.yaml / Vite build)
 
