@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-retail-pulse-340-acceptance",
+  "sessionId": "retail-pulse-340-acceptance",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T23:37:21.044Z",
+  "lastHeartbeatAt": "2026-10-20T23:37:21.044Z",
+  "updatedAt": "2026-10-20T23:37:21.044Z",
+  "terminalReason": null,
+  "executionRef": null
+}
