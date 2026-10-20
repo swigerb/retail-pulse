@@ -14,6 +14,7 @@ import type {
 
 const OUTCOMES: readonly GatewayOutcome[] = [
   'unknown', 'not-applicable', 'allowed', 'throttled', 'hit', 'miss', 'passed', 'blocked',
+  'bypass', 'unavailable',
 ];
 const ROUTES: readonly GatewayRouteState[] = ['unknown', 'primary', 'failover'];
 const STATUSES: readonly GatewayEvidenceStatus[] = ['unavailable', 'observed', 'bypassed', 'blocked', 'failed'];

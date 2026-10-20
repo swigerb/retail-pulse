@@ -64,7 +64,7 @@ The default stays the clearly labelled **Synthetic demo mode**.
 |---|---|
 | APIM diagnostics | No request/response/LLM message bodies are captured (`bytes: 0`, LLM logs disabled); token, model and outcome metadata are retained. |
 | Content Safety | Content Safety and APIM gateway safety are forced on in `regulated` mode: any dependency failure returns a generic 503 (fail closed). |
-| Semantic cache | Pharmacy, recall, identity, patient, clinical, health and sensitive classifications (and unknown/blank ones) always bypass the cache (`SensitiveCachePolicy`). No APIM cache policy is rendered. |
+| Semantic cache | Pharmacy, recall, identity, patient, clinical, health and sensitive classifications (and unknown/blank ones) always bypass the cache (`SensitiveCachePolicy`). The opt-in APIM semantic-cache policy (#339) is rendered with a fixed `regulated` decision, so every request reports `x-rp-gw-cache: bypass` and nothing is looked up or stored. |
 | Identifiers | The client-visible `X-Correlation-ID` and `x-rp-gw-request-id` are masked (`abcd...yz`); server logs keep the full value. |
 | Indicator | `x-rp-gw-profile: regulated-retail-non-hipaa` header and the profile endpoint label. |
 

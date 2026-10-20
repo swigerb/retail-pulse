@@ -1,0 +1,32 @@
+        <!-- #339 semantic cache (outbound). Runs AFTER the outbound safety check, so a blocked response has already been
+             replaced by return-response and can never reach the store. A response is stored only when it is a backend
+             200 whose output was actually safety-checked. Evidence is closed-vocabulary: hit | miss | bypass (+ reason). -->
+        <choose>
+            <when condition="@(((string)context.Variables[&quot;rp-cache-decision&quot;]) == &quot;eligible&quot; &amp;&amp; context.Response.StatusCode == 200 &amp;&amp; context.Variables.ContainsKey(&quot;rp-backend-start&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-safety-output-checked&quot;) &amp;&amp; ((string)context.Variables[&quot;rp-safety-output-checked&quot;]) == &quot;true&quot;)">
+                <azure-openai-semantic-cache-store duration="{cache-ttl}" />
+                <set-header name="x-rp-gw-cache" exists-action="override">
+                    <value>miss</value>
+                </set-header>
+            </when>
+            <when condition="@(((string)context.Variables[&quot;rp-cache-decision&quot;]) == &quot;eligible&quot; &amp;&amp; context.Response.StatusCode == 200 &amp;&amp; !context.Variables.ContainsKey(&quot;rp-backend-start&quot;))">
+                <set-header name="x-rp-gw-cache" exists-action="override">
+                    <value>hit</value>
+                </set-header>
+            </when>
+            <when condition="@(((string)context.Variables[&quot;rp-cache-decision&quot;]) == &quot;eligible&quot;)">
+                <set-header name="x-rp-gw-cache" exists-action="override">
+                    <value>bypass</value>
+                </set-header>
+                <set-header name="x-rp-gw-cache-reason" exists-action="override">
+                    <value>@(context.Response.StatusCode == 200 ? &quot;unsafe&quot; : &quot;failed&quot;)</value>
+                </set-header>
+            </when>
+            <otherwise>
+                <set-header name="x-rp-gw-cache" exists-action="override">
+                    <value>bypass</value>
+                </set-header>
+                <set-header name="x-rp-gw-cache-reason" exists-action="override">
+                    <value>@((string)context.Variables[&quot;rp-cache-decision&quot;])</value>
+                </set-header>
+            </otherwise>
+        </choose>

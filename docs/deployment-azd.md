@@ -662,6 +662,23 @@ Authentication: APIM external cache and semantic caching currently support only 
 
 Network (fail closed): with `AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS=Disabled` (default) both `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` and `AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID` (an existing `privatelink.redis.azure.net` zone linked to the VNet) are required, otherwise provisioning fails before creating the cache. The zone-to-VNet link is owned by the zone owner. The APIM instance in this repo is Developer/non-VNet, so it cannot reach a private endpoint; private mode is only usable once APIM is network-connected to that VNet. Setting `Enabled` is an explicit opt-in that exposes the TLS + access-key endpoint publicly.
 
+### APIM semantic-cache policy (issue #339)
+
+The lookup/store policies (`azure-openai-semantic-cache-lookup` / `-store`) are rendered by `infra/modules/apim-openai-api.bicep` only when **all** of these hold; otherwise no cache policy exists and behaviour is unchanged:
+
+| Setting | Default |
+|---|---|
+| `AZURE_SEMANTIC_CACHE_ENABLED` | `false` (the #338 cache infrastructure must exist) |
+| `AZURE_APIM_SEMANTIC_CACHE_POLICY_ENABLED` | `false` |
+| `AZURE_APIM_SEMANTIC_CACHE_EMBEDDINGS_BACKEND_ID` | empty; the ID of an APIM backend for the embeddings deployment, registered out of band (an ID only, never a key or URL) |
+| `AZURE_APIM_SEMANTIC_CACHE_SCORE_THRESHOLD_PERCENT` | `5` (distance 0.05; 1–20, lower is stricter) |
+| `AZURE_SEMANTIC_CACHE_TTL_SECONDS` | `300`; the policy enforces `min(value, 3600)` |
+| APIM gateway safety | must be on (a response is stored only after its output was safety-checked) |
+
+The APIM external-cache registration (Redis connection string) remains an out-of-band operator step from #338; this change never renders or outputs a key or connection string.
+
+Behaviour: only single-turn, non-streaming, tool-free prompts that match the allow-list of stable knowledge/policy topics (returns, exchanges, refunds, warranty, shipping, delivery, gift cards, loyalty, privacy, terms, accessibility, sustainability, size guides) **and** carry a valid `x-rp-tenant-id` header are cached. Entries are partitioned by APIM subscription, tenant and request path. Price, inventory, stockout, availability, recall, pharmacy, identity/patient/clinical/health, mutation, blank/unknown, low-confidence and regulated-retail requests always bypass; non-200, unchecked or safety-blocked responses are never stored. Evidence: `x-rp-gw-cache` = `hit | miss | bypass | unavailable` plus a closed-vocabulary `x-rp-gw-cache-reason`; the Control Room ribbon shows the outcome. The caller (API) does not yet send `x-rp-tenant-id`, so until it does every request reports `bypass` / `no-tenant`. A cache error raised by the semantic-cache policies is reported as `unavailable`; APIM's fall-through behaviour for an unreachable cache must be confirmed in the live deployment test (not done here).
+
 **Cost class:** a small, continuously billed, always-on Azure Managed Redis instance (roughly tens of USD per month for Balanced_B0; confirm current regional pricing; a private endpoint and its DNS zone group add further billed resources). The live deployment issue must record an explicit cost approval before enabling.
 
 **Teardown:** disabling the flag and rerunning incremental `azd provision` does **not** delete an existing cache. Delete the cache and its private endpoint explicitly with `az redisenterprise delete --name redis-<token> --resource-group rg-<env> --yes` and `az network private-endpoint delete --name pe-redis-<token> --resource-group rg-<env>`, or use `azd down` to remove the entire environment. Also remove any APIM named value holding the connection string and rotate the access keys; the DNS zone is not owned by this module.

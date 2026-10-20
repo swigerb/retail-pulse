@@ -68,6 +68,22 @@ param gatewaySafetyMode string = 'demo'
 @description('Regulated-retail mode (#337) for the synthetic pharmacy scenario: forces gateway safety on in fail-closed regulated mode, disables every APIM body capture, masks the client-visible request id and stamps a non-HIPAA profile header. A configuration posture, NOT a HIPAA certification.')
 param regulatedRetailMode bool = false
 
+@description('Enables the APIM semantic-cache lookup/store policies (#339) for allow-listed stable knowledge/policy intents. Off by default. Requires the #338 cache infrastructure, the Redis external cache registered in APIM out of band, an embeddings backend, and gateway safety; otherwise no cache policy is rendered.')
+param semanticCachePolicyEnabled bool = false
+
+@description('ID of the pre-registered APIM backend for the embeddings deployment used by semantic cache similarity matching. Never a key or URL.')
+param semanticCacheEmbeddingsBackendId string = ''
+
+@minValue(1)
+@maxValue(20)
+@description('Similarity distance threshold in hundredths (5 = 0.05). Lower is stricter; APIM documents values above 0.2 as prone to mismatches, so the upper bound is 20.')
+param semanticCacheScoreThresholdPercent int = 5
+
+@minValue(60)
+@maxValue(3600)
+@description('Cache entry lifetime in seconds for stable knowledge/policy answers.')
+param semanticCacheTtlSeconds int = 300
+
 @description('Text harm severity (FourSeverityLevels: 0, 2, 4, 6) at or above which a prompt or response is blocked.')
 @minValue(2)
 @maxValue(6)
@@ -126,6 +142,16 @@ var safetyOutboundFragment = gatewaySafetyEnabled
   ? replace(replace(replace(loadTextContent('apim-openai-safety-outbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', effectiveSafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
   : ''
 
+var semanticCachePolicyActive = semanticCachePolicyEnabled && gatewaySafetyEnabled && !empty(semanticCacheEmbeddingsBackendId)
+var semanticCacheScoreThreshold = '0.${padLeft(string(semanticCacheScoreThresholdPercent), 2, '0')}'
+var semanticCacheInboundFragment = semanticCachePolicyActive
+  ? replace(replace(replace(loadTextContent('apim-openai-semantic-cache-inbound.xml'), '{cache-regulated}', string(regulatedRetailMode)), '{cache-score-threshold}', semanticCacheScoreThreshold), '{cache-embeddings-backend-id}', semanticCacheEmbeddingsBackendId)
+  : ''
+var semanticCacheOutboundFragment = semanticCachePolicyActive
+  ? replace(loadTextContent('apim-openai-semantic-cache-outbound.xml'), '{cache-ttl}', string(semanticCacheTtlSeconds))
+  : ''
+var semanticCacheErrorFragment = semanticCachePolicyActive ? loadTextContent('apim-openai-semantic-cache-error.xml') : ''
+
 var poolEnabled = backendPoolEnabled
 var primaryBackendName = 'retail-pulse-foundry'
 var secondaryBackendName = 'retail-pulse-foundry-secondary'
@@ -138,7 +164,8 @@ var budgetLimitFragment = replace(
   tokenBudgetDemoEnabled ? loadTextContent('apim-openai-budget-limit-demo.xml') : loadTextContent('apim-openai-budget-limit-normal.xml'),
   '{tokens-per-minute}',
   string(tokensPerMinute))
-var inferencePolicyBase = replace(loadTextContent('apim-openai-policy.xml'), '{budget-limit}', budgetLimitFragment)
+var inferencePolicyBudgeted = replace(loadTextContent('apim-openai-policy.xml'), '{budget-limit}', budgetLimitFragment)
+var inferencePolicyBase = replace(replace(replace(inferencePolicyBudgeted, '{semantic-cache-inbound}', semanticCacheInboundFragment), '{semantic-cache-outbound}', semanticCacheOutboundFragment), '{semantic-cache-error}', semanticCacheErrorFragment)
 
 var failoverDemoActive = failoverDemoEnabled && poolEnabled && length(failoverDemoKey) >= 32
 
@@ -579,6 +606,7 @@ output gatewaySafetyMode string = effectiveSafetyMode
 output regulatedRetailMode bool = regulatedRetailMode
 output backendPoolEnabled bool = poolEnabled
 output failoverDemoEnabled bool = failoverDemoActive
+output semanticCachePolicyActive bool = semanticCachePolicyActive
 output routeBackendId string = routeBackendId
 output primaryBackendId string = backend.name
 output secondaryBackendId string = poolEnabled ? secondaryBackendName : ''
