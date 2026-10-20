@@ -38,18 +38,18 @@ tenant:
       category: "Center Store"
       variants: ["Pasta", "Canned Tomatoes", "Cereal", "Baking"]
       priceSegment: "Value"
-    - name: "Private Selection Demo"
+    - name: "Store Brand Demo"
       category: "Owned Brands"
       variants: ["Snacks", "Frozen Meals", "Bakery", "Beverages"]
       priceSegment: "Premium"
   regions:
-    - "Midwest"
-    - "Southeast"
-    - "Southwest"
-    - "Mountain West"
+    - "Heartland"
+    - "Gulf Coast"
+    - "Desert Basin"
+    - "Rocky Mountain"
   channels:
     - "In-Store"
-    - "Curbside Pickup"
+    - "Curbside Order Pickup"
     - "Home Delivery"
   theme:
     primaryColor: "#1F4E8C"

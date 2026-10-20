@@ -3,7 +3,9 @@
 # Small roster built around grocery concerns: freshness and substitutions,
 # promotion lift, on-shelf availability and fulfillment, and live-data
 # gateway governance. The router prompt is preserved verbatim so the fixed
-# intent set keeps classifying correctly.
+# intent set keeps classifying correctly. Intents without a
+# dedicated specialist (competitive, sentiment, planogram, margin, council,
+# scorecard) are mapped to the general retail-pulse agent so none is unhandled.
 
 agents:
   router:
@@ -175,6 +177,12 @@ agents:
     role: "specialist"
     intents:
       - "general/fallback"
+      - "competitive/market"
+      - "sentiment/field"
+      - "planogram/optimization"
+      - "margin/analysis"
+      - "council/health"
+      - "scorecard/portfolio"
     fallback_reply: "I wasn't able to generate a response."
     system_prompt: |
       You are the Retail Pulse assistant for {tenant.company}, an unofficial

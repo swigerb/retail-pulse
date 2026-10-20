@@ -100,7 +100,7 @@ competitive:
       recommendation: MATCH — Review the synthetic price gap before any change; price changes need approval
     - type: delivery_offer
       description: "{0} offered free delivery on {2} orders in {3}"
-      recommendation: DIFFERENTIATE — Emphasize Curbside Pickup fulfillment rate and substitution quality
+      recommendation: DIFFERENTIATE — Emphasize Curbside Order Pickup fulfillment rate and substitution quality
     - type: assortment_change
       description: "{0} expanded its {2} assortment in {3}"
       recommendation: IGNORE — Within current synthetic assortment band
@@ -146,16 +146,16 @@ supply:
   disruptionSeverities: [critical, elevated, watch]
   disruptionDescriptions:
     cold_chain:
-      - Refrigerated trailer capacity tightened on Midwest lanes
-      - Dock temperature hold delayed Southeast dairy receiving
+      - Refrigerated trailer capacity tightened on Heartland lanes
+      - Dock temperature hold delayed Gulf Coast dairy receiving
     carrier_delay:
-      - Weather delayed Southwest produce deliveries
-      - Carrier appointment backlog slowed Mountain West replenishment
+      - Weather delayed Desert Basin produce deliveries
+      - Carrier appointment backlog slowed Rocky Mountain replenishment
     supplier_shortage:
       - Supplier short-shipped eggs ahead of a holiday week
       - Seasonal berry supply fell below the planned fill rate
     pickup_capacity:
-      - Curbside Pickup slots saturated at a high-volume demo store
+      - Curbside Order Pickup slots saturated at a high-volume demo store
       - Delivery picker staffing gap reduced evening fulfillment
 
 stores:

@@ -8,11 +8,11 @@ categories:
     order: 1
     tasks:
       - name: "Produce days of supply"
-        prompt: "Which Fresh Produce items in the Midwest have fewer than two days of supply, and how is sell-through trending?"
+        prompt: "Which Fresh Produce items in the Heartland have fewer than two days of supply, and how is sell-through trending?"
         order: 1
         capability: { kind: prose }
       - name: "Substitution acceptance"
-        prompt: "Show substitution acceptance rates for Curbside Pickup orders by department"
+        prompt: "Show substitution acceptance rates for Curbside Order Pickup orders by department"
         order: 2
         capability: { kind: chart, chartType: bar }
 
@@ -36,7 +36,7 @@ categories:
         order: 1
         capability: { kind: plan, planPath: stockout-risk }
       - name: "Cache-bypass decision"
-        prompt: "Should we bypass the cache for live price and inventory on Home Delivery orders for Avocados in the Southwest? Explain the staleness and gateway cost trade-off."
+        prompt: "Should we bypass the cache for live price and inventory on Home Delivery orders for Avocados in the Desert Basin? Explain the staleness and gateway cost trade-off."
         order: 2
         capability: { kind: prose }
 
@@ -46,6 +46,6 @@ categories:
     order: 4
     tasks:
       - name: "Substitution policy approval"
-        prompt: "Draft a proposal to auto-approve substitutions for Berries on Curbside Pickup, and route it for human approval before applying it"
+        prompt: "Draft a proposal to auto-approve substitutions for Berries on Curbside Order Pickup, and route it for human approval before applying it"
         order: 1
         capability: { kind: prose }
