@@ -65,6 +65,21 @@ param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Enable the optional Azure AI Content Safety second layer. Ships DISABLED so a clean `azd up` never silently provisions a paid Cognitive Services account. Enable per environment with `azd env set AZURE_CONTENT_SAFETY_ENABLED true` (read by main.bicepparam); the API is then wired to the account endpoint with managed identity and no keys.')
 param contentSafetyEnabled bool = false
 
+@description('Enforce Prompt Shields and text harm checks at APIM (#331) using the Content Safety account. Requires contentSafetyEnabled; ships DISABLED. The application-level checks always remain.')
+param apimGatewaySafetyEnabled bool = false
+
+@description('APIM gateway safety dependency behaviour: demo (continue with allowed_on_safety_error evidence on timeout/429/5xx) or regulated (fail closed with a generic 503).')
+@allowed([
+  'demo'
+  'regulated'
+])
+param apimGatewaySafetyMode string = 'demo'
+
+@description('Text harm severity at or above which APIM blocks (FourSeverityLevels 0/2/4/6).')
+@minValue(2)
+@maxValue(6)
+param apimGatewaySafetySeverityThreshold int = 4
+
 @description('Entra application (client) ID of the Azure Bot Service registration that fronts the Teams bot. Ships EMPTY so a clean `azd up` does not pretend to have a bot; set it per environment with `azd env set AZURE_BOT_APP_ID <id>` once a bot is registered.')
 param botAppId string = ''
 
@@ -165,6 +180,10 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     aiFoundryResourceGroupName: aiFoundryResourceGroupName
     backendPoolEnabled: apimBackendPoolEnabled
     failoverDemoEnabled: apimFailoverDemoEnabled
+    gatewaySafetyEnabled: apimGatewaySafetyEnabled && contentSafetyEnabled
+    contentSafetyAccountName: contentSafetyEnabled ? contentSafety!.outputs.name : ''
+    gatewaySafetyMode: apimGatewaySafetyMode
+    gatewaySafetySeverityThreshold: apimGatewaySafetySeverityThreshold
     failoverDemoKey: apimFailoverDemoKey
     secondaryAiFoundryAccountName: secondaryAiFoundryAccountName
     secondaryAiFoundryResourceGroupName: secondaryAiFoundryResourceGroupName

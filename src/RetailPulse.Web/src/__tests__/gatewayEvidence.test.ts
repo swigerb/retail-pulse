@@ -30,6 +30,24 @@ describe('normalizeGatewayEvidence', () => {
     expect(normalizeGatewayEvidence({ status: 'observed', calls: [{ status: 'observed' }] })?.calls[0].failoverDemo).toBeNull();
   });
 
+  it('keeps only valid gateway safety metadata', () => {
+    const e = normalizeGatewayEvidence({
+      status: 'blocked',
+      calls: [{ status: 'blocked', gatewaySafety: { phase: 'input', decision: 'block', promptAttack: true, category: 'Violence', severity: 4, mode: 'regulated', latencyMs: 12, outputChecked: false, prompt: 'secret text' } }],
+    });
+    expect(e?.calls[0].gatewaySafety).toEqual({
+      phase: 'input', decision: 'block', promptAttack: true, category: 'Violence', severity: 4, mode: 'regulated', latencyMs: 12, outputChecked: false,
+    });
+    expect(JSON.stringify(e)).not.toContain('secret text');
+  });
+
+  it('never fabricates safety evidence from unknown phase/decision or free-text category', () => {
+    expect(normalizeGatewayEvidence({ status: 'observed', calls: [{ gatewaySafety: { phase: 'x', decision: 'allow' } }] })?.calls[0].gatewaySafety).toBeNull();
+    const e = normalizeGatewayEvidence({ status: 'observed', calls: [{ gatewaySafety: { phase: 'output', decision: 'allowed_on_safety_error', category: 'free text', severity: 99, mode: 'x' } }] });
+    expect(e?.calls[0].gatewaySafety).toMatchObject({ decision: 'allowed_on_safety_error', category: null, severity: null, mode: null, promptAttack: null });
+    expect(normalizeGatewayEvidence({ status: 'observed', calls: [{}] })?.calls[0].gatewaySafety).toBeNull();
+  });
+
   it('turns malformed or unsafe values into explicit unknown/null', () => {
     const e = normalizeGatewayEvidence({
       status: 'observed',

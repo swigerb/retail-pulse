@@ -38,6 +38,28 @@ param secondaryAiFoundryAccountName string = ''
 @description('Resource group containing the secondary Azure AI Foundry account. Defaults to the primary resource group.')
 param secondaryAiFoundryResourceGroupName string = aiFoundryResourceGroupName
 
+@description('Enables APIM-level Prompt Shields and text harm enforcement (#331) against the existing Content Safety account. Off by default; application-level checks always remain.')
+param gatewaySafetyEnabled bool = false
+
+@description('Name of the existing Azure AI Content Safety account. Required when gatewaySafetyEnabled is true.')
+param contentSafetyAccountName string = ''
+
+@description('Resource group of the existing Content Safety account. Defaults to the APIM resource group.')
+param contentSafetyResourceGroupName string = resourceGroup().name
+
+@description('Dependency-failure behaviour: demo continues on explicit timeout/429/5xx with allowed_on_safety_error evidence; regulated fails closed with a generic 503. Auth/RBAC misconfiguration always fails closed.')
+@allowed([
+  'demo'
+  'regulated'
+])
+param gatewaySafetyMode string = 'demo'
+
+@description('Text harm severity (FourSeverityLevels: 0, 2, 4, 6) at or above which a prompt or response is blocked.')
+@minValue(2)
+@maxValue(6)
+param gatewaySafetySeverityThreshold int = 4
+
+var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
 var cognitiveServicesOpenAIUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 
 resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' existing = {
@@ -58,6 +80,31 @@ module aiFoundryRoleAssignment './apim-openai-role-assignment.bicep' = {
     roleDefinitionId: cognitiveServicesOpenAIUserRoleId
   }
 }
+
+// Resource-scoped Cognitive Services User for the APIM identity on the Content Safety account only.
+module contentSafetyRoleAssignment './apim-openai-role-assignment.bicep' = if (gatewaySafetyEnabled) {
+  name: 'apim-content-safety-user-role-assignment'
+  scope: resourceGroup(contentSafetyResourceGroupName)
+  params: {
+    aiServicesName: contentSafetyAccountName
+    principalId: apimPrincipalId
+    roleDefinitionId: cognitiveServicesUserRoleId
+  }
+}
+
+resource contentSafetyAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = if (gatewaySafetyEnabled) {
+  name: contentSafetyAccountName
+  scope: resourceGroup(contentSafetyResourceGroupName)
+}
+
+var safetyEndpoint = gatewaySafetyEnabled ? contentSafetyAccount!.properties.endpoint : ''
+var safetyEndpointNormalized = endsWith(safetyEndpoint, '/') ? safetyEndpoint : '${safetyEndpoint}/'
+var safetyInboundFragment = gatewaySafetyEnabled
+  ? replace(replace(replace(loadTextContent('apim-openai-safety-inbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', gatewaySafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
+  : ''
+var safetyOutboundFragment = gatewaySafetyEnabled
+  ? replace(replace(replace(loadTextContent('apim-openai-safety-outbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', gatewaySafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
+  : ''
 
 var poolEnabled = backendPoolEnabled
 var primaryBackendName = 'retail-pulse-foundry'
@@ -256,7 +303,13 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
       replace(
         replace(
           replace(
-            replace(loadTextContent('apim-openai-policy.xml'), '{backend-id}', routeBackendId),
+            replace(
+              replace(
+                replace(loadTextContent('apim-openai-policy.xml'), '{backend-id}', routeBackendId),
+                '{safety-inbound}',
+                safetyInboundFragment),
+              '{safety-outbound}',
+              safetyOutboundFragment),
             '{demo-inbound}',
             failoverDemoActive
               ? loadTextContent('apim-openai-failover-demo-inbound.xml')
@@ -275,8 +328,10 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
     secondaryRoleAssignment
     demoKeyNamedValue
     demoArmedNamedValue
+    contentSafetyRoleAssignment
   ] : [
     backend
+    contentSafetyRoleAssignment
   ]
 }
 
@@ -410,6 +465,8 @@ output subscriptionName string = subscription.name
 // These outputs describe deployed configuration, not the backend that served
 // an individual request. Per-request route evidence must remain unknown until
 // APIM exposes a documented pool-member signal and a live verifier proves it.
+output gatewaySafetyEnabled bool = gatewaySafetyEnabled
+output gatewaySafetyMode string = gatewaySafetyMode
 output backendPoolEnabled bool = poolEnabled
 output failoverDemoEnabled bool = failoverDemoActive
 output routeBackendId string = routeBackendId

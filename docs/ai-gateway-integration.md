@@ -16,6 +16,33 @@ See [ADR-010](adr/010-content-safety-layering.md) for the optional Azure AI
 Content Safety second layer that complements this gateway on the input,
 output, retrieved-knowledge, and tool-result seams.
 
+## Gateway content safety (#331)
+
+Optional defense in depth that runs **before** the application-level input, output, RAG and
+tool-result checks (all of which remain). Enable with `AZURE_CONTENT_SAFETY_ENABLED=true` and
+`AZURE_APIM_GATEWAY_SAFETY_ENABLED=true` (mode: `AZURE_APIM_GATEWAY_SAFETY_MODE=demo|regulated`).
+
+- **Resources:** reuses the provisioned Content Safety account. APIM's system-assigned identity gets
+  the resource-scoped *Cognitive Services User* role (`a97b65f3-24c7-4388-baec-2e87135dc908`) on that
+  account only (deterministic role-assignment name, so redeploys are idempotent). Token audience is
+  `https://cognitiveservices.azure.com`; REST version `2024-09-01` (Prompt Shields `text:shieldPrompt`, `text:analyze`).
+- **Why send-request:** the native `llm-content-safety` policy exposes no result variable, so category/severity
+  evidence and normal-vs-regulated dependency behaviour use an explicit managed-identity `send-request`.
+- **Inbound:** user text (and up to 5 tool results as documents) is checked by Prompt Shields and text harm
+  analysis before backend selection and the token limiter. A prompt attack or severity at/above the threshold
+  (default 4) returns **403** `gateway_safety_blocked`; the model is never invoked. The body shape and
+  `x-rp-gw-safety-*` headers distinguish this from an application-layer block.
+- **Outbound:** buffered 200 completions are analyzed before delivery or any caching; a block returns 403.
+- **Failure behaviour:** Content Safety timeout/408/429/5xx → *demo*: continue, evidence `allowed_on_safety_error`;
+  *regulated*: generic **503** `gateway_safety_unavailable`. Auth/RBAC misconfiguration (401/403, missing token, other 4xx)
+  always fails closed with the same generic 503.
+- **Streaming limitation:** `stream: true` responses are checked on input only
+  (`x-rp-gw-safety-output-checked: false`). Once chunks are emitted the gateway never claims a final 403 or a
+  `passed` result; regulated deployments should disable streaming. Long text is truncated to the 10,000-character service limit.
+- **Evidence:** only phase, decision (`allow`/`block`/`allowed_on_safety_error`), prompt-attack flag, highest
+  category/severity, mode, latency and the existing request id/policy version are emitted through the
+  `x-rp-gw-*` contract. Prompts, completions, documents, raw safety bodies, auth headers and matched text are never logged or echoed.
+
 ## Official Microsoft resources
 
 Azure AI Gateway is a capability set within Azure API Management (APIM) — not a separate Azure product or service.

@@ -1,0 +1,226 @@
+        <!-- #331 gateway safety (inbound). Defense in depth ahead of the unchanged application checks.
+             Prompt Shields and text:analyze run through an explicit managed-identity send-request because
+             llm-content-safety exposes no result variable, so category/severity evidence must be read here.
+             Bodies are read with preserveContent and are never logged, echoed, or placed in a header.
+             Runs BEFORE the model backend call and the token limiter. -->
+        <set-variable name="rp-safety-t0" value="@(DateTime.UtcNow)" />
+        <set-variable name="rp-safety-mode" value="{safety-mode}" />
+        <set-variable name="rp-safety-phase" value="input" />
+        <set-variable name="rp-safety-decision" value="allow" />
+        <set-variable name="rp-safety-decision-public" value="allow" />
+        <set-variable name="rp-safety-attack" value="unknown" />
+        <set-variable name="rp-safety-category" value="" />
+        <set-variable name="rp-safety-severity" value="" />
+        <set-variable name="rp-safety-ms" value="@(0)" />
+        <set-variable name="rp-safety-output-checked" value="false" />
+        <set-variable name="rp-safety-evaluated" value="false" />
+        <set-variable name="rp-safety-stream" value="@{
+        try {
+          var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
+          var s = b[&quot;stream&quot;];
+          return (s != null &amp;&amp; s.Type == JTokenType.Boolean &amp;&amp; (bool)s) ? &quot;true&quot; : &quot;false&quot;;
+        } catch (Exception) { return &quot;false&quot;; }
+        }" />
+        <set-variable name="rp-cs-shield-body" value="@{
+        Func&lt;JToken, string&gt; text = c =&gt; {
+          if (c == null) return &quot;&quot;;
+          if (c.Type == JTokenType.String) return (string)c;
+          var sb = new System.Text.StringBuilder();
+          var arr = c as JArray;
+          if (arr != null) { foreach (var p in arr) { var t = p[&quot;text&quot;]; if (t != null &amp;&amp; t.Type == JTokenType.String) { sb.Append((string)t).Append(&quot;\n&quot;); } } }
+          return sb.ToString();
+        };
+
+        try {
+          var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
+          var msgs = b[&quot;messages&quot;] as JArray;
+          if (msgs == null) return &quot;&quot;;
+          var user = new System.Text.StringBuilder();
+          var docs = new JArray();
+          foreach (var m in msgs) {
+            string role = (string)m[&quot;role&quot;]; string t = text(m[&quot;content&quot;]);
+            if (t.Length == 0) continue;
+            if (role == &quot;user&quot;) { user.Append(t).Append(&quot;\n&quot;); }
+            else if (role == &quot;tool&quot; &amp;&amp; docs.Count &lt; 5) { docs.Add(t.Length &gt; 10000 ? t.Substring(0, 10000) : t); }
+          }
+          string u = user.ToString();
+          if (u.Length == 0) return &quot;&quot;;
+          if (u.Length &gt; 10000) { u = u.Substring(u.Length - 10000); }
+          return new JObject(new JProperty(&quot;userPrompt&quot;, u), new JProperty(&quot;documents&quot;, docs)).ToString(Newtonsoft.Json.Formatting.None);
+        } catch (Exception) { return &quot;&quot;; }
+        }" />
+        <set-variable name="rp-cs-analyze-body" value="@{
+        Func&lt;JToken, string&gt; text = c =&gt; {
+          if (c == null) return &quot;&quot;;
+          if (c.Type == JTokenType.String) return (string)c;
+          var sb = new System.Text.StringBuilder();
+          var arr = c as JArray;
+          if (arr != null) { foreach (var p in arr) { var t = p[&quot;text&quot;]; if (t != null &amp;&amp; t.Type == JTokenType.String) { sb.Append((string)t).Append(&quot;\n&quot;); } } }
+          return sb.ToString();
+        };
+
+        try {
+          var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
+          var msgs = b[&quot;messages&quot;] as JArray;
+          if (msgs == null) return &quot;&quot;;
+          var sb = new System.Text.StringBuilder();
+          foreach (var m in msgs) { if ((string)m[&quot;role&quot;] == &quot;user&quot;) { sb.Append(text(m[&quot;content&quot;])).Append(&quot;\n&quot;); } }
+          string u = sb.ToString();
+          if (u.Trim().Length == 0) return &quot;&quot;;
+          if (u.Length &gt; 10000) { u = u.Substring(u.Length - 10000); }
+          return new JObject(new JProperty(&quot;text&quot;, u), new JProperty(&quot;categories&quot;, new JArray(&quot;Hate&quot;, &quot;SelfHarm&quot;, &quot;Sexual&quot;, &quot;Violence&quot;)), new JProperty(&quot;outputType&quot;, &quot;FourSeverityLevels&quot;)).ToString(Newtonsoft.Json.Formatting.None);
+        } catch (Exception) { return &quot;&quot;; }
+        }" />
+        <choose>
+            <when condition="@(((string)context.Variables[&quot;rp-cs-shield-body&quot;]).Length &gt; 0)">
+                <set-variable name="rp-safety-evaluated" value="true" />
+                <authentication-managed-identity resource="https://cognitiveservices.azure.com" output-token-variable-name="rp-cs-token" ignore-error="true" />
+                <choose>
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-cs-token&quot;))">
+                        <send-request mode="new" response-variable-name="rp-shield-resp" timeout="5" ignore-error="true">
+                            <set-url>{cs-endpoint}contentsafety/text:shieldPrompt?api-version=2024-09-01</set-url>
+                            <set-method>POST</set-method>
+                            <set-header name="Content-Type" exists-action="override">
+                                <value>application/json</value>
+                            </set-header>
+                            <set-header name="Authorization" exists-action="override">
+                                <value>@("Bearer " + (string)context.Variables["rp-cs-token"])</value>
+                            </set-header>
+                            <set-body>@((string)context.Variables["rp-cs-shield-body"])</set-body>
+                        </send-request>
+                    </when>
+                </choose>
+                <choose>
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-cs-token&quot;))">
+                        <send-request mode="new" response-variable-name="rp-analyze-resp" timeout="5" ignore-error="true">
+                            <set-url>{cs-endpoint}contentsafety/text:analyze?api-version=2024-09-01</set-url>
+                            <set-method>POST</set-method>
+                            <set-header name="Content-Type" exists-action="override">
+                                <value>application/json</value>
+                            </set-header>
+                            <set-header name="Authorization" exists-action="override">
+                                <value>@("Bearer " + (string)context.Variables["rp-cs-token"])</value>
+                            </set-header>
+                            <set-body>@((string)context.Variables["rp-cs-analyze-body"])</set-body>
+                        </send-request>
+                    </when>
+                </choose>
+                <set-variable name="rp-shield-result" value="@{
+                try {
+                  var r = (IResponse)context.Variables[&quot;rp-shield-resp&quot;];
+                  if (r == null) return &quot;dependency&quot;;
+                  int s = r.StatusCode;
+                  if (s == 200) {
+                    var j = r.Body.As&lt;JObject&gt;();
+                    bool a = false;
+                    var u = j.SelectToken(&quot;userPromptAnalysis.attackDetected&quot;);
+                    if (u != null &amp;&amp; u.Type == JTokenType.Boolean &amp;&amp; (bool)u) { a = true; }
+                    var docs = j[&quot;documentsAnalysis&quot;] as JArray;
+                    if (docs != null) { foreach (var d in docs) { var x = d[&quot;attackDetected&quot;]; if (x != null &amp;&amp; x.Type == JTokenType.Boolean &amp;&amp; (bool)x) { a = true; } } }
+                    return a ? &quot;attack&quot; : &quot;clean&quot;;
+                  }
+                  if (s == 401 || s == 403) return &quot;auth&quot;;
+                  if (s == 408 || s == 429 || s &gt;= 500) return &quot;dependency&quot;;
+                  return &quot;config&quot;;
+                } catch (Exception) { return &quot;dependency&quot;; }
+                }" />
+                <set-variable name="rp-analyze-result" value="@{
+                try {
+                  var r = (IResponse)context.Variables[&quot;rp-analyze-resp&quot;];
+                  if (r == null) return &quot;dependency&quot;;
+                  int s = r.StatusCode;
+                  if (s == 200) {
+                    var j = r.Body.As&lt;JObject&gt;();
+                    var allowed = new string[] { &quot;Hate&quot;, &quot;SelfHarm&quot;, &quot;Sexual&quot;, &quot;Violence&quot; };
+                    string cat = &quot;&quot;; int sev = 0;
+                    var items = j[&quot;categoriesAnalysis&quot;] as JArray;
+                    if (items != null) {
+                      foreach (var i in items) {
+                        string c = (string)i[&quot;category&quot;]; var sv = i[&quot;severity&quot;];
+                        if (c != null &amp;&amp; Array.IndexOf(allowed, c) &gt;= 0 &amp;&amp; sv != null &amp;&amp; sv.Type == JTokenType.Integer &amp;&amp; (int)sv &gt; sev) { cat = c; sev = (int)sv; }
+                      }
+                    }
+                    return &quot;ok:&quot; + cat + &quot;:&quot; + sev.ToString();
+                  }
+                  if (s == 401 || s == 403) return &quot;auth&quot;;
+                  if (s == 408 || s == 429 || s &gt;= 500) return &quot;dependency&quot;;
+                  return &quot;config&quot;;
+                } catch (Exception) { return &quot;dependency&quot;; }
+                }" />
+                <set-variable name="rp-safety-attack" value="@{
+                string s = (string)context.Variables[&quot;rp-shield-result&quot;];
+                return s == &quot;attack&quot; ? &quot;true&quot; : s == &quot;clean&quot; ? &quot;false&quot; : &quot;unknown&quot;;
+                }" />
+                <set-variable name="rp-safety-category" value="@{
+                string a = (string)context.Variables[&quot;rp-analyze-result&quot;];
+                return a.StartsWith(&quot;ok:&quot;) ? a.Split(':')[1] : &quot;&quot;;
+                }" />
+                <set-variable name="rp-safety-severity" value="@{
+                string a = (string)context.Variables[&quot;rp-analyze-result&quot;];
+                return a.StartsWith(&quot;ok:&quot;) ? a.Split(':')[2] : &quot;&quot;;
+                }" />
+                <set-variable name="rp-safety-decision" value="@{
+                string s = (string)context.Variables[&quot;rp-shield-result&quot;];
+                string a = (string)context.Variables[&quot;rp-analyze-result&quot;];
+                bool over = a.StartsWith(&quot;ok:&quot;) &amp;&amp; int.Parse(a.Split(':')[2]) &gt;= {severity-threshold};
+                if (s == &quot;attack&quot; || over) return &quot;block&quot;;
+                if (!context.Variables.ContainsKey(&quot;rp-cs-token&quot;) || s == &quot;auth&quot; || s == &quot;config&quot; || a == &quot;auth&quot; || a == &quot;config&quot;) return &quot;error&quot;;
+                if (s == &quot;dependency&quot; || a == &quot;dependency&quot;) {
+                  return ((string)context.Variables[&quot;rp-safety-mode&quot;]) == &quot;regulated&quot; ? &quot;error&quot; : &quot;allowed_on_safety_error&quot;;
+                }
+                return &quot;allow&quot;;
+                }" />
+                <set-variable name="rp-safety-decision-public" value="@{
+                string d = (string)context.Variables[&quot;rp-safety-decision&quot;];
+                return d == &quot;error&quot; ? &quot;block&quot; : d;
+                }" />
+                <set-variable name="rp-safety-ms" value="@{
+                (int)(DateTime.UtcNow - (DateTime)context.Variables[&quot;rp-safety-t0&quot;]).TotalMilliseconds
+                }" />
+            </when>
+        </choose>
+        <choose>
+            <when condition="@(((string)context.Variables[&quot;rp-safety-evaluated&quot;]) == &quot;true&quot; &amp;&amp; ((string)context.Variables[&quot;rp-safety-decision&quot;] == &quot;block&quot; || (string)context.Variables[&quot;rp-safety-decision&quot;] == &quot;error&quot;))">
+                <return-response>
+                    <set-status code="@((string)context.Variables[&quot;rp-safety-decision&quot;] == &quot;block&quot; ? 403 : 503)" reason="@((string)context.Variables[&quot;rp-safety-decision&quot;] == &quot;block&quot; ? &quot;Forbidden&quot; : &quot;Service Unavailable&quot;)" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-request-id" exists-action="override">
+                        <value>@(context.RequestId.ToString())</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-policy-version" exists-action="override">
+                        <value>2026-10-rp331-v1</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety" exists-action="override">
+                        <value>blocked</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety-phase" exists-action="override">
+                        <value>@(context.Variables[&quot;rp-safety-phase&quot;])</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety-decision" exists-action="override">
+                        <value>@(context.Variables[&quot;rp-safety-decision-public&quot;])</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety-prompt-attack" exists-action="override">
+                        <value>@(context.Variables[&quot;rp-safety-attack&quot;])</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety-category" exists-action="override">
+                        <value>@(context.Variables[&quot;rp-safety-category&quot;])</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety-severity" exists-action="override">
+                        <value>@(context.Variables[&quot;rp-safety-severity&quot;])</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety-mode" exists-action="override">
+                        <value>@(context.Variables[&quot;rp-safety-mode&quot;])</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety-latency-ms" exists-action="override">
+                        <value>@(((int)context.Variables[&quot;rp-safety-ms&quot;]).ToString())</value>
+                    </set-header>
+                    <set-header name="x-rp-gw-safety-output-checked" exists-action="override">
+                        <value>@(context.Variables[&quot;rp-safety-output-checked&quot;])</value>
+                    </set-header>
+                    <set-body>@((string)context.Variables[&quot;rp-safety-decision&quot;] == "block" ? "{\"error\":{\"code\":\"gateway_safety_blocked\",\"message\":\"The request was blocked by gateway content safety.\"}}" : "{\"error\":{\"code\":\"gateway_safety_unavailable\",\"message\":\"Content safety could not be verified.\"}}")</set-body>
+                </return-response>
+            </when>
+        </choose>
+
