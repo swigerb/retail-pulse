@@ -63,8 +63,8 @@ public sealed partial class McpGatewayDeploymentContractTests
     [Fact]
     public void BackingApi_IsNotBoundToAnyProduct_SoItIsNotCallableAsRest()
     {
-        Regex.Matches(McpBicep, @"service/products/apis@").Should().HaveCount(1);
-        Regex.IsMatch(McpBicep, @"service/products/apis@[^']+'\s*=\s*\{[^}]*name:\s*mcpServerId").Should().BeTrue();
+        ProductApisRegex().Matches(McpBicep).Should().HaveCount(1);
+        ProductApiBindingRegex().IsMatch(McpBicep).Should().BeTrue();
         BackingPolicy.Should().Contain("405").And.Contain("context.Request.Method != &quot;GET&quot;");
     }
 
@@ -113,7 +113,7 @@ public sealed partial class McpGatewayDeploymentContractTests
         }
 
         McpPolicy.Should().Contain("context.Elapsed");
-        Regex.Matches(McpBicep, @"body:\s*\{\s*bytes:\s*0\s*\}").Should().HaveCount(4, "no request/response bodies are logged");
+        ZeroBodyBytesRegex().Matches(McpBicep).Should().HaveCount(4, "no request/response bodies are logged");
         McpBicep.Should().Contain("headers: []");
         McpBicep.Should().Contain("service/apis/diagnostics@");
     }
@@ -132,10 +132,10 @@ public sealed partial class McpGatewayDeploymentContractTests
             text.Should().NotContain("listSecrets");
         }
 
-        Regex.Matches(McpBicep, @"namedValues@").Should().HaveCount(4);
-        Regex.Matches(McpBicep, @"secret:\s*false").Should().HaveCount(4);
+        NamedValuesRegex().Matches(McpBicep).Should().HaveCount(4);
+        NonSecretRegex().Matches(McpBicep).Should().HaveCount(4);
         McpBicep.Should().NotContain("secret: true");
-        Regex.Matches(mcpModuleCall, @"^output\s+(\w+)", RegexOptions.Multiline)
+        OutputRegex().Matches(mcpModuleCall)
             .Select(m => m.Groups[1].Value).Should().OnlyContain(n => !n.Contains("KEY", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -260,6 +260,24 @@ public sealed partial class McpGatewayDeploymentContractTests
 
         throw new InvalidOperationException("Could not locate repo root (RetailPulse.slnx).");
     }
+
+    [GeneratedRegex(@"service/products/apis@")]
+    private static partial Regex ProductApisRegex();
+
+    [GeneratedRegex(@"service/products/apis@[^']+'\s*=\s*\{[^}]*name:\s*mcpServerId")]
+    private static partial Regex ProductApiBindingRegex();
+
+    [GeneratedRegex(@"body:\s*\{\s*bytes:\s*0\s*\}")]
+    private static partial Regex ZeroBodyBytesRegex();
+
+    [GeneratedRegex(@"namedValues@")]
+    private static partial Regex NamedValuesRegex();
+
+    [GeneratedRegex(@"secret:\s*false")]
+    private static partial Regex NonSecretRegex();
+
+    [GeneratedRegex(@"^output\s+(\w+)", RegexOptions.Multiline)]
+    private static partial Regex OutputRegex();
 
     [GeneratedRegex(@"name: '([^']+)'")]
     private static partial Regex MyRegex();

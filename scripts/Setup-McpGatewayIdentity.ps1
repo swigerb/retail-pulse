@@ -74,7 +74,8 @@ function Invoke-Graph {
         [Parameter(Mandatory)][ValidateSet('GET', 'POST', 'PATCH')][string]$Method,
         [Parameter(Mandatory)][string]$Url,
         $Body = $null,
-        [switch]$RetryNotFound
+        [switch]$RetryNotFound,
+        [switch]$RetryReplication
     )
 
     $bodyFile = $null
@@ -101,6 +102,15 @@ function Invoke-Graph {
                     'Graph permissions Application.ReadWrite.All (gateway app registration) and ' +
                     'AppRoleAssignment.ReadWrite.All (RetailPulse.User assignment to the APIM managed identity). ' +
                     'The Cloud Application Administrator role covers both for interactive deployers.'
+            }
+
+            # Fresh app registration not yet replicated: Graph answers 400 (invalid appId reference) or 404.
+            $replicationLag = $output -match 'Request_ResourceNotFound|\(404\)|NotFound|does not reference a valid application object'
+            if ($RetryReplication -and $replicationLag -and $notFoundAttempts -lt 5) {
+                $notFoundAttempts++
+                Write-Host "   waiting for application replication (attempt $notFoundAttempts/5)..."
+                Start-Sleep -Seconds 10
+                continue
             }
 
             if ($output -match 'Request_ResourceNotFound|\(404\)|NotFound' -and $RetryNotFound -and $notFoundAttempts -lt 5) {
@@ -174,7 +184,7 @@ else {
 $gatewaySp = Get-FirstOrNull (Invoke-Graph -Method GET -Url "$graph/servicePrincipals?`$filter=appId eq '$($gatewayApp.appId)'&`$select=id")
 if (-not $gatewaySp) {
     Write-Host '-> creating gateway service principal'
-    $created = Invoke-Graph -Method POST -Url "$graph/servicePrincipals" -Body @{ appId = $gatewayApp.appId }
+    $created = Invoke-Graph -Method POST -Url "$graph/servicePrincipals" -Body @{ appId = $gatewayApp.appId } -RetryReplication
     # A fresh service principal can 404 for a while; retry up to 5 times at 10 s intervals before moving on.
     Invoke-Graph -Method GET -Url "$graph/servicePrincipals/$($created.id)?`$select=id" -RetryNotFound | Out-Null
 }
