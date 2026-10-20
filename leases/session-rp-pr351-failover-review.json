@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr351-failover-review",
+  "sessionId": "rp-pr351-failover-review",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T15:34:39.824Z",
+  "lastHeartbeatAt": "2026-10-20T15:34:39.824Z",
+  "updatedAt": "2026-10-20T15:34:39.824Z",
+  "terminalReason": null,
+  "executionRef": null
+}
