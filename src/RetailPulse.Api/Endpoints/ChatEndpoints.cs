@@ -1202,7 +1202,8 @@ public static class ChatEndpoints
         .Produces(StatusCodes.Status429TooManyRequests)
         .Produces(StatusCodes.Status503ServiceUnavailable)
         .RequireAuthorization()
-        .RequireRateLimiting("strict");
+        .RequireRateLimiting("strict")
+        .WithGatewayEvidence();
 
         // Health/info endpoint
         app.MapGet("/api/info", (IEnumerable<ISpecialistAgent> specialists) => Results.Ok(new

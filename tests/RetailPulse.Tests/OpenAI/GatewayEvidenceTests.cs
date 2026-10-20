@@ -13,7 +13,7 @@ public sealed class GatewayEvidenceTests
     [Fact]
     public void Parse_FullHeaderSet_MapsEveryField()
     {
-        var e = Parse(new()
+        GatewayCallEvidence e = Parse(new()
         {
             [GatewayEvidenceHeaders.RequestId] = "abc-123",
             [GatewayEvidenceHeaders.Backend] = "retail-pulse-foundry",
@@ -37,7 +37,7 @@ public sealed class GatewayEvidenceTests
     [Fact]
     public void Parse_NoHeaders_YieldsExplicitUnknownNotSuccess()
     {
-        var e = Parse([]);
+        GatewayCallEvidence e = Parse([]);
 
         e.IsEmpty.Should().BeTrue();
         e.Quota.Should().Be(GatewayOutcome.Unknown);
@@ -54,7 +54,7 @@ public sealed class GatewayEvidenceTests
     [InlineData("99999999999999999999")]
     public void Parse_MalformedCounts_BecomeNull(string value)
     {
-        var e = Parse(new() { [GatewayEvidenceHeaders.TokensConsumed] = value, [GatewayEvidenceHeaders.LatencyMs] = value });
+        GatewayCallEvidence e = Parse(new() { [GatewayEvidenceHeaders.TokensConsumed] = value, [GatewayEvidenceHeaders.LatencyMs] = value });
 
         e.TokensConsumed.Should().BeNull();
         e.GatewayLatencyMs.Should().BeNull();
@@ -66,7 +66,7 @@ public sealed class GatewayEvidenceTests
     [InlineData("line\r\nbreak")]
     public void Parse_UnsafeIdentifiers_AreRedactedToNull(string value)
     {
-        var e = Parse(new()
+        GatewayCallEvidence e = Parse(new()
         {
             [GatewayEvidenceHeaders.RequestId] = value,
             [GatewayEvidenceHeaders.Backend] = value,
@@ -92,7 +92,7 @@ public sealed class GatewayEvidenceTests
     [InlineData(GatewayEvidenceHeaders.Quota, "OK")]
     public void Parse_OutcomeOutsideFieldVocabulary_IsUnknown(string header, string value)
     {
-        var e = Parse(new() { [header] = value });
+        GatewayCallEvidence e = Parse(new() { [header] = value });
 
         e.Quota.Should().Be(GatewayOutcome.Unknown);
         e.Cache.Should().Be(GatewayOutcome.Unknown);
@@ -113,23 +113,23 @@ public sealed class GatewayEvidenceTests
     [Fact]
     public void Collector_WithoutScope_RecordIsNoOp()
     {
-        var act = () => GatewayEvidenceCollector.Record(Parse([]));
+        Action act = () => GatewayEvidenceCollector.Record(Parse([]));
         act.Should().NotThrow();
     }
 
     [Fact]
     public async Task Collector_AggregatesAcrossAsyncCalls_AndSeparatesUnreported()
     {
-        var scope = GatewayEvidenceCollector.Begin();
+        GatewayEvidenceCollector.Scope scope = GatewayEvidenceCollector.Begin();
         await Task.WhenAll(
             Task.Run(() => GatewayEvidenceCollector.Record(Parse(new()
             { [GatewayEvidenceHeaders.TokensConsumed] = "10", [GatewayEvidenceHeaders.TokensRemaining] = "90" }))),
             Task.Run(() => GatewayEvidenceCollector.Record(Parse(new() { [GatewayEvidenceHeaders.TokensConsumed] = "5" }))));
         GatewayEvidenceCollector.Record(Parse([]));
 
-        var snap = scope.Snapshot();
+        GatewayEvidence snap = scope.Snapshot();
 
-        snap.Observed.Should().BeTrue();
+        snap.Status.Should().Be(GatewayEvidenceStatus.Unavailable);
         snap.CallCount.Should().Be(3);
         snap.TotalTokensConsumed.Should().Be(15);
         snap.TokensRemaining.Should().Be(90);
@@ -145,10 +145,10 @@ public sealed class GatewayEvidenceTests
     [Fact]
     public void Snapshot_OnlyEmptyCalls_IsNotObserved()
     {
-        var scope = GatewayEvidenceCollector.Begin();
+        GatewayEvidenceCollector.Scope scope = GatewayEvidenceCollector.Begin();
         GatewayEvidenceCollector.Record(Parse([]));
 
-        var snap = scope.Snapshot();
+        GatewayEvidence snap = scope.Snapshot();
 
         snap.Observed.Should().BeFalse();
         snap.TotalTokensConsumed.Should().BeNull();
@@ -157,8 +157,8 @@ public sealed class GatewayEvidenceTests
     [Fact]
     public void Serialization_UsesCamelCaseAndKebabOutcomes_AndHasNoSensitiveFields()
     {
-        var json = JsonSerializer.Serialize(
-            new GatewayEvidence(true, 1, 1, 2, [Parse(new() { [GatewayEvidenceHeaders.Cache] = "not-applicable" })]),
+        string json = JsonSerializer.Serialize(
+            new GatewayEvidence(GatewayEvidenceStatus.Observed, 1, 1, 2, [Parse(new() { [GatewayEvidenceHeaders.Cache] = "not-applicable" })]),
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         json.Should().Contain("\"cache\":\"not-applicable\"").And.Contain("\"quota\":\"unknown\"");
@@ -166,10 +166,7 @@ public sealed class GatewayEvidenceTests
     }
 
     [Fact]
-    public void ChatResponse_GatewayDefaultsToNull_PreservingExistingShape()
-    {
-        new RetailPulse.Contracts.ChatResponse("r", "s", []).Gateway.Should().BeNull();
-    }
+    public void ChatResponse_GatewayDefaultsToNull_PreservingExistingShape() => new Contracts.ChatResponse("r", "s", []).Gateway.Should().BeNull();
 
     [Fact]
     public void ApimPolicy_EmitsEvidenceHeadersAndStripsInboundSpoofing()
@@ -179,12 +176,77 @@ public sealed class GatewayEvidenceTests
             dir = Path.GetDirectoryName(dir)!;
         string xml = File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml"));
 
-        foreach (string name in GatewayEvidenceHeaders.AllNames.Where(n => n is not (GatewayEvidenceHeaders.BackendLatencyMs or GatewayEvidenceHeaders.TokensRemaining)))
+        // Cache is intentionally never emitted: the policy has no cache signal, so it stays unknown.
+        foreach (string name in GatewayEvidenceHeaders.AllNames)
         {
             xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"delete\" />", name);
-            xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"override\">", name);
+            if (name != GatewayEvidenceHeaders.Cache)
+            {
+                xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"override\">", name);
+            }
         }
 
         xml.Should().NotContain("context.Subscription.Key").And.NotContain("Authorization");
+    }
+
+    private static string Policy()
+    {
+        string dir = AppContext.BaseDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml")))
+            dir = Path.GetDirectoryName(dir)!;
+        return File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml"));
+    }
+
+    private static string OutboundValue(string xml, string header)
+    {
+        int i = xml.IndexOf($"name=\"{header}\" exists-action=\"override\"", StringComparison.Ordinal);
+        i.Should().BeGreaterThan(0, header);
+        int v = xml.IndexOf("<value>", i, StringComparison.Ordinal);
+        return xml[(v + 7)..xml.IndexOf("</value>", v, StringComparison.Ordinal)];
+    }
+
+    [Fact]
+    public void ApimPolicy_DoesNotHardcodeSuccessValues()
+    {
+        string xml = Policy();
+
+        foreach (string h in new[] { GatewayEvidenceHeaders.Route, GatewayEvidenceHeaders.Quota, GatewayEvidenceHeaders.Cache, GatewayEvidenceHeaders.Safety })
+        {
+            if (xml.Contains($"name=\"{h}\" exists-action=\"override\"", StringComparison.Ordinal))
+            {
+                int start = xml.IndexOf($"name=\"{h}\" exists-action=\"override\"", StringComparison.Ordinal);
+                // Each emitted success-like value must sit inside a <when> guarded by a real signal.
+                string before = xml[..start];
+                int lastWhen = before.LastIndexOf("<when condition", StringComparison.Ordinal);
+                int lastClose = before.LastIndexOf("</when>", StringComparison.Ordinal);
+                (lastWhen > lastClose).Should().BeTrue($"{h} must be emitted only under a conditional signal");
+            }
+
+        }
+
+        xml.Should().NotContain("\"primary\"");
+        xml.Should().NotContain("not-applicable");
+        xml.Should().NotContain("? \"passed\"");
+    }
+
+    [Fact]
+    public void ApimPolicy_EmitsRemainingTokensAndBackendLatencyFromRealSignals()
+    {
+        string xml = Policy();
+
+        xml.Should().Contain("remaining-tokens-variable-name=\"rp-tokens-remaining\"");
+        OutboundValue(xml, GatewayEvidenceHeaders.TokensRemaining).Should().Contain("rp-tokens-remaining");
+        OutboundValue(xml, GatewayEvidenceHeaders.BackendLatencyMs).Should().Contain("rp-backend-start");
+        xml.Should().Contain("<set-variable name=\"rp-backend-start\"");
+        OutboundValue(xml, GatewayEvidenceHeaders.Route).Should().Contain("rp-route");
+    }
+
+    [Fact]
+    public void ApimPolicy_SafetyOnlyEmitsBlockedFromContentFilterSignal()
+    {
+        string xml = Policy();
+
+        OutboundValue(xml, GatewayEvidenceHeaders.Safety).Should().Be("blocked");
+        xml.Should().Contain("content_filter");
     }
 }

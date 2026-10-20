@@ -43,7 +43,7 @@ public static class GatewayEvidenceHeaders
     public static GatewayCallEvidence Parse(Func<string, string?> getHeader, int? statusCode = null)
     {
         ArgumentNullException.ThrowIfNull(getHeader);
-        return new GatewayCallEvidence(
+        var evidence = new GatewayCallEvidence(
             SafeToken(getHeader(RequestId)),
             SafeToken(getHeader(Backend)),
             ParseRoute(getHeader(Route)),
@@ -56,6 +56,11 @@ public static class GatewayEvidenceHeaders
             ParseCount(getHeader(LatencyMs)),
             ParseCount(getHeader(BackendLatencyMs)),
             statusCode);
+
+        GatewayEvidenceStatus status = evidence.IsEmpty
+            ? GatewayEvidenceStatus.Unavailable
+            : evidence.Safety == GatewayOutcome.Blocked ? GatewayEvidenceStatus.Blocked : GatewayEvidenceStatus.Observed;
+        return evidence with { Status = status };
     }
 
     internal static string? SafeToken(string? value)

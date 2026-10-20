@@ -8,9 +8,9 @@ namespace RetailPulse.Api.OpenAI.Gateway;
 public static class GatewayEvidenceExtensions
 {
     /// <summary>Registers the capture policy per-try so retried attempts are each recorded.</summary>
-    public static AzureOpenAIClientOptions AddGatewayEvidence(this AzureOpenAIClientOptions options)
+    public static AzureOpenAIClientOptions AddGatewayEvidence(this AzureOpenAIClientOptions options, GatewayMode mode)
     {
-        options.AddPolicy(new GatewayEvidencePolicy(), PipelinePosition.PerTry);
+        options.AddPolicy(new GatewayEvidencePolicy(mode), PipelinePosition.PerTry);
         return options;
     }
 
@@ -29,12 +29,21 @@ public static class GatewayEvidenceExtensions
 
     /// <summary>Scopes evidence capture to a chat request and attaches it to the typed response.</summary>
     public static RouteHandlerBuilder WithGatewayEvidence(this RouteHandlerBuilder builder) =>
-        builder.AddEndpointFilter(async (ctx, next) =>
+        builder.AddEndpointFilter(ApplyAsync);
+
+    internal static async ValueTask<object?> ApplyAsync(EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+    {
+        GatewayEvidenceCollector.Scope scope = GatewayEvidenceCollector.Begin();
+        try
         {
-            GatewayEvidenceCollector.Scope scope = GatewayEvidenceCollector.Begin();
             object? result = await next(ctx);
             return result is Ok<ChatResponse> ok && ok.Value is { } body
                 ? TypedResults.Ok(body with { Gateway = scope.Snapshot() })
                 : result;
-        });
+        }
+        finally
+        {
+            GatewayEvidenceCollector.End();
+        }
+    }
 }

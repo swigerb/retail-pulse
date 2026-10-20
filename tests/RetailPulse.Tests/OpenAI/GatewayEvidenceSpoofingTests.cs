@@ -12,7 +12,7 @@ public sealed class GatewayEvidenceSpoofingTests
     {
         var builder = new ApplicationBuilder(new ServiceProvider0());
         builder.UseStripInboundGatewayHeaders();
-        var app = builder.Build();
+        RequestDelegate app = builder.Build();
         var ctx = new DefaultHttpContext();
         ctx.Request.Headers["X-RP-GW-Quota"] = "allowed";
         ctx.Request.Headers["x-rp-anything"] = "1";

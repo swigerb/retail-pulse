@@ -885,7 +885,7 @@ var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
     RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 2)
 };
 
-azureClientOptions.AddGatewayEvidence();
+azureClientOptions.AddGatewayEvidence(GatewayModeSettings.Resolve(builder.Configuration));
 
 Azure.AI.OpenAI.AzureOpenAIClient azureClient = openAiConnection.CreateClient(azureClientOptions);
 
