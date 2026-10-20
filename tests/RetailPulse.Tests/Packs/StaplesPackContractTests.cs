@@ -48,7 +48,7 @@ public sealed class StaplesPackContractTests
     public void StartingTasks_IncludeGovernanceAndApprovalPrompts()
     {
         LoadedPack pack = Load();
-        List<string> prompts = pack.StartingTasks.SelectMany(c => c.Tasks).Select(t => t.Prompt).ToList();
+        var prompts = [.. pack.StartingTasks.SelectMany(c => c.Tasks).Select(t => t.Prompt)];
 
         prompts.Should().Contain(p => p.Contains("AI gateway", StringComparison.OrdinalIgnoreCase)
             && p.Contains("content safety", StringComparison.OrdinalIgnoreCase)
