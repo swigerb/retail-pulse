@@ -94,10 +94,10 @@ promos:
   successRatings: [Strong, Steady, Watch, Fell Short]
 
 supply:
-  disruptionTypes: [carrier_delay, stock_shortage, print_backlog]
+  disruptionTypes: [office_carrier_delay, stock_shortage, print_backlog]
   disruptionSeverities: [critical, elevated, watch]
   disruptionDescriptions:
-    carrier_delay:
+    office_carrier_delay:
       - Regional carrier delayed next-day delivery routes in the Atlantic Corridor
       - Linehaul capacity shortfall slowed Gulf & Southern Belt replenishment
     stock_shortage:

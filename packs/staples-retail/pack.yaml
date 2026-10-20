@@ -43,7 +43,7 @@ tenant:
     - "Great Lakes & Plains"
     - "Pacific Rim"
   channels:
-    - "Store"
+    - "Office Supply Store"
     - "Next-Day Delivery"
     - "Business Account Portal"
   theme:
