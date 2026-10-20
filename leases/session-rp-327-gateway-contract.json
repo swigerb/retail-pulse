@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-327-gateway-contract",
+  "sessionId": "rp-327-gateway-contract",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T15:09:40.738Z",
+  "lastHeartbeatAt": "2026-10-20T15:09:40.738Z",
+  "updatedAt": "2026-10-20T15:09:40.738Z",
+  "terminalReason": null,
+  "executionRef": null
+}
