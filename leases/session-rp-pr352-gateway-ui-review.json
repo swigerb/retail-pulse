@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr352-gateway-ui-review",
+  "sessionId": "rp-pr352-gateway-ui-review",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T16:13:04.046Z",
+  "lastHeartbeatAt": "2026-10-20T16:13:04.046Z",
+  "updatedAt": "2026-10-20T16:13:04.046Z",
+  "terminalReason": null,
+  "executionRef": null
+}
