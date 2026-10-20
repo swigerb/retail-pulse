@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-retail-pulse-337-regulated",
+  "sessionId": "retail-pulse-337-regulated",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T21:46:03.831Z",
+  "lastHeartbeatAt": "2026-10-20T21:46:03.831Z",
+  "updatedAt": "2026-10-20T21:46:03.831Z",
+  "terminalReason": null,
+  "executionRef": null
+}
