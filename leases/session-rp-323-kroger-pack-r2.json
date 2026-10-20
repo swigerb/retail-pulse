@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-323-kroger-pack-r2",
+  "sessionId": "rp-323-kroger-pack-r2",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T14:35:48.246Z",
+  "lastHeartbeatAt": "2026-10-20T14:35:48.246Z",
+  "updatedAt": "2026-10-20T14:35:48.246Z",
+  "terminalReason": null,
+  "executionRef": null
+}
