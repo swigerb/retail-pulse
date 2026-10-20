@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr349-mcp-design-fix",
+  "sessionId": "rp-pr349-mcp-design-fix",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T15:23:20.802Z",
+  "lastHeartbeatAt": "2026-10-20T15:23:20.802Z",
+  "updatedAt": "2026-10-20T15:23:20.802Z",
+  "terminalReason": null,
+  "executionRef": null
+}
