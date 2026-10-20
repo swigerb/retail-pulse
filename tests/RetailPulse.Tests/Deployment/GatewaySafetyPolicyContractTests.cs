@@ -51,7 +51,7 @@ public sealed class GatewaySafetyPolicyContractTests
         BasePolicy.IndexOf("{safety-outbound}", StringComparison.Ordinal)
             .Should().BeGreaterThan(BasePolicy.IndexOf("<outbound>", StringComparison.Ordinal))
             .And.BeLessThan(BasePolicy.IndexOf("x-rp-gw-request-id\" exists-action=\"override", StringComparison.Ordinal));
-        Regex.IsMatch(BasePolicy, "<cache-(store|lookup)").Should().BeFalse(
+        BasePolicy.Should().NotContain("<cache-store").And.NotContain("<cache-lookup",
             "no cache policy may store a response before the outbound safety check");
     }
 
@@ -113,7 +113,7 @@ public sealed class GatewaySafetyPolicyContractTests
         {
             string x = Unescape(fragment);
             x.Should().NotContain("<trace").And.NotContain("log-to-eventhub").And.NotContain("<emit-metric");
-            XDocument doc = XDocument.Parse("<r>" + fragment + "</r>");
+            var doc = XDocument.Parse("<r>" + fragment + "</r>");
             foreach (XElement header in doc.Descendants("set-header").Where(h => (string?)h.Attribute("name") != "Authorization"))
             {
                 string value = Unescape(header.Value);
@@ -194,10 +194,18 @@ public sealed class GatewaySafetyPolicyContractTests
     }
 
     [Fact]
+    public void PolicyExpressions_DoNotUseUnsupportedSystemFuncDelegates()
+    {
+        Unescape(Inbound).Should().NotContain("Func<JToken", "System.Func is not in APIM's policy-expression allow-list");
+        Unescape(Outbound).Should().NotContain("Func<JToken", "System.Func is not in APIM's policy-expression allow-list");
+    }
+
+    [Fact]
     public void Diagnostics_CaptureNoBodiesOrMessageContent_WhenGatewaySafetyIsEnabled()
     {
         Bicep.Should().Contain("bytes: gatewaySafetyEnabled ? 0 : 8192");
-        Bicep.Should().Contain("messages: gatewaySafetyEnabled ? 'none' : 'all'");
+        Bicep.Should().Contain("logs: gatewaySafetyEnabled ? 'disabled' : 'enabled'");
+        Bicep.Should().Contain("messages: 'all'", "the only supported message selector is retained behind disabled LLM logging");
         Bicep.Should().NotContain("bytes: 8192\n", "every body capture size must be conditional on gateway safety");
         string apim = Read("apim.bicep");
         apim.Should().Contain("bytes: captureRequestBodies ? 8192 : 0").And.NotContain("bytes: 8192\n");

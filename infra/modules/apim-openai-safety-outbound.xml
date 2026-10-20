@@ -7,44 +7,62 @@
         <choose>
             <when condition="@(context.Variables.ContainsKey(&quot;rp-safety-evaluated&quot;) &amp;&amp; ((string)context.Variables[&quot;rp-safety-evaluated&quot;]) == &quot;true&quot; &amp;&amp; ((string)context.Variables[&quot;rp-safety-stream&quot;]) != &quot;true&quot; &amp;&amp; context.Response.StatusCode == 200)">
             <set-variable name="rp-cs-out-state" value="@{
-                Func&lt;JToken, string&gt; text = c =&gt; {
-                  if (c == null || c.Type == JTokenType.Null) return &quot;&quot;;
-                  if (c.Type == JTokenType.String) return (string)c;
-                  var arr = c as JArray;
-                  if (arr == null) { throw new Exception(&quot;content&quot;); }
-                  var sb = new System.Text.StringBuilder();
-                  foreach (var p in arr) { var t = p[&quot;text&quot;]; if (t != null &amp;&amp; t.Type == JTokenType.String) { sb.Append((string)t).Append(&quot;\n&quot;); } }
-                  return sb.ToString();
-                };
-
                 try {
                   var b = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
                   var ch = b == null ? null : b[&quot;choices&quot;] as JArray;
                   if (ch == null) return &quot;invalid&quot;;
                   var sb = new System.Text.StringBuilder();
-                  foreach (var c in ch) { var m = c[&quot;message&quot;]; if (m != null) { string ct = text(m[&quot;content&quot;]); if (ct.Length &gt; 0) { if (sb.Length &gt; 0) { sb.Append(&quot;
-                &quot;); } sb.Append(ct); } } }
+                  foreach (var c in ch) {
+                    var m = c[&quot;message&quot;];
+                    if (m == null) continue;
+                    var content = m[&quot;content&quot;];
+                    string ct = &quot;&quot;;
+                    if (content != null &amp;&amp; content.Type != JTokenType.Null) {
+                      if (content.Type == JTokenType.String) ct = (string)content;
+                      else {
+                        var parts = content as JArray;
+                        if (parts == null) return &quot;invalid&quot;;
+                        var text = new System.Text.StringBuilder();
+                        foreach (var p in parts) {
+                          var partText = p[&quot;text&quot;];
+                          if (partText != null &amp;&amp; partText.Type == JTokenType.String) text.Append((string)partText).Append(&quot;\n&quot;);
+                        }
+                        ct = text.ToString();
+                      }
+                    }
+                    if (ct.Length &gt; 0) { if (sb.Length &gt; 0) { sb.Append(&quot;
+                &quot;); } sb.Append(ct); }
+                  }
                   string u = sb.ToString();
                   if (u.Trim().Length == 0) return &quot;empty&quot;;
                   return u.Length &gt; 10000 ? &quot;oversized&quot; : &quot;ok&quot;;
                 } catch (Exception) { return &quot;invalid&quot;; }
             }" />
             <set-variable name="rp-cs-out-body" value="@{
-                Func&lt;JToken, string&gt; text = c =&gt; {
-                  if (c == null || c.Type == JTokenType.Null) return &quot;&quot;;
-                  if (c.Type == JTokenType.String) return (string)c;
-                  var arr = c as JArray;
-                  if (arr == null) { throw new Exception(&quot;content&quot;); }
-                  var sb = new System.Text.StringBuilder();
-                  foreach (var p in arr) { var t = p[&quot;text&quot;]; if (t != null &amp;&amp; t.Type == JTokenType.String) { sb.Append((string)t).Append(&quot;\n&quot;); } }
-                  return sb.ToString();
-                };
-
                 if ((string)context.Variables[&quot;rp-cs-out-state&quot;] != &quot;ok&quot;) return &quot;&quot;;
                 var b = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
                 var sb = new System.Text.StringBuilder();
-                foreach (var c in (JArray)b[&quot;choices&quot;]) { var m = c[&quot;message&quot;]; if (m != null) { string ct = text(m[&quot;content&quot;]); if (ct.Length &gt; 0) { if (sb.Length &gt; 0) { sb.Append(&quot;
-                &quot;); } sb.Append(ct); } } }
+                foreach (var c in (JArray)b[&quot;choices&quot;]) {
+                  var m = c[&quot;message&quot;];
+                  if (m == null) continue;
+                  var content = m[&quot;content&quot;];
+                  string ct = &quot;&quot;;
+                  if (content != null &amp;&amp; content.Type != JTokenType.Null) {
+                    if (content.Type == JTokenType.String) ct = (string)content;
+                    else {
+                      var parts = content as JArray;
+                      if (parts == null) throw new Exception(&quot;content&quot;);
+                      var text = new System.Text.StringBuilder();
+                      foreach (var p in parts) {
+                        var partText = p[&quot;text&quot;];
+                        if (partText != null &amp;&amp; partText.Type == JTokenType.String) text.Append((string)partText).Append(&quot;\n&quot;);
+                      }
+                      ct = text.ToString();
+                    }
+                  }
+                  if (ct.Length &gt; 0) { if (sb.Length &gt; 0) { sb.Append(&quot;
+                &quot;); } sb.Append(ct); }
+                }
                 return new JObject(new JProperty(&quot;text&quot;, sb.ToString()), new JProperty(&quot;categories&quot;, new JArray(&quot;Hate&quot;, &quot;SelfHarm&quot;, &quot;Sexual&quot;, &quot;Violence&quot;)), new JProperty(&quot;outputType&quot;, &quot;FourSeverityLevels&quot;)).ToString(Newtonsoft.Json.Formatting.None);
             }" />
             <set-variable name="rp-safety-t0" value="@(DateTime.UtcNow)" />

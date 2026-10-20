@@ -45,7 +45,7 @@ public sealed class GatewayErrorShaperTests
 
         string json = JsonSerializer.Serialize(new { error = s.Message, code = s.Code, gateway = s.Gateway }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
-        using JsonDocument doc = JsonDocument.Parse(json);
+        using var doc = JsonDocument.Parse(json);
         JsonElement safety = doc.RootElement.GetProperty("gateway").GetProperty("calls")[0].GetProperty("gatewaySafety");
         safety.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
             "phase", "decision", "promptAttack", "category", "severity", "mode", "latencyMs", "outputChecked");
@@ -85,5 +85,22 @@ public sealed class GatewayErrorShaperTests
         GatewayErrorShaper.Shaped s = GatewayErrorShaper.Classify(403, "ai_service_error", "generic", Snapshot(403, "mystery"));
 
         s.Code.Should().Be("ai_service_error");
+    }
+
+    [Fact]
+    public void AgentPipeline_RethrowsGatewaySafetyStatuses_ForEndpointShaping()
+    {
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Combine(root, "RetailPulse.slnx")))
+        {
+            root = Path.GetDirectoryName(root);
+        }
+
+        root.Should().NotBeNull();
+        string repoRoot = root ?? throw new InvalidOperationException("Repository root not found.");
+        string source = File.ReadAllText(Path.Combine(repoRoot, "src", "RetailPulse.Api", "Agents", "AgentExecutionPipeline.cs"));
+        const string marker = "catch (ClientResultException ex) when (ex.Status is 400 or 403 or 503)";
+        (source.Split(marker, StringSplitOptions.None).Length - 1).Should().Be(2,
+            "both specialist execution paths must preserve safety failures for the endpoint shaper");
     }
 }

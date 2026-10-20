@@ -425,14 +425,14 @@ resource apiAzureMonitorDiagnostics 'Microsoft.ApiManagement/service/apis/diagno
     logClientIp: true
     #disable-next-line BCP037
     largeLanguageModel: {
-      logs: 'enabled'
+      logs: gatewaySafetyEnabled ? 'disabled' : 'enabled'
       requests: {
         maxSizeInBytes: gatewaySafetyEnabled ? 1024 : 32768
-        messages: gatewaySafetyEnabled ? 'none' : 'all'
+        messages: 'all'
       }
       responses: {
         maxSizeInBytes: gatewaySafetyEnabled ? 1024 : 32768
-        messages: gatewaySafetyEnabled ? 'none' : 'all'
+        messages: 'all'
       }
     }
   }

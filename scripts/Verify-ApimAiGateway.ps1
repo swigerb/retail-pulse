@@ -78,7 +78,7 @@ param(
     [string]$SecondaryAiFoundryAccountName = $env:AZURE_OPENAI_SECONDARY_ACCOUNT_NAME,
     [string]$SecondaryAiFoundryResourceGroup = $(if ($env:AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME) { $env:AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME } else { 'rg-repodigest-agents-demo-eus-001' }),
     [switch]$GatewaySafetyEnabled = ($env:AZURE_APIM_GATEWAY_SAFETY_ENABLED -eq 'true'),
-    [string]$ContentSafetyAccountName = $env:AZURE_CONTENT_SAFETY_ACCOUNT_NAME,
+    [string]$ContentSafetyAccountName = $env:AZURE_CONTENT_SAFETY_NAME,
     [string]$ContentSafetyResourceGroup = $(if ($env:AZURE_CONTENT_SAFETY_RESOURCE_GROUP_NAME) { $env:AZURE_CONTENT_SAFETY_RESOURCE_GROUP_NAME } else { $env:AZURE_RESOURCE_GROUP }),
     [switch]$SelfTest
 )
@@ -186,7 +186,7 @@ function Test-SafetyDiagnosticsBodyFree($appInsights, $azureMonitor) {
     $ai = (Test-BodyBytesZero $appInsights.frontend.request) -and (Test-BodyBytesZero $appInsights.frontend.response) -and
         (Test-BodyBytesZero $appInsights.backend.request) -and (Test-BodyBytesZero $appInsights.backend.response)
     $llm = $azureMonitor.largeLanguageModel
-    $mon = ($null -ne $llm) -and ($llm.requests.messages -eq 'none') -and ($llm.responses.messages -eq 'none')
+    $mon = ($null -ne $llm) -and ($llm.logs -eq 'disabled')
     return ($ai -and $mon)
 }
 
@@ -326,11 +326,11 @@ function Invoke-SelfTest {
     _Expect 'safety policy: missing outbound analysis is rejected' (-not (Test-SafetyPolicyOrder ($goodPolicy -replace '<outbound>.*</outbound>', '<outbound></outbound>')))
     _Expect 'safety policy: null policy is rejected' (-not (Test-SafetyPolicyOrder $null))
     $aiOk = @{ frontend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } }; backend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } } }
-    $monOk = @{ largeLanguageModel = @{ logs = 'enabled'; requests = @{ messages = 'none' }; responses = @{ messages = 'none' } } }
+    $monOk = @{ largeLanguageModel = @{ logs = 'disabled'; requests = @{ messages = 'all' }; responses = @{ messages = 'all' } } }
     _Expect 'safety diagnostics: zero body/message capture passes' (Test-SafetyDiagnosticsBodyFree $aiOk $monOk)
     $aiBad = @{ frontend = @{ request = @{ body = @{ bytes = 8192 } }; response = @{ body = @{ bytes = 0 } } }; backend = @{} }
     _Expect 'safety diagnostics: captured request body is rejected' (-not (Test-SafetyDiagnosticsBodyFree $aiBad $monOk))
-    $monBad = @{ largeLanguageModel = @{ requests = @{ messages = 'all' }; responses = @{ messages = 'none' } } }
+    $monBad = @{ largeLanguageModel = @{ logs = 'enabled'; requests = @{ messages = 'all' }; responses = @{ messages = 'all' } } }
     _Expect 'safety diagnostics: LLM message capture is rejected' (-not (Test-SafetyDiagnosticsBodyFree $aiOk $monBad))
     _Expect 'safety diagnostics: missing diagnostic is rejected' (-not (Test-SafetyDiagnosticsBodyFree $null $monOk))
 
@@ -438,7 +438,12 @@ Assert 'api diag: metrics = true (routes emit-token-metric)' { $apiAppInsightsDi
 $azMonDiagResource = Invoke-ArmGet "/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/apis/$InferenceApiName/diagnostics/azuremonitor?api-version=2024-06-01-preview"
 $azMonDiag = $azMonDiagResource.properties
 Assert 'api diag: azuremonitor present' { $null -ne $azMonDiag } 'API-level azuremonitor diagnostic missing'
-Assert 'api diag: largeLanguageModel logs enabled' { $azMonDiag.largeLanguageModel.logs -eq 'enabled' } 'largeLanguageModel logs not enabled — GatewayLlmLogs stay dark'
+if ($GatewaySafetyEnabled) {
+    Assert 'api diag: largeLanguageModel logs disabled for gateway safety privacy' { $azMonDiag.largeLanguageModel.logs -eq 'disabled' } 'largeLanguageModel logs must be disabled when gateway safety is enabled'
+}
+else {
+    Assert 'api diag: largeLanguageModel logs enabled' { $azMonDiag.largeLanguageModel.logs -eq 'enabled' } 'largeLanguageModel logs not enabled — GatewayLlmLogs stay dark'
+}
 
 if ($GatewaySafetyEnabled) {
     Write-Host "Gateway safety (#331)"
@@ -458,7 +463,7 @@ else {
 }
 
 if ($GatewaySafetyEnabled) {
-    Assert 'safety rbac: Content Safety account parameters supplied' { -not [string]::IsNullOrWhiteSpace($ContentSafetyAccountName) -and -not [string]::IsNullOrWhiteSpace($ContentSafetyResourceGroup) } 'pass -ContentSafetyAccountName/-ContentSafetyResourceGroup (or AZURE_CONTENT_SAFETY_ACCOUNT_NAME)'
+    Assert 'safety rbac: Content Safety account parameters supplied' { -not [string]::IsNullOrWhiteSpace($ContentSafetyAccountName) -and -not [string]::IsNullOrWhiteSpace($ContentSafetyResourceGroup) } 'pass -ContentSafetyAccountName/-ContentSafetyResourceGroup (or AZURE_CONTENT_SAFETY_NAME)'
     if ($apimPrincipalId -and $ContentSafetyAccountName) {
         $csScope = "/subscriptions/$sub/resourceGroups/$ContentSafetyResourceGroup/providers/Microsoft.CognitiveServices/accounts/$ContentSafetyAccountName"
         $csRoles = az role assignment list --assignee $apimPrincipalId --scope $csScope 2>$null | ConvertFrom-Json

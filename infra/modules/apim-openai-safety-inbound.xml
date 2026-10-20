@@ -24,16 +24,6 @@
             } catch (Exception) { return &quot;false&quot;; }
         }" />
         <set-variable name="rp-safety-input-state" value="@{
-            Func&lt;JToken, string&gt; text = c =&gt; {
-              if (c == null || c.Type == JTokenType.Null) return &quot;&quot;;
-              if (c.Type == JTokenType.String) return (string)c;
-              var arr = c as JArray;
-              if (arr == null) { throw new Exception(&quot;content&quot;); }
-              var sb = new System.Text.StringBuilder();
-              foreach (var p in arr) { var t = p[&quot;text&quot;]; if (t != null &amp;&amp; t.Type == JTokenType.String) { sb.Append((string)t).Append(&quot;\n&quot;); } }
-              return sb.ToString();
-            };
-
             if (context.Request.Method != &quot;POST&quot;) return &quot;empty&quot;;
             try {
               var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
@@ -41,7 +31,22 @@
               if (msgs == null) return &quot;invalid&quot;;
               int userLen = 0; int docs = 0; int docLen = 0;
               foreach (var m in msgs) {
-                string role = (string)m[&quot;role&quot;]; string t = text(m[&quot;content&quot;]);
+                string role = (string)m[&quot;role&quot;];
+                var content = m[&quot;content&quot;];
+                string t = &quot;&quot;;
+                if (content != null &amp;&amp; content.Type != JTokenType.Null) {
+                  if (content.Type == JTokenType.String) t = (string)content;
+                  else {
+                    var parts = content as JArray;
+                    if (parts == null) return &quot;invalid&quot;;
+                    var text = new System.Text.StringBuilder();
+                    foreach (var p in parts) {
+                      var partText = p[&quot;text&quot;];
+                      if (partText != null &amp;&amp; partText.Type == JTokenType.String) text.Append((string)partText).Append(&quot;\n&quot;);
+                    }
+                    t = text.ToString();
+                  }
+                }
                 if (t.Trim().Length == 0) continue;
                 if (role == &quot;user&quot;) { userLen += t.Length + (userLen == 0 ? 0 : 1); }
                 else if (role == &quot;tool&quot;) { docs++; docLen += t.Length; if (t.Length &gt; 10000) return &quot;oversized&quot;; }
@@ -55,21 +60,26 @@
             <when condition="@((string)context.Variables[&quot;rp-safety-input-state&quot;] == &quot;ok&quot;)">
             <set-variable name="rp-safety-evaluated" value="true" />
             <set-variable name="rp-cs-shield-body" value="@{
-                Func&lt;JToken, string&gt; text = c =&gt; {
-                  if (c == null || c.Type == JTokenType.Null) return &quot;&quot;;
-                  if (c.Type == JTokenType.String) return (string)c;
-                  var arr = c as JArray;
-                  if (arr == null) { throw new Exception(&quot;content&quot;); }
-                  var sb = new System.Text.StringBuilder();
-                  foreach (var p in arr) { var t = p[&quot;text&quot;]; if (t != null &amp;&amp; t.Type == JTokenType.String) { sb.Append((string)t).Append(&quot;\n&quot;); } }
-                  return sb.ToString();
-                };
-
                 var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
                 var user = new System.Text.StringBuilder();
                 var docs = new JArray();
                 foreach (var m in (JArray)b[&quot;messages&quot;]) {
-                  string role = (string)m[&quot;role&quot;]; string t = text(m[&quot;content&quot;]);
+                  string role = (string)m[&quot;role&quot;];
+                  var content = m[&quot;content&quot;];
+                  string t = &quot;&quot;;
+                  if (content != null &amp;&amp; content.Type != JTokenType.Null) {
+                    if (content.Type == JTokenType.String) t = (string)content;
+                    else {
+                      var parts = content as JArray;
+                      if (parts == null) throw new Exception(&quot;content&quot;);
+                      var text = new System.Text.StringBuilder();
+                      foreach (var p in parts) {
+                        var partText = p[&quot;text&quot;];
+                        if (partText != null &amp;&amp; partText.Type == JTokenType.String) text.Append((string)partText).Append(&quot;\n&quot;);
+                      }
+                      t = text.ToString();
+                    }
+                  }
                   if (t.Trim().Length == 0) continue;
                   if (role == &quot;user&quot;) { if (user.Length &gt; 0) { user.Append(&quot;
                 &quot;); } user.Append(t); }
@@ -79,21 +89,25 @@
                 return new JObject(new JProperty(&quot;userPrompt&quot;, u), new JProperty(&quot;documents&quot;, docs)).ToString(Newtonsoft.Json.Formatting.None);
             }" />
             <set-variable name="rp-cs-analyze-body" value="@{
-                Func&lt;JToken, string&gt; text = c =&gt; {
-                  if (c == null || c.Type == JTokenType.Null) return &quot;&quot;;
-                  if (c.Type == JTokenType.String) return (string)c;
-                  var arr = c as JArray;
-                  if (arr == null) { throw new Exception(&quot;content&quot;); }
-                  var sb = new System.Text.StringBuilder();
-                  foreach (var p in arr) { var t = p[&quot;text&quot;]; if (t != null &amp;&amp; t.Type == JTokenType.String) { sb.Append((string)t).Append(&quot;\n&quot;); } }
-                  return sb.ToString();
-                };
-
                 var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
                 var sb = new System.Text.StringBuilder();
                 foreach (var m in (JArray)b[&quot;messages&quot;]) {
                   if ((string)m[&quot;role&quot;] != &quot;user&quot;) continue;
-                  string t = text(m[&quot;content&quot;]);
+                  var content = m[&quot;content&quot;];
+                  string t = &quot;&quot;;
+                  if (content != null &amp;&amp; content.Type != JTokenType.Null) {
+                    if (content.Type == JTokenType.String) t = (string)content;
+                    else {
+                      var parts = content as JArray;
+                      if (parts == null) throw new Exception(&quot;content&quot;);
+                      var text = new System.Text.StringBuilder();
+                      foreach (var p in parts) {
+                        var partText = p[&quot;text&quot;];
+                        if (partText != null &amp;&amp; partText.Type == JTokenType.String) text.Append((string)partText).Append(&quot;\n&quot;);
+                      }
+                      t = text.ToString();
+                    }
+                  }
                   if (t.Trim().Length == 0) continue;
                   if (sb.Length &gt; 0) { sb.Append(&quot;
                 &quot;); } sb.Append(t);

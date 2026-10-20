@@ -180,6 +180,11 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         {
             return HandleRateLimitError(ex, sw, thoughtActivity, context.AgentName, sessionId);
         }
+        catch (ClientResultException ex) when (ex.Status is 400 or 403 or 503)
+        {
+            // Preserve APIM gateway-safety status and sanitized evidence for the endpoint shaper.
+            throw;
+        }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Caller (e.g. council timeout or request-level timeout) cancelled — propagate
@@ -476,6 +481,11 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         catch (ClientResultException ex) when (ex.Status == 429)
         {
             return HandleRateLimitError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+        }
+        catch (ClientResultException ex) when (ex.Status is 400 or 403 or 503)
+        {
+            // Preserve APIM gateway-safety status and sanitized evidence for the endpoint shaper.
+            throw;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
