@@ -1,0 +1,123 @@
+# Lowe's unofficial synthetic scenario seed. No affiliation with Lowe's.
+# Every name and value is invented and deterministic; no real competitor,
+# store performance, or non-public fact is used.
+
+version: 1
+
+seasonality:
+  factors:
+    Seasonal & Safety:
+      - month: 6
+        multiplier: 1.15
+        event: Hurricane Season Start
+        description: Storm preparation purchases begin to build
+      - month: 9
+        multiplier: 1.35
+        event: Peak Storm Window
+        description: Generator and tarp units surge ahead of forecast landfall
+    Lumber & Building:
+      - month: 4
+        multiplier: 1.10
+        event: Spring Project Season
+        description: Deck and fence projects lift lumber units
+      - month: 9
+        multiplier: 1.20
+        event: Storm Board-Up and Repair
+        description: Plywood and roofing demand follows storm alerts
+    Seasonal:
+      - month: 3
+        multiplier: 1.25
+        event: Garden Kickoff
+        description: Mulch and fertilizer units build for spring planting
+      - month: 12
+        multiplier: 0.85
+        event: Winter Lull
+        description: Outdoor categories soften
+
+competitive:
+  competitorsByCategory:
+    Seasonal & Safety:
+      - Northbay Hardware
+      - Cedarline Supply
+    Lumber & Building:
+      - Ironwood Builders Depot
+      - Summit Yard Supply
+    Major Appliances:
+      - Brightline Appliance Outlet
+    Seasonal:
+      - Greenfold Garden Centers
+  pricingSources: [curated_intake, synthetic_price_check]
+  shareSources: [synthetic_panel, internal_estimate]
+  activityTypes: [price_move, fulfillment_change]
+  impactLevels: [leader, watchlist, monitor]
+  activityTemplates:
+    - type: price_move
+      description: "{0} lowered prices on {2} in {3}"
+      recommendation: MATCH — Review storm-category price positioning
+    - type: price_move
+      description: "{0} raised prices on {2} in {3}"
+      recommendation: IGNORE — Hold current pricing
+    - type: fulfillment_change
+      description: "{0} extended same-day delivery for {2} in {3}"
+      recommendation: DIFFERENTIATE — Highlight curbside readiness windows
+    - type: fulfillment_change
+      description: "{0} paused delivery for {2} in {3}"
+      recommendation: PREEMPT — Publish pickup availability
+
+promos:
+  types:
+    - name: Storm Prep Bundle
+      liftBase: 14.0
+      liftRange: 22.0
+      coefBase: 20.0
+      coefRange: 6.0
+      code: storm-prep-bundle
+      displayName: Storm Prep Bundle
+      description: Synthetic bundle of flashlights, tarps, and batteries
+    - name: Spring Project Savings
+      liftBase: 8.0
+      liftRange: 14.0
+      coefBase: 12.0
+      coefRange: 5.0
+      code: spring-project-savings
+      displayName: Spring Project Savings
+      description: Synthetic seasonal savings on garden and lumber items
+    - name: Pro Volume Pricing
+      liftBase: 6.0
+      liftRange: 10.0
+      coefBase: 9.0
+      coefRange: 4.0
+      code: pro-volume-pricing
+      displayName: Pro Volume Pricing
+      description: Synthetic volume pricing for Pro Desk orders
+  successRatings: [Strong, Steady, Watch, Fell Short]
+
+supply:
+  disruptionTypes: [carrier_delay, vendor_shortfall, dc_capacity]
+  disruptionSeverities: [critical, elevated, watch]
+  disruptionDescriptions:
+    carrier_delay:
+      - Synthetic carrier delay on Gulf Coast lanes ahead of the storm
+      - Synthetic road closure slowed Southeast replenishment
+    vendor_shortfall:
+      - Synthetic generator vendor short-shipped a replenishment order
+      - Synthetic sump pump vendor delayed one production run
+    dc_capacity:
+      - Synthetic distribution center hit its daily outbound limit
+      - Synthetic overnight staffing gap slowed Midwest outbound
+
+stores:
+  types:
+    - Standard Store
+    - Pro-Heavy Store
+    - Coastal Storm-Zone Store
+    - Curbside Hub
+
+margin:
+  driverCategories:
+    - Product Cost
+    - Freight and Expedite
+    - Store Labor
+    - Markdowns
+    - Fulfillment Cost
+  trendLabels: [improving, softening, holding, seasonal]
