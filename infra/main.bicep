@@ -61,6 +61,12 @@ param alwaysWarm bool = true
 @description('Enable the optional Azure AI Search knowledge provider. Disabled by default; no Search resource is provisioned when false.')
 param aiSearchEnabled bool = false
 
+@description('Enable the optional Azure API Center catalog that continuously synchronizes from APIM. Disabled by default; no API Center resources are provisioned when false.')
+param apiCenterEnabled bool = false
+
+@description('Location for Azure API Center (supported in a limited set of regions, so independent of the primary location).')
+param apiCenterLocation string = 'eastus'
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -240,6 +246,28 @@ output AZURE_AI_SEARCH_ENABLED bool = aiSearchEnabled
 output AZURE_AI_SEARCH_ENDPOINT string = aiSearchEnabled ? aiSearch!.outputs.endpoint : ''
 output AZURE_AI_SEARCH_NAME string = aiSearchEnabled ? aiSearch!.outputs.name : ''
 output AZURE_AI_SEARCH_RESOURCE_ID string = aiSearchEnabled ? aiSearch!.outputs.resourceId : ''
+
+// ── Optional Azure API Center (issue #333) ─────────────────────────────────
+// Provisioned only when apiCenterEnabled = true so a default `azd up` is
+// unchanged. The module links the APIM service declaratively (apiSources) and
+// grants the API Center identity API Management Service Reader. Synchronization
+// is one-way (APIM → API Center) and eventually consistent. Outputs are empty
+// when disabled so consumers can branch on the enabled flag.
+module apiCenter './modules/api-center.bicep' = if (apiCenterEnabled) {
+  name: 'api-center'
+  scope: rg
+  params: {
+    location: apiCenterLocation
+    resourceToken: resourceToken
+    tags: tags
+    apimName: apim.outputs.apimName
+  }
+}
+
+output AZURE_API_CENTER_ENABLED bool = apiCenterEnabled
+output AZURE_API_CENTER_NAME string = apiCenterEnabled ? apiCenter!.outputs.name : ''
+output AZURE_API_CENTER_RESOURCE_ID string = apiCenterEnabled ? apiCenter!.outputs.resourceId : ''
+output AZURE_API_CENTER_APIM_SOURCE_NAME string = apiCenterEnabled ? apiCenter!.outputs.apimSourceName : ''
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and
