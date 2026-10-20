@@ -112,7 +112,7 @@ promos:
   successRatings: [Strong, Steady, Watch, Fell Short]
 
 supply:
-  disruptionTypes: [recall_hold, dc_delay, carrier_delay, substitution]
+  disruptionTypes: [recall_hold, dc_delay, pharmacy_carrier_delay, substitution]
   disruptionSeverities: [critical, elevated, watch]
   disruptionDescriptions:
     recall_hold:
@@ -121,7 +121,7 @@ supply:
     dc_delay:
       - Regional distribution center delayed cold and flu replenishment by two days
       - Distribution center slotting backlog slowed allergy replenishment
-    carrier_delay:
+    pharmacy_carrier_delay:
       - Carrier delay slowed same-day delivery capacity in a metro region
       - Weather delay pushed store replenishment into the next window
     substitution:
