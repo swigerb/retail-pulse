@@ -159,7 +159,25 @@ laptop-demo path.
 
 Outputs: `AZURE_API_CENTER_ENABLED`, `AZURE_API_CENTER_NAME`, `AZURE_API_CENTER_RESOURCE_ID`, `AZURE_API_CENTER_APIM_SOURCE_NAME` (names/ids are empty when disabled; disabled mode deploys nothing). Names derive from the deterministic resource token, so re-provisioning is idempotent.
 
-**Synchronization behavior:** APIM → API Center is **one-way** — APIM stays the source of truth and edits made to synchronized APIs in API Center are not written back (and may be overwritten). Sync is continuous but eventually consistent: new or changed APIM APIs typically appear in API Center within a few minutes, not instantly, so a freshly provisioned catalog can be empty briefly. Verify the link after provisioning with `./scripts/Verify-ApiCenter.ps1` (read-only; exits 0 pass/disabled, 1 failure, 2 skipped).
+**Synchronization behavior:** APIM → API Center is **one-way** — APIM stays the source of truth and edits made to synchronized APIs in API Center are not written back (and may be overwritten). Sync is continuous but eventually consistent: new or changed APIM APIs can take from minutes up to 24 hours to appear in API Center, so a freshly provisioned catalog can be empty. Verify the link after provisioning with `./scripts/Verify-ApiCenter.ps1` (read-only; exits 0 pass/disabled, 1 failure, 2 skipped, 3 pending).
+
+#### Retail Pulse MCP server in API Center (issue #336)
+
+The governed MCP server is **not** declared in Bicep. The public API Center ARM schema and CLI do not support creating `kind: mcp` APIs or tool child resources, and the existing APIM → API Center `apiSources` link already synchronizes the APIM MCP API and creates the API, version, definition, environment and deployment graph with **generated IDs** (not the APIM API id). `api-center.bicep` therefore keeps only the service, reader role and `apiSources` link; the `apiSources` relationship stays authoritative and nothing duplicates the synchronized graph.
+
+APIM remains the only runtime endpoint and exposes exactly four read-only tools: `get_inventory`, `get_stockout_risk`, `get_supply_disruptions`, `get_demand_forecast`.
+
+**Verify (read-only):** `./scripts/Verify-ApiCenter.ps1` enumerates the default workspace APIs, resolves the synchronized `kind: mcp` API whose deployment `runtimeUri` is the APIM MCP endpoint (`AZURE_APIM_MCP_ENDPOINT`), follows the returned version, definition, environment and deployment IDs, and fails closed unless: lifecycle is `production`, the environment server type is *Azure API Management*, the `runtimeUri` is exactly the credential-free https APIM endpoint, and the APIM ARM tool resources are exactly the four approved tools. A missing endpoint input or `apiSources` link is a failure. `-SelfTest` runs these checks offline against synthetic data.
+
+**Pending synchronization:** synchronization is eventually consistent and **may take up to 24 hours**. If the synchronized graph is absent or partial, the verifier retries a bounded number of times (`-MaxAttempts`, `-RetryDelaySeconds`) and then reports `[PENDING]` with exit code 3 — never a pass. Re-run later. Exit codes: 0 pass/disabled, 1 failure, 2 skipped, 3 pending.
+
+**Discovery and use**
+1. *Portal discovery:* Azure portal → API Center `apic-<token>` → **Inventory → APIs** (filter kind *MCP*) → the synchronized Retail Pulse MCP server (its name is generated).
+2. *Registry endpoint / client flow:* copy the registry endpoint exposed by your deployed API Center (portal) into registry-aware clients; it is not derived or documented here. Access uses Entra authentication.
+3. *Developer installation:* request the APIM subscription for the approval-required **Retail Pulse MCP (read-only)** product, then add the deployment `runtimeUri` as a remote HTTP MCP server in the client, sending `Ocp-Apim-Subscription-Key` and an Entra bearer token for the gateway audience (`AZURE_MCP_GATEWAY_AUDIENCE`). Store the key in the client's secret input, never in the repo.
+4. *Test invocation:* API Center does not proxy calls. Test through APIM — the APIM developer portal / Test console, or an MCP client (`initialize` → `tools/list` must return exactly the four tools → `tools/call`). Calls are authenticated and metered by APIM.
+
+**Enrichment:** only supported enrichment is allowed; if it needs the generated IDs, use an idempotent discovery/update script after synchronization rather than static Bicep child names. None is required today.
 
 ### azd environment aliases (Bicep outputs → azure.yaml / Vite build)
 

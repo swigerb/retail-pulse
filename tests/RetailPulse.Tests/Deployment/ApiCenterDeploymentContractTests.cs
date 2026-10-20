@@ -95,6 +95,123 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
         script.Should().Contain("AZURE_API_CENTER_ENABLED");
     }
 
+    private static readonly string[] ApprovedTools = ["get_inventory", "get_stockout_risk", "get_supply_disruptions", "get_demand_forecast"];
+
+    // Issue #336: the public API Center ARM schema/CLI cannot create kind=mcp or tool child resources;
+    // APIM apiSources synchronization generates the MCP API graph, so Bicep must not duplicate it.
+    private static readonly string[] ForbiddenHandAuthoredTypes =
+    [
+        "Microsoft.ApiCenter/services/workspaces/apis@",
+        "Microsoft.ApiCenter/services/workspaces/apis/versions",
+        "Microsoft.ApiCenter/services/workspaces/apis/definitions",
+        "Microsoft.ApiCenter/services/workspaces/apis/deployments",
+        "Microsoft.ApiCenter/services/workspaces/environments",
+        "Microsoft.ApiCenter/services/metadataSchemas",
+    ];
+
+    [Fact]
+    public void Module_DoesNotHandAuthorTheSynchronizedMcpGraph_AndKeepsApimSourceAuthoritative()
+    {
+        string module = File.ReadAllText(Path.Combine(_repoRoot, "infra", "modules", "api-center.bicep"));
+
+        foreach (string type in ForbiddenHandAuthoredTypes)
+        {
+            module.Should().NotContain(type, "synchronization generates this child graph");
+        }
+
+        module.Should().NotContain("kind: 'mcp'");
+        module.Should().NotContain("mcpServerApiName").And.NotContain("mcpEndpoint").And.NotContain("customProperties");
+        module.Should().Contain("Microsoft.ApiCenter/services/workspaces/apiSources@");
+        module.Should().Contain("azureApiManagementSource");
+        module.Should().NotMatchRegex("(?i)subscription-?key|secret|apikey|password");
+    }
+
+    [Fact]
+    public void Main_DoesNotWireOrOutputHandAuthoredMcpRegistration()
+    {
+        string main = File.ReadAllText(Path.Combine(_repoRoot, "infra", "main.bicep"));
+
+        main.Should().NotContain("mcpServerApiName:");
+        main.Should().NotContain("mcpEndpoint: apimMcpApi");
+        main.Should().NotContain("AZURE_API_CENTER_MCP_API_NAME");
+        main.Should().NotContain("AZURE_API_CENTER_MCP_ENVIRONMENT_NAME");
+    }
+
+    [Fact]
+    public void CompiledArm_HasNoDuplicateMcpGraphAndKeepsApimSource()
+    {
+        JsonElement? compiled = TryCompile();
+        if (compiled is null)
+        {
+            return;
+        }
+
+        JsonElement deployment = compiled.Value.GetProperty("resources").GetProperty("apiCenter");
+        JsonElement[] inner = [.. deployment.GetProperty("properties").GetProperty("template")
+            .GetProperty("resources").EnumerateArray()];
+        string[] types = [.. inner.Select(r => r.GetProperty("type").GetString()!)];
+
+        types.Should().Contain("Microsoft.ApiCenter/services/workspaces/apiSources");
+        types.Should().NotContain(t => t.StartsWith("Microsoft.ApiCenter/services/workspaces/apis", StringComparison.Ordinal));
+        types.Should().NotContain("Microsoft.ApiCenter/services/workspaces/environments");
+        types.Should().NotContain("Microsoft.ApiCenter/services/metadataSchemas");
+
+        JsonElement outputs = compiled.Value.GetProperty("outputs");
+        outputs.TryGetProperty("AZURE_API_CENTER_MCP_API_NAME", out _).Should().BeFalse();
+        outputs.TryGetProperty("AZURE_API_CENTER_MCP_ENVIRONMENT_NAME", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void LiveVerifier_DiscoversGeneratedIdsAndFailsClosedOnLinkageEndpointAndToolSet()
+    {
+        string script = File.ReadAllText(Path.Combine(_repoRoot, "scripts", "Verify-ApiCenter.ps1"));
+
+        script.Should().Contain("Test-McpSync");
+        script.Should().Contain("workspaces/default/apis");
+        script.Should().Contain("properties.kind -eq 'mcp'");
+        script.Should().Contain("/deployments").And.Contain("/versions").And.Contain("/definitions");
+        script.Should().Contain("environmentId").And.Contain("definitionId").And.Contain("runtimeUri");
+        script.Should().Contain("properties.displayName").And.Contain("operationId")
+            .And.Contain("resolvedOperation").And.Contain("expected GET");
+        script.Should().Contain("state -eq 'active'").And.Contain("does not belong to the synchronized API version");
+        script.Should().Contain("linkState").And.Contain("apiSource linkState");
+        script.Should().Contain("ARM GET forbidden").And.Contain("authorization failure as pending");
+        script.Should().Contain("lifecycleStage -ne 'production'");
+        script.Should().Contain("Azure API Management");
+        script.Should().Contain("2025-09-01-preview", "APIM MCP tools are read from supported APIM ARM tool resources");
+        script.Should().Contain("[switch]$SelfTest");
+        script.Should().Contain("MaxAttempts").And.Contain("exit 3").And.Contain("24 hours");
+        script.Should().Contain("does not construct it");
+        script.Should().NotContain("workspaces/default/apis/$McpApiName", "the API Center API id is generated, not the APIM API id");
+        script.Should().NotContain("azure-apicenter.ms", "never construct the registry endpoint from memory");
+        foreach (string tool in ApprovedTools)
+        {
+            script.Should().Contain(tool);
+        }
+
+        script.Should().NotMatchRegex("(?i)-Method\\s+(Put|Post|Patch|Delete)|az\\s+(apic|rest)\\s+.*(create|delete|put)", "the verifier is read-only");
+    }
+
+    [Fact]
+    public void LiveVerifier_SelfTestProvesDiscoveryPendingAndFailClosedBehavior()
+    {
+        string script = File.ReadAllText(Path.Combine(_repoRoot, "scripts", "Verify-ApiCenter.ps1"));
+        foreach (string probe in new[]
+        {
+            "generated-ID synchronized graph passes", "resolved generated API id, not the APIM API id",
+            "unrelated MCP deployment does not fail a missing target", "missing versions is pending",
+            "partial definition sync is pending", "non-production lifecycle fails", "non-APIM environment fails",
+            "endpoint mismatch fails", "case-changed endpoint path fails", "missing endpoint fails closed", "extra APIM tool fails",
+            "missing APIM tool fails", "renamed APIM tool fails", "case-changed APIM tool fails",
+            "write-bound APIM tool fails", "case-changed operation path fails",
+            "inactive deployment fails", "missing definition linkage fails", "apiSource error fails",
+            "apiSource syncing is pending", "no apiSources fails",
+        })
+        {
+            script.Should().Contain(probe);
+        }
+    }
+
     private JsonElement? TryCompile()
     {
         string main = Path.Combine(_repoRoot, "infra", "main.bicep");
