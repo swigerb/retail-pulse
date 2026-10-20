@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr365-acceptance-fix",
+  "sessionId": "rp-pr365-acceptance-fix",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T23:50:43.356Z",
+  "lastHeartbeatAt": "2026-10-20T23:50:43.356Z",
+  "updatedAt": "2026-10-20T23:50:43.356Z",
+  "terminalReason": null,
+  "executionRef": null
+}
