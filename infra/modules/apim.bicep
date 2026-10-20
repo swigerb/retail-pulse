@@ -145,3 +145,4 @@ output apimId string = apim.id
 output apimName string = apim.name
 output apimPrincipalId string = apim.identity.principalId
 output gatewayUrl string = apim.properties.gatewayUrl
+output appInsightsLoggerId string = appInsightsLogger.id

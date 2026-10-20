@@ -78,9 +78,9 @@ ARM JSON so that a module-boundary regression cannot silently drop the gateway.
 ### `deploy/apim-ai-gateway/` — optional attach-on templates only
 
 `deploy/apim-ai-gateway/` no longer provisions the primary Retail Pulse APIM gateway; that
-is now the responsibility of `infra/modules/apim*.bicep` above. The residual files
-(`mcp-api.bicep`, `a2a-api.bicep`) are optional attach-on templates for wiring extra
-MCP/A2A APIs onto an **already-existing** APIM instance in a separate workflow. See
+is now the responsibility of `infra/modules/apim*.bicep` above. The residual file
+`a2a-api.bicep` is an optional attach-on template for wiring an extra
+A2A API onto an **already-existing** APIM instance in a separate workflow. The MCP runtime is no longer an attach-on: it is `infra/modules/apim-mcp-api.bicep` (ADR 017); the old `mcp-api.bicep` was removed because it could not reach the internal MCP server and sent no key. See
 [`deploy/apim-ai-gateway/README.md`](../deploy/apim-ai-gateway/README.md).
 
 ---

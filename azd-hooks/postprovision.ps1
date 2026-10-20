@@ -200,6 +200,14 @@ if ($aiSearchEnabled -and $aiSearchEnabled.Trim().ToLowerInvariant() -eq 'true' 
     }
 }
 
+# ── Governed APIM MCP runtime identity (ADR 017, issue #335) ────────────────
+# Idempotent Graph setup: gateway app registration + RetailPulse.Mcp.Invoke role and the
+# RetailPulse.User assignment for the APIM managed identity. Fail-closed (no skip on denial).
+& pwsh -NoProfile -File (Join-Path $PSScriptRoot '..\scripts\Setup-McpGatewayIdentity.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "Setup-McpGatewayIdentity.ps1 failed (exit $LASTEXITCODE). The APIM MCP gateway identity is not provisioned; failing provision rather than continuing without it."
+}
+
 # ── Mandatory APIM AI Gateway live gate (issue #67) ────────────────────────
 # `azd provision` reporting "Succeeded" only means the ARM deployments
 # succeeded — it says nothing about whether the AI Gateway invariants

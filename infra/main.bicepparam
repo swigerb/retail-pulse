@@ -55,3 +55,6 @@ param botAppSecret = readEnvironmentVariable('AZURE_BOT_APP_SECRET', '')
 // Keep the API and MCP server warm. Defaults true so the demo never greets a
 // visitor with a cold start. Set false to save money on a non-demo environment.
 param alwaysWarm = toLower(readEnvironmentVariable('AZURE_ALWAYS_WARM', 'true')) == 'true'
+
+param mcpGatewayApimClientId = readEnvironmentVariable('AZURE_MCP_GATEWAY_APIM_CLIENT_ID', '')
+param mcpGatewayAudience = readEnvironmentVariable('AZURE_MCP_GATEWAY_AUDIENCE', 'api://retailpulse-mcp-gateway')
