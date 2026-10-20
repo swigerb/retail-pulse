@@ -74,6 +74,9 @@ param semanticCachePolicyEnabled bool = false
 @description('ID of the pre-registered APIM backend for the embeddings deployment used by semantic cache similarity matching. Never a key or URL.')
 param semanticCacheEmbeddingsBackendId string = ''
 
+@description('Deployment-configured retailer/pack cache partition: 1-63 chars of lowercase a-z, 0-9 and hyphen, not starting with a hyphen. Never taken from a caller header. When empty or invalid the cache policy is not rendered (nothing is cached).')
+param semanticCachePartition string = ''
+
 @minValue(1)
 @maxValue(20)
 @description('Similarity distance threshold in hundredths (5 = 0.05). Lower is stricter; APIM documents values above 0.2 as prone to mismatches, so the upper bound is 20.')
@@ -142,15 +145,16 @@ var safetyOutboundFragment = gatewaySafetyEnabled
   ? replace(replace(replace(loadTextContent('apim-openai-safety-outbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', effectiveSafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
   : ''
 
-var semanticCachePolicyActive = semanticCachePolicyEnabled && gatewaySafetyEnabled && !empty(semanticCacheEmbeddingsBackendId)
+var semanticCachePartitionChars = map(range(0, length(semanticCachePartition)), i => substring(semanticCachePartition, i, 1))
+var semanticCachePartitionValid = length(semanticCachePartition) >= 1 && length(semanticCachePartition) <= 63 && empty(filter(semanticCachePartitionChars, c => !contains('abcdefghijklmnopqrstuvwxyz0123456789-', c))) && !startsWith(semanticCachePartition, '-')
+var semanticCachePolicyActive = semanticCachePolicyEnabled && gatewaySafetyEnabled && !empty(semanticCacheEmbeddingsBackendId) && semanticCachePartitionValid
 var semanticCacheScoreThreshold = '0.${padLeft(string(semanticCacheScoreThresholdPercent), 2, '0')}'
 var semanticCacheInboundFragment = semanticCachePolicyActive
-  ? replace(replace(replace(loadTextContent('apim-openai-semantic-cache-inbound.xml'), '{cache-regulated}', string(regulatedRetailMode)), '{cache-score-threshold}', semanticCacheScoreThreshold), '{cache-embeddings-backend-id}', semanticCacheEmbeddingsBackendId)
+  ? replace(replace(replace(replace(loadTextContent('apim-openai-semantic-cache-inbound.xml'), '{cache-regulated}', string(regulatedRetailMode)), '{cache-partition}', semanticCachePartition), '{cache-score-threshold}', semanticCacheScoreThreshold), '{cache-embeddings-backend-id}', semanticCacheEmbeddingsBackendId)
   : ''
 var semanticCacheOutboundFragment = semanticCachePolicyActive
   ? replace(loadTextContent('apim-openai-semantic-cache-outbound.xml'), '{cache-ttl}', string(semanticCacheTtlSeconds))
   : ''
-var semanticCacheErrorFragment = semanticCachePolicyActive ? loadTextContent('apim-openai-semantic-cache-error.xml') : ''
 
 var poolEnabled = backendPoolEnabled
 var primaryBackendName = 'retail-pulse-foundry'
@@ -165,7 +169,7 @@ var budgetLimitFragment = replace(
   '{tokens-per-minute}',
   string(tokensPerMinute))
 var inferencePolicyBudgeted = replace(loadTextContent('apim-openai-policy.xml'), '{budget-limit}', budgetLimitFragment)
-var inferencePolicyBase = replace(replace(replace(inferencePolicyBudgeted, '{semantic-cache-inbound}', semanticCacheInboundFragment), '{semantic-cache-outbound}', semanticCacheOutboundFragment), '{semantic-cache-error}', semanticCacheErrorFragment)
+var inferencePolicyBase = replace(replace(inferencePolicyBudgeted, '{semantic-cache-inbound}', semanticCacheInboundFragment), '{semantic-cache-outbound}', semanticCacheOutboundFragment)
 
 var failoverDemoActive = failoverDemoEnabled && poolEnabled && length(failoverDemoKey) >= 32
 

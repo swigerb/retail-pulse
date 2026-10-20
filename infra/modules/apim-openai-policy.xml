@@ -138,7 +138,6 @@
     </outbound>
     <on-error>
         <base />
-{semantic-cache-error}
         <set-header name="x-rp-gw-request-id" exists-action="override">
             <value>@(context.RequestId.ToString())</value>
         </set-header>

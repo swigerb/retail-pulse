@@ -1156,8 +1156,7 @@ export type GatewayOutcome =
   | 'miss'
   | 'passed'
   | 'blocked'
-  | 'bypass'
-  | 'unavailable';
+  | 'bypass';
 
 export type GatewayEvidenceStatus = 'unavailable' | 'observed' | 'bypassed' | 'blocked' | 'failed';
 

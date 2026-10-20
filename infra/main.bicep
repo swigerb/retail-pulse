@@ -152,6 +152,9 @@ param apimSemanticCachePolicyEnabled bool = false
 @description('ID of the pre-registered APIM backend for the semantic-cache embeddings deployment (an ID only, never a key or URL).')
 param apimSemanticCacheEmbeddingsBackendId string = ''
 
+@description('Deployment-configured retailer/pack semantic-cache partition (lowercase a-z, 0-9, hyphen; 1-63 chars). Empty or invalid renders no cache policy.')
+param apimSemanticCachePartition string = ''
+
 @minValue(1)
 @maxValue(20)
 @description('Semantic-cache similarity distance threshold in hundredths (5 = 0.05).')
@@ -246,6 +249,7 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     gatewaySafetyMode: apimGatewaySafetyMode
     semanticCachePolicyEnabled: semanticCacheEnabled && apimSemanticCachePolicyEnabled
     semanticCacheEmbeddingsBackendId: apimSemanticCacheEmbeddingsBackendId
+    semanticCachePartition: apimSemanticCachePartition
     semanticCacheScoreThresholdPercent: apimSemanticCacheScoreThresholdPercent
     semanticCacheTtlSeconds: min(semanticCacheTtlSeconds, 3600)
     gatewaySafetySeverityThreshold: apimGatewaySafetySeverityThreshold

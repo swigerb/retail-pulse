@@ -216,14 +216,13 @@ public static class GatewayEvidenceHeaders
             _ => GatewayRouteState.Unknown,
         };
 
-    // Cache vocabulary (#339): hit, miss, bypass (sensitive/dynamic/failed/unsafe request or response) and unavailable.
+    // Cache vocabulary (#339): hit, miss, and bypass (sensitive/dynamic/failed/unsafe request or response). An unreachable cache is not distinguishable from a miss.
     internal static GatewayOutcome ParseCacheOutcome(string? value) =>
         value?.Trim().ToLowerInvariant() switch
         {
             "hit" => GatewayOutcome.Hit,
             "miss" => GatewayOutcome.Miss,
             "bypass" => GatewayOutcome.Bypass,
-            "unavailable" => GatewayOutcome.Unavailable,
             "not-applicable" => GatewayOutcome.NotApplicable,
             _ => GatewayOutcome.Unknown,
         };

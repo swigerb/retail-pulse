@@ -67,6 +67,7 @@ param semanticCachePrivateEndpointSubnetId = readEnvironmentVariable('AZURE_SEMA
 param semanticCachePrivateDnsZoneId = readEnvironmentVariable('AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID', '')
 param apimSemanticCachePolicyEnabled = toLower(readEnvironmentVariable('AZURE_APIM_SEMANTIC_CACHE_POLICY_ENABLED', 'false')) == 'true'
 param apimSemanticCacheEmbeddingsBackendId = readEnvironmentVariable('AZURE_APIM_SEMANTIC_CACHE_EMBEDDINGS_BACKEND_ID', '')
+param apimSemanticCachePartition = readEnvironmentVariable('AZURE_APIM_SEMANTIC_CACHE_PARTITION', '')
 param apimSemanticCacheScoreThresholdPercent = int(readEnvironmentVariable('AZURE_APIM_SEMANTIC_CACHE_SCORE_THRESHOLD_PERCENT', '5'))
 
 // Azure Bot Service registration backing the Teams bot. Empty by default so a
