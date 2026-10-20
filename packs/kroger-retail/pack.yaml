@@ -1,0 +1,62 @@
+# Retail Pulse content pack — Kroger Retail (unofficial synthetic demonstration)
+#
+# DISCLOSURE: This is an unofficial demonstration with no affiliation to,
+# or endorsement by, The Kroger Co. All operational data is synthetic.
+# Trademarks belong to their respective owners. No logos, customer data,
+# non-public facts, or real store performance are used.
+
+metadata:
+  key: kroger-retail
+  displayName: "Kroger Retail (Unofficial Demo)"
+  description: >-
+    Unofficial, synthetic grocery demonstration inspired by the public
+    identity of Kroger. Focuses on substitutions, freshness, promotion lift,
+    on-shelf availability, fulfillment, and live price or inventory
+    cache-bypass governance. No affiliation; synthetic operational data.
+  version: "1.0.0"
+  segment: "Grocery"
+  attribution: "Unofficial demonstration. No affiliation with or endorsement by The Kroger Co. All operational data is synthetic. Trademarks belong to their owners."
+
+tenant:
+  company: "Kroger"
+  industry: "Grocery Retail"
+  description: "Kroger is a publicly known U.S. grocery retailer. This pack is an unofficial demonstration with no affiliation; every metric is synthetic and no real store performance or non-public fact is represented."
+  brands:
+    - name: "Fresh Produce"
+      category: "Produce"
+      variants: ["Berries", "Leafy Greens", "Bananas", "Avocados"]
+      priceSegment: "Standard"
+    - name: "Dairy & Eggs"
+      category: "Dairy"
+      variants: ["Milk", "Eggs", "Yogurt", "Cheese"]
+      priceSegment: "Standard"
+    - name: "Meat & Seafood"
+      category: "Protein"
+      variants: ["Chicken", "Ground Beef", "Salmon", "Deli Counter"]
+      priceSegment: "Premium"
+    - name: "Pantry Staples"
+      category: "Center Store"
+      variants: ["Pasta", "Canned Tomatoes", "Cereal", "Baking"]
+      priceSegment: "Value"
+    - name: "Store Brand Demo"
+      category: "Owned Brands"
+      variants: ["Snacks", "Frozen Meals", "Bakery", "Beverages"]
+      priceSegment: "Premium"
+  regions:
+    - "Heartland"
+    - "Gulf Coast"
+    - "Desert Basin"
+    - "Rocky Mountain"
+  channels:
+    - "In-Store"
+    - "Curbside Order Pickup"
+    - "Home Delivery"
+  theme:
+    primaryColor: "#1F4E8C"
+    accentColor: "#E8A33D"
+    fontFamily: "system-ui, sans-serif"
+  distribution:
+    model: "Retailer Distribution Centers"
+    distributorTypes:
+      - "Regional Distribution Center"
+      - "Direct Store Delivery Vendor"

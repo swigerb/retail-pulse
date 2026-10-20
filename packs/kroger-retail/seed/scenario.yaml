@@ -1,0 +1,176 @@
+# Kroger Retail scenario seed manifest (unofficial synthetic demonstration).
+#
+# All names, promotions, disruptions, and drivers are invented. No affiliation
+# with The Kroger Co.; no real store performance or non-public facts.
+
+version: 1
+
+seasonality:
+  factors:
+    Produce:
+      - month: 6
+        multiplier: 1.15
+        event: Summer Berry Peak
+        description: Warm-weather demand lifts berries and salad greens
+      - month: 11
+        multiplier: 0.95
+        event: Holiday Shift
+        description: Holiday baskets shift spend toward center store
+      - month: 1
+        multiplier: 0.92
+        event: Post-Holiday Reset
+        description: Slower month after holiday stock-up
+    Dairy:
+      - month: 4
+        multiplier: 1.08
+        event: Spring Baking
+        description: Baking season lifts eggs and butter
+      - month: 11
+        multiplier: 1.20
+        event: Holiday Cooking
+        description: Holiday cooking drives eggs, milk, and cheese
+      - month: 7
+        multiplier: 0.95
+        event: Summer Lull
+        description: Lower baking volume in midsummer
+    Protein:
+      - month: 7
+        multiplier: 1.18
+        event: Grilling Season
+        description: Holiday weekends lift ground beef and chicken
+      - month: 11
+        multiplier: 1.15
+        event: Holiday Table
+        description: Entree demand peaks before major holidays
+      - month: 2
+        multiplier: 0.93
+        event: Winter Lull
+        description: Cold-weather slowdown in fresh protein
+    Center Store:
+      - month: 9
+        multiplier: 1.10
+        event: Back to School
+        description: Lunch and snack staples rise
+      - month: 12
+        multiplier: 1.12
+        event: Holiday Pantry
+        description: Baking and pantry stock-up
+      - month: 6
+        multiplier: 0.94
+        event: Summer Fresh Shift
+        description: Spend shifts toward fresh departments
+    Owned Brands:
+      - month: 1
+        multiplier: 1.06
+        event: Value Seeking
+        description: Households trade into owned brands after holidays
+      - month: 5
+        multiplier: 1.10
+        event: Entertaining Season
+        description: Snacks and beverages lift for gatherings
+      - month: 10
+        multiplier: 1.08
+        event: Fall Frozen Meals
+        description: Convenience meals rise with busy schedules
+
+competitive:
+  competitorsByCategory:
+    Produce:
+      - Greenfield Market Demo
+      - Orchard Lane Grocers
+    Dairy:
+      - Meadowbrook Foods Demo
+      - Pailcrest Grocers
+    Protein:
+      - Harborstone Provisions
+      - Prairie Table Markets
+    Center Store:
+      - Brightcart Value Demo
+      - Pantry Row Stores
+    Owned Brands:
+      - Cedarline Select Demo
+      - Summit Basket Co.
+  pricingSources: [field_visit_log, curated_intake, shelf_audit]
+  shareSources: [synthetic_panel, internal_estimate]
+  activityTypes: [price_match, delivery_offer, assortment_change]
+  impactLevels: [watchlist, monitor]
+  activityTemplates:
+    - type: price_match
+      description: "{0} matched shelf prices on {2} in {3}"
+      recommendation: MATCH — Review the synthetic price gap before any change; price changes need approval
+    - type: delivery_offer
+      description: "{0} offered free delivery on {2} orders in {3}"
+      recommendation: DIFFERENTIATE — Emphasize Curbside Order Pickup fulfillment rate and substitution quality
+    - type: assortment_change
+      description: "{0} expanded its {2} assortment in {3}"
+      recommendation: IGNORE — Within current synthetic assortment band
+
+promos:
+  types:
+    - name: Weekly Ad Feature
+      liftBase: 14.0
+      liftRange: 22.0
+      coefBase: 16.0
+      coefRange: 6.0
+      code: weekly-ad-feature
+      displayName: Weekly Ad Feature
+      description: Front-page weekly ad feature with in-store display
+    - name: Digital Coupon
+      liftBase: 8.0
+      liftRange: 14.0
+      coefBase: 10.0
+      coefRange: 4.0
+      code: digital-coupon
+      displayName: Digital Coupon
+      description: Digital coupon clipped by loyalty households
+    - name: Multi-Buy Deal
+      liftBase: 12.0
+      liftRange: 18.0
+      coefBase: 14.0
+      coefRange: 5.0
+      code: multi-buy-deal
+      displayName: Multi-Buy Deal
+      description: Buy-more-save-more price on perishable items
+    - name: Fresh Markdown
+      liftBase: 6.0
+      liftRange: 10.0
+      coefBase: 8.0
+      coefRange: 3.0
+      code: fresh-markdown
+      displayName: Fresh Markdown
+      description: Markdown on items nearing sell-by to reduce waste
+  successRatings: [Strong, Solid, Steady, Watch, Fell Short]
+
+supply:
+  disruptionTypes: [cold_chain, carrier_delay, supplier_shortage, pickup_capacity]
+  disruptionSeverities: [critical, elevated, watch]
+  disruptionDescriptions:
+    cold_chain:
+      - Refrigerated trailer capacity tightened on Heartland lanes
+      - Dock temperature hold delayed Gulf Coast dairy receiving
+    carrier_delay:
+      - Weather delayed Desert Basin produce deliveries
+      - Carrier appointment backlog slowed Rocky Mountain replenishment
+    supplier_shortage:
+      - Supplier short-shipped eggs ahead of a holiday week
+      - Seasonal berry supply fell below the planned fill rate
+    pickup_capacity:
+      - Curbside Order Pickup slots saturated at a high-volume demo store
+      - Delivery picker staffing gap reduced evening fulfillment
+
+stores:
+  types:
+    - Supercenter
+    - Neighborhood Market
+    - Curbside Hub
+    - Urban Compact
+
+margin:
+  driverCategories:
+    - Fresh Shrink
+    - Store Labor
+    - Pickup and Delivery Fulfillment
+    - Promotional Funding
+    - Supplier Cost
+    - Facility Overhead
+  trendLabels: [improving, softening, holding, seasonal]
