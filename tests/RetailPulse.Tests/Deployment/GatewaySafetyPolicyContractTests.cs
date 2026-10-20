@@ -165,6 +165,34 @@ public sealed class GatewaySafetyPolicyContractTests
     }
 
     [Fact]
+    public void RegulatedRetailMode_MaskedRequestIdExpression_RendersXmlSafePolicy()
+    {
+        Match m = Regex.Match(Bicep, @"var maskedRequestIdExpr = '(?<expr>[^\n]*)'\r?\n");
+        m.Success.Should().BeTrue();
+        string expr = m.Groups["expr"].Value;
+        expr.Should().NotContain("<", "raw < is invalid XML inside the rendered policy");
+        expr.Should().Contain("&lt;=");
+
+        string rendered = BasePolicy.Replace("{safety-inbound}", Inbound).Replace("{safety-outbound}", Outbound)
+            .Replace("@(context.RequestId.ToString())", expr);
+        XDocument doc = null!;
+        Action parse = () => doc = XDocument.Parse(rendered.Replace("{profile-outbound}", string.Empty));
+        parse.Should().NotThrow("the regulated rendered policy must be well-formed XML");
+        doc.Descendants("value").Select(v => v.Value)
+            .Should().Contain(v => v.Contains("r.Length <= 8"), "XML parsing unescapes the expression for APIM");
+    }
+
+    [Fact]
+    public void RegulatedRetailMode_IsWiredToApiContainerApp_AsGatewayRegulatedRetailEnabled()
+    {
+        string main = File.ReadAllText(Path.Combine(Modules, "..", "main.bicep"));
+        main.Should().MatchRegex(@"(?m)^\s+regulatedRetailMode: regulatedRetailMode\s*$");
+        string apps = Read("container-apps.bicep");
+        apps.Should().Contain("param regulatedRetailMode bool = false", "disabled by default");
+        apps.Should().MatchRegex(@"name: 'Gateway__RegulatedRetail__Enabled'\s+value: string\(regulatedRetailMode\)");
+    }
+
+    [Fact]
     public void RegulatedRetailMode_ForcesBodyFreeDiagnostics_FailClosed_MaskedIds_AndNoCache()
     {
         Bicep.Should().Contain("param regulatedRetailMode bool = false");

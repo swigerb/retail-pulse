@@ -113,7 +113,7 @@ resource contentSafetyAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' 
 
 var effectiveSafetyMode = regulatedRetailMode ? 'regulated' : gatewaySafetyMode
 var bodiesDisabled = gatewaySafetyEnabled || regulatedRetailMode
-var maskedRequestIdExpr = '@{ var r = context.RequestId.ToString(); return r.Length <= 8 ? "********" : r.Substring(0, 4) + "..." + r.Substring(r.Length - 2); }'
+var maskedRequestIdExpr = '@{ var r = context.RequestId.ToString(); return r.Length &lt;= 8 ? "********" : r.Substring(0, 4) + "..." + r.Substring(r.Length - 2); }'
 var profileOutboundFragment = regulatedRetailMode
   ? '        <set-header name="x-rp-gw-profile" exists-action="override"><value>regulated-retail-non-hipaa</value></set-header>'
   : ''

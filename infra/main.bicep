@@ -236,6 +236,7 @@ module containerApps './modules/container-apps.bicep' = {
     entraApiScope: entraApiScope
     containerRegistryLoginServer: containerRegistry.outputs.loginServer
     contentSafetyEndpoint: contentSafetyOn ? contentSafety!.outputs.endpoint : ''
+    regulatedRetailMode: regulatedRetailMode
     botAppId: botAppId
     botAppSecret: botAppSecret
     alwaysWarm: alwaysWarm
