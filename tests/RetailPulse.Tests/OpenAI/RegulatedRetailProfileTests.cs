@@ -31,11 +31,21 @@ public sealed class RegulatedRetailProfileTests
     [Fact]
     public void Regulated_DisablesBodies_FailsClosed_AndNeverClaimsCertification()
     {
-        var reg = RegulatedRetailProfile.Resolve(Config("true"), new ContentSafetyConfig { ForceFailClosed = true });
+        var reg = RegulatedRetailProfile.Resolve(Config("true"), new ContentSafetyConfig { Enabled = true, ForceFailClosed = true });
         reg.CaptureMessageBodies.Should().BeFalse();
         reg.SafetyFailClosed.Should().BeTrue();
         reg.Label.Should().Contain("not HIPAA certified");
         reg.Disclaimer.Should().Contain("patient data").And.Contain("clinical advice");
+    }
+
+    [Fact]
+    public void Regulated_ContentSafetyDisabled_DoesNotClaimFailClosed()
+    {
+        var reg = RegulatedRetailProfile.Resolve(
+            Config("true"),
+            new ContentSafetyConfig { Enabled = false, ForceFailClosed = true });
+
+        reg.SafetyFailClosed.Should().BeFalse();
     }
 
     [Theory]

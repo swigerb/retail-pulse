@@ -30,7 +30,8 @@ public sealed record RegulatedRetailProfile(
     {
         ArgumentNullException.ThrowIfNull(configuration);
         bool enabled = bool.TryParse(configuration[ConfigKey]?.Trim(), out bool v) && v;
-        bool failClosed = contentSafety.OnUnavailable == ContentSafetyFailPolicy.FailClosed;
+        bool failClosed = contentSafety.Enabled
+            && contentSafety.OnUnavailable == ContentSafetyFailPolicy.FailClosed;
         return enabled
             ? new RegulatedRetailProfile(true, "regulated-retail", RegulatedLabel, DisclaimerText, false, failClosed, SensitiveCachePolicy.BypassClasses)
             : new RegulatedRetailProfile(false, "synthetic-demo", DemoLabel, DisclaimerText, true, failClosed, []);
