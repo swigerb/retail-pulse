@@ -1,0 +1,58 @@
+# Retail Pulse content pack — Lowe's (unofficial synthetic demo)
+#
+# DISCLOSURE: Unofficial demonstration content with no affiliation with,
+# or endorsement by, Lowe's Companies, Inc. All operational data is
+# synthetic. Trademarks belong to their respective owners. No logos,
+# non-public facts, or real store performance are used.
+
+metadata:
+  key: lowes-retail
+  displayName: "Lowe's (Unofficial Synthetic Demo)"
+  description: >-
+    Unofficial, synthetic home-improvement scenario covering storm-driven
+    demand, project material availability, seasonal inventory,
+    fulfillment, safety guidance, and continuity during demand surges.
+  version: "1.0.0"
+  segment: "Home Improvement"
+  attribution: "Unofficial demonstration with no affiliation with Lowe's. Synthetic operational data. Trademarks belong to their owners."
+
+tenant:
+  company: "Lowe's"
+  industry: "Home Improvement"
+  description: "Lowe's is a public home-improvement retailer. This pack is an unofficial demonstration; every metric is synthetic and no affiliation is implied."
+  brands:
+    - name: "Storm Readiness"
+      category: "Seasonal & Safety"
+      variants: ["Generators", "Tarps", "Sump Pumps", "Flashlights"]
+      priceSegment: "Standard"
+    - name: "Building Materials"
+      category: "Lumber & Building"
+      variants: ["Plywood", "Dimensional Lumber", "Roofing", "Fasteners"]
+      priceSegment: "Standard"
+    - name: "Appliances"
+      category: "Major Appliances"
+      variants: ["Refrigerators", "Washers", "Water Heaters"]
+      priceSegment: "Premium"
+    - name: "Outdoor & Garden"
+      category: "Seasonal"
+      variants: ["Mulch", "Fertilizer", "Patio", "Grills"]
+      priceSegment: "Standard"
+  regions:
+    - "Coastal South"
+    - "Atlantic Seaboard"
+    - "Central Plains"
+    - "Mountain West"
+  channels:
+    - "Home Improvement Store"
+    - "Order Pickup"
+    - "Jobsite Delivery"
+    - "Pro Desk"
+  theme:
+    primaryColor: "#37474F"
+    accentColor: "#78909C"
+    fontFamily: "system-ui, sans-serif"
+  distribution:
+    model: "Regional Distribution Centers"
+    distributorTypes:
+      - "Regional Distribution Center"
+      - "Direct-Ship Vendor"

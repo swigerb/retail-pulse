@@ -82,6 +82,8 @@ export interface ChatResponse {
    * Always omitted on fast-path replies.
    */
   planId?: string;
+  /** Gateway evidence for the turn; absent on older servers. */
+  gateway?: GatewayEvidence;
 }
 
 export interface TokenUsage {
@@ -1143,3 +1145,50 @@ export interface PlanSuspendedResponse {
 export type SendMessageResult =
   | { kind: 'complete'; response: ChatResponse }
   | { kind: 'suspended'; suspended: PlanSuspendedResponse };
+
+/** Privacy-safe APIM gateway evidence (mirrors RetailPulse.Contracts.Gateway). */
+export type GatewayOutcome =
+  | 'unknown'
+  | 'not-applicable'
+  | 'allowed'
+  | 'throttled'
+  | 'hit'
+  | 'miss'
+  | 'passed'
+  | 'blocked';
+
+export type GatewayEvidenceStatus = 'unavailable' | 'observed' | 'bypassed' | 'blocked' | 'failed';
+
+export type GatewayRouteState = 'unknown' | 'primary' | 'failover';
+
+export interface GatewayCallEvidence {
+  gatewayRequestId?: string | null;
+  backendAlias?: string | null;
+  route: GatewayRouteState;
+  tokensConsumed?: number | null;
+  tokensRemaining?: number | null;
+  quota: GatewayOutcome;
+  cache: GatewayOutcome;
+  safety: GatewayOutcome;
+  policyVersion?: string | null;
+  gatewayLatencyMs?: number | null;
+  backendLatencyMs?: number | null;
+  statusCode?: number | null;
+  status: GatewayEvidenceStatus;
+  /** Fixed error class for transport failures; never exception text. */
+  transportError?: string | null;
+}
+
+export interface GatewayEvidence {
+  /** Aggregate state; only 'observed' means every call carried trusted gateway evidence. */
+  status: GatewayEvidenceStatus;
+  /** True only when status is 'observed' — never treat anything else as success. */
+  observed: boolean;
+  /** True when more calls were made than are listed in `calls`. */
+  truncated: boolean;
+  droppedCalls: number;
+  callCount: number;
+  totalTokensConsumed?: number | null;
+  tokensRemaining?: number | null;
+  calls: GatewayCallEvidence[];
+}

@@ -1,11 +1,29 @@
+<!--
+  Gateway evidence contract (#327). Outbound emits only non-sensitive x-rp-gw-*
+  headers (see RetailPulse.Contracts.Gateway.GatewayEvidence). Never emit
+  subscription ids/keys, prompts, completions, or backend credentials here.
+  Inbound x-rp-gw-* headers are stripped so callers cannot spoof evidence.
+-->
 <policies>
     <inbound>
         <base />
+        <set-header name="x-rp-gw-request-id" exists-action="delete" />
+        <set-header name="x-rp-gw-backend" exists-action="delete" />
+        <set-header name="x-rp-gw-route" exists-action="delete" />
+        <set-header name="x-rp-gw-tokens-consumed" exists-action="delete" />
+        <set-header name="x-rp-gw-tokens-remaining" exists-action="delete" />
+        <set-header name="x-rp-gw-quota" exists-action="delete" />
+        <set-header name="x-rp-gw-cache" exists-action="delete" />
+        <set-header name="x-rp-gw-safety" exists-action="delete" />
+        <set-header name="x-rp-gw-policy-version" exists-action="delete" />
+        <set-header name="x-rp-gw-latency-ms" exists-action="delete" />
+        <set-header name="x-rp-gw-backend-latency-ms" exists-action="delete" />
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
         <azure-openai-token-limit counter-key="@(context.Subscription.Id)"
             tokens-per-minute="{tokens-per-minute}" estimate-prompt-tokens="true"
             tokens-consumed-header-name="x-tokens-consumed"
+            remaining-tokens-variable-name="rp-tokens-remaining"
             retry-after-header-name="Retry-After" />
         <azure-openai-emit-token-metric namespace="RetailPulse">
             <dimension name="API ID" value="@(context.Api.Id)" />
@@ -14,12 +32,84 @@
         </azure-openai-emit-token-metric>
     </inbound>
     <backend>
+        <set-variable name="rp-backend-start" value="@(DateTime.UtcNow)" />
         {backend-policy}
     </backend>
     <outbound>
         <base />
+        <!-- Every value below comes from a real policy signal. When no signal exists the header is
+             omitted so the API reports the field as unknown; nothing is defaulted to success. -->
+        <set-header name="x-rp-gw-request-id" exists-action="override">
+            <value>@(context.RequestId.ToString())</value>
+        </set-header>
+        <set-header name="x-rp-gw-backend" exists-action="override">
+            <value>{backend-id}</value>
+        </set-header>
+        <choose>
+            <when condition="@(context.Variables.ContainsKey(&quot;rp-route&quot;))">
+                <set-header name="x-rp-gw-route" exists-action="override">
+                    <value>@((string)context.Variables["rp-route"])</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <when condition="@(context.Response.Headers.ContainsKey(&quot;x-tokens-consumed&quot;))">
+                <set-header name="x-rp-gw-tokens-consumed" exists-action="override">
+                    <value>@(context.Response.Headers.GetValueOrDefault("x-tokens-consumed", ""))</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <!-- azure-openai-token-limit publishes the remaining budget only when it admitted the call. -->
+            <when condition="@(context.Variables.ContainsKey(&quot;rp-tokens-remaining&quot;))">
+                <set-header name="x-rp-gw-quota" exists-action="override">
+                    <value>allowed</value>
+                </set-header>
+                <set-header name="x-rp-gw-tokens-remaining" exists-action="override">
+                    <value>@(context.Variables["rp-tokens-remaining"].ToString())</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <!-- A content-filter block is the only safety signal read; success is never asserted. -->
+            <when condition="@(context.Response.StatusCode == 400 &amp;&amp; context.Response.Body.As&lt;string&gt;(preserveContent: true).Contains(&quot;content_filter&quot;))">
+                <set-header name="x-rp-gw-safety" exists-action="override">
+                    <value>blocked</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <when condition="@(context.Variables.ContainsKey(&quot;rp-backend-start&quot;))">
+                <set-header name="x-rp-gw-backend-latency-ms" exists-action="override">
+                    <value>@(((int)(DateTime.UtcNow - (DateTime)context.Variables["rp-backend-start"]).TotalMilliseconds).ToString())</value>
+                </set-header>
+            </when>
+        </choose>
+        <set-header name="x-rp-gw-policy-version" exists-action="override">
+            <value>2026-10-rp327-v2</value>
+        </set-header>
+        <set-header name="x-rp-gw-latency-ms" exists-action="override">
+            <value>@(((int)context.Elapsed.TotalMilliseconds).ToString())</value>
+        </set-header>
     </outbound>
     <on-error>
         <base />
+        <set-header name="x-rp-gw-request-id" exists-action="override">
+            <value>@(context.RequestId.ToString())</value>
+        </set-header>
+        <set-header name="x-rp-gw-backend" exists-action="override">
+            <value>{backend-id}</value>
+        </set-header>
+        <choose>
+            <!-- Only the token limiter's own 429 is a throttle signal; other errors leave quota unknown. -->
+            <when condition="@(context.LastError != null &amp;&amp; context.LastError.Source == &quot;azure-openai-token-limit&quot;)">
+                <set-header name="x-rp-gw-quota" exists-action="override">
+                    <value>throttled</value>
+                </set-header>
+            </when>
+        </choose>
+        <set-header name="x-rp-gw-policy-version" exists-action="override">
+            <value>2026-10-rp327-v2</value>
+        </set-header>
     </on-error>
 </policies>

@@ -235,6 +235,10 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               value: apimInferenceEndpoint
             }
             {
+              name: 'OpenAI__GatewayMode'
+              value: 'Apim'
+            }
+            {
               name: 'OpenAI__UseManagedIdentity'
               value: 'false'
             }

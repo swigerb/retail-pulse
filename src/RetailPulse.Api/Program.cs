@@ -32,6 +32,7 @@ using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.OpenAI;
+using RetailPulse.Api.OpenAI.Gateway;
 using RetailPulse.Api.Packs;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Rag;
@@ -884,6 +885,8 @@ var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
     RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 2)
 };
 
+azureClientOptions.AddGatewayEvidence(GatewayModeSettings.Resolve(builder.Configuration));
+
 Azure.AI.OpenAI.AzureOpenAIClient azureClient = openAiConnection.CreateClient(azureClientOptions);
 
 string agentDeployment = builder.Configuration["OpenAI:Deployment"] ?? agentDef.Model;
@@ -1313,6 +1316,7 @@ ContentSafetyToolResultAmbient.Install(
 
 // Select CORS policy based on environment
 app.UseMiddleware<SecurityHeadersMiddleware>();
+app.UseStripInboundGatewayHeaders();
 app.UseCors(app.Environment.IsDevelopment() ? "Development" : "Production");
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();

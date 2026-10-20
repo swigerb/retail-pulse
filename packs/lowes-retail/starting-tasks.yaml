@@ -1,0 +1,37 @@
+# Starting tasks for the unofficial synthetic Lowe's pack.
+# Synthetic data only; no affiliation with Lowe's.
+
+categories:
+  - id: storm-demand
+    label: "Storm Demand"
+    emoji: "⛈️"
+    order: 1
+    tasks:
+      - name: "Generator sell-through"
+        prompt: "How is generator sell-through trending in the Coastal South ahead of the storm?"
+        order: 1
+        capability: { kind: prose }
+      - name: "Plywood days of supply"
+        prompt: "Show days of supply for plywood across all regions"
+        order: 2
+        capability: { kind: chart, chartType: bar }
+
+  - id: gateway-governance
+    label: "Gateway Governance"
+    emoji: "🛡️"
+    order: 2
+    tasks:
+      - name: "Governed supplier lookup"
+        prompt: "Which vendor shipments are delayed for sump pumps? Route the lookup through the AI gateway and show which governance policies applied"
+        order: 1
+        capability: { kind: prose }
+
+  - id: safety-approval
+    label: "Safety Approval"
+    emoji: "✅"
+    order: 3
+    tasks:
+      - name: "Generator safety notice approval"
+        prompt: "Draft a generator safety notice for storm shoppers and hold it for human approval before anything is published"
+        order: 1
+        capability: { kind: prose }
