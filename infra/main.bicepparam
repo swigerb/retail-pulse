@@ -36,6 +36,12 @@ param contentSafetyEnabled = toLower(readEnvironmentVariable('AZURE_CONTENT_SAFE
 // Enable per environment with `azd env set AZURE_AI_SEARCH_ENABLED true`.
 param aiSearchEnabled = toLower(readEnvironmentVariable('AZURE_AI_SEARCH_ENABLED', 'false')) == 'true'
 
+// Optional Azure API Center synchronized from APIM. Disabled by default.
+// Enable with `azd env set AZURE_API_CENTER_ENABLED true`; region (API Center
+// is region-limited) via `azd env set AZURE_API_CENTER_LOCATION <region>`.
+param apiCenterEnabled = toLower(readEnvironmentVariable('AZURE_API_CENTER_ENABLED', 'false')) == 'true'
+param apiCenterLocation = readEnvironmentVariable('AZURE_API_CENTER_LOCATION', 'eastus')
+
 // Azure Bot Service registration backing the Teams bot. Empty by default so a
 // clean zd up does not claim to have a bot it never registered. Set both with:
 //   azd env set AZURE_BOT_APP_ID <appId>
