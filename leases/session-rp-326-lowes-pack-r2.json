@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-326-lowes-pack-r2",
+  "sessionId": "rp-326-lowes-pack-r2",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T14:36:36.402Z",
+  "lastHeartbeatAt": "2026-10-20T14:36:36.402Z",
+  "updatedAt": "2026-10-20T14:36:36.402Z",
+  "terminalReason": null,
+  "executionRef": null
+}
