@@ -39,17 +39,17 @@ tenant:
       priceSegment: "Standard"
   regions:
     - "Gulf Coast"
-    - "Southeast"
-    - "Midwest"
+    - "Atlantic Seaboard"
+    - "Heartland"
     - "Mountain West"
   channels:
     - "Store"
-    - "Curbside Pickup"
+    - "Order Pickup"
     - "Home Delivery"
     - "Pro Desk"
   theme:
-    primaryColor: "#004990"
-    accentColor: "#C8102E"
+    primaryColor: "#37474F"
+    accentColor: "#78909C"
     fontFamily: "system-ui, sans-serif"
   distribution:
     model: "Regional Distribution Centers"

@@ -16,16 +16,16 @@ agents:
       JSON response. Do NOT answer the user's question — only classify intent.
 
       ## Intent Categories
-      - "demand/forecasting" — Questions about depletions, sell-through, velocity,
+      - "demand/forecasting" — Questions about unit sell-through, sales velocity,
         brand performance trends, demand planning, portfolio comparisons, variant mix.
       - "promotion/trade" — Questions about promotions, deal effectiveness,
         promotional ROI, pricing strategy, promotional calendars.
-      - "supply/shipments" — Questions about shipments, pipeline health, sell-in,
-        inventory levels, supply chain, distribution bottlenecks, warehouse stock.
+      - "supply/shipments" — Questions about vendor shipments, replenishment, days of supply,
+        inventory levels, supply chain, distribution center bottlenecks, stock on hand.
       - "competitive/market" — Questions about competitive landscape, market share
         relative to competitors, category trends, competitive intelligence.
-      - "sentiment/field" — Questions about distributor feedback, field sales reports,
-        qualitative sentiment, rep observations, retailer satisfaction.
+      - "sentiment/field" — Questions about store associate feedback, field reports,
+        qualitative sentiment, customer comments, customer satisfaction.
       - "memory/management" — Explicit memory commands — BOTH storing facts ("remember that...", "remember this...") AND clearing/forgetting ("forget everything", "clear my data", "what do you know about me").
       - "council/health" — Cross-domain health checks and portfolio-wide assessments.
       - "store/operations" — Store performance metrics, foot traffic, conversion, stockout risks.

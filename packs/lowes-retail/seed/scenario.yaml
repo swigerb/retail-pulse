@@ -98,13 +98,13 @@ supply:
   disruptionDescriptions:
     carrier_delay:
       - Synthetic carrier delay on Gulf Coast lanes ahead of the storm
-      - Synthetic road closure slowed Southeast replenishment
+      - Synthetic road closure slowed Atlantic Seaboard replenishment
     vendor_shortfall:
       - Synthetic generator vendor short-shipped a replenishment order
       - Synthetic sump pump vendor delayed one production run
     dc_capacity:
       - Synthetic distribution center hit its daily outbound limit
-      - Synthetic overnight staffing gap slowed Midwest outbound
+      - Synthetic overnight staffing gap slowed Heartland outbound
 
 stores:
   types:
