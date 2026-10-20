@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr353-mcp-runtime-review",
+  "sessionId": "rp-pr353-mcp-runtime-review",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T16:27:03.816Z",
+  "lastHeartbeatAt": "2026-10-20T16:27:03.816Z",
+  "updatedAt": "2026-10-20T16:27:03.816Z",
+  "terminalReason": null,
+  "executionRef": null
+}
