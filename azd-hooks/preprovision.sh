@@ -56,4 +56,19 @@ else
     echo "Auth mode '$AUTH_MODE' selected: skipping the Entra-specific ID check."
 fi
 
+# ── APIM backend-pool fail-closed guard ────────────────────────────────────
+if [ "$(printf '%s' "${AZURE_APIM_BACKEND_POOL_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')" = 'true' ]; then
+    primary_account="${AZURE_OPENAI_ACCOUNT_NAME:-aiagents-3rsdmhyb}"
+    secondary_account="${AZURE_OPENAI_SECONDARY_ACCOUNT_NAME:-}"
+    if [ -z "$secondary_account" ]; then
+        echo 'AZURE_APIM_BACKEND_POOL_ENABLED=true requires AZURE_OPENAI_SECONDARY_ACCOUNT_NAME.' >&2
+        exit 1
+    fi
+    if [ "$(printf '%s' "$secondary_account" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$primary_account" | tr '[:upper:]' '[:lower:]')" ]; then
+        echo 'The secondary Azure AI account must differ from AZURE_OPENAI_ACCOUNT_NAME.' >&2
+        exit 1
+    fi
+    echo 'APIM backend pool validated: primary and secondary accounts are distinct.'
+fi
+
 echo 'All prerequisites met. Proceeding with provisioning...'

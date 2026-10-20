@@ -41,6 +41,12 @@ public sealed partial class ApimGatewayContractTests
     private static string MainBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "main.bicep"));
 
+    private static string PreprovisionPowerShell => File.ReadAllText(
+        Path.Combine(RepoRoot, "azd-hooks", "preprovision.ps1"));
+
+    private static string PreprovisionShell => File.ReadAllText(
+        Path.Combine(RepoRoot, "azd-hooks", "preprovision.sh"));
+
     // ── APIM instance ────────────────────────────────────────────────────────
 
     [Fact]
@@ -331,8 +337,10 @@ public sealed partial class ApimGatewayContractTests
     {
         ApimOpenAiApiBicep.Should().MatchRegex(@"param\s+backendPoolEnabled\s+bool\s*=\s*false");
         ApimOpenAiApiBicep.Should().Contain("var routeBackendId = poolEnabled ? poolBackendName : primaryBackendName");
-        ApimOpenAiApiBicep.Should().Contain("secondaryAiFoundryAccountName != aiFoundryAccountName",
-            "the secondary must be a distinct account from the primary");
+        PreprovisionPowerShell.Should().Contain("AZURE_OPENAI_SECONDARY_ACCOUNT_NAME")
+            .And.Contain("must differ");
+        PreprovisionShell.Should().Contain("AZURE_OPENAI_SECONDARY_ACCOUNT_NAME")
+            .And.Contain("must differ");
         MainBicep.Should().MatchRegex(@"param\s+apimBackendPoolEnabled\s+bool\s*=\s*false");
     }
 
@@ -340,21 +348,24 @@ public sealed partial class ApimGatewayContractTests
     public void ApimOpenAiApi_PoolHasPriorityMembersCircuitBreakersAndSecondaryRbac()
     {
         ApimOpenAiApiBicep.Should().Contain("type: 'Pool'");
-        ApimOpenAiApiBicep.Should().Contain("priority: primaryBackendPriority");
-        ApimOpenAiApiBicep.Should().Contain("priority: secondaryBackendPriority");
-        ApimOpenAiApiBicep.Should().Contain("circuitBreaker: backendCircuitBreaker");
+        ApimOpenAiApiBicep.Should().Contain("priority: 1");
+        ApimOpenAiApiBicep.Should().Contain("priority: 2");
+        ApimOpenAiApiBicep.Should().Contain("circuitBreaker: poolEnabled ? poolCircuitBreaker : throttlingCircuitBreaker");
+        ApimOpenAiApiBicep.Should().Contain("circuitBreaker: poolCircuitBreaker");
         ApimOpenAiApiBicep.Should().Contain("secondaryRoleAssignment",
             "APIM's managed identity needs RBAC on the secondary account");
+        ApimOpenAiApiBicep.Should().Contain("dependsOn: poolEnabled ?",
+            "the policy must wait for the selected backend topology and RBAC");
         ApimOpenAiApiBicep.Should().NotContainEquivalentOf("listKeys");
     }
 
     [Fact]
-    public void ApimPolicy_RoutesViaConfiguredBackendAndEmitsOnlyNonSensitiveEvidence()
+    public void ApimPolicy_RoutesViaConfiguredBackendWithoutFabricatingMemberEvidence()
     {
         ApimPolicyXml.Should().Contain("<set-backend-service backend-id=\"{backend-id}\" />");
-        ApimPolicyXml.Should().MatchRegex("name=\"x-rp-backend-id\" exists-action=\"delete\"",
-            "client-supplied evidence headers must be stripped");
-        ApimPolicyXml.Should().MatchRegex("name=\"x-rp-failover\" exists-action=\"override\"");
+        ApimPolicyXml.Should().Contain("{backend-policy}");
+        ApimPolicyXml.Should().NotContain("x-rp-backend-id");
+        ApimPolicyXml.Should().NotContain("x-rp-failover");
         ApimPolicyXml.Should().NotContain("context.Request.Body",
             "evidence must never include prompt or completion text");
     }

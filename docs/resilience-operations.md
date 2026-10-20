@@ -223,6 +223,29 @@ Both endpoints are anonymous even under `Security:RequireAuth=true` and are wire
 
 ---
 
+## APIM Model Backend Pool
+
+The optional two-backend model pool is enabled with
+`AZURE_APIM_BACKEND_POOL_ENABLED=true` plus a distinct secondary Azure AI
+account. The primary has the lower priority; APIM opens a member circuit on
+429 or 5xx and the API policy retries once so backend selection can use the
+remaining healthy member. With the pool disabled, the primary retains the
+existing 429-only circuit breaker and no 5xx retry.
+
+The pool uses APIM's preview backend-pool resource schema described in the
+[APIM backend documentation](https://learn.microsoft.com/azure/api-management/backends).
+It is available on the Developer tier for demonstrations, but Developer has no
+production SLA. Confirm current tier and regional support before adopting this
+topology for a production deployment.
+
+APIM does not currently expose a documented policy expression identifying the
+selected pool member. Retail Pulse therefore does not emit a per-request
+backend or failover header from an inferred URL. Those gateway-evidence fields
+remain `unknown` until a supported signal is available and live verification
+proves it. The deterministic failure demonstration is owned by issue #330.
+
+---
+
 ## Alerting Thresholds (Recommended)
 
 | Metric | Warning | Critical |

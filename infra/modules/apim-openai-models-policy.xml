@@ -13,6 +13,8 @@
   Foundry. The AI Gateway invariant is untouched - this operation is served by
   APIM, routed to the APIM backend, and requires the API's subscription key. It
   creates no path from the API to Azure OpenAI that bypasses the gateway.
+  This readiness operation intentionally emits no per-request failover evidence;
+  APIM does not expose a documented selected-pool-member policy expression.
 -->
 <policies>
     <inbound>

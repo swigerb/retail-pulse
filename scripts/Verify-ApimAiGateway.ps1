@@ -354,7 +354,11 @@ if ($BackendPoolEnabled) {
         $sec = ($pool.pool.services | Where-Object { $_.id -match '/retail-pulse-foundry-secondary$' }).priority
         $pri -lt $sec
     } 'primary priority must be lower than secondary priority'
-    Assert 'pool: policy emits non-sensitive route evidence headers' { $policyValue -match 'x-rp-backend-id' -and $policyValue -match 'x-rp-failover' } 'x-rp-backend-id / x-rp-failover evidence headers missing from policy'
+    Assert 'pool: policy retries once after 429/5xx so the open circuit can reselect a member' {
+        $policyValue -match '<retry\s+condition=' -and
+        $policyValue -match 'count="1"' -and
+        $policyValue -match '<forward-request'
+    } 'pool policy does not retry once through backend selection'
 }
 
 # ── Diagnostics (API + instance) ──────────────────────────────────────────

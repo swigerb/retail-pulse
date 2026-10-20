@@ -164,6 +164,8 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
         JsonElement? compiled = TryCompileMainBicep();
         if (compiled is null)
         {
+            Environment.GetEnvironmentVariable("CI").Should().NotBe("true",
+                "CI must compile infra/main.bicep; a missing or unusable az/Bicep tool cannot silently skip the deployment graph proof");
             return;
         }
 
@@ -192,19 +194,22 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
         inner.GetProperty("parameters").GetProperty("backendPoolEnabled").GetProperty("defaultValue").GetBoolean()
             .Should().BeFalse("the pool must be opt-in");
 
-        // Both backends authenticate with managed identity and carry circuit breakers.
+        // Both backends authenticate with managed identity. Pool mode adds
+        // 5xx handling; single-backend mode retains the prior 429-only breaker.
         foreach (string name in new[] { "backend", "secondaryBackend" })
         {
             JsonElement props = resources.GetProperty(name).GetProperty("properties");
             props.GetProperty("credentials").GetProperty("managedIdentity").GetProperty("resource").GetString()
                 .Should().Be("https://cognitiveservices.azure.com");
-            props.GetProperty("circuitBreaker").GetString().Should().Contain("backendCircuitBreaker");
         }
 
-        JsonElement breaker = inner.GetProperty("variables").GetProperty("backendCircuitBreaker")
+        JsonElement throttlingBreaker = inner.GetProperty("variables").GetProperty("throttlingCircuitBreaker")
             .GetProperty("rules")[0];
-        breaker.GetProperty("acceptRetryAfter").GetBoolean().Should().BeTrue();
-        breaker.GetProperty("failureCondition").GetRawText().Should().Contain("429").And.Contain("500");
+        throttlingBreaker.GetProperty("acceptRetryAfter").GetBoolean().Should().BeTrue();
+        throttlingBreaker.GetProperty("failureCondition").GetRawText().Should().Contain("429").And.NotContain("500");
+        JsonElement poolBreaker = inner.GetProperty("variables").GetProperty("poolCircuitBreaker")
+            .GetProperty("rules")[0];
+        poolBreaker.GetProperty("failureCondition").GetRawText().Should().Contain("429").And.Contain("500");
 
         // Pool membership and priority failover.
         JsonElement poolProps = resources.GetProperty("backendPool").GetProperty("properties");
@@ -213,8 +218,8 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
         services.GetArrayLength().Should().Be(2);
         services[0].GetProperty("id").GetString().Should().Contain("primaryBackendName");
         services[1].GetProperty("id").GetString().Should().Contain("secondaryBackendName");
-        services[0].GetProperty("priority").GetString().Should().Contain("primaryBackendPriority");
-        services[1].GetProperty("priority").GetString().Should().Contain("secondaryBackendPriority");
+        services[0].GetProperty("priority").GetInt32().Should().Be(1);
+        services[1].GetProperty("priority").GetInt32().Should().Be(2);
 
         // RBAC for the secondary account and no model keys anywhere.
         resources.GetProperty("secondaryRoleAssignment").GetRawText()
@@ -222,9 +227,15 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
         string json = inner.GetRawText();
         json.ToLowerInvariant().Should().NotContain("listkeys");
 
-        // Policies route to the pool id (or primary) and emit non-sensitive evidence.
+        // Policies route to the selected topology only after its resources and
+        // secondary RBAC are ready. No selected-member evidence is fabricated.
         json.Should().Contain("routeBackendId");
-        json.Should().Contain("x-rp-backend-id").And.Contain("x-rp-failover");
+        JsonElement apiPolicy = resources.GetProperty("apiPolicy");
+        string dependencies = apiPolicy.GetProperty("dependsOn").GetRawText();
+        dependencies.Should().Contain("backend").And.Contain("secondaryBackend")
+            .And.Contain("backendPool").And.Contain("secondaryRoleAssignment");
+        json.Should().NotContain("x-rp-backend-id").And.NotContain("x-rp-failover");
+        json.Should().Contain("first-fast-retry").And.Contain("forward-request");
         inner.GetProperty("outputs").TryGetProperty("backendPoolEnabled", out _).Should().BeTrue();
         inner.GetProperty("outputs").TryGetProperty("routeBackendId", out _).Should().BeTrue();
     }
