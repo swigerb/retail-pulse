@@ -67,6 +67,12 @@ param botAppSecret string = ''
 
 @description('Keep one replica of the API and MCP server always running. Scale-to-zero makes the first request after an idle period look like an outage. Set false with `azd env set AZURE_ALWAYS_WARM false` for a cost-optimised, non-customer-facing environment.')
 param alwaysWarm bool = true
+
+@description('Application (client) ID of the APIM managed identity, produced by scripts/Setup-McpGatewayIdentity.ps1 (azd env AZURE_MCP_GATEWAY_APIM_CLIENT_ID). Empty until the postprovision hook has run; the API then trusts no gateway app-only caller.')
+param mcpGatewayApimClientId string = ''
+
+@description('Audience (identifier URI) of the MCP gateway app registration that callers request tokens for')
+param mcpGatewayAudience string = 'api://retailpulse-mcp-gateway'
 @description('Enable the optional Azure AI Search knowledge provider. Disabled by default; no Search resource is provisioned when false.')
 param aiSearchEnabled bool = false
 
@@ -184,6 +190,7 @@ module containerApps './modules/container-apps.bicep' = {
     botAppId: botAppId
     botAppSecret: botAppSecret
     alwaysWarm: alwaysWarm
+    mcpGatewayClientId: mcpGatewayApimClientId
   }
 }
 
@@ -348,3 +355,23 @@ output VITE_FEATURE_STORES string = 'true'
 output VITE_FEATURE_FINANCIALS string = 'true'
 output VITE_FEATURE_PORTFOLIO string = 'true'
 output VITE_FEATURE_OBSERVABILITY string = 'true'
+
+// Governed APIM MCP runtime (ADR 017, issue #335): APIM "Expose REST API as MCP server" over the
+// public Retail Pulse API, authenticated with the APIM system-assigned managed identity. The
+// internal MCP server is not referenced. Runs after containerApps to consume the API FQDN.
+module apimMcpApi './modules/apim-mcp-api.bicep' = {
+  name: 'apim-mcp-api'
+  scope: rg
+  params: {
+    apimName: apim.outputs.apimName
+    retailPulseApiFqdn: containerApps.outputs.apiFqdn
+    retailPulseApiAudience: empty(entraAudience) && !empty(entraClientId) ? 'api://${entraClientId}' : entraAudience
+    mcpGatewayAudience: mcpGatewayAudience
+    tenantId: entraTenantId
+    appInsightsLoggerId: apim.outputs.appInsightsLoggerId
+  }
+}
+
+output AZURE_APIM_MCP_ENDPOINT string = apimMcpApi.outputs.mcpEndpoint
+output AZURE_APIM_PRINCIPAL_ID string = apim.outputs.apimPrincipalId
+output AZURE_MCP_GATEWAY_AUDIENCE string = mcpGatewayAudience

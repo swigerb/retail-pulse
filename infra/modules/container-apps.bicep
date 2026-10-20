@@ -67,6 +67,17 @@ param botTenantId string = tenant().tenantId
 @description('Keep one replica of the API and MCP server always running. Scale-to-zero saves money while idle, but the first request after an idle period pays a cold start during which SignalR cannot connect and chat appears to hang — indistinguishable from an outage to anyone looking at the screen. Set false for a cost-optimised environment that is not customer-facing.')
 param alwaysWarm bool = true
 
+@description('Application (client) ID of the APIM system-assigned managed identity, emitted by scripts/Setup-McpGatewayIdentity.ps1 as an azd env value. Empty until that hook has succeeded, which keeps app-only tokens for the gateway disabled (fail closed).')
+param mcpGatewayClientId string = ''
+
+@description('Exact "{METHOD} {route template}" operations app-only callers may reach (McpGateway:AllowedOperations). Empty denies every app-only request.')
+param mcpAllowedOperations array = [
+  'GET /api/supply/inventory'
+  'GET /api/stores/stockout-risks'
+  'GET /api/supply/disruptions'
+  'GET /api/demand/forecast'
+]
+
 var apimSubscriptionKeySecretName = 'apim-sub-key'
 var mcpApiKeySecretName = 'mcp-api-key'
 var botAppSecretName = 'bot-app-secret'
@@ -76,6 +87,16 @@ var botAppSecretName = 'bot-app-secret'
 // and no audience to validate inbound Activities against, so emitting half the
 // configuration would leave the bot failing in a way that looks like a code fault.
 var botConfigured = !empty(botAppId)
+
+// Governed APIM MCP gateway (ADR 017). The APIM managed identity is only trusted once
+// Setup-McpGatewayIdentity.ps1 has emitted its client id; until then no gateway operation is
+// allow-listed. The Teams bot keeps its existing app-only route (POST /api/chat) when configured.
+var mcpGatewayConfigured = !empty(mcpGatewayClientId)
+var appOnlyOperations = concat(mcpGatewayConfigured ? mcpAllowedOperations : [], botConfigured ? ['POST /api/chat'] : [])
+var mcpGatewayEnv = [for (operation, i) in appOnlyOperations: {
+  name: 'McpGateway__AllowedOperations__${i}'
+  value: operation
+}]
 
 // The `registries` block binds a container app's image-pull auth to its own
 // system-assigned identity, with no admin credentials. It is only emitted when
@@ -229,7 +250,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           //   Security__RequireAuth = true (JWT bearer gate)
           // This is what closes the §7 regression where a re-provision would
           // drop these values off the active revision.
-          env: [
+          env: concat([
             {
               name: 'OpenAI__Endpoint'
               value: apimInferenceEndpoint
@@ -296,11 +317,15 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             // this from widening the API to any app-only token in the tenant.
             {
               name: 'MicrosoftEntra__AllowAppOnlyTokens'
-              value: botConfigured ? 'true' : 'false'
+              value: (botConfigured || mcpGatewayConfigured) ? 'true' : 'false'
             }
             {
               name: 'MicrosoftEntra__AllowedAppClientIds__0'
               value: botAppId
+            }
+            {
+              name: 'MicrosoftEntra__AllowedAppClientIds__1'
+              value: mcpGatewayClientId
             }
             {
               name: 'RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE'
@@ -367,7 +392,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'ASPNETCORE_ENVIRONMENT'
               value: 'Production'
             }
-          ]
+          ], mcpGatewayEnv)
         }
       ]
       // The API's SQLite stores (cost/audit/memory/approvals/alerts) live in the
@@ -525,6 +550,7 @@ resource teamsBot 'Microsoft.App/containerApps@2024-03-01' = {
 
 output apiName string = api.name
 output apiUrl string = 'https://${api.properties.configuration.ingress.fqdn}'
+output apiFqdn string = api.properties.configuration.ingress.fqdn
 output apiPrincipalId string = api.identity.principalId
 output mcpServerName string = mcpServer.name
 output mcpServerUrl string = 'https://${mcpServer.properties.configuration.ingress.fqdn}'

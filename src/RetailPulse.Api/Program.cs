@@ -1324,6 +1324,8 @@ app.UseMiddleware<ApiKeyAuthMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
+// Narrows app-only (APIM managed identity) tokens to the approved MCP gateway operations.
+app.UseMiddleware<RetailPulse.Api.Security.AppOnlyRouteAllowListMiddleware>();
 app.UseRateLimiter();
 
 // Anonymous mode central enforcement: read-only restriction (block mutations), request-size
@@ -1380,6 +1382,7 @@ app.MapEscalationEndpoints();
 app.MapPromoEndpoints();
 app.MapSupplyEndpoints();
 app.MapStoreEndpoints();
+app.MapDemandEndpoints();
 app.MapMarginEndpoints();
 app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();

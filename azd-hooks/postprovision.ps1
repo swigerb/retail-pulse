@@ -217,6 +217,14 @@ if ($aiSearchEnabled -and $aiSearchEnabled.Trim().ToLowerInvariant() -eq 'true' 
 # missing required azd outputs) — once those preconditions are met, EVERY
 # invariant failure is a hard [FAIL] that surfaces as exit 1 here too. A
 # signed-in, reachable az session can never mask a real failure as a skip.
+# ── Governed APIM MCP runtime identity (ADR 017, issue #335) ────────────────
+# Idempotent Graph setup: gateway app registration + RetailPulse.Mcp.Invoke role and the
+# RetailPulse.User assignment for the APIM managed identity. Fail-closed (no skip on denial).
+& pwsh -NoProfile -File (Join-Path $PSScriptRoot '..\scripts\Setup-McpGatewayIdentity.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "Setup-McpGatewayIdentity.ps1 failed (exit $LASTEXITCODE). The APIM MCP gateway identity is not provisioned; failing provision rather than continuing without it."
+}
+
 $verifyScript = Join-Path $PSScriptRoot '..\scripts\Verify-ApimAiGateway.ps1'
 Write-Host ''
 Write-Host 'Running mandatory APIM AI Gateway live verification gate...'

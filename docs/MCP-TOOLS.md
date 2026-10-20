@@ -789,3 +789,33 @@ Identify margin-destructive patterns across brands.
   "total_risks": 5
 }
 ```
+
+---
+
+## Governed APIM MCP gateway (ADR 017)
+
+Four read-only tools are exposed to external MCP clients through the APIM "Expose REST API as MCP
+server" resource (`infra/modules/apim-mcp-api.bicep`, endpoint output `AZURE_APIM_MCP_ENDPOINT`).
+The internal `ca-retailpulse-mcp` app stays internal and keeps its API key; APIM calls the public
+Retail Pulse API with its managed identity.
+
+| Tool | API operation |
+|---|---|
+| `get_inventory` | `GET /api/supply/inventory` |
+| `get_stockout_risk` | `GET /api/stores/stockout-risks` (`limit` clamped 1–50) |
+| `get_supply_disruptions` | `GET /api/supply/disruptions` |
+| `get_demand_forecast` | `GET /api/demand/forecast?brand=&region=` (`brand` required, `region` defaults to `National`) |
+
+- **Caller auth:** `Ocp-Apim-Subscription-Key` (product `retailpulse-mcp`, approval required) plus an Entra
+  token for audience `api://retailpulse-mcp-gateway` with app role `RetailPulse.Mcp.Invoke`.
+- **Quotas per subscription:** 30 calls/min, 2,000 calls/day, 20 MB/day.
+- **API-side caps for app-only callers:** `McpGateway:MaxItems` (default 50) and `McpGateway:MaxResponseBytes`
+  (default 262144, `413 {"error":"response_too_large"}`).
+- **Route allow-list:** `McpGateway:AllowedOperations` (`"GET /api/supply/inventory"`, …) is enforced by
+  `AppOnlyRouteAllowListMiddleware` after authorization; an empty list denies every app-only request. The Teams bot
+  keeps `POST /api/chat` when a bot is configured.
+- **Provisioning:** `scripts/Setup-McpGatewayIdentity.ps1` (azd `postprovision`) creates the gateway app role and the
+  APIM identity's `RetailPulse.User` assignment idempotently. It needs Graph `Application.ReadWrite.All` and
+  `AppRoleAssignment.ReadWrite.All`. The APIM client id is emitted as `AZURE_MCP_GATEWAY_APIM_CLIENT_ID`, which takes
+  effect on the next `azd provision` (until then no gateway caller is trusted).
+- **Write tools:** none in v1; adding one requires a new ADR.

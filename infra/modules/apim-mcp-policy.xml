@@ -1,0 +1,63 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- Caller auth (ADR 017): pinned-issuer Entra v2 token, gateway audience, invoke role. -->
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-expiration-time="true" require-signed-tokens="true" clock-skew="60" output-token-variable-name="callerJwt">
+      <openid-config url="https://login.microsoftonline.com/{{tenantId}}/v2.0/.well-known/openid-configuration" />
+      <issuers>
+        <issuer>https://login.microsoftonline.com/{{tenantId}}/v2.0</issuer>
+      </issuers>
+      <audiences>
+        <audience>{{mcpGatewayAudience}}</audience>
+      </audiences>
+      <required-claims>
+        <claim name="roles" match="any">
+          <value>RetailPulse.Mcp.Invoke</value>
+        </claim>
+      </required-claims>
+    </validate-jwt>
+    <!-- MCP transport verbs only; tool operations themselves are GET-only (backing API). -->
+    <choose>
+      <when condition="@(context.Request.Method != "POST" &amp;&amp; context.Request.Method != "GET" &amp;&amp; context.Request.Method != "DELETE")">
+        <return-response>
+          <set-status code="405" reason="Method Not Allowed" />
+        </return-response>
+      </when>
+    </choose>
+    <!-- Belt and braces: only the four approved read-only operations may execute. -->
+    <choose>
+      <when condition="@(context.Operation != null && context.Operation.Id != "get_inventory" && context.Operation.Id != "get_stockout_risk" && context.Operation.Id != "get_supply_disruptions" && context.Operation.Id != "get_demand_forecast")">
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+        </return-response>
+      </when>
+    </choose>
+    <rate-limit-by-key calls="30" renewal-period="60" counter-key="@(context.Subscription.Id)" />
+    <quota-by-key calls="2000" bandwidth="20480" renewal-period="86400" counter-key="@(context.Subscription.Id)" />
+    <!-- Backend identity: the caller token is never forwarded; APIM presents its own managed identity token. -->
+    <set-header name="Authorization" exists-action="delete" />
+    <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
+    <authentication-managed-identity resource="{{retailPulseApiAudience}}" output-token-variable-name="backendToken" ignore-error="false" />
+    <set-header name="Authorization" exists-action="override">
+      <value>@("Bearer " + (string)context.Variables["backendToken"])</value>
+    </set-header>
+    <set-backend-service base-url="https://{{retailPulseApiFqdn}}" />
+  </inbound>
+  <backend>
+    <forward-request timeout="30" />
+  </backend>
+  <outbound>
+    <base />
+    <!-- Telemetry without payloads: server, tool, caller scope, latency, outcome. No policy reads the response body. -->
+    <emit-metric name="mcp_gateway_calls" namespace="retailpulse_mcp" value="@(context.Elapsed.TotalMilliseconds)">
+      <dimension name="mcp_server" value="retail-pulse-mcp-server" />
+      <dimension name="tool" value="@(context.Operation != null ? context.Operation.Id : "mcp-transport")" />
+      <dimension name="caller_scope" value="RetailPulse.Mcp.Invoke" />
+      <dimension name="outcome" value="@(context.Response.StatusCode.ToString())" />
+      <dimension name="subscription" value="@(context.Subscription != null ? context.Subscription.Id : "none")" />
+    </emit-metric>
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

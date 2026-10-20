@@ -244,12 +244,12 @@ public static class AuthenticationSetup
     }
 
     /// <summary>Returns true when the principal has any <c>scp</c>-style claim (v1 short or v2 long form).</summary>
-    private static bool HasScopeClaim(ClaimsPrincipal principal) =>
+    internal static bool HasScopeClaim(ClaimsPrincipal principal) =>
         principal.HasClaim(c =>
             c.Type is "scp" or "http://schemas.microsoft.com/identity/claims/scope");
 
     /// <summary>Returns true when the principal has any <c>roles</c> claim.</summary>
-    private static bool HasRolesClaim(ClaimsPrincipal principal) =>
+    internal static bool HasRolesClaim(ClaimsPrincipal principal) =>
         principal.HasClaim(c => c.Type == "roles");
 
     /// <summary>

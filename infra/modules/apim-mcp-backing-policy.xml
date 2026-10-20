@@ -1,0 +1,22 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- Every tool operation is a read-only GET; anything else is refused before it can reach the API. -->
+    <choose>
+      <when condition="@(context.Request.Method != "GET")">
+        <return-response>
+          <set-status code="405" reason="Method Not Allowed" />
+        </return-response>
+      </when>
+    </choose>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

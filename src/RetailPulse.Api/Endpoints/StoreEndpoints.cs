@@ -1,3 +1,5 @@
+using RetailPulse.Api.Security;
+
 namespace RetailPulse.Api.Endpoints;
 
 public static class StoreEndpoints
@@ -86,7 +88,8 @@ public static class StoreEndpoints
                 return Results.Ok(Array.Empty<StockoutRisk>());
             }
         })
-        .WithName("GetStockoutRisks").RequireAuthorization().RequireRateLimiting("relaxed");
+        .WithName("GetStockoutRisks").RequireAuthorization().RequireRateLimiting("relaxed")
+        .AddEndpointFilter<McpGatewayResponseBudgetFilter>();
 
         app.MapGet("/api/stores/performance", async (IHttpClientFactory httpFactory, CancellationToken ct, string? region = null) =>
         {
