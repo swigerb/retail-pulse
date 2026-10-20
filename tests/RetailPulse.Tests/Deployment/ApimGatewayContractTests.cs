@@ -23,6 +23,9 @@ public sealed partial class ApimGatewayContractTests
     [GeneratedRegex(@"@description\('APIM inference endpoint[^']*'\)\s*param\s+apimInferenceEndpoint\s+(?<type>[A-Za-z]+)(?<rest>[^\r\n]*)")]
     private static partial Regex ApimInferenceEndpointParamRegex();
 
+    [GeneratedRegex(@"<when condition=""([^""]*)"">\s*<set-header name=""x-rp-gw-route""[\s\S]*?failover")]
+    private static partial Regex FailoverRouteConditionRegex();
+
     private static string ApimBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "modules", "apim.bicep"));
 
@@ -407,6 +410,10 @@ public sealed partial class ApimGatewayContractTests
         inbound.Should().Contain("<rate-limit-by-key calls=\"3\"");
         inbound.Should().Contain("<rate-limit-by-key calls=\"10\"", "denied attempts are limited too");
         inbound.Should().Contain("name=\"rp.failover.demo.audit\"");
+        int attempt = inbound.IndexOf("name=\"rp.failover.demo.attempt\"", StringComparison.Ordinal);
+        attempt.Should().BeGreaterThan(-1);
+        attempt.Should().BeLessThan(inbound.IndexOf("<rate-limit-by-key", StringComparison.Ordinal),
+            "every attempt, including rate-limited ones, must be counted before any limiter runs");
         inbound.Should().Contain("value=\"authorized\"").And.Contain("value=\"denied\"");
 
         string backend = Module("apim-openai-failover-demo-backend.xml");
@@ -431,7 +438,7 @@ public sealed partial class ApimGatewayContractTests
         outbound.Should().Contain("context.Response.StatusCode");
         outbound.Should().Contain("rp-demo-primary-status");
         // failover route is only emitted behind a second attempt that really succeeded
-        Regex.Match(outbound, @"<when condition=""([^""]*)"">\s*<set-header name=""x-rp-gw-route""[\s\S]*?failover")
+        FailoverRouteConditionRegex().Match(outbound)
             .Groups[1].Value.Should().Contain("&gt; 1").And.Contain("&lt; 400");
         outbound.Should().NotContain("x-rp-gw-quota").And.NotContain("x-rp-gw-safety").And.NotContain("x-rp-gw-cache");
         Module("apim-openai-failover-demo-backend.xml").Should().Contain("1900-01-01");

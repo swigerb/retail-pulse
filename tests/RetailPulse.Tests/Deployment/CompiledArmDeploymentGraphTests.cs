@@ -242,7 +242,7 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
             .And.Contain("backendPool").And.Contain("secondaryRoleAssignment");
         json.Should().NotContain("x-rp-backend-id");
         // The only failover header is the authorized demo trigger (#330); no inferred-backend header exists.
-        System.Text.RegularExpressions.Regex.Matches(json, @"x-rp-failover[A-Za-z-]*").Select(m => m.Value)
+        FailoverHeaderRegex().Matches(json).Select(m => m.Value)
             .Should().OnlyContain(v => v == "x-rp-failover-demo");
         json.Should().Contain("first-fast-retry").And.Contain("forward-request");
         inner.GetProperty("outputs").TryGetProperty("backendPoolEnabled", out _).Should().BeTrue();
@@ -366,4 +366,7 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
 
     [System.Text.RegularExpressions.GeneratedRegex(@"\s+")]
     private static partial System.Text.RegularExpressions.Regex MyRegex();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"x-rp-failover[A-Za-z-]*")]
+    private static partial System.Text.RegularExpressions.Regex FailoverHeaderRegex();
 }

@@ -652,7 +652,7 @@ Forget everything
 
 A deterministic, operator-only demonstration of APIM backend failover (#330). It is **disabled by default** and never alters normal traffic.
 
-**How it works.** For an authorized request only, the APIM policy sends attempt 1 to the real primary backend with an unsupported `api-version`, so the primary genuinely rejects it (HTTP 4xx). The policy then makes attempt 2 to the fixed secondary backend with the original request. Both backends are fixed in the policy; callers cannot choose or name a backend. The demo does **not** trip the circuit breaker (and claims no breaker outcome) — it exercises the pool's priority and retry path. APIM exposes no policy expression for the selected pool member, so the secondary is targeted explicitly rather than inferred from a URL.
+**How it works.** For an authorized request only, the APIM policy sends attempt 1 to the real primary backend with an unsupported `api-version`, so the primary genuinely rejects it (HTTP 4xx). The policy then makes attempt 2 to the fixed secondary backend with the original request. Both backends are fixed in the policy; callers cannot choose or name a backend. This demo **directly selects the fixed demo backends** (primary, then secondary) in the policy; it does **not** prove pool-priority selection, and it does not trip the circuit breaker (no breaker outcome is claimed). APIM exposes no policy expression for the selected pool member, so the secondary is targeted explicitly rather than inferred from a URL.
 
 **Setup** (operator, no production resources broken):
 
@@ -664,7 +664,9 @@ A deterministic, operator-only demonstration of APIM backend failover (#330). It
 
 **Evidence** (real response headers; the Control Room ribbon renders the same fields as *Route* and *Failover* for any call carrying them): `x-rp-gw-primary-status` (primary's actual status), `x-rp-gw-attempts`, `x-rp-gw-fallback` (`used`/`not-used`), `x-rp-gw-backend` (the secondary id the policy chose), and `x-rp-gw-route: failover` only when attempt 2 returned success. If anything is missing the field is omitted and shown as unknown. Note the standard API client does not send the demo header, so chat traffic in the UI is never affected.
 
-**Safeguards.** Wrong/missing key or disarmed → 403 and an audit metric; authorized runs are limited to 3 per minute per subscription (all demo-header attempts to 10). Every attempt emits the `rp.failover.demo.audit` metric (`Outcome` = authorized/denied) to Application Insights.
+**Safeguards.** Every demo-header attempt first emits the `rp.failover.demo.attempt` metric, before any rate limiter, so rate-limited calls are observable too. Attempts are limited to 10 per minute per subscription (excess → 429, attempt metric only). When evaluation continues, the `rp.failover.demo.audit` metric records `Outcome` = authorized/denied; a wrong/missing key or disarmed state returns 403 (denied). Authorized runs are limited to 3 per minute per subscription. No key material is emitted.
+
+**Live probe.** After deployment run `node scripts/probe-failover-demo.cjs` (env vars documented in the script header). It checks disarmed and unauthorized rejection, an authorized run with a real primary failure and real secondary response/evidence, spoof resistance, and disarm/reset (it always disarms at the end). `node scripts/probe-failover-demo.cjs --self-test` validates the harness offline and runs in CI.
 
 **Reset.** Disarm: `az apim nv update ... --named-value-id rp-failover-demo-armed --value false`. Redeploying also resets it to `false`. To disable entirely, redeploy with `apimFailoverDemoEnabled=false` and rotate/remove the key.
 

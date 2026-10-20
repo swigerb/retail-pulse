@@ -6,6 +6,10 @@
         <set-header name="x-rp-failover-demo" exists-action="delete" />
         <choose>
             <when condition="@(((string)context.Variables[&quot;rp-demo-key&quot;]) != &quot;&quot;)">
+                <!-- Attempt metric first, before any limiter, so rate-limited activations are observable. No key material is emitted. -->
+                <emit-metric name="rp.failover.demo.attempt" namespace="RetailPulse">
+                    <dimension name="Subscription ID" value="@(context.Subscription.Id)" />
+                </emit-metric>
                 <rate-limit-by-key calls="10" renewal-period="60" counter-key="@(&quot;rp-failover-demo-attempt-&quot; + context.Subscription.Id)" />
                 <choose>
                     <when condition="@(&quot;{{rp-failover-demo-armed}}&quot; == &quot;true&quot; &amp;&amp; &quot;{{rp-failover-demo-key}}&quot; != &quot;&quot; &amp;&amp; ((string)context.Variables[&quot;rp-demo-key&quot;]) == &quot;{{rp-failover-demo-key}}&quot;)">
