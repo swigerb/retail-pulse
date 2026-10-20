@@ -160,8 +160,26 @@ public sealed class GatewaySafetyPolicyContractTests
         role.Should().Contain("scope: aiServices");
 
         string main = File.ReadAllText(Path.Combine(Modules, "..", "main.bicep"));
-        main.Should().Contain("gatewaySafetyEnabled: apimGatewaySafetyEnabled && contentSafetyEnabled");
-        main.Should().Contain("contentSafetyAccountName: contentSafetyEnabled ? contentSafety!.outputs.name : ''");
+        main.Should().Contain("gatewaySafetyEnabled: (apimGatewaySafetyEnabled || regulatedRetailMode) && contentSafetyOn");
+        main.Should().Contain("contentSafetyAccountName: contentSafetyOn ? contentSafety!.outputs.name : ''");
+    }
+
+    [Fact]
+    public void RegulatedRetailMode_ForcesBodyFreeDiagnostics_FailClosed_MaskedIds_AndNoCache()
+    {
+        Bicep.Should().Contain("param regulatedRetailMode bool = false");
+        Bicep.Should().Contain("var effectiveSafetyMode = regulatedRetailMode ? 'regulated' : gatewaySafetyMode");
+        Bicep.Should().Contain("var bodiesDisabled = gatewaySafetyEnabled || regulatedRetailMode");
+        Bicep.Should().Contain("regulatedRetailMode ? maskedRequestIdExpr");
+        Bicep.Should().Contain("regulated-retail-non-hipaa");
+        string apim = Read("apim.bicep");
+        apim.Should().Contain("bytes: captureRequestBodies ? 8192 : 0");
+        string main = File.ReadAllText(Path.Combine(Modules, "..", "main.bicep"));
+        main.Should().Contain("var contentSafetyOn = contentSafetyEnabled || regulatedRetailMode");
+        main.Should().Contain("regulatedRetailMode: regulatedRetailMode && contentSafetyOn");
+        BasePolicy.Should().Contain("{profile-outbound}").And.NotContain("<cache-lookup").And.NotContain("<cache-store");
+        string doc = File.ReadAllText(Path.Combine(Modules, "..", "..", "docs", "ai-gateway-integration.md"));
+        doc.Should().Contain("not HIPAA certification").And.Contain("patient data").And.Contain("clinical advice");
     }
 
     [Fact]
@@ -203,14 +221,14 @@ public sealed class GatewaySafetyPolicyContractTests
     [Fact]
     public void Diagnostics_CaptureNoBodiesOrMessageContent_WhenGatewaySafetyIsEnabled()
     {
-        Bicep.Should().Contain("bytes: gatewaySafetyEnabled ? 0 : 8192");
-        Bicep.Should().Contain("logs: gatewaySafetyEnabled ? 'disabled' : 'enabled'");
+        Bicep.Should().Contain("bytes: bodiesDisabled ? 0 : 8192");
+        Bicep.Should().Contain("logs: bodiesDisabled ? 'disabled' : 'enabled'");
         Bicep.Should().Contain("messages: 'all'", "the only supported message selector is retained behind disabled LLM logging");
         Bicep.Should().NotContain("bytes: 8192\n", "every body capture size must be conditional on gateway safety");
         string apim = Read("apim.bicep");
         apim.Should().Contain("bytes: captureRequestBodies ? 8192 : 0").And.NotContain("bytes: 8192\n");
         File.ReadAllText(Path.Combine(Modules, "..", "main.bicep"))
-            .Should().Contain("captureRequestBodies: !(apimGatewaySafetyEnabled && contentSafetyEnabled)");
+            .Should().Contain("captureRequestBodies: !((apimGatewaySafetyEnabled || regulatedRetailMode) && contentSafetyOn)");
     }
 
     [Fact]

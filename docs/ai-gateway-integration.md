@@ -50,6 +50,24 @@ tool-result checks (all of which remain). Enable with `AZURE_CONTENT_SAFETY_ENAB
   category/severity, mode, latency and the existing request id/policy version are emitted through the
   `x-rp-gw-*` contract. Prompts, completions, documents, raw safety bodies, auth headers and matched text are never logged or echoed.
 
+## Regulated-retail mode (#337)
+
+An explicit, opt-in configuration posture for the **synthetic** Walgreens-style pharmacy scenario. Enable with
+`azd env set AZURE_REGULATED_RETAIL_MODE true` (Bicep `regulatedRetailMode`); the API reports it at
+`GET /api/gateway/profile` (`Gateway:RegulatedRetail:Enabled`) and the UI shows a "Regulated-retail mode" badge.
+The default stays the clearly labelled **Synthetic demo mode**.
+
+> **This is not HIPAA certification or attestation.** Never enter patient data, prescriptions, or identifiers of real
+> people, and never request or rely on clinical advice. Use synthetic data only.
+
+| Control | Regulated-retail behaviour |
+|---|---|
+| APIM diagnostics | No request/response/LLM message bodies are captured (`bytes: 0`, LLM logs disabled); token, model and outcome metadata are retained. |
+| Content Safety | Content Safety and APIM gateway safety are forced on in `regulated` mode: any dependency failure returns a generic 503 (fail closed). |
+| Semantic cache | Pharmacy, recall, identity, patient, clinical, health and sensitive classifications (and unknown/blank ones) always bypass the cache (`SensitiveCachePolicy`). No APIM cache policy is rendered. |
+| Identifiers | The client-visible `X-Correlation-ID` and `x-rp-gw-request-id` are masked (`abcd...yz`); server logs keep the full value. |
+| Indicator | `x-rp-gw-profile: regulated-retail-non-hipaa` header and the profile endpoint label. |
+
 ## Official Microsoft resources
 
 Azure AI Gateway is a capability set within Azure API Management (APIM) — not a separate Azure product or service.

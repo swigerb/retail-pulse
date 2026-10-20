@@ -65,6 +65,9 @@ param contentSafetyResourceGroupName string = resourceGroup().name
 ])
 param gatewaySafetyMode string = 'demo'
 
+@description('Regulated-retail mode (#337) for the synthetic pharmacy scenario: forces gateway safety on in fail-closed regulated mode, disables every APIM body capture, masks the client-visible request id and stamps a non-HIPAA profile header. A configuration posture, NOT a HIPAA certification.')
+param regulatedRetailMode bool = false
+
 @description('Text harm severity (FourSeverityLevels: 0, 2, 4, 6) at or above which a prompt or response is blocked.')
 @minValue(2)
 @maxValue(6)
@@ -108,13 +111,19 @@ resource contentSafetyAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' 
   scope: resourceGroup(contentSafetyResourceGroupName)
 }
 
+var effectiveSafetyMode = regulatedRetailMode ? 'regulated' : gatewaySafetyMode
+var bodiesDisabled = gatewaySafetyEnabled || regulatedRetailMode
+var maskedRequestIdExpr = '@{ var r = context.RequestId.ToString(); return r.Length <= 8 ? "********" : r.Substring(0, 4) + "..." + r.Substring(r.Length - 2); }'
+var profileOutboundFragment = regulatedRetailMode
+  ? '        <set-header name="x-rp-gw-profile" exists-action="override"><value>regulated-retail-non-hipaa</value></set-header>'
+  : ''
 var safetyEndpoint = gatewaySafetyEnabled ? contentSafetyAccount!.properties.endpoint : ''
 var safetyEndpointNormalized = endsWith(safetyEndpoint, '/') ? safetyEndpoint : '${safetyEndpoint}/'
 var safetyInboundFragment = gatewaySafetyEnabled
-  ? replace(replace(replace(loadTextContent('apim-openai-safety-inbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', gatewaySafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
+  ? replace(replace(replace(loadTextContent('apim-openai-safety-inbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', effectiveSafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
   : ''
 var safetyOutboundFragment = gatewaySafetyEnabled
-  ? replace(replace(replace(loadTextContent('apim-openai-safety-outbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', gatewaySafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
+  ? replace(replace(replace(loadTextContent('apim-openai-safety-outbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', effectiveSafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
   : ''
 
 var poolEnabled = backendPoolEnabled
@@ -351,10 +360,12 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
     format: 'rawxml'
     value: replace(
       replace(
+      replace(
         replace(
           replace(
             replace(
               replace(
+                replace(
                 replace(inferencePolicyBase, '{backend-id}', routeBackendId),
                 '{safety-inbound}',
                 safetyInboundFragment),
@@ -369,7 +380,11 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
         '{backend-policy}',
         backendPolicy),
       '{tokens-per-minute}',
-      string(tokensPerMinute))
+      string(tokensPerMinute)),
+      '{profile-outbound}',
+      profileOutboundFragment),
+      '@(context.RequestId.ToString())',
+      regulatedRetailMode ? maskedRequestIdExpr : '@(context.RequestId.ToString())')
   }
   dependsOn: poolEnabled ? [
     backend
@@ -439,7 +454,7 @@ resource apiAppInsightsDiagnostics 'Microsoft.ApiManagement/service/apis/diagnos
     frontend: {
       request: {
         body: {
-          bytes: gatewaySafetyEnabled ? 0 : 8192
+          bytes: bodiesDisabled ? 0 : 8192
         }
       }
       response: {
@@ -451,7 +466,7 @@ resource apiAppInsightsDiagnostics 'Microsoft.ApiManagement/service/apis/diagnos
     backend: {
       request: {
         body: {
-          bytes: gatewaySafetyEnabled ? 0 : 8192
+          bytes: bodiesDisabled ? 0 : 8192
         }
       }
       response: {
@@ -481,13 +496,13 @@ resource apiAzureMonitorDiagnostics 'Microsoft.ApiManagement/service/apis/diagno
     logClientIp: true
     #disable-next-line BCP037
     largeLanguageModel: {
-      logs: gatewaySafetyEnabled ? 'disabled' : 'enabled'
+      logs: bodiesDisabled ? 'disabled' : 'enabled'
       requests: {
-        maxSizeInBytes: gatewaySafetyEnabled ? 1024 : 32768
+        maxSizeInBytes: bodiesDisabled ? 1024 : 32768
         messages: 'all'
       }
       responses: {
-        maxSizeInBytes: gatewaySafetyEnabled ? 1024 : 32768
+        maxSizeInBytes: bodiesDisabled ? 1024 : 32768
         messages: 'all'
       }
     }
@@ -560,7 +575,8 @@ output subscriptionName string = subscription.name
 // an individual request. Per-request route evidence must remain unknown until
 // APIM exposes a documented pool-member signal and a live verifier proves it.
 output gatewaySafetyEnabled bool = gatewaySafetyEnabled
-output gatewaySafetyMode string = gatewaySafetyMode
+output gatewaySafetyMode string = effectiveSafetyMode
+output regulatedRetailMode bool = regulatedRetailMode
 output backendPoolEnabled bool = poolEnabled
 output failoverDemoEnabled bool = failoverDemoActive
 output routeBackendId string = routeBackendId

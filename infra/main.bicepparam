@@ -44,6 +44,7 @@ param teamsBotImageName = readEnvironmentVariable('SERVICE_TEAMSBOT_IMAGE_NAME',
 param contentSafetyEnabled = toLower(readEnvironmentVariable('AZURE_CONTENT_SAFETY_ENABLED', 'false')) == 'true'
 param apimGatewaySafetyEnabled = toLower(readEnvironmentVariable('AZURE_APIM_GATEWAY_SAFETY_ENABLED', 'false')) == 'true'
 param apimGatewaySafetyMode = readEnvironmentVariable('AZURE_APIM_GATEWAY_SAFETY_MODE', 'demo')
+param regulatedRetailMode = toLower(readEnvironmentVariable('AZURE_REGULATED_RETAIL_MODE', 'false')) == 'true'
 
 // Optional Azure AI Search knowledge provider. Disabled by
 // default so `azd up` keeps working unchanged (no Search resource, no cost).

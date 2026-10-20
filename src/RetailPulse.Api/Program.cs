@@ -1387,6 +1387,7 @@ app.MapMarginEndpoints();
 app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();
 app.MapCacheEndpoints();
+app.MapGatewayProfileEndpoints();
 
 // User-initiated execution control (issue #92): cancel endpoints for the
 // in-flight fast-path / streaming request and for the plan orchestrator.
