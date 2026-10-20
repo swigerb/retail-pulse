@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr351-final-integration-review",
+  "sessionId": "rp-pr351-final-integration-review",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T16:09:03.086Z",
+  "lastHeartbeatAt": "2026-10-20T16:09:03.086Z",
+  "updatedAt": "2026-10-20T16:09:03.086Z",
+  "terminalReason": null,
+  "executionRef": null
+}
