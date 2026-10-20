@@ -67,7 +67,9 @@ public record ChatResponse(
     /// Always null on the fast/single-shot path so no plan chrome leaks into
     /// those replies.
     /// </summary>
-    string? PlanId = null
+    string? PlanId = null,
+    /// <summary>Privacy-safe APIM gateway evidence for this turn; see GatewayEvidence.</summary>
+    Gateway.GatewayEvidence? Gateway = null
 );
 
 /// <summary>
