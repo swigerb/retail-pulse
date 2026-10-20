@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-329-failover-pool",
+  "sessionId": "rp-329-failover-pool",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T15:30:13.029Z",
+  "lastHeartbeatAt": "2026-10-20T15:30:13.029Z",
+  "updatedAt": "2026-10-20T15:30:13.029Z",
+  "terminalReason": null,
+  "executionRef": null
+}
