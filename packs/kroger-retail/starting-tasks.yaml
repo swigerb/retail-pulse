@@ -1,0 +1,51 @@
+# Curated starting tasks for the Kroger Retail demonstration pack.
+# Unofficial and synthetic; see pack.yaml for the disclosure.
+
+categories:
+  - id: freshness
+    label: "Freshness & Substitutions"
+    emoji: "🥬"
+    order: 1
+    tasks:
+      - name: "Produce days of supply"
+        prompt: "Which Fresh Produce items in the Midwest have fewer than two days of supply, and how is sell-through trending?"
+        order: 1
+        capability: { kind: prose }
+      - name: "Substitution acceptance"
+        prompt: "Show substitution acceptance rates for Curbside Pickup orders by department"
+        order: 2
+        capability: { kind: chart, chartType: bar }
+
+  - id: promotions
+    label: "Promotion Lift"
+    emoji: "🏷️"
+    order: 2
+    tasks:
+      - name: "Weekly ad lift"
+        prompt: "Compare promotion lift for Dairy & Eggs weekly ad items against baseline units"
+        order: 1
+        capability: { kind: chart, chartType: bar }
+
+  - id: availability
+    label: "Availability & Fulfillment"
+    emoji: "🛒"
+    order: 3
+    tasks:
+      - name: "On-shelf availability risks"
+        prompt: "Where is on-shelf availability below the service-level target for Meat & Seafood this week?"
+        order: 1
+        capability: { kind: plan, planPath: stockout-risk }
+      - name: "Cache-bypass decision"
+        prompt: "Should we bypass the cache for live price and inventory on Home Delivery orders for Avocados in the Southwest? Explain the staleness and gateway cost trade-off."
+        order: 2
+        capability: { kind: prose }
+
+  - id: approvals
+    label: "Approvals & Safety"
+    emoji: "✅"
+    order: 4
+    tasks:
+      - name: "Substitution policy approval"
+        prompt: "Draft a proposal to auto-approve substitutions for Berries on Curbside Pickup, and route it for human approval before applying it"
+        order: 1
+        capability: { kind: prose }
