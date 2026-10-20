@@ -10,6 +10,7 @@
         <!-- Subscription keys are consumed by APIM; they must never reach the backend. -->
         <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
         <set-header name="api-key" exists-action="delete" />
+        <set-query-parameter name="api-key" exists-action="delete" />
         <set-header name="x-rp-gw-request-id" exists-action="delete" />
         <set-header name="x-rp-gw-backend" exists-action="delete" />
         <set-header name="x-rp-gw-route" exists-action="delete" />

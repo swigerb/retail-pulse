@@ -10,7 +10,7 @@ namespace RetailPulse.Tests.Deployment;
 /// from trusted APIM subscription/product context, a disabled-by-default tiny-TPM operator demo with a generation
 /// based reset, and privacy-safe evidence that never fabricates consumed tokens on a pre-backend 429.
 /// </summary>
-public sealed class TokenBudgetPolicyContractTests
+public sealed partial class TokenBudgetPolicyContractTests
 {
     private static readonly string Modules = Path.Combine(FindRepoRoot(), "infra", "modules");
 
@@ -22,10 +22,27 @@ public sealed class TokenBudgetPolicyContractTests
 
     private static string Demo => Read("apim-openai-budget-limit-demo.xml");
 
+    private static string Models => Read("apim-openai-models-policy.xml");
+
     private static string Bicep => Read("apim-openai-api.bicep");
 
     private static string CounterKeys(string xml) =>
-        string.Concat(Regex.Matches(xml, "counter-key=\"([^\"]*)\"").Select(m => m.Groups[1].Value));
+        string.Concat(CounterKeyRegex().Matches(xml).Select(m => m.Groups[1].Value));
+
+    [GeneratedRegex("counter-key=\"([^\"]*)\"")]
+    private static partial Regex CounterKeyRegex();
+
+    [GeneratedRegex("estimate-prompt-tokens=\"true\"")]
+    private static partial Regex EstimatePromptTokensRegex();
+
+    [GeneratedRegex("rp-budget-demo-armed'[\\s\\S]*?value: '(\\w+)'")]
+    private static partial Regex DemoArmedRegex();
+
+    [GeneratedRegex("rp-budget-demo-generation'[\\s\\S]*?value: '(\\w+)'")]
+    private static partial Regex DemoGenerationRegex();
+
+    [GeneratedRegex("(primaryKey|subscriptionKey)\\s*=", RegexOptions.IgnoreCase)]
+    private static partial Regex SensitiveParameterRegex();
 
     [Fact]
     public void Fragments_AreWellFormedXml()
@@ -86,6 +103,10 @@ public sealed class TokenBudgetPolicyContractTests
     {
         Base.Should().Contain("<set-header name=\"Ocp-Apim-Subscription-Key\" exists-action=\"delete\"");
         Base.Should().Contain("<set-header name=\"api-key\" exists-action=\"delete\"");
+        Base.Should().Contain("<set-query-parameter name=\"api-key\" exists-action=\"delete\"");
+        Models.Should().Contain("<set-header name=\"Ocp-Apim-Subscription-Key\" exists-action=\"delete\"");
+        Models.Should().Contain("<set-header name=\"api-key\" exists-action=\"delete\"");
+        Models.Should().Contain("<set-query-parameter name=\"api-key\" exists-action=\"delete\"");
         Base.Should().NotContain("context.Subscription.Key").And.NotContain("PrimaryKey");
         string outbound = Base[Base.IndexOf("<outbound>", StringComparison.Ordinal)..];
         outbound.Should().NotContain("Subscription.Id", "counter identifiers are never exposed in response headers");
@@ -99,7 +120,7 @@ public sealed class TokenBudgetPolicyContractTests
         Normal.Should().NotContain("{{");
         Demo.Should().Contain("tokens-per-minute=\"{{rp-budget-demo-tpm}}\"");
         Demo.Should().Contain("estimate-prompt-tokens=\"true\"");
-        Regex.Matches(Demo, "estimate-prompt-tokens=\"true\"").Count.Should().Be(2);
+        EstimatePromptTokensRegex().Count(Demo).Should().Be(2);
         Bicep.Should().Contain("@maxValue(500)").And.Contain("param tokenBudgetDemoTokensPerMinute int = 50");
         Demo.Should().NotContain("token-quota", "the TPM demo must not be confused with the long-period quota 403");
         Normal.Should().NotContain("token-quota");
@@ -109,9 +130,9 @@ public sealed class TokenBudgetPolicyContractTests
     public void Demo_IsDisabledByDefault_ArmedByOperator_AndResetsThroughGeneration()
     {
         Bicep.Should().Contain("param tokenBudgetDemoEnabled bool = false");
-        Regex.Match(Bicep, "rp-budget-demo-armed'[\\s\\S]*?value: '(\\w+)'").Groups[1].Value.Should().Be("false");
-        Regex.Match(Bicep, "rp-budget-demo-generation'[\\s\\S]*?value: '(\\w+)'").Groups[1].Value.Should().Be("1");
-        Demo.Should().Contain("\"{{rp-budget-demo-armed}}\" == \"true\"");
+        DemoArmedRegex().Match(Bicep).Groups[1].Value.Should().Be("false");
+        DemoGenerationRegex().Match(Bicep).Groups[1].Value.Should().Be("1");
+        Demo.Should().Contain("&quot;{{rp-budget-demo-armed}}&quot; == &quot;true&quot;");
         CounterKeys(Demo).Should().Contain("{{rp-budget-demo-generation}}");
         // Demo counter differs from the normal one so arming never drains the production budget.
         CounterKeys(Demo).Should().Contain("rp-budget-demo-");
@@ -142,7 +163,7 @@ public sealed class TokenBudgetPolicyContractTests
         block.Should().NotContainEquivalentOf("primaryKey").And.NotContainEquivalentOf("secondaryKey").And.NotContain("listSecrets");
         Bicep.Split('\n').Count(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal) && l.Contains("listSecrets(", StringComparison.Ordinal))
             .Should().Be(1, "the single pre-existing secure subscription key output is the only listSecrets use");
-        Regex.Matches(File.ReadAllText(Path.Combine(FindRepoRoot(), "infra", "main.bicepparam")), "(?i)(primaryKey|subscriptionKey)\\s*=").Count.Should().Be(0);
+        SensitiveParameterRegex().Count(File.ReadAllText(Path.Combine(FindRepoRoot(), "infra", "main.bicepparam"))).Should().Be(0);
     }
 
     [Fact]

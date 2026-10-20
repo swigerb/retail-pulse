@@ -215,7 +215,10 @@ public sealed class GatewayEvidenceTests
         string dir = AppContext.BaseDirectory;
         while (dir is not null && !File.Exists(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml")))
             dir = Path.GetDirectoryName(dir)!;
-        return File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml"));
+        string modules = Path.Combine(dir, "infra", "modules");
+        string policy = File.ReadAllText(Path.Combine(modules, "apim-openai-policy.xml"));
+        string budget = File.ReadAllText(Path.Combine(modules, "apim-openai-budget-limit-normal.xml"));
+        return policy.Replace("{budget-limit}", budget, StringComparison.Ordinal);
     }
 
     private static string OutboundValue(string xml, string header)

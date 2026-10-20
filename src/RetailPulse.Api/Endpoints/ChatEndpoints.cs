@@ -975,7 +975,7 @@ public static class ChatEndpoints
                 GatewayErrorShaper.RateLimited limited = GatewayErrorShaper.ClassifyRateLimit(GatewayEvidenceCollector.Current());
                 if (limited.RetryAfterSeconds is { } retryAfter)
                 {
-                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
                 }
 
                 return Results.Json(
@@ -1166,7 +1166,7 @@ public static class ChatEndpoints
                 GatewayErrorShaper.RateLimited limited = GatewayErrorShaper.ClassifyRateLimit(GatewayEvidenceCollector.Current());
                 if (limited.RetryAfterSeconds is { } retryAfter)
                 {
-                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
                 }
 
                 try
