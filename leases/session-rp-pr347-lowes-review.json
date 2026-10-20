@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr347-lowes-review",
+  "sessionId": "rp-pr347-lowes-review",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T14:40:47.958Z",
+  "lastHeartbeatAt": "2026-10-20T14:40:47.958Z",
+  "updatedAt": "2026-10-20T14:40:47.958Z",
+  "terminalReason": null,
+  "executionRef": null
+}
