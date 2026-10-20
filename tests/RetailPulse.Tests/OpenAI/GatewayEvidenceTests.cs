@@ -182,7 +182,12 @@ public sealed class GatewayEvidenceTests
             xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"delete\" />", name);
             bool demoOnly = name is GatewayEvidenceHeaders.FailoverDemo or GatewayEvidenceHeaders.PrimaryStatus
                 or GatewayEvidenceHeaders.Attempts or GatewayEvidenceHeaders.Fallback;
-            if (name != GatewayEvidenceHeaders.Cache && !demoOnly)
+            if (name.StartsWith("x-rp-gw-safety-", StringComparison.Ordinal))
+            {
+                string safety = File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-safety-outbound.xml"));
+                safety.Should().Contain($"<set-header name=\"{name}\" exists-action=\"override\">", name);
+            }
+            else if (name != GatewayEvidenceHeaders.Cache && !demoOnly)
             {
                 xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"override\">", name);
             }
@@ -313,5 +318,81 @@ public sealed class GatewayEvidenceTests
 
         OutboundValue(xml, GatewayEvidenceHeaders.Safety).Should().Be("blocked");
         xml.Should().Contain("content_filter");
+    }
+
+    [Fact]
+    public void Parse_GatewaySafety_MapsMetadataOnly()
+    {
+        GatewayCallEvidence e = Parse(new()
+        {
+            [GatewayEvidenceHeaders.Safety] = "blocked",
+            [GatewayEvidenceHeaders.SafetyPhase] = "input",
+            [GatewayEvidenceHeaders.SafetyDecision] = "block",
+            [GatewayEvidenceHeaders.SafetyPromptAttack] = "true",
+            [GatewayEvidenceHeaders.SafetyCategory] = "Violence",
+            [GatewayEvidenceHeaders.SafetySeverity] = "4",
+            [GatewayEvidenceHeaders.SafetyMode] = "regulated",
+            [GatewayEvidenceHeaders.SafetyLatencyMs] = "120",
+            [GatewayEvidenceHeaders.SafetyOutputChecked] = "false",
+        });
+
+        e.GatewaySafety.Should().Be(new GatewaySafetyEvidence(
+            GatewaySafetyPhase.Input, GatewaySafetyDecision.Block, true, "Violence", 4, "regulated", 120, false));
+        e.Status.Should().Be(GatewayEvidenceStatus.Blocked);
+    }
+
+    [Fact]
+    public void Parse_GatewaySafety_AllowedOnSafetyError_IsNeverAPass()
+    {
+        GatewayCallEvidence e = Parse(new()
+        {
+            [GatewayEvidenceHeaders.SafetyPhase] = "output",
+            [GatewayEvidenceHeaders.SafetyDecision] = "allowed_on_safety_error",
+            [GatewayEvidenceHeaders.SafetyMode] = "demo",
+        });
+
+        e.GatewaySafety!.Decision.Should().Be(GatewaySafetyDecision.AllowedOnSafetyError);
+        e.GatewaySafety.PromptAttack.Should().BeNull();
+        e.GatewaySafety.Severity.Should().BeNull();
+        e.Safety.Should().Be(GatewayOutcome.Unknown);
+    }
+
+    [Theory]
+    [InlineData("middle", "block")]
+    [InlineData("input", "maybe")]
+    [InlineData("", "")]
+    public void Parse_GatewaySafety_RejectsUnknownPhaseOrDecision(string phase, string decision)
+    {
+        Parse(new()
+        {
+            [GatewayEvidenceHeaders.SafetyPhase] = phase,
+            [GatewayEvidenceHeaders.SafetyDecision] = decision,
+        }).GatewaySafety.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_GatewaySafety_DropsFreeTextCategoryAndOutOfRangeSeverity()
+    {
+        GatewayCallEvidence e = Parse(new()
+        {
+            [GatewayEvidenceHeaders.SafetyPhase] = "input",
+            [GatewayEvidenceHeaders.SafetyDecision] = "allow",
+            [GatewayEvidenceHeaders.SafetyCategory] = "my secret prompt text",
+            [GatewayEvidenceHeaders.SafetySeverity] = "99",
+            [GatewayEvidenceHeaders.SafetyMode] = "bogus",
+        });
+
+        e.GatewaySafety.Should().Be(new GatewaySafetyEvidence(
+            GatewaySafetyPhase.Input, GatewaySafetyDecision.Allow, null, null, null, null, null, null));
+    }
+
+    [Fact]
+    public void GatewaySafety_Serialization_ContainsNoFreeTextFields()
+    {
+        string json = JsonSerializer.Serialize(new GatewaySafetyEvidence(
+            GatewaySafetyPhase.Output, GatewaySafetyDecision.Block, false, "Hate", 6, "demo", 5, true));
+
+        json.Should().Contain("\"Decision\":\"block\"").And.Contain("\"Phase\":\"output\"");
+        json.Should().NotContainEquivalentOf("prompt\":\"").And.NotContainEquivalentOf("text");
     }
 }

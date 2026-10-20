@@ -30,6 +30,24 @@ describe('normalizeGatewayEvidence', () => {
     expect(normalizeGatewayEvidence({ status: 'observed', calls: [{ status: 'observed' }] })?.calls[0].failoverDemo).toBeNull();
   });
 
+  it('keeps only valid gateway safety metadata', () => {
+    const e = normalizeGatewayEvidence({
+      status: 'blocked',
+      calls: [{ status: 'blocked', gatewaySafety: { phase: 'input', decision: 'block', promptAttack: true, category: 'Violence', severity: 4, mode: 'regulated', latencyMs: 12, outputChecked: false, prompt: 'secret text' } }],
+    });
+    expect(e?.calls[0].gatewaySafety).toEqual({
+      phase: 'input', decision: 'block', promptAttack: true, category: 'Violence', severity: 4, mode: 'regulated', latencyMs: 12, outputChecked: false,
+    });
+    expect(JSON.stringify(e)).not.toContain('secret text');
+  });
+
+  it('never fabricates safety evidence from unknown phase/decision or free-text category', () => {
+    expect(normalizeGatewayEvidence({ status: 'observed', calls: [{ gatewaySafety: { phase: 'x', decision: 'allow' } }] })?.calls[0].gatewaySafety).toBeNull();
+    const e = normalizeGatewayEvidence({ status: 'observed', calls: [{ gatewaySafety: { phase: 'output', decision: 'allowed_on_safety_error', category: 'free text', severity: 99, mode: 'x' } }] });
+    expect(e?.calls[0].gatewaySafety).toMatchObject({ decision: 'allowed_on_safety_error', category: null, severity: null, mode: null, promptAttack: null });
+    expect(normalizeGatewayEvidence({ status: 'observed', calls: [{}] })?.calls[0].gatewaySafety).toBeNull();
+  });
+
   it('turns malformed or unsafe values into explicit unknown/null', () => {
     const e = normalizeGatewayEvidence({
       status: 'observed',
@@ -74,5 +92,35 @@ describe('normalizeGatewayEvidence', () => {
     expect(e?.droppedCalls).toBe(4);
     expect(e?.callCount).toBe(36);
     expect(e?.calls.map((c) => c.transportError)).toEqual(['timeout', null]);
+  });
+});
+
+describe('gateway safety error propagation (#331)', () => {
+  it('keeps sanitized safety evidence on a blocked 403 and drops spoofed fields', async () => {
+    const { vi } = await import('vitest');
+    const { sendMessage, GatewayChatError } = await import('../services/api');
+    const body = {
+      error: 'The request was blocked by gateway content safety.',
+      code: 'gateway_safety_blocked',
+      gateway: {
+        status: 'blocked', callCount: 1, calls: [{
+          route: 'unknown', quota: 'unknown', cache: 'unknown', safety: 'blocked', status: 'blocked', statusCode: 403,
+          gatewaySafety: { phase: 'input', decision: 'block', promptAttack: true, category: 'Violence<script>', severity: 99, mode: 'evil', prompt: 'SECRET' },
+        }],
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 403, headers: { 'content-type': 'application/json' } })));
+    const err = await sendMessage({ message: 'x', sessionId: 's' } as never).catch(e => e);
+    vi.unstubAllGlobals();
+    expect(err).toBeInstanceOf(GatewayChatError);
+    expect(err.code).toBe('gateway_safety_blocked');
+    const gs = err.gateway.calls[0].gatewaySafety;
+    expect(gs).toMatchObject({ phase: 'input', decision: 'block', category: null, severity: null, mode: null });
+    expect(JSON.stringify(err.gateway)).not.toContain('SECRET');
+  });
+
+  it('rejects unknown decisions instead of inventing safety evidence', () => {
+    const g = normalizeGatewayEvidence({ status: 'observed', calls: [{ gatewaySafety: { phase: 'input', decision: 'mystery' } }] });
+    expect(g?.calls[0]?.gatewaySafety).toBeNull();
   });
 });

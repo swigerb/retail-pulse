@@ -55,6 +55,43 @@ public enum GatewayEvidenceStatus
 /// </summary>
 public sealed record GatewayFailoverDemoEvidence(int? PrimaryStatusCode, int? Attempts, bool? FallbackUsed);
 
+[JsonConverter(typeof(JsonStringEnumConverter<GatewaySafetyPhase>))]
+public enum GatewaySafetyPhase
+{
+    [JsonStringEnumMemberName("unknown")] Unknown = 0,
+    [JsonStringEnumMemberName("input")] Input,
+    [JsonStringEnumMemberName("output")] Output,
+}
+
+/// <summary>
+/// Decision of the APIM-level content safety layer (#331). <c>AllowedOnSafetyError</c> means
+/// the Content Safety dependency failed in demo mode and the call continued; it is never a pass.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<GatewaySafetyDecision>))]
+public enum GatewaySafetyDecision
+{
+    [JsonStringEnumMemberName("unknown")] Unknown = 0,
+    [JsonStringEnumMemberName("allow")] Allow,
+    [JsonStringEnumMemberName("block")] Block,
+    [JsonStringEnumMemberName("allowed_on_safety_error")] AllowedOnSafetyError,
+}
+
+/// <summary>
+/// Privacy-safe APIM content safety evidence (#331): phase, decision, prompt-attack flag, the
+/// highest harm category/severity actually reported, policy mode and latency. It never carries
+/// prompts, completions, documents, raw safety bodies or matched text. A null
+/// <see cref="PromptAttack"/>/<see cref="Severity"/>/<see cref="OutputChecked"/> means unknown.
+/// </summary>
+public sealed record GatewaySafetyEvidence(
+    GatewaySafetyPhase Phase,
+    GatewaySafetyDecision Decision,
+    bool? PromptAttack,
+    string? Category,
+    int? Severity,
+    string? Mode,
+    long? LatencyMs,
+    bool? OutputChecked);
+
 /// <summary>
 /// Privacy-safe evidence of the decisions APIM made for one gateway call. Carries no
 /// subscription identifiers, secrets, prompts, completions, backend credentials, or
@@ -75,7 +112,8 @@ public sealed record GatewayCallEvidence(
     int? StatusCode = null,
     GatewayEvidenceStatus Status = GatewayEvidenceStatus.Observed,
     string? TransportError = null,
-    GatewayFailoverDemoEvidence? FailoverDemo = null)
+    GatewayFailoverDemoEvidence? FailoverDemo = null,
+    GatewaySafetyEvidence? GatewaySafety = null)
 {
     /// <summary>True when the response carried no gateway evidence at all.</summary>
     [JsonIgnore]
@@ -83,7 +121,8 @@ public sealed record GatewayCallEvidence(
         GatewayRequestId is null && BackendAlias is null && Route == GatewayRouteState.Unknown
         && TokensConsumed is null && TokensRemaining is null && Quota == GatewayOutcome.Unknown
         && Cache == GatewayOutcome.Unknown && Safety == GatewayOutcome.Unknown
-        && PolicyVersion is null && GatewayLatencyMs is null && BackendLatencyMs is null;
+        && PolicyVersion is null && GatewayLatencyMs is null && BackendLatencyMs is null
+        && GatewaySafety is null;
 
     public static GatewayCallEvidence Empty(GatewayEvidenceStatus status, int? statusCode = null, string? transportError = null) =>
         new(null, null, GatewayRouteState.Unknown, null, null, GatewayOutcome.Unknown, GatewayOutcome.Unknown,

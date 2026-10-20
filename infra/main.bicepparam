@@ -35,6 +35,8 @@ param teamsBotImageName = readEnvironmentVariable('SERVICE_TEAMSBOT_IMAGE_NAME',
 // default so `azd up` keeps working unchanged. Enable per environment with
 // `azd env set AZURE_CONTENT_SAFETY_ENABLED true`.
 param contentSafetyEnabled = toLower(readEnvironmentVariable('AZURE_CONTENT_SAFETY_ENABLED', 'false')) == 'true'
+param apimGatewaySafetyEnabled = toLower(readEnvironmentVariable('AZURE_APIM_GATEWAY_SAFETY_ENABLED', 'false')) == 'true'
+param apimGatewaySafetyMode = readEnvironmentVariable('AZURE_APIM_GATEWAY_SAFETY_MODE', 'demo')
 
 // Optional Azure AI Search knowledge provider. Disabled by
 // default so `azd up` keeps working unchanged (no Search resource, no cost).

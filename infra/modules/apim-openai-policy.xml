@@ -16,6 +16,14 @@
         <set-header name="x-rp-gw-cache" exists-action="delete" />
         <set-header name="x-rp-gw-safety" exists-action="delete" />
         <set-header name="x-rp-gw-policy-version" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-phase" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-decision" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-prompt-attack" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-category" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-severity" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-mode" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-latency-ms" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-output-checked" exists-action="delete" />
         <set-header name="x-rp-gw-latency-ms" exists-action="delete" />
         <set-header name="x-rp-gw-backend-latency-ms" exists-action="delete" />
         <set-header name="x-rp-gw-failover-demo" exists-action="delete" />
@@ -23,6 +31,7 @@
         <set-header name="x-rp-gw-attempts" exists-action="delete" />
         <set-header name="x-rp-gw-fallback" exists-action="delete" />
 {demo-inbound}
+{safety-inbound}
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
         <azure-openai-token-limit counter-key="@(context.Subscription.Id)"
@@ -42,6 +51,7 @@
     </backend>
     <outbound>
         <base />
+{safety-outbound}
         <!-- Every value below comes from a real policy signal. When no signal exists the header is
              omitted so the API reports the field as unknown; nothing is defaulted to success. -->
         <set-header name="x-rp-gw-request-id" exists-action="override">
@@ -91,7 +101,7 @@
             </when>
         </choose>
         <set-header name="x-rp-gw-policy-version" exists-action="override">
-            <value>2026-10-rp327-v2</value>
+            <value>2026-10-rp331-v1</value>
         </set-header>
         <set-header name="x-rp-gw-latency-ms" exists-action="override">
             <value>@(((int)context.Elapsed.TotalMilliseconds).ToString())</value>
@@ -115,7 +125,7 @@
             </when>
         </choose>
         <set-header name="x-rp-gw-policy-version" exists-action="override">
-            <value>2026-10-rp327-v2</value>
+            <value>2026-10-rp331-v1</value>
         </set-header>
     </on-error>
 </policies>

@@ -151,3 +151,66 @@ describe('GatewayControlRoom', () => {
     expect(item('failover')).toHaveAttribute('data-item-state', 'unknown');
   });
 });
+
+describe('GatewayControlRoom gateway safety (#331)', () => {
+  const safety = (over: Record<string, unknown> = {}) => ({
+    phase: 'input', decision: 'allow', promptAttack: false, category: null, severity: null,
+    mode: 'demo', latencyMs: 12, outputChecked: true, ...over,
+  }) as GatewayCallEvidence['gatewaySafety'];
+  const withSafety = (s: GatewayCallEvidence['gatewaySafety'], over: Partial<GatewayCallEvidence> = {}) =>
+    evidence({}, [call({ gatewaySafety: s, ...over })]);
+
+  it('renders a clear blocked state with sanitized detail and an accessible name', () => {
+    renderRibbon(withSafety(
+      safety({ decision: 'block', promptAttack: true, category: 'Violence', severity: 6, outputChecked: false }),
+      { status: 'blocked', safety: 'blocked', statusCode: 403 },
+    ));
+    expect(screen.getByRole('group', { name: 'Gateway Control Room: Blocked' })).toBeInTheDocument();
+    expect(item('gatewaySafety')).toHaveAttribute('data-item-state', 'blocked');
+    expect(item('gatewaySafety')).toHaveTextContent('Blocked (input, prompt attack, Violence severity 6)');
+    expect(screen.getByLabelText(/^Gateway safety: Blocked/)).toBeInTheDocument();
+  });
+
+  it('shows allowed_on_safety_error as a warning, never success', () => {
+    renderRibbon(withSafety(safety({ decision: 'allowed_on_safety_error', outputChecked: false })));
+    expect(item('gatewaySafety')).toHaveAttribute('data-item-state', 'warning');
+    expect(item('gatewaySafety')).toHaveTextContent('Allowed on safety error — not verified');
+    expect(screen.getByTestId('gateway-control-room')).toHaveAttribute('data-gateway-state', 'warning');
+    expect(screen.getByTestId('gateway-status')).not.toHaveTextContent('Observed');
+  });
+
+  it('warns when streaming or input-only evidence left output unchecked', () => {
+    renderRibbon(withSafety(safety({ outputChecked: false })));
+    expect(item('gatewaySafety')).toHaveAttribute('data-item-state', 'warning');
+    expect(item('gatewaySafety')).toHaveTextContent('Allowed — output not checked');
+  });
+
+  it('treats a valid allow with both phases checked as neutral', () => {
+    renderRibbon(withSafety(safety()));
+    expect(item('gatewaySafety')).toHaveAttribute('data-item-state', 'neutral');
+    expect(item('gatewaySafety')).toHaveTextContent('Allowed — input and output checked');
+    expect(screen.getByTestId('gateway-control-room')).toHaveAttribute('data-gateway-state', 'observed');
+  });
+
+  it('never presents unknown or partial evidence as success', () => {
+    renderRibbon(withSafety(safety({ outputChecked: null })));
+    expect(item('gatewaySafety')).toHaveAttribute('data-item-state', 'warning');
+    expect(item('gatewaySafety')).toHaveTextContent('output check unknown');
+
+    const model = buildGatewayRibbon(evidence({}, [call({ gatewaySafety: safety() }), call()]));
+    const gs = model.items.find(i => i.key === 'gatewaySafety')!;
+    expect(gs.state).toBe('warning');
+    expect(gs.value).toContain('partial');
+
+    const none = buildGatewayRibbon(evidence()).items.find(i => i.key === 'gatewaySafety')!;
+    expect(none.state).toBe('unknown');
+    expect(none.value).toBe('Not reported');
+  });
+
+  it('keeps the legacy safety item distinct from gateway safety', () => {
+    renderRibbon(withSafety(safety()));
+    expect(item('safety')).toHaveTextContent('Passed');
+    expect(item('gatewaySafety')).not.toBe(item('safety'));
+    expect(screen.getByText('Gateway safety:')).toBeInTheDocument();
+  });
+});

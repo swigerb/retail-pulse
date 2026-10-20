@@ -4,6 +4,9 @@ import type {
   GatewayEvidence,
   GatewayOutcome,
   GatewayRouteState,
+  GatewaySafetyDecision,
+  GatewaySafetyEvidence,
+  GatewaySafetyPhase,
 } from '../types';
 
 const OUTCOMES: readonly GatewayOutcome[] = [
@@ -44,6 +47,28 @@ function normalizeDemo(v: unknown): GatewayCallEvidence['failoverDemo'] {
   };
 }
 
+const HARM_CATEGORIES = ['Hate', 'SelfHarm', 'Sexual', 'Violence'];
+const SAFETY_PHASES: readonly GatewaySafetyPhase[] = ['input', 'output'];
+const SAFETY_DECISIONS: readonly GatewaySafetyDecision[] = ['allow', 'block', 'allowed_on_safety_error'];
+
+function normalizeSafety(v: unknown): GatewaySafetyEvidence | null {
+  if (!v || typeof v !== 'object') return null;
+  const d = v as Record<string, unknown>;
+  if (!SAFETY_PHASES.includes(d.phase as GatewaySafetyPhase)) return null;
+  if (!SAFETY_DECISIONS.includes(d.decision as GatewaySafetyDecision)) return null;
+  const sev = count(d.severity);
+  return {
+    phase: d.phase as GatewaySafetyPhase,
+    decision: d.decision as GatewaySafetyDecision,
+    promptAttack: typeof d.promptAttack === 'boolean' ? d.promptAttack : null,
+    category: typeof d.category === 'string' && HARM_CATEGORIES.includes(d.category) ? d.category : null,
+    severity: sev !== null && sev <= 7 ? sev : null,
+    mode: d.mode === 'demo' || d.mode === 'regulated' ? d.mode : null,
+    latencyMs: count(d.latencyMs),
+    outputChecked: typeof d.outputChecked === 'boolean' ? d.outputChecked : null,
+  };
+}
+
 function normalizeCall(raw: unknown): GatewayCallEvidence | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
@@ -69,6 +94,7 @@ function normalizeCall(raw: unknown): GatewayCallEvidence | null {
         ? r.transportError
         : null,
     failoverDemo: normalizeDemo(r.failoverDemo),
+    gatewaySafety: normalizeSafety(r.gatewaySafety),
   };
 }
 

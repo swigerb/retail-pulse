@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Offline executable self-test for the #331 APIM gateway safety policy. It compiles the REAL
+    policy expressions from infra/modules/apim-openai-safety-*.xml with Roslyn and runs them through a
+    small policy interpreter against fake Content Safety / model backends. No Azure access, no network.
+    Standalone on purpose: it is not part of RetailPulse.slnx and does not touch the repo's central
+    package versions.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <AnalysisLevel>none</AnalysisLevel>
+    <NoWarn>$(NoWarn);CA1050;CA1051;CA1305;CA2211</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.12.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>

@@ -988,12 +988,10 @@ public static class ChatEndpoints
                 int statusCode = ex.Status is >= 400 and < 600
                     ? ex.Status
                     : StatusCodes.Status503ServiceUnavailable;
+                GatewayErrorShaper.Shaped shaped = GatewayErrorShaper.Classify(
+                    statusCode, "ai_service_error", "The AI service encountered an error. Please try again shortly.", GatewayEvidenceCollector.Current());
                 return Results.Json(
-                    new
-                    {
-                        error = "The AI service encountered an error. Please try again shortly.",
-                        code = "ai_service_error"
-                    },
+                    new { error = shaped.Message, code = shaped.Code, gateway = shaped.Gateway },
                     statusCode: statusCode);
             }
             catch (Exception ex)
@@ -1181,8 +1179,10 @@ public static class ChatEndpoints
                 int statusCode = ex.Status is >= 400 and < 600
                     ? ex.Status
                     : StatusCodes.Status503ServiceUnavailable;
+                GatewayErrorShaper.Shaped shaped = GatewayErrorShaper.Classify(
+                    statusCode, "ai_service_error", "The AI service encountered an error. Please try again shortly.", GatewayEvidenceCollector.Current());
                 return Results.Json(
-                    new { error = "The AI service encountered an error. Please try again shortly.", code = "ai_service_error" },
+                    new { error = shaped.Message, code = shaped.Code, gateway = shaped.Gateway },
                     statusCode: statusCode);
             }
             catch (Exception ex)

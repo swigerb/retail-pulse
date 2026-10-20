@@ -30,6 +30,17 @@ public static class GatewayEvidenceHeaders
     public const string Attempts = "x-rp-gw-attempts";
     public const string Fallback = "x-rp-gw-fallback";
 
+    public const string SafetyPhase = "x-rp-gw-safety-phase";
+    public const string SafetyDecision = "x-rp-gw-safety-decision";
+    public const string SafetyPromptAttack = "x-rp-gw-safety-prompt-attack";
+    public const string SafetyCategory = "x-rp-gw-safety-category";
+    public const string SafetySeverity = "x-rp-gw-safety-severity";
+    public const string SafetyMode = "x-rp-gw-safety-mode";
+    public const string SafetyLatencyMs = "x-rp-gw-safety-latency-ms";
+    public const string SafetyOutputChecked = "x-rp-gw-safety-output-checked";
+
+    private static readonly string[] _harmCategories = ["Hate", "SelfHarm", "Sexual", "Violence"];
+
     private const int _maxTokenLength = 64;
     private const long _maxCount = 1_000_000_000_000;
 
@@ -37,6 +48,8 @@ public static class GatewayEvidenceHeaders
     [
         RequestId, Backend, Route, TokensConsumed, TokensRemaining, Quota, Cache,
         Safety, PolicyVersion, LatencyMs, BackendLatencyMs, FailoverDemo, PrimaryStatus, Attempts, Fallback,
+        SafetyPhase, SafetyDecision, SafetyPromptAttack, SafetyCategory, SafetySeverity, SafetyMode,
+        SafetyLatencyMs, SafetyOutputChecked,
     ];
 
     public static GatewayCallEvidence Parse(PipelineResponse response)
@@ -61,13 +74,53 @@ public static class GatewayEvidenceHeaders
             ParseCount(getHeader(LatencyMs)),
             ParseCount(getHeader(BackendLatencyMs)),
             statusCode,
-            FailoverDemo: ParseFailoverDemo(getHeader));
+            FailoverDemo: ParseFailoverDemo(getHeader),
+            GatewaySafety: ParseSafety(getHeader));
 
         GatewayEvidenceStatus status = evidence.IsEmpty
             ? GatewayEvidenceStatus.Unavailable
             : evidence.Safety == GatewayOutcome.Blocked ? GatewayEvidenceStatus.Blocked : GatewayEvidenceStatus.Observed;
         return evidence with { Status = status };
     }
+
+    // Safety detail is only trusted when the gateway reported a known phase and decision; the
+    // category is allow-listed and severity bounded, so no free text can reach the evidence.
+    internal static GatewaySafetyEvidence? ParseSafety(Func<string, string?> getHeader)
+    {
+        GatewaySafetyPhase phase = getHeader(SafetyPhase)?.Trim().ToLowerInvariant() switch
+        {
+            "input" => GatewaySafetyPhase.Input,
+            "output" => GatewaySafetyPhase.Output,
+            _ => GatewaySafetyPhase.Unknown,
+        };
+        GatewaySafetyDecision decision = getHeader(SafetyDecision)?.Trim().ToLowerInvariant() switch
+        {
+            "allow" => GatewaySafetyDecision.Allow,
+            "block" => GatewaySafetyDecision.Block,
+            "allowed_on_safety_error" => GatewaySafetyDecision.AllowedOnSafetyError,
+            _ => GatewaySafetyDecision.Unknown,
+        };
+        if (phase == GatewaySafetyPhase.Unknown || decision == GatewaySafetyDecision.Unknown)
+        {
+            return null;
+        }
+
+        string? category = _harmCategories.FirstOrDefault(c => string.Equals(c, getHeader(SafetyCategory)?.Trim(), StringComparison.Ordinal));
+        long? severity = ParseCount(getHeader(SafetySeverity));
+        string? mode = getHeader(SafetyMode)?.Trim().ToLowerInvariant();
+        return new GatewaySafetyEvidence(
+            phase,
+            decision,
+            ParseBool(getHeader(SafetyPromptAttack)),
+            category,
+            severity is <= 7 ? (int?)severity : null,
+            mode is "demo" or "regulated" ? mode : null,
+            ParseCount(getHeader(SafetyLatencyMs)),
+            ParseBool(getHeader(SafetyOutputChecked)));
+    }
+
+    internal static bool? ParseBool(string? value) =>
+        value?.Trim().ToLowerInvariant() switch { "true" => true, "false" => false, _ => null };
 
     // Demo fields are only trusted behind the explicit "active" marker; without it they are ignored.
     internal static GatewayFailoverDemoEvidence? ParseFailoverDemo(Func<string, string?> getHeader)

@@ -749,9 +749,13 @@ export function ChatPanel({
           setTimeoutInfo({ prompt: trimmed, timeoutMs: err.timeoutMs });
           return;
         }
+        const gateway =
+          err instanceof Error && err.name === 'GatewayChatError' && 'gateway' in err
+            ? ((err as Error & { gateway?: GatewayEvidence | null }).gateway ?? null)
+            : null;
         setMessages(prev => [
           ...prev,
-          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}` },
+          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`, ...(gateway ? { gateway } : {}) },
         ]);
       } finally {
         if (isMountedRef.current && abortControllerRef.current === controller) {

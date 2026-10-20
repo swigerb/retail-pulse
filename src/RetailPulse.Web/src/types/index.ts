@@ -1167,6 +1167,21 @@ export interface GatewayFailoverDemoEvidence {
   fallbackUsed?: boolean | null;
 }
 
+export type GatewaySafetyPhase = 'unknown' | 'input' | 'output';
+export type GatewaySafetyDecision = 'unknown' | 'allow' | 'block' | 'allowed_on_safety_error';
+
+/** APIM content safety evidence (#331). Metadata only; never prompt, completion, or matched text. */
+export interface GatewaySafetyEvidence {
+  phase: GatewaySafetyPhase;
+  decision: GatewaySafetyDecision;
+  promptAttack?: boolean | null;
+  category?: string | null;
+  severity?: number | null;
+  mode?: string | null;
+  latencyMs?: number | null;
+  outputChecked?: boolean | null;
+}
+
 export interface GatewayCallEvidence {
   gatewayRequestId?: string | null;
   backendAlias?: string | null;
@@ -1185,6 +1200,8 @@ export interface GatewayCallEvidence {
   transportError?: string | null;
   /** Present only for an authorized failover demonstration. */
   failoverDemo?: GatewayFailoverDemoEvidence | null;
+  /** APIM-level Prompt Shields / text harm decision, when the gateway reported one. */
+  gatewaySafety?: GatewaySafetyEvidence | null;
 }
 
 export interface GatewayEvidence {

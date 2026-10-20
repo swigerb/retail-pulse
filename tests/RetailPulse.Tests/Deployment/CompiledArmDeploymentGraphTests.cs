@@ -165,6 +165,38 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
     }
 
     [Fact]
+    public void CompiledArmTemplate_WiresGatewaySafetyRoleAndPolicyFragmentsBehindDisabledDefault()
+    {
+        JsonElement? compiled = TryCompileMainBicep();
+        if (compiled is null)
+        {
+            Environment.GetEnvironmentVariable("CI").Should().NotBe("true",
+                "CI must compile infra/main.bicep; a missing or unusable az/Bicep tool cannot silently skip the deployment graph proof");
+            return;
+        }
+
+        JsonElement api = compiled.Value.GetProperty("resources").GetProperty("apimOpenAiApi").GetProperty("properties").GetProperty("template");
+        JsonElement resources = api.GetProperty("resources");
+
+        JsonElement role = resources.GetProperty("contentSafetyRoleAssignment");
+        role.GetProperty("condition").GetString().Should().Contain("gatewaySafetyEnabled");
+        role.GetProperty("type").GetString().Should().Be("Microsoft.Resources/deployments");
+        role.GetRawText().Should().Contain("contentSafetyAccountName").And.Contain("apimPrincipalId");
+        api.GetProperty("variables").GetProperty("cognitiveServicesUserRoleId").GetString()
+            .Should().Be("a97b65f3-24c7-4388-baec-2e87135dc908");
+
+        resources.GetProperty("contentSafetyAccount").GetProperty("condition").GetString().Should().Contain("gatewaySafetyEnabled");
+        api.GetProperty("parameters").GetProperty("gatewaySafetyEnabled").GetProperty("defaultValue").GetBoolean().Should().BeFalse();
+
+        string policy = resources.GetProperty("apiPolicy").GetRawText();
+        policy.Should().Contain("{safety-inbound}").And.Contain("{safety-outbound}").And.Contain("{severity-threshold}")
+            .And.Contain("parameters('gatewaySafetyEnabled')");
+        policy.IndexOf("contentSafetyRoleAssignment", StringComparison.Ordinal).Should().BeGreaterThan(-1,
+            "the policy deployment must wait for the Content Safety role assignment");
+        api.GetRawText().Should().Contain("text:shieldPrompt?api-version=2024-09-01");
+    }
+
+    [Fact]
     public void CompiledArmTemplate_DeclaresConditionalTwoBackendPoolWithManagedIdentityAndCircuitBreakers()
     {
         JsonElement? compiled = TryCompileMainBicep();
