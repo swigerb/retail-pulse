@@ -65,7 +65,7 @@ public sealed class KrogerRetailPackContractTests
     [Fact]
     public void EveryRouterIntent_IsMappedToASpecialist()
     {
-        HashSet<string> mapped = Load().Agents.Agents.Values
+        var mapped = Load().Agents.Agents.Values
             .SelectMany(a => a.Intents)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
