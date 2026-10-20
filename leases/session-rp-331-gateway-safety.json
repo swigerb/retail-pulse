@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-331-gateway-safety",
+  "sessionId": "rp-331-gateway-safety",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T18:23:07.860Z",
+  "lastHeartbeatAt": "2026-10-20T18:23:07.860Z",
+  "updatedAt": "2026-10-20T18:23:07.860Z",
+  "terminalReason": null,
+  "executionRef": null
+}
