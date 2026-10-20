@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using RetailPulse.Contracts.Guardrails;
 
 namespace RetailPulse.Api.OpenAI.Gateway;
 
@@ -21,13 +22,18 @@ public sealed record RegulatedRetailProfile(
     public const string RegulatedLabel = "Regulated-retail mode (synthetic data only, not HIPAA certified)";
     public const string DisclaimerText = "Configuration posture for synthetic demonstrations. Not HIPAA certified; do not enter patient data or request clinical advice.";
 
-    public static RegulatedRetailProfile Resolve(IConfiguration configuration)
+    public static RegulatedRetailProfile Resolve(IConfiguration configuration) =>
+        Resolve(configuration, new ContentSafetyConfig());
+
+    /// <summary>SafetyFailClosed is derived from the effective Content Safety fail policy.</summary>
+    public static RegulatedRetailProfile Resolve(IConfiguration configuration, ContentSafetyConfig contentSafety)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         bool enabled = bool.TryParse(configuration[ConfigKey]?.Trim(), out bool v) && v;
+        bool failClosed = contentSafety.OnUnavailable == ContentSafetyFailPolicy.FailClosed;
         return enabled
-            ? new RegulatedRetailProfile(true, "regulated-retail", RegulatedLabel, DisclaimerText, false, true, SensitiveCachePolicy.BypassClasses)
-            : new RegulatedRetailProfile(false, "synthetic-demo", DemoLabel, DisclaimerText, true, false, []);
+            ? new RegulatedRetailProfile(true, "regulated-retail", RegulatedLabel, DisclaimerText, false, failClosed, SensitiveCachePolicy.BypassClasses)
+            : new RegulatedRetailProfile(false, "synthetic-demo", DemoLabel, DisclaimerText, true, failClosed, []);
     }
 }
 

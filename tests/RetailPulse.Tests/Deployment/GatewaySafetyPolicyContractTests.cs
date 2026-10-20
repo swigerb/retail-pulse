@@ -11,7 +11,7 @@ namespace RetailPulse.Tests.Deployment;
 /// an APIM runtime (benign, attack, severity boundary, outbound block, dependency errors, disabled
 /// mode) is proven by asserting the exact decision code paths and their ordering in the policy.
 /// </summary>
-public sealed class GatewaySafetyPolicyContractTests
+public sealed partial class GatewaySafetyPolicyContractTests
 {
     private static readonly string Modules = Path.Combine(FindRepoRoot(), "infra", "modules");
 
@@ -164,10 +164,13 @@ public sealed class GatewaySafetyPolicyContractTests
         main.Should().Contain("contentSafetyAccountName: contentSafetyOn ? contentSafety!.outputs.name : ''");
     }
 
+    [GeneratedRegex(@"var maskedRequestIdExpr = '(?<expr>[^\n]*)'\r?\n")]
+    private static partial Regex MaskedRequestIdRegex();
+
     [Fact]
     public void RegulatedRetailMode_MaskedRequestIdExpression_RendersXmlSafePolicy()
     {
-        Match m = Regex.Match(Bicep, @"var maskedRequestIdExpr = '(?<expr>[^\n]*)'\r?\n");
+        Match m = MaskedRequestIdRegex().Match(Bicep);
         m.Success.Should().BeTrue();
         string expr = m.Groups["expr"].Value;
         expr.Should().NotContain("<", "raw < is invalid XML inside the rendered policy");

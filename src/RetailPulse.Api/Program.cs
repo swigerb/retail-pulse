@@ -270,6 +270,7 @@ foreach ((string sectionKey, AgentDefinition def) in promptConfig.Agents)
 // of these registrations depend on prompt/tool composition.
 var guardrailsConfig = new GuardrailsConfig();
 builder.Configuration.GetSection("Guardrails").Bind(guardrailsConfig);
+guardrailsConfig.ContentSafety.ForceFailClosed = RegulatedRetailProfile.Resolve(builder.Configuration).Enabled;
 builder.Services.AddSingleton(guardrailsConfig);
 
 var suspiciousLog = new InMemorySuspiciousRequestLog();

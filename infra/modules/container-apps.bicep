@@ -417,6 +417,10 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               value: string(regulatedRetailMode)
             }
             {
+              name: 'Guardrails__ContentSafety__OnUnavailable'
+              value: regulatedRetailMode ? 'FailClosed' : 'FailOpen'
+            }
+            {
               name: 'Guardrails__ContentSafety__Enabled'
               value: empty(contentSafetyEndpoint) ? 'false' : 'true'
             }
