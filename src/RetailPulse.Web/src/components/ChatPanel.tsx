@@ -25,6 +25,7 @@ import { BrandLogo } from './BrandLogo';
 import { AgentRoutingIndicator } from './AgentRoutingIndicator';
 import { MemoryIndicator } from './MemoryIndicator';
 import { GatewayControlRoom } from './GatewayControlRoom';
+import { RegulatedModeBadge } from './RegulatedModeBadge';
 import { ApprovalCard } from './ApprovalCard';
 import { StreamingMessage, CacheIndicator } from './streaming';
 import { ProgressIndicator } from './ProgressIndicator';
@@ -852,6 +853,7 @@ export function ChatPanel({
 
   return (
     <div className={styles.panel}>
+      <RegulatedModeBadge />
       <div className={styles.messages} data-testid="chat-message-list">
         {messages.length === 0 && (
           <div className={styles.welcome}>

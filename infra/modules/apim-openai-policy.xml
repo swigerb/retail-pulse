@@ -66,6 +66,7 @@
     <outbound>
         <base />
 {safety-outbound}
+{profile-outbound}
         <!-- Every value below comes from a real policy signal. When no signal exists the header is
              omitted so the API reports the field as unknown; nothing is defaulted to success. -->
         <set-header name="x-rp-gw-request-id" exists-action="override">

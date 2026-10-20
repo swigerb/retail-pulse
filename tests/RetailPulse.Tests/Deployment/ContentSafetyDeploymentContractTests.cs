@@ -43,7 +43,7 @@ public class ContentSafetyDeploymentContractTests
 
         main.Should().Contain("param contentSafetyEnabled bool = false",
             "Content Safety must ship disabled-by-default so a clean azd up is unchanged");
-        main.Should().Contain("if (contentSafetyEnabled)",
+        main.Should().Contain("if (contentSafetyOn)",
             "the Content Safety module must be conditional on the enabled flag");
         main.Should().Contain("AZURE_CONTENT_SAFETY_ENDPOINT",
             "provisioning must publish the endpoint output so the API can consume it");

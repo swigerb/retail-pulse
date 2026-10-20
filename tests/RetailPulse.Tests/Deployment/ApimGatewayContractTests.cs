@@ -218,8 +218,8 @@ public sealed partial class ApimGatewayContractTests
             "apim-openai-api.bicep must declare an API-level 'azuremonitor' diagnostic");
         ApimOpenAiApiBicep.Should().Contain("largeLanguageModel:",
             "the API-level azuremonitor diagnostic must declare the largeLanguageModel section for LLM request/response capture");
-        ApimOpenAiApiBicep.Should().Contain("logs: gatewaySafetyEnabled ? 'disabled' : 'enabled'",
-            "LLM message capture must be disabled when gateway safety requires metadata-only diagnostics");
+        ApimOpenAiApiBicep.Should().Contain("logs: bodiesDisabled ? 'disabled' : 'enabled'",
+            "LLM message capture must be disabled when gateway safety or regulated mode requires metadata-only diagnostics");
     }
 
     [Fact]

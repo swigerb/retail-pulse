@@ -54,6 +54,9 @@ param mcpApiKey string = '${uniqueString(resourceGroup().id, 'mcp-api-key')}${un
 @description('Azure AI Content Safety endpoint. Empty disables the optional second guardrail layer, leaving the regex-only baseline in place.')
 param contentSafetyEndpoint string = ''
 
+@description('Regulated-retail mode (#337). Surfaced to the API as Gateway__RegulatedRetail__Enabled so its profile endpoint reflects the deployed posture.')
+param regulatedRetailMode bool = false
+
 @description('Entra application (client) ID of the Azure Bot Service registration. Empty leaves the Teams bot unconfigured, which is the correct state for an environment that has not registered a bot.')
 param botAppId string = ''
 
@@ -409,6 +412,14 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             // key here by design, and the endpoint is injected only when the
             // account was provisioned (contentSafetyEnabled). An empty endpoint
             // leaves the layer off and the regex-only baseline in place.
+            {
+              name: 'Gateway__RegulatedRetail__Enabled'
+              value: string(regulatedRetailMode)
+            }
+            {
+              name: 'Guardrails__ContentSafety__OnUnavailable'
+              value: regulatedRetailMode ? 'FailClosed' : 'FailOpen'
+            }
             {
               name: 'Guardrails__ContentSafety__Enabled'
               value: empty(contentSafetyEndpoint) ? 'false' : 'true'

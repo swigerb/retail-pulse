@@ -26,7 +26,17 @@ public class ContentSafetyConfig
     public string? Endpoint { get; set; }
 
     /// <summary>Fail policy when the remote layer is unavailable (breaker open, timeout, 5xx).</summary>
-    public ContentSafetyFailPolicy OnUnavailable { get; set; } = ContentSafetyFailPolicy.FailOpen;
+    public ContentSafetyFailPolicy OnUnavailable
+    {
+        get => ForceFailClosed ? ContentSafetyFailPolicy.FailClosed : field;
+        set;
+    } = ContentSafetyFailPolicy.FailOpen;
+
+    /// <summary>
+    /// Set by regulated-retail mode. Pins <see cref="OnUnavailable"/> to
+    /// <see cref="ContentSafetyFailPolicy.FailClosed"/> so runtime updates cannot drift back to fail-open.
+    /// </summary>
+    public bool ForceFailClosed { get; set; }
 
     /// <summary>Bounded per-call timeout in milliseconds for a single Content Safety call.</summary>
     public int TimeoutMs { get; set; } = 1500;

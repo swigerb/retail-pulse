@@ -76,6 +76,11 @@ param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Enable the optional Azure AI Content Safety second layer. Ships DISABLED so a clean `azd up` never silently provisions a paid Cognitive Services account. Enable per environment with `azd env set AZURE_CONTENT_SAFETY_ENABLED true` (read by main.bicepparam); the API is then wired to the account endpoint with managed identity and no keys.')
 param contentSafetyEnabled bool = false
 
+@description('Regulated-retail gateway mode (#337) for the synthetic pharmacy scenario. Forces Content Safety and APIM gateway safety on in fail-closed regulated mode, disables all APIM body capture and masks client-visible request ids. A configuration posture only: NOT HIPAA certified; no patient data or clinical advice. Enable with `azd env set AZURE_REGULATED_RETAIL_MODE true`.')
+param regulatedRetailMode bool = false
+
+var contentSafetyOn = contentSafetyEnabled || regulatedRetailMode
+
 @description('Enforce Prompt Shields and text harm checks at APIM (#331) using the Content Safety account. Requires contentSafetyEnabled; ships DISABLED. The application-level checks always remain.')
 param apimGatewaySafetyEnabled bool = false
 
@@ -207,7 +212,7 @@ module apim './modules/apim.bicep' = {
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     appInsightsId: monitoring.outputs.appInsightsId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
-    captureRequestBodies: !(apimGatewaySafetyEnabled && contentSafetyEnabled)
+    captureRequestBodies: !((apimGatewaySafetyEnabled || regulatedRetailMode) && contentSafetyOn)
   }
 }
 
@@ -224,8 +229,9 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     tokenBudgetScopes: apimTokenBudgetScopes
     tokenBudgetDemoEnabled: apimTokenBudgetDemoEnabled
     tokenBudgetDemoTokensPerMinute: apimTokenBudgetDemoTokensPerMinute
-    gatewaySafetyEnabled: apimGatewaySafetyEnabled && contentSafetyEnabled
-    contentSafetyAccountName: contentSafetyEnabled ? contentSafety!.outputs.name : ''
+    gatewaySafetyEnabled: (apimGatewaySafetyEnabled || regulatedRetailMode) && contentSafetyOn
+    regulatedRetailMode: regulatedRetailMode && contentSafetyOn
+    contentSafetyAccountName: contentSafetyOn ? contentSafety!.outputs.name : ''
     gatewaySafetyMode: apimGatewaySafetyMode
     gatewaySafetySeverityThreshold: apimGatewaySafetySeverityThreshold
     failoverDemoKey: apimFailoverDemoKey
@@ -258,7 +264,8 @@ module containerApps './modules/container-apps.bicep' = {
     entraClientId: entraClientId
     entraApiScope: entraApiScope
     containerRegistryLoginServer: containerRegistry.outputs.loginServer
-    contentSafetyEndpoint: contentSafetyEnabled ? contentSafety!.outputs.endpoint : ''
+    contentSafetyEndpoint: contentSafetyOn ? contentSafety!.outputs.endpoint : ''
+    regulatedRetailMode: regulatedRetailMode
     botAppId: botAppId
     botAppSecret: botAppSecret
     alwaysWarm: alwaysWarm
@@ -304,7 +311,7 @@ output AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME string = apimOpenAiApi.outputs.sub
 // the postprovision hook grants each container app system identity the
 // `Cognitive Services User` role on this account. When disabled the endpoint
 // output is an empty string so downstream consumers can safely branch on it.
-module contentSafety './modules/content-safety.bicep' = if (contentSafetyEnabled) {
+module contentSafety './modules/content-safety.bicep' = if (contentSafetyOn) {
   name: 'content-safety'
   scope: rg
   params: {
@@ -314,10 +321,10 @@ module contentSafety './modules/content-safety.bicep' = if (contentSafetyEnabled
   }
 }
 
-output AZURE_CONTENT_SAFETY_ENABLED bool = contentSafetyEnabled
-output AZURE_CONTENT_SAFETY_ENDPOINT string = contentSafetyEnabled ? contentSafety!.outputs.endpoint : ''
-output AZURE_CONTENT_SAFETY_NAME string = contentSafetyEnabled ? contentSafety!.outputs.name : ''
-output AZURE_CONTENT_SAFETY_RESOURCE_ID string = contentSafetyEnabled ? contentSafety!.outputs.resourceId : ''
+output AZURE_CONTENT_SAFETY_ENABLED bool = contentSafetyOn
+output AZURE_CONTENT_SAFETY_ENDPOINT string = contentSafetyOn ? contentSafety!.outputs.endpoint : ''
+output AZURE_CONTENT_SAFETY_NAME string = contentSafetyOn ? contentSafety!.outputs.name : ''
+output AZURE_CONTENT_SAFETY_RESOURCE_ID string = contentSafetyOn ? contentSafety!.outputs.resourceId : ''
 
 // ── Optional Azure AI Search knowledge provider (issue #103) ───────────────
 // Provisioned only when aiSearchEnabled = true so a default `azd up` remains

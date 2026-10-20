@@ -39,6 +39,14 @@ namespace RetailPulse.Api.Endpoints;
 
 public static class ChatEndpoints
 {
+    /// <summary>Regulated-retail mode (#337): no request classifier exists, so the cache is bypassed entirely for lookup and store.</summary>
+    public static bool ShouldBypassSensitiveCache(HttpContext httpContext, string? message)
+    {
+        IConfiguration? config = httpContext.RequestServices.GetService<IConfiguration>();
+        bool regulated = config is not null && RegulatedRetailProfile.Resolve(config).Enabled;
+        return SensitiveCachePolicy.ShouldBypassForRequest(regulated, message);
+    }
+
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
@@ -74,6 +82,7 @@ public static class ChatEndpoints
                 //    accountable identity, so no stored cross-prompt injection surface).
                 bool anonymous = anonymousChatPolicy?.AppliesToCurrentRequest == true;
                 bool cacheDisabled = anonymousChatPolicy.IsCacheDisabled();
+                bool sensitiveBypass = ShouldBypassSensitiveCache(httpContext, request.Message);
                 bool memoryDisabled = anonymousChatPolicy.IsMemoryDisabled();
 
                 // Session persistence is opt-in (issue #90). Anonymous callers are refused by
@@ -132,7 +141,7 @@ public static class ChatEndpoints
                 }
 
                 // ── Cache: check for cached response ─────────────────────────────
-                if (!cacheDisabled && CacheHelpers.IsCacheable(request.Message))
+                if (!cacheDisabled && !sensitiveBypass && CacheHelpers.IsCacheable(request.Message))
                 {
                     string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                     CachedResponse? cached = await responseCache.GetAsync(cacheKey, ct);
@@ -920,6 +929,7 @@ public static class ChatEndpoints
                 // all. Failing once is a model problem; failing repeatably from cache is
                 // ours.
                 if (!cacheDisabled
+                    && !sensitiveBypass
                     && CacheHelpers.IsCacheable(request.Message)
                     && CacheHelpers.IsCacheableOutcome(
                         response.Reply,

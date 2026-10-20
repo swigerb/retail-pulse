@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using RetailPulse.Api.OpenAI.Gateway;
 using RetailPulse.Api.Resilience;
 
 namespace RetailPulse.Api.Middleware;
@@ -12,6 +13,7 @@ public class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
+    private readonly bool _maskClientVisible;
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -19,10 +21,11 @@ public class ExceptionHandlingMiddleware
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
+    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger, IConfiguration? configuration = null)
     {
         _next = next;
         _logger = logger;
+        _maskClientVisible = configuration is not null && RegulatedRetailProfile.Resolve(configuration).Enabled;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -56,7 +59,7 @@ public class ExceptionHandlingMiddleware
             status = (int)statusCode,
             detail = GetDetail(category, ex),
             instance = path,
-            correlationId,
+            correlationId = _maskClientVisible ? ClientIdentifierMasker.Mask(correlationId) : correlationId,
             errorCategory = category.ToString()
         };
 

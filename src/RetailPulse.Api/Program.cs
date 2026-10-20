@@ -270,6 +270,7 @@ foreach ((string sectionKey, AgentDefinition def) in promptConfig.Agents)
 // of these registrations depend on prompt/tool composition.
 var guardrailsConfig = new GuardrailsConfig();
 builder.Configuration.GetSection("Guardrails").Bind(guardrailsConfig);
+guardrailsConfig.ContentSafety.ForceFailClosed = RegulatedRetailProfile.Resolve(builder.Configuration).Enabled;
 builder.Services.AddSingleton(guardrailsConfig);
 
 var suspiciousLog = new InMemorySuspiciousRequestLog();
@@ -1387,6 +1388,7 @@ app.MapMarginEndpoints();
 app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();
 app.MapCacheEndpoints();
+app.MapGatewayProfileEndpoints();
 
 // User-initiated execution control (issue #92): cancel endpoints for the
 // in-flight fast-path / streaming request and for the plan orchestrator.
