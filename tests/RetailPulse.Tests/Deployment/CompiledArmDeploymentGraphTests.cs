@@ -102,8 +102,8 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
         // template graph carries the actual policy XML content somewhere in
         // its variables so it isn't silently dropped by the module boundary.
         string compiledJson = root.GetRawText();
-        compiledJson.Should().Contain("azure-openai-token-limit",
-            "the compiled template must carry the azure-openai-token-limit policy fragment");
+        compiledJson.Should().Contain("llm-token-limit",
+            "the compiled template must carry the llm-token-limit policy fragment");
         compiledJson.Should().Contain("azure-openai-emit-token-metric",
             "the compiled template must carry the azure-openai-emit-token-metric policy fragment");
         compiledJson.Should().Contain("RetailPulse",

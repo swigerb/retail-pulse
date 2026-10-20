@@ -882,7 +882,7 @@ var openAiConnection = OpenAiConnectionSettings.Load(
 var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
 {
     NetworkTimeout = TimeSpan.FromSeconds(45),
-    RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 2)
+    RetryPolicy = new BudgetAwareRetryPolicy(maxRetries: 2)
 };
 
 azureClientOptions.AddGatewayEvidence(GatewayModeSettings.Resolve(builder.Configuration));

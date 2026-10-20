@@ -35,6 +35,9 @@ public sealed partial class ApimGatewayContractTests
     private static string ApimPolicyXml => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "modules", "apim-openai-policy.xml"));
 
+    private static string NormalBudgetFragment => File.ReadAllText(
+        Path.Combine(RepoRoot, "infra", "modules", "apim-openai-budget-limit-normal.xml"));
+
     private static string ApimRoleAssignmentBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "modules", "apim-openai-role-assignment.bicep"));
 
@@ -266,12 +269,12 @@ public sealed partial class ApimGatewayContractTests
     {
         // Subscription-scoped counter (not caller IP or global) — required for
         // the multi-tenant cost/quota story.
-        ApimPolicyXml.Should().MatchRegex(
-            @"<azure-openai-token-limit\s+counter-key=""@\(context\.Subscription\.Id\)""",
+        NormalBudgetFragment.Should().MatchRegex(
+            @"<llm-token-limit\s+counter-key=""@\(context\.Subscription\.Id\)""",
             "token-limit must key on the APIM subscription id (per-subscription quota)");
-        ApimPolicyXml.Should().Contain("tokens-per-minute=\"{tokens-per-minute}\"",
+        NormalBudgetFragment.Should().Contain("tokens-per-minute=\"{tokens-per-minute}\"",
             "token-limit must reference the templated tokens-per-minute cap");
-        ApimPolicyXml.Should().Contain("retry-after-header-name=\"Retry-After\"",
+        NormalBudgetFragment.Should().Contain("retry-after-header-name=\"Retry-After\"",
             "token-limit must emit the standard Retry-After header on throttle");
     }
 

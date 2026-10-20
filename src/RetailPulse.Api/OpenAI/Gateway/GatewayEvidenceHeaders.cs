@@ -39,6 +39,12 @@ public static class GatewayEvidenceHeaders
     public const string SafetyLatencyMs = "x-rp-gw-safety-latency-ms";
     public const string SafetyOutputChecked = "x-rp-gw-safety-output-checked";
 
+    public const string BudgetScope = "x-rp-gw-budget-scope";
+    public const string BudgetMode = "x-rp-gw-budget-mode";
+    public const string RetryAfter = "x-rp-gw-retry-after";
+
+    private const long _maxRetryAfterSeconds = 86_400;
+
     private static readonly string[] _harmCategories = ["Hate", "SelfHarm", "Sexual", "Violence"];
 
     private const int _maxTokenLength = 64;
@@ -49,7 +55,7 @@ public static class GatewayEvidenceHeaders
         RequestId, Backend, Route, TokensConsumed, TokensRemaining, Quota, Cache,
         Safety, PolicyVersion, LatencyMs, BackendLatencyMs, FailoverDemo, PrimaryStatus, Attempts, Fallback,
         SafetyPhase, SafetyDecision, SafetyPromptAttack, SafetyCategory, SafetySeverity, SafetyMode,
-        SafetyLatencyMs, SafetyOutputChecked,
+        SafetyLatencyMs, SafetyOutputChecked, BudgetScope, BudgetMode, RetryAfter,
     ];
 
     public static GatewayCallEvidence Parse(PipelineResponse response)
@@ -75,7 +81,8 @@ public static class GatewayEvidenceHeaders
             ParseCount(getHeader(BackendLatencyMs)),
             statusCode,
             FailoverDemo: ParseFailoverDemo(getHeader),
-            GatewaySafety: ParseSafety(getHeader));
+            GatewaySafety: ParseSafety(getHeader),
+            Budget: ParseBudget(getHeader));
 
         GatewayEvidenceStatus status = evidence.IsEmpty
             ? GatewayEvidenceStatus.Unavailable
@@ -117,6 +124,33 @@ public static class GatewayEvidenceHeaders
             mode is "demo" or "regulated" ? mode : null,
             ParseCount(getHeader(SafetyLatencyMs)),
             ParseBool(getHeader(SafetyOutputChecked)));
+    }
+
+    // Budget detail is trusted only when scope kind and mode are both from the fixed vocabulary.
+    // Retry-after must be a bounded non-negative integer; anything else is unknown, never defaulted.
+    internal static GatewayBudgetEvidence? ParseBudget(Func<string, string?> getHeader)
+    {
+        GatewayBudgetScopeKind? scope = getHeader(BudgetScope)?.Trim().ToLowerInvariant() switch
+        {
+            "store" => GatewayBudgetScopeKind.Store,
+            "channel" => GatewayBudgetScopeKind.Channel,
+            "application" => GatewayBudgetScopeKind.Application,
+            "b2b" => GatewayBudgetScopeKind.B2b,
+            _ => null,
+        };
+        GatewayBudgetMode? mode = getHeader(BudgetMode)?.Trim().ToLowerInvariant() switch
+        {
+            "normal" => GatewayBudgetMode.Normal,
+            "demo" => GatewayBudgetMode.Demo,
+            _ => null,
+        };
+        if (scope is null || mode is null)
+        {
+            return null;
+        }
+
+        long? retry = ParseCount(getHeader(RetryAfter));
+        return new GatewayBudgetEvidence(scope.Value, mode.Value, retry is <= _maxRetryAfterSeconds ? retry : null);
     }
 
     internal static bool? ParseBool(string? value) =>

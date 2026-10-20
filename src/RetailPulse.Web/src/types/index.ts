@@ -1182,6 +1182,17 @@ export interface GatewaySafetyEvidence {
   outputChecked?: boolean | null;
 }
 
+export type GatewayBudgetScopeKind = 'store' | 'channel' | 'application' | 'b2b';
+export type GatewayBudgetMode = 'normal' | 'demo';
+
+/** Token-budget evidence (#332). Scope kind and mode only; never a counter key or subscription id. */
+export interface GatewayBudgetEvidence {
+  scopeKind: GatewayBudgetScopeKind;
+  mode: GatewayBudgetMode;
+  /** Seconds until the limiter admits calls again; null when the gateway did not report a number. */
+  retryAfterSeconds?: number | null;
+}
+
 export interface GatewayCallEvidence {
   gatewayRequestId?: string | null;
   backendAlias?: string | null;
@@ -1202,6 +1213,8 @@ export interface GatewayCallEvidence {
   failoverDemo?: GatewayFailoverDemoEvidence | null;
   /** APIM-level Prompt Shields / text harm decision, when the gateway reported one. */
   gatewaySafety?: GatewaySafetyEvidence | null;
+  /** Token budget scope/mode/retry, when the gateway reported them. */
+  budget?: GatewayBudgetEvidence | null;
 }
 
 export interface GatewayEvidence {

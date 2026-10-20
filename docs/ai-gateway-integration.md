@@ -251,7 +251,7 @@ The policies in `infra/modules/apim-openai-policy.xml`:
 |--------|---------|-------------|
 | `set-backend-service` | inbound | Routes to the Azure AI Foundry backend |
 | `authentication-managed-identity` | inbound | Authenticates to backend via APIM managed identity |
-| `azure-openai-token-limit` | inbound | Rate limits to **80,000 TPM** per subscription (default; `tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`) |
+| `llm-token-limit` | inbound | Rate limits to **80,000 TPM** per subscription scope; operator demo and reset in [token-budgets.md](token-budgets.md) (default; `tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`) |
 | `azure-openai-emit-token-metric` | inbound | Emits token usage to App Insights `customMetrics` |
 | Circuit breaker (on backend) | — | Trips on 429 responses for 1 minute |
 

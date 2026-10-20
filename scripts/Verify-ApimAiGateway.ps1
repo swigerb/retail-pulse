@@ -167,7 +167,7 @@ function Test-SafetyPolicyOrder([string]$policy) {
     $shield = $policy.IndexOf('text:shieldPrompt')
     $analyze = $policy.IndexOf('text:analyze')
     $backendSel = $policy.IndexOf('<set-backend-service')
-    $limit = $policy.IndexOf('<azure-openai-token-limit')
+    $limit = $policy.IndexOf('<llm-token-limit')
     $outAnalyze = if ($outbound -ge 0) { $policy.IndexOf('text:analyze', $outbound) } else { -1 }
     $phase = $policy.IndexOf('x-rp-gw-safety-decision')
     return ($inbound -ge 0 -and $outbound -gt $inbound -and $shield -gt $inbound -and $analyze -gt $inbound -and
@@ -320,7 +320,7 @@ function Invoke-SelfTest {
     _Expect 'safety rbac: resource-scoped Cognitive Services User passes' (Test-SafetyRoleScoped @(@{ roleDefinitionId = "/x/$csUser"; scope = $csScope }) $csScope)
     _Expect 'safety rbac: resource-group-scoped assignment is rejected' (-not (Test-SafetyRoleScoped @(@{ roleDefinitionId = "/x/$csUser"; scope = '/subscriptions/s/resourceGroups/rg' }) $csScope))
     _Expect 'safety rbac: wrong role at resource scope is rejected' (-not (Test-SafetyRoleScoped @(@{ roleDefinitionId = '/x/5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'; scope = $csScope }) $csScope))
-    $goodPolicy = '<policies><inbound><send-request><set-url>x/text:shieldPrompt</set-url></send-request><send-request><set-url>x/text:analyze</set-url></send-request><set-backend-service backend-id="b" /><azure-openai-token-limit counter-key="k" /></inbound><backend/><outbound><send-request><set-url>x/text:analyze</set-url></send-request><set-header name="x-rp-gw-safety-decision" /></outbound></policies>'
+    $goodPolicy = '<policies><inbound><send-request><set-url>x/text:shieldPrompt</set-url></send-request><send-request><set-url>x/text:analyze</set-url></send-request><set-backend-service backend-id="b" /><llm-token-limit counter-key="k" /></inbound><backend/><outbound><send-request><set-url>x/text:analyze</set-url></send-request><set-header name="x-rp-gw-safety-decision" /></outbound></policies>'
     _Expect 'safety policy: correct order passes' (Test-SafetyPolicyOrder $goodPolicy)
     _Expect 'safety policy: safety after backend selection is rejected' (-not (Test-SafetyPolicyOrder ($goodPolicy -replace 'text:shieldPrompt', 'zzz')))
     _Expect 'safety policy: missing outbound analysis is rejected' (-not (Test-SafetyPolicyOrder ($goodPolicy -replace '<outbound>.*</outbound>', '<outbound></outbound>')))
@@ -387,7 +387,7 @@ $policyValue = $policyResource.properties.value
 $routeBackendId = if ($BackendPoolEnabled) { 'retail-pulse-foundry-pool' } else { 'retail-pulse-foundry' }
 Assert "policy: sets backend service ($routeBackendId)" { $policyValue -match ('<set-backend-service\s+backend-id="' + [regex]::Escape($routeBackendId) + '"') } 'policy did not reference the AOAI backend'
 Assert 'policy: managed-identity auth to cognitiveservices.azure.com' { $policyValue -match '<authentication-managed-identity\s+resource="https://cognitiveservices\.azure\.com"' } 'policy is not using MI auth to AOAI'
-Assert 'policy: azure-openai-token-limit configured' { $policyValue -match '<azure-openai-token-limit\s+counter-key="@\(context\.Subscription\.Id\)"' } 'token-limit missing or wrong counter-key'
+Assert 'policy: llm-token-limit configured' { $policyValue -match '<llm-token-limit\s+counter-key="@\(context\.Subscription\.Id\)"' } 'token-limit missing or wrong counter-key'
 Assert 'policy: azure-openai-emit-token-metric in RetailPulse namespace' { $policyValue -match '<azure-openai-emit-token-metric\s+namespace="RetailPulse">' } 'emit-token-metric missing or wrong namespace'
 
 # ── Backend ──────────────────────────────────────────────────────────────

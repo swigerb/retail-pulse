@@ -2,7 +2,7 @@
   Operation-scope policy for the `listModels` readiness probe.
 
   This deliberately does NOT include <base /> in <inbound>. The API-scope policy
-  applies `azure-openai-token-limit` and `azure-openai-emit-token-metric`, both of
+  applies `llm-token-limit` and `azure-openai-emit-token-metric`, both of
   which are defined only for Azure OpenAI inference payloads - they parse a chat
   request body to estimate and meter prompt tokens. A token-free GET has no such
   body, so inheriting them would meter a non-inference call and risk a policy fault
@@ -18,6 +18,10 @@
 -->
 <policies>
     <inbound>
+        <!-- APIM has already consumed the subscription key; never forward it to Foundry. -->
+        <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
+        <set-header name="api-key" exists-action="delete" />
+        <set-query-parameter name="api-key" exists-action="delete" />
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
     </inbound>

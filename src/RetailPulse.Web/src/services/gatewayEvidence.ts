@@ -1,4 +1,7 @@
 import type {
+  GatewayBudgetEvidence,
+  GatewayBudgetMode,
+  GatewayBudgetScopeKind,
   GatewayEvidenceStatus,
   GatewayCallEvidence,
   GatewayEvidence,
@@ -69,6 +72,23 @@ function normalizeSafety(v: unknown): GatewaySafetyEvidence | null {
   };
 }
 
+const BUDGET_SCOPES: readonly GatewayBudgetScopeKind[] = ['store', 'channel', 'application', 'b2b'];
+const BUDGET_MODES: readonly GatewayBudgetMode[] = ['normal', 'demo'];
+const MAX_RETRY_AFTER_SECONDS = 86_400;
+
+function normalizeBudget(v: unknown): GatewayBudgetEvidence | null {
+  if (!v || typeof v !== 'object') return null;
+  const d = v as Record<string, unknown>;
+  if (!BUDGET_SCOPES.includes(d.scopeKind as GatewayBudgetScopeKind)) return null;
+  if (!BUDGET_MODES.includes(d.mode as GatewayBudgetMode)) return null;
+  const retry = count(d.retryAfterSeconds);
+  return {
+    scopeKind: d.scopeKind as GatewayBudgetScopeKind,
+    mode: d.mode as GatewayBudgetMode,
+    retryAfterSeconds: retry !== null && retry <= MAX_RETRY_AFTER_SECONDS ? retry : null,
+  };
+}
+
 function normalizeCall(raw: unknown): GatewayCallEvidence | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
@@ -95,6 +115,7 @@ function normalizeCall(raw: unknown): GatewayCallEvidence | null {
         : null,
     failoverDemo: normalizeDemo(r.failoverDemo),
     gatewaySafety: normalizeSafety(r.gatewaySafety),
+    budget: normalizeBudget(r.budget),
   };
 }
 

@@ -40,6 +40,17 @@ param apimBackendPoolEnabled bool = false
 @description('Enables the demo-only APIM failover trigger (#330). Disabled by default; requires apimBackendPoolEnabled.')
 param apimFailoverDemoEnabled bool = false
 
+@description('Fictional store/channel/application/B2B token-budget scopes (#332): [{ kind: store|channel|b2b, id: kebab-id, displayName: text }]. Each gets its own APIM product, subscription and counter.')
+param apimTokenBudgetScopes array = []
+
+@description('Deploys the operator-only token budget demo named values (#332). Disabled by default and inert until rp-budget-demo-armed is set to true.')
+param apimTokenBudgetDemoEnabled bool = false
+
+@minValue(1)
+@maxValue(500)
+@description('Deliberately tiny static TPM used only while the budget demo is armed.')
+param apimTokenBudgetDemoTokensPerMinute int = 50
+
 @secure()
 @description('Operator secret authorizing the APIM failover demo (>= 32 chars). Never share with ordinary callers.')
 param apimFailoverDemoKey string = ''
@@ -181,6 +192,9 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     aiFoundryResourceGroupName: aiFoundryResourceGroupName
     backendPoolEnabled: apimBackendPoolEnabled
     failoverDemoEnabled: apimFailoverDemoEnabled
+    tokenBudgetScopes: apimTokenBudgetScopes
+    tokenBudgetDemoEnabled: apimTokenBudgetDemoEnabled
+    tokenBudgetDemoTokensPerMinute: apimTokenBudgetDemoTokensPerMinute
     gatewaySafetyEnabled: apimGatewaySafetyEnabled && contentSafetyEnabled
     contentSafetyAccountName: contentSafetyEnabled ? contentSafety!.outputs.name : ''
     gatewaySafetyMode: apimGatewaySafetyMode
