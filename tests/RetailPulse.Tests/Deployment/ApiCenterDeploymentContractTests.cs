@@ -97,41 +97,48 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
 
     private static readonly string[] ApprovedTools = ["get_inventory", "get_stockout_risk", "get_supply_disruptions", "get_demand_forecast"];
 
+    // Issue #336: the public API Center ARM schema/CLI cannot create kind=mcp or tool child resources;
+    // APIM apiSources synchronization generates the MCP API graph, so Bicep must not duplicate it.
+    private static readonly string[] ForbiddenHandAuthoredTypes =
+    [
+        "Microsoft.ApiCenter/services/workspaces/apis@",
+        "Microsoft.ApiCenter/services/workspaces/apis/versions",
+        "Microsoft.ApiCenter/services/workspaces/apis/definitions",
+        "Microsoft.ApiCenter/services/workspaces/apis/deployments",
+        "Microsoft.ApiCenter/services/workspaces/environments",
+        "Microsoft.ApiCenter/services/metadataSchemas",
+    ];
+
     [Fact]
-    public void Module_RegistersMcpApiVersionEnvironmentAndDeploymentWithoutSecrets()
+    public void Module_DoesNotHandAuthorTheSynchronizedMcpGraph_AndKeepsApimSourceAuthoritative()
     {
         string module = File.ReadAllText(Path.Combine(_repoRoot, "infra", "modules", "api-center.bicep"));
 
-        module.Should().Contain("Microsoft.ApiCenter/services/workspaces/apis@2024-03-01");
-        module.Should().Contain("Microsoft.ApiCenter/services/workspaces/apis/versions@2024-03-01");
-        module.Should().Contain("Microsoft.ApiCenter/services/workspaces/apis/versions/definitions@2024-03-01");
-        module.Should().Contain("Microsoft.ApiCenter/services/workspaces/environments@2024-03-01");
-        module.Should().Contain("Microsoft.ApiCenter/services/workspaces/apis/deployments@2024-03-01");
-        module.Should().Contain("Microsoft.ApiCenter/services/metadataSchemas@2024-03-01");
-        module.Should().Contain("kind: 'mcp'");
-        module.Should().Contain("param mcpServerApiName string = 'retail-pulse-mcp-server'");
-        module.Should().Contain("runtimeUri");
-        module.Should().NotMatchRegex("(?i)subscription-?key|secret|apikey|password", "registration metadata must carry no credentials");
-        foreach (string tool in ApprovedTools)
+        foreach (string type in ForbiddenHandAuthoredTypes)
         {
-            module.Should().Contain($"'{tool}'");
+            module.Should().NotContain(type, "synchronization generates this child graph");
         }
 
-        module.Split("readOnly: true").Length.Should().Be(6, "four tool schemas plus the aggregate flag, all read-only");
+        module.Should().NotContain("kind: 'mcp'");
+        module.Should().NotContain("mcpServerApiName").And.NotContain("mcpEndpoint").And.NotContain("customProperties");
+        module.Should().Contain("Microsoft.ApiCenter/services/workspaces/apiSources@");
+        module.Should().Contain("azureApiManagementSource");
+        module.Should().NotMatchRegex("(?i)subscription-?key|secret|apikey|password");
     }
 
     [Fact]
-    public void Main_PassesApimMcpEndpointAndApiIdIntoApiCenterModule()
+    public void Main_DoesNotWireOrOutputHandAuthoredMcpRegistration()
     {
         string main = File.ReadAllText(Path.Combine(_repoRoot, "infra", "main.bicep"));
 
-        main.Should().Contain("mcpServerApiName: apimMcpApi.outputs.mcpServerName");
-        main.Should().Contain("mcpEndpoint: apimMcpApi.outputs.mcpEndpoint");
-        main.Should().Contain("output AZURE_API_CENTER_MCP_API_NAME string = apiCenterEnabled ? apiCenter!.outputs.mcpApiName : ''");
+        main.Should().NotContain("mcpServerApiName:");
+        main.Should().NotContain("mcpEndpoint: apimMcpApi");
+        main.Should().NotContain("AZURE_API_CENTER_MCP_API_NAME");
+        main.Should().NotContain("AZURE_API_CENTER_MCP_ENVIRONMENT_NAME");
     }
 
     [Fact]
-    public void CompiledArm_LinksMcpDeploymentToEnvironmentAndApimEndpoint()
+    public void CompiledArm_HasNoDuplicateMcpGraphAndKeepsApimSource()
     {
         JsonElement? compiled = TryCompile();
         if (compiled is null)
@@ -140,50 +147,60 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
         }
 
         JsonElement deployment = compiled.Value.GetProperty("resources").GetProperty("apiCenter");
-        deployment.GetProperty("condition").GetString().Should().Contain("apiCenterEnabled");
         JsonElement[] inner = [.. deployment.GetProperty("properties").GetProperty("template")
             .GetProperty("resources").EnumerateArray()];
-
-        JsonElement api = inner.Single(r => r.GetProperty("type").GetString() == "Microsoft.ApiCenter/services/workspaces/apis");
-        api.GetProperty("properties").GetProperty("kind").GetString().Should().Be("mcp");
-        api.GetProperty("name").GetString().Should().Contain("mcpServerApiName");
-
         string[] types = [.. inner.Select(r => r.GetProperty("type").GetString()!)];
-        types.Should().Contain("Microsoft.ApiCenter/services/workspaces/apis/versions");
-        types.Should().Contain("Microsoft.ApiCenter/services/workspaces/environments");
-        types.Should().Contain("Microsoft.ApiCenter/services/metadataSchemas");
 
-        JsonElement deploy = inner.Single(r => r.GetProperty("type").GetString() == "Microsoft.ApiCenter/services/workspaces/apis/deployments");
-        string raw = deploy.GetRawText();
-        raw.Should().Contain("environmentId").And.Contain("definitionId").And.Contain("runtimeUri").And.Contain("mcpEndpoint");
-        deploy.GetProperty("properties").GetProperty("state").GetString().Should().Be("active");
-
-        JsonElement tools = api.GetProperty("properties").GetProperty("customProperties").GetProperty("retailPulseMcp");
-        // The approved tool list compiles to a variable reference or literal; the module's outputs prove the set.
-        tools.GetRawText().Should().Contain("approvedTools").And.Contain("toolSchemas");
+        types.Should().Contain("Microsoft.ApiCenter/services/workspaces/apiSources");
+        types.Should().NotContain(t => t.StartsWith("Microsoft.ApiCenter/services/workspaces/apis", StringComparison.Ordinal));
+        types.Should().NotContain("Microsoft.ApiCenter/services/workspaces/environments");
+        types.Should().NotContain("Microsoft.ApiCenter/services/metadataSchemas");
 
         JsonElement outputs = compiled.Value.GetProperty("outputs");
-        outputs.TryGetProperty("AZURE_API_CENTER_MCP_API_NAME", out _).Should().BeTrue();
-        outputs.TryGetProperty("AZURE_API_CENTER_MCP_ENVIRONMENT_NAME", out _).Should().BeTrue();
+        outputs.TryGetProperty("AZURE_API_CENTER_MCP_API_NAME", out _).Should().BeFalse();
+        outputs.TryGetProperty("AZURE_API_CENTER_MCP_ENVIRONMENT_NAME", out _).Should().BeFalse();
     }
 
     [Fact]
-    public void LiveVerifier_IsReadOnlyAndFailsOnWrongRegistrationLinkageEndpointOrToolSet()
+    public void LiveVerifier_DiscoversGeneratedIdsAndFailsClosedOnLinkageEndpointAndToolSet()
     {
         string script = File.ReadAllText(Path.Combine(_repoRoot, "scripts", "Verify-ApiCenter.ps1"));
 
-        script.Should().Contain("Get-McpRegistrationFailures");
-        script.Should().Contain("-ne 'mcp'");
-        script.Should().Contain("runtimeUri");
-        script.Should().Contain("environmentId");
-        script.Should().Contain("2025-09-01-preview");
+        script.Should().Contain("Test-McpSync");
+        script.Should().Contain("workspaces/default/apis");
+        script.Should().Contain("properties.kind -eq 'mcp'");
+        script.Should().Contain("/deployments").And.Contain("/versions").And.Contain("/definitions");
+        script.Should().Contain("environmentId").And.Contain("definitionId").And.Contain("runtimeUri");
+        script.Should().Contain("lifecycleStage -ne 'production'");
+        script.Should().Contain("Azure API Management");
+        script.Should().Contain("2025-09-01-preview", "APIM MCP tools are read from supported APIM ARM tool resources");
         script.Should().Contain("[switch]$SelfTest");
+        script.Should().Contain("MaxAttempts").And.Contain("exit 3").And.Contain("24 hours");
+        script.Should().Contain("does not construct it");
+        script.Should().NotContain("workspaces/default/apis/$McpApiName", "the API Center API id is generated, not the APIM API id");
+        script.Should().NotContain("azure-apicenter.ms", "never construct the registry endpoint from memory");
         foreach (string tool in ApprovedTools)
         {
             script.Should().Contain(tool);
         }
 
         script.Should().NotMatchRegex("(?i)-Method\\s+(Put|Post|Patch|Delete)|az\\s+(apic|rest)\\s+.*(create|delete|put)", "the verifier is read-only");
+    }
+
+    [Fact]
+    public void LiveVerifier_SelfTestProvesDiscoveryPendingAndFailClosedBehavior()
+    {
+        string script = File.ReadAllText(Path.Combine(_repoRoot, "scripts", "Verify-ApiCenter.ps1"));
+        foreach (string probe in new[]
+        {
+            "generated-ID synchronized graph passes", "resolved generated API id, not the APIM API id",
+            "no synchronized MCP API is pending", "non-production lifecycle fails", "non-APIM environment fails",
+            "endpoint mismatch fails", "missing endpoint fails closed", "extra APIM tool fails",
+            "missing APIM tool fails", "no apiSources fails",
+        })
+        {
+            script.Should().Contain(probe);
+        }
     }
 
     private JsonElement? TryCompile()

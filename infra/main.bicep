@@ -293,8 +293,6 @@ module apiCenter './modules/api-center.bicep' = if (apiCenterEnabled) {
     resourceToken: resourceToken
     tags: tags
     apimName: apim.outputs.apimName
-    mcpServerApiName: apimMcpApi.outputs.mcpServerName
-    mcpEndpoint: apimMcpApi.outputs.mcpEndpoint
   }
 }
 
@@ -302,8 +300,6 @@ output AZURE_API_CENTER_ENABLED bool = apiCenterEnabled
 output AZURE_API_CENTER_NAME string = apiCenterEnabled ? apiCenter!.outputs.name : ''
 output AZURE_API_CENTER_RESOURCE_ID string = apiCenterEnabled ? apiCenter!.outputs.resourceId : ''
 output AZURE_API_CENTER_APIM_SOURCE_NAME string = apiCenterEnabled ? apiCenter!.outputs.apimSourceName : ''
-output AZURE_API_CENTER_MCP_API_NAME string = apiCenterEnabled ? apiCenter!.outputs.mcpApiName : ''
-output AZURE_API_CENTER_MCP_ENVIRONMENT_NAME string = apiCenterEnabled ? apiCenter!.outputs.mcpEnvironmentName : ''
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and
