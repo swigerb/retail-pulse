@@ -1,0 +1,124 @@
+# Staples (unofficial demonstration) scenario seed manifest.
+# Every name, promo, disruption, and driver below is synthetic and invented;
+# no affiliation with Staples, no third-party analysis, no real performance.
+# Changing this file rehashes the pack fingerprint and forces a reseed.
+
+version: 1
+
+seasonality:
+  factors:
+    Office Essentials:
+      - month: 1
+        multiplier: 1.10
+        event: New Fiscal Year Restock
+        description: Business accounts reset budgets and reorder core supplies
+      - month: 8
+        multiplier: 1.25
+        event: Back-to-School Season
+        description: School and home-office supplies lift unit sales
+      - month: 12
+        multiplier: 0.90
+        event: Year-End Budget Slowdown
+        description: Accounts defer discretionary orders as budgets close
+    Furniture & Technology:
+      - month: 3
+        multiplier: 1.12
+        event: Quarter-End Refresh
+        description: Facilities teams spend remaining budget on seating and monitors
+      - month: 11
+        multiplier: 1.15
+        event: Year-End Capital Spend
+        description: Accounts use remaining capital budget before close
+    Print Services:
+      - month: 4
+        multiplier: 1.18
+        event: Conference Signage Season
+        description: Signage and business-card orders rise ahead of events
+      - month: 12
+        multiplier: 1.10
+        event: Holiday Print Rush
+        description: Greeting and packaging orders peak
+
+competitive:
+  competitorsByCategory:
+    Office Essentials:
+      - Fictional Office Direct
+      - Sample Supply Exchange
+    Furniture & Technology:
+      - Imaginary Workspace Co.
+      - Placeholder Furnishings
+    Print Services:
+      - Example Print Works
+      - Demo Copy Hub
+  pricingSources: [curated_intake, account_quote_log, internal_estimate]
+  shareSources: [synthetic_panel, internal_estimate]
+  activityTypes: [contract_discount, delivery_promise, print_turnaround]
+  impactLevels: [watchlist, monitor]
+  activityTemplates:
+    - type: contract_discount
+      description: "{0} offered a synthetic contract discount on {2} in {3}"
+      recommendation: DIFFERENTIATE — Emphasize service levels over price on contract accounts
+    - type: delivery_promise
+      description: "{0} advertised faster delivery windows for {2} in {3}"
+      recommendation: MATCH — Review next-day delivery coverage for affected accounts
+    - type: print_turnaround
+      description: "{0} shortened print turnaround for {2} in {3}"
+      recommendation: MONITOR — Track print-order lateness before responding
+
+promos:
+  types:
+    - name: Contract Tier Discount
+      liftBase: 6.0
+      liftRange: 10.0
+      coefBase: 9.0
+      coefRange: 4.0
+      code: contract-tier-discount
+      displayName: Contract Tier Discount
+      description: Negotiated discount applied to a business account's contract catalog
+    - name: Volume Quote Bundle
+      liftBase: 10.0
+      liftRange: 16.0
+      coefBase: 14.0
+      coefRange: 5.0
+      code: volume-quote-bundle
+      displayName: Volume Quote Bundle
+      description: Bundled pricing on large furniture or technology quotes
+    - name: Print Reorder Credit
+      liftBase: 5.0
+      liftRange: 9.0
+      coefBase: 7.0
+      coefRange: 3.0
+      code: print-reorder-credit
+      displayName: Print Reorder Credit
+      description: Credit toward a repeat print order within 60 days
+  successRatings: [Strong, Steady, Watch, Fell Short]
+
+supply:
+  disruptionTypes: [office_carrier_delay, stock_shortage, print_backlog]
+  disruptionSeverities: [critical, elevated, watch]
+  disruptionDescriptions:
+    office_carrier_delay:
+      - Regional carrier delayed next-day delivery routes in the Atlantic Corridor
+      - Linehaul capacity shortfall slowed Gulf & Southern Belt replenishment
+    stock_shortage:
+      - Paper and toner days of supply fell below the review floor in the Great Lakes & Plains
+      - Task seating inventory ran short at one Pacific Rim fulfillment center
+    print_backlog:
+      - Proof approvals backed up and delayed Pacific Rim signage production
+      - Bulk copy equipment maintenance extended print turnaround
+
+stores:
+  types:
+    - Retail Store
+    - Fulfillment Center
+    - Print Production Site
+    - Business Account Hub
+
+margin:
+  driverCategories:
+    - Contract Pricing
+    - Delivery Cost
+    - Substitution Mix
+    - Print Production
+    - Store Labor
+  trendLabels: [improving, softening, holding, seasonal]
