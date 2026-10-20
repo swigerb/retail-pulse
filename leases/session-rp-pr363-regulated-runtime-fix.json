@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr363-regulated-runtime-fix",
+  "sessionId": "rp-pr363-regulated-runtime-fix",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T22:00:03.124Z",
+  "lastHeartbeatAt": "2026-10-20T22:00:03.124Z",
+  "updatedAt": "2026-10-20T22:00:03.124Z",
+  "terminalReason": null,
+  "executionRef": null
+}
