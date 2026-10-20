@@ -14,7 +14,7 @@ import {
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, GatewayEvidence, ApprovalRequest, ApprovalDecision, CacheInfo, ForceableExecutionPath } from '../types';
 import type { SendMessageOptions } from '../services/api';
-import { sendMessage, isErrorReply, isChatRequestTimeoutError } from '../services/api';
+import { sendMessage, isErrorReply, isChatRequestTimeoutError, GatewayChatError } from '../services/api';
 import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
 import { cancelChatSession, cancelPlan } from '../services/executionControlApi';
 import { useConnectionStatus } from '../hooks/useConnectionStatus';
@@ -751,7 +751,7 @@ export function ChatPanel({
         }
         setMessages(prev => [
           ...prev,
-          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}` },
+          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`, ...(err instanceof GatewayChatError ? { gateway: err.gateway } : {}) },
         ]);
       } finally {
         if (isMountedRef.current && abortControllerRef.current === controller) {

@@ -94,3 +94,33 @@ describe('normalizeGatewayEvidence', () => {
     expect(e?.calls.map((c) => c.transportError)).toEqual(['timeout', null]);
   });
 });
+
+describe('gateway safety error propagation (#331)', () => {
+  it('keeps sanitized safety evidence on a blocked 403 and drops spoofed fields', async () => {
+    const { vi } = await import('vitest');
+    const { sendMessage, GatewayChatError } = await import('../services/api');
+    const body = {
+      error: 'The request was blocked by gateway content safety.',
+      code: 'gateway_safety_blocked',
+      gateway: {
+        status: 'blocked', callCount: 1, calls: [{
+          route: 'unknown', quota: 'unknown', cache: 'unknown', safety: 'blocked', status: 'blocked', statusCode: 403,
+          gatewaySafety: { phase: 'input', decision: 'block', promptAttack: true, category: 'Violence<script>', severity: 99, mode: 'evil', prompt: 'SECRET' },
+        }],
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 403, headers: { 'content-type': 'application/json' } })));
+    const err = await sendMessage({ message: 'x', sessionId: 's' } as never).catch(e => e);
+    vi.unstubAllGlobals();
+    expect(err).toBeInstanceOf(GatewayChatError);
+    expect(err.code).toBe('gateway_safety_blocked');
+    const gs = err.gateway.calls[0].gatewaySafety;
+    expect(gs).toMatchObject({ phase: 'input', decision: 'block', category: null, severity: null, mode: null });
+    expect(JSON.stringify(err.gateway)).not.toContain('SECRET');
+  });
+
+  it('rejects unknown decisions instead of inventing safety evidence', () => {
+    const g = normalizeGatewayEvidence({ status: 'observed', calls: [{ gatewaySafety: { phase: 'input', decision: 'mystery' } }] });
+    expect(g?.calls[0]?.gatewaySafety).toBeNull();
+  });
+});

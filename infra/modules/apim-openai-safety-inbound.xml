@@ -47,6 +47,7 @@
                 else if (role == &quot;tool&quot;) { docs++; docLen += t.Length; if (t.Length &gt; 10000) return &quot;oversized&quot;; }
               }
               if (userLen &gt; 10000 || docs &gt; 5 || docLen &gt; 10000) return &quot;oversized&quot;;
+              if (userLen == 0 &amp;&amp; docs &gt; 0) return &quot;invalid&quot;;
               return (userLen == 0 &amp;&amp; docs == 0) ? &quot;empty&quot; : &quot;ok&quot;;
             } catch (Exception) { return &quot;invalid&quot;; }
         }" />
@@ -74,7 +75,7 @@
                 &quot;); } user.Append(t); }
                   else if (role == &quot;tool&quot;) { docs.Add(t); }
                 }
-                string u = user.Length == 0 ? &quot;.&quot; : user.ToString();
+                string u = user.ToString();
                 return new JObject(new JProperty(&quot;userPrompt&quot;, u), new JProperty(&quot;documents&quot;, docs)).ToString(Newtonsoft.Json.Formatting.None);
             }" />
             <set-variable name="rp-cs-analyze-body" value="@{

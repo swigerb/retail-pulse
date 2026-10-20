@@ -47,6 +47,8 @@ const useStyles = makeStyles({
   neutral: { backgroundColor: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
   warn: { backgroundColor: 'rgba(250,204,21,0.15)', color: '#facc15' },
   danger: { backgroundColor: 'rgba(248,113,113,0.15)', color: '#f87171' },
+  itemBlocked: { color: '#f87171', fontWeight: 700 },
+  itemWarning: { color: '#facc15' },
   dim: { opacity: 0.6, fontStyle: 'italic' },
 });
 
@@ -56,7 +58,7 @@ export function GatewayControlRoom({ gateway }: { gateway: GatewayEvidence | nul
   const tone =
     model.state === 'observed' ? styles.observed
     : model.state === 'blocked' || model.state === 'failed' ? styles.danger
-    : model.state === 'throttled' || model.state === 'truncated' ? styles.warn
+    : model.state === 'throttled' || model.state === 'truncated' || model.state === 'warning' ? styles.warn
     : styles.neutral;
 
   return (
@@ -76,12 +78,15 @@ export function GatewayControlRoom({ gateway }: { gateway: GatewayEvidence | nul
             className={styles.item}
             data-testid={`gateway-item-${item.key}`}
             data-item-state={item.state}
+            aria-label={item.key === 'gatewaySafety' ? `${item.label}: ${item.value}` : undefined}
           >
             <span className={styles.label}>{item.label}:</span>
             <span
               className={mergeClasses(
                 styles.value,
                 (item.state === 'unavailable' || item.state === 'unknown') && styles.dim,
+                item.state === 'blocked' && styles.itemBlocked,
+                item.state === 'warning' && styles.itemWarning,
               )}
             >
               {item.value}

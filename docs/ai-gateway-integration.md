@@ -38,7 +38,7 @@ tool-result checks (all of which remain). Enable with `AZURE_CONTENT_SAFETY_ENAB
   with the same generic 503 before the model call / client delivery: null responses (timeout, DNS, TLS, connectivity),
   malformed or incomplete 200 JSON, parse errors, 400/401/403/other 4xx, RBAC/config errors and a missing token.
 - **Limits, never truncation:** content is not truncated. User text over 10,000 characters, a tool result over 10,000,
-  more than 5 tool results / 10,000 characters of tool text, an unparseable request, or a buffered completion over
+  more than 5 tool results / 10,000 characters of tool text, a tool-only request with no user text (never checked against a placeholder prompt), an unparseable request, or a buffered completion over
   10,000 characters is rejected (**400** `gateway_safety_rejected` inbound, generic **503** outbound) rather than partially checked.
   `x-rp-gw-safety-output-checked` is `true` only after a valid parsed 200 output analysis.
 - **Logging:** when gateway safety is enabled, APIM diagnostics and LLM logs capture no request/response bodies or

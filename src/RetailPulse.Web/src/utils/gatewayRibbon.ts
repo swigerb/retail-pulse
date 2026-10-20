@@ -8,13 +8,14 @@ export type GatewayDisplayState =
   | 'failed'
   | 'throttled'
   | 'truncated'
+  | 'warning'
   | 'unknown';
 
 export interface GatewayRibbonItem {
-  key: 'route' | 'tokens' | 'cache' | 'safety' | 'failover' | 'policy' | 'correlation';
+  key: 'route' | 'tokens' | 'cache' | 'safety' | 'gatewaySafety' | 'failover' | 'policy' | 'correlation';
   label: string;
   value: string;
-  state: GatewayDisplayState;
+  state: GatewayDisplayState | 'neutral';
 }
 
 export interface GatewayRibbonModel {
@@ -35,6 +36,7 @@ const STATUS_LABELS: Record<GatewayDisplayState, string> = {
   failed: 'Failed',
   throttled: 'Throttled',
   truncated: 'Truncated',
+  warning: 'Safety warning',
   unknown: 'Unknown',
 };
 
@@ -65,6 +67,40 @@ function outcomeItem(
   return { key, label, value: vals.includes('unknown') ? `${text} (partial)` : text, state };
 }
 
+/**
+ * APIM-level content safety (#331). Only a fully verified allow (known phase, input and output
+ * checked) is neutral; blocks are blocked; safety-error allows, unchecked output and partial or
+ * missing detail are warnings/unknown and never success. Distinct from the legacy application safety item.
+ */
+function gatewaySafetyItem(calls: GatewayCallEvidence[]): GatewayRibbonItem {
+  const key = 'gatewaySafety';
+  const label = 'Gateway safety';
+  const found = calls.map(c => c.gatewaySafety).filter((x): x is NonNullable<typeof x> => !!x);
+  if (found.length === 0) return { key, label, value: 'Not reported', state: 'unknown' };
+
+  const blocked = found.find(f => f.decision === 'block');
+  if (blocked) {
+    const detail = [
+      blocked.phase,
+      blocked.promptAttack ? 'prompt attack' : null,
+      blocked.category ? `${blocked.category}${blocked.severity != null ? ` severity ${blocked.severity}` : ''}` : null,
+    ].filter(Boolean).join(', ');
+    return { key, label, value: `Blocked (${detail})`, state: 'blocked' };
+  }
+  const partial = found.length < calls.length ? ' (partial: some calls not reported)' : '';
+  if (found.some(f => f.decision === 'allowed_on_safety_error')) {
+    return { key, label, value: `Allowed on safety error — not verified${partial}`, state: 'warning' };
+  }
+  if (found.some(f => f.outputChecked === false)) {
+    return { key, label, value: `Allowed — output not checked${partial}`, state: 'warning' };
+  }
+  if (found.some(f => f.outputChecked == null)) {
+    return { key, label, value: `Allowed — output check unknown${partial}`, state: 'warning' };
+  }
+  if (partial) return { key, label, value: `Allowed${partial}`, state: 'warning' };
+  return { key, label, value: 'Allowed — input and output checked', state: 'neutral' };
+}
+
 /** Pure mapping from the gateway contract to display state; never invents values. */
 export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined): GatewayRibbonModel {
   const calls = gateway?.calls ?? [];
@@ -79,6 +115,7 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
   else if (status === 'blocked' || calls.some(c => c.status === 'blocked' || c.safety === 'blocked')) state = 'blocked';
   else if (calls.some(c => c.quota === 'throttled')) state = 'throttled';
   else if (!hasCalls) state = 'unknown';
+  else if (gatewaySafetyItem(calls).state === 'warning') state = 'warning';
   else if (gateway?.truncated) state = 'truncated';
   else state = 'observed';
 
@@ -97,6 +134,7 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
         placeholder('tokens', 'Tokens'),
         placeholder('cache', 'Cache'),
         placeholder('safety', 'Safety'),
+        placeholder('gatewaySafety', 'Gateway safety'),
         placeholder('failover', 'Failover'),
         placeholder('policy', 'Policy'),
         placeholder('correlation', 'Request ID'),
@@ -148,6 +186,7 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
     },
     cache,
     safety,
+    outcomeUnavailable ? placeholder('gatewaySafety', 'Gateway safety') : gatewaySafetyItem(calls),
     {
       key: 'failover',
       label: 'Failover',

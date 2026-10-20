@@ -221,6 +221,7 @@ public static class Program
         string big(int n) => new string('a', n);
         Expect(S("oversized:user", Chat(("user", big(10001))), OkShield, OkAnalyze), 400, "block", "false", false, "blocked", 0);
         Expect(S("oversized:user-over-two-messages", Chat(("user", big(6000)), ("user", big(6000))), OkShield, OkAnalyze), 400, "block", "false", false, null, 0);
+        Expect(S("rejected:tool-only-no-user-text", Chat(("tool", "inventory table")), OkShield, OkAnalyze), 400, "block", "false", false, null, 0);
         Expect(S("oversized:tool", Chat(("user", "x"), ("tool", big(10001))), OkShield, OkAnalyze), 400, "block", "false", false, null, 0);
         Expect(S("oversized:tool-total", Chat(("user", "x"), ("tool", big(6000)), ("tool", big(6000))), OkShield, OkAnalyze), 400, "block", "false", false, null, 0);
         Expect(S("oversized:6-tools", Chat(new[] { ("user", "x") }.Concat(Enumerable.Repeat(("tool", "t"), 6)).ToArray()), OkShield, OkAnalyze), 400, "block", "false", false, null, 0);

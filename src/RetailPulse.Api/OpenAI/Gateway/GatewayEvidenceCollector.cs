@@ -23,6 +23,9 @@ public static class GatewayEvidenceCollector
 
     public static void End() => _current.Value = null;
 
+    /// <summary>Current scope evidence, or null outside a chat request.</summary>
+    public static GatewayEvidence? Current() => _current.Value?.Snapshot();
+
     public static void Record(GatewayCallEvidence evidence) => _current.Value?.Add(evidence);
 
     public sealed class Scope
