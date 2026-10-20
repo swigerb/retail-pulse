@@ -8,7 +8,7 @@ categories:
     order: 1
     tasks:
       - name: "Generator sell-through"
-        prompt: "How is generator sell-through trending on the Gulf Coast ahead of the storm?"
+        prompt: "How is generator sell-through trending in the Coastal South ahead of the storm?"
         order: 1
         capability: { kind: prose }
       - name: "Plywood days of supply"

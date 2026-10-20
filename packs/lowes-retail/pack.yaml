@@ -38,14 +38,14 @@ tenant:
       variants: ["Mulch", "Fertilizer", "Patio", "Grills"]
       priceSegment: "Standard"
   regions:
-    - "Gulf Coast"
+    - "Coastal South"
     - "Atlantic Seaboard"
-    - "Heartland"
+    - "Central Plains"
     - "Mountain West"
   channels:
-    - "Store"
+    - "Home Improvement Store"
     - "Order Pickup"
-    - "Home Delivery"
+    - "Jobsite Delivery"
     - "Pro Desk"
   theme:
     primaryColor: "#37474F"

@@ -93,18 +93,18 @@ promos:
   successRatings: [Strong, Steady, Watch, Fell Short]
 
 supply:
-  disruptionTypes: [carrier_delay, vendor_shortfall, dc_capacity]
+  disruptionTypes: [home_improvement_carrier_delay, vendor_shortfall, dc_capacity]
   disruptionSeverities: [critical, elevated, watch]
   disruptionDescriptions:
-    carrier_delay:
-      - Synthetic carrier delay on Gulf Coast lanes ahead of the storm
+    home_improvement_carrier_delay:
+      - Synthetic carrier delay on Coastal South lanes ahead of the storm
       - Synthetic road closure slowed Atlantic Seaboard replenishment
     vendor_shortfall:
       - Synthetic generator vendor short-shipped a replenishment order
       - Synthetic sump pump vendor delayed one production run
     dc_capacity:
       - Synthetic distribution center hit its daily outbound limit
-      - Synthetic overnight staffing gap slowed Heartland outbound
+      - Synthetic overnight staffing gap slowed Central Plains outbound
 
 stores:
   types:
