@@ -7,6 +7,7 @@ import type {
   SendMessageResult,
 } from '../types';
 import { resolveApiUrl } from '../config/apiOrigin';
+import { normalizeGatewayEvidence } from './gatewayEvidence';
 
 async function parseErrorBody(res: Response): Promise<string> {
   const contentType = res.headers.get('content-type') ?? '';
@@ -220,7 +221,7 @@ export async function sendMessage(
   if (!isChatResponse(data)) {
     throw new Error('API error: malformed response payload');
   }
-  return { kind: 'complete', response: data };
+  return { kind: 'complete', response: { ...data, gateway: normalizeGatewayEvidence(data.gateway) } };
 }
 
 /**

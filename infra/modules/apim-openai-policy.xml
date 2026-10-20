@@ -1,11 +1,29 @@
+<!--
+  Gateway evidence contract (#327). Outbound emits only non-sensitive x-rp-gw-*
+  headers (see RetailPulse.Contracts.Gateway.GatewayEvidence). Never emit
+  subscription ids/keys, prompts, completions, or backend credentials here.
+  Inbound x-rp-gw-* headers are stripped so callers cannot spoof evidence.
+-->
 <policies>
     <inbound>
         <base />
+        <set-header name="x-rp-gw-request-id" exists-action="delete" />
+        <set-header name="x-rp-gw-backend" exists-action="delete" />
+        <set-header name="x-rp-gw-route" exists-action="delete" />
+        <set-header name="x-rp-gw-tokens-consumed" exists-action="delete" />
+        <set-header name="x-rp-gw-tokens-remaining" exists-action="delete" />
+        <set-header name="x-rp-gw-quota" exists-action="delete" />
+        <set-header name="x-rp-gw-cache" exists-action="delete" />
+        <set-header name="x-rp-gw-safety" exists-action="delete" />
+        <set-header name="x-rp-gw-policy-version" exists-action="delete" />
+        <set-header name="x-rp-gw-latency-ms" exists-action="delete" />
+        <set-header name="x-rp-gw-backend-latency-ms" exists-action="delete" />
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
         <azure-openai-token-limit counter-key="@(context.Subscription.Id)"
             tokens-per-minute="{tokens-per-minute}" estimate-prompt-tokens="true"
             tokens-consumed-header-name="x-tokens-consumed"
+            remaining-tokens-header-name="x-rp-gw-tokens-remaining"
             retry-after-header-name="Retry-After" />
         <azure-openai-emit-token-metric namespace="RetailPulse">
             <dimension name="API ID" value="@(context.Api.Id)" />
@@ -18,8 +36,47 @@
     </backend>
     <outbound>
         <base />
+        <set-header name="x-rp-gw-request-id" exists-action="override">
+            <value>@(context.RequestId.ToString())</value>
+        </set-header>
+        <set-header name="x-rp-gw-backend" exists-action="override">
+            <value>{backend-id}</value>
+        </set-header>
+        <set-header name="x-rp-gw-route" exists-action="override">
+            <value>@(context.Variables.ContainsKey("rp-route") ? (string)context.Variables["rp-route"] : "primary")</value>
+        </set-header>
+        <set-header name="x-rp-gw-tokens-consumed" exists-action="override">
+            <value>@(context.Response.Headers.GetValueOrDefault("x-tokens-consumed", ""))</value>
+        </set-header>
+        <set-header name="x-rp-gw-quota" exists-action="override">
+            <value>allowed</value>
+        </set-header>
+        <set-header name="x-rp-gw-cache" exists-action="override">
+            <value>not-applicable</value>
+        </set-header>
+        <set-header name="x-rp-gw-safety" exists-action="override">
+            <value>@(context.Response.StatusCode >= 200 &amp;&amp; context.Response.StatusCode &lt; 300 ? "passed" : "unknown")</value>
+        </set-header>
+        <set-header name="x-rp-gw-policy-version" exists-action="override">
+            <value>2026-10-rp327-v1</value>
+        </set-header>
+        <set-header name="x-rp-gw-latency-ms" exists-action="override">
+            <value>@(((int)context.Elapsed.TotalMilliseconds).ToString())</value>
+        </set-header>
     </outbound>
     <on-error>
         <base />
+        <set-header name="x-rp-gw-request-id" exists-action="override">
+            <value>@(context.RequestId.ToString())</value>
+        </set-header>
+        <set-header name="x-rp-gw-backend" exists-action="override">
+            <value>{backend-id}</value>
+        </set-header>
+        <set-header name="x-rp-gw-quota" exists-action="override">
+            <value>@(context.Response.StatusCode == 429 ? "throttled" : "unknown")</value>
+        </set-header>
+        <set-header name="x-rp-gw-policy-version" exists-action="override">
+            <value>2026-10-rp327-v1</value>
+        </set-header>
     </on-error>
 </policies>

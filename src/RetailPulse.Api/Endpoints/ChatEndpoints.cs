@@ -18,6 +18,7 @@ using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
+using RetailPulse.Api.OpenAI.Gateway;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Prefetch;
 using RetailPulse.Api.Rag;
@@ -1017,7 +1018,8 @@ public static class ChatEndpoints
         .Produces(StatusCodes.Status429TooManyRequests)
         .Produces(StatusCodes.Status503ServiceUnavailable)
         .RequireAuthorization()
-        .RequireRateLimiting("strict");
+        .RequireRateLimiting("strict")
+        .WithGatewayEvidence();
 
         // Streaming chat endpoint — SSE/SignalR progressive token delivery
         app.MapPost("/api/chat/stream", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, StreamingProgressFeature streamingProgressFeature, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt, [FromServices] IOptions<ChatTimeoutOptions>? chatTimeoutOptions = null, [FromServices] IExecutionCancellationRegistry? cancellationRegistry = null, [FromServices] ISessionOwnershipRegistry? sessionOwnership = null) =>

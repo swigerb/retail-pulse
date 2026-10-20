@@ -82,6 +82,8 @@ export interface ChatResponse {
    * Always omitted on fast-path replies.
    */
   planId?: string;
+  /** Gateway evidence for the turn; absent on older servers. */
+  gateway?: GatewayEvidence;
 }
 
 export interface TokenUsage {
@@ -1143,3 +1145,40 @@ export interface PlanSuspendedResponse {
 export type SendMessageResult =
   | { kind: 'complete'; response: ChatResponse }
   | { kind: 'suspended'; suspended: PlanSuspendedResponse };
+
+/** Privacy-safe APIM gateway evidence (mirrors RetailPulse.Contracts.Gateway). */
+export type GatewayOutcome =
+  | 'unknown'
+  | 'not-applicable'
+  | 'allowed'
+  | 'throttled'
+  | 'hit'
+  | 'miss'
+  | 'passed'
+  | 'blocked';
+
+export type GatewayRouteState = 'unknown' | 'primary' | 'failover';
+
+export interface GatewayCallEvidence {
+  gatewayRequestId?: string | null;
+  backendAlias?: string | null;
+  route: GatewayRouteState;
+  tokensConsumed?: number | null;
+  tokensRemaining?: number | null;
+  quota: GatewayOutcome;
+  cache: GatewayOutcome;
+  safety: GatewayOutcome;
+  policyVersion?: string | null;
+  gatewayLatencyMs?: number | null;
+  backendLatencyMs?: number | null;
+  statusCode?: number | null;
+}
+
+export interface GatewayEvidence {
+  /** False when no call reported gateway evidence — never treat as success. */
+  observed: boolean;
+  callCount: number;
+  totalTokensConsumed?: number | null;
+  tokensRemaining?: number | null;
+  calls: GatewayCallEvidence[];
+}
