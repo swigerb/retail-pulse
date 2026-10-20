@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-322-gateway-architecture-r3",
+  "sessionId": "rp-322-gateway-architecture-r3",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T14:35:33.245Z",
+  "lastHeartbeatAt": "2026-10-20T14:35:33.245Z",
+  "updatedAt": "2026-10-20T14:35:33.245Z",
+  "terminalReason": null,
+  "executionRef": null
+}
