@@ -63,7 +63,7 @@ public sealed class LowesRetailPackContractTests
         LoadedPack pack = Load();
         string[] banned = ["depletion", "sell-in", "distributor", "retailer satisfaction"];
 
-        var routerPrompt = pack.Agents.Agents["router"].SystemPrompt;
+        string routerPrompt = pack.Agents.Agents["router"].SystemPrompt;
         var texts = new List<string> { routerPrompt, pack.Tenant.Description, pack.Metadata.Attribution };
         texts.AddRange(pack.StartingTasks.SelectMany(c => c.Tasks.Select(t => t.Name + " " + t.Prompt)));
         texts.AddRange(pack.KnowledgeDocuments.Select(d => d.Content));
