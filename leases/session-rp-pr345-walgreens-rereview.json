@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr345-walgreens-rereview",
+  "sessionId": "rp-pr345-walgreens-rereview",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T14:46:36.235Z",
+  "lastHeartbeatAt": "2026-10-20T14:46:36.235Z",
+  "updatedAt": "2026-10-20T14:46:36.235Z",
+  "terminalReason": null,
+  "executionRef": null
+}
