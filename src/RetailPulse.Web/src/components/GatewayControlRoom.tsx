@@ -49,6 +49,15 @@ const useStyles = makeStyles({
   danger: { backgroundColor: 'rgba(248,113,113,0.15)', color: '#f87171' },
   itemBlocked: { color: '#f87171', fontWeight: 700 },
   itemWarning: { color: '#facc15' },
+  quota: {
+    width: '100%',
+    padding: '6px 8px',
+    borderRadius: '6px',
+    backgroundColor: 'rgba(250,204,21,0.10)',
+    border: '1px solid rgba(250,204,21,0.35)',
+  },
+  quotaTitle: { fontWeight: 700, color: '#facc15' },
+  quotaSteps: { margin: '4px 0 0', paddingLeft: '18px' },
   dim: { opacity: 0.6, fontStyle: 'italic' },
 });
 
@@ -94,6 +103,20 @@ export function GatewayControlRoom({ gateway }: { gateway: GatewayEvidence | nul
           </li>
         ))}
       </ul>
+      {model.quota && (
+        <div role="status" className={styles.quota} data-testid="gateway-quota-state">
+          <div className={styles.quotaTitle}>
+            Token budget exhausted — {model.quota.scopeLabel} scope · {model.quota.modeLabel}
+          </div>
+          <div data-testid="gateway-quota-numbers">
+            Retry after: {model.quota.retryAfterSeconds != null ? `${model.quota.retryAfterSeconds}s` : 'not reported'}
+            {' · '}Remaining: {model.quota.remaining != null ? model.quota.remaining.toLocaleString() : 'not reported'}
+          </div>
+          <ol className={styles.quotaSteps} aria-label="Quota reset walkthrough">
+            {model.quota.steps.map(step => <li key={step}>{step}</li>)}
+          </ol>
+        </div>
+      )}
       {model.truncatedNote && (
         <span className={styles.note} role="note" data-testid="gateway-truncated">
           {model.truncatedNote}

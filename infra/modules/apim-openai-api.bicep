@@ -19,8 +19,19 @@ param subscriptionDisplayName string = 'Retail Pulse Demo Inference'
 @description('Name for the APIM subscription resource')
 param subscriptionName string = 'retail-pulse-inference-sub'
 
-@description('Tokens per minute limit enforced per APIM subscription')
+@description('Tokens per minute limit enforced per APIM subscription (one counter per store, channel, application or B2B subscription). Production default.')
 param tokensPerMinute int = 80000
+
+@description('Fictional store/channel/application/B2B budget scopes (#332). Each entry creates one APIM product (rp-budget-<kind>-<id>) and one subscription with service-generated keys that are never output. Counter keys derive only from the APIM subscription.')
+param tokenBudgetScopes array = []
+
+@description('Deploys the operator-only token budget demo (#332): tiny-TPM named value, arm switch and counter generation. Off by default; even when deployed it stays inactive until rp-budget-demo-armed is set to true.')
+param tokenBudgetDemoEnabled bool = false
+
+@description('Deliberately tiny static tokens-per-minute used only while the budget demo is armed. Never affects the normal limit.')
+@minValue(1)
+@maxValue(500)
+param tokenBudgetDemoTokensPerMinute int = 50
 
 @description('Enables the two-backend priority pool. When false (default) the single primary backend is used directly, which is valid for local or constrained deployments.')
 param backendPoolEnabled bool = false
@@ -113,6 +124,12 @@ var poolBackendName = 'retail-pulse-foundry-pool'
 
 // Policies address the pool when enabled; otherwise the single primary backend.
 var routeBackendId = poolEnabled ? poolBackendName : primaryBackendName
+
+var budgetLimitFragment = replace(
+  tokenBudgetDemoEnabled ? loadTextContent('apim-openai-budget-limit-demo.xml') : loadTextContent('apim-openai-budget-limit-normal.xml'),
+  '{tokens-per-minute}',
+  string(tokensPerMinute))
+var inferencePolicyBase = replace(loadTextContent('apim-openai-policy.xml'), '{budget-limit}', budgetLimitFragment)
 
 var failoverDemoActive = failoverDemoEnabled && poolEnabled && length(failoverDemoKey) >= 32
 
@@ -294,6 +311,39 @@ resource demoArmedNamedValue 'Microsoft.ApiManagement/service/namedValues@2024-0
   }
 }
 
+// Budget demo named values (#332). "armed" and the counter generation default to false/1 on every
+// deployment. Operators arm the demo and bump the generation with az apim nv update; bumping the
+// generation is the immediate reset because APIM has no documented clear-counter API.
+resource budgetDemoArmed 'Microsoft.ApiManagement/service/namedValues@2024-06-01-preview' = if (tokenBudgetDemoEnabled) {
+  parent: apim
+  name: 'rp-budget-demo-armed'
+  properties: {
+    displayName: 'rp-budget-demo-armed'
+    secret: false
+    value: 'false'
+  }
+}
+
+resource budgetDemoTpm 'Microsoft.ApiManagement/service/namedValues@2024-06-01-preview' = if (tokenBudgetDemoEnabled) {
+  parent: apim
+  name: 'rp-budget-demo-tpm'
+  properties: {
+    displayName: 'rp-budget-demo-tpm'
+    secret: false
+    value: string(tokenBudgetDemoTokensPerMinute)
+  }
+}
+
+resource budgetDemoGeneration 'Microsoft.ApiManagement/service/namedValues@2024-06-01-preview' = if (tokenBudgetDemoEnabled) {
+  parent: apim
+  name: 'rp-budget-demo-generation'
+  properties: {
+    displayName: 'rp-budget-demo-generation'
+    secret: false
+    value: '1'
+  }
+}
+
 resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-preview' = {
   parent: api
   name: 'policy'
@@ -305,7 +355,7 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
           replace(
             replace(
               replace(
-                replace(loadTextContent('apim-openai-policy.xml'), '{backend-id}', routeBackendId),
+                replace(inferencePolicyBase, '{backend-id}', routeBackendId),
                 '{safety-inbound}',
                 safetyInboundFragment),
               '{safety-outbound}',
@@ -328,9 +378,15 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-pre
     secondaryRoleAssignment
     demoKeyNamedValue
     demoArmedNamedValue
+    budgetDemoArmed
+    budgetDemoTpm
+    budgetDemoGeneration
     contentSafetyRoleAssignment
   ] : [
     backend
+    budgetDemoArmed
+    budgetDemoTpm
+    budgetDemoGeneration
     contentSafetyRoleAssignment
   ]
 }
@@ -449,6 +505,42 @@ resource subscription 'Microsoft.ApiManagement/service/subscriptions@2024-06-01-
   }
 }
 
+// One product + subscription per budget scope. Keys are service-generated (never specified in
+// source) and intentionally not output; operators read them with the APIM listSecrets API.
+// Product ids must start rp-budget-{store|channel|b2b}-; anything else is the application scope.
+resource budgetProducts 'Microsoft.ApiManagement/service/products@2024-06-01-preview' = [for scope in tokenBudgetScopes: {
+  parent: apim
+  name: 'rp-budget-${scope.kind}-${scope.id}'
+  properties: {
+    displayName: scope.displayName
+    description: 'Token budget scope (${scope.kind}). Counter key derives from the product subscription only.'
+    subscriptionRequired: true
+    approvalRequired: false
+    state: 'published'
+  }
+}]
+
+resource budgetProductApis 'Microsoft.ApiManagement/service/products/apis@2024-06-01-preview' = [for (scope, i) in tokenBudgetScopes: {
+  parent: budgetProducts[i]
+  name: api.name
+}]
+
+resource budgetSubscriptions 'Microsoft.ApiManagement/service/subscriptions@2024-06-01-preview' = [for (scope, i) in tokenBudgetScopes: {
+  parent: apim
+  name: 'rp-budget-sub-${scope.kind}-${scope.id}'
+  properties: {
+    allowTracing: false
+    displayName: '${scope.displayName} token budget'
+    scope: budgetProducts[i].id
+    state: 'active'
+  }
+  dependsOn: [
+    budgetProductApis
+  ]
+}]
+
+output budgetScopeSubscriptionNames array = [for (scope, i) in tokenBudgetScopes: budgetSubscriptions[i].name]
+output tokenBudgetDemoEnabled bool = tokenBudgetDemoEnabled
 output inferenceApiName string = api.name
 output inferenceApiPath string = api.properties.path
 // NOTE: The Azure OpenAI SDK (AzureOpenAIClient) appends '/openai/deployments/{id}/...'

@@ -1,0 +1,10 @@
+        <!-- Token budget (#332), normal mode. The counter key is the APIM subscription id, which is
+             trusted gateway context (one subscription per store/channel/application/B2B product).
+             No request header, body field or query string participates in the key. -->
+        <set-variable name="rp-budget-mode" value="normal" />
+        <llm-token-limit counter-key="@(context.Subscription.Id)"
+            tokens-per-minute="{tokens-per-minute}" estimate-prompt-tokens="true"
+            tokens-consumed-header-name="x-tokens-consumed"
+            remaining-tokens-variable-name="rp-tokens-remaining"
+            retry-after-header-name="Retry-After"
+            retry-after-variable-name="rp-budget-retry-after" />

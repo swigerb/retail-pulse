@@ -1,0 +1,25 @@
+        <!-- Token budget (#332), operator demo. Only deployed when tokenBudgetDemoEnabled=true and used
+             only while the operator-controlled named value rp-budget-demo-armed is "true". The tiny
+             static TPM comes from rp-budget-demo-tpm. The demo counter key embeds the
+             rp-budget-demo-generation named value so bumping the generation starts a fresh counter
+             immediately (APIM has no documented clear-counter API). Demo and normal counters never mix. -->
+        <choose>
+            <when condition="@(&quot;{{rp-budget-demo-armed}}&quot; == &quot;true&quot;)">
+                <set-variable name="rp-budget-mode" value="demo" />
+                <llm-token-limit counter-key="@(&quot;rp-budget-demo-{{rp-budget-demo-generation}}-&quot; + context.Subscription.Id)"
+                    tokens-per-minute="{{rp-budget-demo-tpm}}" estimate-prompt-tokens="true"
+                    tokens-consumed-header-name="x-tokens-consumed"
+                    remaining-tokens-variable-name="rp-tokens-remaining"
+                    retry-after-header-name="Retry-After"
+                    retry-after-variable-name="rp-budget-retry-after" />
+            </when>
+            <otherwise>
+                <set-variable name="rp-budget-mode" value="normal" />
+                <llm-token-limit counter-key="@(context.Subscription.Id)"
+                    tokens-per-minute="{tokens-per-minute}" estimate-prompt-tokens="true"
+                    tokens-consumed-header-name="x-tokens-consumed"
+                    remaining-tokens-variable-name="rp-tokens-remaining"
+                    retry-after-header-name="Retry-After"
+                    retry-after-variable-name="rp-budget-retry-after" />
+            </otherwise>
+        </choose>

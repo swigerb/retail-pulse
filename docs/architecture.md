@@ -189,7 +189,7 @@ Retail Pulse uses Azure API Management as an AI Gateway following the [Azure-Sam
 1. **RetailPulse API** sends chat completion requests to APIM using the Azure OpenAI SDK
 2. **APIM** validates the `api-key` header (subscription key)
 3. **AI Gateway policies** apply (see [`infra/modules/apim-openai-policy.xml`](../infra/modules/apim-openai-policy.xml)):
-   - `azure-openai-token-limit`: Rate limits to **80,000 tokens per minute** per subscription by default (`tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`)
+   - `llm-token-limit`: Rate limits to **80,000 tokens per minute** per subscription (one counter per store/channel/application/B2B scope, see [token-budgets.md](token-budgets.md)) by default (`tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`)
    - `azure-openai-emit-token-metric`: Emits token usage metrics to Application Insights `customMetrics`
    - Circuit breaker: Trips on 429s for 1 minute
 4. **APIM** forwards to Azure AI Foundry using its managed identity (no keys in transit)

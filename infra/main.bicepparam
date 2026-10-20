@@ -16,6 +16,13 @@ param aiFoundryResourceGroupName = readEnvironmentVariable('AZURE_OPENAI_RESOURC
 // Model deployment consumed by the API through APIM. Overridable via `azd env set`.
 param apimBackendPoolEnabled = toLower(readEnvironmentVariable('AZURE_APIM_BACKEND_POOL_ENABLED', 'false')) == 'true'
 param apimFailoverDemoEnabled = toLower(readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_ENABLED', 'false')) == 'true'
+param apimTokenBudgetDemoEnabled = toLower(readEnvironmentVariable('AZURE_APIM_TOKEN_BUDGET_DEMO_ENABLED', 'false')) == 'true'
+param apimTokenBudgetDemoTokensPerMinute = int(readEnvironmentVariable('AZURE_APIM_TOKEN_BUDGET_DEMO_TPM', '50'))
+param apimTokenBudgetScopes = [
+  { kind: 'store', id: 'store-1042', displayName: 'Fictional Store 1042' }
+  { kind: 'channel', id: 'ecommerce', displayName: 'E-commerce channel' }
+  { kind: 'b2b', id: 'contoso-wholesale', displayName: 'Contoso Wholesale (B2B)' }
+]
 param apimFailoverDemoKey = readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_KEY', '')
 param secondaryAiFoundryAccountName = readEnvironmentVariable('AZURE_OPENAI_SECONDARY_ACCOUNT_NAME', '')
 param secondaryAiFoundryResourceGroupName = readEnvironmentVariable('AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME', readEnvironmentVariable('AZURE_OPENAI_RESOURCE_GROUP_NAME', 'rg-repodigest-agents-demo-eus-001'))

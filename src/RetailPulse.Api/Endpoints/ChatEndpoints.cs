@@ -972,12 +972,14 @@ public static class ChatEndpoints
                 // routing classification OR agent execution). Return a proper 429 so
                 // the frontend can show a retry prompt instead of crashing to debugger.
                 logger.LogWarning(ex, "Rate-limited (429) during chat for session {SessionId}", request.SessionId);
+                GatewayErrorShaper.RateLimited limited = GatewayErrorShaper.ClassifyRateLimit(GatewayEvidenceCollector.Current());
+                if (limited.RetryAfterSeconds is { } retryAfter)
+                {
+                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+
                 return Results.Json(
-                    new
-                    {
-                        error = "The AI service is experiencing high demand. Please wait 30 seconds and try again.",
-                        code = "rate_limited"
-                    },
+                    new { error = limited.Message, code = limited.Code, retryAfterSeconds = limited.RetryAfterSeconds, gateway = limited.Gateway },
                     statusCode: StatusCodes.Status429TooManyRequests);
             }
             catch (ClientResultException ex)
@@ -1161,16 +1163,22 @@ public static class ChatEndpoints
             catch (ClientResultException ex) when (ex.Status == 429)
             {
                 logger.LogWarning(ex, "Rate-limited (429) during streaming chat for session {SessionId}", request.SessionId);
+                GatewayErrorShaper.RateLimited limited = GatewayErrorShaper.ClassifyRateLimit(GatewayEvidenceCollector.Current());
+                if (limited.RetryAfterSeconds is { } retryAfter)
+                {
+                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+
                 try
                 {
                     IHubContext<StreamingHub>? hub = app.Services.GetService<IHubContext<StreamingHub>>();
                     if (hub is not null && request.SessionId is not null)
-                        await StreamingEvents.SendErrorAsync(hub, request.SessionId, "The AI service is experiencing high demand. Please wait 30 seconds and try again.");
+                        await StreamingEvents.SendErrorAsync(hub, request.SessionId, limited.Message);
                 }
                 catch { /* best-effort notification */ }
 
                 return Results.Json(
-                    new { error = "The AI service is experiencing high demand. Please wait 30 seconds and try again.", code = "rate_limited" },
+                    new { error = limited.Message, code = limited.Code, retryAfterSeconds = limited.RetryAfterSeconds, gateway = limited.Gateway },
                     statusCode: StatusCodes.Status429TooManyRequests);
             }
             catch (ClientResultException ex)

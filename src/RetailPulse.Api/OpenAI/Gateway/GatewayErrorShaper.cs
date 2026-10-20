@@ -15,6 +15,32 @@ public static class GatewayErrorShaper
     public const string Rejected = "gateway_safety_rejected";
     public const string Unavailable = "gateway_safety_unavailable";
 
+    public const string TokenBudgetExceeded = "gateway_token_budget_exceeded";
+
+    public sealed record RateLimited(string Code, string Message, long? RetryAfterSeconds, GatewayEvidence? Gateway);
+
+    /// <summary>
+    /// Shapes a 429. A throttle that APIM attributed to a token budget keeps a distinct code, the scope kind,
+    /// the numeric retry-after and the allow-listed evidence; any other 429 keeps the generic rate_limited code.
+    /// </summary>
+    public static RateLimited ClassifyRateLimit(GatewayEvidence? snapshot)
+    {
+        GatewayCallEvidence? call = snapshot?.Calls.LastOrDefault(c =>
+            c.StatusCode == 429 && c.Quota == GatewayOutcome.Throttled && c.Budget is not null);
+        if (call?.Budget is not { } budget)
+        {
+            return new RateLimited("rate_limited", "The AI service is experiencing high demand. Please wait 30 seconds and try again.", null, snapshot);
+        }
+
+        string wait = budget.RetryAfterSeconds is { } s ? $"Retry in {s} seconds." : "Retry shortly.";
+        string mode = budget.Mode == GatewayBudgetMode.Demo ? " (demo limit)" : string.Empty;
+        return new RateLimited(
+            TokenBudgetExceeded,
+            $"The token budget for this {budget.ScopeKind.ToString().ToLowerInvariant()} scope is exhausted{mode}. {wait}",
+            budget.RetryAfterSeconds,
+            snapshot);
+    }
+
     public sealed record Shaped(string Code, string Message, GatewayEvidence? Gateway);
 
     public static Shaped Classify(int status, string fallbackCode, string fallbackMessage, GatewayEvidence? snapshot)

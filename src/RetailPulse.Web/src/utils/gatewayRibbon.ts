@@ -12,7 +12,7 @@ export type GatewayDisplayState =
   | 'unknown';
 
 export interface GatewayRibbonItem {
-  key: 'route' | 'tokens' | 'cache' | 'safety' | 'gatewaySafety' | 'failover' | 'policy' | 'correlation';
+  key: 'route' | 'tokens' | 'budget' | 'cache' | 'safety' | 'gatewaySafety' | 'failover' | 'policy' | 'correlation';
   label: string;
   value: string;
   state: GatewayDisplayState | 'neutral';
@@ -23,6 +23,17 @@ export interface GatewayRibbonModel {
   statusLabel: string;
   items: GatewayRibbonItem[];
   truncatedNote?: string;
+  /** Present only when a token budget throttled a call; drives the quota-state walkthrough. */
+  quota?: GatewayQuotaState;
+}
+
+export interface GatewayQuotaState {
+  scopeLabel: string;
+  modeLabel: string;
+  retryAfterSeconds: number | null;
+  remaining: number | null;
+  /** Ordered reset walkthrough; normal Retry-After first, demo-only generation reset second. */
+  steps: string[];
 }
 
 const UNAVAILABLE = 'Unavailable';
@@ -101,6 +112,37 @@ function gatewaySafetyItem(calls: GatewayCallEvidence[]): GatewayRibbonItem {
   return { key, label, value: 'Allowed — input and output checked', state: 'neutral' };
 }
 
+const SCOPE_LABELS = { store: 'Store', channel: 'Channel', application: 'Application', b2b: 'B2B account' } as const;
+
+function budgetItem(calls: GatewayCallEvidence[]): GatewayRibbonItem | null {
+  const call = [...calls].reverse().find(c => c.budget);
+  const b = call?.budget;
+  if (!b) return null;
+  const parts = [`${SCOPE_LABELS[b.scopeKind]} scope`, b.mode === 'demo' ? 'Demo limit' : 'Normal limit'];
+  const throttled = calls.some(c => c.quota === 'throttled');
+  if (throttled && b.retryAfterSeconds != null) parts.push(`retry in ${b.retryAfterSeconds}s`);
+  return { key: 'budget', label: 'Budget', value: parts.join(' · '), state: throttled ? 'throttled' : 'observed' };
+}
+
+function quotaState(calls: GatewayCallEvidence[]): GatewayQuotaState | undefined {
+  const call = [...calls].reverse().find(c => c.quota === 'throttled' && c.budget);
+  const b = call?.budget;
+  if (!call || !b) return undefined;
+  const wait = b.retryAfterSeconds != null ? `${b.retryAfterSeconds} seconds` : 'the Retry-After interval';
+  const steps = [`Normal reset: wait ${wait}; the per-minute token window then admits calls again.`];
+  if (b.mode === 'demo') {
+    steps.push('Demo reset: an operator bumps the rp-budget-demo-generation named value for an immediate fresh counter (APIM has no clear-counter API), or disarms rp-budget-demo-armed.');
+  }
+  steps.push('Counters are gateway-local: another region or gateway resource keeps its own counter.');
+  return {
+    scopeLabel: SCOPE_LABELS[b.scopeKind],
+    modeLabel: b.mode === 'demo' ? 'Demo limit' : 'Normal limit',
+    retryAfterSeconds: b.retryAfterSeconds ?? null,
+    remaining: call.tokensRemaining ?? null,
+    steps,
+  };
+}
+
 /** Pure mapping from the gateway contract to display state; never invents values. */
 export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined): GatewayRibbonModel {
   const calls = gateway?.calls ?? [];
@@ -161,6 +203,7 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
   if (remaining != null) tokenParts.push(`${remaining.toLocaleString()} left`);
   const tokenValue = tokenParts.length ? tokenParts.join(' · ') : UNAVAILABLE;
 
+  const budget = budgetItem(calls);
   const ids = distinct(calls.map(c => c.gatewayRequestId));
   const policies = distinct(calls.map(c => c.policyVersion));
   const outcomeUnavailable = state === 'failed' && !hasCalls;
@@ -184,6 +227,7 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
       value: throttled ? `Throttled · ${tokenValue}` : tokenValue,
       state: throttled ? 'throttled' : tokenParts.length ? 'observed' : 'unavailable',
     },
+    ...(budget ? [budget] : []),
     cache,
     safety,
     outcomeUnavailable ? placeholder('gatewaySafety', 'Gateway safety') : gatewaySafetyItem(calls),
@@ -211,5 +255,5 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
     ? `${gateway.droppedCalls > 0 ? `${gateway.droppedCalls} ` : 'Some '}gateway call${gateway.droppedCalls === 1 ? '' : 's'} not listed`
     : undefined;
 
-  return { state, statusLabel: STATUS_LABELS[state], items, truncatedNote: hidden };
+  return { state, statusLabel: STATUS_LABELS[state], items, truncatedNote: hidden, quota: quotaState(calls) };
 }

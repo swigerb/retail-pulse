@@ -2,7 +2,7 @@
   Operation-scope policy for the `listModels` readiness probe.
 
   This deliberately does NOT include <base /> in <inbound>. The API-scope policy
-  applies `azure-openai-token-limit` and `azure-openai-emit-token-metric`, both of
+  applies `llm-token-limit` and `azure-openai-emit-token-metric`, both of
   which are defined only for Azure OpenAI inference payloads - they parse a chat
   request body to estimate and meter prompt tokens. A token-free GET has no such
   body, so inheriting them would meter a non-inference call and risk a policy fault

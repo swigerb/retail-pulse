@@ -211,7 +211,7 @@ az rest `
 
 ### Goal
 
-Intentionally exceed the configured TPM policy and prove APIM returns `429` plus `Retry-After`, showing the `azure-openai-token-limit` policy is active.
+Intentionally exceed the configured TPM policy and prove APIM returns `429` plus `Retry-After`, showing the `llm-token-limit` policy is active.
 
 ### Commands
 

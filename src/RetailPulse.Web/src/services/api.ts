@@ -195,7 +195,7 @@ function parseGatewayError(text: string): { code: string | null; gateway: Gatewa
     const obj = JSON.parse(text) as Record<string, unknown>;
     const gateway = normalizeGatewayEvidence(obj.gateway);
     const code = typeof obj.code === 'string' ? obj.code : null;
-    return gateway && gateway.calls.some(c => c.gatewaySafety) ? { code, gateway } : null;
+    return gateway && gateway.calls.some(c => c.gatewaySafety || c.budget) ? { code, gateway } : null;
   } catch {
     return null;
   }

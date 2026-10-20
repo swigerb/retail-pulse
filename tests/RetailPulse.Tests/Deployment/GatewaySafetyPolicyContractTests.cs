@@ -44,7 +44,7 @@ public sealed class GatewaySafetyPolicyContractTests
             .And.BeLessThan(BasePolicy.IndexOf("<set-backend-service", StringComparison.Ordinal),
                 "a blocked prompt must never reach backend selection, so the model is not invoked");
         BasePolicy.IndexOf("{safety-inbound}", StringComparison.Ordinal)
-            .Should().BeLessThan(BasePolicy.IndexOf("<azure-openai-token-limit", StringComparison.Ordinal));
+            .Should().BeLessThan(BasePolicy.IndexOf("{budget-limit}", StringComparison.Ordinal));
         BasePolicy.IndexOf("{safety-inbound}", StringComparison.Ordinal)
             .Should().BeGreaterThan(BasePolicy.IndexOf("x-rp-gw-safety-output-checked", StringComparison.Ordinal),
                 "spoofable caller evidence headers are stripped first");

@@ -92,6 +92,31 @@ public sealed record GatewaySafetyEvidence(
     long? LatencyMs,
     bool? OutputChecked);
 
+/// <summary>Kind of token-budget scope (#332). Never an identifier: counters and subscription ids are not exposed.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<GatewayBudgetScopeKind>))]
+public enum GatewayBudgetScopeKind
+{
+    [JsonStringEnumMemberName("store")] Store = 0,
+    [JsonStringEnumMemberName("channel")] Channel,
+    [JsonStringEnumMemberName("application")] Application,
+    [JsonStringEnumMemberName("b2b")] B2b,
+}
+
+/// <summary>Whether the call was governed by the normal production limit or the operator demo limit.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<GatewayBudgetMode>))]
+public enum GatewayBudgetMode
+{
+    [JsonStringEnumMemberName("normal")] Normal = 0,
+    [JsonStringEnumMemberName("demo")] Demo,
+}
+
+/// <summary>
+/// Privacy-safe token-budget evidence (#332): scope kind, demo/normal mode and, only when the gateway
+/// published a numeric value, the seconds until the limiter admits calls again. Consumed and remaining
+/// tokens stay on <see cref="GatewayCallEvidence"/>; a null <see cref="RetryAfterSeconds"/> is unknown.
+/// </summary>
+public sealed record GatewayBudgetEvidence(GatewayBudgetScopeKind ScopeKind, GatewayBudgetMode Mode, long? RetryAfterSeconds);
+
 /// <summary>
 /// Privacy-safe evidence of the decisions APIM made for one gateway call. Carries no
 /// subscription identifiers, secrets, prompts, completions, backend credentials, or
@@ -113,7 +138,8 @@ public sealed record GatewayCallEvidence(
     GatewayEvidenceStatus Status = GatewayEvidenceStatus.Observed,
     string? TransportError = null,
     GatewayFailoverDemoEvidence? FailoverDemo = null,
-    GatewaySafetyEvidence? GatewaySafety = null)
+    GatewaySafetyEvidence? GatewaySafety = null,
+    GatewayBudgetEvidence? Budget = null)
 {
     /// <summary>True when the response carried no gateway evidence at all.</summary>
     [JsonIgnore]
@@ -122,7 +148,7 @@ public sealed record GatewayCallEvidence(
         && TokensConsumed is null && TokensRemaining is null && Quota == GatewayOutcome.Unknown
         && Cache == GatewayOutcome.Unknown && Safety == GatewayOutcome.Unknown
         && PolicyVersion is null && GatewayLatencyMs is null && BackendLatencyMs is null
-        && GatewaySafety is null;
+        && GatewaySafety is null && Budget is null;
 
     public static GatewayCallEvidence Empty(GatewayEvidenceStatus status, int? statusCode = null, string? transportError = null) =>
         new(null, null, GatewayRouteState.Unknown, null, null, GatewayOutcome.Unknown, GatewayOutcome.Unknown,
