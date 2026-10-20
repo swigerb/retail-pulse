@@ -47,7 +47,7 @@ Re-key the existing `azure-openai-token-limit` from subscription id to a per-cha
 Provision one Azure API Center (Bicep) with a system-assigned identity and an APIM API source integration so APIM APIs and MCP servers are synchronized continuously. Validation (#336) checks that the Retail Pulse MCP server appears with its metadata.
 
 ### 2.6 Governed MCP (#334, #335)
-**Superseded by [ADR 017](../adr/017-governed-apim-mcp-runtime.md): APIM exposes the allow-listed operations of the public API using its managed identity; the MCP app stays internal. The text below is the original, rejected option (a).** **Decision: option (a), external ingress locked down to APIM.** APIM is public (`virtualNetworkType: None`) and the Container Apps environment has no VNet, so an `external: false` app is not addressable from APIM. We keep the demo networking decision (no VNet) and set the MCP app to external ingress restricted so only APIM can use it: the Container App IP restriction allows only APIM's outbound public IP(s) (confirm the Developer SKU address in #334), and the MCP app still requires its API-key secret, which APIM injects from a named value backed by Key Vault or a secret store. VNet integration for both APIM and the environment is the production alternative (§5) and is not part of this epic. The MCP server's ingress is therefore **changed**, not unchanged (§3).
+**Decided in [ADR 017](../adr/017-governed-apim-mcp-runtime.md) (Proposed):** APIM exposes four allow-listed, read-only operations of the public Retail Pulse API as an MCP server, authenticating with its system-assigned managed identity (Entra app-only token). The MCP app stays `external: false` with its API-key secret; it is not exposed, IP-restricted, or addressed by APIM. No VNet is introduced. VNet integration for APIM and the environment is the production alternative (§5) and is not part of this epic.
 
 Clients authenticate to APIM (subscription key plus Entra token validation via `validate-jwt`). APIM exposes only an explicit allow-list of read-only operations as MCP tools; no tool is exposed implicitly. #334 records the IP restriction and verifies that direct calls to the MCP FQDN without the key, or from other IPs, fail.
 
@@ -62,9 +62,9 @@ Each pack uses public company name only plus fully synthetic data, with the unof
 
 ## 3. What changes and what stays unchanged
 
-Changes: the MCP app ingress (external, APIM-only, §2.6), prompt-body and client-IP logging defaults, the token-limit key, APIM Bicep and policy XML (pool, safety, budgets, cache, evidence headers, MCP), new API Center and cache Bicep modules, an API evidence-forwarding path, a Web ribbon, retailer packs, acceptance tests and walkthrough docs.
+Changes: prompt-body and client-IP logging defaults, the token-limit key, APIM Bicep and policy XML (pool, safety, budgets, cache, evidence headers, MCP), new API Center and cache Bicep modules, an API evidence-forwarding path, a Web ribbon, retailer packs, acceptance tests and walkthrough docs.
 
-Unchanged: the application-level guardrails, existing content-pack loading, telemetry and OpenTelemetry pipeline, authentication (Entra) behavior, existing APIM invariants (managed-identity backend auth, token metrics, subscription-key requirement), and all package versions.
+Unchanged: the MCP app ingress and API key (internal; APIM reaches the data through the public API, §2.6), the application-level guardrails, existing content-pack loading, telemetry and OpenTelemetry pipeline, authentication (Entra) behavior, existing APIM invariants (managed-identity backend auth, token metrics, subscription-key requirement), and all package versions.
 
 ## 4. Dependency waves
 
@@ -89,21 +89,21 @@ Priority mapping: P1 ribbon → #327, #328; P2 failover → #329, #330; P3 safet
 | Topic | Demo decision | Production decision |
 | --- | --- | --- |
 | APIM SKU | Keep Developer (cost; no SLA). | Choose the tier per feature: verify support for VNet injection versus outbound-only integration, backend pools, `llm-content-safety`, semantic cache, API Center sync and MCP export against the linked docs. Not every tier with an SLA supports private ingress. |
-| Networking | Public network access stays enabled; protected by subscription key plus Entra. | Private ingress on a tier that supports it, VNet integration for APIM and the Container Apps environment (replacing the §2.6 IP-restricted external MCP ingress), and restricted public access. |
+| Networking | Public network access stays enabled; protected by subscription key plus Entra. | Private ingress on a tier that supports it, VNet integration for APIM and the Container Apps environment (replacing the managed-identity-to-public-API path of §2.6), and restricted public access. |
 | Backend pool | Two deployments in one region. | Multi-region deployments. |
 | Quota counters | Per-gateway-instance counters, acceptable on one unit. | Account for per-gateway counters in multi-region/multi-unit deployments, or enforce a central quota. |
 | Semantic cache | Small external cache, synthetic data only; prompt text persists in Redis with short TTL. | Sized, access-controlled cache with data-classification review. |
 | Logging | Today bodies (8192 bytes) and client IPs are logged (§1); #337 changes the demo default to metadata and token metrics only (no body capture); regulated mode additionally disables `logClientIp`, always bypasses semantic cache, tightens thresholds and shortens retention. | Metadata only; bodies opt-in only with approved retention. |
-| MCP | Read-only allow-listed tools behind APIM; MCP ingress external but APIM-only. | Add per-tool authorization and rate limits. |
+| MCP | Read-only allow-listed tools behind APIM; MCP app stays internal; APIM exposes it through the public API with managed identity (ADR 017). | Add per-tool authorization and rate limits. |
 
-Preconditions: confirm the Developer SKU supports each proposed policy (semantic cache needs an external cache; `llm-content-safety`; MCP export) in #329, #331 and #335 before relying on it, and document any limitation.
+Preconditions: confirm the Developer SKU supports each proposed policy (semantic cache needs an external cache; `llm-content-safety`; MCP export, confirmed supported on Developer per ADR 017) in #329, #331 and #335 before relying on it, and document any limitation.
 
 ## 6. Risks and mitigations
 
 | Risk | Mitigation |
 | --- | --- |
 | Prompt-body logging leaks sensitive text | Evidence headers and diagnostics carry metadata only; existing body capture (8192 bytes) and `logClientIp` body capture is disabled by #337 in both demo and regulated modes (`logClientIp` in regulated mode); tests assert absence of body text in headers and logs. |
-| Public APIM network posture | Keep subscription key plus JWT validation; MCP app is externally reachable but IP-restricted to APIM and key-protected; document as demo-only; no secrets in headers; production table above requires private networking. |
+| Public APIM network posture | Keep subscription key plus JWT validation; MCP app stays internal and key-protected (APIM uses the public API with managed identity, ADR 017); document as demo-only; no secrets in headers; production table above requires private networking. |
 | API Center synchronization delay | Treat sync as eventually consistent; #336 polls with a bounded timeout and the walkthrough waits for the sync before showing discovery; no demo step assumes instant propagation. |
 | APIM gateway-local quota counters | Token-limit counters are tracked per gateway instance, so limits are approximate across instances; demo uses a single unit and states this; production uses guidance above. |
 | Semantic-cache safety | Explicit eligibility/bypass rules, per-tenant `vary-by` partitioning, safety verdict must pass before store, regulated mode always bypasses, similarity threshold set conservatively, TTL short; Redis holds prompt-derived text so encryption and bounded retention apply. |
