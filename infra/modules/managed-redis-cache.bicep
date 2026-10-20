@@ -7,9 +7,6 @@ param resourceToken string
 @description('Common tags applied to every resource.')
 param tags object
 
-@description('Principal ID of the APIM system-assigned identity that is granted data access.')
-param apimPrincipalId string
-
 @description('Azure Managed Redis SKU. Balanced_B0 is the lowest SKU that can host the RediSearch module APIM semantic caching needs.')
 @allowed([
   'Balanced_B0'
@@ -23,17 +20,24 @@ param skuName string = 'Balanced_B0'
 @maxValue(86400)
 param defaultTtlSeconds int = 300
 
-@description('Public network access. Disabled by default; supply privateEndpointSubnetId so APIM reaches the cache privately.')
+@description('Public network access. Disabled by default (fail closed): Disabled requires privateEndpointSubnetId and privateDnsZoneId, otherwise the deployment fails. Enabled must be chosen explicitly and exposes the TLS + access-key endpoint to the internet.')
 @allowed([
   'Disabled'
   'Enabled'
 ])
 param publicNetworkAccess string = 'Disabled'
 
-@description('Optional subnet resource ID for a private endpoint to the cache. Empty creates no private endpoint.')
+@description('Subnet resource ID for the cache private endpoint. Required when publicNetworkAccess is Disabled.')
 param privateEndpointSubnetId string = ''
 
+@description('Resource ID of an existing privatelink.redis.azure.net private DNS zone (already linked to the VNet APIM resolves from). Required when publicNetworkAccess is Disabled.')
+param privateDnsZoneId string = ''
+
 var redisName = 'redis-${resourceToken}'
+var usePrivateEndpoint = publicNetworkAccess == 'Disabled'
+var networkPostureValid = !usePrivateEndpoint || (!empty(privateEndpointSubnetId) && !empty(privateDnsZoneId))
+// Evaluated by the cache resource, so an invalid posture fails the deployment before anything is created.
+var validatedPublicNetworkAccess = networkPostureValid ? publicNetworkAccess : string(json('{"error": "publicNetworkAccess=Disabled requires privateEndpointSubnetId and privateDnsZoneId"'))
 
 resource redis 'Microsoft.Cache/redisEnterprise@2025-07-01' = {
   name: redisName
@@ -42,12 +46,9 @@ resource redis 'Microsoft.Cache/redisEnterprise@2025-07-01' = {
   sku: {
     name: skuName
   }
-  identity: {
-    type: 'SystemAssigned'
-  }
   properties: {
     minimumTlsVersion: '1.2'
-    publicNetworkAccess: publicNetworkAccess
+    publicNetworkAccess: validatedPublicNetworkAccess
   }
 }
 
@@ -59,8 +60,10 @@ resource database 'Microsoft.Cache/redisEnterprise/databases@2025-07-01' = {
     port: 10000
     clusteringPolicy: 'EnterpriseCluster'
     evictionPolicy: 'NoEviction'
-    // Access keys stay disabled: callers authenticate with Entra identities only.
-    accessKeysAuthentication: 'Disabled'
+    // APIM external cache / semantic caching only supports a Redis connection
+    // string with an access key (no Entra auth). Keys are enabled on the service
+    // but never emitted; the connection string must be supplied to APIM out of band.
+    accessKeysAuthentication: 'Enabled'
     modules: [
       {
         name: 'RediSearch'
@@ -69,18 +72,7 @@ resource database 'Microsoft.Cache/redisEnterprise/databases@2025-07-01' = {
   }
 }
 
-resource apimAccess 'Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments@2025-07-01' = {
-  parent: database
-  name: guid(redis.id, apimPrincipalId, 'default')
-  properties: {
-    accessPolicyName: 'default'
-    user: {
-      objectId: apimPrincipalId
-    }
-  }
-}
-
-resource privateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (!empty(privateEndpointSubnetId)) {
+resource privateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (usePrivateEndpoint) {
   name: 'pe-${redisName}'
   location: location
   tags: tags
@@ -102,9 +94,25 @@ resource privateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (!
   }
 }
 
+resource dnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = if (usePrivateEndpoint) {
+  parent: privateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'redis'
+        properties: {
+          privateDnsZoneId: privateDnsZoneId
+        }
+      }
+    ]
+  }
+}
+
 output name string = redis.name
 output resourceId string = redis.id
 output hostName string = redis.properties.hostName
 output port int = database.properties.port
 output defaultTtlSeconds int = defaultTtlSeconds
 output publicNetworkAccess string = publicNetworkAccess
+output networkPosture string = usePrivateEndpoint ? 'PrivateEndpoint' : 'Public'

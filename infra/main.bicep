@@ -135,8 +135,11 @@ param semanticCacheTtlSeconds int = 300
 @description('Public network access for the semantic cache. Disabled by default.')
 param semanticCachePublicNetworkAccess string = 'Disabled'
 
-@description('Optional subnet resource ID for a private endpoint to the semantic cache.')
+@description('Subnet resource ID for the semantic cache private endpoint. Required when semanticCachePublicNetworkAccess is Disabled.')
 param semanticCachePrivateEndpointSubnetId string = ''
+
+@description('Private DNS zone (privatelink.redis.azure.net) resource ID for the semantic cache private endpoint. Required when semanticCachePublicNetworkAccess is Disabled.')
+param semanticCachePrivateDnsZoneId string = ''
 
 @description('Location for Azure API Center (supported in a limited set of regions, so independent of the primary location).')
 param apiCenterLocation string = 'eastus'
@@ -340,9 +343,9 @@ output AZURE_AI_SEARCH_NAME string = aiSearchEnabled ? aiSearch!.outputs.name : 
 output AZURE_AI_SEARCH_RESOURCE_ID string = aiSearchEnabled ? aiSearch!.outputs.resourceId : ''
 
 // ── Optional Azure Managed Redis semantic cache (issue #338) ───────────────
-// Provisioned only when semanticCacheEnabled = true. Access keys are disabled
-// and APIM's system identity is the only data principal; no key or connection
-// string is emitted. Outputs are empty/zero when disabled.
+// Provisioned only when semanticCacheEnabled = true. APIM semantic caching
+// supports only access-key (connection string) auth to Redis, so keys are
+// enabled on the service but no key or connection string is ever emitted. Outputs are empty/zero when disabled.
 module semanticCache './modules/managed-redis-cache.bicep' = if (semanticCacheEnabled) {
   name: 'semantic-cache'
   scope: rg
@@ -350,11 +353,11 @@ module semanticCache './modules/managed-redis-cache.bicep' = if (semanticCacheEn
     location: location
     resourceToken: resourceToken
     tags: tags
-    apimPrincipalId: apim.outputs.apimPrincipalId
     skuName: semanticCacheSku
     defaultTtlSeconds: semanticCacheTtlSeconds
     publicNetworkAccess: semanticCachePublicNetworkAccess
     privateEndpointSubnetId: semanticCachePrivateEndpointSubnetId
+    privateDnsZoneId: semanticCachePrivateDnsZoneId
   }
 }
 

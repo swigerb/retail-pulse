@@ -655,10 +655,13 @@ deploy loudly rather than proceeding with a broken registry configuration.
 | `AZURE_SEMANTIC_CACHE_SKU` | `Balanced_B0` (lowest Azure Managed Redis SKU with the RediSearch module) |
 | `AZURE_SEMANTIC_CACHE_TTL_SECONDS` | `300` (60–86400) |
 | `AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS` | `Disabled` |
-| `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` | empty (no private endpoint) |
+| `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` | empty (required when public access is Disabled) |
+| `AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID` | empty (required when public access is Disabled) |
 
-Security: TLS 1.2 only, encrypted client protocol, access keys disabled, and the APIM system identity is the only data principal. No key or connection string is emitted; outputs are `AZURE_SEMANTIC_CACHE_{ENABLED,NAME,RESOURCE_ID,HOST,TTL_SECONDS}`. With public access disabled, supply a private-endpoint subnet (and private DNS) before wiring APIM.
+Authentication: APIM external cache and semantic caching currently support only a Redis connection string with an access key; APIM does not support Microsoft Entra authentication to Azure Managed Redis. The database therefore has access-key authentication **enabled** (TLS 1.2, encrypted client protocol). No key or connection string is emitted by Bicep or azd outputs, and the module does not wire APIM to the cache: an operator must add the connection string to APIM out of band (for example a Key Vault-backed named value) after cost approval. Outputs are `AZURE_SEMANTIC_CACHE_{ENABLED,NAME,RESOURCE_ID,HOST,TTL_SECONDS}`.
 
-**Cost class:** a small, continuously billed, always-on Azure Managed Redis instance (roughly tens of USD per month for Balanced_B0; confirm current regional pricing). The live deployment issue must record an explicit cost approval before enabling.
+Network (fail closed): with `AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS=Disabled` (default) both `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` and `AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID` (an existing `privatelink.redis.azure.net` zone linked to the VNet) are required, otherwise provisioning fails before creating the cache. The zone-to-VNet link is owned by the zone owner. The APIM instance in this repo is Developer/non-VNet, so it cannot reach a private endpoint; private mode is only usable once APIM is network-connected to that VNet. Setting `Enabled` is an explicit opt-in that exposes the TLS + access-key endpoint publicly.
 
-**Teardown:** `azd env set AZURE_SEMANTIC_CACHE_ENABLED false && azd provision`, or delete directly: `az redisenterprise delete --name redis-<token> --resource-group rg-<env> --yes`. `azd down` also removes it.
+**Cost class:** a small, continuously billed, always-on Azure Managed Redis instance (roughly tens of USD per month for Balanced_B0; confirm current regional pricing; a private endpoint and its DNS zone group add further billed resources). The live deployment issue must record an explicit cost approval before enabling.
+
+**Teardown:** `azd env set AZURE_SEMANTIC_CACHE_ENABLED false && azd provision`, or delete directly: `az redisenterprise delete --name redis-<token> --resource-group rg-<env> --yes`. `azd down` also removes it. Also remove the private endpoint and any APIM named value holding the connection string, and rotate the access keys; the DNS zone is not owned by this module.
