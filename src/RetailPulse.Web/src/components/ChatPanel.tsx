@@ -663,6 +663,7 @@ export function ChatPanel({
               role: 'assistant' as const,
               content: suspended.message ?? 'Plan awaiting review.',
               planId: suspended.planId,
+              gateway: null,
             },
           ]);
           return;

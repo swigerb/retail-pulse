@@ -107,6 +107,9 @@ describe('GatewayControlRoom', () => {
     renderRibbon(evidence({ truncated: true, droppedCalls: 2 }));
     expect(screen.getByTestId('gateway-status')).toHaveTextContent('Truncated');
     expect(screen.getByTestId('gateway-truncated')).toHaveTextContent('2 gateway calls not listed');
+    expect(item('route')).toHaveTextContent('Partial');
+    expect(item('route')).toHaveAttribute('data-item-state', 'unknown');
+    expect(item('failover')).toHaveTextContent('Unknown');
   });
 
   it('marks unknown values as unknown, not success', () => {
@@ -123,5 +126,13 @@ describe('GatewayControlRoom', () => {
     renderRibbon(evidence({}, [call(), call({ gatewayRequestId: 'req-456', backendAlias: 'gpt-fast' })]));
     expect(item('route')).toHaveTextContent('gpt-primary +1');
     expect(item('correlation')).toHaveTextContent('req-123 +1');
+  });
+
+  it('does not claim a primary route or no failover when evidence is partial', () => {
+    renderRibbon(evidence({}, [call(), call({ route: 'unknown', backendAlias: null })]));
+    expect(item('route')).toHaveTextContent('gpt-primary (Partial)');
+    expect(item('route')).toHaveAttribute('data-item-state', 'unknown');
+    expect(item('failover')).toHaveTextContent('Unknown');
+    expect(item('failover')).toHaveAttribute('data-item-state', 'unknown');
   });
 });

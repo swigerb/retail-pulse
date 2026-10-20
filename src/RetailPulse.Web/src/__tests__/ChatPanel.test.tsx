@@ -568,6 +568,8 @@ describe('ChatPanel', () => {
       expect.objectContaining({ planId: 'plan-77', sessionId: 'sess-77' }),
     );
     expect(await screen.findByText(/awaiting reviewer input/i)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Gateway Control Room: Metadata unavailable' }))
+      .toBeInTheDocument();
   });
 });
 

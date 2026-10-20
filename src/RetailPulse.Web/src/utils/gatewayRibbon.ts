@@ -107,7 +107,7 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
   const backends = distinct(calls.map(c => c.backendAlias));
   const routes = distinct(calls.map(c => c.route));
   const failedOver = routes.includes('failover');
-  const allUnknownRoute = routes.every(r => r === 'unknown');
+  const incompleteRoute = Boolean(gateway?.truncated) || routes.length === 0 || routes.includes('unknown');
   const routeLabel = (r: string) => (r === 'failover' ? 'Failover' : r === 'primary' ? 'Primary' : UNKNOWN);
   const throttled = calls.some(c => c.quota === 'throttled');
 
@@ -128,10 +128,12 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
     {
       key: 'route',
       label: 'Route',
-      value: backends.length
-        ? `${join(backends, '')}${allUnknownRoute ? '' : ` (${routeLabel(failedOver ? 'failover' : routes[0])})`}`
-        : allUnknownRoute ? UNKNOWN : routeLabel(failedOver ? 'failover' : routes[0]),
-      state: backends.length || !allUnknownRoute ? 'observed' : 'unknown',
+      value: failedOver
+        ? backends.length ? `${join(backends, '')} (Failover)` : 'Failover'
+        : incompleteRoute
+          ? backends.length ? `${join(backends, '')} (Partial)` : UNKNOWN
+          : backends.length ? `${join(backends, '')} (${routeLabel(routes[0])})` : routeLabel(routes[0]),
+      state: failedOver ? 'observed' : incompleteRoute ? 'unknown' : 'observed',
     },
     {
       key: 'tokens',
@@ -144,8 +146,8 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
     {
       key: 'failover',
       label: 'Failover',
-      value: failedOver ? 'Failed over' : allUnknownRoute ? UNKNOWN : 'None',
-      state: failedOver ? 'observed' : allUnknownRoute ? 'unknown' : 'observed',
+      value: failedOver ? 'Failed over' : incompleteRoute ? UNKNOWN : 'None',
+      state: failedOver ? 'observed' : incompleteRoute ? 'unknown' : 'observed',
     },
     {
       key: 'policy',
