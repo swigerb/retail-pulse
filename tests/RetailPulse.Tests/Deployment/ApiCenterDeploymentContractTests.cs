@@ -66,9 +66,9 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
             .Should().Contain("apim", "the link must be ordered after APIM");
 
         // Nested module resources compile to an array (not a symbolic-name map).
-        JsonElement[] inner = deployment.GetProperty("properties").GetProperty("template")
-            .GetProperty("resources").EnumerateArray().ToArray();
-        string[] types = inner.Select(r => r.GetProperty("type").GetString()!).ToArray();
+        JsonElement[] inner = [.. deployment.GetProperty("properties").GetProperty("template")
+            .GetProperty("resources").EnumerateArray()];
+        string[] types = [.. inner.Select(r => r.GetProperty("type").GetString()!)];
         types.Should().Contain("Microsoft.ApiCenter/services");
         types.Should().Contain("Microsoft.Authorization/roleAssignments");
 
@@ -112,7 +112,7 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
         output = string.Empty;
         try
         {
-            var info = OperatingSystem.IsWindows()
+            ProcessStartInfo info = OperatingSystem.IsWindows()
                 ? new ProcessStartInfo("cmd.exe") { ArgumentList = { "/c", "az" } }
                 : new ProcessStartInfo("az");
             foreach (string a in args)
