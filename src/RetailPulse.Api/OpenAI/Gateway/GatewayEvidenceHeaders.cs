@@ -20,6 +20,7 @@ public static class GatewayEvidenceHeaders
     public const string TokensRemaining = "x-rp-gw-tokens-remaining";
     public const string Quota = "x-rp-gw-quota";
     public const string Cache = "x-rp-gw-cache";
+    public const string CacheReason = "x-rp-gw-cache-reason";
     public const string Safety = "x-rp-gw-safety";
     public const string PolicyVersion = "x-rp-gw-policy-version";
     public const string LatencyMs = "x-rp-gw-latency-ms";
@@ -52,7 +53,7 @@ public static class GatewayEvidenceHeaders
 
     public static IReadOnlyList<string> AllNames { get; } =
     [
-        RequestId, Backend, Route, TokensConsumed, TokensRemaining, Quota, Cache,
+        RequestId, Backend, Route, TokensConsumed, TokensRemaining, Quota, Cache, CacheReason,
         Safety, PolicyVersion, LatencyMs, BackendLatencyMs, FailoverDemo, PrimaryStatus, Attempts, Fallback,
         SafetyPhase, SafetyDecision, SafetyPromptAttack, SafetyCategory, SafetySeverity, SafetyMode,
         SafetyLatencyMs, SafetyOutputChecked, BudgetScope, BudgetMode, RetryAfter,
@@ -74,7 +75,7 @@ public static class GatewayEvidenceHeaders
             ParseCount(getHeader(TokensConsumed)),
             ParseCount(getHeader(TokensRemaining)),
             ParseOutcome(getHeader(Quota), GatewayOutcome.Allowed, GatewayOutcome.Throttled),
-            ParseOutcome(getHeader(Cache), GatewayOutcome.Hit, GatewayOutcome.Miss),
+            ParseCacheOutcome(getHeader(Cache)),
             ParseOutcome(getHeader(Safety), GatewayOutcome.Passed, GatewayOutcome.Blocked),
             SafeToken(getHeader(PolicyVersion)),
             ParseCount(getHeader(LatencyMs)),
@@ -213,6 +214,17 @@ public static class GatewayEvidenceHeaders
             "primary" => GatewayRouteState.Primary,
             "failover" => GatewayRouteState.Failover,
             _ => GatewayRouteState.Unknown,
+        };
+
+    // Cache vocabulary (#339): hit, miss, and bypass (sensitive/dynamic/failed/unsafe request or response). An unreachable cache is not distinguishable from a miss.
+    internal static GatewayOutcome ParseCacheOutcome(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            "hit" => GatewayOutcome.Hit,
+            "miss" => GatewayOutcome.Miss,
+            "bypass" => GatewayOutcome.Bypass,
+            "not-applicable" => GatewayOutcome.NotApplicable,
+            _ => GatewayOutcome.Unknown,
         };
 
     internal static GatewayOutcome ParseOutcome(string? value, GatewayOutcome a, GatewayOutcome b)

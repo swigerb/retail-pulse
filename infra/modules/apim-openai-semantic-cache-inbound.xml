@@ -1,0 +1,92 @@
+        <!-- #339 semantic cache (inbound, llm-semantic-cache-lookup). Runs AFTER gateway safety so a blocked prompt is never
+             looked up, and BEFORE backend selection/token limiting so a hit consumes no backend tokens. Only an anchored,
+             stable FAQ/policy intent is cacheable; everything else is a visible bypass with a closed-vocabulary reason.
+             Cache partition = trusted APIM context only (subscription, product) + a deployment-configured retailer/pack
+             partition + a hash of the model and system/developer messages. No caller header is read for isolation.
+             Microsoft documents that a cache lookup failure does not raise and the call completes (backend fall-through),
+             so an unreachable cache is indistinguishable from a miss and no "unavailable" signal is fabricated.
+             The external cache (#338) is registered with APIM out of band; no key or connection string is rendered here. -->
+        <set-variable name="rp-cache-regulated" value="{cache-regulated}" />
+        <set-variable name="rp-cache-partition" value="{cache-partition}" />
+        <set-variable name="rp-cache-deny-sensitive" value="(?i)\b(recall\w*|pharmac\w*|prescri\w*|rx|medicat\w*|medicine\w*|drug\w*|patient\w*|clinic\w*|health\w*|medical|diagnos\w*|symptom\w*|dosage|insurance|ssn|social security|password\w*|passport|credit card|account|address|email|phone|birthday|dob|my|mine|me|myself|our|ours)\b|[\w.+-]+@[\w-]+\.[\w.]+" />
+        <set-variable name="rp-cache-deny-identifier" value="(?i)\d|#|\b(order|orders|ordered|tracking|confirmation|invoice|receipt|ticket|case|customer|member|id|number|purchased|bought|mr|mrs|ms|dr)\b" />
+        <set-variable name="rp-cache-deny-analytics" value="(?i)\b(sales|sold|revenue|rate|rates|volume|volumes|count|counts|total|totals|average|avg|sum|trend|trends|forecast|growth|margin|kpi|metric|metrics|top|bottom|rank|ranking|compare|comparison|versus|vs|percent|percentage|how many|how much|per|by|breakdown|report|dashboard|chart|analytics|analysis|units|transactions|traffic|conversion)\b" />
+        <set-variable name="rp-cache-deny-scope" value="(?i)\b(store|stores|region|regions|district|location|locations|branch|market|state|city|zip|country|today|tonight|tomorrow|yesterday|now|currently|current|latest|recent|recently|week|weeks|month|months|quarter|quarters|year|years|ytd|mtd|qtd|q[1-4]|fy\w*|january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday|season|holiday|last|next|this|past)\b" />
+        <set-variable name="rp-cache-deny-dynamic" value="(?i)\b(price|prices|pricing|cost|costs|sale|discount|deal|deals|coupon|promo|promotion|promotions|in stock|stock|stockout|out of stock|inventory|available|availability|on hand|near me|status|live|real-time|realtime)\b" />
+        <set-variable name="rp-cache-deny-mutation" value="(?i)\b(cancel|delete|remove|update|change|modify|edit|create|add|place|submit|reorder|refill|transfer|subscribe|unsubscribe|send|book|schedule|request|start|initiate|apply|redeem|activate|register|sign up|buy|purchase|pay)\b" />
+        <set-variable name="rp-cache-allow" value="(?i)^(what|what's|whats|how does|how do i|how can i|can i|do you|does|where can i|where do i|is there|are there|explain)\b[a-z' ,-]{0,40}?\b(return|returns|exchange|exchanges|refund|refunds|warranty|warranties|shipping|delivery|gift card|gift cards|loyalty|rewards|privacy|accessibility|sustainability|size guide|sizing guide)( policy| policies| process| terms| rules| options| window| program| information| details| guide)\b[a-z' ,-]{0,40}[?.!]?$" />
+        <set-variable name="rp-cache-partition-pattern" value="^[a-z0-9][a-z0-9-]{0,62}$" />
+        <set-variable name="rp-cache-vary" value="@{
+            try {
+                var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
+                var msgs = b == null ? null : b[&quot;messages&quot;] as JArray;
+                if (msgs == null) return &quot;&quot;;
+                var sb = new System.Text.StringBuilder();
+                sb.Append(b[&quot;model&quot;] == null ? &quot;&quot; : b[&quot;model&quot;].ToString()).Append(&quot;|&quot;);
+                foreach (var m in msgs) {
+                    string role = (string)m[&quot;role&quot;];
+                    if (role == &quot;system&quot; || role == &quot;developer&quot;) {
+                        if (m[&quot;content&quot;] == null || m[&quot;content&quot;].Type != JTokenType.String) return &quot;&quot;;
+                        sb.Append(role).Append(&quot;:&quot;).Append((string)m[&quot;content&quot;]).Append(&quot;\n&quot;);
+                    }
+                }
+                return Convert.ToBase64String(System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(sb.ToString())));
+            } catch (Exception) { return &quot;&quot;; }
+        }" />
+        <set-variable name="rp-cache-decision" value="@{
+            try {
+                if (((string)context.Variables[&quot;rp-cache-regulated&quot;]) == &quot;true&quot;) return &quot;regulated&quot;;
+                if (context.Request.Method != &quot;POST&quot;) return &quot;unknown-intent&quot;;
+                var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
+                if (b == null) return &quot;unknown-intent&quot;;
+                if (b[&quot;stream&quot;] != null || b[&quot;stream_options&quot;] != null) return &quot;streaming&quot;;
+                if (b[&quot;tools&quot;] != null || b[&quot;functions&quot;] != null || b[&quot;tool_choice&quot;] != null || b[&quot;function_call&quot;] != null || b[&quot;parallel_tool_calls&quot;] != null) return &quot;tools&quot;;
+                if (b[&quot;response_format&quot;] != null) return &quot;response-format&quot;;
+                foreach (var p in b.Properties()) {
+                    string k = p.Name;
+                    if (k == &quot;messages&quot; || k == &quot;model&quot;) continue;
+                    if (k == &quot;temperature&quot; || k == &quot;top_p&quot; || k == &quot;n&quot;) {
+                        if ((p.Value.Type == JTokenType.Integer || p.Value.Type == JTokenType.Float) &amp;&amp; (double)p.Value == 1.0) continue;
+                    }
+                    return &quot;model-params&quot;;
+                }
+                var msgs = b[&quot;messages&quot;] as JArray;
+                if (msgs == null) return &quot;unknown-intent&quot;;
+                int users = 0;
+                string text = &quot;&quot;;
+                foreach (var m in msgs) {
+                    string role = (string)m[&quot;role&quot;];
+                    var c = m[&quot;content&quot;];
+                    if (c == null || c.Type != JTokenType.String) return &quot;unknown-intent&quot;;
+                    if (role == &quot;system&quot; || role == &quot;developer&quot;) continue;
+                    if (role != &quot;user&quot;) return &quot;low-confidence&quot;;
+                    users++;
+                    text = (string)c;
+                }
+                text = text.Trim();
+                if (text.Length == 0) return &quot;blank&quot;;
+                if (users != 1 || text.Length &lt; 12 || text.Length &gt; 200) return &quot;low-confidence&quot;;
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-sensitive&quot;])) return &quot;sensitive-intent&quot;;
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-identifier&quot;])) return &quot;identifier&quot;;
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-mutation&quot;])) return &quot;mutation&quot;;
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-analytics&quot;])) return &quot;analytics&quot;;
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-scope&quot;])) return &quot;scoped-intent&quot;;
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-dynamic&quot;])) return &quot;dynamic-intent&quot;;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-allow&quot;])) return &quot;unknown-intent&quot;;
+                if (!System.Text.RegularExpressions.Regex.IsMatch((string)context.Variables[&quot;rp-cache-partition&quot;], (string)context.Variables[&quot;rp-cache-partition-pattern&quot;])) return &quot;no-partition&quot;;
+                if (context.Subscription == null || string.IsNullOrEmpty(context.Subscription.Id) || context.Product == null || string.IsNullOrEmpty(context.Product.Id)) return &quot;no-scope&quot;;
+                if (((string)context.Variables[&quot;rp-cache-vary&quot;]).Length == 0) return &quot;low-confidence&quot;;
+                return &quot;eligible&quot;;
+            } catch (Exception) { return &quot;unknown-intent&quot;; }
+        }" />
+        <choose>
+            <when condition="@(((string)context.Variables[&quot;rp-cache-decision&quot;]) == &quot;eligible&quot;)">
+                <llm-semantic-cache-lookup score-threshold="{cache-score-threshold}" embeddings-backend-id="{cache-embeddings-backend-id}" embeddings-backend-auth="system-assigned" ignore-system-messages="true" max-message-count="10">
+                    <vary-by>@(context.Subscription.Id)</vary-by>
+                    <vary-by>@(context.Product.Id)</vary-by>
+                    <vary-by>@((string)context.Variables["rp-cache-partition"])</vary-by>
+                    <vary-by>@(context.Request.Url.Path)</vary-by>
+                    <vary-by>@((string)context.Variables["rp-cache-vary"])</vary-by>
+                </llm-semantic-cache-lookup>
+            </when>
+        </choose>

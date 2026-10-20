@@ -176,7 +176,10 @@ public sealed class GatewayEvidenceTests
             dir = Path.GetDirectoryName(dir)!;
         string xml = File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml"));
 
-        // Cache is intentionally never emitted: the policy has no cache signal, so it stays unknown.
+        // Cache evidence (#339) is emitted only by the opt-in semantic-cache fragment, never by the base policy.
+        string cacheOut = File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-semantic-cache-outbound.xml"));
+        cacheOut.Should().Contain($"<set-header name=\"{GatewayEvidenceHeaders.Cache}\" exists-action=\"override\">")
+            .And.Contain($"<set-header name=\"{GatewayEvidenceHeaders.CacheReason}\" exists-action=\"override\">");
         foreach (string name in GatewayEvidenceHeaders.AllNames)
         {
             xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"delete\" />", name);
@@ -187,7 +190,7 @@ public sealed class GatewayEvidenceTests
                 string safety = File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-safety-outbound.xml"));
                 safety.Should().Contain($"<set-header name=\"{name}\" exists-action=\"override\">", name);
             }
-            else if (name != GatewayEvidenceHeaders.Cache && !demoOnly)
+            else if (name is not (GatewayEvidenceHeaders.Cache or GatewayEvidenceHeaders.CacheReason) && !demoOnly)
             {
                 xml.Should().Contain($"<set-header name=\"{name}\" exists-action=\"override\">", name);
             }

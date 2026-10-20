@@ -130,7 +130,7 @@ param semanticCacheSku string = 'Balanced_B0'
 
 @minValue(60)
 @maxValue(86400)
-@description('Advisory handoff value only: intended semantic cache TTL in seconds. Not enforced until issue #339 wires the APIM semantic-cache policy.')
+@description('Intended semantic cache TTL in seconds. The APIM policy (#339, when apimSemanticCachePolicyEnabled) enforces min(value, 3600).')
 param semanticCacheTtlSeconds int = 300
 
 @allowed([
@@ -145,6 +145,20 @@ param semanticCachePrivateEndpointSubnetId string = ''
 
 @description('Private DNS zone (privatelink.redis.azure.net) resource ID for the semantic cache private endpoint. Required when semanticCachePublicNetworkAccess is Disabled.')
 param semanticCachePrivateDnsZoneId string = ''
+
+@description('Render the APIM semantic-cache lookup/store policies (#339). Disabled by default; takes effect only when semanticCacheEnabled, gateway safety and an embeddings backend exist, and the Redis external cache has been registered in APIM out of band.')
+param apimSemanticCachePolicyEnabled bool = false
+
+@description('ID of the pre-registered APIM backend for the semantic-cache embeddings deployment (an ID only, never a key or URL).')
+param apimSemanticCacheEmbeddingsBackendId string = ''
+
+@description('Deployment-configured retailer/pack semantic-cache partition (lowercase a-z, 0-9, hyphen; 1-63 chars). Empty or invalid renders no cache policy.')
+param apimSemanticCachePartition string = ''
+
+@minValue(1)
+@maxValue(20)
+@description('Semantic-cache similarity distance threshold in hundredths (5 = 0.05).')
+param apimSemanticCacheScoreThresholdPercent int = 5
 
 @description('Location for Azure API Center (supported in a limited set of regions, so independent of the primary location).')
 param apiCenterLocation string = 'eastus'
@@ -233,6 +247,11 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     regulatedRetailMode: regulatedRetailMode && contentSafetyOn
     contentSafetyAccountName: contentSafetyOn ? contentSafety!.outputs.name : ''
     gatewaySafetyMode: apimGatewaySafetyMode
+    semanticCachePolicyEnabled: semanticCacheEnabled && apimSemanticCachePolicyEnabled
+    semanticCacheEmbeddingsBackendId: apimSemanticCacheEmbeddingsBackendId
+    semanticCachePartition: apimSemanticCachePartition
+    semanticCacheScoreThresholdPercent: apimSemanticCacheScoreThresholdPercent
+    semanticCacheTtlSeconds: min(semanticCacheTtlSeconds, 3600)
     gatewaySafetySeverityThreshold: apimGatewaySafetySeverityThreshold
     failoverDemoKey: apimFailoverDemoKey
     secondaryAiFoundryAccountName: secondaryAiFoundryAccountName

@@ -65,6 +65,10 @@ param semanticCacheTtlSeconds = int(readEnvironmentVariable('AZURE_SEMANTIC_CACH
 param semanticCachePublicNetworkAccess = readEnvironmentVariable('AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS', 'Disabled')
 param semanticCachePrivateEndpointSubnetId = readEnvironmentVariable('AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID', '')
 param semanticCachePrivateDnsZoneId = readEnvironmentVariable('AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID', '')
+param apimSemanticCachePolicyEnabled = toLower(readEnvironmentVariable('AZURE_APIM_SEMANTIC_CACHE_POLICY_ENABLED', 'false')) == 'true'
+param apimSemanticCacheEmbeddingsBackendId = readEnvironmentVariable('AZURE_APIM_SEMANTIC_CACHE_EMBEDDINGS_BACKEND_ID', '')
+param apimSemanticCachePartition = readEnvironmentVariable('AZURE_APIM_SEMANTIC_CACHE_PARTITION', '')
+param apimSemanticCacheScoreThresholdPercent = int(readEnvironmentVariable('AZURE_APIM_SEMANTIC_CACHE_SCORE_THRESHOLD_PERCENT', '5'))
 
 // Azure Bot Service registration backing the Teams bot. Empty by default so a
 // clean zd up does not claim to have a bot it never registered. Set both with:

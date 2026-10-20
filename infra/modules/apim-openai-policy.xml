@@ -18,6 +18,7 @@
         <set-header name="x-rp-gw-tokens-remaining" exists-action="delete" />
         <set-header name="x-rp-gw-quota" exists-action="delete" />
         <set-header name="x-rp-gw-cache" exists-action="delete" />
+        <set-header name="x-rp-gw-cache-reason" exists-action="delete" />
         <set-header name="x-rp-gw-safety" exists-action="delete" />
         <set-header name="x-rp-gw-policy-version" exists-action="delete" />
         <set-header name="x-rp-gw-safety-phase" exists-action="delete" />
@@ -41,6 +42,7 @@
         <set-header name="x-rp-gw-fallback" exists-action="delete" />
 {demo-inbound}
 {safety-inbound}
+{semantic-cache-inbound}
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
         <!-- Scope kind comes only from the APIM product the subscription belongs to (trusted gateway
@@ -66,6 +68,7 @@
     <outbound>
         <base />
 {safety-outbound}
+{semantic-cache-outbound}
 {profile-outbound}
         <!-- Every value below comes from a real policy signal. When no signal exists the header is
              omitted so the API reports the field as unknown; nothing is defaulted to success. -->

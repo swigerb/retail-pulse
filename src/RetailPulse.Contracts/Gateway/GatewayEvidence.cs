@@ -19,6 +19,7 @@ public enum GatewayOutcome
     [JsonStringEnumMemberName("miss")] Miss,
     [JsonStringEnumMemberName("passed")] Passed,
     [JsonStringEnumMemberName("blocked")] Blocked,
+    [JsonStringEnumMemberName("bypass")] Bypass,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<GatewayRouteState>))]
