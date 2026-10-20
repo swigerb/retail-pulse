@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr364-semantic-cache-fix",
+  "sessionId": "rp-pr364-semantic-cache-fix",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T23:06:41.807Z",
+  "lastHeartbeatAt": "2026-10-20T23:06:41.807Z",
+  "updatedAt": "2026-10-20T23:06:41.807Z",
+  "terminalReason": null,
+  "executionRef": null
+}
