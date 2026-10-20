@@ -15,7 +15,7 @@ param tags object
 ])
 param skuName string = 'Balanced_B0'
 
-@description('Default semantic cache entry TTL in seconds (consumed by the APIM semantic cache policy).')
+@description('Advisory handoff value only: the intended semantic cache entry TTL in seconds. It is only emitted as an output and is NOT enforced by anything until issue #339 wires the APIM semantic-cache policy.')
 @minValue(60)
 @maxValue(86400)
 param defaultTtlSeconds int = 300
@@ -113,6 +113,7 @@ output name string = redis.name
 output resourceId string = redis.id
 output hostName string = redis.properties.hostName
 output port int = database.properties.port
+// Advisory handoff only; not enforced until issue #339 wires the APIM semantic-cache policy.
 output defaultTtlSeconds int = defaultTtlSeconds
 output publicNetworkAccess string = publicNetworkAccess
 output networkPosture string = usePrivateEndpoint ? 'PrivateEndpoint' : 'Public'

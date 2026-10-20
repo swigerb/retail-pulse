@@ -6,7 +6,7 @@ namespace RetailPulse.Tests.Deployment;
 
 /// <summary>
 /// Issue #338 — opt-in Azure Managed Redis vector cache for APIM semantic caching.
-/// Assertions run against the ARM template compiled from the Bicep sources.
+/// Assertions run against the ARM template compiled from the Bicep sources (no live Azure deployment validation).
 /// </summary>
 public sealed class SemanticCacheDeploymentContractTests : IDisposable
 {
@@ -79,6 +79,24 @@ public sealed class SemanticCacheDeploymentContractTests : IDisposable
         string guard = variables.GetProperty("validatedPublicNetworkAccess").GetString()!;
         guard.Should().Contain("json(").And.Contain("networkPostureValid");
 
+        const string Subnet = "/subscriptions/s/subnets/pe";
+        const string Zone = "/subscriptions/s/privateDnsZones/privatelink.redis.azure.net";
+        string Evaluate(string access, string subnet, string zone) =>
+            ArmExpression.Evaluate(variables, "validatedPublicNetworkAccess", new Dictionary<string, object?>
+            {
+                ["publicNetworkAccess"] = access,
+                ["privateEndpointSubnetId"] = subnet,
+                ["privateDnsZoneId"] = zone,
+            });
+
+        Evaluate("Enabled", "", "").Should().Be("Enabled");
+        Evaluate("Disabled", Subnet, Zone).Should().Be("Disabled");
+        foreach ((string subnet, string zone) in new[] { ("", ""), (Subnet, ""), ("", Zone) })
+        {
+            FluentActions.Invoking(() => Evaluate("Disabled", subnet, zone)).Should().Throw<JsonException>(
+                "an incomplete private posture must evaluate to invalid JSON, which ARM rejects before creating the cache");
+        }
+
         JsonElement[] resources = [.. module.Value.GetProperty("resources").EnumerateArray()];
         JsonElement endpoint = resources.Single(r => r.GetProperty("type").GetString() == "Microsoft.Network/privateEndpoints");
         endpoint.GetProperty("condition").GetString().Should().Contain("usePrivateEndpoint");
@@ -109,6 +127,7 @@ public sealed class SemanticCacheDeploymentContractTests : IDisposable
         d.Should().Contain("Optional semantic cache").And.Contain("Cost class").And.Contain("az redisenterprise delete");
         d.Should().Contain("does not support Microsoft Entra");
         d.Should().Contain("AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID");
+        d.Should().Contain("advisory handoff value only").And.Contain("issue #339");
         d.Should().NotContain("access keys disabled").And.NotContain("APIM system identity is the only data principal");
     }
 
@@ -123,8 +142,9 @@ public sealed class SemanticCacheDeploymentContractTests : IDisposable
             if (!Run(["bicep", "install"], out _)) return Unavailable();
             if (!Run(["bicep", "build", "--file", source, "--outfile", output], out string log))
             {
-                if (log.Contains("not found", StringComparison.OrdinalIgnoreCase)) return Unavailable();
-                throw new InvalidOperationException($"az bicep build failed for {relativeBicepPath}:\n{log}");
+                return log.Contains("not found", StringComparison.OrdinalIgnoreCase)
+                    ? Unavailable()
+                    : throw new InvalidOperationException($"az bicep build failed for {relativeBicepPath}:\n{log}");
             }
         }
         catch (System.ComponentModel.Win32Exception)
@@ -132,7 +152,7 @@ public sealed class SemanticCacheDeploymentContractTests : IDisposable
             return Unavailable();
         }
 
-        using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(output));
+        using var doc = JsonDocument.Parse(File.ReadAllText(output));
         return doc.RootElement.Clone();
     }
 
@@ -170,5 +190,115 @@ public sealed class SemanticCacheDeploymentContractTests : IDisposable
             dir = dir.Parent;
         }
         throw new InvalidOperationException("Repo root not found");
+    }
+}
+
+/// <summary>
+/// Minimal local evaluator for the ARM template-language subset used by the cache module's
+/// network guard. It proves the compiled expression branches correctly; it is not ARM
+/// deployment validation and does not contact Azure.
+/// </summary>
+internal static class ArmExpression
+{
+    public static string Evaluate(JsonElement variables, string name, IReadOnlyDictionary<string, object?> parameters)
+    {
+        object? value = EvaluateVariable(variables, name, parameters);
+        return (string)value!;
+    }
+
+    private static object? EvaluateVariable(JsonElement variables, string name, IReadOnlyDictionary<string, object?> parameters)
+    {
+        string raw = variables.GetProperty(name).GetString()!;
+        raw.Should().StartWith("[").And.EndWith("]");
+        int pos = 1;
+        object? result = Parse(raw, ref pos, variables, parameters);
+        pos.Should().Be(raw.Length - 1, "the whole expression must be consumed");
+        return result;
+    }
+
+    private static object? Parse(string s, ref int pos, JsonElement variables, IReadOnlyDictionary<string, object?> parameters)
+    {
+        if (s[pos] == '\'')
+        {
+            System.Text.StringBuilder text = new();
+            pos++;
+            while (true)
+            {
+                if (s[pos] == '\'' && pos + 1 < s.Length && s[pos + 1] == '\'') { text.Append('\''); pos += 2; }
+                else if (s[pos] == '\'') { pos++; return text.ToString(); }
+                else
+                {
+                    text.Append(s[pos++]);
+                }
+            }
+        }
+
+        int start = pos;
+        while (char.IsLetterOrDigit(s[pos])) pos++;
+        string fn = s[start..pos];
+        s[pos].Should().Be('(');
+        pos++;
+
+        List<Func<object?>> args = [];
+        while (s[pos] != ')')
+        {
+            int argStart = pos;
+            Skip(s, ref pos);
+            string argText = s[argStart..pos];
+            args.Add(() =>
+            {
+                int p = 0;
+                return Parse(argText, ref p, variables, parameters);
+            });
+            if (s[pos] == ',') pos++;
+            while (s[pos] == ' ') pos++;
+        }
+        pos++;
+
+        return fn switch
+        {
+            "parameters" => parameters[(string)args[0]()!],
+            "variables" => EvaluateVariable(variables, (string)args[0]()!, parameters),
+            "equals" => Equals(args[0](), args[1]()),
+            "not" => !(bool)args[0]()!,
+            "empty" => string.IsNullOrEmpty((string?)args[0]()),
+            "or" => args.Any(a => (bool)a()!),
+            "and" => args.All(a => (bool)a()!),
+            "if" => (bool)args[0]()! ? args[1]() : args[2](),
+            "json" => JsonDocument.Parse((string)args[0]()!).RootElement.GetRawText(),
+            "string" => args[0]()?.ToString(),
+            _ => throw new NotSupportedException($"ARM function '{fn}' is not supported by the test evaluator"),
+        };
+    }
+
+    private static void Skip(string s, ref int pos)
+    {
+        if (s[pos] == '\'')
+        {
+            pos++;
+            while (true)
+            {
+                if (s[pos] == '\'' && s[pos + 1] == '\'')
+                {
+                    pos += 2;
+                }
+                else if (s[pos] == '\'') { pos++; return; }
+                else
+                {
+                    pos++;
+                }
+            }
+        }
+
+        while (char.IsLetterOrDigit(s[pos])) pos++;
+        pos++;
+        int depth = 1;
+        while (depth > 0)
+        {
+            if (s[pos] == '\'') { Skip(s, ref pos); continue; }
+            if (s[pos] == '(') depth++;
+            else if (s[pos] == ')') depth--;
+            pos++;
+        }
     }
 }

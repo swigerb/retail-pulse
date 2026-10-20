@@ -125,7 +125,7 @@ param semanticCacheSku string = 'Balanced_B0'
 
 @minValue(60)
 @maxValue(86400)
-@description('Default semantic cache TTL in seconds.')
+@description('Advisory handoff value only: intended semantic cache TTL in seconds. Not enforced until issue #339 wires the APIM semantic-cache policy.')
 param semanticCacheTtlSeconds int = 300
 
 @allowed([
@@ -365,6 +365,7 @@ output AZURE_SEMANTIC_CACHE_ENABLED bool = semanticCacheEnabled
 output AZURE_SEMANTIC_CACHE_NAME string = semanticCacheEnabled ? semanticCache!.outputs.name : ''
 output AZURE_SEMANTIC_CACHE_RESOURCE_ID string = semanticCacheEnabled ? semanticCache!.outputs.resourceId : ''
 output AZURE_SEMANTIC_CACHE_HOST string = semanticCacheEnabled ? semanticCache!.outputs.hostName : ''
+// Advisory handoff only; not enforced until issue #339 wires the APIM semantic-cache policy.
 output AZURE_SEMANTIC_CACHE_TTL_SECONDS int = semanticCacheEnabled ? semanticCache!.outputs.defaultTtlSeconds : 0
 
 // ── Optional Azure API Center (issue #333) ─────────────────────────────────

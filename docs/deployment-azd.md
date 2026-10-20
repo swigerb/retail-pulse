@@ -653,12 +653,12 @@ deploy loudly rather than proceeding with a broken registry configuration.
 | Setting | Default |
 |---|---|
 | `AZURE_SEMANTIC_CACHE_SKU` | `Balanced_B0` (lowest Azure Managed Redis SKU with the RediSearch module) |
-| `AZURE_SEMANTIC_CACHE_TTL_SECONDS` | `300` (60–86400) |
+| `AZURE_SEMANTIC_CACHE_TTL_SECONDS` | `300` (60–86400); advisory/handoff only, not enforced until issue #339 wires the APIM semantic-cache policy |
 | `AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS` | `Disabled` |
 | `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` | empty (required when public access is Disabled) |
 | `AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID` | empty (required when public access is Disabled) |
 
-Authentication: APIM external cache and semantic caching currently support only a Redis connection string with an access key; APIM does not support Microsoft Entra authentication to Azure Managed Redis. The database therefore has access-key authentication **enabled** (TLS 1.2, encrypted client protocol). No key or connection string is emitted by Bicep or azd outputs, and the module does not wire APIM to the cache: an operator must add the connection string to APIM out of band (for example a Key Vault-backed named value) after cost approval. Outputs are `AZURE_SEMANTIC_CACHE_{ENABLED,NAME,RESOURCE_ID,HOST,TTL_SECONDS}`.
+Authentication: APIM external cache and semantic caching currently support only a Redis connection string with an access key; APIM does not support Microsoft Entra authentication to Azure Managed Redis. The database therefore has access-key authentication **enabled** (TLS 1.2, encrypted client protocol). No key or connection string is emitted by Bicep or azd outputs, and the module does not wire APIM to the cache: an operator must add the connection string to APIM out of band (for example a Key Vault-backed named value) after cost approval. Outputs are `AZURE_SEMANTIC_CACHE_{ENABLED,NAME,RESOURCE_ID,HOST,TTL_SECONDS}`; `AZURE_SEMANTIC_CACHE_TTL_SECONDS` is an advisory handoff value only and is not enforced until issue #339 wires the APIM semantic-cache policy.
 
 Network (fail closed): with `AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS=Disabled` (default) both `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` and `AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID` (an existing `privatelink.redis.azure.net` zone linked to the VNet) are required, otherwise provisioning fails before creating the cache. The zone-to-VNet link is owned by the zone owner. The APIM instance in this repo is Developer/non-VNet, so it cannot reach a private endpoint; private mode is only usable once APIM is network-connected to that VNet. Setting `Enabled` is an explicit opt-in that exposes the TLS + access-key endpoint publicly.
 
