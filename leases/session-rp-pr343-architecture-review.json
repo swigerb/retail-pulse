@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-pr343-architecture-review",
+  "sessionId": "rp-pr343-architecture-review",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-20T14:38:34.355Z",
+  "lastHeartbeatAt": "2026-10-20T14:38:34.355Z",
+  "updatedAt": "2026-10-20T14:38:34.355Z",
+  "terminalReason": null,
+  "executionRef": null
+}
