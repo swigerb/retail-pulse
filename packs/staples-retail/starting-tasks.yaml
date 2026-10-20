@@ -7,7 +7,7 @@ categories:
     order: 1
     tasks:
       - name: "Contract sell-through"
-        prompt: "How is Contract Catalog sell-through trending in the Midwest this quarter, and where is on-shelf availability below target?"
+        prompt: "How is Contract Catalog sell-through trending in the Great Lakes & Plains this quarter, and where is on-shelf availability below target?"
         order: 1
         capability: { kind: prose }
       - name: "Paper & toner days of supply"
@@ -35,7 +35,7 @@ categories:
     order: 3
     tasks:
       - name: "Print-order status"
-        prompt: "Summarize print-order status and late-order risk for Print & Marketing Services in the West"
+        prompt: "Summarize print-order status and late-order risk for Print & Marketing Services in the Pacific Rim"
         order: 1
         capability: { kind: prose }
       - name: "AI gateway governance check"

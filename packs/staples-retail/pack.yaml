@@ -38,10 +38,10 @@ tenant:
       variants: ["Writing", "Filing", "Mailing", "School Supplies"]
       priceSegment: "Standard"
   regions:
-    - "Northeast"
-    - "Southeast"
-    - "Midwest"
-    - "West"
+    - "Atlantic Corridor"
+    - "Gulf & Southern Belt"
+    - "Great Lakes & Plains"
+    - "Pacific Rim"
   channels:
     - "Store"
     - "Next-Day Delivery"
@@ -51,7 +51,7 @@ tenant:
     accentColor: "#2B2B2B"
     fontFamily: "system-ui, sans-serif"
   distribution:
-    model: "Hybrid Direct"
+    model: "Contract Catalog + Store Fulfillment"
     distributorTypes:
       - "Regional Fulfillment Center"
       - "Store Pickup"

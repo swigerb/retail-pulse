@@ -98,13 +98,13 @@ supply:
   disruptionSeverities: [critical, elevated, watch]
   disruptionDescriptions:
     carrier_delay:
-      - Regional carrier delayed next-day delivery routes in the Northeast
-      - Linehaul capacity shortfall slowed Southeast replenishment
+      - Regional carrier delayed next-day delivery routes in the Atlantic Corridor
+      - Linehaul capacity shortfall slowed Gulf & Southern Belt replenishment
     stock_shortage:
-      - Paper and toner days of supply fell below the review floor in the Midwest
-      - Task seating inventory ran short at one West fulfillment center
+      - Paper and toner days of supply fell below the review floor in the Great Lakes & Plains
+      - Task seating inventory ran short at one Pacific Rim fulfillment center
     print_backlog:
-      - Proof approvals backed up and delayed West signage production
+      - Proof approvals backed up and delayed Pacific Rim signage production
       - Bulk copy equipment maintenance extended print turnaround
 
 stores:
