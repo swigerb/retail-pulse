@@ -77,8 +77,14 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
             "the compiled apimOpenAiApi template must declare the 'backend' resource (retail-pulse-foundry)");
         backendResource.GetProperty("type").GetString().Should().Be(
             "Microsoft.ApiManagement/service/backends");
-        backendResource.GetProperty("name").GetString().Should().Contain("retail-pulse-foundry",
-            "the backend's compiled name expression must reference the 'retail-pulse-foundry' literal");
+        string backendName = backendResource.GetProperty("name").GetString() ?? string.Empty;
+        (backendName.Contains("retail-pulse-foundry", StringComparison.Ordinal) ||
+            backendName.Contains("primaryBackendName", StringComparison.Ordinal)).Should().BeTrue(
+            "Bicep versions may inline the reviewed backend id or retain the variable reference");
+        if (apimApiTemplate.GetProperty("variables").TryGetProperty("primaryBackendName", out JsonElement primaryBackendName))
+        {
+            primaryBackendName.GetString().Should().Be("retail-pulse-foundry");
+        }
 
         string backendJson = backendResource.GetRawText();
         backendJson.Should().Contain("cognitiveservices.azure.com",
