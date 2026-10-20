@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using FluentAssertions;
@@ -75,17 +76,18 @@ public sealed class GatewaySafetyPolicyContractTests
         x.Should().Contain("if (s == \"attack\" || over) return \"block\";");
         x.Should().Contain(">= {severity-threshold}", "severity at the threshold blocks; below it allows");
         x.Should().Contain("return \"allow\";");
-        x.Should().Contain("<set-status code=\"@((string)context.Variables[\"rp-safety-decision\"] == \"block\" ? 403 : 503)\"");
+        x.Should().Contain("== \"block\" ? 403 : (string)context.Variables[\"rp-safety-decision\"] == \"reject\" ? 400 : 503");
     }
 
     [Fact]
     public void DependencyErrors_DemoAllowsWithEvidence_RegulatedAndAuthFailClosed()
     {
         string x = Unescape(Inbound);
-        x.Should().Contain("if (s == 408 || s == 429 || s >= 500) return \"dependency\";");
+        x.Should().Contain("if (s == 408 || s == 429 || (s >= 500 && s <= 599)) return \"dependency\";");
         x.Should().Contain("if (s == 401 || s == 403) return \"auth\";");
         x.Should().Contain("return \"config\";");
-        x.Should().Contain("s == \"auth\" || s == \"config\" || a == \"auth\" || a == \"config\") return \"error\";");
+        x.Should().Contain("if (r == null) return \"null\";", "a null response is NOT a confirmed dependency status");
+        x.Should().Contain("if ((sOk || s == \"dependency\") && (aOk || a == \"dependency\"))");
         x.Should().Contain("== \"regulated\" ? \"error\" : \"allowed_on_safety_error\"");
         x.Should().Contain("!context.Variables.ContainsKey(\"rp-cs-token\")");
         x.Should().Contain("gateway_safety_unavailable").And.Contain("Content safety could not be verified.");
@@ -169,6 +171,61 @@ public sealed class GatewaySafetyPolicyContractTests
         doc.Should().Contain("allowed_on_safety_error").And.Contain("regulated").And.Contain("streaming");
         doc.Should().Contain("never claims a final 403");
     }
+
+    [Fact]
+    public void Policy_NeverTruncatesContent_AndFailsClosedOnOversizedOrUnparseableInput()
+    {
+        foreach (string fragment in new[] { Inbound, Outbound })
+        {
+            Unescape(fragment).Should().NotContain(".Substring(", "truncation would let unchecked content reach the model or client");
+        }
+
+        Unescape(Inbound).Should().Contain("return \"oversized\"").And.Contain("return \"invalid\"");
+        Unescape(Outbound).Should().Contain("return u.Length > 10000 ? \"oversized\" : \"ok\"");
+    }
+
+    [Fact]
+    public void OutputChecked_IsSetOnlyAfterAParsedSuccessfulAnalysis()
+    {
+        string x = Unescape(Outbound);
+        x.Should().Contain("StartsWith(\"ok:\") ? \"true\" : \"false\"");
+        x.IndexOf("name=\"rp-safety-output-checked\"", StringComparison.Ordinal)
+            .Should().BeGreaterThan(x.IndexOf("name=\"rp-out-result\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Diagnostics_CaptureNoBodiesOrMessageContent_WhenGatewaySafetyIsEnabled()
+    {
+        Bicep.Should().Contain("bytes: gatewaySafetyEnabled ? 0 : 8192");
+        Bicep.Should().Contain("messages: gatewaySafetyEnabled ? 'none' : 'all'");
+        Bicep.Should().NotContain("bytes: 8192\n", "every body capture size must be conditional on gateway safety");
+        string apim = Read("apim.bicep");
+        apim.Should().Contain("bytes: captureRequestBodies ? 8192 : 0").And.NotContain("bytes: 8192\n");
+        File.ReadAllText(Path.Combine(Modules, "..", "main.bicep"))
+            .Should().Contain("captureRequestBodies: !(apimGatewaySafetyEnabled && contentSafetyEnabled)");
+    }
+
+    [Fact]
+    public void ExecutableSelfTest_RunsRealPolicyExpressionsThroughDecisionMatrix()
+    {
+        string project = Path.Combine(FindRepoRoot(), "scripts", "gateway-safety-selftest", "GatewaySafetySelfTest.csproj");
+        var psi = new ProcessStartInfo("dotnet", $"run --project \"{project}\" -c Release")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.Environment["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"] = "1";
+        using Process p = Process.Start(psi)!;
+        Task<string> stderr = p.StandardError.ReadToEndAsync();
+        string output = p.StandardOutput.ReadToEnd();
+        p.WaitForExit(280_000).Should().BeTrue();
+        p.ExitCode.Should().Be(0, output + await_(stderr));
+        output.Should().Contain("SELFTEST PASS").And.NotContain("FAIL [");
+        output.Should().Contain("[benign]").And.Contain("[streaming]").And.Contain("[oversized:user]")
+            .And.Contain("[demo:shield-408]").And.Contain("[closed:analyze-null]").And.Contain("[outbound:block]");
+    }
+
+    private static string await_(Task<string> t) => t.GetAwaiter().GetResult();
 
     private static string FindRepoRoot()
     {

@@ -167,6 +167,7 @@ module apim './modules/apim.bicep' = {
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     appInsightsId: monitoring.outputs.appInsightsId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    captureRequestBodies: !(apimGatewaySafetyEnabled && contentSafetyEnabled)
   }
 }
 

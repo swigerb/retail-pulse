@@ -33,12 +33,19 @@ tool-result checks (all of which remain). Enable with `AZURE_CONTENT_SAFETY_ENAB
   (default 4) returns **403** `gateway_safety_blocked`; the model is never invoked. The body shape and
   `x-rp-gw-safety-*` headers distinguish this from an application-layer block.
 - **Outbound:** buffered 200 completions are analyzed before delivery or any caching; a block returns 403.
-- **Failure behaviour:** Content Safety timeout/408/429/5xx → *demo*: continue, evidence `allowed_on_safety_error`;
-  *regulated*: generic **503** `gateway_safety_unavailable`. Auth/RBAC misconfiguration (401/403, missing token, other 4xx)
-  always fails closed with the same generic 503.
+- **Failure behaviour:** only a *confirmed* Content Safety HTTP 408/429/5xx → *demo*: continue, evidence
+  `allowed_on_safety_error`; *regulated*: generic **503** `gateway_safety_unavailable`. Everything else fails closed
+  with the same generic 503 before the model call / client delivery: null responses (timeout, DNS, TLS, connectivity),
+  malformed or incomplete 200 JSON, parse errors, 400/401/403/other 4xx, RBAC/config errors and a missing token.
+- **Limits, never truncation:** content is not truncated. User text over 10,000 characters, a tool result over 10,000,
+  more than 5 tool results / 10,000 characters of tool text, an unparseable request, or a buffered completion over
+  10,000 characters is rejected (**400** `gateway_safety_rejected` inbound, generic **503** outbound) rather than partially checked.
+  `x-rp-gw-safety-output-checked` is `true` only after a valid parsed 200 output analysis.
+- **Logging:** when gateway safety is enabled, APIM diagnostics and LLM logs capture no request/response bodies or
+  message content (metadata and token metrics still flow). Disabled behaviour is unchanged.
 - **Streaming limitation:** `stream: true` responses are checked on input only
   (`x-rp-gw-safety-output-checked: false`). Once chunks are emitted the gateway never claims a final 403 or a
-  `passed` result; regulated deployments should disable streaming. Long text is truncated to the 10,000-character service limit.
+  `passed` result; regulated deployments should disable streaming.
 - **Evidence:** only phase, decision (`allow`/`block`/`allowed_on_safety_error`), prompt-attack flag, highest
   category/severity, mode, latency and the existing request id/policy version are emitted through the
   `x-rp-gw-*` contract. Prompts, completions, documents, raw safety bodies, auth headers and matched text are never logged or echoed.

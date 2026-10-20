@@ -376,12 +376,14 @@ resource apiAppInsightsDiagnostics 'Microsoft.ApiManagement/service/apis/diagnos
     // silently dropped — request logs still flow but the AI Gateway token
     // dashboard sees zero rows.
     metrics: true
+    // #331: with gateway safety on, no request/response body or LLM message content may be captured
+    // (prompts and completions are what the gateway inspects); metadata and token metrics still flow.
     verbosity: 'information'
     logClientIp: true
     frontend: {
       request: {
         body: {
-          bytes: 8192
+          bytes: gatewaySafetyEnabled ? 0 : 8192
         }
       }
       response: {
@@ -393,7 +395,7 @@ resource apiAppInsightsDiagnostics 'Microsoft.ApiManagement/service/apis/diagnos
     backend: {
       request: {
         body: {
-          bytes: 8192
+          bytes: gatewaySafetyEnabled ? 0 : 8192
         }
       }
       response: {
@@ -425,12 +427,12 @@ resource apiAzureMonitorDiagnostics 'Microsoft.ApiManagement/service/apis/diagno
     largeLanguageModel: {
       logs: 'enabled'
       requests: {
-        maxSizeInBytes: 32768
-        messages: 'all'
+        maxSizeInBytes: gatewaySafetyEnabled ? 1024 : 32768
+        messages: gatewaySafetyEnabled ? 'none' : 'all'
       }
       responses: {
-        maxSizeInBytes: 32768
-        messages: 'all'
+        maxSizeInBytes: gatewaySafetyEnabled ? 1024 : 32768
+        messages: gatewaySafetyEnabled ? 'none' : 'all'
       }
     }
   }
