@@ -74,6 +74,9 @@ param(
     [string]$InferenceApiName = ($env:AZURE_APIM_INFERENCE_API_NAME | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_)) { 'retail-pulse-inference-api' } else { $_ } }),
     [string]$AiFoundryAccountName = 'aiagents-3rsdmhyb',
     [string]$AiFoundryResourceGroup = 'rg-repodigest-agents-demo-eus-001',
+    [switch]$BackendPoolEnabled = ($env:AZURE_APIM_BACKEND_POOL_ENABLED -eq 'true'),
+    [string]$SecondaryAiFoundryAccountName = $env:AZURE_OPENAI_SECONDARY_ACCOUNT_NAME,
+    [string]$SecondaryAiFoundryResourceGroup = $(if ($env:AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME) { $env:AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME } else { 'rg-repodigest-agents-demo-eus-001' }),
     [switch]$SelfTest
 )
 
@@ -316,7 +319,8 @@ Write-Host "API policy"
 $sub = $script:ArmSubscriptionId
 $policyResource = Invoke-ArmGet "/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/apis/$InferenceApiName/policies/policy?api-version=2024-06-01-preview"
 $policyValue = $policyResource.properties.value
-Assert 'policy: sets backend service (retail-pulse-foundry)' { $policyValue -match '<set-backend-service\s+backend-id="retail-pulse-foundry"' } 'policy did not reference the AOAI backend'
+$routeBackendId = if ($BackendPoolEnabled) { 'retail-pulse-foundry-pool' } else { 'retail-pulse-foundry' }
+Assert "policy: sets backend service ($routeBackendId)" { $policyValue -match ('<set-backend-service\s+backend-id="' + [regex]::Escape($routeBackendId) + '"') } 'policy did not reference the AOAI backend'
 Assert 'policy: managed-identity auth to cognitiveservices.azure.com' { $policyValue -match '<authentication-managed-identity\s+resource="https://cognitiveservices\.azure\.com"' } 'policy is not using MI auth to AOAI'
 Assert 'policy: azure-openai-token-limit configured' { $policyValue -match '<azure-openai-token-limit\s+counter-key="@\(context\.Subscription\.Id\)"' } 'token-limit missing or wrong counter-key'
 Assert 'policy: azure-openai-emit-token-metric in RetailPulse namespace' { $policyValue -match '<azure-openai-emit-token-metric\s+namespace="RetailPulse">' } 'emit-token-metric missing or wrong namespace'
@@ -330,6 +334,32 @@ $backend = $backendResource.properties
 Assert 'backend: retail-pulse-foundry exists' { $null -ne $backend } 'backend retail-pulse-foundry not found'
 Assert 'backend: url targets /openai on cognitiveservices' { $backend.url -match '/openai$' -and ($backend.url -match 'cognitiveservices\.azure\.com|\.services\.ai\.azure\.com') } "backend url = $($backend.url)"
 Assert 'backend: MI credentials to cognitiveservices.azure.com' { $backend.credentials.managedIdentity.resource -eq 'https://cognitiveservices.azure.com' } 'backend is not MI-authenticated to AOAI'
+
+# ── Backend pool (only when the two-backend pool is enabled) ────────────────
+if ($BackendPoolEnabled) {
+    Write-Host "Backend pool"
+    $base = "/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/backends"
+    $secondary = (Invoke-ArmGet "$base/retail-pulse-foundry-secondary?api-version=2024-06-01-preview").properties
+    $pool = (Invoke-ArmGet "$base/retail-pulse-foundry-pool?api-version=2024-06-01-preview").properties
+    Assert 'pool: secondary backend exists with MI credentials' { $secondary.credentials.managedIdentity.resource -eq 'https://cognitiveservices.azure.com' } 'secondary backend missing or not MI-authenticated'
+    Assert 'pool: secondary backend has a circuit breaker' { @($secondary.circuitBreaker.rules).Count -gt 0 } 'secondary backend has no circuit breaker'
+    Assert 'pool: primary backend has a circuit breaker' { @($backend.circuitBreaker.rules).Count -gt 0 } 'primary backend has no circuit breaker'
+    Assert 'pool: type is Pool' { $pool.type -eq 'Pool' } 'pool backend missing or not of type Pool'
+    Assert 'pool: members are primary and secondary' {
+        $ids = @($pool.pool.services | ForEach-Object { ($_.id -split '/')[-1] })
+        ($ids -contains 'retail-pulse-foundry') -and ($ids -contains 'retail-pulse-foundry-secondary')
+    } 'pool membership is not exactly primary + secondary'
+    Assert 'pool: primary has a better (lower) priority than secondary' {
+        $pri = ($pool.pool.services | Where-Object { $_.id -match '/retail-pulse-foundry$' }).priority
+        $sec = ($pool.pool.services | Where-Object { $_.id -match '/retail-pulse-foundry-secondary$' }).priority
+        $pri -lt $sec
+    } 'primary priority must be lower than secondary priority'
+    Assert 'pool: policy retries once after 429/5xx so the open circuit can reselect a member' {
+        $policyValue -match '<retry\s+condition=' -and
+        $policyValue -match 'count="1"' -and
+        $policyValue -match '<forward-request'
+    } 'pool policy does not retry once through backend selection'
+}
 
 # ── Diagnostics (API + instance) ──────────────────────────────────────────
 # `az apim api diagnostic show` does not exist either (no `diagnostic`
@@ -354,6 +384,12 @@ if ($apimPrincipalId) {
 }
 else {
     Assert 'rbac: APIM principalId available' { $false } 'Could not read APIM principalId to check role assignments'
+}
+
+if ($BackendPoolEnabled -and $apimPrincipalId) {
+    $secRoles = az role assignment list --assignee $apimPrincipalId --scope "/subscriptions/$sub/resourceGroups/$SecondaryAiFoundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$SecondaryAiFoundryAccountName" 2>$null | ConvertFrom-Json
+    $hasSecOpenAiUser = ($secRoles | Where-Object { $_.roleDefinitionId -match '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd' })
+    Assert 'rbac: APIM MI has Cognitive Services OpenAI User on secondary AI Foundry account' { $null -ne $hasSecOpenAiUser } 'Secondary role assignment missing — failover to the secondary will 403'
 }
 
 # ── ACA API container app wiring ──────────────────────────────────────────

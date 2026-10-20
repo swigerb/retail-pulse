@@ -34,6 +34,15 @@ param aiFoundryAccountName string = 'aiagents-3rsdmhyb'
 @description('Resource group containing the Azure AI Foundry / Cognitive Services account used by the AI gateway backend')
 param aiFoundryResourceGroupName string = 'rg-repodigest-agents-demo-eus-001'
 
+@description('Enable the two-backend APIM model pool (primary + secondary Azure AI accounts). Default false keeps the single-backend topology.')
+param apimBackendPoolEnabled bool = false
+
+@description('Secondary Azure AI Foundry / Cognitive Services account for the APIM backend pool. Required when apimBackendPoolEnabled is true.')
+param secondaryAiFoundryAccountName string = ''
+
+@description('Resource group of the secondary Azure AI Foundry account (defaults to the primary resource group)')
+param secondaryAiFoundryResourceGroupName string = aiFoundryResourceGroupName
+
 @description('Azure OpenAI deployment name that the API sends chat/completions to (through APIM)')
 param openAiDeployment string = 'gpt-5.4-mini-2026-03-17'
 
@@ -141,6 +150,9 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     apimPrincipalId: apim.outputs.apimPrincipalId
     aiFoundryAccountName: aiFoundryAccountName
     aiFoundryResourceGroupName: aiFoundryResourceGroupName
+    backendPoolEnabled: apimBackendPoolEnabled
+    secondaryAiFoundryAccountName: secondaryAiFoundryAccountName
+    secondaryAiFoundryResourceGroupName: secondaryAiFoundryResourceGroupName
   }
 }
 
@@ -199,6 +211,10 @@ output AZURE_FRONTEND_APP_URL string = staticWebApp.outputs.staticWebAppUrl
 output AZURE_APIM_NAME string = apim.outputs.apimName
 output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
 output AZURE_APIM_INFERENCE_ENDPOINT string = apimOpenAiApi.outputs.inferenceEndpoint
+output AZURE_APIM_BACKEND_POOL_ENABLED bool = apimOpenAiApi.outputs.backendPoolEnabled
+output AZURE_APIM_ROUTE_BACKEND_ID string = apimOpenAiApi.outputs.routeBackendId
+output AZURE_APIM_PRIMARY_BACKEND_ID string = apimOpenAiApi.outputs.primaryBackendId
+output AZURE_APIM_SECONDARY_BACKEND_ID string = apimOpenAiApi.outputs.secondaryBackendId
 output AZURE_APIM_INFERENCE_API_NAME string = apimOpenAiApi.outputs.inferenceApiName
 output AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME string = apimOpenAiApi.outputs.subscriptionName
 

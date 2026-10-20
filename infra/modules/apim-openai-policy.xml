@@ -33,7 +33,7 @@
     </inbound>
     <backend>
         <set-variable name="rp-backend-start" value="@(DateTime.UtcNow)" />
-        <base />
+        {backend-policy}
     </backend>
     <outbound>
         <base />
