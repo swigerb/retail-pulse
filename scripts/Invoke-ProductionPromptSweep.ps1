@@ -24,15 +24,18 @@ param(
     [string]$ApiOrigin = $env:AZURE_API_APP_URL,
     [string]$ApiResource = 'api://b03317ab-a407-49cc-8769-0a15062777b1',
     [int]$TimeoutSec = 180,
-    [string]$JsonOut
+    [string]$JsonOut,
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = 'Stop'
 
-if ([string]::IsNullOrWhiteSpace($ApiOrigin)) {
+if (-not $SelfTest -and [string]::IsNullOrWhiteSpace($ApiOrigin)) {
     throw 'ApiOrigin not set. Pass -ApiOrigin or set AZURE_API_APP_URL.'
 }
-$ApiOrigin = $ApiOrigin.TrimEnd('/')
+if (-not [string]::IsNullOrWhiteSpace($ApiOrigin)) {
+    $ApiOrigin = $ApiOrigin.TrimEnd('/')
+}
 
 # ── curated prompt set (verbatim from prompts.ts) ──────────────────────────
 # ExpectedChart = $null  -> prose prompt (must NOT emit a chart)
@@ -128,6 +131,94 @@ function Get-GatewayRequestIds($body, $headers) {
         }
     }
     return @($ids)
+}
+
+function Get-Failed200Metadata($body) {
+    if ($null -eq $body) { return $null }
+
+    $reply = [string]$body.reply
+    $fallbackPatterns = @(
+        "I wasn't able",
+        "I couldn't generate",
+        'unexpected error',
+        'timed out',
+        'rate limit'
+    )
+    $looksSynthetic = $false
+    foreach ($pattern in $fallbackPatterns) {
+        if ($reply.Contains($pattern, [StringComparison]::OrdinalIgnoreCase)) {
+            $looksSynthetic = $true
+            break
+        }
+    }
+
+    $spanShape = @(
+        foreach ($span in @($body.spans)) {
+            if ($null -eq $span) { continue }
+            $type = [string]$span.type
+            [pscustomobject]@{
+                Type = $type
+                ToolName = if ($type -in @('tool_call', 'tool_result')) { [string]$span.name } else { $null }
+            }
+        }
+    )
+
+    $errorCode = $body.errorCode
+    if ([string]::IsNullOrWhiteSpace([string]$errorCode)) { $errorCode = $body.error.code }
+    if ([string]::IsNullOrWhiteSpace([string]$errorCode)) { $errorCode = $body.code }
+
+    return [pscustomobject]@{
+        ReplySynthetic = [pscustomobject]@{
+            Present = -not [string]::IsNullOrWhiteSpace($reply)
+            Chars = $reply.Length
+            LooksLikeFallback = $looksSynthetic
+        }
+        Routing = [pscustomobject]@{
+            AgentKey = [string]$body.routing.agentKey
+            Intent = [string]$body.routing.intent
+        }
+        Spans = $spanShape
+        TopLevelFields = @($body.PSObject.Properties.Name | Sort-Object)
+        Approval = [pscustomobject]@{
+            Status = [string]$(if ($null -ne $body.approvalStatus) { $body.approvalStatus } else { $body.status })
+            PlanId = [string]$body.planId
+            ReviewRequestId = [string]$body.reviewRequestId
+        }
+        ErrorCode = [string]$errorCode
+    }
+}
+
+if ($SelfTest) {
+    $sample = [pscustomobject]@{
+        reply = "I wasn't able to generate a response. SECRET_REPLY"
+        routing = [pscustomobject]@{ agentKey = 'general'; intent = 'general/fallback' }
+        spans = @(
+            [pscustomobject]@{ type = 'thought'; name = 'General'; detail = 'SECRET_THOUGHT' },
+            [pscustomobject]@{ type = 'tool_call'; name = 'GetDepletionStats'; detail = 'SECRET_ARGS' },
+            [pscustomobject]@{ type = 'tool_result'; name = 'GetDepletionStats'; detail = 'SECRET_PAYLOAD' }
+        )
+        approvalStatus = 'pending'
+        planId = 'plan-safe-id'
+        reviewRequestId = 'review-safe-id'
+        errorCode = 'synthetic_failure'
+        gateway = [pscustomobject]@{ calls = @() }
+    }
+    $metadata = Get-Failed200Metadata $sample
+    $json = $metadata | ConvertTo-Json -Depth 8 -Compress
+
+    if (-not $metadata.ReplySynthetic.LooksLikeFallback) { throw 'Self-test: fallback reply was not classified.' }
+    if ($metadata.Routing.AgentKey -ne 'general') { throw 'Self-test: routing metadata missing.' }
+    if (@($metadata.Spans | Where-Object ToolName).Count -ne 2) { throw 'Self-test: tool span shape missing.' }
+    if ($metadata.Approval.ReviewRequestId -ne 'review-safe-id') { throw 'Self-test: approval metadata missing.' }
+    if ($metadata.ErrorCode -ne 'synthetic_failure') { throw 'Self-test: error code missing.' }
+    foreach ($secret in @('SECRET_REPLY', 'SECRET_THOUGHT', 'SECRET_ARGS', 'SECRET_PAYLOAD')) {
+        if ($json.Contains($secret, [StringComparison]::Ordinal)) {
+            throw "Self-test: sensitive response content leaked: $secret"
+        }
+    }
+
+    Write-Host 'Invoke-ProductionPromptSweep failed-200 metadata self-test: PASS'
+    exit 0
 }
 
 $token = Get-Token
@@ -245,6 +336,7 @@ foreach ($p in $prompts) {
 
     $sw.Stop()
     $ok = ($failures.Count -eq 0)
+    $failed200Metadata = if ($status -eq 200 -and -not $ok) { Get-Failed200Metadata $body } else { $null }
     $results.Add([pscustomobject]@{
             N = $i; Category = $p.C; Prompt = $p.P; Pass = $ok
             Status = $status; Agent = $agent; ToolCalls = $toolCalls; CacheHit = $cacheHit
@@ -254,6 +346,7 @@ foreach ($p in $prompts) {
             ReturnedCorrelationId = if ($attemptTraces.Count) { $attemptTraces[-1].ReturnedCorrelationId } else { $null }
             GatewayRequestIds = if ($attemptTraces.Count) { @($attemptTraces[-1].GatewayRequestIds) } else { @() }
             Attempts = @($attemptTraces)
+            Failed200Metadata = $failed200Metadata
             Failures = ($failures -join '; ')
         })
 

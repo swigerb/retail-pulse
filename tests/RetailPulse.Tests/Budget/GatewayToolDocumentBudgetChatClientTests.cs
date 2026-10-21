@@ -157,7 +157,7 @@ public sealed class GatewayToolDocumentBudgetChatClientTests
     }
 
     [Fact]
-    public async Task FunctionInvocation_FollowUpSendsBoundedCloneToGatewayTransport()
+    public async Task ChatClientBuilder_ProductionOrder_BoundsFunctionInvocationFollowUp()
     {
         string canonicalChart = JsonSerializer.Serialize(new
         {
@@ -191,14 +191,15 @@ public sealed class GatewayToolDocumentBudgetChatClientTests
             () => canonicalChart,
             "CreateChart",
             "Creates a canonical chart");
-        using var boundary = new GatewayToolDocumentBudgetChatClient(
-            transport.Object,
-            new ToolResultBudgetOptions { Enabled = true, MaxCumulativeChars = 9_500 },
-            NullLogger<GatewayToolDocumentBudgetChatClient>.Instance);
-        using var functionClient = new FunctionInvokingChatClient(boundary)
-        {
-            MaximumIterationsPerRequest = 3
-        };
+        using IChatClient functionClient = transport.Object
+            .AsBuilder()
+            .UseFunctionInvocation(configure: client =>
+                client.MaximumIterationsPerRequest = 3)
+            .Use(inner => new GatewayToolDocumentBudgetChatClient(
+                inner,
+                new ToolResultBudgetOptions { Enabled = true, MaxCumulativeChars = 9_500 },
+                NullLogger<GatewayToolDocumentBudgetChatClient>.Instance))
+            .Build();
 
         ChatResponse response = await functionClient.GetResponseAsync(
             [new ChatMessage(ChatRole.User, "compare the brands")],

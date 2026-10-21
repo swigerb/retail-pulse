@@ -894,13 +894,6 @@ string agentDeployment = builder.Configuration["OpenAI:Deployment"] ?? agentDef.
 
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDeployment).AsIChatClient())
-    // This wrapper sits directly around the transport, inside function invocation.
-    // It sees the complete tool-message sequence for each model turn and bounds a
-    // cloned request without destroying canonical results retained in the transcript.
-    .Use((innerClient, services) => new RetailPulse.Api.Budget.GatewayToolDocumentBudgetChatClient(
-        innerClient,
-        services.GetRequiredService<RetailPulse.Api.Budget.ToolResultBudgetOptions>(),
-        services.GetRequiredService<ILogger<RetailPulse.Api.Budget.GatewayToolDocumentBudgetChatClient>>()))
     .UseFunctionInvocation(configure: client =>
         // Cap tool-call iterations: 3 allows the full tool-calling lifecycle:
         //   Iteration 1 — LLM decides to call tools (fast, ~5-10s).
@@ -912,6 +905,14 @@ builder.Services.AddChatClient(
         // Why not unlimited: prevents runaway loops; the 90s request-level timeout
         // is the hard ceiling regardless.
         client.MaximumIterationsPerRequest = 3)
+    // ChatClientBuilder applies factories in reverse registration order. Register
+    // this after function invocation so the final stack is:
+    // FunctionInvokingChatClient(GatewayToolDocumentBudgetChatClient(transport)).
+    // The boundary then sees every internally generated tool-result follow-up.
+    .Use((innerClient, services) => new RetailPulse.Api.Budget.GatewayToolDocumentBudgetChatClient(
+        innerClient,
+        services.GetRequiredService<RetailPulse.Api.Budget.ToolResultBudgetOptions>(),
+        services.GetRequiredService<ILogger<RetailPulse.Api.Budget.GatewayToolDocumentBudgetChatClient>>()))
     // EnableSensitiveData logs full prompts, responses, and tool arguments as span
     // attributes — these can contain user PII. Default to OFF in every environment
     // (including Development) and only enable when an operator explicitly opts in via
