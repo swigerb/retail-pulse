@@ -518,7 +518,8 @@ public sealed partial class IntegratedGatewayAcceptanceTests
         Contains("walkthrough-regulated-cache", section, "AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "drop the cache-header claim", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "sequential pre-capture", "gateway walkthrough");
-        Contains("walkthrough-regulated-cache", section, "azd env get-value AZURE_APIM_INFERENCE_ENDPOINT", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "azd env get-value AZURE_APIM_INFERENCE_ENDPOINT)/openai", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "$APIM_BASE_URL/deployments/", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "x-rp-gw-cache: bypass", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "PROBE_BENIGN_PROMPT", "gateway walkthrough");
         int select = section.IndexOf("azd env select <normal-env-name>", StringComparison.Ordinal);

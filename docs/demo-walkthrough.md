@@ -842,7 +842,7 @@ azd env new retailpulse-regulated   # or: azd env select <existing regulated env
 azd env set AZURE_REGULATED_RETAIL_MODE true
 azd provision
 # Re-point these to the regulated environment after `azd env get-values`.
-export APIM_BASE_URL="$(azd env get-value AZURE_APIM_INFERENCE_ENDPOINT)"
+export APIM_BASE_URL="$(azd env get-value AZURE_APIM_INFERENCE_ENDPOINT)/openai"
 : "${APIM_SUBSCRIPTION_KEY:?set the regulated APIM subscription key}" "${DEPLOYMENT:?}" "${API_VERSION:?}"
 body="$(mktemp)"
 trap 'rm -f "$body"' EXIT
