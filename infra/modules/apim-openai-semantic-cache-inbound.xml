@@ -20,13 +20,13 @@
             try {
                 var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
                 var msgs = b == null ? null : b[&quot;messages&quot;] as JArray;
-                if (msgs == null) return &quot;&quot;;
+                if (msgs == null) { return &quot;&quot;; }
                 var sb = new System.Text.StringBuilder();
                 sb.Append(b[&quot;model&quot;] == null ? &quot;&quot; : b[&quot;model&quot;].ToString()).Append(&quot;|&quot;);
                 foreach (var m in msgs) {
                     string role = (string)m[&quot;role&quot;];
                     if (role == &quot;system&quot; || role == &quot;developer&quot;) {
-                        if (m[&quot;content&quot;] == null || m[&quot;content&quot;].Type != JTokenType.String) return &quot;&quot;;
+                        if (m[&quot;content&quot;] == null || m[&quot;content&quot;].Type != JTokenType.String) { return &quot;&quot;; }
                         sb.Append(role).Append(&quot;:&quot;).Append((string)m[&quot;content&quot;]).Append(&quot;\n&quot;);
                     }
                 }
@@ -35,47 +35,47 @@
         }" />
         <set-variable name="rp-cache-decision" value="@{
             try {
-                if (((string)context.Variables[&quot;rp-cache-regulated&quot;]) == &quot;true&quot;) return &quot;regulated&quot;;
-                if (context.Request.Method != &quot;POST&quot;) return &quot;unknown-intent&quot;;
+                if (((string)context.Variables[&quot;rp-cache-regulated&quot;]) == &quot;true&quot;) { return &quot;regulated&quot;; }
+                if (context.Request.Method != &quot;POST&quot;) { return &quot;unknown-intent&quot;; }
                 var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
-                if (b == null) return &quot;unknown-intent&quot;;
-                if (b[&quot;stream&quot;] != null || b[&quot;stream_options&quot;] != null) return &quot;streaming&quot;;
-                if (b[&quot;tools&quot;] != null || b[&quot;functions&quot;] != null || b[&quot;tool_choice&quot;] != null || b[&quot;function_call&quot;] != null || b[&quot;parallel_tool_calls&quot;] != null) return &quot;tools&quot;;
-                if (b[&quot;response_format&quot;] != null) return &quot;response-format&quot;;
+                if (b == null) { return &quot;unknown-intent&quot;; }
+                if (b[&quot;stream&quot;] != null || b[&quot;stream_options&quot;] != null) { return &quot;streaming&quot;; }
+                if (b[&quot;tools&quot;] != null || b[&quot;functions&quot;] != null || b[&quot;tool_choice&quot;] != null || b[&quot;function_call&quot;] != null || b[&quot;parallel_tool_calls&quot;] != null) { return &quot;tools&quot;; }
+                if (b[&quot;response_format&quot;] != null) { return &quot;response-format&quot;; }
                 foreach (var p in b.Properties()) {
                     string k = p.Name;
-                    if (k == &quot;messages&quot; || k == &quot;model&quot;) continue;
+                    if (k == &quot;messages&quot; || k == &quot;model&quot;) { continue; }
                     if (k == &quot;temperature&quot; || k == &quot;top_p&quot; || k == &quot;n&quot;) {
-                        if ((p.Value.Type == JTokenType.Integer || p.Value.Type == JTokenType.Float) &amp;&amp; (double)p.Value == 1.0) continue;
+                        if ((p.Value.Type == JTokenType.Integer || p.Value.Type == JTokenType.Float) &amp;&amp; (double)p.Value == 1.0) { continue; }
                     }
                     return &quot;model-params&quot;;
                 }
                 var msgs = b[&quot;messages&quot;] as JArray;
-                if (msgs == null) return &quot;unknown-intent&quot;;
+                if (msgs == null) { return &quot;unknown-intent&quot;; }
                 int users = 0;
                 string text = &quot;&quot;;
                 foreach (var m in msgs) {
                     string role = (string)m[&quot;role&quot;];
                     var c = m[&quot;content&quot;];
-                    if (c == null || c.Type != JTokenType.String) return &quot;unknown-intent&quot;;
-                    if (role == &quot;system&quot; || role == &quot;developer&quot;) continue;
-                    if (role != &quot;user&quot;) return &quot;low-confidence&quot;;
+                    if (c == null || c.Type != JTokenType.String) { return &quot;unknown-intent&quot;; }
+                    if (role == &quot;system&quot; || role == &quot;developer&quot;) { continue; }
+                    if (role != &quot;user&quot;) { return &quot;low-confidence&quot;; }
                     users++;
                     text = (string)c;
                 }
                 text = text.Trim();
-                if (text.Length == 0) return &quot;blank&quot;;
-                if (users != 1 || text.Length &lt; 12 || text.Length &gt; 200) return &quot;low-confidence&quot;;
-                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-sensitive&quot;])) return &quot;sensitive-intent&quot;;
-                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-identifier&quot;])) return &quot;identifier&quot;;
-                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-mutation&quot;])) return &quot;mutation&quot;;
-                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-analytics&quot;])) return &quot;analytics&quot;;
-                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-scope&quot;])) return &quot;scoped-intent&quot;;
-                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-dynamic&quot;])) return &quot;dynamic-intent&quot;;
-                if (!System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-allow&quot;])) return &quot;unknown-intent&quot;;
-                if (!System.Text.RegularExpressions.Regex.IsMatch((string)context.Variables[&quot;rp-cache-partition&quot;], (string)context.Variables[&quot;rp-cache-partition-pattern&quot;])) return &quot;no-partition&quot;;
-                if (context.Subscription == null || string.IsNullOrEmpty(context.Subscription.Id) || context.Product == null || string.IsNullOrEmpty(context.Product.Id)) return &quot;no-scope&quot;;
-                if (((string)context.Variables[&quot;rp-cache-vary&quot;]).Length == 0) return &quot;low-confidence&quot;;
+                if (text.Length == 0) { return &quot;blank&quot;; }
+                if (users != 1 || text.Length &lt; 12 || text.Length &gt; 200) { return &quot;low-confidence&quot;; }
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-sensitive&quot;])) { return &quot;sensitive-intent&quot;; }
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-identifier&quot;])) { return &quot;identifier&quot;; }
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-mutation&quot;])) { return &quot;mutation&quot;; }
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-analytics&quot;])) { return &quot;analytics&quot;; }
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-scope&quot;])) { return &quot;scoped-intent&quot;; }
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-deny-dynamic&quot;])) { return &quot;dynamic-intent&quot;; }
+                if (!System.Text.RegularExpressions.Regex.IsMatch(text, (string)context.Variables[&quot;rp-cache-allow&quot;])) { return &quot;unknown-intent&quot;; }
+                if (!System.Text.RegularExpressions.Regex.IsMatch((string)context.Variables[&quot;rp-cache-partition&quot;], (string)context.Variables[&quot;rp-cache-partition-pattern&quot;])) { return &quot;no-partition&quot;; }
+                if (context.Subscription == null || string.IsNullOrEmpty(context.Subscription.Id) || context.Product == null || string.IsNullOrEmpty(context.Product.Id)) { return &quot;no-scope&quot;; }
+                if (((string)context.Variables[&quot;rp-cache-vary&quot;]).Length == 0) { return &quot;low-confidence&quot;; }
                 return &quot;eligible&quot;;
             } catch (Exception) { return &quot;unknown-intent&quot;; }
         }" />

@@ -36,7 +36,7 @@ public sealed class GatewaySafetyProbeSelfTest
     {
         string xml = File.ReadAllText(Path.Combine(Root(), "infra", "modules", "apim-openai-safety-inbound.xml"));
 
-        xml.Should().Contain("userLen == 0 &amp;&amp; docs &gt; 0) return &quot;invalid&quot;");
+        xml.Should().Contain("userLen == 0 &amp;&amp; docs &gt; 0) { return &quot;invalid&quot;; }");
         xml.Should().NotContain("&quot;.&quot;");
     }
 
