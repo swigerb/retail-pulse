@@ -89,10 +89,8 @@ public sealed partial class McpGatewayDeploymentContractTests
         string parameters = Read("infra", "main.bicepparam");
         policy.Should().Contain("<validate-jwt");
         policy.Should().Contain("{{mcpGatewayAudience}}").And.Contain("{{tenantId}}");
-        main.Should().Contain("param mcpGatewayResourceIdentifier string = 'api://retailpulse-mcp-gateway'");
         main.Should().Contain("param mcpGatewayAudience string").And.Contain("@minLength(36)").And.Contain("@maxLength(36)");
         module.Should().Contain("Exact application (client) ID GUID in MCP caller v2 access-token aud claims");
-        parameters.Should().Contain("AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER', 'api://retailpulse-mcp-gateway'");
         parameters.Should().Contain("AZURE_MCP_GATEWAY_AUDIENCE', ''");
         parameters.Should().NotContain("AZURE_MCP_GATEWAY_AUDIENCE', 'api://",
             "the identifier URI must never fall back into the v2 token audience parameter");

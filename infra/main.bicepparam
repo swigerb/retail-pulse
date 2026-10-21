@@ -82,5 +82,4 @@ param botAppSecret = readEnvironmentVariable('AZURE_BOT_APP_SECRET', '')
 param alwaysWarm = toLower(readEnvironmentVariable('AZURE_ALWAYS_WARM', 'true')) == 'true'
 
 param mcpGatewayApimClientId = readEnvironmentVariable('AZURE_MCP_GATEWAY_APIM_CLIENT_ID', '')
-param mcpGatewayResourceIdentifier = readEnvironmentVariable('AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER', 'api://retailpulse-mcp-gateway')
 param mcpGatewayAudience = readEnvironmentVariable('AZURE_MCP_GATEWAY_AUDIENCE', '')
