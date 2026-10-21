@@ -360,6 +360,12 @@ public sealed partial class IntegratedGatewayAcceptanceTests
         }
 
         AssertEnvContract(id, lang, code, armAt);
+        int waitAt = lang == "powershell"
+            ? code.IndexOf("Start-Sleep", StringComparison.Ordinal)
+            : code.IndexOf("sleep ", StringComparison.Ordinal);
+        int firstRequestAt = code.IndexOf("curl", StringComparison.Ordinal);
+        Invariant(id, waitAt > armAt && firstRequestAt > waitAt,
+            "named-value propagation wait must occur after arming and before the first request");
 
         if (bumpName is not null)
         {
@@ -416,6 +422,7 @@ public sealed partial class IntegratedGatewayAcceptanceTests
             "azd env set AZURE_REGULATED_RETAIL_MODE true",
             "azd env set AZURE_REGULATED_RETAIL_MODE false",
             "Packs__Active=",
+            "$env:Packs__Active=",
             "node scripts/probe-failover-demo.cjs",
             "node scripts/probe-gateway-safety.cjs",
             "node scripts/probe-token-budget.cjs",
@@ -505,11 +512,15 @@ public sealed partial class IntegratedGatewayAcceptanceTests
 
         Contains("walkthrough-regulated-cache", section, "What is your return policy?", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "node scripts/probe-semantic-cache.cjs", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "tool-free direct-APIM", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "out-of-band APIM external-cache registration", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "drop the cache-header claim", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "sequential pre-capture", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "azd env get-value AZURE_APIM_INFERENCE_ENDPOINT", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "x-rp-gw-cache: bypass", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "PROBE_BENIGN_PROMPT", "gateway walkthrough");
         int select = section.IndexOf("azd env select <normal-env-name>", StringComparison.Ordinal);
         int restore = section.IndexOf("azd env set AZURE_REGULATED_RETAIL_MODE false", StringComparison.Ordinal);
         Invariant("walkthrough-regulated-restore", select > 0 && restore > select, "restore must select the normal env before setting regulated=false");

@@ -697,7 +697,7 @@ azd env set AZURE_APIM_SEMANTIC_CACHE_PARTITION lowes-retail
 azd up
 ```
 
-The exact semantic cache partition value is `lowes-retail` (lowercase `a-z0-9-`, 1-63 chars); it is deployment-wide and is never taken from a caller header. Also set `AZURE_APIM_FAILOVER_DEMO_KEY` and `AZURE_APIM_SEMANTIC_CACHE_EMBEDDINGS_BACKEND_ID` as described in [deployment-azd.md](deployment-azd.md). Switch the retailer per scenario with `Packs__Active=<pack> dotnet run --project src/RetailPulse.AppHost` and reset its data by deleting `retailpulse.db` under the system temp directory (`$env:TEMP\retailpulse` on Windows, `${TMPDIR:-/tmp}/retailpulse` elsewhere) before the restart. Pre-switch the packs in separate terminals if the restart would exceed a slot.
+The exact semantic cache partition value is `lowes-retail` (lowercase `a-z0-9-`, 1-63 chars); it is deployment-wide and is never taken from a caller header. Also set `AZURE_APIM_FAILOVER_DEMO_KEY` and `AZURE_APIM_SEMANTIC_CACHE_EMBEDDINGS_BACKEND_ID` as described in [deployment-azd.md](deployment-azd.md). Switch the retailer per scenario with `Packs__Active=<pack> dotnet run --project src/RetailPulse.AppHost` in bash, or `$env:Packs__Active='<pack>'; dotnet run --project src/RetailPulse.AppHost` in PowerShell. Reset its data by deleting `retailpulse.db` under the system temp directory (`$env:TEMP\retailpulse` on Windows, `${TMPDIR:-/tmp}/retailpulse` elsewhere) before the restart. Pre-switch the packs in separate terminals if the restart would exceed a slot.
 
 Environment contract for the commands below (never echoed, never committed). `APIM_BASE_URL` always already includes the `/inference/openai` suffix, for example `https://<apim>.azure-api.net/inference/openai`; the blocks append only `/deployments/...`, never the suffix again. Every block validates its required variables **before** arming anything.
 
@@ -716,7 +716,7 @@ Steps 1-6 run together against the **normal-mode** deployment in one sitting; th
 | Min | Retailer pack | Priority | What to do and show |
 |---|---|---|---|
 | 0:00–1:00 | `kroger-retail` | 1. Control Room evidence | Ask *Which Fresh Produce items in the Heartland have fewer than two days of supply…*. Open the Control Room: route `primary`, quota allowed, safety passed, tokens consumed/remaining, latency. Missing headers render as unknown, never as success. |
-| 1:00–2:30 | `lowes-retail` | 7. Semantic cache | Prerequisites (see *Semantic cache prerequisites*): cache, policy, embeddings backend, partition and the out-of-band APIM external-cache registration are in place. Send the exact eligible prompt `What is your return policy?` twice (the second, reworded as *what's the return policy*, must be a `hit` with no backend contact), then run `node scripts/probe-semantic-cache.cjs`. A dynamic price/inventory question is a `bypass`. Run this before failover so the cache is warm and untouched. |
+| 1:00–2:30 | `lowes-retail` | 7. Semantic cache | Prerequisites (see *Semantic cache prerequisites*): cache, policy, embeddings backend, partition and the out-of-band APIM external-cache registration are in place. Run the **tool-free direct-APIM** `node scripts/probe-semantic-cache.cjs`; do not type this into the tool-enabled app agent. It sends `What is your return policy?`, then the equivalent *what's the return policy* and requires a `hit` with no backend contact. Its dynamic price/inventory cases must be `bypass`. Run this before failover so the cache is warm and untouched. |
 | 2:30–3:30 | `kroger-retail` | 2. Authorized failover | Run the failover block (below). Show `x-rp-gw-primary-status`, `x-rp-gw-attempts: 2`, `x-rp-gw-fallback: used`, route `failover`. The block always disarms. |
 | 3:30–4:30 | `walgreens-retail` | 3. Pre-model safety block | Send the *Gateway governance check* starting task. The gateway returns 403 `gateway_safety_blocked` before any backend call, with no token evidence. |
 | 4:30–6:00 | `staples-retail` | 4. Token quota and reset | Run the quota block (below), send *AI gateway governance check*, show HTTP 429 with numeric `Retry-After` and the Control Room *Token budget exhausted* state. The block pauses while armed so you can do this; pressing Enter then bumps the generation to reset, disarms and verifies. |
@@ -739,6 +739,7 @@ Set-Content -Path $body -Value '{"messages":[{"role":"user","content":"ping"}],"
 try {
     az apim nv update --service-name $env:APIM_NAME -g $env:RESOURCE_GROUP --named-value-id rp-failover-demo-armed --value true
     if ($LASTEXITCODE -ne 0) { throw 'arm failed' }
+    Start-Sleep -Seconds 5 # named-value propagation; matches probe-failover-demo.cjs
     curl.exe -i -X POST "$($env:APIM_BASE_URL)/deployments/$($env:DEPLOYMENT)/chat/completions?api-version=$($env:API_VERSION)" -H "api-key: $($env:APIM_SUBSCRIPTION_KEY)" -H "x-rp-failover-demo: $($env:FAILOVER_DEMO_KEY)" -H "content-type: application/json" --data-binary "@$body"
 }
 finally {
@@ -764,6 +765,7 @@ disarm() {
 }
 trap disarm EXIT
 az apim nv update --service-name "$APIM_NAME" -g "$RESOURCE_GROUP" --named-value-id rp-failover-demo-armed --value true
+sleep 5 # named-value propagation; matches probe-failover-demo.cjs
 curl -i -X POST "$APIM_BASE_URL/deployments/$DEPLOYMENT/chat/completions?api-version=$API_VERSION" -H "api-key: $APIM_SUBSCRIPTION_KEY" -H "x-rp-failover-demo: $FAILOVER_DEMO_KEY" -H "content-type: application/json" --data-binary "@$body"
 ```
 
@@ -781,6 +783,7 @@ Set-Content -Path $body -Value '{"messages":[{"role":"user","content":"ping"}],"
 try {
     az apim nv update -g $env:RESOURCE_GROUP -n $env:APIM_NAME --named-value-id rp-budget-demo-armed --value true
     if ($LASTEXITCODE -ne 0) { throw 'arm failed' }
+    Start-Sleep -Seconds 15 # named-value propagation; matches probe-token-budget.cjs
     1..3 | ForEach-Object {
         curl.exe -i -X POST "$($env:APIM_BASE_URL)/deployments/$($env:DEPLOYMENT)/chat/completions?api-version=$($env:API_VERSION)" -H "api-key: $($env:SUBSCRIPTION_KEY)" -H "content-type: application/json" --data-binary "@$body"
     }
@@ -812,6 +815,7 @@ reset_and_disarm() {
 }
 trap reset_and_disarm EXIT
 az apim nv update -g "$RESOURCE_GROUP" -n "$APIM_NAME" --named-value-id rp-budget-demo-armed --value true
+sleep 15 # named-value propagation; matches probe-token-budget.cjs
 for i in 1 2 3; do
   curl -i -X POST "$APIM_BASE_URL/deployments/$DEPLOYMENT/chat/completions?api-version=$API_VERSION" -H "api-key: $SUBSCRIPTION_KEY" -H "content-type: application/json" --data-binary "@$body"
 done
@@ -837,9 +841,16 @@ azd env new retailpulse-regulated   # or: azd env select <existing regulated env
 # repeat every cache/embeddings/partition/network azd env set from the normal setup, then:
 azd env set AZURE_REGULATED_RETAIL_MODE true
 azd provision
-node scripts/probe-gateway-safety.cjs --scenario fault --fault 503 --mode regulated
-# send the eligible prompt (What is your return policy?) and capture x-rp-gw-cache: bypass with reason regulated;
-# the hit-oriented semantic-cache probe is for the normal environment only
+# Re-point these to the regulated environment after `azd env get-values`.
+export APIM_BASE_URL="$(azd env get-value AZURE_APIM_INFERENCE_ENDPOINT)"
+: "${APIM_SUBSCRIPTION_KEY:?set the regulated APIM subscription key}" "${DEPLOYMENT:?}" "${API_VERSION:?}"
+body="$(mktemp)"
+trap 'rm -f "$body"' EXIT
+echo '{"messages":[{"role":"user","content":"What is your return policy?"}]}' > "$body"
+curl -i -X POST "$APIM_BASE_URL/deployments/$DEPLOYMENT/chat/completions?api-version=$API_VERSION" -H "api-key: $APIM_SUBSCRIPTION_KEY" -H "content-type: application/json" --data-binary "@$body"
+# Capture: masked x-rp-gw-request-id, metadata-only diagnostics, and x-rp-gw-cache: bypass / reason regulated.
+# A live dependency-fault proof needs a deliberately faulted Content Safety test endpoint; do not run the fault probe
+# against a healthy endpoint and do not claim that proof unless #342 records the induced fault and PROBE_BENIGN_PROMPT.
 azd env select <normal-env-name>        # restore: select the normal environment first
 azd env set AZURE_REGULATED_RETAIL_MODE false
 azd provision
