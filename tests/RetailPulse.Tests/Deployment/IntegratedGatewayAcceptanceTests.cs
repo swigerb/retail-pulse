@@ -305,6 +305,29 @@ public sealed partial class IntegratedGatewayAcceptanceTests
     private static (string Lang, string Code)[] Blocks(string section, string marker) =>
         [.. CodeBlockRegex().Matches(section).Select(m => (Lang: m.Groups["lang"].Value, Code: m.Groups["code"].Value)).Where(b => b.Code.Contains(marker, StringComparison.Ordinal))];
 
+    private static readonly string[] _contractVariables =
+    [
+        "APIM_NAME", "RESOURCE_GROUP", "APIM_BASE_URL", "DEPLOYMENT", "API_VERSION", "APIM_SUBSCRIPTION_KEY", "FAILOVER_DEMO_KEY", "SUBSCRIPTION_KEY",
+    ];
+
+    // Every variable a block uses must be validated before the block arms, and the base URL must not double the path.
+    private static void AssertEnvContract(string id, string lang, string code, int armAt)
+    {
+        string before = code[..armAt];
+        string[] used = [.. _contractVariables.Where(v => lang == "powershell"
+            ? Regex.IsMatch(code, @"\$env:" + v + @"\b")
+            : Regex.IsMatch(code, @"\$\{?" + v + @"\b"))];
+        Invariant(id, used.Length >= 6, $"{lang} block uses too few contract variables ({string.Join(',', used)})");
+        foreach (string v in used)
+        {
+            Invariant(id, before.Contains($"'{v}'", StringComparison.Ordinal) || before.Contains($"\"${{{v}:?}}\"", StringComparison.Ordinal),
+                $"{lang} block must validate {v} before arming");
+        }
+
+        Invariant(id, !code.Contains("/inference/openai", StringComparison.Ordinal), "APIM_BASE_URL already includes /inference/openai; the block must not append it again");
+        Invariant(id, code.Contains("/deployments/", StringComparison.Ordinal), "block must call /deployments/ under APIM_BASE_URL");
+    }
+
     // Within ONE block: arm only after try/trap is in place, disarm only in finally/trap, bump before disarm, verify after disarm.
     private static void AssertFailSafeBlock(string id, string lang, string code, string armName, string? bumpName)
     {
@@ -336,8 +359,25 @@ public sealed partial class IntegratedGatewayAcceptanceTests
             Invariant(id, code.Contains("set -euo pipefail", StringComparison.Ordinal) && code.Contains("mktemp", StringComparison.Ordinal), "bash block must fail fast and use mktemp");
         }
 
+        AssertEnvContract(id, lang, code, armAt);
+
         if (bumpName is not null)
         {
+            int pauseAt = lang == "powershell" ? code.IndexOf("Read-Host", StringComparison.Ordinal) : code.IndexOf("read -r", StringComparison.Ordinal);
+            int cleanupAt = lang == "powershell" ? code.IndexOf("finally {", StringComparison.Ordinal) : code.IndexOf("() {", StringComparison.Ordinal);
+            int bumpFirst = code.IndexOf($"--named-value-id {bumpName} --value", StringComparison.Ordinal);
+            Invariant(id, pauseAt > armAt, "the quota block must pause after arming so the operator can send the app prompt and observe the Control Room 429");
+            if (lang == "powershell")
+            {
+                Invariant(id, pauseAt < cleanupAt, "PowerShell pause must be inside the armed try window, before finally");
+            }
+            else
+            {
+                Invariant(id, pauseAt > code.IndexOf("trap ", StringComparison.Ordinal) && cleanupAt < code.IndexOf("trap ", StringComparison.Ordinal), "bash pause must come after the trap is set and the handler is defined");
+            }
+
+            Invariant(id, lang == "bash" || pauseAt < bumpFirst, "the pause must precede the generation bump, disarm and verification");
+            Invariant(id, code.Contains("429", StringComparison.Ordinal) && code.Contains("Control Room", StringComparison.Ordinal), "the pause prompt must tell the operator to observe the Control Room 429");
             int bumpAt = code.IndexOf($"--named-value-id {bumpName} --value", StringComparison.Ordinal);
             Invariant(id, bumpAt >= 0 && bumpAt < disarmAt, $"{bumpName} must be bumped before the demo is disarmed");
             int cleanupStart = lang == "powershell" ? code.IndexOf("finally {", StringComparison.Ordinal) : code.IndexOf("() {", StringComparison.Ordinal);
@@ -386,9 +426,28 @@ public sealed partial class IntegratedGatewayAcceptanceTests
             Contains("walkthrough-commands", section, command, "gateway walkthrough");
         }
 
-        foreach (string variable in new[] { "APIM_NAME", "RESOURCE_GROUP", "APIM_BASE_URL", "DEPLOYMENT", "API_VERSION", "APIM_SUBSCRIPTION_KEY", "FAILOVER_DEMO_KEY" })
+        foreach (string variable in new[]
+        {
+            "APIM_NAME", "RESOURCE_GROUP", "APIM_BASE_URL", "DEPLOYMENT", "API_VERSION", "APIM_SUBSCRIPTION_KEY", "FAILOVER_DEMO_KEY",
+            "SUBSCRIPTION_KEY", "KEY_SCOPE_A", "KEY_SCOPE_B", "EXPECT_SCOPE_A", "EXPECT_SCOPE_B", "/inference/openai",
+        })
         {
             Contains("walkthrough-env-vars", section, variable, "gateway walkthrough");
+        }
+
+        // Every variable each probe script reads must be in the documented contract.
+        foreach ((string script, string[] vars) in new[]
+        {
+            ("probe-semantic-cache.cjs", new[] { "APIM_BASE_URL", "DEPLOYMENT", "API_VERSION", "SUBSCRIPTION_KEY" }),
+            ("probe-token-budget.cjs", ["KEY_SCOPE_A", "KEY_SCOPE_B", "EXPECT_SCOPE_A", "EXPECT_SCOPE_B", "APIM_NAME", "RESOURCE_GROUP"]),
+        })
+        {
+            string source = File.ReadAllText(Path.Combine(Root, "scripts", script));
+            foreach (string v in vars)
+            {
+                Contains("walkthrough-probe-env", source, v, $"scripts/{script}");
+                Contains("walkthrough-probe-env", section, v, "gateway walkthrough");
+            }
         }
 
         Contains("walkthrough-live-ownership", section, "#341", "gateway walkthrough");
@@ -444,6 +503,16 @@ public sealed partial class IntegratedGatewayAcceptanceTests
                 "no timed narrative row may imply an azd (re)provision");
         }
 
+        Contains("walkthrough-regulated-cache", section, "What is your return policy?", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "node scripts/probe-semantic-cache.cjs", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "out-of-band APIM external-cache registration", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "drop the cache-header claim", "gateway walkthrough");
+        Contains("walkthrough-regulated-cache", section, "sequential pre-capture", "gateway walkthrough");
+        int select = section.IndexOf("azd env select <normal-env-name>", StringComparison.Ordinal);
+        int restore = section.IndexOf("azd env set AZURE_REGULATED_RETAIL_MODE false", StringComparison.Ordinal);
+        Invariant("walkthrough-regulated-restore", select > 0 && restore > select, "restore must select the normal env before setting regulated=false");
         Contains("walkthrough-regulated-order", section, "never** toggled during the walkthrough", "gateway walkthrough");
         Contains("walkthrough-regulated-order", section, "azd env new retailpulse-regulated", "gateway walkthrough");
         int regulatedSetup = section.IndexOf("azd env set AZURE_REGULATED_RETAIL_MODE true", StringComparison.Ordinal);
