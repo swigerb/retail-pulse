@@ -30,7 +30,7 @@ Everything else (`/api/supply/health`, `/api/supply/fulfillment`, margin, promo,
 ### Caller authentication (client → APIM)
 
 1. **Subscription key** required on the MCP API (`subscriptionRequired: true`, product `retailpulse-mcp`, header `Ocp-Apim-Subscription-Key`). The product is approval-required; keys identify the calling team for quotas and logs.
-2. **`validate-jwt`** in the API inbound policy: Entra v2 issuer pinned to the tenant, audience `api://retailpulse-mcp-gateway` (new app registration, named value `mcpGatewayAudience`), and required app role claim `RetailPulse.Mcp.Invoke` (`roles`). `require-expiration-time`, `require-signed-tokens`, clock-skew 60s. Failure → 401 with no body detail.
+2. **`validate-jwt`** in the API inbound policy: Entra v2 issuer pinned to the tenant, audience pinned to the gateway application's client-ID GUID (named value `mcpGatewayAudience`), and required app role claim `RetailPulse.Mcp.Invoke` (`roles`). The distinct identifier URI `api://retailpulse-mcp-gateway` is the resource clients use when requesting `/.default`; Microsoft Entra v2 access tokens carry the API client ID in `aud`. `require-expiration-time`, `require-signed-tokens`, clock-skew 60s. Failure → 401 with no body detail.
 3. The caller's `Authorization` header is **stripped** before the backend call; it is never forwarded.
 
 ### APIM → backend authentication
@@ -62,12 +62,14 @@ Fail-closed rule: if the MCP server resource cannot be created on the deployed i
 
 ### Identity provisioning (one hook, idempotent)
 
-The azd `postprovision` hook (`azd-hooks/postprovision.ps1`/`.sh`, already wired in `azure.yaml`) calls new `scripts/Setup-McpGatewayIdentity.ps1` (the `.sh` wrapper runs it with `pwsh`). This is the only provisioning path. It uses Microsoft Graph as the deploy identity and is safe to re-run:
+The azd hooks call `scripts/Setup-McpGatewayIdentity.ps1` as one idempotent provisioning path. `preprovision` runs `-BootstrapOnly` so the gateway client ID exists before ARM compiles the APIM policy; `postprovision` completes assignments after the APIM identity exists. Both wrappers use `pwsh`. The script uses Microsoft Graph as the deploy identity and is safe to re-run.
 
-1. Find the gateway app registration by identifier URI `api://retailpulse-mcp-gateway`; create it with app role `RetailPulse.Mcp.Invoke` (`allowedMemberTypes: ["Application"]`) only if missing, add the role only if absent, and ensure its service principal exists.
+`azd` does not hot-reload environment values written inside a preprovision hook. On a clean environment (or when migrating the old URI-valued `AZURE_MCP_GATEWAY_AUDIENCE`), the first `azd provision`/`azd up` invocation therefore creates or repairs the app, persists the client-ID GUID, and intentionally stops **before ARM** with instructions to rerun the same command. The second invocation receives the persisted GUID and proceeds. This two-pass bootstrap is fail-closed: no policy is ever deployed with an empty, guessed, stale, or identifier-URI audience.
+
+1. Find the gateway app registration by identifier URI `api://retailpulse-mcp-gateway`; create it with `api.requestedAccessTokenVersion=2` and app role `RetailPulse.Mcp.Invoke` (`allowedMemberTypes: ["Application"]`) only if missing. Existing apps are repaired to v2, the role is added only if absent, and the service principal is ensured.
 2. Resolve the Retail Pulse API service principal and its `RetailPulse.User` app role id.
 3. Resolve the APIM system-assigned managed identity service principal (`principalId` from the Bicep output) and create the `appRoleAssignment` for `RetailPulse.User` only if no identical (principal, resource, appRoleId) assignment exists.
-4. Emit the gateway audience and the APIM MI `appId` as azd env values consumed by the Container App settings (`MicrosoftEntra__AllowedAppClientIds__0`). No secret is created or output.
+4. Emit the resource identifier as `AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER`, the gateway client-ID token audience as `AZURE_MCP_GATEWAY_AUDIENCE`, and the APIM MI `appId` as `AZURE_MCP_GATEWAY_APIM_CLIENT_ID`. No secret is created or output.
 
 **Required Graph permissions for the deploy identity** (admin-consented): `Application.ReadWrite.All` (create/update the gateway app registration and its role) and `AppRoleAssignment.ReadWrite.All` (assign `RetailPulse.User` to the APIM MI service principal). The Cloud Application Administrator directory role covers both for interactive deployers. `Application.ReadWrite.OwnedBy` is not sufficient (it cannot create app-role assignments).
 
@@ -84,8 +86,9 @@ sequenceDiagram
     participant M as APIM managed identity
     participant A as Retail Pulse API (public)
     participant S as MCP server (internal, X-Api-Key)
-    C->>E: client credentials (aud api://retailpulse-mcp-gateway)
-    E-->>C: JWT with role RetailPulse.Mcp.Invoke
+    C->>E: client credentials (resource api://retailpulse-mcp-gateway/.default)
+    E-->>C: v2 JWT (aud gateway application client ID)
+    Note over C,E: JWT also carries role RetailPulse.Mcp.Invoke
     C->>G: tools/call get_inventory + subscription key + JWT
     G->>G: validate subscription, validate-jwt, tool allow-list, GET only
     G->>G: rate-limit-by-key / quota-by-key

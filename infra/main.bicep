@@ -109,8 +109,10 @@ param alwaysWarm bool = true
 @description('Application (client) ID of the APIM managed identity, produced by scripts/Setup-McpGatewayIdentity.ps1 (azd env AZURE_MCP_GATEWAY_APIM_CLIENT_ID). Empty until the postprovision hook has run; the API then trusts no gateway app-only caller.')
 param mcpGatewayApimClientId string = ''
 
-@description('Audience (identifier URI) of the MCP gateway app registration that callers request tokens for')
-param mcpGatewayAudience string = 'api://retailpulse-mcp-gateway'
+@description('Exact application (client) ID GUID expected in the MCP gateway v2 access-token aud claim. Emitted by Setup-McpGatewayIdentity.ps1 -BootstrapOnly before ARM runs.')
+@minLength(36)
+@maxLength(36)
+param mcpGatewayAudience string
 @description('Enable the optional Azure AI Search knowledge provider. Disabled by default; no Search resource is provisioned when false.')
 param aiSearchEnabled bool = false
 

@@ -807,15 +807,21 @@ Retail Pulse API with its managed identity.
 | `get_demand_forecast` | `GET /api/demand/forecast?brand=&region=` (`brand` required, `region` defaults to `National`) |
 
 - **Caller auth:** `Ocp-Apim-Subscription-Key` (product `retailpulse-mcp`, approval required) plus an Entra
-  token for audience `api://retailpulse-mcp-gateway` with app role `RetailPulse.Mcp.Invoke`.
+  v2 token requested for `AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER/.default` (default resource identifier
+  `api://retailpulse-mcp-gateway`) with app role `RetailPulse.Mcp.Invoke`. APIM validates the token's
+  distinct `aud` claim against `AZURE_MCP_GATEWAY_AUDIENCE`, the gateway application client-ID GUID.
 - **Quotas per subscription:** 30 calls/min, 2,000 calls/day, 20 MB/day.
 - **API-side caps for app-only callers:** `McpGateway:MaxItems` (default 50) and `McpGateway:MaxResponseBytes`
   (default 262144, `413 {"error":"response_too_large"}`).
 - **Route allow-list:** `McpGateway:Clients:{i}` (`ClientId` + its own `Operations`, e.g. `"GET /api/supply/inventory"` for APIM only, `"POST /api/chat"` for the bot) is enforced by
   `AppOnlyRouteAllowListMiddleware` after authorization; an empty list denies every app-only request. The Teams bot
   keeps `POST /api/chat` when a bot is configured.
-- **Provisioning:** `scripts/Setup-McpGatewayIdentity.ps1` (azd `postprovision`) creates the gateway app role and the
-  APIM identity's `RetailPulse.User` assignment idempotently. It needs Graph `Application.ReadWrite.All` and
-  `AppRoleAssignment.ReadWrite.All`. The APIM client id is emitted as `AZURE_MCP_GATEWAY_APIM_CLIENT_ID`, which takes
-  effect on the next `azd provision` (until then no gateway caller is trusted).
+- **Provisioning:** azd `preprovision` calls `scripts/Setup-McpGatewayIdentity.ps1 -BootstrapOnly` to create or
+  repair the gateway app with `api.requestedAccessTokenVersion=2` and emit its client ID before ARM runs.
+  `postprovision` completes the APIM identity's `RetailPulse.User` assignment idempotently. It needs Graph
+  `Application.ReadWrite.All` and `AppRoleAssignment.ReadWrite.All`. The APIM client id is emitted as
+  `AZURE_MCP_GATEWAY_APIM_CLIENT_ID` and applied to the API in the same postprovision flow. Because `azd`
+  does not hot-reload values written by preprovision hooks, a clean setup intentionally stops before ARM
+  after persisting the gateway client ID; rerun the same `azd provision`/`azd up` command to deploy with
+  the exact GUID. The hook never substitutes the identifier URI or a guessed audience.
 - **Write tools:** none in v1; adding one requires a new ADR.

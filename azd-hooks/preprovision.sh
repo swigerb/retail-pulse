@@ -12,7 +12,7 @@ set -e
 
 echo 'Checking prerequisites...'
 
-for cmd in az dotnet node npm; do
+for cmd in az azd dotnet node npm pwsh; do
     if ! command -v "$cmd" > /dev/null 2>&1; then
         echo "Required command '$cmd' is not installed or is not on PATH." >&2
         exit 1
@@ -69,6 +69,21 @@ if [ "$(printf '%s' "${AZURE_APIM_BACKEND_POOL_ENABLED:-false}" | tr '[:upper:]'
         exit 1
     fi
     echo 'APIM backend pool validated: primary and secondary accounts are distinct.'
+fi
+
+# Bootstrap the gateway app before ARM so Bicep receives the exact v2 JWT audience (the
+# application client-id GUID), never the distinct api:// resource identifier.
+loaded_gateway_audience="${AZURE_MCP_GATEWAY_AUDIENCE:-}"
+pwsh -NoProfile -File "$(dirname "$0")/../scripts/Setup-McpGatewayIdentity.ps1" -BootstrapOnly
+persisted_gateway_audience="$(azd env get-value AZURE_MCP_GATEWAY_AUDIENCE)"
+if ! printf '%s' "$persisted_gateway_audience" | grep -Eq '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'; then
+    echo 'The MCP gateway bootstrap did not persist a valid AZURE_MCP_GATEWAY_AUDIENCE client-id GUID.' >&2
+    exit 1
+fi
+if [ "$loaded_gateway_audience" != "$persisted_gateway_audience" ]; then
+    echo "MCP gateway identity bootstrap completed and persisted audience $persisted_gateway_audience." >&2
+    echo 'azd does not hot-reload values written by preprovision hooks; rerun the same azd provision/up command so ARM receives the exact client-id audience. No Azure resources were provisioned by this run.' >&2
+    exit 1
 fi
 
 echo 'All prerequisites met. Proceeding with provisioning...'

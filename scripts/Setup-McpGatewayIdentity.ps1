@@ -8,14 +8,19 @@
     `az rest` as the deploy identity and is safe to re-run:
 
       1. Find the gateway app registration by identifier URI (default api://retailpulse-mcp-gateway);
-         create it with the app role RetailPulse.Mcp.Invoke (Application members only) only if
-         missing, add the role only if absent, and ensure its service principal exists.
+         create it with v2 access tokens and the app role RetailPulse.Mcp.Invoke (Application
+         members only) only if missing, repair existing apps to v2, add the role only if absent,
+         and ensure its service principal exists.
       2. Resolve the Retail Pulse API service principal and its RetailPulse.User app role id.
       3. Resolve the APIM system-assigned managed identity service principal and create the
          appRoleAssignment for RetailPulse.User only if no identical assignment exists.
-      4. Emit AZURE_MCP_GATEWAY_AUDIENCE and AZURE_MCP_GATEWAY_APIM_CLIENT_ID as azd env values
-         (consumed by main.bicepparam -> MicrosoftEntra__AllowedAppClientIds__1). No secret is
-         created or printed.
+      4. Emit AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER (the api:// URI callers request) and
+         AZURE_MCP_GATEWAY_AUDIENCE (the app client-id GUID found in v2 tokens), plus
+         AZURE_MCP_GATEWAY_APIM_CLIENT_ID, as azd env values. No secret is created or printed.
+
+    The preprovision hook calls this script with -BootstrapOnly so the app client id exists before
+    Bicep creates the pinned APIM validate-jwt policy. The postprovision hook calls the full flow
+    after the APIM identity exists.
 
     Required Graph permissions for the deploy identity (admin-consented):
       * Application.ReadWrite.All       - create/update the gateway app registration and its role
@@ -33,12 +38,28 @@
 
 .PARAMETER ApiClientId
     Application (client) id of the Retail Pulse API app registration (RETAIL_PULSE_ENTRA_CLIENT_ID).
+
+.PARAMETER GatewayResourceIdentifier
+    Application ID URI callers use as the OAuth resource/scope prefix. This is not the v2 JWT aud.
+
+.PARAMETER BootstrapOnly
+    Create or repair the gateway app registration, ensure its service principal exists, and emit
+    its non-secret resource identifier and client-id audience for Bicep. Skip APIM/backend setup.
 #>
 [CmdletBinding()]
 param(
     [string]$ApimPrincipalId = $env:AZURE_APIM_PRINCIPAL_ID,
     [string]$ApiClientId = $env:RETAIL_PULSE_ENTRA_CLIENT_ID,
-    [string]$GatewayAudience = $(if ($env:AZURE_MCP_GATEWAY_AUDIENCE) { $env:AZURE_MCP_GATEWAY_AUDIENCE } else { 'api://retailpulse-mcp-gateway' }),
+    [string]$GatewayResourceIdentifier = $(if ($env:AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER) {
+            $env:AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER
+        }
+        elseif ($env:AZURE_MCP_GATEWAY_AUDIENCE -match '^api://') {
+            # One-time migration from the old variable, where "audience" incorrectly meant the URI.
+            $env:AZURE_MCP_GATEWAY_AUDIENCE
+        }
+        else {
+            'api://retailpulse-mcp-gateway'
+        }),
     [string]$ApiAppRole = 'RetailPulse.User',
     [string]$InvokeRole = 'RetailPulse.Mcp.Invoke',
     [string]$ResourceGroup = $env:AZURE_RESOURCE_GROUP,
@@ -48,6 +69,7 @@ param(
         'GET /api/stores/stockout-risks',
         'GET /api/supply/disruptions',
         'GET /api/demand/forecast'),
+    [switch]$BootstrapOnly,
     [switch]$SkipContainerAppUpdate,
     [switch]$SkipAzdEnv
 )
@@ -58,15 +80,17 @@ Set-StrictMode -Version Latest
 $graph = 'https://graph.microsoft.com/v1.0'
 $guidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
 
-foreach ($required in @(
-        @{ Name = 'ApimPrincipalId (AZURE_APIM_PRINCIPAL_ID)'; Value = $ApimPrincipalId },
-        @{ Name = 'ApiClientId (RETAIL_PULSE_ENTRA_CLIENT_ID)'; Value = $ApiClientId })) {
-    if ([string]::IsNullOrWhiteSpace($required.Value) -or $required.Value -notmatch $guidPattern) {
-        throw "Setup-McpGatewayIdentity: $($required.Name) must be a GUID."
+if (-not $BootstrapOnly) {
+    foreach ($required in @(
+            @{ Name = 'ApimPrincipalId (AZURE_APIM_PRINCIPAL_ID)'; Value = $ApimPrincipalId },
+            @{ Name = 'ApiClientId (RETAIL_PULSE_ENTRA_CLIENT_ID)'; Value = $ApiClientId })) {
+        if ([string]::IsNullOrWhiteSpace($required.Value) -or $required.Value -notmatch $guidPattern) {
+            throw "Setup-McpGatewayIdentity: $($required.Name) must be a GUID."
+        }
     }
 }
-if ($GatewayAudience -notmatch '^api://[A-Za-z0-9._-]+$') {
-    throw "Setup-McpGatewayIdentity: gateway audience '$GatewayAudience' must look like api://<name>."
+if ($GatewayResourceIdentifier -notmatch '^api://[A-Za-z0-9._-]+$') {
+    throw "Setup-McpGatewayIdentity: gateway resource identifier '$GatewayResourceIdentifier' must look like api://<name>."
 }
 
 function Invoke-Graph {
@@ -141,19 +165,22 @@ function Get-FirstOrNull($Response) {
     return $items[0]
 }
 
-Write-Host "Setting up MCP gateway identity (audience $GatewayAudience)..."
+Write-Host "Setting up MCP gateway identity (resource $GatewayResourceIdentifier)..."
 
 # 1. Gateway app registration + role + service principal.
-$escapedAudience = $GatewayAudience.Replace("'", "''")
-$filter = [uri]::EscapeDataString("identifierUris/any(u:u eq '$escapedAudience')")
-$gatewayApp = Get-FirstOrNull (Invoke-Graph -Method GET -Url "$graph/applications?`$filter=$filter&`$select=id,appId,appRoles")
+$escapedIdentifier = $GatewayResourceIdentifier.Replace("'", "''")
+$filter = [uri]::EscapeDataString("identifierUris/any(u:u eq '$escapedIdentifier')")
+$gatewayApp = Get-FirstOrNull (Invoke-Graph -Method GET -Url "$graph/applications?`$filter=$filter&`$select=id,appId,appRoles,api")
 
 if (-not $gatewayApp) {
     Write-Host '-> creating gateway app registration'
     $gatewayApp = Invoke-Graph -Method POST -Url "$graph/applications" -Body @{
         displayName    = 'Retail Pulse MCP Gateway'
-        identifierUris = @($GatewayAudience)
+        identifierUris = @($GatewayResourceIdentifier)
         signInAudience = 'AzureADMyOrg'
+        api            = @{
+            requestedAccessTokenVersion = 2
+        }
         appRoles       = @(@{
                 id                 = [guid]::NewGuid().ToString()
                 allowedMemberTypes = @('Application')
@@ -166,6 +193,28 @@ if (-not $gatewayApp) {
 }
 else {
     Write-Host '-> gateway app registration already present'
+    $patch = @{}
+    $requestedVersion = if (
+        $gatewayApp.PSObject.Properties['api'] -and
+        $gatewayApp.api -and
+        $gatewayApp.api.PSObject.Properties['requestedAccessTokenVersion']) {
+        $gatewayApp.api.requestedAccessTokenVersion
+    }
+    else {
+        $null
+    }
+    if ($requestedVersion -ne 2) {
+        Write-Host '-> enforcing v2 access tokens'
+        $api = if ($gatewayApp.PSObject.Properties['api'] -and $gatewayApp.api) {
+            $gatewayApp.api | ConvertTo-Json -Depth 10 | ConvertFrom-Json -AsHashtable
+        }
+        else {
+            @{}
+        }
+        $api['requestedAccessTokenVersion'] = 2
+        $patch['api'] = $api
+    }
+
     $existingRoles = @($gatewayApp.appRoles)
     if (-not ($existingRoles | Where-Object { $_.value -eq $InvokeRole })) {
         Write-Host "-> adding app role $InvokeRole"
@@ -177,8 +226,17 @@ else {
             value              = $InvokeRole
             isEnabled          = $true
         }
-        Invoke-Graph -Method PATCH -Url "$graph/applications/$($gatewayApp.id)" -Body @{ appRoles = $existingRoles } | Out-Null
+        $patch['appRoles'] = $existingRoles
     }
+
+    if ($patch.Count -gt 0) {
+        Invoke-Graph -Method PATCH -Url "$graph/applications/$($gatewayApp.id)" -Body $patch | Out-Null
+    }
+}
+
+$gatewayAudience = $gatewayApp.appId
+if ([string]::IsNullOrWhiteSpace($gatewayAudience) -or $gatewayAudience -notmatch $guidPattern) {
+    throw 'Setup-McpGatewayIdentity: Microsoft Graph returned no valid application client id for the gateway app.'
 }
 
 $gatewaySp = Get-FirstOrNull (Invoke-Graph -Method GET -Url "$graph/servicePrincipals?`$filter=appId eq '$($gatewayApp.appId)'&`$select=id")
@@ -187,6 +245,21 @@ if (-not $gatewaySp) {
     $created = Invoke-Graph -Method POST -Url "$graph/servicePrincipals" -Body @{ appId = $gatewayApp.appId } -RetryReplication
     # A fresh service principal can 404 for a while; retry up to 5 times at 10 s intervals before moving on.
     Invoke-Graph -Method GET -Url "$graph/servicePrincipals/$($created.id)?`$select=id" -RetryNotFound | Out-Null
+}
+
+# Emit the two distinct non-secret identity values before ARM on bootstrap and re-assert them on
+# the full pass. OAuth clients request "$GatewayResourceIdentifier/.default"; APIM validates the
+# v2 token's aud claim against the application client-id GUID.
+if (-not $SkipAzdEnv) {
+    & azd env set AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER $GatewayResourceIdentifier
+    if ($LASTEXITCODE -ne 0) { throw 'azd env set AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER failed.' }
+    & azd env set AZURE_MCP_GATEWAY_AUDIENCE $gatewayAudience
+    if ($LASTEXITCODE -ne 0) { throw 'azd env set AZURE_MCP_GATEWAY_AUDIENCE failed.' }
+}
+
+if ($BootstrapOnly) {
+    Write-Host "MCP gateway app ready for ARM. Resource identifier: $GatewayResourceIdentifier; v2 token audience: $gatewayAudience"
+    return
 }
 
 # 2. Retail Pulse API service principal and its app role id.
@@ -211,10 +284,8 @@ else {
     } | Out-Null
 }
 
-# 4. Emit non-secret azd env values (consumed on the next provision by main.bicepparam).
+# 4. Emit the APIM managed identity client id consumed by the API allow-list.
 if (-not $SkipAzdEnv) {
-    & azd env set AZURE_MCP_GATEWAY_AUDIENCE $GatewayAudience
-    if ($LASTEXITCODE -ne 0) { throw 'azd env set AZURE_MCP_GATEWAY_AUDIENCE failed.' }
     & azd env set AZURE_MCP_GATEWAY_APIM_CLIENT_ID $apimSp.appId
     if ($LASTEXITCODE -ne 0) { throw 'azd env set AZURE_MCP_GATEWAY_APIM_CLIENT_ID failed.' }
 }
@@ -254,4 +325,4 @@ if (-not $SkipContainerAppUpdate) {
     Write-Host '-> verified MCP gateway configuration on the API Container App'
 }
 
-Write-Host "MCP gateway identity ready. Audience: $GatewayAudience; APIM managed identity client id: $($apimSp.appId)"
+Write-Host "MCP gateway identity ready. Resource identifier: $GatewayResourceIdentifier; v2 token audience: $gatewayAudience; APIM managed identity client id: $($apimSp.appId)"
