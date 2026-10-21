@@ -2,7 +2,7 @@
 
 - **Status:** Proposed (design only; becomes Accepted when the Squad lead signs off; implemented by the runtime issue under epic #321)
 - **Issue:** #334 (parent #321, blocked-by #322)
-- **Supersedes:** §2.6 "option (a)" of `docs/proposals/retail-ai-gateway-control-plane.md` (external MCP ingress restricted to APIM and a static API key). The proposal's governing goals (explicit read-only allow-list, subscription key plus Entra at the edge, no implicit tools) are kept.
+- **Supersedes:** §2.6 "option (a)" of `docs/retail-ai-gateway-control-plane.md` (external MCP ingress restricted to APIM and a static API key). The proposal's governing goals (explicit read-only allow-list, subscription key plus Entra at the edge, no implicit tools) are kept.
 
 ## Context
 

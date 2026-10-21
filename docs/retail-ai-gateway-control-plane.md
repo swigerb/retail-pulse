@@ -47,7 +47,7 @@ Re-key the existing `azure-openai-token-limit` from subscription id to a per-cha
 Provision one Azure API Center (Bicep) with a system-assigned identity and an APIM API source integration so APIM APIs and MCP servers are synchronized continuously. Validation (#336) checks that the Retail Pulse MCP server appears with its metadata.
 
 ### 2.6 Governed MCP (#334, #335)
-**Decided in [ADR 017](../adr/017-governed-apim-mcp-runtime.md) (Proposed):** APIM exposes four allow-listed, read-only operations of the public Retail Pulse API as an MCP server, authenticating with its system-assigned managed identity (Entra app-only token). The MCP app stays `external: false` with its API-key secret; it is not exposed, IP-restricted, or addressed by APIM. No VNet is introduced. VNet integration for APIM and the environment is the production alternative (§5) and is not part of this epic.
+**Decided in [ADR 017](adr/017-governed-apim-mcp-runtime.md) (Proposed):** APIM exposes four allow-listed, read-only operations of the public Retail Pulse API as an MCP server, authenticating with its system-assigned managed identity (Entra app-only token). The MCP app stays `external: false` with its API-key secret; it is not exposed, IP-restricted, or addressed by APIM. No VNet is introduced. VNet integration for APIM and the environment is the production alternative (§5) and is not part of this epic.
 
 Clients authenticate to APIM (subscription key plus Entra token validation via `validate-jwt`). APIM exposes only an explicit allow-list of read-only operations as MCP tools; no tool is exposed implicitly. #334 records the IP restriction and verifies that direct calls to the MCP FQDN without the key, or from other IPs, fail.
 
