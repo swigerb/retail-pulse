@@ -154,7 +154,10 @@ public sealed partial class TokenBudgetPolicyContractTests
         onError.Should().Contain("x-rp-gw-retry-after").And.Contain("^[0-9]{1,6}$");
         onError.Should().Contain("x-rp-gw-tokens-remaining").And.Contain("^[0-9]{1,12}$")
             .And.NotContain("<value>0</value>", "insufficient budget for one request does not prove the measured counter is zero");
-        onError.Should().NotContain("x-rp-gw-tokens-consumed").And.NotContain("x-tokens-consumed");
+        onError.Should().Contain("<set-header name=\"x-tokens-consumed\" exists-action=\"delete\" />")
+            .And.Contain("<set-header name=\"x-rp-gw-tokens-consumed\" exists-action=\"delete\" />");
+        onError.Should().NotContain("<set-header name=\"x-rp-gw-tokens-consumed\" exists-action=\"override\"")
+            .And.NotContain("<set-header name=\"x-tokens-consumed\" exists-action=\"override\"");
         Normal.Should().Contain("retry-after-variable-name=\"rp-budget-retry-after\"");
         Normal.Should().Contain("remaining-tokens-variable-name=\"rp-tokens-remaining\"");
         string outbound = Base[Base.IndexOf("<outbound>", StringComparison.Ordinal)..Base.IndexOf("<on-error>", StringComparison.Ordinal)];

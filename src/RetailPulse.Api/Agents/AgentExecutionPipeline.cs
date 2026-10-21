@@ -232,6 +232,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             inputTokens > 0 ? inputTokens : null,
             outputTokens > 0 ? outputTokens : null);
 
+        await RecordPrefetchSpansAsync(compactedPrefetch, collector, _hubContext, sessionId, ct);
         await RecordToolSpansAsync(response, collector, thoughtDurationMs, context.OnToolResult, _hubContext, sessionId, ct);
 
         // Emit progress: synthesizing phase
@@ -563,6 +564,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             inputTokens > 0 ? inputTokens : null,
             outputTokens > 0 ? outputTokens : null);
 
+        await RecordPrefetchSpansAsync(compactedPrefetch, collector, _hubContext, sessionId, ct);
         await RecordToolSpansAsync(response, collector, thoughtDurationMs, context.OnToolResult, _hubContext, sessionId, ct);
 
         // Emit progress: synthesizing phase
@@ -656,6 +658,42 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         int output = (int)(response.Usage?.OutputTokenCount ?? 0);
         int total = (int)(response.Usage?.TotalTokenCount ?? (input + output));
         return (input, output, total);
+    }
+
+    private static async Task RecordPrefetchSpansAsync(
+        IReadOnlyList<PrefetchEntry>? prefetchedData,
+        TelemetryCollector collector,
+        IHubContext<TelemetryHub> hubContext,
+        string sessionId,
+        CancellationToken ct)
+    {
+        if (prefetchedData is not { Count: > 0 })
+            return;
+
+        foreach (PrefetchEntry entry in prefetchedData)
+        {
+            string toolName = entry.ToolName.Split(':', 2)[0];
+            string status = entry.IsSummary ? "summary" : "complete";
+
+            await hubContext.Clients.Group(sessionId).SendAsync("progress", new
+            {
+                sessionId,
+                phase = "tool_call",
+                detail = $"Using prefetched {toolName}...",
+                timestamp = DateTimeOffset.UtcNow
+            }, ct);
+
+            await collector.RecordSpanAsync(
+                toolName,
+                "tool_call",
+                $"Prefetched {entry.ToolName} ({status})",
+                0);
+            await collector.RecordSpanAsync(
+                toolName,
+                "tool_result",
+                $"Prefetched result available ({status}, {entry.Json.Length} chars)",
+                0);
+        }
     }
 
     private static async Task RecordToolSpansAsync(

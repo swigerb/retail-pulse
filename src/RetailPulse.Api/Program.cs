@@ -461,12 +461,12 @@ builder.Services.AddSingleton(sp =>
     // source of truth for horizontal-bar ranking coverage (issue #74). The
     // default 6 KB per-tool cap can clip brand rows below the 12-brand roster
     // threshold, which then triggers the fail-closed diagnostic even though
-    // the tool did return complete data. Raise the ceiling ONLY for this tool
-    // to preserve full portfolio coverage; the compactor still strips the
-    // verbose per-brand sentiment narrative so the aggregate stays lean.
+    // the tool did return complete data. Raise the ceiling ONLY for this tool,
+    // but keep it below APIM's 10,000-character aggregate tool-document limit.
+    // The compactor still strips the verbose per-brand sentiment narrative.
     if (!options.PerToolMaxResultChars.ContainsKey("GetPortfolioDepletionStats"))
     {
-        options.PerToolMaxResultChars["GetPortfolioDepletionStats"] = 20_000;
+        options.PerToolMaxResultChars["GetPortfolioDepletionStats"] = 9_500;
     }
     return options;
 });
@@ -894,6 +894,13 @@ string agentDeployment = builder.Configuration["OpenAI:Deployment"] ?? agentDef.
 
 builder.Services.AddChatClient(
     azureClient.GetChatClient(agentDeployment).AsIChatClient())
+    // This wrapper sits directly around the transport, inside function invocation.
+    // It sees the complete tool-message sequence for each model turn and bounds a
+    // cloned request without destroying canonical results retained in the transcript.
+    .Use((innerClient, services) => new RetailPulse.Api.Budget.GatewayToolDocumentBudgetChatClient(
+        innerClient,
+        services.GetRequiredService<RetailPulse.Api.Budget.ToolResultBudgetOptions>(),
+        services.GetRequiredService<ILogger<RetailPulse.Api.Budget.GatewayToolDocumentBudgetChatClient>>()))
     .UseFunctionInvocation(configure: client =>
         // Cap tool-call iterations: 3 allows the full tool-calling lifecycle:
         //   Iteration 1 — LLM decides to call tools (fast, ~5-10s).

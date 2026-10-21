@@ -231,6 +231,12 @@ public class AgentPipelineTests
         response.Charts[0].Type.Should().Be("groupedBar");
         response.Charts[0].Data.Select(s => s.Legend)
             .Should().BeEquivalentTo(["Coastline Tacos", "Apex Grill"]);
+        response.Spans.Count(s => s.Type == "tool_call").Should().Be(2);
+        response.Spans.Count(s => s.Type == "tool_result").Should().Be(2);
+        response.Spans.Where(s => s.Type == "tool_call").Select(s => s.Name)
+            .Should().OnlyContain(name => name == "GetHistoricalDemand");
+        response.Spans.Where(s => s.Type == "tool_result").Select(s => s.Detail)
+            .Should().OnlyContain(detail => detail.Contains("Prefetched result available", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -266,11 +272,14 @@ public class AgentPipelineTests
             },
         };
 
-        await pipeline.ExecuteAsync(context);
+        Contracts.ChatResponse response = await pipeline.ExecuteAsync(context);
 
         observedOptions.Should().NotBeNull();
         observedOptions.Tools.Should().ContainSingle(
             "partial prefetch must preserve the normal recovery tool path");
+        response.Spans.Should().Contain(s =>
+            s.Type == "tool_call" && s.Name == "GetHistoricalDemand"
+            && s.Detail.Contains("Prefetched", StringComparison.Ordinal));
     }
 
     #endregion
