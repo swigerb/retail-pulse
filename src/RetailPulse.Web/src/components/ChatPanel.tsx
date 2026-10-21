@@ -12,7 +12,7 @@ import {
   makeStyles,
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
-import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, ApprovalRequest, ApprovalDecision, CacheInfo, ForceableExecutionPath } from '../types';
+import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, GatewayEvidence, ApprovalRequest, ApprovalDecision, CacheInfo, ForceableExecutionPath } from '../types';
 import type { SendMessageOptions } from '../services/api';
 import { sendMessage, isErrorReply, isChatRequestTimeoutError } from '../services/api';
 import { joinTelemetrySession, onProgress } from '../services/telemetryHub';
@@ -24,6 +24,8 @@ import { activeAuthMode } from '../auth/activeProvider';
 import { BrandLogo } from './BrandLogo';
 import { AgentRoutingIndicator } from './AgentRoutingIndicator';
 import { MemoryIndicator } from './MemoryIndicator';
+import { GatewayControlRoom } from './GatewayControlRoom';
+import { RegulatedModeBadge } from './RegulatedModeBadge';
 import { ApprovalCard } from './ApprovalCard';
 import { StreamingMessage, CacheIndicator } from './streaming';
 import { ProgressIndicator } from './ProgressIndicator';
@@ -49,6 +51,8 @@ interface ChatMessage {
   totalDurationMs?: number;
   tokenUsage?: TokenUsage;
   memoryContext?: MemoryContext;
+  /** null = server turn without gateway metadata; undefined = no server turn (no ribbon). */
+  gateway?: GatewayEvidence | null;
   approval?: ApprovalRequest;
   isStreaming?: boolean;
   cacheInfo?: CacheInfo;
@@ -660,6 +664,7 @@ export function ChatPanel({
               role: 'assistant' as const,
               content: suspended.message ?? 'Plan awaiting review.',
               planId: suspended.planId,
+              gateway: null,
             },
           ]);
           return;
@@ -713,6 +718,7 @@ export function ChatPanel({
               routing: response.routing,
               totalDurationMs: response.totalDurationMs,
               tokenUsage: response.tokenUsage,
+              gateway: response.gateway ?? null,
               planId,
             },
           ]);
@@ -724,6 +730,7 @@ export function ChatPanel({
             ? {
                 role: 'assistant' as const,
                 content: safetyDisplay.reason,
+                gateway: response.gateway ?? null,
                 blocked: {
                   reason: safetyDisplay.reason,
                   suggestion: safetyDisplay.suggestion,
@@ -731,8 +738,8 @@ export function ChatPanel({
                 },
               }
             : errorMasked
-              ? { role: 'assistant' as const, content: response.reply }
-              : { role: 'assistant' as const, content: response.reply, spans: response.spans, charts: response.charts, routing: response.routing, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, memoryContext: response.memoryContext },
+              ? { role: 'assistant' as const, content: response.reply, gateway: response.gateway ?? null }
+              : { role: 'assistant' as const, content: response.reply, spans: response.spans, charts: response.charts, routing: response.routing, totalDurationMs: response.totalDurationMs, tokenUsage: response.tokenUsage, memoryContext: response.memoryContext, gateway: response.gateway ?? null },
         ]);
       } catch (err) {
         if (!isMountedRef.current || controller.signal.aborted) return;
@@ -743,9 +750,13 @@ export function ChatPanel({
           setTimeoutInfo({ prompt: trimmed, timeoutMs: err.timeoutMs });
           return;
         }
+        const gateway =
+          err instanceof Error && err.name === 'GatewayChatError' && 'gateway' in err
+            ? ((err as Error & { gateway?: GatewayEvidence | null }).gateway ?? null)
+            : null;
         setMessages(prev => [
           ...prev,
-          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}` },
+          { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`, ...(gateway ? { gateway } : {}) },
         ]);
       } finally {
         if (isMountedRef.current && abortControllerRef.current === controller) {
@@ -842,6 +853,7 @@ export function ChatPanel({
 
   return (
     <div className={styles.panel}>
+      <RegulatedModeBadge />
       <div className={styles.messages} data-testid="chat-message-list">
         {messages.length === 0 && (
           <div className={styles.welcome}>
@@ -1012,6 +1024,9 @@ export function ChatPanel({
               )}
               {msg.spans && msg.spans.length > 0 && !msg.planId && (
                 <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} tokenUsage={msg.tokenUsage} />
+              )}
+              {msg.role === 'assistant' && msg.gateway !== undefined && (
+                <GatewayControlRoom gateway={msg.gateway} />
               )}
               {msg.charts && msg.charts.length > 0 && !msg.planId && (
                 <ErrorBoundary fallback={<div className={styles.loadingContainer}>Chart failed to load.</div>}>

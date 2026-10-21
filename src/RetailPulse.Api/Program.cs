@@ -32,6 +32,7 @@ using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
 using RetailPulse.Api.OpenAI;
+using RetailPulse.Api.OpenAI.Gateway;
 using RetailPulse.Api.Packs;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Rag;
@@ -269,6 +270,7 @@ foreach ((string sectionKey, AgentDefinition def) in promptConfig.Agents)
 // of these registrations depend on prompt/tool composition.
 var guardrailsConfig = new GuardrailsConfig();
 builder.Configuration.GetSection("Guardrails").Bind(guardrailsConfig);
+guardrailsConfig.ContentSafety.ForceFailClosed = RegulatedRetailProfile.Resolve(builder.Configuration).Enabled;
 builder.Services.AddSingleton(guardrailsConfig);
 
 var suspiciousLog = new InMemorySuspiciousRequestLog();
@@ -881,8 +883,10 @@ var openAiConnection = OpenAiConnectionSettings.Load(
 var azureClientOptions = new Azure.AI.OpenAI.AzureOpenAIClientOptions
 {
     NetworkTimeout = TimeSpan.FromSeconds(45),
-    RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 2)
+    RetryPolicy = new BudgetAwareRetryPolicy(maxRetries: 2)
 };
+
+azureClientOptions.AddGatewayEvidence(GatewayModeSettings.Resolve(builder.Configuration));
 
 Azure.AI.OpenAI.AzureOpenAIClient azureClient = openAiConnection.CreateClient(azureClientOptions);
 
@@ -1313,6 +1317,7 @@ ContentSafetyToolResultAmbient.Install(
 
 // Select CORS policy based on environment
 app.UseMiddleware<SecurityHeadersMiddleware>();
+app.UseStripInboundGatewayHeaders();
 app.UseCors(app.Environment.IsDevelopment() ? "Development" : "Production");
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -1320,6 +1325,8 @@ app.UseMiddleware<ApiKeyAuthMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
+// Narrows app-only (APIM managed identity) tokens to the approved MCP gateway operations.
+app.UseMiddleware<AppOnlyRouteAllowListMiddleware>();
 app.UseRateLimiter();
 
 // Anonymous mode central enforcement: read-only restriction (block mutations), request-size
@@ -1376,10 +1383,12 @@ app.MapEscalationEndpoints();
 app.MapPromoEndpoints();
 app.MapSupplyEndpoints();
 app.MapStoreEndpoints();
+app.MapDemandEndpoints();
 app.MapMarginEndpoints();
 app.MapDeadLetterEndpoints();
 app.MapMemoryEndpoints();
 app.MapCacheEndpoints();
+app.MapGatewayProfileEndpoints();
 
 // User-initiated execution control (issue #92): cancel endpoints for the
 // in-flight fast-path / streaming request and for the plan orchestrator.

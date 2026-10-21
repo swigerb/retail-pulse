@@ -1,12 +1,60 @@
+<!--
+  Gateway evidence contract (#327). Outbound emits only non-sensitive x-rp-gw-*
+  headers (see RetailPulse.Contracts.Gateway.GatewayEvidence). Never emit
+  subscription ids/keys, prompts, completions, or backend credentials here.
+  Inbound x-rp-gw-* headers are stripped so callers cannot spoof evidence.
+-->
 <policies>
     <inbound>
         <base />
+        <!-- Subscription keys are consumed by APIM; they must never reach the backend. -->
+        <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
+        <set-header name="api-key" exists-action="delete" />
+        <set-query-parameter name="api-key" exists-action="delete" />
+        <set-header name="x-rp-gw-request-id" exists-action="delete" />
+        <set-header name="x-rp-gw-backend" exists-action="delete" />
+        <set-header name="x-rp-gw-route" exists-action="delete" />
+        <set-header name="x-rp-gw-tokens-consumed" exists-action="delete" />
+        <set-header name="x-rp-gw-tokens-remaining" exists-action="delete" />
+        <set-header name="x-rp-gw-quota" exists-action="delete" />
+        <set-header name="x-rp-gw-cache" exists-action="delete" />
+        <set-header name="x-rp-gw-cache-reason" exists-action="delete" />
+        <set-header name="x-rp-gw-safety" exists-action="delete" />
+        <set-header name="x-rp-gw-policy-version" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-phase" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-decision" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-prompt-attack" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-category" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-severity" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-mode" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-latency-ms" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-output-checked" exists-action="delete" />
+        <set-header name="x-rp-gw-latency-ms" exists-action="delete" />
+        <set-header name="x-rp-gw-backend-latency-ms" exists-action="delete" />
+        <set-header name="x-rp-gw-failover-demo" exists-action="delete" />
+        <set-header name="x-rp-gw-primary-status" exists-action="delete" />
+        <set-header name="x-rp-gw-budget-scope" exists-action="delete" />
+        <set-header name="x-rp-gw-budget-mode" exists-action="delete" />
+        <set-header name="x-rp-gw-retry-after" exists-action="delete" />
+        <set-header name="x-rp-budget-scope" exists-action="delete" />
+        <set-header name="x-rp-budget-demo" exists-action="delete" />
+        <set-header name="x-rp-gw-attempts" exists-action="delete" />
+        <set-header name="x-rp-gw-fallback" exists-action="delete" />
+{demo-inbound}
+{safety-inbound}
+{semantic-cache-inbound}
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
-        <azure-openai-token-limit counter-key="@(context.Subscription.Id)"
-            tokens-per-minute="{tokens-per-minute}" estimate-prompt-tokens="true"
-            tokens-consumed-header-name="x-tokens-consumed"
-            retry-after-header-name="Retry-After" />
+        <!-- Scope kind comes only from the APIM product the subscription belongs to (trusted gateway
+             context). Unknown or product-less subscriptions are the application scope. -->
+        <set-variable name="rp-budget-scope" value="@{
+            string p = context.Product != null ? context.Product.Id : &quot;&quot;;
+            return p.StartsWith(&quot;rp-budget-store-&quot;) ? &quot;store&quot;
+                : p.StartsWith(&quot;rp-budget-channel-&quot;) ? &quot;channel&quot;
+                : p.StartsWith(&quot;rp-budget-b2b-&quot;) ? &quot;b2b&quot;
+                : &quot;application&quot;;
+        }" />
+{budget-limit}
         <azure-openai-emit-token-metric namespace="RetailPulse">
             <dimension name="API ID" value="@(context.Api.Id)" />
             <dimension name="Operation ID" value="@(context.Operation.Id)" />
@@ -14,12 +62,124 @@
         </azure-openai-emit-token-metric>
     </inbound>
     <backend>
-        <base />
+        <set-variable name="rp-backend-start" value="@(DateTime.UtcNow)" />
+        {backend-policy}
     </backend>
     <outbound>
         <base />
+{safety-outbound}
+{semantic-cache-outbound}
+{profile-outbound}
+        <!-- Every value below comes from a real policy signal. When no signal exists the header is
+             omitted so the API reports the field as unknown; nothing is defaulted to success. -->
+        <set-header name="x-rp-gw-request-id" exists-action="override">
+            <value>@(context.RequestId.ToString())</value>
+        </set-header>
+        <set-header name="x-rp-gw-backend" exists-action="override">
+            <value>{backend-id}</value>
+        </set-header>
+        <choose>
+            <when condition="@(context.Variables.ContainsKey(&quot;rp-route&quot;))">
+                <set-header name="x-rp-gw-route" exists-action="override">
+                    <value>@((string)context.Variables["rp-route"])</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <when condition="@(context.Response.Headers.ContainsKey(&quot;x-tokens-consumed&quot;))">
+                <set-header name="x-rp-gw-tokens-consumed" exists-action="override">
+                    <value>@(context.Response.Headers.GetValueOrDefault("x-tokens-consumed", ""))</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <!-- llm-token-limit publishes the remaining budget only when it admitted the call. -->
+            <when condition="@(context.Variables.ContainsKey(&quot;rp-tokens-remaining&quot;))">
+                <set-header name="x-rp-gw-quota" exists-action="override">
+                    <value>allowed</value>
+                </set-header>
+                <set-header name="x-rp-gw-tokens-remaining" exists-action="override">
+                    <value>@(context.Variables["rp-tokens-remaining"].ToString())</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <when condition="@(context.Variables.ContainsKey(&quot;rp-budget-scope&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-mode&quot;))">
+                <set-header name="x-rp-gw-budget-scope" exists-action="override">
+                    <value>@((string)context.Variables["rp-budget-scope"])</value>
+                </set-header>
+                <set-header name="x-rp-gw-budget-mode" exists-action="override">
+                    <value>@((string)context.Variables["rp-budget-mode"])</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <!-- A content-filter block is the only safety signal read; success is never asserted. -->
+            <when condition="@(context.Response.StatusCode == 400 &amp;&amp; context.Response.Body.As&lt;string&gt;(preserveContent: true).Contains(&quot;content_filter&quot;))">
+                <set-header name="x-rp-gw-safety" exists-action="override">
+                    <value>blocked</value>
+                </set-header>
+            </when>
+        </choose>
+        <choose>
+            <when condition="@(context.Variables.ContainsKey(&quot;rp-backend-start&quot;))">
+                <set-header name="x-rp-gw-backend-latency-ms" exists-action="override">
+                    <value>@(((int)(DateTime.UtcNow - (DateTime)context.Variables["rp-backend-start"]).TotalMilliseconds).ToString())</value>
+                </set-header>
+            </when>
+        </choose>
+        <set-header name="x-rp-gw-policy-version" exists-action="override">
+            <value>2026-10-rp332-v1</value>
+        </set-header>
+        <set-header name="x-rp-gw-latency-ms" exists-action="override">
+            <value>@(((int)context.Elapsed.TotalMilliseconds).ToString())</value>
+        </set-header>
+{demo-outbound}
     </outbound>
     <on-error>
         <base />
+        <set-header name="x-rp-gw-request-id" exists-action="override">
+            <value>@(context.RequestId.ToString())</value>
+        </set-header>
+        <set-header name="x-rp-gw-backend" exists-action="override">
+            <value>{backend-id}</value>
+        </set-header>
+        <choose>
+            <!-- Only the token limiter's own 429 is a throttle signal; other errors leave quota unknown.
+                 A pre-backend 429 consumed nothing, so no consumed-token header is ever set here.
+                 Remaining and retry are emitted only when the limiter published numeric values. -->
+            <when condition="@(context.LastError != null &amp;&amp; context.LastError.Source == &quot;llm-token-limit&quot;)">
+                <set-header name="x-rp-gw-quota" exists-action="override">
+                    <value>throttled</value>
+                </set-header>
+                <choose>
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-budget-scope&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-mode&quot;))">
+                        <set-header name="x-rp-gw-budget-scope" exists-action="override">
+                            <value>@((string)context.Variables["rp-budget-scope"])</value>
+                        </set-header>
+                        <set-header name="x-rp-gw-budget-mode" exists-action="override">
+                            <value>@((string)context.Variables["rp-budget-mode"])</value>
+                        </set-header>
+                    </when>
+                </choose>
+                <choose>
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-budget-retry-after&quot;) &amp;&amp; System.Text.RegularExpressions.Regex.IsMatch(context.Variables[&quot;rp-budget-retry-after&quot;].ToString(), &quot;^[0-9]{1,6}$&quot;))">
+                        <set-header name="x-rp-gw-retry-after" exists-action="override">
+                            <value>@(context.Variables["rp-budget-retry-after"].ToString())</value>
+                        </set-header>
+                    </when>
+                </choose>
+                <choose>
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-tokens-remaining&quot;) &amp;&amp; System.Text.RegularExpressions.Regex.IsMatch(context.Variables[&quot;rp-tokens-remaining&quot;].ToString(), &quot;^[0-9]{1,12}$&quot;))">
+                        <set-header name="x-rp-gw-tokens-remaining" exists-action="override">
+                            <value>@(context.Variables["rp-tokens-remaining"].ToString())</value>
+                        </set-header>
+                    </when>
+                </choose>
+            </when>
+        </choose>
+        <set-header name="x-rp-gw-policy-version" exists-action="override">
+            <value>2026-10-rp332-v1</value>
+        </set-header>
     </on-error>
 </policies>

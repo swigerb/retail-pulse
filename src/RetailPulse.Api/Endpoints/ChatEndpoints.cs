@@ -18,6 +18,7 @@ using RetailPulse.Api.Memory;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Observability;
+using RetailPulse.Api.OpenAI.Gateway;
 using RetailPulse.Api.Persistence;
 using RetailPulse.Api.Prefetch;
 using RetailPulse.Api.Rag;
@@ -38,6 +39,14 @@ namespace RetailPulse.Api.Endpoints;
 
 public static class ChatEndpoints
 {
+    /// <summary>Regulated-retail mode (#337): no request classifier exists, so the cache is bypassed entirely for lookup and store.</summary>
+    public static bool ShouldBypassSensitiveCache(HttpContext httpContext, string? message)
+    {
+        IConfiguration? config = httpContext.RequestServices.GetService<IConfiguration>();
+        bool regulated = config is not null && RegulatedRetailProfile.Resolve(config).Enabled;
+        return SensitiveCachePolicy.ShouldBypassForRequest(regulated, message);
+    }
+
     public static WebApplication MapChatEndpoints(this WebApplication app, AgentDefinition agentDef)
     {
         // Chat endpoint — routes through guardrails → cache → multi-agent router with memory and tracing
@@ -73,6 +82,7 @@ public static class ChatEndpoints
                 //    accountable identity, so no stored cross-prompt injection surface).
                 bool anonymous = anonymousChatPolicy?.AppliesToCurrentRequest == true;
                 bool cacheDisabled = anonymousChatPolicy.IsCacheDisabled();
+                bool sensitiveBypass = ShouldBypassSensitiveCache(httpContext, request.Message);
                 bool memoryDisabled = anonymousChatPolicy.IsMemoryDisabled();
 
                 // Session persistence is opt-in (issue #90). Anonymous callers are refused by
@@ -131,7 +141,7 @@ public static class ChatEndpoints
                 }
 
                 // ── Cache: check for cached response ─────────────────────────────
-                if (!cacheDisabled && CacheHelpers.IsCacheable(request.Message))
+                if (!cacheDisabled && !sensitiveBypass && CacheHelpers.IsCacheable(request.Message))
                 {
                     string cacheKey = CacheHelpers.BuildCacheKey("pre-route", request.Message);
                     CachedResponse? cached = await responseCache.GetAsync(cacheKey, ct);
@@ -919,6 +929,7 @@ public static class ChatEndpoints
                 // all. Failing once is a model problem; failing repeatably from cache is
                 // ours.
                 if (!cacheDisabled
+                    && !sensitiveBypass
                     && CacheHelpers.IsCacheable(request.Message)
                     && CacheHelpers.IsCacheableOutcome(
                         response.Reply,
@@ -971,12 +982,14 @@ public static class ChatEndpoints
                 // routing classification OR agent execution). Return a proper 429 so
                 // the frontend can show a retry prompt instead of crashing to debugger.
                 logger.LogWarning(ex, "Rate-limited (429) during chat for session {SessionId}", request.SessionId);
+                GatewayErrorShaper.RateLimited limited = GatewayErrorShaper.ClassifyRateLimit(GatewayEvidenceCollector.Current());
+                if (limited.RetryAfterSeconds is { } retryAfter)
+                {
+                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
+                }
+
                 return Results.Json(
-                    new
-                    {
-                        error = "The AI service is experiencing high demand. Please wait 30 seconds and try again.",
-                        code = "rate_limited"
-                    },
+                    new { error = limited.Message, code = limited.Code, retryAfterSeconds = limited.RetryAfterSeconds, gateway = limited.Gateway },
                     statusCode: StatusCodes.Status429TooManyRequests);
             }
             catch (ClientResultException ex)
@@ -987,12 +1000,10 @@ public static class ChatEndpoints
                 int statusCode = ex.Status is >= 400 and < 600
                     ? ex.Status
                     : StatusCodes.Status503ServiceUnavailable;
+                GatewayErrorShaper.Shaped shaped = GatewayErrorShaper.Classify(
+                    statusCode, "ai_service_error", "The AI service encountered an error. Please try again shortly.", GatewayEvidenceCollector.Current());
                 return Results.Json(
-                    new
-                    {
-                        error = "The AI service encountered an error. Please try again shortly.",
-                        code = "ai_service_error"
-                    },
+                    new { error = shaped.Message, code = shaped.Code, gateway = shaped.Gateway },
                     statusCode: statusCode);
             }
             catch (Exception ex)
@@ -1017,7 +1028,8 @@ public static class ChatEndpoints
         .Produces(StatusCodes.Status429TooManyRequests)
         .Produces(StatusCodes.Status503ServiceUnavailable)
         .RequireAuthorization()
-        .RequireRateLimiting("strict");
+        .RequireRateLimiting("strict")
+        .WithGatewayEvidence();
 
         // Streaming chat endpoint — SSE/SignalR progressive token delivery
         app.MapPost("/api/chat/stream", async (HttpContext httpContext, ChatRequest request, IAgentRouter router, IEnumerable<ISpecialistAgent> specialists, ConversationMemoryMiddleware memoryMiddleware, GuardrailsMiddleware guardrails, StreamingMiddleware streaming, StreamingProgressFeature streamingProgressFeature, MemoryExtractionChannel memoryChannel, ILogger<Program> logger, CancellationToken clientCt, [FromServices] IOptions<ChatTimeoutOptions>? chatTimeoutOptions = null, [FromServices] IExecutionCancellationRegistry? cancellationRegistry = null, [FromServices] ISessionOwnershipRegistry? sessionOwnership = null) =>
@@ -1161,16 +1173,22 @@ public static class ChatEndpoints
             catch (ClientResultException ex) when (ex.Status == 429)
             {
                 logger.LogWarning(ex, "Rate-limited (429) during streaming chat for session {SessionId}", request.SessionId);
+                GatewayErrorShaper.RateLimited limited = GatewayErrorShaper.ClassifyRateLimit(GatewayEvidenceCollector.Current());
+                if (limited.RetryAfterSeconds is { } retryAfter)
+                {
+                    httpContext.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
+                }
+
                 try
                 {
                     IHubContext<StreamingHub>? hub = app.Services.GetService<IHubContext<StreamingHub>>();
                     if (hub is not null && request.SessionId is not null)
-                        await StreamingEvents.SendErrorAsync(hub, request.SessionId, "The AI service is experiencing high demand. Please wait 30 seconds and try again.");
+                        await StreamingEvents.SendErrorAsync(hub, request.SessionId, limited.Message);
                 }
                 catch { /* best-effort notification */ }
 
                 return Results.Json(
-                    new { error = "The AI service is experiencing high demand. Please wait 30 seconds and try again.", code = "rate_limited" },
+                    new { error = limited.Message, code = limited.Code, retryAfterSeconds = limited.RetryAfterSeconds, gateway = limited.Gateway },
                     statusCode: StatusCodes.Status429TooManyRequests);
             }
             catch (ClientResultException ex)
@@ -1179,8 +1197,10 @@ public static class ChatEndpoints
                 int statusCode = ex.Status is >= 400 and < 600
                     ? ex.Status
                     : StatusCodes.Status503ServiceUnavailable;
+                GatewayErrorShaper.Shaped shaped = GatewayErrorShaper.Classify(
+                    statusCode, "ai_service_error", "The AI service encountered an error. Please try again shortly.", GatewayEvidenceCollector.Current());
                 return Results.Json(
-                    new { error = "The AI service encountered an error. Please try again shortly.", code = "ai_service_error" },
+                    new { error = shaped.Message, code = shaped.Code, gateway = shaped.Gateway },
                     statusCode: statusCode);
             }
             catch (Exception ex)
@@ -1200,7 +1220,8 @@ public static class ChatEndpoints
         .Produces(StatusCodes.Status429TooManyRequests)
         .Produces(StatusCodes.Status503ServiceUnavailable)
         .RequireAuthorization()
-        .RequireRateLimiting("strict");
+        .RequireRateLimiting("strict")
+        .WithGatewayEvidence();
 
         // Health/info endpoint
         app.MapGet("/api/info", (IEnumerable<ISpecialistAgent> specialists) => Results.Ok(new

@@ -16,6 +16,9 @@ param appInsightsId string
 @description('Application Insights connection string used by the APIM logger')
 param appInsightsConnectionString string
 
+@description('When false (gateway safety enabled, #331) no request/response body is captured by instance diagnostics.')
+param captureRequestBodies bool = true
+
 @description('Publisher email required by Azure API Management')
 param publisherEmail string = 'noreply@retail-pulse.example.com'
 
@@ -117,7 +120,7 @@ resource apimAppInsightsDiagnostics 'Microsoft.ApiManagement/service/diagnostics
     frontend: {
       request: {
         body: {
-          bytes: 8192
+          bytes: captureRequestBodies ? 8192 : 0
         }
       }
       response: {
@@ -129,7 +132,7 @@ resource apimAppInsightsDiagnostics 'Microsoft.ApiManagement/service/diagnostics
     backend: {
       request: {
         body: {
-          bytes: 8192
+          bytes: captureRequestBodies ? 8192 : 0
         }
       }
       response: {
@@ -145,3 +148,4 @@ output apimId string = apim.id
 output apimName string = apim.name
 output apimPrincipalId string = apim.identity.principalId
 output gatewayUrl string = apim.properties.gatewayUrl
+output appInsightsLoggerId string = appInsightsLogger.id

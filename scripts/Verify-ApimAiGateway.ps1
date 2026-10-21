@@ -74,6 +74,12 @@ param(
     [string]$InferenceApiName = ($env:AZURE_APIM_INFERENCE_API_NAME | ForEach-Object { if ([string]::IsNullOrWhiteSpace($_)) { 'retail-pulse-inference-api' } else { $_ } }),
     [string]$AiFoundryAccountName = 'aiagents-3rsdmhyb',
     [string]$AiFoundryResourceGroup = 'rg-repodigest-agents-demo-eus-001',
+    [switch]$BackendPoolEnabled = ($env:AZURE_APIM_BACKEND_POOL_ENABLED -eq 'true'),
+    [string]$SecondaryAiFoundryAccountName = $env:AZURE_OPENAI_SECONDARY_ACCOUNT_NAME,
+    [string]$SecondaryAiFoundryResourceGroup = $(if ($env:AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME) { $env:AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME } else { 'rg-repodigest-agents-demo-eus-001' }),
+    [switch]$GatewaySafetyEnabled = ($env:AZURE_APIM_GATEWAY_SAFETY_ENABLED -eq 'true'),
+    [string]$ContentSafetyAccountName = $env:AZURE_CONTENT_SAFETY_NAME,
+    [string]$ContentSafetyResourceGroup = $(if ($env:AZURE_CONTENT_SAFETY_RESOURCE_GROUP_NAME) { $env:AZURE_CONTENT_SAFETY_RESOURCE_GROUP_NAME } else { $env:AZURE_RESOURCE_GROUP }),
     [switch]$SelfTest
 )
 
@@ -140,6 +146,48 @@ function Invoke-ArmGet {
         if ($response -and $response.StatusCode -in @('NotFound', 'Forbidden')) { return $null }
         throw
     }
+}
+
+# ── Gateway safety (#331) pure evaluators (offline-testable; read-only) ─────────
+# Cognitive Services User (a97b65f3-...) must be assigned to the APIM identity exactly at the Content Safety
+# resource scope, not inherited from a resource group or subscription.
+function Test-SafetyRoleScoped($assignments, [string]$resourceScope) {
+    $hit = @($assignments | Where-Object {
+        $_.roleDefinitionId -match 'a97b65f3-24c7-4388-baec-2e87135dc908' -and $_.scope -ieq $resourceScope
+    })
+    return $hit.Count -gt 0
+}
+
+# The rendered policy must run Prompt Shields + text analysis inbound BEFORE backend selection and the token
+# limiter, and the outbound text analysis inside <outbound>.
+function Test-SafetyPolicyOrder([string]$policy) {
+    if ([string]::IsNullOrEmpty($policy)) { return $false }
+    $inbound = $policy.IndexOf('<inbound>')
+    $outbound = $policy.IndexOf('<outbound>')
+    $shield = $policy.IndexOf('text:shieldPrompt')
+    $analyze = $policy.IndexOf('text:analyze')
+    $backendSel = $policy.IndexOf('<set-backend-service')
+    $limit = $policy.IndexOf('<llm-token-limit')
+    $outAnalyze = if ($outbound -ge 0) { $policy.IndexOf('text:analyze', $outbound) } else { -1 }
+    $phase = $policy.IndexOf('x-rp-gw-safety-decision')
+    return ($inbound -ge 0 -and $outbound -gt $inbound -and $shield -gt $inbound -and $analyze -gt $inbound -and
+        $backendSel -gt $shield -and $limit -gt $shield -and $outAnalyze -gt $outbound -and $phase -gt 0 -and $shield -lt $outbound)
+}
+
+function Test-BodyBytesZero($section) {
+    # A section with no body configuration captures nothing; any positive byte count captures content.
+    if ($null -eq $section -or $null -eq $section.body -or $null -eq $section.body.bytes) { return $true }
+    return ([int]$section.body.bytes -eq 0)
+}
+
+# Safety-enabled diagnostics must capture zero body/message content on both loggers.
+function Test-SafetyDiagnosticsBodyFree($appInsights, $azureMonitor) {
+    if ($null -eq $appInsights -or $null -eq $azureMonitor) { return $false }
+    $ai = (Test-BodyBytesZero $appInsights.frontend.request) -and (Test-BodyBytesZero $appInsights.frontend.response) -and
+        (Test-BodyBytesZero $appInsights.backend.request) -and (Test-BodyBytesZero $appInsights.backend.response)
+    $llm = $azureMonitor.largeLanguageModel
+    $mon = ($null -ne $llm) -and ($llm.logs -eq 'disabled')
+    return ($ai -and $mon)
 }
 
 function Test-Prereq {
@@ -266,6 +314,26 @@ function Invoke-SelfTest {
     _Expect 'no live az rest invocation remains in Verify-ApimAiGateway.ps1' (-not $hasAzRest)
     _Expect 'no nonexistent az apim policy/backend/diagnostic subcommand remains' (-not $hasBrokenApimSubcommand)
 
+    # ── gateway safety evaluators (#331) ──
+    $csScope = '/subscriptions/s/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/cs'
+    $csUser = 'a97b65f3-24c7-4388-baec-2e87135dc908'
+    _Expect 'safety rbac: resource-scoped Cognitive Services User passes' (Test-SafetyRoleScoped @(@{ roleDefinitionId = "/x/$csUser"; scope = $csScope }) $csScope)
+    _Expect 'safety rbac: resource-group-scoped assignment is rejected' (-not (Test-SafetyRoleScoped @(@{ roleDefinitionId = "/x/$csUser"; scope = '/subscriptions/s/resourceGroups/rg' }) $csScope))
+    _Expect 'safety rbac: wrong role at resource scope is rejected' (-not (Test-SafetyRoleScoped @(@{ roleDefinitionId = '/x/5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'; scope = $csScope }) $csScope))
+    $goodPolicy = '<policies><inbound><send-request><set-url>x/text:shieldPrompt</set-url></send-request><send-request><set-url>x/text:analyze</set-url></send-request><set-backend-service backend-id="b" /><llm-token-limit counter-key="k" /></inbound><backend/><outbound><send-request><set-url>x/text:analyze</set-url></send-request><set-header name="x-rp-gw-safety-decision" /></outbound></policies>'
+    _Expect 'safety policy: correct order passes' (Test-SafetyPolicyOrder $goodPolicy)
+    _Expect 'safety policy: safety after backend selection is rejected' (-not (Test-SafetyPolicyOrder ($goodPolicy -replace 'text:shieldPrompt', 'zzz')))
+    _Expect 'safety policy: missing outbound analysis is rejected' (-not (Test-SafetyPolicyOrder ($goodPolicy -replace '<outbound>.*</outbound>', '<outbound></outbound>')))
+    _Expect 'safety policy: null policy is rejected' (-not (Test-SafetyPolicyOrder $null))
+    $aiOk = @{ frontend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } }; backend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } } }
+    $monOk = @{ largeLanguageModel = @{ logs = 'disabled'; requests = @{ messages = 'all' }; responses = @{ messages = 'all' } } }
+    _Expect 'safety diagnostics: zero body/message capture passes' (Test-SafetyDiagnosticsBodyFree $aiOk $monOk)
+    $aiBad = @{ frontend = @{ request = @{ body = @{ bytes = 8192 } }; response = @{ body = @{ bytes = 0 } } }; backend = @{} }
+    _Expect 'safety diagnostics: captured request body is rejected' (-not (Test-SafetyDiagnosticsBodyFree $aiBad $monOk))
+    $monBad = @{ largeLanguageModel = @{ logs = 'enabled'; requests = @{ messages = 'all' }; responses = @{ messages = 'all' } } }
+    _Expect 'safety diagnostics: LLM message capture is rejected' (-not (Test-SafetyDiagnosticsBodyFree $aiOk $monBad))
+    _Expect 'safety diagnostics: missing diagnostic is rejected' (-not (Test-SafetyDiagnosticsBodyFree $null $monOk))
+
     if ($script:_selfFailed -gt 0) {
         Write-Host ("SELFTEST FAIL ({0} case(s))" -f $script:_selfFailed) -ForegroundColor Red
         exit 1
@@ -316,9 +384,10 @@ Write-Host "API policy"
 $sub = $script:ArmSubscriptionId
 $policyResource = Invoke-ArmGet "/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/apis/$InferenceApiName/policies/policy?api-version=2024-06-01-preview"
 $policyValue = $policyResource.properties.value
-Assert 'policy: sets backend service (retail-pulse-foundry)' { $policyValue -match '<set-backend-service\s+backend-id="retail-pulse-foundry"' } 'policy did not reference the AOAI backend'
+$routeBackendId = if ($BackendPoolEnabled) { 'retail-pulse-foundry-pool' } else { 'retail-pulse-foundry' }
+Assert "policy: sets backend service ($routeBackendId)" { $policyValue -match ('<set-backend-service\s+backend-id="' + [regex]::Escape($routeBackendId) + '"') } 'policy did not reference the AOAI backend'
 Assert 'policy: managed-identity auth to cognitiveservices.azure.com' { $policyValue -match '<authentication-managed-identity\s+resource="https://cognitiveservices\.azure\.com"' } 'policy is not using MI auth to AOAI'
-Assert 'policy: azure-openai-token-limit configured' { $policyValue -match '<azure-openai-token-limit\s+counter-key="@\(context\.Subscription\.Id\)"' } 'token-limit missing or wrong counter-key'
+Assert 'policy: llm-token-limit configured' { $policyValue -match '<llm-token-limit\s+counter-key="@\(context\.Subscription\.Id\)"' } 'token-limit missing or wrong counter-key'
 Assert 'policy: azure-openai-emit-token-metric in RetailPulse namespace' { $policyValue -match '<azure-openai-emit-token-metric\s+namespace="RetailPulse">' } 'emit-token-metric missing or wrong namespace'
 
 # ── Backend ──────────────────────────────────────────────────────────────
@@ -330,6 +399,32 @@ $backend = $backendResource.properties
 Assert 'backend: retail-pulse-foundry exists' { $null -ne $backend } 'backend retail-pulse-foundry not found'
 Assert 'backend: url targets /openai on cognitiveservices' { $backend.url -match '/openai$' -and ($backend.url -match 'cognitiveservices\.azure\.com|\.services\.ai\.azure\.com') } "backend url = $($backend.url)"
 Assert 'backend: MI credentials to cognitiveservices.azure.com' { $backend.credentials.managedIdentity.resource -eq 'https://cognitiveservices.azure.com' } 'backend is not MI-authenticated to AOAI'
+
+# ── Backend pool (only when the two-backend pool is enabled) ────────────────
+if ($BackendPoolEnabled) {
+    Write-Host "Backend pool"
+    $base = "/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/backends"
+    $secondary = (Invoke-ArmGet "$base/retail-pulse-foundry-secondary?api-version=2024-06-01-preview").properties
+    $pool = (Invoke-ArmGet "$base/retail-pulse-foundry-pool?api-version=2024-06-01-preview").properties
+    Assert 'pool: secondary backend exists with MI credentials' { $secondary.credentials.managedIdentity.resource -eq 'https://cognitiveservices.azure.com' } 'secondary backend missing or not MI-authenticated'
+    Assert 'pool: secondary backend has a circuit breaker' { @($secondary.circuitBreaker.rules).Count -gt 0 } 'secondary backend has no circuit breaker'
+    Assert 'pool: primary backend has a circuit breaker' { @($backend.circuitBreaker.rules).Count -gt 0 } 'primary backend has no circuit breaker'
+    Assert 'pool: type is Pool' { $pool.type -eq 'Pool' } 'pool backend missing or not of type Pool'
+    Assert 'pool: members are primary and secondary' {
+        $ids = @($pool.pool.services | ForEach-Object { ($_.id -split '/')[-1] })
+        ($ids -contains 'retail-pulse-foundry') -and ($ids -contains 'retail-pulse-foundry-secondary')
+    } 'pool membership is not exactly primary + secondary'
+    Assert 'pool: primary has a better (lower) priority than secondary' {
+        $pri = ($pool.pool.services | Where-Object { $_.id -match '/retail-pulse-foundry$' }).priority
+        $sec = ($pool.pool.services | Where-Object { $_.id -match '/retail-pulse-foundry-secondary$' }).priority
+        $pri -lt $sec
+    } 'primary priority must be lower than secondary priority'
+    Assert 'pool: policy retries once after 429/5xx so the open circuit can reselect a member' {
+        $policyValue -match '<retry\s+condition=' -and
+        $policyValue -match 'count="1"' -and
+        $policyValue -match '<forward-request'
+    } 'pool policy does not retry once through backend selection'
+}
 
 # ── Diagnostics (API + instance) ──────────────────────────────────────────
 # `az apim api diagnostic show` does not exist either (no `diagnostic`
@@ -343,7 +438,18 @@ Assert 'api diag: metrics = true (routes emit-token-metric)' { $apiAppInsightsDi
 $azMonDiagResource = Invoke-ArmGet "/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/apis/$InferenceApiName/diagnostics/azuremonitor?api-version=2024-06-01-preview"
 $azMonDiag = $azMonDiagResource.properties
 Assert 'api diag: azuremonitor present' { $null -ne $azMonDiag } 'API-level azuremonitor diagnostic missing'
-Assert 'api diag: largeLanguageModel logs enabled' { $azMonDiag.largeLanguageModel.logs -eq 'enabled' } 'largeLanguageModel logs not enabled — GatewayLlmLogs stay dark'
+if ($GatewaySafetyEnabled) {
+    Assert 'api diag: largeLanguageModel logs disabled for gateway safety privacy' { $azMonDiag.largeLanguageModel.logs -eq 'disabled' } 'largeLanguageModel logs must be disabled when gateway safety is enabled'
+}
+else {
+    Assert 'api diag: largeLanguageModel logs enabled' { $azMonDiag.largeLanguageModel.logs -eq 'enabled' } 'largeLanguageModel logs not enabled — GatewayLlmLogs stay dark'
+}
+
+if ($GatewaySafetyEnabled) {
+    Write-Host "Gateway safety (#331)"
+    Assert 'safety policy: Prompt Shields/text analysis rendered inbound before backend selection and token limit; outbound analysis present' { Test-SafetyPolicyOrder $policyValue } 'rendered policy is missing the safety fragments or they are out of order'
+    Assert 'safety diagnostics: applicationinsights and azuremonitor capture zero body/message content' { Test-SafetyDiagnosticsBodyFree $apiAppInsightsDiag $azMonDiag } 'a diagnostic still captures request/response bodies or LLM messages'
+}
 
 # ── RBAC: Cognitive Services OpenAI User on AI Foundry ────────────────────
 Write-Host "RBAC"
@@ -354,6 +460,21 @@ if ($apimPrincipalId) {
 }
 else {
     Assert 'rbac: APIM principalId available' { $false } 'Could not read APIM principalId to check role assignments'
+}
+
+if ($GatewaySafetyEnabled) {
+    Assert 'safety rbac: Content Safety account parameters supplied' { -not [string]::IsNullOrWhiteSpace($ContentSafetyAccountName) -and -not [string]::IsNullOrWhiteSpace($ContentSafetyResourceGroup) } 'pass -ContentSafetyAccountName/-ContentSafetyResourceGroup (or AZURE_CONTENT_SAFETY_NAME)'
+    if ($apimPrincipalId -and $ContentSafetyAccountName) {
+        $csScope = "/subscriptions/$sub/resourceGroups/$ContentSafetyResourceGroup/providers/Microsoft.CognitiveServices/accounts/$ContentSafetyAccountName"
+        $csRoles = az role assignment list --assignee $apimPrincipalId --scope $csScope 2>$null | ConvertFrom-Json
+        Assert 'safety rbac: APIM MI has resource-scoped Cognitive Services User on the Content Safety account' { Test-SafetyRoleScoped $csRoles $csScope } 'Cognitive Services User missing at the Content Safety resource scope — gateway safety will fail closed'
+    }
+}
+
+if ($BackendPoolEnabled -and $apimPrincipalId) {
+    $secRoles = az role assignment list --assignee $apimPrincipalId --scope "/subscriptions/$sub/resourceGroups/$SecondaryAiFoundryResourceGroup/providers/Microsoft.CognitiveServices/accounts/$SecondaryAiFoundryAccountName" 2>$null | ConvertFrom-Json
+    $hasSecOpenAiUser = ($secRoles | Where-Object { $_.roleDefinitionId -match '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd' })
+    Assert 'rbac: APIM MI has Cognitive Services OpenAI User on secondary AI Foundry account' { $null -ne $hasSecOpenAiUser } 'Secondary role assignment missing — failover to the secondary will 403'
 }
 
 # ── ACA API container app wiring ──────────────────────────────────────────

@@ -33,6 +33,7 @@ for the local-only walkthrough).
 | Foundry retrieval agent | Azure AI Foundry IQ (Azure AI Projects) | `Knowledge:Provider:Mode = FoundryIQ` + `Knowledge:FoundryIQ:ProjectEndpoint`, plus vector store id / retrieval agent name from the pack. | [ADR-013](adr/013-foundry-iq-knowledge-provider.md) |
 | Prompt injection + harmful content filtering | Azure AI Content Safety + Prompt Shields | `Security:ContentSafety:Enabled = true` + endpoint/API version. Bicep helper: `infra/modules/content-safety.bicep`. | [ADR-010](adr/010-content-safety-layering.md) |
 | Persistent Foundry shipment specialist | Azure AI Foundry Agent Service | `FoundryAgent:Enabled = true` + `FoundryAgent:ProjectEndpoint` + agent name. | — |
+| Central API catalog | Azure API Center | `azd env set AZURE_API_CENTER_ENABLED true` — one-way continuous sync from APIM; see "Azure API Center" below. | — |
 | Durable SQLite mount | Azure Files SMB mount on the API Container App | Currently **not enabled** — this tenant's governance policy forces new storage accounts to `allowSharedKeyAccess=false` and blocks key-based CIFS mounts. The API therefore ships with `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`. See the "App data storage" note below for the incident detail and the future durable path. | — |
 
 The rest of this document describes the required stack in detail — jump to
@@ -149,6 +150,34 @@ Neither feature is referenced by the default runtime path: with both
 toggles left at `false`, the API boots against the InMemory BM25
 knowledge base and the regex-only guardrails baseline — exactly the
 laptop-demo path.
+
+### Azure API Center (opt-in, synchronized from APIM)
+
+| Toggle | Provisioned when on |
+|---|---|
+| `azd env set AZURE_API_CENTER_ENABLED true` (optional `AZURE_API_CENTER_LOCATION`, default `eastus` — API Center is available in a limited set of regions) | `infra/modules/api-center.bicep` — `Microsoft.ApiCenter/services` (`apic-<token>`, system identity), an `API Management Service Reader` role assignment on the APIM service, and a declarative `apiSources` link (`apim-<token>`) in the `default` workspace. No portal step is needed. |
+
+Outputs: `AZURE_API_CENTER_ENABLED`, `AZURE_API_CENTER_NAME`, `AZURE_API_CENTER_RESOURCE_ID`, `AZURE_API_CENTER_APIM_SOURCE_NAME` (names/ids are empty when disabled; disabled mode deploys nothing). Names derive from the deterministic resource token, so re-provisioning is idempotent.
+
+**Synchronization behavior:** APIM → API Center is **one-way** — APIM stays the source of truth and edits made to synchronized APIs in API Center are not written back (and may be overwritten). Sync is continuous but eventually consistent: new or changed APIM APIs can take from minutes up to 24 hours to appear in API Center, so a freshly provisioned catalog can be empty. Verify the link after provisioning with `./scripts/Verify-ApiCenter.ps1` (read-only; exits 0 pass/disabled, 1 failure, 2 skipped, 3 pending).
+
+#### Retail Pulse MCP server in API Center (issue #336)
+
+The governed MCP server is **not** declared in Bicep. The public API Center ARM schema and CLI do not support creating `kind: mcp` APIs or tool child resources, and the existing APIM → API Center `apiSources` link already synchronizes the APIM MCP API and creates the API, version, definition, environment and deployment graph with **generated IDs** (not the APIM API id). `api-center.bicep` therefore keeps only the service, reader role and `apiSources` link; the `apiSources` relationship stays authoritative and nothing duplicates the synchronized graph.
+
+APIM remains the only runtime endpoint and exposes exactly four read-only tools: `get_inventory`, `get_stockout_risk`, `get_supply_disruptions`, `get_demand_forecast`.
+
+**Verify (read-only):** `./scripts/Verify-ApiCenter.ps1` enumerates the default workspace APIs, resolves the synchronized `kind: mcp` API whose deployment `runtimeUri` is the APIM MCP endpoint (`AZURE_APIM_MCP_ENDPOINT`), follows the returned version, definition, environment and deployment IDs, and fails closed unless: lifecycle is `production`, the environment server type is *Azure API Management*, the `runtimeUri` is exactly the credential-free https APIM endpoint, and the APIM ARM tool resources are exactly the four approved tools. A missing endpoint input or `apiSources` link is a failure. `-SelfTest` runs these checks offline against synthetic data.
+
+**Pending synchronization:** synchronization is eventually consistent and **may take up to 24 hours**. If the synchronized graph is absent or partial, the verifier retries a bounded number of times (`-MaxAttempts`, `-RetryDelaySeconds`) and then reports `[PENDING]` with exit code 3 — never a pass. Re-run later. Exit codes: 0 pass/disabled, 1 failure, 2 skipped, 3 pending.
+
+**Discovery and use**
+1. *Portal discovery:* Azure portal → API Center `apic-<token>` → **Inventory → APIs** (filter kind *MCP*) → the synchronized Retail Pulse MCP server (its name is generated).
+2. *Registry endpoint / client flow:* copy the registry endpoint exposed by your deployed API Center (portal) into registry-aware clients; it is not derived or documented here. Access uses Entra authentication.
+3. *Developer installation:* request the APIM subscription for the approval-required **Retail Pulse MCP (read-only)** product, then add the deployment `runtimeUri` as a remote HTTP MCP server in the client, sending `Ocp-Apim-Subscription-Key` and an Entra bearer token for the gateway audience (`AZURE_MCP_GATEWAY_AUDIENCE`). Store the key in the client's secret input, never in the repo.
+4. *Test invocation:* API Center does not proxy calls. Test through APIM — the APIM developer portal / Test console, or an MCP client (`initialize` → `tools/list` must return exactly the four tools → `tools/call`). Calls are authenticated and metered by APIM.
+
+**Enrichment:** only supported enrichment is allowed; if it needs the generated IDs, use an idempotent discovery/update script after synchronization rather than static Bicep child names. None is required today.
 
 ### azd environment aliases (Bicep outputs → azure.yaml / Vite build)
 
@@ -616,3 +645,45 @@ deploy loudly rather than proceeding with a broken registry configuration.
 | Frontend 404 after deploy | Ensure the frontend deploy ran `npm run build` after provision (`azd deploy frontend`); confirm `dist/` was produced |
 | Container Apps unhealthy | Run `azd monitor` → check container logs in Log Analytics; confirm the postprovision hook applied runtime environment values |
 | CORS errors on frontend | Confirm the postprovision hook set `Security__AllowedOrigins__0` to the SWA origin and that API ingress is external |
+
+## Optional semantic cache (Azure Managed Redis, issue #338)
+
+`infra/modules/managed-redis-cache.bicep` provisions the external vector cache APIM semantic caching requires. It is **disabled by default** (`AZURE_SEMANTIC_CACHE_ENABLED=false`), so a default `azd up` is unchanged.
+
+| Setting | Default |
+|---|---|
+| `AZURE_SEMANTIC_CACHE_SKU` | `Balanced_B0` (lowest Azure Managed Redis SKU with the RediSearch module) |
+| `AZURE_SEMANTIC_CACHE_TTL_SECONDS` | `300` (60–86400); advisory/handoff only, not enforced until issue #339 wires the APIM semantic-cache policy |
+| `AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS` | `Disabled` |
+| `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` | empty (required when public access is Disabled) |
+| `AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID` | empty (required when public access is Disabled) |
+
+Authentication: APIM external cache and semantic caching currently support only a Redis connection string with an access key; APIM does not support Microsoft Entra authentication to Azure Managed Redis. The database therefore has access-key authentication **enabled** (TLS 1.2, encrypted client protocol). No key or connection string is emitted by Bicep or azd outputs, and the module does not wire APIM to the cache: an operator must add the connection string to APIM out of band (for example a Key Vault-backed named value) after cost approval. Outputs are `AZURE_SEMANTIC_CACHE_{ENABLED,NAME,RESOURCE_ID,HOST,TTL_SECONDS}`; `AZURE_SEMANTIC_CACHE_TTL_SECONDS` is an advisory handoff value only and is not enforced until issue #339 wires the APIM semantic-cache policy.
+
+Network (fail closed): with `AZURE_SEMANTIC_CACHE_PUBLIC_NETWORK_ACCESS=Disabled` (default) both `AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID` and `AZURE_SEMANTIC_CACHE_PRIVATE_DNS_ZONE_ID` (an existing `privatelink.redis.azure.net` zone linked to the VNet) are required, otherwise provisioning fails before creating the cache. The zone-to-VNet link is owned by the zone owner. The APIM instance in this repo is Developer/non-VNet, so it cannot reach a private endpoint; private mode is only usable once APIM is network-connected to that VNet. Setting `Enabled` is an explicit opt-in that exposes the TLS + access-key endpoint publicly.
+
+### APIM semantic-cache policy (issue #339)
+
+The lookup/store policies (`azure-openai-semantic-cache-lookup` / `-store`) are rendered by `infra/modules/apim-openai-api.bicep` only when **all** of these hold; otherwise no cache policy exists and behaviour is unchanged:
+
+| Setting | Default |
+|---|---|
+| `AZURE_SEMANTIC_CACHE_ENABLED` | `false` (the #338 cache infrastructure must exist) |
+| `AZURE_APIM_SEMANTIC_CACHE_POLICY_ENABLED` | `false` |
+| `AZURE_APIM_SEMANTIC_CACHE_EMBEDDINGS_BACKEND_ID` | empty; the ID of an APIM backend for the embeddings deployment, registered out of band (an ID only, never a key or URL) |
+| `AZURE_APIM_SEMANTIC_CACHE_PARTITION` | empty; deployment-configured retailer/pack partition (lowercase `a-z0-9-`, 1-63 chars, validated in Bicep and again in the policy). Empty or invalid renders no cache policy |
+| `AZURE_APIM_SEMANTIC_CACHE_SCORE_THRESHOLD_PERCENT` | `5` (distance 0.05; 1–20, lower is stricter) |
+| `AZURE_SEMANTIC_CACHE_TTL_SECONDS` | `300`; the policy enforces `min(value, 3600)` |
+| APIM gateway safety | must be on (a response is stored only after its output was safety-checked) |
+
+The APIM external-cache registration (Redis connection string) remains an out-of-band operator step from #338; this change never renders or outputs a key or connection string.
+
+Behaviour (policies `llm-semantic-cache-lookup` / `llm-semantic-cache-store`): only single-turn, tool-free, non-streaming requests whose user text is an **anchored** stable FAQ/policy intent (a question opener such as "what is / how does / can I / do you", then a topic — returns, exchanges, refunds, warranty, shipping, delivery, gift cards, loyalty, rewards, privacy, accessibility, sustainability, size guide — immediately followed by a policy noun) are cacheable. Entries are partitioned only on trusted APIM context `context.Subscription.Id` and `context.Product.Id`, the deployment-configured partition, the request path, and a SHA-256 of the model plus all system/developer messages (system messages are kept in similarity, `ignore-system-messages="false"`). No caller header (the former `x-rp-tenant-id`) is read or trusted. A request bypasses (visible `x-rp-gw-cache: bypass` + closed-vocabulary `x-rp-gw-cache-reason`) when it has tools/functions, streaming, `response_format`, any body key other than `messages`/`model`/`temperature`/`top_p`/`n`, a non-default (≠1) temperature/top_p/n, multi-turn or oversized text, or text that matches the aggressive deny lists: sensitive/personal (pharmacy, recall, health, account, email, "my/me"), identifiers (any digit, order/ticket/member), mutation verbs, analytics (sales, rates, volume, counts, totals, "by", trends), store/region/location and time periods (today, week, month, quarter, year, month names, "last/next/this"), and dynamic price/stock/availability/status. Regulated-retail mode always bypasses. Non-200, safety-unchecked or safety-blocked responses are never stored. Evidence is only `hit | miss | bypass` (+ reason); the Control Room ribbon shows it.
+
+**Cache unavailable:** Microsoft documents that if a cache lookup fails the API call does not raise an error and the cache operation completes successfully. An unreachable cache is therefore backend fall-through and is **indistinguishable from a miss**; the gateway does not emit an `unavailable` signal and there is no semantic-cache `on-error` handling. Whether any additional signal exists is unproven until a live trace shows it.
+
+**Acceptance evidence (#342):** `node scripts/probe-semantic-cache.cjs` (env `APIM_BASE_URL`, `DEPLOYMENT`, `API_VERSION`, `SUBSCRIPTION_KEY`; secrets never printed) sends equivalent safe requests and checks miss→hit with no backend contact evidence, that a spoofed `x-rp-tenant-id` is ignored, and bypass for dynamic/sensitive/analytics/tools/streaming/temperature requests. `--expect-unavailable` (cache made unreachable out of band) proves only fall-through (200, backend reached, no hit). `--self-test` validates the harness against an in-process model. Offline, `SemanticCachePolicyRuntimeTests` assert the rendered policy structure and evaluate the rendered classifier patterns; they are not a behavioural simulator of APIM or the cache. The live probe has not been run against a deployment.
+
+**Cost class:** a small, continuously billed, always-on Azure Managed Redis instance (roughly tens of USD per month for Balanced_B0; confirm current regional pricing; a private endpoint and its DNS zone group add further billed resources). The live deployment issue must record an explicit cost approval before enabling.
+
+**Teardown:** disabling the flag and rerunning incremental `azd provision` does **not** delete an existing cache. Delete the cache and its private endpoint explicitly with `az redisenterprise delete --name redis-<token> --resource-group rg-<env> --yes` and `az network private-endpoint delete --name pe-redis-<token> --resource-group rg-<env>`, or use `azd down` to remove the entire environment. Also remove any APIM named value holding the connection string and rotate the access keys; the DNS zone is not owned by this module.

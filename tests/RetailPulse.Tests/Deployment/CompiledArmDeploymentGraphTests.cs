@@ -77,8 +77,14 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
             "the compiled apimOpenAiApi template must declare the 'backend' resource (retail-pulse-foundry)");
         backendResource.GetProperty("type").GetString().Should().Be(
             "Microsoft.ApiManagement/service/backends");
-        backendResource.GetProperty("name").GetString().Should().Contain("retail-pulse-foundry",
-            "the backend's compiled name expression must reference the 'retail-pulse-foundry' literal");
+        string backendName = backendResource.GetProperty("name").GetString() ?? string.Empty;
+        (backendName.Contains("retail-pulse-foundry", StringComparison.Ordinal) ||
+            backendName.Contains("primaryBackendName", StringComparison.Ordinal)).Should().BeTrue(
+            "Bicep versions may inline the reviewed backend id or retain the variable reference");
+        if (apimApiTemplate.GetProperty("variables").TryGetProperty("primaryBackendName", out JsonElement primaryBackendName))
+        {
+            primaryBackendName.GetString().Should().Be("retail-pulse-foundry");
+        }
 
         string backendJson = backendResource.GetRawText();
         backendJson.Should().Contain("cognitiveservices.azure.com",
@@ -96,8 +102,8 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
         // template graph carries the actual policy XML content somewhere in
         // its variables so it isn't silently dropped by the module boundary.
         string compiledJson = root.GetRawText();
-        compiledJson.Should().Contain("azure-openai-token-limit",
-            "the compiled template must carry the azure-openai-token-limit policy fragment");
+        compiledJson.Should().Contain("llm-token-limit",
+            "the compiled template must carry the llm-token-limit policy fragment");
         compiledJson.Should().Contain("azure-openai-emit-token-metric",
             "the compiled template must carry the azure-openai-emit-token-metric policy fragment");
         compiledJson.Should().Contain("RetailPulse",
@@ -156,6 +162,123 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
             "the compiled containerApps deployment must receive apimSubscriptionKey from apimOpenAiApi's outputs");
         subscriptionKeyParam.GetRawText().Should().Contain("apimOpenAiApi",
             "apimSubscriptionKey must be sourced from the apimOpenAiApi deployment's outputs via listOutputsWithSecureValues, not a literal");
+    }
+
+    [Fact]
+    public void CompiledArmTemplate_WiresGatewaySafetyRoleAndPolicyFragmentsBehindDisabledDefault()
+    {
+        JsonElement? compiled = TryCompileMainBicep();
+        if (compiled is null)
+        {
+            Environment.GetEnvironmentVariable("CI").Should().NotBe("true",
+                "CI must compile infra/main.bicep; a missing or unusable az/Bicep tool cannot silently skip the deployment graph proof");
+            return;
+        }
+
+        JsonElement api = compiled.Value.GetProperty("resources").GetProperty("apimOpenAiApi").GetProperty("properties").GetProperty("template");
+        JsonElement resources = api.GetProperty("resources");
+
+        JsonElement role = resources.GetProperty("contentSafetyRoleAssignment");
+        role.GetProperty("condition").GetString().Should().Contain("gatewaySafetyEnabled");
+        role.GetProperty("type").GetString().Should().Be("Microsoft.Resources/deployments");
+        role.GetRawText().Should().Contain("contentSafetyAccountName").And.Contain("apimPrincipalId");
+        api.GetProperty("variables").GetProperty("cognitiveServicesUserRoleId").GetString()
+            .Should().Be("a97b65f3-24c7-4388-baec-2e87135dc908");
+
+        resources.GetProperty("contentSafetyAccount").GetProperty("condition").GetString().Should().Contain("gatewaySafetyEnabled");
+        api.GetProperty("parameters").GetProperty("gatewaySafetyEnabled").GetProperty("defaultValue").GetBoolean().Should().BeFalse();
+
+        string policy = resources.GetProperty("apiPolicy").GetRawText();
+        policy.Should().Contain("{safety-inbound}").And.Contain("{safety-outbound}").And.Contain("{severity-threshold}")
+            .And.Contain("parameters('gatewaySafetyEnabled')");
+        policy.IndexOf("contentSafetyRoleAssignment", StringComparison.Ordinal).Should().BeGreaterThan(-1,
+            "the policy deployment must wait for the Content Safety role assignment");
+        api.GetRawText().Should().Contain("text:shieldPrompt?api-version=2024-09-01");
+    }
+
+    [Fact]
+    public void CompiledArmTemplate_DeclaresConditionalTwoBackendPoolWithManagedIdentityAndCircuitBreakers()
+    {
+        JsonElement? compiled = TryCompileMainBicep();
+        if (compiled is null)
+        {
+            Environment.GetEnvironmentVariable("CI").Should().NotBe("true",
+                "CI must compile infra/main.bicep; a missing or unusable az/Bicep tool cannot silently skip the deployment graph proof");
+            return;
+        }
+
+        JsonElement inner = compiled.Value
+            .GetProperty("resources")
+            .GetProperty("apimOpenAiApi")
+            .GetProperty("properties")
+            .GetProperty("template");
+        JsonElement resources = inner.GetProperty("resources");
+
+        // Single-backend compatibility: the primary is unconditional and the
+        // pool resources are gated on the same poolEnabled condition.
+        JsonElement primary = resources.GetProperty("backend");
+        primary.TryGetProperty("condition", out _).Should().BeFalse(
+            "the primary backend must always deploy so a single-backend configuration stays valid");
+
+        foreach (string name in new[] { "secondaryBackend", "backendPool", "secondaryRoleAssignment", "secondaryAiFoundry" })
+        {
+            resources.TryGetProperty(name, out JsonElement r).Should().BeTrue($"'{name}' must be compiled into the template");
+            r.GetProperty("condition").GetRawText().Should().Contain("poolEnabled",
+                $"'{name}' must only deploy when the pool is enabled");
+        }
+
+        inner.GetProperty("variables").GetProperty("poolEnabled").GetRawText().Should().Contain("backendPoolEnabled",
+            "poolEnabled must derive from the backendPoolEnabled parameter");
+        inner.GetProperty("parameters").GetProperty("backendPoolEnabled").GetProperty("defaultValue").GetBoolean()
+            .Should().BeFalse("the pool must be opt-in");
+
+        // Both backends authenticate with managed identity. Pool mode adds
+        // 5xx handling; single-backend mode retains the prior 429-only breaker.
+        foreach (string name in new[] { "backend", "secondaryBackend" })
+        {
+            JsonElement props = resources.GetProperty(name).GetProperty("properties");
+            props.GetProperty("credentials").GetProperty("managedIdentity").GetProperty("resource").GetString()
+                .Should().Be("https://cognitiveservices.azure.com");
+        }
+
+        JsonElement throttlingBreaker = inner.GetProperty("variables").GetProperty("throttlingCircuitBreaker")
+            .GetProperty("rules")[0];
+        throttlingBreaker.GetProperty("acceptRetryAfter").GetBoolean().Should().BeTrue();
+        throttlingBreaker.GetProperty("failureCondition").GetRawText().Should().Contain("429").And.NotContain("500");
+        JsonElement poolBreaker = inner.GetProperty("variables").GetProperty("poolCircuitBreaker")
+            .GetProperty("rules")[0];
+        poolBreaker.GetProperty("failureCondition").GetRawText().Should().Contain("429").And.Contain("500");
+
+        // Pool membership and priority failover.
+        JsonElement poolProps = resources.GetProperty("backendPool").GetProperty("properties");
+        poolProps.GetProperty("type").GetString().Should().Be("Pool");
+        JsonElement services = poolProps.GetProperty("pool").GetProperty("services");
+        services.GetArrayLength().Should().Be(2);
+        services[0].GetProperty("id").GetString().Should().Contain("primaryBackendName");
+        services[1].GetProperty("id").GetString().Should().Contain("secondaryBackendName");
+        services[0].GetProperty("priority").GetInt32().Should().Be(1);
+        services[1].GetProperty("priority").GetInt32().Should().Be(2);
+
+        // RBAC for the secondary account and no model keys anywhere.
+        resources.GetProperty("secondaryRoleAssignment").GetRawText()
+            .Should().Contain("cognitiveServicesOpenAIUserRoleId");
+        string json = inner.GetRawText();
+        json.ToLowerInvariant().Should().NotContain("listkeys");
+
+        // Policies route to the selected topology only after its resources and
+        // secondary RBAC are ready. No selected-member evidence is fabricated.
+        json.Should().Contain("routeBackendId");
+        JsonElement apiPolicy = resources.GetProperty("apiPolicy");
+        string dependencies = apiPolicy.GetProperty("dependsOn").GetRawText();
+        dependencies.Should().Contain("backend").And.Contain("secondaryBackend")
+            .And.Contain("backendPool").And.Contain("secondaryRoleAssignment");
+        json.Should().NotContain("x-rp-backend-id");
+        // The only failover header is the authorized demo trigger (#330); no inferred-backend header exists.
+        FailoverHeaderRegex().Matches(json).Select(m => m.Value)
+            .Should().OnlyContain(v => v == "x-rp-failover-demo");
+        json.Should().Contain("first-fast-retry").And.Contain("forward-request");
+        inner.GetProperty("outputs").TryGetProperty("backendPoolEnabled", out _).Should().BeTrue();
+        inner.GetProperty("outputs").TryGetProperty("routeBackendId", out _).Should().BeTrue();
     }
 
     private JsonElement? TryCompileMainBicep()
@@ -275,4 +398,7 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
 
     [System.Text.RegularExpressions.GeneratedRegex(@"\s+")]
     private static partial System.Text.RegularExpressions.Regex MyRegex();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"x-rp-failover[A-Za-z-]*")]
+    private static partial System.Text.RegularExpressions.Regex FailoverHeaderRegex();
 }

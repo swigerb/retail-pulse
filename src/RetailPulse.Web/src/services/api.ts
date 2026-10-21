@@ -6,7 +6,23 @@ import type {
   PlanSuspendedResponse,
   SendMessageResult,
 } from '../types';
+import type { GatewayEvidence } from '../types';
 import { resolveApiUrl } from '../config/apiOrigin';
+import { normalizeGatewayEvidence } from './gatewayEvidence';
+
+/** Chat failure that preserves sanitized gateway evidence (e.g. a gateway safety block). */
+export class GatewayChatError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly gateway: GatewayEvidence | null;
+  constructor(message: string, status: number, code: string | null, gateway: GatewayEvidence | null) {
+    super(message);
+    this.name = 'GatewayChatError';
+    this.status = status;
+    this.code = code;
+    this.gateway = gateway;
+  }
+}
 
 async function parseErrorBody(res: Response): Promise<string> {
   const contentType = res.headers.get('content-type') ?? '';
@@ -173,6 +189,18 @@ function withTimeout(
   };
 }
 
+function parseGatewayError(text: string): { code: string | null; gateway: GatewayEvidence } | null {
+  if (!text) return null;
+  try {
+    const obj = JSON.parse(text) as Record<string, unknown>;
+    const gateway = normalizeGatewayEvidence(obj.gateway);
+    const code = typeof obj.code === 'string' ? obj.code : null;
+    return gateway && gateway.calls.some(c => c.gatewaySafety || c.budget) ? { code, gateway } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function sendMessage(
   request: ChatRequest,
   options: SendMessageOptions = {},
@@ -201,7 +229,14 @@ export async function sendMessage(
   }
 
   if (!res.ok) {
+    const errorText = (res.headers.get('content-type') ?? '').includes('application/json')
+      ? await res.clone().text().catch(() => '')
+      : '';
     const detail = await parseErrorBody(res);
+    const gatewayError = parseGatewayError(errorText);
+    if (gatewayError) {
+      throw new GatewayChatError(`API error ${res.status}: ${detail}`, res.status, gatewayError.code, gatewayError.gateway);
+    }
     if (res.status === 429) {
       throw new Error('The AI service is busy. Please wait a moment and try again.');
     }
@@ -220,7 +255,7 @@ export async function sendMessage(
   if (!isChatResponse(data)) {
     throw new Error('API error: malformed response payload');
   }
-  return { kind: 'complete', response: data };
+  return { kind: 'complete', response: { ...data, gateway: normalizeGatewayEvidence(data.gateway) } };
 }
 
 /**

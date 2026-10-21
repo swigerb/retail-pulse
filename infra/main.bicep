@@ -34,6 +34,33 @@ param aiFoundryAccountName string = 'aiagents-3rsdmhyb'
 @description('Resource group containing the Azure AI Foundry / Cognitive Services account used by the AI gateway backend')
 param aiFoundryResourceGroupName string = 'rg-repodigest-agents-demo-eus-001'
 
+@description('Enable the two-backend APIM model pool (primary + secondary Azure AI accounts). Default false keeps the single-backend topology.')
+param apimBackendPoolEnabled bool = false
+
+@description('Enables the demo-only APIM failover trigger (#330). Disabled by default; requires apimBackendPoolEnabled.')
+param apimFailoverDemoEnabled bool = false
+
+@description('Fictional store/channel/application/B2B token-budget scopes (#332): [{ kind: store|channel|b2b, id: kebab-id, displayName: text }]. Each gets its own APIM product, subscription and counter.')
+param apimTokenBudgetScopes array = []
+
+@description('Deploys the operator-only token budget demo named values (#332). Disabled by default and inert until rp-budget-demo-armed is set to true.')
+param apimTokenBudgetDemoEnabled bool = false
+
+@minValue(1)
+@maxValue(500)
+@description('Deliberately tiny static TPM used only while the budget demo is armed.')
+param apimTokenBudgetDemoTokensPerMinute int = 50
+
+@secure()
+@description('Operator secret authorizing the APIM failover demo (>= 32 chars). Never share with ordinary callers.')
+param apimFailoverDemoKey string = ''
+
+@description('Secondary Azure AI Foundry / Cognitive Services account for the APIM backend pool. Required when apimBackendPoolEnabled is true.')
+param secondaryAiFoundryAccountName string = ''
+
+@description('Resource group of the secondary Azure AI Foundry account (defaults to the primary resource group)')
+param secondaryAiFoundryResourceGroupName string = aiFoundryResourceGroupName
+
 @description('Azure OpenAI deployment name that the API sends chat/completions to (through APIM)')
 param openAiDeployment string = 'gpt-5.4-mini-2026-03-17'
 
@@ -49,6 +76,26 @@ param teamsBotImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Enable the optional Azure AI Content Safety second layer. Ships DISABLED so a clean `azd up` never silently provisions a paid Cognitive Services account. Enable per environment with `azd env set AZURE_CONTENT_SAFETY_ENABLED true` (read by main.bicepparam); the API is then wired to the account endpoint with managed identity and no keys.')
 param contentSafetyEnabled bool = false
 
+@description('Regulated-retail gateway mode (#337) for the synthetic pharmacy scenario. Forces Content Safety and APIM gateway safety on in fail-closed regulated mode, disables all APIM body capture and masks client-visible request ids. A configuration posture only: NOT HIPAA certified; no patient data or clinical advice. Enable with `azd env set AZURE_REGULATED_RETAIL_MODE true`.')
+param regulatedRetailMode bool = false
+
+var contentSafetyOn = contentSafetyEnabled || regulatedRetailMode
+
+@description('Enforce Prompt Shields and text harm checks at APIM (#331) using the Content Safety account. Requires contentSafetyEnabled; ships DISABLED. The application-level checks always remain.')
+param apimGatewaySafetyEnabled bool = false
+
+@description('APIM gateway safety dependency behaviour: demo (continue with allowed_on_safety_error evidence on timeout/429/5xx) or regulated (fail closed with a generic 503).')
+@allowed([
+  'demo'
+  'regulated'
+])
+param apimGatewaySafetyMode string = 'demo'
+
+@description('Text harm severity at or above which APIM blocks (FourSeverityLevels 0/2/4/6).')
+@minValue(2)
+@maxValue(6)
+param apimGatewaySafetySeverityThreshold int = 4
+
 @description('Entra application (client) ID of the Azure Bot Service registration that fronts the Teams bot. Ships EMPTY so a clean `azd up` does not pretend to have a bot; set it per environment with `azd env set AZURE_BOT_APP_ID <id>` once a bot is registered.')
 param botAppId string = ''
 
@@ -58,8 +105,63 @@ param botAppSecret string = ''
 
 @description('Keep one replica of the API and MCP server always running. Scale-to-zero makes the first request after an idle period look like an outage. Set false with `azd env set AZURE_ALWAYS_WARM false` for a cost-optimised, non-customer-facing environment.')
 param alwaysWarm bool = true
+
+@description('Application (client) ID of the APIM managed identity, produced by scripts/Setup-McpGatewayIdentity.ps1 (azd env AZURE_MCP_GATEWAY_APIM_CLIENT_ID). Empty until the postprovision hook has run; the API then trusts no gateway app-only caller.')
+param mcpGatewayApimClientId string = ''
+
+@description('Audience (identifier URI) of the MCP gateway app registration that callers request tokens for')
+param mcpGatewayAudience string = 'api://retailpulse-mcp-gateway'
 @description('Enable the optional Azure AI Search knowledge provider. Disabled by default; no Search resource is provisioned when false.')
 param aiSearchEnabled bool = false
+
+@description('Enable the optional Azure API Center catalog that continuously synchronizes from APIM. Disabled by default; no API Center resources are provisioned when false.')
+param apiCenterEnabled bool = false
+
+@description('Enable the optional Azure Managed Redis external vector cache for APIM semantic caching (#338). Disabled by default; billed while it exists, so see docs/deployment-azd.md for cost class and teardown.')
+param semanticCacheEnabled bool = false
+
+@allowed([
+  'Balanced_B0'
+  'Balanced_B1'
+  'Balanced_B3'
+])
+@description('Azure Managed Redis SKU for the semantic cache.')
+param semanticCacheSku string = 'Balanced_B0'
+
+@minValue(60)
+@maxValue(86400)
+@description('Intended semantic cache TTL in seconds. The APIM policy (#339, when apimSemanticCachePolicyEnabled) enforces min(value, 3600).')
+param semanticCacheTtlSeconds int = 300
+
+@allowed([
+  'Disabled'
+  'Enabled'
+])
+@description('Public network access for the semantic cache. Disabled by default.')
+param semanticCachePublicNetworkAccess string = 'Disabled'
+
+@description('Subnet resource ID for the semantic cache private endpoint. Required when semanticCachePublicNetworkAccess is Disabled.')
+param semanticCachePrivateEndpointSubnetId string = ''
+
+@description('Private DNS zone (privatelink.redis.azure.net) resource ID for the semantic cache private endpoint. Required when semanticCachePublicNetworkAccess is Disabled.')
+param semanticCachePrivateDnsZoneId string = ''
+
+@description('Render the APIM semantic-cache lookup/store policies (#339). Disabled by default; takes effect only when semanticCacheEnabled, gateway safety and an embeddings backend exist, and the Redis external cache has been registered in APIM out of band.')
+param apimSemanticCachePolicyEnabled bool = false
+
+@description('ID of the pre-registered APIM backend for the semantic-cache embeddings deployment (an ID only, never a key or URL).')
+param apimSemanticCacheEmbeddingsBackendId string = ''
+
+@description('Deployment-configured retailer/pack semantic-cache partition (lowercase a-z, 0-9, hyphen; 1-63 chars). Empty or invalid renders no cache policy.')
+param apimSemanticCachePartition string = ''
+
+@minValue(1)
+@maxValue(20)
+@description('Semantic-cache similarity distance threshold in hundredths (5 = 0.05).')
+param apimSemanticCacheScoreThresholdPercent int = 5
+
+@description('Location for Azure API Center (supported in a limited set of regions, so independent of the primary location).')
+param apiCenterLocation string = 'eastus'
 
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
@@ -124,6 +226,7 @@ module apim './modules/apim.bicep' = {
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     appInsightsId: monitoring.outputs.appInsightsId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    captureRequestBodies: !((apimGatewaySafetyEnabled || regulatedRetailMode) && contentSafetyOn)
   }
 }
 
@@ -135,6 +238,24 @@ module apimOpenAiApi './modules/apim-openai-api.bicep' = {
     apimPrincipalId: apim.outputs.apimPrincipalId
     aiFoundryAccountName: aiFoundryAccountName
     aiFoundryResourceGroupName: aiFoundryResourceGroupName
+    backendPoolEnabled: apimBackendPoolEnabled
+    failoverDemoEnabled: apimFailoverDemoEnabled
+    tokenBudgetScopes: apimTokenBudgetScopes
+    tokenBudgetDemoEnabled: apimTokenBudgetDemoEnabled
+    tokenBudgetDemoTokensPerMinute: apimTokenBudgetDemoTokensPerMinute
+    gatewaySafetyEnabled: (apimGatewaySafetyEnabled || regulatedRetailMode) && contentSafetyOn
+    regulatedRetailMode: regulatedRetailMode && contentSafetyOn
+    contentSafetyAccountName: contentSafetyOn ? contentSafety!.outputs.name : ''
+    gatewaySafetyMode: apimGatewaySafetyMode
+    semanticCachePolicyEnabled: semanticCacheEnabled && apimSemanticCachePolicyEnabled
+    semanticCacheEmbeddingsBackendId: apimSemanticCacheEmbeddingsBackendId
+    semanticCachePartition: apimSemanticCachePartition
+    semanticCacheScoreThresholdPercent: apimSemanticCacheScoreThresholdPercent
+    semanticCacheTtlSeconds: min(semanticCacheTtlSeconds, 3600)
+    gatewaySafetySeverityThreshold: apimGatewaySafetySeverityThreshold
+    failoverDemoKey: apimFailoverDemoKey
+    secondaryAiFoundryAccountName: secondaryAiFoundryAccountName
+    secondaryAiFoundryResourceGroupName: secondaryAiFoundryResourceGroupName
   }
 }
 
@@ -162,10 +283,12 @@ module containerApps './modules/container-apps.bicep' = {
     entraClientId: entraClientId
     entraApiScope: entraApiScope
     containerRegistryLoginServer: containerRegistry.outputs.loginServer
-    contentSafetyEndpoint: contentSafetyEnabled ? contentSafety!.outputs.endpoint : ''
+    contentSafetyEndpoint: contentSafetyOn ? contentSafety!.outputs.endpoint : ''
+    regulatedRetailMode: regulatedRetailMode
     botAppId: botAppId
     botAppSecret: botAppSecret
     alwaysWarm: alwaysWarm
+    mcpGatewayClientId: mcpGatewayApimClientId
   }
 }
 
@@ -193,6 +316,10 @@ output AZURE_FRONTEND_APP_URL string = staticWebApp.outputs.staticWebAppUrl
 output AZURE_APIM_NAME string = apim.outputs.apimName
 output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
 output AZURE_APIM_INFERENCE_ENDPOINT string = apimOpenAiApi.outputs.inferenceEndpoint
+output AZURE_APIM_BACKEND_POOL_ENABLED bool = apimOpenAiApi.outputs.backendPoolEnabled
+output AZURE_APIM_ROUTE_BACKEND_ID string = apimOpenAiApi.outputs.routeBackendId
+output AZURE_APIM_PRIMARY_BACKEND_ID string = apimOpenAiApi.outputs.primaryBackendId
+output AZURE_APIM_SECONDARY_BACKEND_ID string = apimOpenAiApi.outputs.secondaryBackendId
 output AZURE_APIM_INFERENCE_API_NAME string = apimOpenAiApi.outputs.inferenceApiName
 output AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME string = apimOpenAiApi.outputs.subscriptionName
 
@@ -203,7 +330,7 @@ output AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME string = apimOpenAiApi.outputs.sub
 // the postprovision hook grants each container app system identity the
 // `Cognitive Services User` role on this account. When disabled the endpoint
 // output is an empty string so downstream consumers can safely branch on it.
-module contentSafety './modules/content-safety.bicep' = if (contentSafetyEnabled) {
+module contentSafety './modules/content-safety.bicep' = if (contentSafetyOn) {
   name: 'content-safety'
   scope: rg
   params: {
@@ -213,10 +340,10 @@ module contentSafety './modules/content-safety.bicep' = if (contentSafetyEnabled
   }
 }
 
-output AZURE_CONTENT_SAFETY_ENABLED bool = contentSafetyEnabled
-output AZURE_CONTENT_SAFETY_ENDPOINT string = contentSafetyEnabled ? contentSafety!.outputs.endpoint : ''
-output AZURE_CONTENT_SAFETY_NAME string = contentSafetyEnabled ? contentSafety!.outputs.name : ''
-output AZURE_CONTENT_SAFETY_RESOURCE_ID string = contentSafetyEnabled ? contentSafety!.outputs.resourceId : ''
+output AZURE_CONTENT_SAFETY_ENABLED bool = contentSafetyOn
+output AZURE_CONTENT_SAFETY_ENDPOINT string = contentSafetyOn ? contentSafety!.outputs.endpoint : ''
+output AZURE_CONTENT_SAFETY_NAME string = contentSafetyOn ? contentSafety!.outputs.name : ''
+output AZURE_CONTENT_SAFETY_RESOURCE_ID string = contentSafetyOn ? contentSafety!.outputs.resourceId : ''
 
 // ── Optional Azure AI Search knowledge provider (issue #103) ───────────────
 // Provisioned only when aiSearchEnabled = true so a default `azd up` remains
@@ -240,6 +367,54 @@ output AZURE_AI_SEARCH_ENABLED bool = aiSearchEnabled
 output AZURE_AI_SEARCH_ENDPOINT string = aiSearchEnabled ? aiSearch!.outputs.endpoint : ''
 output AZURE_AI_SEARCH_NAME string = aiSearchEnabled ? aiSearch!.outputs.name : ''
 output AZURE_AI_SEARCH_RESOURCE_ID string = aiSearchEnabled ? aiSearch!.outputs.resourceId : ''
+
+// ── Optional Azure Managed Redis semantic cache (issue #338) ───────────────
+// Provisioned only when semanticCacheEnabled = true. APIM semantic caching
+// supports only access-key (connection string) auth to Redis, so keys are
+// enabled on the service but no key or connection string is ever emitted. Outputs are empty/zero when disabled.
+module semanticCache './modules/managed-redis-cache.bicep' = if (semanticCacheEnabled) {
+  name: 'semantic-cache'
+  scope: rg
+  params: {
+    location: location
+    resourceToken: resourceToken
+    tags: tags
+    skuName: semanticCacheSku
+    defaultTtlSeconds: semanticCacheTtlSeconds
+    publicNetworkAccess: semanticCachePublicNetworkAccess
+    privateEndpointSubnetId: semanticCachePrivateEndpointSubnetId
+    privateDnsZoneId: semanticCachePrivateDnsZoneId
+  }
+}
+
+output AZURE_SEMANTIC_CACHE_ENABLED bool = semanticCacheEnabled
+output AZURE_SEMANTIC_CACHE_NAME string = semanticCacheEnabled ? semanticCache!.outputs.name : ''
+output AZURE_SEMANTIC_CACHE_RESOURCE_ID string = semanticCacheEnabled ? semanticCache!.outputs.resourceId : ''
+output AZURE_SEMANTIC_CACHE_HOST string = semanticCacheEnabled ? semanticCache!.outputs.hostName : ''
+// Advisory handoff only; not enforced until issue #339 wires the APIM semantic-cache policy.
+output AZURE_SEMANTIC_CACHE_TTL_SECONDS int = semanticCacheEnabled ? semanticCache!.outputs.defaultTtlSeconds : 0
+
+// ── Optional Azure API Center (issue #333) ─────────────────────────────────
+// Provisioned only when apiCenterEnabled = true so a default `azd up` is
+// unchanged. The module links the APIM service declaratively (apiSources) and
+// grants the API Center identity API Management Service Reader. Synchronization
+// is one-way (APIM → API Center) and eventually consistent. Outputs are empty
+// when disabled so consumers can branch on the enabled flag.
+module apiCenter './modules/api-center.bicep' = if (apiCenterEnabled) {
+  name: 'api-center'
+  scope: rg
+  params: {
+    location: apiCenterLocation
+    resourceToken: resourceToken
+    tags: tags
+    apimName: apim.outputs.apimName
+  }
+}
+
+output AZURE_API_CENTER_ENABLED bool = apiCenterEnabled
+output AZURE_API_CENTER_NAME string = apiCenterEnabled ? apiCenter!.outputs.name : ''
+output AZURE_API_CENTER_RESOURCE_ID string = apiCenterEnabled ? apiCenter!.outputs.resourceId : ''
+output AZURE_API_CENTER_APIM_SOURCE_NAME string = apiCenterEnabled ? apiCenter!.outputs.apimSourceName : ''
 
 // ── azd environment aliases ────────────────────────────────────────────────
 // These outputs are captured into the azd environment (.azure/<env>/.env) and
@@ -304,3 +479,23 @@ output VITE_FEATURE_STORES string = 'true'
 output VITE_FEATURE_FINANCIALS string = 'true'
 output VITE_FEATURE_PORTFOLIO string = 'true'
 output VITE_FEATURE_OBSERVABILITY string = 'true'
+
+// Governed APIM MCP runtime (ADR 017, issue #335): APIM "Expose REST API as MCP server" over the
+// public Retail Pulse API, authenticated with the APIM system-assigned managed identity. The
+// internal MCP server is not referenced. Runs after containerApps to consume the API FQDN.
+module apimMcpApi './modules/apim-mcp-api.bicep' = {
+  name: 'apim-mcp-api'
+  scope: rg
+  params: {
+    apimName: apim.outputs.apimName
+    retailPulseApiFqdn: containerApps.outputs.apiFqdn
+    retailPulseApiAudience: empty(entraAudience) && !empty(entraClientId) ? 'api://${entraClientId}' : entraAudience
+    mcpGatewayAudience: mcpGatewayAudience
+    tenantId: entraTenantId
+    appInsightsLoggerId: apim.outputs.appInsightsLoggerId
+  }
+}
+
+output AZURE_APIM_MCP_ENDPOINT string = apimMcpApi.outputs.mcpEndpoint
+output AZURE_APIM_PRINCIPAL_ID string = apim.outputs.apimPrincipalId
+output AZURE_MCP_GATEWAY_AUDIENCE string = mcpGatewayAudience

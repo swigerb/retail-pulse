@@ -1,0 +1,54 @@
+# Starting tasks for the unofficial Staples demonstration pack (synthetic data).
+
+categories:
+  - id: contract-catalog
+    label: "Contract Catalog"
+    emoji: "📦"
+    order: 1
+    tasks:
+      - name: "Contract sell-through"
+        prompt: "How is Contract Catalog sell-through trending in the Great Lakes & Plains this quarter, and where is on-shelf availability below target?"
+        order: 1
+        capability: { kind: prose }
+      - name: "Paper & toner days of supply"
+        prompt: "Show days of supply for Paper & Toner by region"
+        order: 2
+        capability: { kind: chart, chartType: bar }
+
+  - id: account-budgets
+    label: "Account Budgets"
+    emoji: "💼"
+    order: 2
+    tasks:
+      - name: "Budget burn by account"
+        prompt: "Which business accounts are tracking above their quarterly office-supply budget, and what are the main spend drivers?"
+        order: 1
+        capability: { kind: prose }
+      - name: "Substitution impact"
+        prompt: "Show account-level margin drivers for approved substitutions across the portfolio"
+        order: 2
+        capability: { kind: chart, chartType: horizontalBar }
+
+  - id: fulfillment-print
+    label: "Fulfillment & Print Orders"
+    emoji: "🚚"
+    order: 3
+    tasks:
+      - name: "Print-order status"
+        prompt: "Summarize print-order status and late-order risk for Print & Marketing Services in the Pacific Rim"
+        order: 1
+        capability: { kind: prose }
+      - name: "AI gateway governance check"
+        prompt: "For the contract-pricing answers you just gave, which AI gateway controls applied — content safety, token budget, and audit logging — and were any calls blocked or throttled?"
+        order: 2
+        capability: { kind: prose }
+
+  - id: quote-approval
+    label: "Quote Approval"
+    emoji: "✅"
+    order: 4
+    tasks:
+      - name: "Large quote approval"
+        prompt: "Prepare a quote for ACME-Synthetic Corp's 4,000-unit task-seating order at the contract tier and request approval before it is sent"
+        order: 1
+        capability: { kind: prose }

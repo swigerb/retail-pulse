@@ -82,6 +82,8 @@ export interface ChatResponse {
    * Always omitted on fast-path replies.
    */
   planId?: string;
+  /** Gateway evidence for the turn; absent on older servers. */
+  gateway?: GatewayEvidence;
 }
 
 export interface TokenUsage {
@@ -1143,3 +1145,89 @@ export interface PlanSuspendedResponse {
 export type SendMessageResult =
   | { kind: 'complete'; response: ChatResponse }
   | { kind: 'suspended'; suspended: PlanSuspendedResponse };
+
+/** Privacy-safe APIM gateway evidence (mirrors RetailPulse.Contracts.Gateway). */
+export type GatewayOutcome =
+  | 'unknown'
+  | 'not-applicable'
+  | 'allowed'
+  | 'throttled'
+  | 'hit'
+  | 'miss'
+  | 'passed'
+  | 'blocked'
+  | 'bypass';
+
+export type GatewayEvidenceStatus = 'unavailable' | 'observed' | 'bypassed' | 'blocked' | 'failed';
+
+export type GatewayRouteState = 'unknown' | 'primary' | 'failover';
+
+export interface GatewayFailoverDemoEvidence {
+  primaryStatusCode?: number | null;
+  attempts?: number | null;
+  fallbackUsed?: boolean | null;
+}
+
+export type GatewaySafetyPhase = 'unknown' | 'input' | 'output';
+export type GatewaySafetyDecision = 'unknown' | 'allow' | 'block' | 'allowed_on_safety_error';
+
+/** APIM content safety evidence (#331). Metadata only; never prompt, completion, or matched text. */
+export interface GatewaySafetyEvidence {
+  phase: GatewaySafetyPhase;
+  decision: GatewaySafetyDecision;
+  promptAttack?: boolean | null;
+  category?: string | null;
+  severity?: number | null;
+  mode?: string | null;
+  latencyMs?: number | null;
+  outputChecked?: boolean | null;
+}
+
+export type GatewayBudgetScopeKind = 'store' | 'channel' | 'application' | 'b2b';
+export type GatewayBudgetMode = 'normal' | 'demo';
+
+/** Token-budget evidence (#332). Scope kind and mode only; never a counter key or subscription id. */
+export interface GatewayBudgetEvidence {
+  scopeKind: GatewayBudgetScopeKind;
+  mode: GatewayBudgetMode;
+  /** Seconds until the limiter admits calls again; null when the gateway did not report a number. */
+  retryAfterSeconds?: number | null;
+}
+
+export interface GatewayCallEvidence {
+  gatewayRequestId?: string | null;
+  backendAlias?: string | null;
+  route: GatewayRouteState;
+  tokensConsumed?: number | null;
+  tokensRemaining?: number | null;
+  quota: GatewayOutcome;
+  cache: GatewayOutcome;
+  safety: GatewayOutcome;
+  policyVersion?: string | null;
+  gatewayLatencyMs?: number | null;
+  backendLatencyMs?: number | null;
+  statusCode?: number | null;
+  status: GatewayEvidenceStatus;
+  /** Fixed error class for transport failures; never exception text. */
+  transportError?: string | null;
+  /** Present only for an authorized failover demonstration. */
+  failoverDemo?: GatewayFailoverDemoEvidence | null;
+  /** APIM-level Prompt Shields / text harm decision, when the gateway reported one. */
+  gatewaySafety?: GatewaySafetyEvidence | null;
+  /** Token budget scope/mode/retry, when the gateway reported them. */
+  budget?: GatewayBudgetEvidence | null;
+}
+
+export interface GatewayEvidence {
+  /** Aggregate state; only 'observed' means every call carried trusted gateway evidence. */
+  status: GatewayEvidenceStatus;
+  /** True only when status is 'observed' — never treat anything else as success. */
+  observed: boolean;
+  /** True when more calls were made than are listed in `calls`. */
+  truncated: boolean;
+  droppedCalls: number;
+  callCount: number;
+  totalTokensConsumed?: number | null;
+  tokensRemaining?: number | null;
+  calls: GatewayCallEvidence[];
+}

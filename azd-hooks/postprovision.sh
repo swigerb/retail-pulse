@@ -218,6 +218,10 @@ if [ "$ai_search_enabled" = "true" ] && [ -n "$ai_search_resource_id" ]; then
     done
 fi
 
+# ── Governed APIM MCP runtime identity (ADR 017, issue #335) ────────────────
+# Idempotent Graph setup; fail-closed (set -e): a denial or missing permission fails the hook.
+pwsh -NoProfile -File "$(dirname "$0")/../scripts/Setup-McpGatewayIdentity.ps1"
+
 # ── Mandatory APIM AI Gateway live gate (issue #67) ────────────────────────
 # See postprovision.ps1 for the full rationale: a successful `azd provision`
 # only means the ARM deployments succeeded, not that the AI Gateway

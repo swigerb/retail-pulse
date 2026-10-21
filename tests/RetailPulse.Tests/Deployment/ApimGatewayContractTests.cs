@@ -23,6 +23,9 @@ public sealed partial class ApimGatewayContractTests
     [GeneratedRegex(@"@description\('APIM inference endpoint[^']*'\)\s*param\s+apimInferenceEndpoint\s+(?<type>[A-Za-z]+)(?<rest>[^\r\n]*)")]
     private static partial Regex ApimInferenceEndpointParamRegex();
 
+    [GeneratedRegex(@"<when condition=""([^""]*)"">\s*<set-header name=""x-rp-gw-route""[\s\S]*?failover")]
+    private static partial Regex FailoverRouteConditionRegex();
+
     private static string ApimBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "modules", "apim.bicep"));
 
@@ -32,6 +35,9 @@ public sealed partial class ApimGatewayContractTests
     private static string ApimPolicyXml => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "modules", "apim-openai-policy.xml"));
 
+    private static string NormalBudgetFragment => File.ReadAllText(
+        Path.Combine(RepoRoot, "infra", "modules", "apim-openai-budget-limit-normal.xml"));
+
     private static string ApimRoleAssignmentBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "modules", "apim-openai-role-assignment.bicep"));
 
@@ -40,6 +46,15 @@ public sealed partial class ApimGatewayContractTests
 
     private static string MainBicep => File.ReadAllText(
         Path.Combine(RepoRoot, "infra", "main.bicep"));
+
+    private static string MainBicepParam => File.ReadAllText(
+        Path.Combine(RepoRoot, "infra", "main.bicepparam"));
+
+    private static string PreprovisionPowerShell => File.ReadAllText(
+        Path.Combine(RepoRoot, "azd-hooks", "preprovision.ps1"));
+
+    private static string PreprovisionShell => File.ReadAllText(
+        Path.Combine(RepoRoot, "azd-hooks", "preprovision.sh"));
 
     // ── APIM instance ────────────────────────────────────────────────────────
 
@@ -203,8 +218,8 @@ public sealed partial class ApimGatewayContractTests
             "apim-openai-api.bicep must declare an API-level 'azuremonitor' diagnostic");
         ApimOpenAiApiBicep.Should().Contain("largeLanguageModel:",
             "the API-level azuremonitor diagnostic must declare the largeLanguageModel section for LLM request/response capture");
-        ApimOpenAiApiBicep.Should().Contain("logs: 'enabled'",
-            "the largeLanguageModel section must enable log capture");
+        ApimOpenAiApiBicep.Should().Contain("logs: bodiesDisabled ? 'disabled' : 'enabled'",
+            "LLM message capture must be disabled when gateway safety or regulated mode requires metadata-only diagnostics");
     }
 
     [Fact]
@@ -254,12 +269,12 @@ public sealed partial class ApimGatewayContractTests
     {
         // Subscription-scoped counter (not caller IP or global) — required for
         // the multi-tenant cost/quota story.
-        ApimPolicyXml.Should().MatchRegex(
-            @"<azure-openai-token-limit\s+counter-key=""@\(context\.Subscription\.Id\)""",
+        NormalBudgetFragment.Should().MatchRegex(
+            @"<llm-token-limit\s+counter-key=""@\(context\.Subscription\.Id\)""",
             "token-limit must key on the APIM subscription id (per-subscription quota)");
-        ApimPolicyXml.Should().Contain("tokens-per-minute=\"{tokens-per-minute}\"",
+        NormalBudgetFragment.Should().Contain("tokens-per-minute=\"{tokens-per-minute}\"",
             "token-limit must reference the templated tokens-per-minute cap");
-        ApimPolicyXml.Should().Contain("retry-after-header-name=\"Retry-After\"",
+        NormalBudgetFragment.Should().Contain("retry-after-header-name=\"Retry-After\"",
             "token-limit must emit the standard Retry-After header on throttle");
     }
 
@@ -311,6 +326,9 @@ public sealed partial class ApimGatewayContractTests
     [InlineData("AZURE_APIM_GATEWAY_URL")]
     [InlineData("AZURE_APIM_INFERENCE_ENDPOINT")]
     [InlineData("AZURE_APIM_INFERENCE_API_NAME")]
+    [InlineData("AZURE_APIM_ROUTE_BACKEND_ID")]
+    [InlineData("AZURE_APIM_PRIMARY_BACKEND_ID")]
+    [InlineData("AZURE_APIM_SECONDARY_BACKEND_ID")]
     [InlineData("AZURE_APIM_INFERENCE_SUBSCRIPTION_NAME")]
     public void MainBicep_EmitsApimGatewayOutput_ForOperatorAndVerificationTooling(string outputName)
     {
@@ -319,6 +337,142 @@ public sealed partial class ApimGatewayContractTests
             RegexOptions.Multiline);
         pattern.IsMatch(MainBicep).Should().BeTrue(
             $"main.bicep must emit '{outputName}' so the postprovision hook + Verify-ApimAiGateway.ps1 can locate the deployed AI Gateway");
+    }
+
+    // ── Two-backend failover pool (#329) ─────────────────────────────────────
+
+    [Fact]
+    public void ApimOpenAiApi_BackendPoolIsOptInAndSingleBackendRemainsValid()
+    {
+        ApimOpenAiApiBicep.Should().MatchRegex(@"param\s+backendPoolEnabled\s+bool\s*=\s*false");
+        ApimOpenAiApiBicep.Should().Contain("var routeBackendId = poolEnabled ? poolBackendName : primaryBackendName");
+        PreprovisionPowerShell.Should().Contain("AZURE_OPENAI_SECONDARY_ACCOUNT_NAME")
+            .And.Contain("must differ");
+        PreprovisionShell.Should().Contain("AZURE_OPENAI_SECONDARY_ACCOUNT_NAME")
+            .And.Contain("must differ");
+        MainBicep.Should().MatchRegex(@"param\s+apimBackendPoolEnabled\s+bool\s*=\s*false");
+    }
+
+    [Fact]
+    public void ApimOpenAiApi_PoolHasPriorityMembersCircuitBreakersAndSecondaryRbac()
+    {
+        ApimOpenAiApiBicep.Should().Contain("type: 'Pool'");
+        ApimOpenAiApiBicep.Should().Contain("priority: 1");
+        ApimOpenAiApiBicep.Should().Contain("priority: 2");
+        ApimOpenAiApiBicep.Should().Contain("circuitBreaker: poolEnabled ? poolCircuitBreaker : throttlingCircuitBreaker");
+        ApimOpenAiApiBicep.Should().Contain("circuitBreaker: poolCircuitBreaker");
+        ApimOpenAiApiBicep.Should().Contain("secondaryRoleAssignment",
+            "APIM's managed identity needs RBAC on the secondary account");
+        ApimOpenAiApiBicep.Should().Contain("dependsOn: poolEnabled ?",
+            "the policy must wait for the selected backend topology and RBAC");
+        ApimOpenAiApiBicep.Should().NotContainEquivalentOf("listKeys");
+    }
+
+    [Fact]
+    public void ApimPolicy_RoutesViaConfiguredBackendWithoutFabricatingMemberEvidence()
+    {
+        ApimPolicyXml.Should().Contain("<set-backend-service backend-id=\"{backend-id}\" />");
+        ApimPolicyXml.Should().Contain("{backend-policy}");
+        ApimPolicyXml.Should().NotContain("x-rp-backend-id");
+        ApimPolicyXml.Should().NotContain("x-rp-failover");
+        ApimPolicyXml.Should().NotContain("context.Request.Body",
+            "evidence must never include prompt or completion text");
+    }
+
+    // ── failover demo (#330) ─────────────────────────────────────────────────
+
+    private static string Module(string file) => File.ReadAllText(Path.Combine(RepoRoot, "infra", "modules", file));
+
+    [Fact]
+    public void FailoverDemo_IsDisabledByDefault_AndFailsClosed()
+    {
+        ApimOpenAiApiBicep.Should().MatchRegex(@"param\s+failoverDemoEnabled\s+bool\s*=\s*false");
+        ApimOpenAiApiBicep.Should().Contain("var failoverDemoActive = failoverDemoEnabled && poolEnabled && length(failoverDemoKey) >= 32");
+        MainBicep.Should().MatchRegex(@"param\s+apimFailoverDemoEnabled\s+bool\s*=\s*false");
+        // Disabled traffic keeps the original backend policy and only strips the demo header.
+        ApimOpenAiApiBicep.Should().Contain("failoverDemoActive\n  ? replace(failoverDemoBackendFragment");
+        ApimOpenAiApiBicep.Should().Contain("failoverDemoActive ? loadTextContent('apim-openai-failover-demo-outbound.xml') : ''");
+        ApimPolicyXml.Should().NotContain("rp-failover-demo", "the base policy carries no demo logic when disabled");
+    }
+
+    [Fact]
+    public void FailoverDemo_AzdParametersMapTheEnablementAndSecretEnvironmentVariables()
+    {
+        MainBicepParam.Should().Contain(
+            "param apimFailoverDemoEnabled = toLower(readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_ENABLED', 'false')) == 'true'");
+        MainBicepParam.Should().Contain(
+            "param apimFailoverDemoKey = readEnvironmentVariable('AZURE_APIM_FAILOVER_DEMO_KEY', '')");
+    }
+
+    [Fact]
+    public void FailoverDemo_ProbeSeparatesDisabledDeploymentFromEnabledButDisarmed()
+    {
+        string probe = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "probe-failover-demo.cjs"));
+        int disabledStart = probe.IndexOf("async function runDisabledProbe", StringComparison.Ordinal);
+        int enabledStart = probe.IndexOf("async function runEnabledProbe", StringComparison.Ordinal);
+
+        disabledStart.Should().BeGreaterThan(-1);
+        enabledStart.Should().BeGreaterThan(disabledStart);
+        probe[disabledStart..enabledStart].Should().NotContain("setArmed")
+            .And.Contain("ordinary traffic succeeds")
+            .And.Contain("demo header does not change normal traffic");
+        probe.Should().Contain("FAILOVER_DEMO_DEPLOYMENT")
+            .And.Contain("deploymentMode === 'disabled'");
+    }
+
+    [Fact]
+    public void FailoverDemo_RequiresSecretKeyAndArmSwitch_AndRejectsOthers()
+    {
+        string inbound = Module("apim-openai-failover-demo-inbound.xml");
+        inbound.Should().Contain("{{rp-failover-demo-key}}");
+        inbound.Should().Contain("{{rp-failover-demo-armed}}");
+        inbound.Should().Contain("{{rp-failover-demo-key}}&quot; != &quot;&quot;", "an empty key must never authorize");
+        inbound.Should().Contain("<set-status code=\"403\"");
+        inbound.Should().Contain("<set-header name=\"x-rp-failover-demo\" exists-action=\"delete\"",
+            "the secret must never be forwarded to a backend");
+        ApimOpenAiApiBicep.Should().Contain("secret: true");
+        ApimOpenAiApiBicep.Should().MatchRegex(@"@secure\(\)\s*@description\('Operator secret[^']*'\)\s*param\s+failoverDemoKey");
+    }
+
+    [Fact]
+    public void FailoverDemo_IsRateLimitedAndAudited_WithoutCallerBackendSelection()
+    {
+        string inbound = Module("apim-openai-failover-demo-inbound.xml");
+        inbound.Should().Contain("<rate-limit-by-key calls=\"3\"");
+        inbound.Should().Contain("<rate-limit-by-key calls=\"10\"", "denied attempts are limited too");
+        inbound.Should().Contain("name=\"rp.failover.demo.audit\"");
+        int attempt = inbound.IndexOf("name=\"rp.failover.demo.attempt\"", StringComparison.Ordinal);
+        attempt.Should().BeGreaterThan(-1);
+        attempt.Should().BeLessThan(inbound.IndexOf("<rate-limit-by-key", StringComparison.Ordinal),
+            "every attempt, including rate-limited ones, must be counted before any limiter runs");
+        inbound.Should().Contain("value=\"authorized\"").And.Contain("value=\"denied\"");
+
+        string backend = Module("apim-openai-failover-demo-backend.xml");
+        backend.Should().Contain("backend-id=\"{demo-primary-backend}\"").And.Contain("backend-id=\"{demo-secondary-backend}\"");
+        (inbound + backend).Should().NotMatchRegex(@"Headers\.GetValueOrDefault\(&quot;x-rp-(backend|failover-backend)",
+            "callers must not choose a backend");
+        backend.Should().NotContain("context.Request.Headers");
+    }
+
+    [Fact]
+    public void FailoverDemo_ResetIsDocumentedAndDefaultsToDisarmedOnDeploy()
+    {
+        ApimOpenAiApiBicep.Should().MatchRegex(@"rp-failover-demo-armed'[\s\S]{0,200}value:\s*'false'");
+        File.ReadAllText(Path.Combine(RepoRoot, "docs", "demo-walkthrough.md"))
+            .Should().Contain("rp-failover-demo-armed").And.Contain("Reset");
+    }
+
+    [Fact]
+    public void FailoverDemo_EvidenceComesFromRealResponses_NeverHardCodedSuccess()
+    {
+        string outbound = Module("apim-openai-failover-demo-outbound.xml");
+        outbound.Should().Contain("context.Response.StatusCode");
+        outbound.Should().Contain("rp-demo-primary-status");
+        // failover route is only emitted behind a second attempt that really succeeded
+        FailoverRouteConditionRegex().Match(outbound)
+            .Groups[1].Value.Should().Contain("&gt; 1").And.Contain("&lt; 400");
+        outbound.Should().NotContain("x-rp-gw-quota").And.NotContain("x-rp-gw-safety").And.NotContain("x-rp-gw-cache");
+        Module("apim-openai-failover-demo-backend.xml").Should().Contain("1900-01-01");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

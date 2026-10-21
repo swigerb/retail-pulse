@@ -52,4 +52,20 @@ else {
     Write-Host "Auth mode '$authMode' selected: skipping the Entra-specific ID check."
 }
 
+# ── APIM backend-pool fail-closed guard ────────────────────────────────────
+$poolEnabled = $env:AZURE_APIM_BACKEND_POOL_ENABLED -ieq 'true'
+if ($poolEnabled) {
+    $primaryAccount = $env:AZURE_OPENAI_ACCOUNT_NAME
+    if ([string]::IsNullOrWhiteSpace($primaryAccount)) { $primaryAccount = 'aiagents-3rsdmhyb' }
+    $secondaryAccount = $env:AZURE_OPENAI_SECONDARY_ACCOUNT_NAME
+
+    if ([string]::IsNullOrWhiteSpace($secondaryAccount)) {
+        throw 'AZURE_APIM_BACKEND_POOL_ENABLED=true requires AZURE_OPENAI_SECONDARY_ACCOUNT_NAME.'
+    }
+    if ($secondaryAccount -ieq $primaryAccount) {
+        throw 'The secondary Azure AI account must differ from AZURE_OPENAI_ACCOUNT_NAME.'
+    }
+    Write-Host "APIM backend pool validated: primary and secondary accounts are distinct."
+}
+
 Write-Host 'All prerequisites met. Proceeding with provisioning...'

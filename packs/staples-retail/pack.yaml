@@ -1,0 +1,57 @@
+# Retail Pulse content pack — Staples (unofficial demonstration)
+#
+# DISCLOSURE: Unofficial demonstration pack. No affiliation with, or
+# endorsement by, Staples. All operational data is synthetic and invented.
+# Trademarks belong to their respective owners. No logos, customer data,
+# non-public facts, or real store/account performance are used.
+
+metadata:
+  key: staples-retail
+  displayName: "Staples (Unofficial Demo)"
+  description: >-
+    Unofficial, synthetic office-supply and B2B operations scenario: contract
+    catalog, account-level budgets, print-order status, inventory,
+    fulfillment, and quote approval. No affiliation with Staples.
+  version: "1.0.0"
+  segment: "Office Supply & B2B"
+  attribution: "Unofficial demonstration; no affiliation with Staples. Synthetic operational data. Trademarks belong to their owners."
+
+tenant:
+  company: "Staples"
+  industry: "Office Supply & B2B"
+  description: "Staples (unofficial demonstration, no affiliation, synthetic data) is modeled as an office-supply retailer serving business accounts through contract catalogs, print and marketing services, and store and delivery fulfillment."
+  brands:
+    - name: "Contract Catalog"
+      category: "Office Essentials"
+      variants: ["Paper & Toner", "Breakroom", "Cleaning & Safety", "Facilities"]
+      priceSegment: "Contract"
+    - name: "Workspace Furniture"
+      category: "Furniture & Technology"
+      variants: ["Desks", "Task Seating", "Monitors", "Accessories"]
+      priceSegment: "Premium"
+    - name: "Print & Marketing Services"
+      category: "Print Services"
+      variants: ["Business Cards", "Signage", "Bulk Copies", "Custom Packaging"]
+      priceSegment: "Standard"
+    - name: "Everyday Supplies"
+      category: "Office Essentials"
+      variants: ["Writing", "Filing", "Mailing", "School Supplies"]
+      priceSegment: "Standard"
+  regions:
+    - "Atlantic Corridor"
+    - "Gulf & Southern Belt"
+    - "Great Lakes & Plains"
+    - "Pacific Rim"
+  channels:
+    - "Office Supply Store"
+    - "Next-Day Delivery"
+    - "Business Account Portal"
+  theme:
+    primaryColor: "#B3202A"
+    accentColor: "#2B2B2B"
+    fontFamily: "system-ui, sans-serif"
+  distribution:
+    model: "Contract Catalog + Store Fulfillment"
+    distributorTypes:
+      - "Regional Fulfillment Center"
+      - "Store Pickup"

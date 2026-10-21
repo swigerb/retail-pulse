@@ -16,6 +16,58 @@ See [ADR-010](adr/010-content-safety-layering.md) for the optional Azure AI
 Content Safety second layer that complements this gateway on the input,
 output, retrieved-knowledge, and tool-result seams.
 
+## Gateway content safety (#331)
+
+Optional defense in depth that runs **before** the application-level input, output, RAG and
+tool-result checks (all of which remain). Enable with `AZURE_CONTENT_SAFETY_ENABLED=true` and
+`AZURE_APIM_GATEWAY_SAFETY_ENABLED=true` (mode: `AZURE_APIM_GATEWAY_SAFETY_MODE=demo|regulated`).
+
+- **Resources:** reuses the provisioned Content Safety account. APIM's system-assigned identity gets
+  the resource-scoped *Cognitive Services User* role (`a97b65f3-24c7-4388-baec-2e87135dc908`) on that
+  account only (deterministic role-assignment name, so redeploys are idempotent). Token audience is
+  `https://cognitiveservices.azure.com`; REST version `2024-09-01` (Prompt Shields `text:shieldPrompt`, `text:analyze`).
+- **Why send-request:** the native `llm-content-safety` policy exposes no result variable, so category/severity
+  evidence and normal-vs-regulated dependency behaviour use an explicit managed-identity `send-request`.
+- **Inbound:** user text (and up to 5 tool results as documents) is checked by Prompt Shields and text harm
+  analysis before backend selection and the token limiter. A prompt attack or severity at/above the threshold
+  (default 4) returns **403** `gateway_safety_blocked`; the model is never invoked. The body shape and
+  `x-rp-gw-safety-*` headers distinguish this from an application-layer block.
+- **Outbound:** buffered 200 completions are analyzed before delivery or any caching; a block returns 403.
+- **Failure behaviour:** only a *confirmed* Content Safety HTTP 408/429/5xx → *demo*: continue, evidence
+  `allowed_on_safety_error`; *regulated*: generic **503** `gateway_safety_unavailable`. Everything else fails closed
+  with the same generic 503 before the model call / client delivery: null responses (timeout, DNS, TLS, connectivity),
+  malformed or incomplete 200 JSON, parse errors, 400/401/403/other 4xx, RBAC/config errors and a missing token.
+- **Limits, never truncation:** content is not truncated. User text over 10,000 characters, a tool result over 10,000,
+  more than 5 tool results / 10,000 characters of tool text, a tool-only request with no user text (never checked against a placeholder prompt), an unparseable request, or a buffered completion over
+  10,000 characters is rejected (**400** `gateway_safety_rejected` inbound, generic **503** outbound) rather than partially checked.
+  `x-rp-gw-safety-output-checked` is `true` only after a valid parsed 200 output analysis.
+- **Logging:** when gateway safety is enabled, APIM diagnostics and LLM logs capture no request/response bodies or
+  message content (metadata and token metrics still flow). Disabled behaviour is unchanged.
+- **Streaming limitation:** `stream: true` responses are checked on input only
+  (`x-rp-gw-safety-output-checked: false`). Once chunks are emitted the gateway never claims a final 403 or a
+  `passed` result; regulated deployments should disable streaming.
+- **Evidence:** only phase, decision (`allow`/`block`/`allowed_on_safety_error`), prompt-attack flag, highest
+  category/severity, mode, latency and the existing request id/policy version are emitted through the
+  `x-rp-gw-*` contract. Prompts, completions, documents, raw safety bodies, auth headers and matched text are never logged or echoed.
+
+## Regulated-retail mode (#337)
+
+An explicit, opt-in configuration posture for the **synthetic** Walgreens-style pharmacy scenario. Enable with
+`azd env set AZURE_REGULATED_RETAIL_MODE true` (Bicep `regulatedRetailMode`); the API reports it at
+`GET /api/gateway/profile` (`Gateway:RegulatedRetail:Enabled`) and the UI shows a "Regulated-retail mode" badge.
+The default stays the clearly labelled **Synthetic demo mode**.
+
+> **This is not HIPAA certification or attestation.** Never enter patient data, prescriptions, or identifiers of real
+> people, and never request or rely on clinical advice. Use synthetic data only.
+
+| Control | Regulated-retail behaviour |
+|---|---|
+| APIM diagnostics | No request/response/LLM message bodies are captured (`bytes: 0`, LLM logs disabled); token, model and outcome metadata are retained. |
+| Content Safety | Content Safety and APIM gateway safety are forced on in `regulated` mode: any dependency failure returns a generic 503 (fail closed). |
+| Semantic cache | Pharmacy, recall, identity, patient, clinical, health and sensitive classifications (and unknown/blank ones) always bypass the cache (`SensitiveCachePolicy`). The opt-in APIM semantic-cache policy (#339) is rendered with a fixed `regulated` decision, so every request reports `x-rp-gw-cache: bypass` and nothing is looked up or stored. |
+| Identifiers | The client-visible `X-Correlation-ID` and `x-rp-gw-request-id` are masked (`abcd...yz`); server logs keep the full value. |
+| Indicator | `x-rp-gw-profile: regulated-retail-non-hipaa` header and the profile endpoint label. |
+
 ## Official Microsoft resources
 
 Azure AI Gateway is a capability set within Azure API Management (APIM) — not a separate Azure product or service.
@@ -78,9 +130,9 @@ ARM JSON so that a module-boundary regression cannot silently drop the gateway.
 ### `deploy/apim-ai-gateway/` — optional attach-on templates only
 
 `deploy/apim-ai-gateway/` no longer provisions the primary Retail Pulse APIM gateway; that
-is now the responsibility of `infra/modules/apim*.bicep` above. The residual files
-(`mcp-api.bicep`, `a2a-api.bicep`) are optional attach-on templates for wiring extra
-MCP/A2A APIs onto an **already-existing** APIM instance in a separate workflow. See
+is now the responsibility of `infra/modules/apim*.bicep` above. The residual file
+`a2a-api.bicep` is an optional attach-on template for wiring an extra
+A2A API onto an **already-existing** APIM instance in a separate workflow. The MCP runtime is no longer an attach-on: it is `infra/modules/apim-mcp-api.bicep` (ADR 017); the old `mcp-api.bicep` was removed because it could not reach the internal MCP server and sent no key. See
 [`deploy/apim-ai-gateway/README.md`](../deploy/apim-ai-gateway/README.md).
 
 ---
@@ -217,7 +269,7 @@ The policies in `infra/modules/apim-openai-policy.xml`:
 |--------|---------|-------------|
 | `set-backend-service` | inbound | Routes to the Azure AI Foundry backend |
 | `authentication-managed-identity` | inbound | Authenticates to backend via APIM managed identity |
-| `azure-openai-token-limit` | inbound | Rate limits to **80,000 TPM** per subscription (default; `tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`) |
+| `llm-token-limit` | inbound | Rate limits to **80,000 TPM** per subscription scope; operator demo and reset in [token-budgets.md](token-budgets.md) (default; `tokensPerMinute` param in `infra/modules/apim-openai-api.bicep`) |
 | `azure-openai-emit-token-metric` | inbound | Emits token usage to App Insights `customMetrics` |
 | Circuit breaker (on backend) | — | Trips on 429 responses for 1 minute |
 
