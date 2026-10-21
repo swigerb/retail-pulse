@@ -254,7 +254,7 @@ public sealed partial class GatewaySafetyPolicyContractTests
     {
         foreach (string file in Directory.GetFiles(Modules, "apim-*.xml"))
         {
-            string policy = Unescape(File.ReadAllText(file));
+            string policy = XmlCommentRegex().Replace(Unescape(File.ReadAllText(file)), string.Empty);
             foreach (Match control in ControlFlowRegex().Matches(policy))
             {
                 int open = policy.IndexOf('(', control.Index);
@@ -270,6 +270,21 @@ public sealed partial class GatewaySafetyPolicyContractTests
 
                 (body < policy.Length && policy[body] == '{').Should().BeTrue(
                     $"{Path.GetFileName(file)} has an unbraced APIM policy control-flow body near '{control.Value}'");
+            }
+
+            foreach (Match otherwise in ElseRegex().Matches(policy))
+            {
+                int body = otherwise.Index + otherwise.Length;
+                while (body < policy.Length && char.IsWhiteSpace(policy[body]))
+                {
+                    body++;
+                }
+
+                bool bracedOrElseIf = body < policy.Length
+                    && (policy[body] == '{'
+                        || policy.AsSpan(body).StartsWith("if", StringComparison.Ordinal));
+                bracedOrElseIf.Should().BeTrue(
+                    $"{Path.GetFileName(file)} has an unbraced APIM policy else body");
             }
         }
     }
@@ -329,6 +344,12 @@ public sealed partial class GatewaySafetyPolicyContractTests
 
     [GeneratedRegex(@"\b(?:if|else\s+if|for|foreach|while)\s*\(")]
     private static partial Regex ControlFlowRegex();
+
+    [GeneratedRegex(@"\belse\b")]
+    private static partial Regex ElseRegex();
+
+    [GeneratedRegex(@"<!--[\s\S]*?-->")]
+    private static partial Regex XmlCommentRegex();
 
     private static string FindRepoRoot()
     {
