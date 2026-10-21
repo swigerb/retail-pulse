@@ -37,6 +37,15 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
     }
 
     [Fact]
+    public void Service_DeclaresTheLiveRequiredFreeSku_WithScopedSchemaSuppression()
+    {
+        string module = File.ReadAllText(Path.Combine(_repoRoot, "infra", "modules", "api-center.bicep"));
+
+        module.Should().Contain("#disable-next-line BCP187");
+        module.Should().Contain("sku: {\n    name: 'Free'\n  }");
+    }
+
+    [Fact]
     public void Main_GatesApiCenterBehindDisabledDefaultAndEmitsEmptyOutputs()
     {
         string main = File.ReadAllText(Path.Combine(_repoRoot, "infra", "main.bicep"));
