@@ -107,9 +107,14 @@ every chart and made the whole gate unmeasurable.
 
 ## Current result
 
-Stable at **22/26** across three consecutive runs. **G4 has not passed.**
-The four outstanding prompts are tracked in
-[#172](https://github.com/swigerb/retail-pulse/issues/172).
+The 2026-10-21 production run against release
+`103bf3242043285a16ec99e7110f2f845f067b73` passed **26/26** with
+`-InterPromptDelaySeconds 30`: 26 attempts, zero retries, zero application
+cache hits, and gateway request IDs for every case. All chart-bearing cases
+passed, including the horizontal brand-ranking chart.
 
-G3 — `Show a horizontal bar chart ranking all brands by depletion growth
-rate` — renders a `horizontalBar` with ≥6 finite marks on every run.
+The sanitized per-case correlation evidence is recorded on
+[#342](https://github.com/swigerb/retail-pulse/issues/342#issuecomment-6324900122).
+That prompt sweep is complete, but #342 remains open until its separate
+failover, quota, API Center/MCP, regulated-mode, semantic-cache, and retailer
+pack proof requirements are all satisfied.
