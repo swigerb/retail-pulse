@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 
@@ -439,7 +440,46 @@ public sealed partial class ApimGatewayContractTests
             .And.Contain("GatewayRequestIds")
             .And.Contain("foreach ($call in @($body.gateway.calls))")
             .And.Contain("$candidate = $call.gatewayRequestId")
-            .And.Contain("Attempts = @($attemptTraces)");
+            .And.Contain("Attempts = @($attemptTraces)")
+            .And.Contain("Get-Failed200Metadata")
+            .And.Contain("ReplySynthetic")
+            .And.Contain("LooksLikeFallback")
+            .And.Contain("TopLevelFields")
+            .And.Contain("ToolName = if ($type -in @('tool_call', 'tool_result'))")
+            .And.Contain("Approval = [pscustomobject]")
+            .And.Contain("ReviewRequestId")
+            .And.Contain("ErrorCode")
+            .And.Contain("Failed200Metadata = $failed200Metadata")
+            .And.NotContain("Reply = $reply",
+                "failed-200 evidence must retain only synthetic reply metadata, never response prose");
+    }
+
+    [Fact]
+    public void ProductionSweep_Failed200MetadataSelfTest_PassesWithoutPayloadLeakage()
+    {
+        string script = Path.Combine(RepoRoot, "scripts", "Invoke-ProductionPromptSweep.ps1");
+        var startInfo = new ProcessStartInfo("pwsh")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(script);
+        startInfo.ArgumentList.Add("-SelfTest");
+
+        using Process process = Process.Start(startInfo)!;
+        string stdout = process.StandardOutput.ReadToEnd();
+        string stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        process.ExitCode.Should().Be(0, stderr);
+        stdout.Should().Contain("failed-200 metadata self-test: PASS");
+        stdout.Should().NotContain("SECRET_REPLY")
+            .And.NotContain("SECRET_THOUGHT")
+            .And.NotContain("SECRET_ARGS")
+            .And.NotContain("SECRET_PAYLOAD");
     }
 
     [Fact]
@@ -462,9 +502,9 @@ public sealed partial class ApimGatewayContractTests
         program.Should().Contain("GatewayToolDocumentBudgetChatClient")
             .And.Contain(".UseFunctionInvocation",
                 "the transport boundary must be registered inside function invocation so it sees follow-up tool messages");
-        program.IndexOf("GatewayToolDocumentBudgetChatClient", StringComparison.Ordinal).Should().BeLessThan(
+        program.IndexOf("GatewayToolDocumentBudgetChatClient", StringComparison.Ordinal).Should().BeGreaterThan(
             program.IndexOf(".UseFunctionInvocation", StringComparison.Ordinal),
-            "builder ordering must place the gateway boundary directly around the transport");
+            "ChatClientBuilder reverses registrations, so registering the boundary last places it directly around the transport");
     }
 
     [Fact]

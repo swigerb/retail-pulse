@@ -17,8 +17,10 @@ param retailPulseApiFqdn string
 @description('Audience (Application ID URI) the Retail Pulse API validates; used for the managed identity token')
 param retailPulseApiAudience string
 
-@description('Audience for MCP callers (app registration identifier URI created by scripts/Setup-McpGatewayIdentity.ps1)')
-param mcpGatewayAudience string = 'api://retailpulse-mcp-gateway'
+@description('Exact application (client) ID GUID in MCP caller v2 access-token aud claims')
+@minLength(36)
+@maxLength(36)
+param mcpGatewayAudience string
 
 @description('Entra tenant id used to pin the caller token issuer')
 param tenantId string
@@ -34,7 +36,7 @@ resource apim 'Microsoft.ApiManagement/service@2025-09-01-preview' existing = {
   name: apimName
 }
 
-// Non-secret configuration only: audiences, FQDN and tenant id.
+// Non-secret configuration only: client-id audience, backend resource, FQDN and tenant id.
 resource nvApiFqdn 'Microsoft.ApiManagement/service/namedValues@2025-09-01-preview' = {
   parent: apim
   name: 'retailPulseApiFqdn'
