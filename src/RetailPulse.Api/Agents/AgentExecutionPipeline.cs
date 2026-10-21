@@ -145,7 +145,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         };
         _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
-        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, CompactPrefetch(context.PrefetchedData));
+        IReadOnlyList<PrefetchEntry>? compactedPrefetch = CompactPrefetch(context.PrefetchedData);
+        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, compactedPrefetch);
+        if (IsChartCompletePrefetch(request.UserIntentMessage, compactedPrefetch))
+        {
+            systemPrompt += "\n\nThe server will render the requested chart deterministically from the pre-loaded data. "
+                + "Do not call data tools or CreateChart for this request. Return only a concise prose summary of the pre-loaded results.";
+        }
         List<ChatMessage> messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
@@ -256,7 +262,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         // Chart-fulfillment invariant: an explicit chart request must yield a renderable
         // chart (reconstructed deterministically from tool results if the model emitted
         // none) or a structured chart-unavailable diagnostic — never silent prose-only.
-        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.UserIntentMessage, response, charts, reply);
+        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(
+            context.Request.UserIntentMessage, response, charts, reply, compactedPrefetch);
         charts = fulfillment.Charts;
         reply = fulfillment.Reply;
 
@@ -389,7 +396,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         foreach ((string toolName, string result) in prefetchedData)
         {
-            BudgetedResult budgeted = _toolBudget.Apply(toolName, result, _budgetOptions);
+            string budgetToolName = toolName.Split(':', 2)[0];
+            BudgetedResult budgeted = _toolBudget.Apply(budgetToolName, result, _budgetOptions);
             ToolResultMetrics m = budgeted.Metrics;
             entries.Add(new PrefetchEntry(
                 toolName,
@@ -429,6 +437,30 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         return messages;
     }
 
+    private bool IsChartCompletePrefetch(string? userMessage, IReadOnlyList<PrefetchEntry>? entries)
+    {
+        if (entries is not { Count: > 0 })
+            return false;
+
+        Charts.ChartIntent intent = Charts.ChartRequestDetector.Detect(userMessage);
+        if (!intent.IsExplicitChartRequest)
+            return false;
+
+        var emptyResponse = new Microsoft.Extensions.AI.ChatResponse(
+            new ChatMessage(ChatRole.Assistant, string.Empty));
+        IReadOnlyList<string> payloads = [.. entries.Select(e => e.Json)];
+        int typeFloor = Charts.ChartSpecValidator.MinimumMarksForType(intent.ChartType);
+        int targetMarks = Math.Max(typeFloor, intent.MinMarks);
+
+        IReadOnlyCollection<string>? roster = IsPortfolioRankingIntent(userMessage, intent)
+            && _tenant.Brands.Count > 0
+            ? _tenant.Brands.Select(b => b.Name).ToArray()
+            : null;
+
+        return Charts.DeterministicChartBuilder.TryBuild(
+            emptyResponse, intent.ChartType, targetMarks, roster, payloads, out _);
+    }
+
     public async Task<ChatResponse> ExecuteWithProgressAsync(AgentExecutionContext context, CancellationToken ct = default)
     {
         ChatRequest request = context.Request;
@@ -447,7 +479,13 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         };
         _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
-        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, CompactPrefetch(context.PrefetchedData));
+        IReadOnlyList<PrefetchEntry>? compactedPrefetch = CompactPrefetch(context.PrefetchedData);
+        string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, compactedPrefetch);
+        if (IsChartCompletePrefetch(request.UserIntentMessage, compactedPrefetch))
+        {
+            systemPrompt += "\n\nThe server will render the requested chart deterministically from the pre-loaded data. "
+                + "Do not call data tools or CreateChart for this request. Return only a concise prose summary of the pre-loaded results.";
+        }
         List<ChatMessage> messages = BuildMessages(systemPrompt, request);
 
         var sw = Stopwatch.StartNew();
@@ -554,7 +592,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         // Chart-fulfillment invariant (streaming): reconstruct deterministically or append
         // a structured chart-unavailable diagnostic before streaming, so the streamed reply
         // matches the final response and never silently omits an explicitly requested chart.
-        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(context.Request.UserIntentMessage, response, charts, reply);
+        ChartFulfillmentResult fulfillment = EnforceChartFulfillment(
+            context.Request.UserIntentMessage, response, charts, reply, compactedPrefetch);
         charts = fulfillment.Charts;
         reply = fulfillment.Reply;
 

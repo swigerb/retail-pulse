@@ -475,6 +475,53 @@ public sealed class ChartFulfillmentTests
         result.Charts[0].Data.Sum(s => s.Values.Count).Should().Be(4);
     }
 
+    [Fact]
+    public void EnforceChartFulfillment_ReconstructsCuratedGroupedBar_FromPrefetchedPayloads()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults();
+        PrefetchEntry[] prefetched =
+        [
+            PrefetchEntry.Complete("GetHistoricalDemand:Coastline Tacos",
+                CompactedDemand("Coastline Tacos", "Northeast", 900)),
+            PrefetchEntry.Complete("GetHistoricalDemand:Apex Grill",
+                CompactedDemand("Apex Grill", "Northeast", 700)),
+        ];
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Compare Coastline Tacos vs Apex Grill depletions across all regions",
+            response, [], "Here is the comparison.", prefetched);
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("groupedBar");
+        result.Charts[0].Data.Select(s => s.Legend)
+            .Should().BeEquivalentTo(["Coastline Tacos", "Apex Grill"]);
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_ReconstructsCuratedTable_FromIndividualPrefetchedStats()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults();
+        PrefetchEntry[] prefetched =
+        [
+            PrefetchEntry.Complete("GetDepletionStats:Pinnacle Hardware:Northeast",
+                DepletionStats("Pinnacle Hardware", "Northeast", "4.2%")),
+            PrefetchEntry.Complete("GetDepletionStats:Summit Outdoor:Northeast",
+                DepletionStats("Summit Outdoor", "Northeast", "2.6%")),
+        ];
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a table showing depletion stats for all home improvement brands by region",
+            response, [], "Here are the results.", prefetched);
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("table");
+        result.Charts[0].Data.SelectMany(s => s.Values).Select(v => v.X)
+            .Should().Contain(x => x.Contains("Pinnacle Hardware", StringComparison.Ordinal))
+            .And.Contain(x => x.Contains("Summit Outdoor", StringComparison.Ordinal));
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static AgentExecutionPipeline CreatePipeline()

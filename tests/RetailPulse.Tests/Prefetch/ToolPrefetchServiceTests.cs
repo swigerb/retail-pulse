@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -31,9 +32,9 @@ public class ToolPrefetchServiceTests
                 "SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) => new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(/*lang=json,strict*/ "{\"data\":\"mock\"}")
+                Content = new StringContent(ResponseFor(request.RequestUri?.AbsolutePath))
             });
 
         var httpClient = new HttpClient(_httpHandler.Object) { BaseAddress = new Uri("http://localhost") };
@@ -42,6 +43,8 @@ public class ToolPrefetchServiceTests
         var historicalDemandTool = new HistoricalDemandTool(httpClient);
         var seasonalityTool = new SeasonalityFactorsTool(httpClient);
 #pragma warning restore CS0618
+        var depletionStatsTool = new DepletionStatsTool(httpClient);
+        var portfolioDepletionStatsTool = new PortfolioDepletionStatsTool(httpClient);
 
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var toolCache = new ToolResultCache(
@@ -52,6 +55,8 @@ public class ToolPrefetchServiceTests
         _sut = new ToolPrefetchService(
             historicalDemandTool,
             seasonalityTool,
+            depletionStatsTool,
+            portfolioDepletionStatsTool,
             toolCache,
             NullLogger<ToolPrefetchService>.Instance);
     }
@@ -146,6 +151,74 @@ public class ToolPrefetchServiceTests
     // ──────────────────────────────────────────────────────────────────────────
     // Prefetch Tests
     // ──────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task PrefetchAsync_CuratedSpiritsChart_PrefetchesOnlyManifestBrands()
+    {
+        const string prompt =
+            "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast";
+        PrefetchEntities entities = _sut.ExtractEntities(prompt);
+
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(
+            AgentIntent.DemandForecasting, entities, prompt);
+
+        results.Keys.Should().BeEquivalentTo(
+            "GetHistoricalDemand:Sierra Gold Tequila",
+            "GetHistoricalDemand:Ridgeline Bourbon",
+            "GetHistoricalDemand:Summit Vodka");
+    }
+
+    [Fact]
+    public async Task PrefetchAsync_CuratedHomeImprovementTable_PrefetchesOnlyManifestBrandsAcrossRegions()
+    {
+        const string prompt =
+            "Create a table showing depletion stats for all home improvement brands by region";
+        PrefetchEntities entities = _sut.ExtractEntities(prompt);
+
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(
+            AgentIntent.DemandForecasting, entities, prompt);
+
+        results.Should().HaveCount(12);
+        results.Keys.Should().OnlyContain(k =>
+            k.Contains("Pinnacle Hardware", StringComparison.Ordinal)
+            || k.Contains("Summit Outdoor", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PrefetchAsync_CuratedPortfolioRanking_UsesSingleAggregateCall()
+    {
+        const string prompt =
+            "Show a horizontal bar chart ranking all brands by depletion growth rate";
+
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(
+            AgentIntent.General, PrefetchEntities.Empty, prompt);
+
+        results.Keys.Should().Equal("GetPortfolioDepletionStats");
+    }
+
+    [Fact]
+    public async Task PrefetchAsync_CuratedChartWithFallbackPayload_ReturnsEmptySoToolsCanRecover()
+    {
+        _httpHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(r => r.RequestUri!.AbsolutePath == "/api/historical-demand"),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(/*lang=json,strict*/
+                    """{"brand":"Sierra Gold Tequila","error":"Historical demand data unavailable — MCP server not reachable.","monthly_data":[]}""")
+            });
+
+        const string prompt =
+            "Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast";
+
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(
+            AgentIntent.DemandForecasting, _sut.ExtractEntities(prompt), prompt);
+
+        results.Keys.Should().NotContain(k => k.StartsWith("GetHistoricalDemand:", StringComparison.Ordinal),
+            "a partial/fallback curated bundle must not suppress the normal historical-demand tool path");
+    }
 
     [Fact]
     public async Task PrefetchAsync_ReturnsDemandData_WhenBrandExtracted()
@@ -299,6 +372,7 @@ public class ToolPrefetchServiceTests
                     avg_daily_volume = 142.9
                 });
             }
+
         }
 
         return JsonSerializer.Serialize(new
@@ -315,6 +389,17 @@ public class ToolPrefetchServiceTests
             weekly_data = weekly
         });
     }
+
+    private static string ResponseFor(string? path) => path switch
+    {
+        "/api/historical-demand" => /*lang=json,strict*/
+            """{"filters":{"brand":"Test Brand","region":"Northeast","channel":"All"},"summary":{"total_volume":5200,"total_units":1000,"weeks_of_data":52,"avg_weekly_volume":100},"weekly_data":[{"region":"Northeast","volume":100,"units":20,"week_starting":"2026-01-01"}]}""",
+        "/api/depletion-stats" => /*lang=json,strict*/
+            """{"brand":"Test Brand","region":"Northeast","period":"YTD","metrics":{"depletions_yoy":"+3.2%","sell_through_yoy":"+2.1%","inventory_weeks_on_hand":7.2}}""",
+        "/api/portfolio-depletion-stats" => /*lang=json,strict*/
+            """{"region":"National","period":"YTD","brands":[{"brand":"Test Brand A","depletions_yoy":"+3.2%"},{"brand":"Test Brand B","depletions_yoy":"+1.4%"}]}""",
+        _ => /*lang=json,strict*/ """{"data":"mock"}""",
+    };
 
     private static AgentExecutionPipeline CreatePipelineWithBudget()
     {

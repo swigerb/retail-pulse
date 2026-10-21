@@ -731,7 +731,8 @@ public static class ChatEndpoints
                         if (prefetchService is not null)
                         {
                             PrefetchEntities entities = prefetchService.ExtractEntities(enrichedRequest.Message);
-                            IReadOnlyDictionary<string, string> prefetchedData = await prefetchService.PrefetchAsync(decision.Intent, entities, ct);
+                            IReadOnlyDictionary<string, string> prefetchedData = await prefetchService.PrefetchAsync(
+                                decision.Intent, entities, enrichedRequest.UserIntentMessage, ct);
                             response = await prefetchable.HandleWithPrefetchAsync(enrichedRequest, prefetchedData, ct);
                         }
                         else
@@ -1121,7 +1122,8 @@ public static class ChatEndpoints
                     if (prefetchService is not null)
                     {
                         PrefetchEntities entities = prefetchService.ExtractEntities(enrichedRequest.Message);
-                        IReadOnlyDictionary<string, string> prefetchedData = await prefetchService.PrefetchAsync(decision.Intent, entities, ct);
+                        IReadOnlyDictionary<string, string> prefetchedData = await prefetchService.PrefetchAsync(
+                            decision.Intent, entities, enrichedRequest.UserIntentMessage, ct);
                         response = await prefetchable.HandleWithPrefetchAsync(enrichedRequest, prefetchedData, ct);
                     }
                     else

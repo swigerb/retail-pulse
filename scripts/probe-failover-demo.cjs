@@ -49,7 +49,7 @@ async function post(cfg, headers) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'api-key': cfg.subscriptionKey, 'content-type': 'application/json', ...headers },
-    body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 }),
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }], max_completion_tokens: 32 }),
   });
   await res.arrayBuffer();
   return res;
@@ -80,11 +80,13 @@ async function runEnabledProbe(cfg, control) {
   const check = (name, ok, detail) => results.push({ name, ok: !!ok, detail });
 
   await control.setArmed(false);
+  await waitForArmedState(cfg, false);
   let r = await post(cfg, { 'x-rp-failover-demo': cfg.demoKey });
   check('disarmed: correct key refused with 403', r.status === 403, `status ${r.status}`);
   check('disarmed: no failover evidence', !hasDemoEvidence(r.headers), 'evidence headers present');
 
   await control.setArmed(true);
+  await waitForArmedState(cfg, true);
   r = await post(cfg, { 'x-rp-failover-demo': `${cfg.demoKey}-wrong` });
   check('unauthorized: wrong key refused with 403', r.status === 403, `status ${r.status}`);
   check('unauthorized: no failover evidence', !hasDemoEvidence(r.headers), 'evidence headers present');
@@ -113,9 +115,23 @@ async function runEnabledProbe(cfg, control) {
   check('spoof: injected evidence with wrong key is refused', r.status === 403 && !hasDemoEvidence(r.headers), `status ${r.status}`);
 
   await control.setArmed(false);
+  await waitForArmedState(cfg, false);
   r = await post(cfg, { 'x-rp-failover-demo': cfg.demoKey });
   check('reset: disarmed again, correct key refused', r.status === 403, `status ${r.status}`);
   return results;
+}
+
+async function waitForArmedState(cfg, expectedArmed) {
+  const attempts = cfg.propagationAttempts ?? 8;
+  const delayMs = cfg.propagationDelayMs ?? 5000;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const r = await post(cfg, { 'x-rp-failover-demo': cfg.demoKey });
+    const observedArmed = r.headers.get('x-rp-gw-failover-demo') === 'active';
+    const observedDisarmed = r.status === 403 && !hasDemoEvidence(r.headers);
+    if ((expectedArmed && observedArmed) || (!expectedArmed && observedDisarmed)) return;
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error(`failover demo state did not propagate to ${expectedArmed ? 'armed' : 'disarmed'} within ${attempts * delayMs}ms`);
 }
 
 function azControl(cfg) {
@@ -124,7 +140,6 @@ function azControl(cfg) {
       execFileSync('az', ['apim', 'nv', 'update', '--service-name', cfg.apimName, '-g', cfg.resourceGroup,
         '--named-value-id', 'rp-failover-demo-armed', '--value', on ? 'true' : 'false', '--only-show-errors', '-o', 'none'],
       { stdio: ['ignore', 'ignore', 'inherit'] });
-      await new Promise((r) => setTimeout(r, 5000)); // named-value propagation
     },
   };
 }
@@ -189,11 +204,20 @@ async function selfTest() {
   ];
   for (const { label, deploymentMode, gatewayMode, shouldPass } of cases) {
     const gw = await startFakeGateway(gatewayMode, deploymentMode);
-    const cfg = { baseUrl: gw.baseUrl, deployment: 'd', apiVersion: 'v', subscriptionKey: 's', demoKey: gw.key, expectSecondary: 'secondary' };
-    const results = deploymentMode === 'disabled'
-      ? await runDisabledProbe(cfg)
-      : await runEnabledProbe(cfg, { async setArmed(on) { gw.state.armed = on; } });
-    gw.server.close();
+    const cfg = {
+      baseUrl: gw.baseUrl, deployment: 'd', apiVersion: 'v', subscriptionKey: 's',
+      demoKey: gw.key, expectSecondary: 'secondary', propagationAttempts: 1, propagationDelayMs: 0,
+    };
+    let results;
+    try {
+      results = deploymentMode === 'disabled'
+        ? await runDisabledProbe(cfg)
+        : await runEnabledProbe(cfg, { async setArmed(on) { gw.state.armed = on; } });
+    } catch (error) {
+      results = [{ name: 'probe execution', ok: false, detail: error.message }];
+    } finally {
+      gw.server.close();
+    }
     const passed = results.every((x) => x.ok);
     const ok = passed === shouldPass;
     console.log(`${ok ? 'PASS' : 'FAIL'} self-test [${label}]: harness ${passed ? 'accepted' : 'rejected'} the gateway (expected ${shouldPass ? 'accept' : 'reject'})`);

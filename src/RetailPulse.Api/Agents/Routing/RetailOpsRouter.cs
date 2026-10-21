@@ -9,6 +9,7 @@ using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Models;
 using RetailPulse.Api.Telemetry;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Prompts;
 using RetailPulse.Contracts.Routing;
 
 namespace RetailPulse.Api.Agents.Routing;
@@ -186,6 +187,17 @@ public partial class RetailOpsRouter : IAgentRouter
 
         try
         {
+            ProsePromptAcceptanceCase? curatedProse = ProsePromptAcceptanceManifest.Cases.FirstOrDefault(c =>
+                string.Equals(NormalizePrompt(c.Prompt), NormalizePrompt(message), StringComparison.OrdinalIgnoreCase));
+            if (curatedProse is not null)
+            {
+                return new RoutingDecision(
+                    curatedProse.ExpectedAgentKey,
+                    curatedProse.ExpectedIntent,
+                    1.0,
+                    [curatedProse.ExpectedIntent]);
+            }
+
             // Fast-path: skip LLM call if keywords clearly indicate intent
             IntentClassification? keywordResult = TryKeywordClassify(message);
             if (keywordResult is not null)
@@ -497,6 +509,12 @@ public partial class RetailOpsRouter : IAgentRouter
             return new IntentClassification(AgentIntent.General, 0.0, [AgentIntent.General]);
         }
     }
+
+    private static string NormalizePrompt(string value) =>
+        PromptWhitespaceRegex().Replace(value.Trim(), " ").TrimEnd('.', '!', '?');
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex PromptWhitespaceRegex();
 
     internal record IntentClassification(
         string Intent,

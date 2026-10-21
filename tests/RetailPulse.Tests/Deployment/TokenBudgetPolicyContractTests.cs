@@ -145,13 +145,24 @@ public sealed partial class TokenBudgetPolicyContractTests
     {
         string onError = Base[Base.IndexOf("<on-error>", StringComparison.Ordinal)..];
         onError.Should().Contain("context.LastError.Source == &quot;llm-token-limit&quot;");
+        onError.Should().Contain("context.LastError.Reason == &quot;RateLimitExceeded&quot;")
+            .And.Contain("context.Response.StatusCode == 429")
+            .And.Contain("context.Response.Headers.GetValueOrDefault(&quot;Retry-After&quot;, &quot;&quot;)");
         onError.Should().Contain("x-rp-gw-retry-after").And.Contain("^[0-9]{1,6}$");
-        onError.Should().Contain("x-rp-gw-tokens-remaining").And.Contain("^[0-9]{1,12}$");
+        onError.Should().Contain("x-rp-gw-tokens-remaining").And.Contain("^[0-9]{1,12}$")
+            .And.Contain("<value>0</value>", "a verified pre-backend limiter rejection has no remaining admission budget");
         onError.Should().NotContain("x-rp-gw-tokens-consumed").And.NotContain("x-tokens-consumed");
         Normal.Should().Contain("retry-after-variable-name=\"rp-budget-retry-after\"");
         Normal.Should().Contain("remaining-tokens-variable-name=\"rp-tokens-remaining\"");
         string outbound = Base[Base.IndexOf("<outbound>", StringComparison.Ordinal)..Base.IndexOf("<on-error>", StringComparison.Ordinal)];
         outbound.Should().Contain("x-rp-gw-budget-scope").And.Contain("x-rp-gw-budget-mode");
+    }
+
+    [Fact]
+    public void LiveProbe_UsesTheDeployedModelsTokenParameter()
+    {
+        string probe = File.ReadAllText(Path.Combine(FindRepoRoot(), "scripts", "probe-token-budget.cjs"));
+        probe.Should().Contain("max_completion_tokens").And.NotContain("max_tokens:");
     }
 
     [Fact]

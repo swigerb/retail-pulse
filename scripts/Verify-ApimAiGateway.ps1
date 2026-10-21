@@ -17,7 +17,8 @@
         * Backend authenticates to AOAI via managed identity to
           cognitiveservices.azure.com.
         * API-level applicationinsights diagnostic has metrics enabled and
-          azuremonitor diagnostic has largeLanguageModel logs enabled.
+          azuremonitor diagnostic follows the rendered gateway privacy profile:
+          LLM logs disabled for safety-enabled policy, enabled otherwise.
         * APIM system-assigned identity holds the Cognitive Services OpenAI
           User role on the AOAI account.
         * The API container app has:
@@ -86,6 +87,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $failures = [System.Collections.Generic.List[string]]::new()
 $checks = 0
+$gatewaySafetyProfileSupplied = $PSBoundParameters.ContainsKey('GatewaySafetyEnabled') `
+    -or $null -ne [Environment]::GetEnvironmentVariable('AZURE_APIM_GATEWAY_SAFETY_ENABLED')
 
 # ── ARM REST helper ─────────────────────────────────────────────────────────
 # `az apim api policy show`, `az apim backend show`, and `az apim api
@@ -172,6 +175,11 @@ function Test-SafetyPolicyOrder([string]$policy) {
     $phase = $policy.IndexOf('x-rp-gw-safety-decision')
     return ($inbound -ge 0 -and $outbound -gt $inbound -and $shield -gt $inbound -and $analyze -gt $inbound -and
         $backendSel -gt $shield -and $limit -gt $shield -and $outAnalyze -gt $outbound -and $phase -gt 0 -and $shield -lt $outbound)
+}
+
+function Resolve-GatewaySafetyEnabled([bool]$WasSupplied, [bool]$SuppliedValue, [string]$Policy) {
+    if ($WasSupplied) { return $SuppliedValue }
+    return Test-SafetyPolicyOrder $Policy
 }
 
 function Test-BodyBytesZero($section) {
@@ -325,6 +333,9 @@ function Invoke-SelfTest {
     _Expect 'safety policy: safety after backend selection is rejected' (-not (Test-SafetyPolicyOrder ($goodPolicy -replace 'text:shieldPrompt', 'zzz')))
     _Expect 'safety policy: missing outbound analysis is rejected' (-not (Test-SafetyPolicyOrder ($goodPolicy -replace '<outbound>.*</outbound>', '<outbound></outbound>')))
     _Expect 'safety policy: null policy is rejected' (-not (Test-SafetyPolicyOrder $null))
+    _Expect 'safety profile: omitted flag infers enabled from rendered policy' (Resolve-GatewaySafetyEnabled $false $false $goodPolicy)
+    _Expect 'safety profile: explicit false overrides policy inference' (-not (Resolve-GatewaySafetyEnabled $true $false $goodPolicy))
+    _Expect 'safety profile: omitted flag stays disabled for a non-safety policy' (-not (Resolve-GatewaySafetyEnabled $false $false '<policies><inbound /></policies>'))
     $aiOk = @{ frontend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } }; backend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } } }
     $monOk = @{ largeLanguageModel = @{ logs = 'disabled'; requests = @{ messages = 'all' }; responses = @{ messages = 'all' } } }
     _Expect 'safety diagnostics: zero body/message capture passes' (Test-SafetyDiagnosticsBodyFree $aiOk $monOk)
@@ -384,6 +395,11 @@ Write-Host "API policy"
 $sub = $script:ArmSubscriptionId
 $policyResource = Invoke-ArmGet "/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/apis/$InferenceApiName/policies/policy?api-version=2024-06-01-preview"
 $policyValue = $policyResource.properties.value
+$effectiveGatewaySafetyEnabled = Resolve-GatewaySafetyEnabled `
+    $gatewaySafetyProfileSupplied ([bool]$GatewaySafetyEnabled) $policyValue
+if (-not $gatewaySafetyProfileSupplied) {
+    Write-Host ("  gatewaySafety       = {0} (inferred from rendered policy)" -f $effectiveGatewaySafetyEnabled)
+}
 $routeBackendId = if ($BackendPoolEnabled) { 'retail-pulse-foundry-pool' } else { 'retail-pulse-foundry' }
 Assert "policy: sets backend service ($routeBackendId)" { $policyValue -match ('<set-backend-service\s+backend-id="' + [regex]::Escape($routeBackendId) + '"') } 'policy did not reference the AOAI backend'
 Assert 'policy: managed-identity auth to cognitiveservices.azure.com' { $policyValue -match '<authentication-managed-identity\s+resource="https://cognitiveservices\.azure\.com"' } 'policy is not using MI auth to AOAI'
@@ -438,14 +454,14 @@ Assert 'api diag: metrics = true (routes emit-token-metric)' { $apiAppInsightsDi
 $azMonDiagResource = Invoke-ArmGet "/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName/apis/$InferenceApiName/diagnostics/azuremonitor?api-version=2024-06-01-preview"
 $azMonDiag = $azMonDiagResource.properties
 Assert 'api diag: azuremonitor present' { $null -ne $azMonDiag } 'API-level azuremonitor diagnostic missing'
-if ($GatewaySafetyEnabled) {
+if ($effectiveGatewaySafetyEnabled) {
     Assert 'api diag: largeLanguageModel logs disabled for gateway safety privacy' { $azMonDiag.largeLanguageModel.logs -eq 'disabled' } 'largeLanguageModel logs must be disabled when gateway safety is enabled'
 }
 else {
     Assert 'api diag: largeLanguageModel logs enabled' { $azMonDiag.largeLanguageModel.logs -eq 'enabled' } 'largeLanguageModel logs not enabled — GatewayLlmLogs stay dark'
 }
 
-if ($GatewaySafetyEnabled) {
+if ($effectiveGatewaySafetyEnabled) {
     Write-Host "Gateway safety (#331)"
     Assert 'safety policy: Prompt Shields/text analysis rendered inbound before backend selection and token limit; outbound analysis present' { Test-SafetyPolicyOrder $policyValue } 'rendered policy is missing the safety fragments or they are out of order'
     Assert 'safety diagnostics: applicationinsights and azuremonitor capture zero body/message content' { Test-SafetyDiagnosticsBodyFree $apiAppInsightsDiag $azMonDiag } 'a diagnostic still captures request/response bodies or LLM messages'
@@ -462,7 +478,7 @@ else {
     Assert 'rbac: APIM principalId available' { $false } 'Could not read APIM principalId to check role assignments'
 }
 
-if ($GatewaySafetyEnabled) {
+if ($effectiveGatewaySafetyEnabled) {
     Assert 'safety rbac: Content Safety account parameters supplied' { -not [string]::IsNullOrWhiteSpace($ContentSafetyAccountName) -and -not [string]::IsNullOrWhiteSpace($ContentSafetyResourceGroup) } 'pass -ContentSafetyAccountName/-ContentSafetyResourceGroup (or AZURE_CONTENT_SAFETY_NAME)'
     if ($apimPrincipalId -and $ContentSafetyAccountName) {
         $csScope = "/subscriptions/$sub/resourceGroups/$ContentSafetyResourceGroup/providers/Microsoft.CognitiveServices/accounts/$ContentSafetyAccountName"

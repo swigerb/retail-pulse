@@ -64,6 +64,11 @@ public sealed class ProsePromptRoutingAcceptanceTests
         result.AgentKey.Should().NotBe(
             "council",
             $"prose prompt '{c.Prompt}' must never target the council agent key");
+        result.DetectedIntents.Should().ContainSingle()
+            .Which.Should().Be(c.ExpectedIntent,
+                "curated prose prompts must remain single-domain so read-only comparisons stay on the fast path");
+        result.Confidence.Should().Be(1.0,
+            "the checked-in prompt manifest is authoritative and must not depend on nondeterministic LLM classification");
     }
 
     [Theory]

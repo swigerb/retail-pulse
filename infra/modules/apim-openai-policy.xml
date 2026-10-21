@@ -145,10 +145,10 @@
             <value>{backend-id}</value>
         </set-header>
         <choose>
-            <!-- Only the token limiter's own 429 is a throttle signal; other errors leave quota unknown.
-                 A pre-backend 429 consumed nothing, so no consumed-token header is ever set here.
-                 Remaining and retry are emitted only when the limiter published numeric values. -->
-            <when condition="@(context.LastError != null &amp;&amp; context.LastError.Source == &quot;llm-token-limit&quot;)">
+            <!-- APIM reports llm-token-limit exhaustion as RateLimitExceeded, but the LastError source is
+                 not stable across gateway versions. Budget variables plus the 429/reason identify this
+                 limiter without misclassifying the earlier failover-demo rate limits or backend errors. -->
+            <when condition="@(context.LastError != null &amp;&amp; context.Response.StatusCode == 429 &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-scope&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-mode&quot;) &amp;&amp; (context.LastError.Source == &quot;llm-token-limit&quot; || context.LastError.Reason == &quot;RateLimitExceeded&quot;))">
                 <set-header name="x-rp-gw-quota" exists-action="override">
                     <value>throttled</value>
                 </set-header>
@@ -168,6 +168,11 @@
                             <value>@(System.Convert.ToString(context.Variables["rp-budget-retry-after"]))</value>
                         </set-header>
                     </when>
+                    <when condition="@(System.Text.RegularExpressions.Regex.IsMatch(context.Response.Headers.GetValueOrDefault(&quot;Retry-After&quot;, &quot;&quot;), &quot;^[0-9]{1,6}$&quot;))">
+                        <set-header name="x-rp-gw-retry-after" exists-action="override">
+                            <value>@(context.Response.Headers.GetValueOrDefault("Retry-After", ""))</value>
+                        </set-header>
+                    </when>
                 </choose>
                 <choose>
                     <when condition="@(context.Variables.ContainsKey(&quot;rp-tokens-remaining&quot;) &amp;&amp; System.Text.RegularExpressions.Regex.IsMatch(System.Convert.ToString(context.Variables[&quot;rp-tokens-remaining&quot;]), &quot;^[0-9]{1,12}$&quot;))">
@@ -175,6 +180,11 @@
                             <value>@(System.Convert.ToString(context.Variables["rp-tokens-remaining"]))</value>
                         </set-header>
                     </when>
+                    <otherwise>
+                        <set-header name="x-rp-gw-tokens-remaining" exists-action="override">
+                            <value>0</value>
+                        </set-header>
+                    </otherwise>
                 </choose>
             </when>
         </choose>

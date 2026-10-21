@@ -89,7 +89,7 @@ async function post(cfg, key, headers = {}) {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'api-key': key, 'content-type': 'application/json', ...headers },
-      body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 }),
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }], max_completion_tokens: 32 }),
       signal: controller.signal,
     });
     const body = await res.text();
