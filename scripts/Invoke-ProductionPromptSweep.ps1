@@ -19,6 +19,10 @@
 
     Auth is a delegated Entra token from the caller's own `az login` context.
     The token is never printed.
+
+.PARAMETER InterPromptDelaySeconds
+    Optional additional delay between curated prompt cases. Defaults to 0,
+    must be nonnegative, and does not delay retries within a case.
 #>
 param(
     [string]$ApiOrigin = $env:AZURE_API_APP_URL,
