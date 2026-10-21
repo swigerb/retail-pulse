@@ -44,6 +44,17 @@ public sealed partial class McpGatewayDeploymentContractTests
     }
 
     [Fact]
+    public void McpApiChildren_AreSerialized_ToAvoidApimEtagWriteRaces()
+    {
+        McpBicep.Should().Contain("resource toolInventory");
+        McpBicep.Should().Contain("dependsOn: [toolInventory]");
+        McpBicep.Should().Contain("dependsOn: [toolStockout]");
+        McpBicep.Should().Contain("dependsOn: [toolDisruptions]");
+        McpBicep.Should().Contain("dependsOn: [toolForecast, nvApiFqdn");
+        McpBicep.Should().Contain("dependsOn: [mcpPolicy]");
+    }
+
+    [Fact]
     public void Operations_AreGetOnly_Explicit_AndNotWildcard()
     {
         MatchCollection ops = OperationRegex().Matches(McpBicep);
@@ -81,9 +92,17 @@ public sealed partial class McpGatewayDeploymentContractTests
         policy.Should().Contain("<forward-request timeout=\"30\"");
 
         int validate = policy.IndexOf("<validate-jwt", StringComparison.Ordinal);
+        int audiences = policy.IndexOf("<audiences>", validate, StringComparison.Ordinal);
+        int issuers = policy.IndexOf("<issuers>", validate, StringComparison.Ordinal);
+        int requiredClaims = policy.IndexOf("<required-claims>", validate, StringComparison.Ordinal);
         int strip = policy.IndexOf("name=\"Authorization\" exists-action=\"delete\"", StringComparison.Ordinal);
         int mi = policy.IndexOf("<authentication-managed-identity", StringComparison.Ordinal);
         validate.Should().BeGreaterThan(-1);
+        audiences.Should().BeGreaterThan(validate);
+        issuers.Should().BeGreaterThan(audiences,
+            "APIM validate-jwt requires audiences before issuers");
+        requiredClaims.Should().BeGreaterThan(issuers,
+            "APIM validate-jwt requires required-claims after issuers");
         strip.Should().BeGreaterThan(validate, "the caller header is stripped only after it was validated");
         mi.Should().BeGreaterThan(strip, "the managed-identity token is set after the caller header is removed");
     }
