@@ -85,6 +85,11 @@ function Test-RuntimeUriEqual([string]$Actual, [string]$Expected) {
     catch { return $false }
 }
 
+function Test-ApimServerType([string]$ServerType) {
+    if ([string]::IsNullOrWhiteSpace($ServerType)) { return $false }
+    return ($ServerType -replace '[\s_-]+', '') -ieq 'AzureApiManagement'
+}
+
 # Resolves the generated synchronized MCP API (its id is not the APIM API id) and verifies it.
 # Status is Pass | Pending | Fail; anything unresolved is Pending or Fail, never Pass.
 function Test-McpSync {
@@ -155,12 +160,15 @@ function Test-McpSync {
         }
     }
 
-    $activeDeployments = @($selectedDeployments | Where-Object { $_.properties.state -eq 'active' })
-    if ($activeDeployments.Count -eq 0) {
-        $fail.Add("synchronized API '$apiName' has no active deployment at the APIM MCP endpoint")
+    # API Center omits the optional state on synchronized deployments; explicit non-active states remain ineligible.
+    $eligibleDeployments = @($selectedDeployments | Where-Object {
+        [string]::IsNullOrWhiteSpace([string]$_.properties.state) -or $_.properties.state -ieq 'active'
+    })
+    if ($eligibleDeployments.Count -eq 0) {
+        $fail.Add("synchronized API '$apiName' has no eligible deployment (state omitted or active) at the APIM MCP endpoint")
         return Done
     }
-    foreach ($d in $activeDeployments) {
+    foreach ($d in $eligibleDeployments) {
         $uris = @($d.properties.server.runtimeUri)
         if ($uris.Count -ne 1 -or -not (Test-RuntimeUriEqual $uris[0] $ExpectedEndpoint)) { $fail.Add("deployment '$($d.name)' runtimeUri [$($uris -join ', ')] != APIM endpoint '$ExpectedEndpoint'") }
         if (-not $d.properties.definitionId) {
@@ -181,7 +189,7 @@ function Test-McpSync {
         $environmentId = Resolve-ApiCenterResourceId $Base $d.properties.environmentId
         $envRes = & $Get $environmentId
         if ($null -eq $envRes) { $pend.Add("deployment '$($d.name)' environmentId '$($d.properties.environmentId)' does not resolve yet"); continue }
-        if ($envRes.properties.server.type -ine 'Azure API Management') { $fail.Add("environment '$($envRes.name)' server type is '$($envRes.properties.server.type)', expected 'Azure API Management'") }
+        if (-not (Test-ApimServerType $envRes.properties.server.type)) { $fail.Add("environment '$($envRes.name)' server type is '$($envRes.properties.server.type)', expected Azure API Management") }
     }
     return Done
 }
@@ -211,7 +219,7 @@ if ($SelfTest) {
         }
     })
     $script:bad = 0
-    function New-Store([string]$Endpoint = $ep, [string]$Lifecycle = 'production', [string]$ServerType = 'Azure API Management', [bool]$Versions = $true, [bool]$Definitions = $true, [bool]$Env = $true, [bool]$Mcp = $true) {
+    function New-Store([string]$Endpoint = $ep, [string]$Lifecycle = 'production', [string]$ServerType = 'azure-api-management', [bool]$Versions = $true, [bool]$Definitions = $true, [bool]$Env = $true, [bool]$Mcp = $true) {
         $w = "$base/workspaces/default"
         $api = "$w/apis/rp-mcp-9f3a1c"   # generated id, deliberately not the APIM API id
         $store = @{}
@@ -224,7 +232,7 @@ if ($SelfTest) {
         }
         $store["$w/apis"] = [pscustomobject]@{ value = $items }
         $store["$w/apis/decoy-mcp/deployments"] = [pscustomobject]@{ value = @([pscustomobject]@{ name = 'x'; properties = [pscustomobject]@{ environmentId = '/workspaces/default/environments/other'; server = [pscustomobject]@{ runtimeUri = @('https://other.example.net/mcp') } } }) }
-        $store["$api/deployments"] = [pscustomobject]@{ value = @([pscustomobject]@{ name = 'dep-gen-1'; properties = [pscustomobject]@{ state = 'active'; environmentId = '/workspaces/default/environments/env-gen-1'; definitionId = '/workspaces/default/apis/rp-mcp-9f3a1c/versions/ver-gen-1/definitions/def-gen-1'; server = [pscustomobject]@{ runtimeUri = @($Endpoint) } } }) }
+        $store["$api/deployments"] = [pscustomobject]@{ value = @([pscustomobject]@{ name = 'dep-gen-1'; properties = [pscustomobject]@{ isDefault = $true; environmentId = '/workspaces/default/environments/env-gen-1'; definitionId = '/workspaces/default/apis/rp-mcp-9f3a1c/versions/ver-gen-1/definitions/def-gen-1'; server = [pscustomobject]@{ runtimeUri = @($Endpoint) } } }) }
         if ($Versions) {
             $store["$api/versions"] = [pscustomobject]@{ value = @([pscustomobject]@{ id = "$api/versions/ver-gen-1"; name = 'ver-gen-1'; properties = [pscustomobject]@{ lifecycleStage = $Lifecycle } }) }
             if ($Definitions) {
@@ -243,16 +251,24 @@ if ($SelfTest) {
         if ($r.Status -eq $Status) { Write-Host "[PASS] self-test: $Name" }
         else { Write-Host "[FAIL] self-test: $Name (got $($r.Status): $(($r.Failures + $r.Pending) -join '; '))"; $script:bad++ }
     }
+    function Expect-Failure([string]$Name, [string]$FailureFragment, $r) {
+        $matchingFailures = @($r.Failures | Where-Object { $_.Contains($FailureFragment, [StringComparison]::Ordinal) })
+        if ($r.Status -eq 'Fail' -and $matchingFailures.Count -gt 0) { Write-Host "[PASS] self-test: $Name" }
+        else { Write-Host "[FAIL] self-test: $Name (got $($r.Status): $(($r.Failures + $r.Pending) -join '; '))"; $script:bad++ }
+    }
     $ok = Invoke-Sync (New-Store) $tools
     Expect 'generated-ID synchronized graph passes' 'Pass' $ok
     if ($ok.ApiName -eq 'rp-mcp-9f3a1c' -and $ok.ApiName -ne $McpApiName) { Write-Host '[PASS] self-test: resolved generated API id, not the APIM API id' }
     else { Write-Host "[FAIL] self-test: resolved '$($ok.ApiName)'"; $script:bad++ }
+    $explicitActive = New-Store
+    $explicitActive["$base/workspaces/default/apis/rp-mcp-9f3a1c/deployments"].value[0].properties | Add-Member -NotePropertyName state -NotePropertyValue 'ACTIVE'
+    Expect 'explicit active deployment passes case-insensitively' 'Pass' (Invoke-Sync $explicitActive $tools)
     Expect 'unrelated MCP deployment does not fail a missing target' 'Pending' (Invoke-Sync (New-Store -Mcp $false) $tools)
     Expect 'missing versions is pending' 'Pending' (Invoke-Sync (New-Store -Versions $false) $tools)
     Expect 'partial definition sync is pending' 'Pending' (Invoke-Sync (New-Store -Definitions $false) $tools)
     Expect 'unresolved environment is pending' 'Pending' (Invoke-Sync (New-Store -Env $false) $tools)
     Expect 'non-production lifecycle fails' 'Fail' (Invoke-Sync (New-Store -Lifecycle 'design') $tools)
-    Expect 'non-APIM environment fails' 'Fail' (Invoke-Sync (New-Store -ServerType 'Azure App Service') $tools)
+    Expect-Failure 'non-APIM environment fails' "server type is 'Azure App Service'" (Invoke-Sync (New-Store -ServerType 'Azure App Service') $tools)
     Expect 'endpoint mismatch fails' 'Fail' (Invoke-Sync (New-Store -Endpoint 'https://other.example.net/x/mcp') $tools)
     Expect 'case-changed endpoint path fails' 'Fail' (Invoke-Sync (New-Store -Endpoint 'https://apim.example.net/RETAIL-PULSE-MCP/mcp') $tools)
     Expect 'missing endpoint fails closed' 'Fail' (Invoke-Sync (New-Store) $tools '')
@@ -281,8 +297,8 @@ if ($SelfTest) {
     }
     Expect 'case-changed operation path fails' 'Fail' (Invoke-Sync (New-Store) $pathChanged)
     $inactive = New-Store
-    $inactive["$base/workspaces/default/apis/rp-mcp-9f3a1c/deployments"].value[0].properties.state = 'inactive'
-    Expect 'inactive deployment fails' 'Fail' (Invoke-Sync $inactive $tools)
+    $inactive["$base/workspaces/default/apis/rp-mcp-9f3a1c/deployments"].value[0].properties | Add-Member -NotePropertyName state -NotePropertyValue 'inactive'
+    Expect-Failure 'explicit inactive deployment fails' 'no eligible deployment (state omitted or active)' (Invoke-Sync $inactive $tools)
     $unlinked = New-Store
     $unlinked["$base/workspaces/default/apis/rp-mcp-9f3a1c/deployments"].value[0].properties.definitionId = $null
     Expect 'missing definition linkage fails' 'Fail' (Invoke-Sync $unlinked $tools)
