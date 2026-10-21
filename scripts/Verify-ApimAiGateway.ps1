@@ -192,6 +192,10 @@ function Resolve-ContentSafetyAccountName([string]$Policy) {
     return $match.Groups['name'].Value
 }
 
+function Get-CognitiveAccountArmPath([string]$ResourceGroupName, [string]$AccountName) {
+    return "/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/${AccountName}?api-version=2023-05-01"
+}
+
 function Test-BodyBytesZero($section) {
     # A section with no body configuration captures nothing; any positive byte count captures content.
     if ($null -eq $section -or $null -eq $section.body -or $null -eq $section.body.bytes) { return $true }
@@ -348,6 +352,8 @@ function Invoke-SelfTest {
     _Expect 'safety profile: omitted flag stays disabled for a non-safety policy' (-not (Resolve-GatewaySafetyEnabled $false $false '<policies><inbound /></policies>'))
     _Expect 'safety profile: Content Safety account derives from rendered endpoint' `
         ((Resolve-ContentSafetyAccountName '<set-url>https://cs-live-123.cognitiveservices.azure.com/contentsafety/text:analyze</set-url>') -eq 'cs-live-123')
+    _Expect 'safety profile: Content Safety ARM path preserves account name before query string' `
+        ((Get-CognitiveAccountArmPath 'rg-live' 'cs-live-123') -eq '/resourceGroups/rg-live/providers/Microsoft.CognitiveServices/accounts/cs-live-123?api-version=2023-05-01')
     $aiOk = @{ frontend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } }; backend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } } }
     $monOk = @{ largeLanguageModel = @{ logs = 'disabled'; requests = @{ messages = 'all' }; responses = @{ messages = 'all' } } }
     _Expect 'safety diagnostics: zero body/message capture passes' (Test-SafetyDiagnosticsBodyFree $aiOk $monOk)
@@ -417,7 +423,7 @@ if ($effectiveGatewaySafetyEnabled -and [string]::IsNullOrWhiteSpace($ContentSaf
 }
 if ($effectiveGatewaySafetyEnabled -and -not [string]::IsNullOrWhiteSpace($ContentSafetyAccountName) -and
     [string]::IsNullOrWhiteSpace($ContentSafetyResourceGroup)) {
-    $sameGroupAccount = Invoke-ArmGet "/resourceGroups/$ResourceGroup/providers/Microsoft.CognitiveServices/accounts/$ContentSafetyAccountName?api-version=2023-05-01"
+    $sameGroupAccount = Invoke-ArmGet (Get-CognitiveAccountArmPath $ResourceGroup $ContentSafetyAccountName)
     if ($null -ne $sameGroupAccount) {
         $ContentSafetyResourceGroup = $ResourceGroup
     }
