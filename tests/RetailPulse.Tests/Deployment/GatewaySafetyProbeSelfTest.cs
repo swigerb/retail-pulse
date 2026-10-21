@@ -47,6 +47,8 @@ public sealed class GatewaySafetyProbeSelfTest
 
         ps.Should().Contain("a97b65f3-24c7-4388-baec-2e87135dc908")
             .And.Contain("Test-SafetyPolicyOrder")
-            .And.Contain("Test-SafetyDiagnosticsBodyFree");
+            .And.Contain("Test-SafetyDiagnosticsBodyFree")
+            .And.Contain("Resolve-GatewaySafetyEnabled")
+            .And.Contain("inferred from rendered policy");
     }
 }

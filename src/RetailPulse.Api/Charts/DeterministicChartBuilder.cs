@@ -51,7 +51,15 @@ internal static class DeterministicChartBuilder
         string? requestedType,
         int minMarks,
         out ChartSpec? chart)
-        => TryBuild(response, requestedType, minMarks, requiredBrands: null, out chart);
+        => TryBuild(response, requestedType, minMarks, requiredBrands: null, supplementalPayloads: null, out chart);
+
+    public static bool TryBuild(
+        Microsoft.Extensions.AI.ChatResponse response,
+        string? requestedType,
+        int minMarks,
+        IReadOnlyList<string>? supplementalPayloads,
+        out ChartSpec? chart)
+        => TryBuild(response, requestedType, minMarks, requiredBrands: null, supplementalPayloads, out chart);
 
     /// <summary>
     /// Overload adding a portfolio-coverage contract for horizontal-bar ranking requests:
@@ -68,9 +76,18 @@ internal static class DeterministicChartBuilder
         int minMarks,
         IReadOnlyCollection<string>? requiredBrands,
         out ChartSpec? chart)
+        => TryBuild(response, requestedType, minMarks, requiredBrands, supplementalPayloads: null, out chart);
+
+    public static bool TryBuild(
+        Microsoft.Extensions.AI.ChatResponse response,
+        string? requestedType,
+        int minMarks,
+        IReadOnlyCollection<string>? requiredBrands,
+        IReadOnlyList<string>? supplementalPayloads,
+        out ChartSpec? chart)
     {
         chart = null;
-        List<JsonElement> payloads = CollectToolPayloads(response);
+        List<JsonElement> payloads = CollectToolPayloads(response, supplementalPayloads);
         if (payloads.Count == 0)
         {
             return false;
@@ -206,7 +223,9 @@ internal static class DeterministicChartBuilder
             };
     }
 
-    private static List<JsonElement> CollectToolPayloads(Microsoft.Extensions.AI.ChatResponse response)
+    private static List<JsonElement> CollectToolPayloads(
+        Microsoft.Extensions.AI.ChatResponse response,
+        IReadOnlyList<string>? supplementalPayloads)
     {
         var payloads = new List<JsonElement>();
         foreach (ChatMessage msg in response.Messages)
@@ -231,6 +250,26 @@ internal static class DeterministicChartBuilder
                 }
             }
         }
+
+        if (supplementalPayloads is not null)
+        {
+            foreach (string text in supplementalPayloads)
+            {
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(text, _docOptions);
+                    payloads.Add(doc.RootElement.Clone());
+                }
+                catch (JsonException)
+                {
+                    // Non-JSON prefetch output — ignore for deterministic charting.
+                }
+            }
+        }
+
         return payloads;
     }
 
@@ -646,11 +685,10 @@ internal static class DeterministicChartBuilder
 
         foreach (JsonElement payload in payloads)
         {
-            if (payload.ValueKind != JsonValueKind.Object)
-                continue;
-
             // Variant mix: variants[].variant + mix_percent.
-            if (payload.TryGetProperty("variants", out JsonElement variants) && variants.ValueKind == JsonValueKind.Array)
+            if (payload.ValueKind == JsonValueKind.Object
+                && payload.TryGetProperty("variants", out JsonElement variants)
+                && variants.ValueKind == JsonValueKind.Array)
             {
                 var points = new List<ChartDataPoint>();
                 foreach (JsonElement v in variants.EnumerateArray())
@@ -673,17 +711,38 @@ internal static class DeterministicChartBuilder
                 }
             }
 
-            // Market share: share_data[].brand + share_percent.
-            if (payload.TryGetProperty("share_data", out JsonElement shareData) && shareData.ValueKind == JsonValueKind.Array)
+            // Market share: raw MCP payloads use share_data[].share_percent; the typed API tool
+            // returns a projected array with share. Support both without asking the model to reshape.
+            JsonElement shareData = default;
+            bool hasShareData = payload.ValueKind == JsonValueKind.Array
+                || (payload.ValueKind == JsonValueKind.Object
+                    && payload.TryGetProperty("share_data", out shareData)
+                    && shareData.ValueKind == JsonValueKind.Array);
+            if (hasShareData)
             {
+                if (payload.ValueKind == JsonValueKind.Array)
+                {
+                    shareData = payload;
+                }
                 var points = new List<ChartDataPoint>();
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (JsonElement s in shareData.EnumerateArray())
                 {
-                    if (s.ValueKind != JsonValueKind.Object) continue;
+                    if (s.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
                     string? label = ReadNestedString(s, "brand");
-                    if (string.IsNullOrWhiteSpace(label) || !seen.Add(label)) continue;
-                    if (!TryReadDouble(s, "share_percent", out double share) || !double.IsFinite(share)) continue;
+                    if (string.IsNullOrWhiteSpace(label) || !seen.Add(label))
+                    {
+                        continue;
+                    }
+                    if ((!TryReadDouble(s, "share_percent", out double share)
+                            && !TryReadDouble(s, "share", out share))
+                        || !double.IsFinite(share))
+                    {
+                        continue;
+                    }
                     points.Add(new ChartDataPoint { X = label, Y = Math.Round(share, 1) });
                 }
                 if (points.Count >= 2)
@@ -721,47 +780,68 @@ internal static class DeterministicChartBuilder
         var seenLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var contributingRegions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        void AddRow(string name, string? rowRegion, JsonElement source)
+        {
+            if (!string.IsNullOrWhiteSpace(rowRegion))
+                contributingRegions.Add(rowRegion);
+
+            string label = string.IsNullOrWhiteSpace(rowRegion) ? name : $"{name} — {rowRegion}";
+            if (!seenLabels.Add(label))
+                return;
+
+            if (TryReadPercent(source, "depletions_yoy", out double depYoy) && double.IsFinite(depYoy))
+                depletionsYoy.Add(new ChartDataPoint { X = label, Y = Math.Round(depYoy, 1) });
+
+            if (TryReadPercent(source, "sell_through_yoy", out double sellYoy) && double.IsFinite(sellYoy))
+                sellThroughYoy.Add(new ChartDataPoint { X = label, Y = Math.Round(sellYoy, 1) });
+
+            if (TryReadDouble(source, "inventory_weeks_on_hand", out double weeks) && double.IsFinite(weeks))
+                inventoryWeeks.Add(new ChartDataPoint { X = label, Y = Math.Round(weeks, 1) });
+        }
+
         foreach (JsonElement payload in payloads)
         {
             if (payload.ValueKind != JsonValueKind.Object)
                 continue;
-            if (!payload.TryGetProperty("brands", out JsonElement brands) || brands.ValueKind != JsonValueKind.Array)
-                continue;
 
             string? payloadRegion = payload.TryGetProperty("region", out JsonElement rEl)
                 && rEl.ValueKind == JsonValueKind.String ? rEl.GetString() : null;
-            if (!string.IsNullOrWhiteSpace(payloadRegion))
-                contributingRegions.Add(payloadRegion);
 
-            foreach (JsonElement brand in brands.EnumerateArray())
+            if (payload.TryGetProperty("brands", out JsonElement brands)
+                && brands.ValueKind == JsonValueKind.Array)
             {
-                if (brand.ValueKind != JsonValueKind.Object)
-                    continue;
-                string? name = ReadNestedString(brand, "brand");
-                if (string.IsNullOrWhiteSpace(name))
-                    continue;
-                string? rowRegion = ReadNestedString(brand, "region") ?? payloadRegion;
+                foreach (JsonElement brand in brands.EnumerateArray())
+                {
+                    if (brand.ValueKind != JsonValueKind.Object)
+                        continue;
+                    string? name = ReadNestedString(brand, "brand");
+                    if (string.IsNullOrWhiteSpace(name))
+                        continue;
+                    string? rowRegion = ReadNestedString(brand, "region") ?? payloadRegion;
 
-                JsonElement source = brand;
-                if (brand.TryGetProperty("metrics", out JsonElement metrics)
-                    && metrics.ValueKind == JsonValueKind.Object
-                    && !brand.TryGetProperty("depletions_yoy", out _))
+                    JsonElement source = brand;
+                    if (brand.TryGetProperty("metrics", out JsonElement metrics)
+                        && metrics.ValueKind == JsonValueKind.Object
+                        && !brand.TryGetProperty("depletions_yoy", out _))
+                    {
+                        source = metrics;
+                    }
+
+                    AddRow(name, rowRegion, source);
+                }
+                continue;
+            }
+
+            string? singleBrand = ReadBrand(payload);
+            if (!string.IsNullOrWhiteSpace(singleBrand))
+            {
+                JsonElement source = payload;
+                if (payload.TryGetProperty("metrics", out JsonElement metrics)
+                    && metrics.ValueKind == JsonValueKind.Object)
                 {
                     source = metrics;
                 }
-
-                string label = string.IsNullOrWhiteSpace(rowRegion) ? name : $"{name} — {rowRegion}";
-                if (!seenLabels.Add(label))
-                    continue;
-
-                if (TryReadPercent(source, "depletions_yoy", out double depYoy) && double.IsFinite(depYoy))
-                    depletionsYoy.Add(new ChartDataPoint { X = label, Y = Math.Round(depYoy, 1) });
-
-                if (TryReadPercent(source, "sell_through_yoy", out double sellYoy) && double.IsFinite(sellYoy))
-                    sellThroughYoy.Add(new ChartDataPoint { X = label, Y = Math.Round(sellYoy, 1) });
-
-                if (TryReadDouble(source, "inventory_weeks_on_hand", out double weeks) && double.IsFinite(weeks))
-                    inventoryWeeks.Add(new ChartDataPoint { X = label, Y = Math.Round(weeks, 1) });
+                AddRow(singleBrand, ReadRegion(payload) ?? payloadRegion, source);
             }
         }
 

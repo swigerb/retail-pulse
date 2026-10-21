@@ -417,7 +417,27 @@ public sealed partial class ApimGatewayContractTests
             .And.Contain("ordinary traffic succeeds")
             .And.Contain("demo header does not change normal traffic");
         probe.Should().Contain("FAILOVER_DEMO_DEPLOYMENT")
-            .And.Contain("deploymentMode === 'disabled'");
+            .And.Contain("deploymentMode === 'disabled'")
+            .And.Contain("max_completion_tokens")
+            .And.NotContain("max_tokens:")
+            .And.Contain("waitForArmedState")
+            .And.Contain("failover demo state did not propagate")
+            .And.Contain("retry-after")
+            .And.Contain("spawnSync")
+            .And.Contain("az.cmd")
+            .And.Contain("cleanup: disarm is effective");
+    }
+
+    [Fact]
+    public void ProductionSweep_RecordsSanitizedCorrelationEvidenceForEveryAttempt()
+    {
+        string sweep = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "Invoke-ProductionPromptSweep.ps1"));
+
+        sweep.Should().Contain("'X-Correlation-ID' = $callerCorrelationId")
+            .And.Contain("CallerCorrelationId")
+            .And.Contain("ReturnedCorrelationId")
+            .And.Contain("GatewayRequestIds")
+            .And.Contain("Attempts = @($attemptTraces)");
     }
 
     [Fact]

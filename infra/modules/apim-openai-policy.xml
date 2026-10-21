@@ -145,10 +145,11 @@
             <value>{backend-id}</value>
         </set-header>
         <choose>
-            <!-- Only the token limiter's own 429 is a throttle signal; other errors leave quota unknown.
-                 A pre-backend 429 consumed nothing, so no consumed-token header is ever set here.
-                 Remaining and retry are emitted only when the limiter published numeric values. -->
-            <when condition="@(context.LastError != null &amp;&amp; context.LastError.Source == &quot;llm-token-limit&quot;)">
+            <!-- Consumption-time llm-token-limit rejection is reported by the v2 gateway as
+                 token-limit-process-request-handler / TokenLimitExceededAfterPrompt. Retain the
+                 documented policy source as a compatibility signal, with budget variables and 429
+                 guards so earlier rate-limit-by-key or backend 429 responses are never mislabeled. -->
+            <when condition="@(context.LastError != null &amp;&amp; context.Response.StatusCode == 429 &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-scope&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-mode&quot;) &amp;&amp; ((context.LastError.Source == &quot;token-limit-process-request-handler&quot; &amp;&amp; context.LastError.Reason == &quot;TokenLimitExceededAfterPrompt&quot;) || context.LastError.Source == &quot;llm-token-limit&quot;))">
                 <set-header name="x-rp-gw-quota" exists-action="override">
                     <value>throttled</value>
                 </set-header>
@@ -166,6 +167,11 @@
                     <when condition="@(context.Variables.ContainsKey(&quot;rp-budget-retry-after&quot;) &amp;&amp; System.Text.RegularExpressions.Regex.IsMatch(System.Convert.ToString(context.Variables[&quot;rp-budget-retry-after&quot;]), &quot;^[0-9]{1,6}$&quot;))">
                         <set-header name="x-rp-gw-retry-after" exists-action="override">
                             <value>@(System.Convert.ToString(context.Variables["rp-budget-retry-after"]))</value>
+                        </set-header>
+                    </when>
+                    <when condition="@(System.Text.RegularExpressions.Regex.IsMatch(context.Response.Headers.GetValueOrDefault(&quot;Retry-After&quot;, &quot;&quot;), &quot;^[0-9]{1,6}$&quot;))">
+                        <set-header name="x-rp-gw-retry-after" exists-action="override">
+                            <value>@(context.Response.Headers.GetValueOrDefault("Retry-After", ""))</value>
                         </set-header>
                     </when>
                 </choose>

@@ -40,7 +40,7 @@ numeric `tokensConsumed` / `tokensRemaining`:
 - `x-rp-gw-budget-scope`: `store|channel|application|b2b`
 - `x-rp-gw-budget-mode`: `normal|demo`
 - `x-rp-gw-retry-after`: numeric seconds, only on a throttle and only when the limiter published a number
-- `x-rp-gw-tokens-remaining`: numeric, when available
+- `x-rp-gw-tokens-remaining`: numeric only when the limiter publishes a measured value. A rejected request can require more tokens than remain, so absence is unknown and must never be rewritten as zero.
 - `x-rp-gw-tokens-consumed`: only on admitted calls. A **pre-backend 429 consumed nothing and never reports consumed tokens.**
 
 The API preserves the 429 (`code: gateway_token_budget_exceeded`, `retryAfterSeconds`, `Retry-After`, gateway evidence)
