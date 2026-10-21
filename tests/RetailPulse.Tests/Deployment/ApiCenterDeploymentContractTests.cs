@@ -182,7 +182,8 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
         script.Should().Contain("environmentId").And.Contain("definitionId").And.Contain("runtimeUri");
         script.Should().Contain("properties.displayName").And.Contain("operationId")
             .And.Contain("resolvedOperation").And.Contain("expected GET");
-        script.Should().Contain("state -eq 'active'").And.Contain("does not belong to the synchronized API version");
+        script.Should().Contain("state omitted or active").And.Contain("Test-ApimServerType")
+            .And.Contain("does not belong to the synchronized API version");
         script.Should().Contain("linkState").And.Contain("apiSource linkState");
         script.Should().Contain("ARM GET forbidden").And.Contain("authorization failure as pending");
         script.Should().Contain("lifecycleStage -ne 'production'");
@@ -207,13 +208,14 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
         string script = File.ReadAllText(Path.Combine(_repoRoot, "scripts", "Verify-ApiCenter.ps1"));
         foreach (string probe in new[]
         {
-            "generated-ID synchronized graph passes", "resolved generated API id, not the APIM API id",
+            "live canonical omitted-state hyphenated APIM graph passes", "resolved generated API id, not the APIM API id",
+            "explicit active deployment passes case-insensitively",
             "unrelated MCP deployment does not fail a missing target", "missing versions is pending",
             "partial definition sync is pending", "non-production lifecycle fails", "non-APIM environment fails",
             "endpoint mismatch fails", "case-changed endpoint path fails", "missing endpoint fails closed", "extra APIM tool fails",
             "missing APIM tool fails", "renamed APIM tool fails", "case-changed APIM tool fails",
             "write-bound APIM tool fails", "case-changed operation path fails",
-            "inactive deployment fails", "missing definition linkage fails", "apiSource error fails",
+            "explicit inactive deployment fails", "missing definition linkage fails", "apiSource error fails",
             "apiSource syncing is pending", "no apiSources fails",
         })
         {
