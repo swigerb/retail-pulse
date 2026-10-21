@@ -24,12 +24,16 @@ param(
     [string]$ApiOrigin = $env:AZURE_API_APP_URL,
     [string]$ApiResource = 'api://b03317ab-a407-49cc-8769-0a15062777b1',
     [int]$TimeoutSec = 180,
+    [int]$InterPromptDelaySeconds = 0,
     [string]$JsonOut,
     [switch]$SelfTest
 )
 
 $ErrorActionPreference = 'Stop'
 
+if ($InterPromptDelaySeconds -lt 0) {
+    throw 'InterPromptDelaySeconds must be nonnegative.'
+}
 if (-not $SelfTest -and [string]::IsNullOrWhiteSpace($ApiOrigin)) {
     throw 'ApiOrigin not set. Pass -ApiOrigin or set AZURE_API_APP_URL.'
 }
@@ -236,6 +240,9 @@ Write-Host ""
 
 foreach ($p in $prompts) {
     $i++
+    if ($i -gt 1 -and $InterPromptDelaySeconds -gt 0) {
+        Start-Sleep -Seconds $InterPromptDelaySeconds
+    }
     $failures = [System.Collections.Generic.List[string]]::new()
     $attemptTraces = [System.Collections.Generic.List[object]]::new()
     $cacheHit = $false

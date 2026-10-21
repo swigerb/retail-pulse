@@ -187,7 +187,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         }
         catch (ClientResultException ex) when (ex.Status == 429)
         {
-            return HandleRateLimitError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+            RecordRateLimitError(ex, sw, thoughtActivity, context.AgentName);
+            throw;
         }
         catch (ClientResultException ex) when (ex.Status is 400 or 403 or 503)
         {
@@ -523,7 +524,8 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         }
         catch (ClientResultException ex) when (ex.Status == 429)
         {
-            return HandleRateLimitError(ex, sw, thoughtActivity, context.AgentName, sessionId);
+            RecordRateLimitError(ex, sw, thoughtActivity, context.AgentName);
+            throw;
         }
         catch (ClientResultException ex) when (ex.Status is 400 or 403 or 503)
         {
@@ -855,9 +857,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             : sanitized;
     }
 
-    private ChatResponse HandleRateLimitError(
+    private void RecordRateLimitError(
         ClientResultException ex, Stopwatch sw, Activity? thoughtActivity,
-        string agentName, string sessionId)
+        string agentName)
     {
         long failureDurationMs = sw.ElapsedMilliseconds;
         thoughtActivity?.SetTag("agent.duration_ms", failureDurationMs);
@@ -868,10 +870,6 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         _logger.LogWarning(ex,
             "Agent {AgentName} rate-limited after {DurationMs}ms. Status: {Status}",
             agentName, failureDurationMs, ex.Status);
-
-        return new ChatResponse(
-            "⏳ The AI service is experiencing high demand. Please wait 30 seconds and try again.",
-            sessionId, [], null, failureDurationMs);
     }
 
     private ChatResponse HandleTimeoutError(

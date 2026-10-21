@@ -450,6 +450,10 @@ public sealed partial class ApimGatewayContractTests
             .And.Contain("ReviewRequestId")
             .And.Contain("ErrorCode")
             .And.Contain("Failed200Metadata = $failed200Metadata")
+            .And.Contain("[int]$InterPromptDelaySeconds = 0")
+            .And.Contain("if ($InterPromptDelaySeconds -lt 0)")
+            .And.Contain("if ($i -gt 1 -and $InterPromptDelaySeconds -gt 0)")
+            .And.Contain("Start-Sleep -Seconds $InterPromptDelaySeconds")
             .And.NotContain("Reply = $reply",
                 "failed-200 evidence must retain only synthetic reply metadata, never response prose");
     }
@@ -480,6 +484,32 @@ public sealed partial class ApimGatewayContractTests
             .And.NotContain("SECRET_THOUGHT")
             .And.NotContain("SECRET_ARGS")
             .And.NotContain("SECRET_PAYLOAD");
+    }
+
+    [Fact]
+    public void ProductionSweep_RejectsNegativeInterPromptDelay()
+    {
+        string script = Path.Combine(RepoRoot, "scripts", "Invoke-ProductionPromptSweep.ps1");
+        var startInfo = new ProcessStartInfo("pwsh")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-File");
+        startInfo.ArgumentList.Add(script);
+        startInfo.ArgumentList.Add("-SelfTest");
+        startInfo.ArgumentList.Add("-InterPromptDelaySeconds");
+        startInfo.ArgumentList.Add("-1");
+
+        using Process process = Process.Start(startInfo)!;
+        _ = process.StandardOutput.ReadToEnd();
+        string stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        process.ExitCode.Should().NotBe(0);
+        stderr.Should().Contain("InterPromptDelaySeconds must be nonnegative");
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using System.ClientModel;
+using System.ClientModel.Primitives;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.AI;
@@ -177,6 +179,38 @@ public class AgentPipelineTests
         // The pipeline uses: string.IsNullOrWhiteSpace(response.Text) ? context.FallbackReply : response.Text
         // When the LLM returns null/empty text, the fallback reply is used.
         response.Reply.Should().Be("Custom fallback");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_WhenGatewayRateLimits_RethrowsForEndpoint429Shaping(bool withProgress)
+    {
+        var rawResponse = new Mock<PipelineResponse>();
+        rawResponse.SetupGet(response => response.Status).Returns(429);
+        var chatClient = new Mock<IChatClient>();
+        chatClient
+            .Setup(client => client.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ClientResultException("rate limited", rawResponse.Object, null));
+
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        var pipeline = new AgentExecutionPipeline(
+            chatClient.Object,
+            AgentTestFixtures.CreateMockHubContext(),
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+        AgentExecutionContext context = CreateContext("Show me Urban Living depletion trends");
+
+        Func<Task> act = () => withProgress
+            ? pipeline.ExecuteWithProgressAsync(context)
+            : pipeline.ExecuteAsync(context);
+
+        ClientResultException exception = (await act.Should().ThrowAsync<ClientResultException>()).Which;
+        exception.Status.Should().Be(429,
+            "the endpoint must receive the typed throttle and return HTTP 429 with gateway evidence");
     }
 
     [Theory]
