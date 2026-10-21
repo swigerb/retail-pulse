@@ -73,7 +73,7 @@ public sealed partial class GatewaySafetyPolicyContractTests
     {
         string x = Unescape(Inbound);
         x.Should().Contain("attackDetected").And.Contain("return a ? \"attack\" : \"clean\"");
-        x.Should().Contain("if (s == \"attack\" || over) return \"block\";");
+        x.Should().Contain("if (s == \"attack\" || over) { return \"block\"; }");
         x.Should().Contain(">= {severity-threshold}", "severity at the threshold blocks; below it allows");
         x.Should().Contain("return \"allow\";");
         x.Should().Contain("== \"block\" ? 403 : (string)context.Variables[\"rp-safety-decision\"] == \"reject\" ? 400 : 503");
@@ -83,10 +83,10 @@ public sealed partial class GatewaySafetyPolicyContractTests
     public void DependencyErrors_DemoAllowsWithEvidence_RegulatedAndAuthFailClosed()
     {
         string x = Unescape(Inbound);
-        x.Should().Contain("if (s == 408 || s == 429 || (s >= 500 && s <= 599)) return \"dependency\";");
-        x.Should().Contain("if (s == 401 || s == 403) return \"auth\";");
+        x.Should().Contain("if (s == 408 || s == 429 || (s >= 500 && s <= 599)) { return \"dependency\"; }");
+        x.Should().Contain("if (s == 401 || s == 403) { return \"auth\"; }");
         x.Should().Contain("return \"config\";");
-        x.Should().Contain("if (r == null) return \"null\";", "a null response is NOT a confirmed dependency status");
+        x.Should().Contain("if (r == null) { return \"null\"; }", "a null response is NOT a confirmed dependency status");
         x.Should().Contain("if ((sOk || s == \"dependency\") && (aOk || a == \"dependency\"))");
         x.Should().Contain("== \"regulated\" ? \"error\" : \"allowed_on_safety_error\"");
         x.Should().Contain("!context.Variables.ContainsKey(\"rp-cs-token\")");
@@ -250,6 +250,46 @@ public sealed partial class GatewaySafetyPolicyContractTests
     }
 
     [Fact]
+    public void PolicyExpressions_BraceEveryControlFlowBody_ForApimRazorCompiler()
+    {
+        foreach (string file in Directory.GetFiles(Modules, "apim-*.xml"))
+        {
+            string policy = XmlCommentRegex().Replace(Unescape(File.ReadAllText(file)), string.Empty);
+            foreach (Match control in ControlFlowRegex().Matches(policy))
+            {
+                int open = policy.IndexOf('(', control.Index);
+                int close = FindMatchingParenthesis(policy, open);
+                close.Should().BeGreaterThan(open,
+                    $"{Path.GetFileName(file)} contains an unterminated control-flow condition");
+
+                int body = close + 1;
+                while (body < policy.Length && char.IsWhiteSpace(policy[body]))
+                {
+                    body++;
+                }
+
+                (body < policy.Length && policy[body] == '{').Should().BeTrue(
+                    $"{Path.GetFileName(file)} has an unbraced APIM policy control-flow body near '{control.Value}'");
+            }
+
+            foreach (Match otherwise in ElseRegex().Matches(policy))
+            {
+                int body = otherwise.Index + otherwise.Length;
+                while (body < policy.Length && char.IsWhiteSpace(policy[body]))
+                {
+                    body++;
+                }
+
+                bool bracedOrElseIf = body < policy.Length
+                    && (policy[body] == '{'
+                        || policy.AsSpan(body).StartsWith("if", StringComparison.Ordinal));
+                bracedOrElseIf.Should().BeTrue(
+                    $"{Path.GetFileName(file)} has an unbraced APIM policy else body");
+            }
+        }
+    }
+
+    [Fact]
     public void Diagnostics_CaptureNoBodiesOrMessageContent_WhenGatewaySafetyIsEnabled()
     {
         Bicep.Should().Contain("bytes: bodiesDisabled ? 0 : 8192");
@@ -283,6 +323,33 @@ public sealed partial class GatewaySafetyPolicyContractTests
     }
 
     private static string await_(Task<string> t) => t.GetAwaiter().GetResult();
+
+    private static int FindMatchingParenthesis(string text, int open)
+    {
+        int depth = 0;
+        for (int i = open; i < text.Length; i++)
+        {
+            if (text[i] == '(')
+            {
+                depth++;
+            }
+            else if (text[i] == ')' && --depth == 0)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    [GeneratedRegex(@"\b(?:if|else\s+if|for|foreach|while)\s*\(")]
+    private static partial Regex ControlFlowRegex();
+
+    [GeneratedRegex(@"\belse\b")]
+    private static partial Regex ElseRegex();
+
+    [GeneratedRegex(@"<!--[\s\S]*?-->")]
+    private static partial Regex XmlCommentRegex();
 
     private static string FindRepoRoot()
     {

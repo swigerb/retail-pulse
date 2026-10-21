@@ -214,7 +214,7 @@ public sealed partial class SemanticCachePolicyRuntimeTests
     [GeneratedRegex("\"(rp-cache-(?:deny-[a-z]+|allow))\"")]
     private static partial Regex OrderRegex();
 
-    [GeneratedRegex("IsMatch\\(text, \\(string\\)context\\.Variables\\[\"rp-cache-[a-z-]+\"\\]\\)\\) return \"([a-z-]+)\"")]
+    [GeneratedRegex("IsMatch\\(text, \\(string\\)context\\.Variables\\[\"rp-cache-[a-z-]+\"\\]\\)\\)\\s*\\{\\s*return \"([a-z-]+)\";\\s*\\}")]
     private static partial Regex ReasonRegex();
 
     [GeneratedRegex("<set-variable name=\"rp-cache-partition\" value=\"\\{cache-partition\\}\"")]
