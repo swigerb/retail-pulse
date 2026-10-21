@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 
@@ -83,8 +84,18 @@ public sealed partial class McpGatewayDeploymentContractTests
     public void Policy_AuthenticatesCaller_ThenUsesManagedIdentityForBackend()
     {
         string policy = McpPolicy;
+        string main = Read("infra", "main.bicep");
+        string module = McpBicep;
+        string parameters = Read("infra", "main.bicepparam");
         policy.Should().Contain("<validate-jwt");
         policy.Should().Contain("{{mcpGatewayAudience}}").And.Contain("{{tenantId}}");
+        main.Should().Contain("param mcpGatewayResourceIdentifier string = 'api://retailpulse-mcp-gateway'");
+        main.Should().Contain("param mcpGatewayAudience string").And.Contain("@minLength(36)").And.Contain("@maxLength(36)");
+        module.Should().Contain("Exact application (client) ID GUID in MCP caller v2 access-token aud claims");
+        parameters.Should().Contain("AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER', 'api://retailpulse-mcp-gateway'");
+        parameters.Should().Contain("AZURE_MCP_GATEWAY_AUDIENCE', ''");
+        parameters.Should().NotContain("AZURE_MCP_GATEWAY_AUDIENCE', 'api://",
+            "the identifier URI must never fall back into the v2 token audience parameter");
         policy.Should().Contain("RetailPulse.Mcp.Invoke");
         policy.Should().Contain("require-expiration-time=\"true\"").And.Contain("require-signed-tokens=\"true\"");
         policy.Should().Contain("<authentication-managed-identity resource=\"{{retailPulseApiAudience}}\"");
@@ -244,6 +255,19 @@ public sealed partial class McpGatewayDeploymentContractTests
     public void OldUnsafeAttachOn_IsRetired() => File.Exists(Path.Combine(Root, "deploy", "apim-ai-gateway", "mcp-api.bicep")).Should().BeFalse();
 
     [Theory]
+    [InlineData("azd-hooks", "preprovision.ps1")]
+    [InlineData("azd-hooks", "preprovision.sh")]
+    public void PreprovisionHooks_BootstrapExactGatewayAudienceBeforeArm(string dir, string file)
+    {
+        string hook = Read(dir, file);
+        hook.Should().Contain("Setup-McpGatewayIdentity.ps1").And.Contain("-BootstrapOnly");
+        hook.Should().Contain("client-id", "the hook must document why the resource URI cannot be used as the v2 aud");
+        hook.Should().Contain("azd env get-value AZURE_MCP_GATEWAY_AUDIENCE");
+        hook.Should().Contain("does not hot-reload",
+            "the first bootstrap run must stop before ARM instead of deploying with a stale URI/empty audience");
+    }
+
+    [Theory]
     [InlineData("azd-hooks", "postprovision.ps1")]
     [InlineData("azd-hooks", "postprovision.sh")]
     public void PostprovisionHooks_InvokeIdentitySetupFailClosed(string dir, string file)
@@ -261,11 +285,158 @@ public sealed partial class McpGatewayDeploymentContractTests
         script.Should().Contain("Application.ReadWrite.All").And.Contain("AppRoleAssignment.ReadWrite.All");
         script.Should().Contain("RetailPulse.Mcp.Invoke").And.Contain("RetailPulse.User");
         script.Should().Contain("api://retailpulse-mcp-gateway");
+        script.Should().Contain("requestedAccessTokenVersion").And.Contain("= 2");
+        script.Should().Contain("AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER");
+        script.Should().Contain("AZURE_MCP_GATEWAY_AUDIENCE $gatewayAudience");
         script.Should().Contain("AZURE_MCP_GATEWAY_APIM_CLIENT_ID");
         script.Should().Contain("allowedMemberTypes").And.Contain("Application");
         script.Should().Contain("already present");
         script.Should().NotContainEquivalentOf("addPassword").And.NotContainEquivalentOf("client_secret").And.NotContainEquivalentOf("passwordCredentials");
         script.Should().Contain("-lt 5").And.Contain("Start-Sleep -Seconds 10").And.Contain("-lt 3");
+    }
+
+    [Fact]
+    public void IdentityScript_CreatePath_RequestsV2AndEmitsDistinctResourceAndAudience()
+    {
+        if (!CommandExists("pwsh")) return;
+        string output = RunBootstrapHarness(existingApp: false);
+
+        output.Should().Contain("APPLICATION_POST=");
+        output.Should().Contain("\"identifierUris\":[\"api://retailpulse-mcp-gateway\"]");
+        output.Should().Contain("\"requestedAccessTokenVersion\":2");
+        output.Should().Contain("AZD env set AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER api://retailpulse-mcp-gateway");
+        output.Should().Contain("AZD env set AZURE_MCP_GATEWAY_AUDIENCE 11111111-1111-1111-1111-111111111111");
+    }
+
+    [Fact]
+    public void IdentityScript_ExistingPath_RepairsV1WithoutDuplicatingAppOrRole()
+    {
+        if (!CommandExists("pwsh")) return;
+        string output = RunBootstrapHarness(existingApp: true);
+
+        output.Should().NotContain("APPLICATION_POST=");
+        output.Should().Contain("APPLICATION_PATCH=");
+        output.Should().Contain("\"requestedAccessTokenVersion\":2");
+        output.Should().NotContain("\"appRoles\"", "the existing application-only invoke role must not be duplicated");
+        output.Should().Contain("AZD env set AZURE_MCP_GATEWAY_AUDIENCE 11111111-1111-1111-1111-111111111111");
+    }
+
+    private static string RunBootstrapHarness(bool existingApp)
+    {
+        string temp = Path.Combine(Path.GetTempPath(), $"retail-pulse-mcp-identity-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(temp);
+        string log = Path.Combine(temp, "calls.log");
+        string harness = Path.Combine(temp, "harness.ps1");
+        string setup = Path.Combine(Root, "scripts", "Setup-McpGatewayIdentity.ps1");
+
+        string content = $$"""
+            $ErrorActionPreference = 'Stop'
+            $log = '{{log.Replace("'", "''")}}'
+            $existingApp = {{(existingApp ? "$true" : "$false")}}
+            if ($existingApp) {
+                $existingResponse = @{
+                    value = @(@{
+                        id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+                        appId = '11111111-1111-1111-1111-111111111111'
+                        api = @{ requestedAccessTokenVersion = 1 }
+                        appRoles = @(@{
+                            id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+                            allowedMemberTypes = @('Application')
+                            value = 'RetailPulse.Mcp.Invoke'
+                            isEnabled = $true
+                        })
+                    })
+                } | ConvertTo-Json -Depth 10 -Compress
+                $spResponse = @{
+                    value = @(@{ id = 'cccccccc-cccc-cccc-cccc-cccccccccccc' })
+                } | ConvertTo-Json -Depth 10 -Compress
+            }
+            else {
+                $existingResponse = @{ value = @() } | ConvertTo-Json -Compress
+                $spResponse = @{ value = @() } | ConvertTo-Json -Compress
+            }
+            function global:az {
+                $methodIndex = [Array]::IndexOf($args, '--method')
+                $urlIndex = [Array]::IndexOf($args, '--url')
+                $method = $args[$methodIndex + 1]
+                $url = $args[$urlIndex + 1]
+                $bodyIndex = [Array]::IndexOf($args, '--body')
+                if ($bodyIndex -ge 0) {
+                    $bodyPath = $args[$bodyIndex + 1].Substring(1)
+                    $body = Get-Content -Raw $bodyPath
+                }
+                if ($url -match '/applications\?') {
+                    $global:LASTEXITCODE = 0
+                    $existingResponse
+                    return
+                }
+                if ($method -eq 'POST' -and $url -match '/applications$') {
+                    Add-Content -Path $log -Value "APPLICATION_POST=$body"
+                    $global:LASTEXITCODE = 0
+                    @{
+                        id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+                        appId = '11111111-1111-1111-1111-111111111111'
+                    } | ConvertTo-Json -Compress
+                    return
+                }
+                if ($method -eq 'PATCH' -and $url -match '/applications/') {
+                    Add-Content -Path $log -Value "APPLICATION_PATCH=$body"
+                    $global:LASTEXITCODE = 0
+                    return
+                }
+                if ($method -eq 'GET' -and $url -match '/servicePrincipals\?') {
+                    $global:LASTEXITCODE = 0
+                    $spResponse
+                    return
+                }
+                if ($method -eq 'POST' -and $url -match '/servicePrincipals$') {
+                    $global:LASTEXITCODE = 0
+                    @{ id = 'cccccccc-cccc-cccc-cccc-cccccccccccc' } | ConvertTo-Json -Compress
+                    return
+                }
+                if ($method -eq 'GET' -and $url -match '/servicePrincipals/cccccccc-cccc-cccc-cccc-cccccccccccc') {
+                    $global:LASTEXITCODE = 0
+                    @{ id = 'cccccccc-cccc-cccc-cccc-cccccccccccc' } | ConvertTo-Json -Compress
+                    return
+                }
+                throw "Unexpected az call: $method $url"
+            }
+            function global:azd {
+                Add-Content -Path $log -Value "AZD $($args -join ' ')"
+                $global:LASTEXITCODE = 0
+            }
+            . '{{setup.Replace("'", "''")}}' -BootstrapOnly
+            Get-Content -Raw $log
+            """;
+
+        try
+        {
+            File.WriteAllText(harness, content);
+            using Process process = Process.Start(new ProcessStartInfo("pwsh")
+            {
+                ArgumentList = { "-NoProfile", "-File", harness },
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            })!;
+            string stdout = process.StandardOutput.ReadToEnd();
+            string stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            process.ExitCode.Should().Be(0, $"bootstrap harness failed: {stderr}\n{stdout}");
+            return stdout;
+        }
+        finally
+        {
+            Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    private static bool CommandExists(string command)
+    {
+        string executable = OperatingSystem.IsWindows() ? $"{command}.exe" : command;
+        return (Environment.GetEnvironmentVariable("PATH") ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Any(dir => File.Exists(Path.Combine(dir, executable)));
     }
 
     private static string FindRepoRoot()
