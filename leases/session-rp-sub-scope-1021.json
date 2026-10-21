@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-sub-scope-1021",
+  "sessionId": "rp-sub-scope-1021",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-21T12:48:43.818Z",
+  "lastHeartbeatAt": "2026-10-21T12:48:43.818Z",
+  "updatedAt": "2026-10-21T12:48:43.818Z",
+  "terminalReason": null,
+  "executionRef": null
+}
