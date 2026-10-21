@@ -150,6 +150,8 @@
                  documented policy source as a compatibility signal, with budget variables and 429
                  guards so earlier rate-limit-by-key or backend 429 responses are never mislabeled. -->
             <when condition="@(context.LastError != null &amp;&amp; context.Response.StatusCode == 429 &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-scope&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-mode&quot;) &amp;&amp; ((context.LastError.Source == &quot;token-limit-process-request-handler&quot; &amp;&amp; context.LastError.Reason == &quot;TokenLimitExceededAfterPrompt&quot;) || context.LastError.Source == &quot;llm-token-limit&quot;))">
+                <set-header name="x-tokens-consumed" exists-action="delete" />
+                <set-header name="x-rp-gw-tokens-consumed" exists-action="delete" />
                 <set-header name="x-rp-gw-quota" exists-action="override">
                     <value>throttled</value>
                 </set-header>

@@ -142,6 +142,11 @@ public sealed class BudgetedAIFunctionTests
         using var doc = JsonDocument.Parse((string)second!);
         doc.RootElement.TryGetProperty("budget_notice", out _).Should().BeTrue(
             "the second result exceeds the cumulative budget and is withheld");
+        string notice = doc.RootElement.GetProperty("budget_notice").GetString()!;
+        notice.Should().Contain("This tool result was withheld");
+        notice.Should().Contain("do not claim they cover data that was not returned");
+        notice.Should().NotContain("COMPLETE",
+            "crossing the byte budget does not prove the earlier results satisfy the request");
     }
 
     [Fact]

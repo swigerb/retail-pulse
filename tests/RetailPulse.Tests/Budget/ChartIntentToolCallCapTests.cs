@@ -139,10 +139,10 @@ public sealed class ChartIntentToolCallCapTests
         message.Should().NotContain("truncated", "the word 'truncated' primed the model to hallucinate a refusal narrative");
         message.Should().NotContain("placeholder", "the word 'placeholder' primed the model to describe zeros as fake");
         message.Should().NotContain("unavailable");
-        message.Should().Contain("COMPLETE",
-            "the cap notice must positively instruct the model that the results already gathered are complete");
-        message.Should().Contain("CreateChart",
-            "the cap notice must instruct the model to synthesise and call CreateChart");
+        message.Should().NotContain("COMPLETE",
+            "hitting a call cap does not prove that the gathered data satisfies the request");
+        message.Should().Contain("do not claim",
+            "the cap notice must fail closed instead of presenting partial data as complete");
     }
 
     [Fact]

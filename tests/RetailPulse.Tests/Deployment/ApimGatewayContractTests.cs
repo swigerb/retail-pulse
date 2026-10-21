@@ -437,7 +437,34 @@ public sealed partial class ApimGatewayContractTests
             .And.Contain("CallerCorrelationId")
             .And.Contain("ReturnedCorrelationId")
             .And.Contain("GatewayRequestIds")
+            .And.Contain("foreach ($call in @($body.gateway.calls))")
+            .And.Contain("$candidate = $call.gatewayRequestId")
             .And.Contain("Attempts = @($attemptTraces)");
+    }
+
+    [Fact]
+    public void PortfolioToolOverride_RemainsBelowGatewaySafetyDocumentLimit()
+    {
+        string program = File.ReadAllText(Path.Combine(RepoRoot, "src", "RetailPulse.Api", "Program.cs"));
+
+        program.Should().Contain("options.PerToolMaxResultChars[\"GetPortfolioDepletionStats\"] = 9_500")
+            .And.NotContain("options.PerToolMaxResultChars[\"GetPortfolioDepletionStats\"] = 20_000");
+    }
+
+    [Fact]
+    public void RuntimeToolContextBudget_RemainsBelowGatewaySafetyDocumentLimit()
+    {
+        string settings = File.ReadAllText(Path.Combine(RepoRoot, "src", "RetailPulse.Api", "appsettings.json"));
+        string program = File.ReadAllText(Path.Combine(RepoRoot, "src", "RetailPulse.Api", "Program.cs"));
+
+        settings.Should().Contain("\"MaxCumulativeChars\": 9500")
+            .And.NotContain("\"MaxCumulativeChars\": 24000");
+        program.Should().Contain("GatewayToolDocumentBudgetChatClient")
+            .And.Contain(".UseFunctionInvocation",
+                "the transport boundary must be registered inside function invocation so it sees follow-up tool messages");
+        program.IndexOf("GatewayToolDocumentBudgetChatClient", StringComparison.Ordinal).Should().BeLessThan(
+            program.IndexOf(".UseFunctionInvocation", StringComparison.Ordinal),
+            "builder ordering must place the gateway boundary directly around the transport");
     }
 
     [Fact]
