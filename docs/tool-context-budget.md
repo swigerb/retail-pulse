@@ -16,13 +16,19 @@ is the root of the six-figure token counts observed live.
 
 ## Design
 
-A single, typed compaction boundary is applied at the **one** place every specialist
-agent funnels through: `AgentExecutionPipeline` wraps each tool with
-`BudgetedAIFunction` (outermost, after the existing `TimedAIFunction` /
-`InstrumentedAIFunction`). Wrapping there covers the entire tool catalog automatically.
+Two typed boundaries cover both semantic compaction and the exact gateway artifact:
+
+1. `AgentExecutionPipeline` wraps each tool with `BudgetedAIFunction` (outermost,
+   after the existing `TimedAIFunction` / `InstrumentedAIFunction`). This preserves
+   useful summaries before results enter the transcript.
+2. `GatewayToolDocumentBudgetChatClient` sits directly around the Azure OpenAI
+   transport, inside `FunctionInvokingChatClient`. It measures the complete outgoing
+   tool-message sequence for each model turn and bounds a cloned request to at most
+   **5 non-empty tool documents / 9,500 aggregate characters**.
 
 ```
 raw AIFunction → Timed/Instrumented → Budgeted (outermost) → ChatOptions.Tools
+FunctionInvokingChatClient → GatewayToolDocumentBudgetChatClient → APIM
 ```
 
 For each tool result, in order:
@@ -53,13 +59,18 @@ For each tool result, in order:
      A tiny (`≤256 char`) opaque `diagnostic_preview.excerpt` may appear for debugging
      only when the per-result budget leaves headroom, and is clearly labeled as
      non-parseable. Always valid JSON, never silent loss, never a partial-looking result.
-4. **Cumulative per-request budget** (`MaxCumulativeChars`) — once the running total of
-   returned characters would exceed the cap, further results are replaced by a compact
-   diagnostic that tells the model to synthesize from what it already has.
+4. **Cumulative request guidance** (`MaxCumulativeChars`) — the tool wrapper avoids
+   unnecessary fan-out early. The transport boundary is the authoritative enforcement:
+   it counts every actual outgoing occurrence, including dedup hits, diagnostics, and
+   exempt tools. If the sequence exceeds APIM's contract, it preserves the earliest
+   substantive results that fit, emits one truthful bounded notice, and blanks later
+   protocol-required results so APIM does not count fabricated or repeated documents.
 
 Exempt tools (`CreateChart`) carry a canonical payload the frontend renders
-(`ChartSpec`), so they pass through **byte-for-byte** and do **not** count toward the
-cumulative budget. The canonical `ChartSpec` is never compacted or truncated.
+(`ChartSpec`), so the original transcript retains them **byte-for-byte** for frontend
+reconstruction. They are not exempt from the gateway request contract: the transport
+boundary may replace the model-facing cloned copy with a truthful notice when it would
+cross the aggregate limit.
 
 ## Configuration
 
@@ -68,9 +79,9 @@ boundary is active even without configuration):
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Enabled` | `true` | Master switch. When false, results pass through unchanged. |
+| `Enabled` | `true` | Semantic tool-result compaction switch. The hard transport ceiling remains active when false. |
 | `MaxResultChars` | `6000` | Max serialized chars for a single result before compaction. |
-| `MaxCumulativeChars` | `9500` | Max cumulative chars of all tool results in one request. Kept below APIM Content Safety's 10,000-character aggregate document limit so model follow-up requests remain valid. |
+| `MaxCumulativeChars` | `9500` | Max aggregate chars of non-empty tool documents in one model request. The transport also hard-caps this at 9,500 even if configuration is raised accidentally. |
 | `MaxToolCalls` | `8` | Max distinct (non-deduplicated) tool invocations per request. |
 | `CharsPerToken` | `4` | Divisor for the estimated-token telemetry. |
 | `MaxArrayItems` | `24` | Max elements kept by the generic array compactor. |
@@ -106,7 +117,8 @@ independently compacted and bounded by request dedup and the cumulative budget.
 `BudgetedAIFunction` emits one structured log per tool result carrying **sizes/flags
 only — never payload content or PII**: `originalChars`, `returnedChars`, `estTokens`,
 `origItems`/`retItems`, and the `compacted` / `truncated` / `dedup` / `exempt` /
-`budgetExceeded` flags plus `durationMs`. Cost-dashboard semantics remain truthful.
+`budgetExceeded` flags plus `durationMs`. The gateway boundary logs only document and
+character counts when it withholds results. Cost-dashboard semantics remain truthful.
 
 ## Measured impact (deterministic, single occurrence)
 

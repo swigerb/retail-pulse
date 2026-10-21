@@ -455,9 +455,16 @@ public sealed partial class ApimGatewayContractTests
     public void RuntimeToolContextBudget_RemainsBelowGatewaySafetyDocumentLimit()
     {
         string settings = File.ReadAllText(Path.Combine(RepoRoot, "src", "RetailPulse.Api", "appsettings.json"));
+        string program = File.ReadAllText(Path.Combine(RepoRoot, "src", "RetailPulse.Api", "Program.cs"));
 
         settings.Should().Contain("\"MaxCumulativeChars\": 9500")
             .And.NotContain("\"MaxCumulativeChars\": 24000");
+        program.Should().Contain("GatewayToolDocumentBudgetChatClient")
+            .And.Contain(".UseFunctionInvocation",
+                "the transport boundary must be registered inside function invocation so it sees follow-up tool messages");
+        program.IndexOf("GatewayToolDocumentBudgetChatClient", StringComparison.Ordinal).Should().BeLessThan(
+            program.IndexOf(".UseFunctionInvocation", StringComparison.Ordinal),
+            "builder ordering must place the gateway boundary directly around the transport");
     }
 
     [Fact]

@@ -9,16 +9,19 @@ public sealed class ToolResultBudgetOptions
 {
     public const string SectionName = "ToolResultBudget";
 
-    /// <summary>Master switch. When false the boundary passes tool results through unchanged.</summary>
+    /// <summary>
+    /// Semantic compaction switch. The transport-level APIM document safety ceiling
+    /// remains active when false.
+    /// </summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>Maximum serialized characters allowed for a single tool result before compaction.</summary>
     public int MaxResultChars { get; set; } = 6_000;
 
     /// <summary>
-    /// Maximum cumulative serialized characters of all tool results within one request.
-    /// Once exceeded, further tool results are replaced with a compact diagnostic so the
-    /// model context cannot explode.
+    /// Maximum aggregate characters of the tool documents sent in one gateway request.
+    /// The transport boundary applies this to the actual outgoing message sequence,
+    /// including repeated, diagnostic, and exempt results.
     /// </summary>
     public int MaxCumulativeChars { get; set; } = 9_500;
 

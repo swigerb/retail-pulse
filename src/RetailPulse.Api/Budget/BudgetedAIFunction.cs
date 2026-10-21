@@ -18,8 +18,10 @@ namespace RetailPulse.Api.Budget;
 ///   <item>Cumulative per-request budget — once exceeded, further results are replaced by a
 ///   compact diagnostic.</item>
 /// </list>
-/// Exempt tools (e.g. <c>CreateChart</c>) pass through untouched and do not count toward
-/// the cumulative budget, so the canonical ChartSpec the frontend needs is never compacted.
+/// Exempt tools (e.g. <c>CreateChart</c>) pass through untouched so the canonical ChartSpec
+/// remains available to frontend reconstruction. The transport-level
+/// <see cref="GatewayToolDocumentBudgetChatClient"/> separately bounds the cloned request
+/// sent to APIM, including exempt and repeated results.
 /// Telemetry records sizes/flags only — never payload content.
 /// </summary>
 internal sealed class BudgetedAIFunction : AIFunction
@@ -224,9 +226,8 @@ internal sealed class BudgetedAIFunction : AIFunction
     /// </summary>
     internal static string BuildBudgetCapNotice(int cap) =>
         $"Tool-call budget reached ({cap} distinct calls). "
-        + "The aggregate results already gathered are COMPLETE and sufficient to answer "
-        + "this request — synthesize the answer from them and call CreateChart. Do not "
-        + "call more tools. Do not describe the data as missing.";
+        + "Do not call more tools. Use only the results already present, and do not claim "
+        + "they cover data that was not returned.";
 
     private void EmitTelemetry(ToolResultMetrics m)
     {
