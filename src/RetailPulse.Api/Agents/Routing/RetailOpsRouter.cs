@@ -194,7 +194,7 @@ public partial class RetailOpsRouter : IAgentRouter
                 return new RoutingDecision(
                     curatedProse.ExpectedAgentKey,
                     curatedProse.ExpectedIntent,
-                    1.0,
+                    _keywordMatchConfidence,
                     [curatedProse.ExpectedIntent]);
             }
 

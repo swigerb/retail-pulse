@@ -95,6 +95,35 @@ function Measure-Marks($chart) {
     return $n
 }
 
+function Get-HeaderValue($headers, [string]$name) {
+    $value = $headers[$name]
+    if ($null -eq $value) { return $null }
+    return [string]($value | Select-Object -First 1)
+}
+
+function Get-GatewayRequestIds($body, $headers) {
+    $ids = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $headerId = Get-HeaderValue $headers 'x-rp-gw-request-id'
+    if (-not [string]::IsNullOrWhiteSpace($headerId)) { $ids.Add($headerId) | Out-Null }
+    foreach ($span in @($body.spans)) {
+        foreach ($candidate in @(
+                $span.gatewayRequestId,
+                $span.gateway.gatewayRequestId,
+                $span.gatewayEvidence.gatewayRequestId,
+                $span.metadata.gatewayRequestId)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$candidate)) {
+                $ids.Add([string]$candidate) | Out-Null
+            }
+        }
+    }
+    foreach ($candidate in @($body.gatewayRequestIds)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$candidate)) {
+            $ids.Add([string]$candidate) | Out-Null
+        }
+    }
+    return @($ids)
+}
+
 $token = Get-Token
 $results = [System.Collections.Generic.List[object]]::new()
 $i = 0
@@ -111,6 +140,7 @@ Write-Host ""
 foreach ($p in $prompts) {
     $i++
     $failures = [System.Collections.Generic.List[string]]::new()
+    $attemptTraces = [System.Collections.Generic.List[object]]::new()
     $cacheHit = $false
     $status = 0; $body = $null; $chartTypes = ''; $marks = 0; $agent = ''; $toolCalls = 0
 
@@ -120,14 +150,23 @@ foreach ($p in $prompts) {
         if ($wait -gt [TimeSpan]::Zero) { Start-Sleep -Milliseconds $wait.TotalMilliseconds }
 
         $status = 0; $body = $null
+        $callerCorrelationId = [guid]::NewGuid().ToString()
         try {
             $lastSent = [datetime]::UtcNow
             $resp = Invoke-WebRequest -Method Post -Uri "$ApiOrigin/api/chat" `
-                -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json'; Accept = 'application/json' } `
+                -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json'; Accept = 'application/json'; 'X-Correlation-ID' = $callerCorrelationId } `
                 -Body (@{ message = $p.P } | ConvertTo-Json -Compress) `
                 -SkipHttpErrorCheck -TimeoutSec $TimeoutSec
             $status = [int]$resp.StatusCode
-            if ($status -eq 200) { $body = $resp.Content | ConvertFrom-Json; break }
+            try { $body = $resp.Content | ConvertFrom-Json } catch { $body = $null }
+            $attemptTraces.Add([pscustomobject]@{
+                    Attempt = $attempt
+                    CallerCorrelationId = $callerCorrelationId
+                    ReturnedCorrelationId = Get-HeaderValue $resp.Headers 'X-Correlation-ID'
+                    GatewayRequestIds = @(Get-GatewayRequestIds $body $resp.Headers)
+                    Status = $status
+                })
+            if ($status -eq 200) { break }
             if ($status -eq 429) {
                 $retryAfter = 20
                 if ($resp.Headers['Retry-After']) { [int]::TryParse(($resp.Headers['Retry-After'] | Select-Object -First 1), [ref]$retryAfter) | Out-Null }
@@ -141,7 +180,17 @@ foreach ($p in $prompts) {
             if ($errBody) { $failures.Add("HTTP $status body: $($errBody.Substring(0,[Math]::Min(300,$errBody.Length)))") }
             break
         }
-        catch { $failures.Add("transport: $($_.Exception.Message)"); break }
+        catch {
+            $attemptTraces.Add([pscustomobject]@{
+                    Attempt = $attempt
+                    CallerCorrelationId = $callerCorrelationId
+                    ReturnedCorrelationId = $null
+                    GatewayRequestIds = @()
+                    Status = 0
+                })
+            $failures.Add("transport: $($_.Exception.Message)")
+            break
+        }
     }
 
     if ($status -ne 200) {
@@ -195,6 +244,10 @@ foreach ($p in $prompts) {
             Status = $status; Agent = $agent; ToolCalls = $toolCalls; CacheHit = $cacheHit
             ExpectedChart = $p.Chart; ChartTypes = $chartTypes; Marks = $marks
             Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+            CallerCorrelationId = if ($attemptTraces.Count) { $attemptTraces[-1].CallerCorrelationId } else { $null }
+            ReturnedCorrelationId = if ($attemptTraces.Count) { $attemptTraces[-1].ReturnedCorrelationId } else { $null }
+            GatewayRequestIds = if ($attemptTraces.Count) { @($attemptTraces[-1].GatewayRequestIds) } else { @() }
+            Attempts = @($attemptTraces)
             Failures = ($failures -join '; ')
         })
 

@@ -45,6 +45,7 @@ public class ToolPrefetchServiceTests
 #pragma warning restore CS0618
         var depletionStatsTool = new DepletionStatsTool(httpClient);
         var portfolioDepletionStatsTool = new PortfolioDepletionStatsTool(httpClient);
+        var marketShareTool = new MarketShareTool(httpClient);
 
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var toolCache = new ToolResultCache(
@@ -57,6 +58,7 @@ public class ToolPrefetchServiceTests
             seasonalityTool,
             depletionStatsTool,
             portfolioDepletionStatsTool,
+            marketShareTool,
             toolCache,
             NullLogger<ToolPrefetchService>.Instance);
     }
@@ -194,6 +196,19 @@ public class ToolPrefetchServiceTests
             AgentIntent.General, PrefetchEntities.Empty, prompt);
 
         results.Keys.Should().Equal("GetPortfolioDepletionStats");
+    }
+
+    [Fact]
+    public async Task PrefetchAsync_CuratedGroceryPie_PrefetchesNationalMarketShare()
+    {
+        const string prompt =
+            "Create a pie chart showing market share breakdown for our grocery brands nationally";
+
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(
+            AgentIntent.CompetitiveMarket, _sut.ExtractEntities(prompt), prompt);
+
+        results.Keys.Should().Equal("GetMarketShare");
+        results["GetMarketShare"].Should().Contain("FreshMart").And.Contain("Harvest Table");
     }
 
     [Fact]
@@ -398,6 +413,8 @@ public class ToolPrefetchServiceTests
             """{"brand":"Test Brand","region":"Northeast","period":"YTD","metrics":{"depletions_yoy":"+3.2%","sell_through_yoy":"+2.1%","inventory_weeks_on_hand":7.2}}""",
         "/api/portfolio-depletion-stats" => /*lang=json,strict*/
             """{"region":"National","period":"YTD","brands":[{"brand":"Test Brand A","depletions_yoy":"+3.2%"},{"brand":"Test Brand B","depletions_yoy":"+1.4%"}]}""",
+        "/api/competitive/market-share" => /*lang=json,strict*/
+            """[{"quarter":"2026-Q2","brand":"FreshMart","share":26.9,"isOurBrand":true},{"quarter":"2026-Q2","brand":"Harvest Table","share":26.9,"isOurBrand":true}]""",
         _ => /*lang=json,strict*/ """{"data":"mock"}""",
     };
 

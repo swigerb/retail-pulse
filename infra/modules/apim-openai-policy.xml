@@ -145,10 +145,11 @@
             <value>{backend-id}</value>
         </set-header>
         <choose>
-            <!-- APIM reports llm-token-limit exhaustion as RateLimitExceeded, but the LastError source is
-                 not stable across gateway versions. Budget variables plus the 429/reason identify this
-                 limiter without misclassifying the earlier failover-demo rate limits or backend errors. -->
-            <when condition="@(context.LastError != null &amp;&amp; context.Response.StatusCode == 429 &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-scope&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-mode&quot;) &amp;&amp; (context.LastError.Source == &quot;llm-token-limit&quot; || context.LastError.Reason == &quot;RateLimitExceeded&quot;))">
+            <!-- Consumption-time llm-token-limit rejection is reported by the v2 gateway as
+                 token-limit-process-request-handler / TokenLimitExceededAfterPrompt. Retain the
+                 documented policy source as a compatibility signal, with budget variables and 429
+                 guards so earlier rate-limit-by-key or backend 429 responses are never mislabeled. -->
+            <when condition="@(context.LastError != null &amp;&amp; context.Response.StatusCode == 429 &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-scope&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-budget-mode&quot;) &amp;&amp; ((context.LastError.Source == &quot;token-limit-process-request-handler&quot; &amp;&amp; context.LastError.Reason == &quot;TokenLimitExceededAfterPrompt&quot;) || context.LastError.Source == &quot;llm-token-limit&quot;))">
                 <set-header name="x-rp-gw-quota" exists-action="override">
                     <value>throttled</value>
                 </set-header>
@@ -180,11 +181,6 @@
                             <value>@(System.Convert.ToString(context.Variables["rp-tokens-remaining"]))</value>
                         </set-header>
                     </when>
-                    <otherwise>
-                        <set-header name="x-rp-gw-tokens-remaining" exists-action="override">
-                            <value>0</value>
-                        </set-header>
-                    </otherwise>
                 </choose>
             </when>
         </choose>

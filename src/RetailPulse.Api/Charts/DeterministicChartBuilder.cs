@@ -685,11 +685,10 @@ internal static class DeterministicChartBuilder
 
         foreach (JsonElement payload in payloads)
         {
-            if (payload.ValueKind != JsonValueKind.Object)
-                continue;
-
             // Variant mix: variants[].variant + mix_percent.
-            if (payload.TryGetProperty("variants", out JsonElement variants) && variants.ValueKind == JsonValueKind.Array)
+            if (payload.ValueKind == JsonValueKind.Object
+                && payload.TryGetProperty("variants", out JsonElement variants)
+                && variants.ValueKind == JsonValueKind.Array)
             {
                 var points = new List<ChartDataPoint>();
                 foreach (JsonElement v in variants.EnumerateArray())
@@ -712,17 +711,38 @@ internal static class DeterministicChartBuilder
                 }
             }
 
-            // Market share: share_data[].brand + share_percent.
-            if (payload.TryGetProperty("share_data", out JsonElement shareData) && shareData.ValueKind == JsonValueKind.Array)
+            // Market share: raw MCP payloads use share_data[].share_percent; the typed API tool
+            // returns a projected array with share. Support both without asking the model to reshape.
+            JsonElement shareData = default;
+            bool hasShareData = payload.ValueKind == JsonValueKind.Array
+                || (payload.ValueKind == JsonValueKind.Object
+                    && payload.TryGetProperty("share_data", out shareData)
+                    && shareData.ValueKind == JsonValueKind.Array);
+            if (hasShareData)
             {
+                if (payload.ValueKind == JsonValueKind.Array)
+                {
+                    shareData = payload;
+                }
                 var points = new List<ChartDataPoint>();
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (JsonElement s in shareData.EnumerateArray())
                 {
-                    if (s.ValueKind != JsonValueKind.Object) continue;
+                    if (s.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
                     string? label = ReadNestedString(s, "brand");
-                    if (string.IsNullOrWhiteSpace(label) || !seen.Add(label)) continue;
-                    if (!TryReadDouble(s, "share_percent", out double share) || !double.IsFinite(share)) continue;
+                    if (string.IsNullOrWhiteSpace(label) || !seen.Add(label))
+                    {
+                        continue;
+                    }
+                    if ((!TryReadDouble(s, "share_percent", out double share)
+                            && !TryReadDouble(s, "share", out share))
+                        || !double.IsFinite(share))
+                    {
+                        continue;
+                    }
                     points.Add(new ChartDataPoint { X = label, Y = Math.Round(share, 1) });
                 }
                 if (points.Count >= 2)

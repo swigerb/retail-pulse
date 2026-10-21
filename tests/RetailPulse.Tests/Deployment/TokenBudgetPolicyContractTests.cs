@@ -145,12 +145,15 @@ public sealed partial class TokenBudgetPolicyContractTests
     {
         string onError = Base[Base.IndexOf("<on-error>", StringComparison.Ordinal)..];
         onError.Should().Contain("context.LastError.Source == &quot;llm-token-limit&quot;");
-        onError.Should().Contain("context.LastError.Reason == &quot;RateLimitExceeded&quot;")
+        onError.Should().Contain("context.LastError.Source == &quot;token-limit-process-request-handler&quot;")
+            .And.Contain("context.LastError.Reason == &quot;TokenLimitExceededAfterPrompt&quot;")
             .And.Contain("context.Response.StatusCode == 429")
+            .And.Contain("context.Variables.ContainsKey(&quot;rp-budget-scope&quot;)")
+            .And.Contain("context.Variables.ContainsKey(&quot;rp-budget-mode&quot;)")
             .And.Contain("context.Response.Headers.GetValueOrDefault(&quot;Retry-After&quot;, &quot;&quot;)");
         onError.Should().Contain("x-rp-gw-retry-after").And.Contain("^[0-9]{1,6}$");
         onError.Should().Contain("x-rp-gw-tokens-remaining").And.Contain("^[0-9]{1,12}$")
-            .And.Contain("<value>0</value>", "a verified pre-backend limiter rejection has no remaining admission budget");
+            .And.NotContain("<value>0</value>", "insufficient budget for one request does not prove the measured counter is zero");
         onError.Should().NotContain("x-rp-gw-tokens-consumed").And.NotContain("x-tokens-consumed");
         Normal.Should().Contain("retry-after-variable-name=\"rp-budget-retry-after\"");
         Normal.Should().Contain("remaining-tokens-variable-name=\"rp-tokens-remaining\"");

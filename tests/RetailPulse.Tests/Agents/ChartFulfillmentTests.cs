@@ -522,6 +522,27 @@ public sealed class ChartFulfillmentTests
             .And.Contain(x => x.Contains("Summit Outdoor", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void EnforceChartFulfillment_ReconstructsCuratedMarketSharePie_FromProjectedToolPayload()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults();
+        PrefetchEntry[] prefetched =
+        [
+            PrefetchEntry.Complete("GetMarketShare",
+                /*lang=json,strict*/ """[{"quarter":"2026-Q2","brand":"FreshMart","share":26.9,"isOurBrand":true},{"quarter":"2026-Q2","brand":"Harvest Table","share":26.9,"isOurBrand":true}]"""),
+        ];
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a pie chart showing market share breakdown for our grocery brands nationally",
+            response, [], "Here is the breakdown.", prefetched);
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be("pie");
+        result.Charts[0].Data.SelectMany(s => s.Values).Select(v => v.X)
+            .Should().BeEquivalentTo(["FreshMart", "Harvest Table"]);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static AgentExecutionPipeline CreatePipeline()

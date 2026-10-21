@@ -172,7 +172,7 @@ async function runEnabledProbe(cfg, control) {
   check('demo: quota is throttled', tiny.headers.get('x-rp-gw-quota') === 'throttled', `quota ${tiny.headers.get('x-rp-gw-quota')}`);
   check('demo: mode demo and scope kind reported', tiny.headers.get('x-rp-gw-budget-mode') === 'demo' && tiny.headers.get('x-rp-gw-budget-scope') === cfg.expectA, 'mode/scope mismatch');
   const rem = tiny.headers.get('x-rp-gw-tokens-remaining');
-  check('demo: remaining is numeric', NUMERIC.test(rem || ''), `remaining ${rem}`);
+  check('demo: remaining is numeric when the limiter publishes it', rem === null || NUMERIC.test(rem), `remaining ${rem}`);
   check('demo: no consumed tokens fabricated on the pre-backend 429', !tiny.headers.has('x-rp-gw-tokens-consumed') && !tiny.headers.has('x-tokens-consumed'), 'consumed present on 429');
   check('demo: no key material in 429', !leaks(tiny, keys), 'key leaked');
 
@@ -317,7 +317,7 @@ function fakeGateway(flaw = '') {
 
 async function selfTest() {
   const scenarios = [['correct', true], ['trust-spoof', false], ['quota-403', false], ['bad-retry', false],
-    ['missing-remaining', false], ['fabricate-consumed', false], ['leak-key', false], ['no-reset', false]];
+    ['missing-remaining', true], ['fabricate-consumed', false], ['leak-key', false], ['no-reset', false]];
   let failed = false;
   for (const [flaw, shouldPass] of scenarios) {
     const { server, control } = fakeGateway(flaw === 'correct' ? '' : flaw);

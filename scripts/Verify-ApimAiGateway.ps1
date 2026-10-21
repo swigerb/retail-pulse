@@ -80,7 +80,7 @@ param(
     [string]$SecondaryAiFoundryResourceGroup = $(if ($env:AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME) { $env:AZURE_OPENAI_SECONDARY_RESOURCE_GROUP_NAME } else { 'rg-repodigest-agents-demo-eus-001' }),
     [switch]$GatewaySafetyEnabled = ($env:AZURE_APIM_GATEWAY_SAFETY_ENABLED -eq 'true'),
     [string]$ContentSafetyAccountName = $env:AZURE_CONTENT_SAFETY_NAME,
-    [string]$ContentSafetyResourceGroup = $(if ($env:AZURE_CONTENT_SAFETY_RESOURCE_GROUP_NAME) { $env:AZURE_CONTENT_SAFETY_RESOURCE_GROUP_NAME } else { $env:AZURE_RESOURCE_GROUP }),
+    [string]$ContentSafetyResourceGroup = $env:AZURE_CONTENT_SAFETY_RESOURCE_GROUP_NAME,
     [switch]$SelfTest
 )
 
@@ -180,6 +180,16 @@ function Test-SafetyPolicyOrder([string]$policy) {
 function Resolve-GatewaySafetyEnabled([bool]$WasSupplied, [bool]$SuppliedValue, [string]$Policy) {
     if ($WasSupplied) { return $SuppliedValue }
     return Test-SafetyPolicyOrder $Policy
+}
+
+function Resolve-ContentSafetyAccountName([string]$Policy) {
+    if ([string]::IsNullOrWhiteSpace($Policy)) { return $null }
+    $match = [regex]::Match(
+        $Policy,
+        'https://(?<name>[a-z0-9-]+)\.cognitiveservices\.azure\.com/contentsafety/',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $match.Success) { return $null }
+    return $match.Groups['name'].Value
 }
 
 function Test-BodyBytesZero($section) {
@@ -336,6 +346,8 @@ function Invoke-SelfTest {
     _Expect 'safety profile: omitted flag infers enabled from rendered policy' (Resolve-GatewaySafetyEnabled $false $false $goodPolicy)
     _Expect 'safety profile: explicit false overrides policy inference' (-not (Resolve-GatewaySafetyEnabled $true $false $goodPolicy))
     _Expect 'safety profile: omitted flag stays disabled for a non-safety policy' (-not (Resolve-GatewaySafetyEnabled $false $false '<policies><inbound /></policies>'))
+    _Expect 'safety profile: Content Safety account derives from rendered endpoint' `
+        ((Resolve-ContentSafetyAccountName '<set-url>https://cs-live-123.cognitiveservices.azure.com/contentsafety/text:analyze</set-url>') -eq 'cs-live-123')
     $aiOk = @{ frontend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } }; backend = @{ request = @{ body = @{ bytes = 0 } }; response = @{ body = @{ bytes = 0 } } } }
     $monOk = @{ largeLanguageModel = @{ logs = 'disabled'; requests = @{ messages = 'all' }; responses = @{ messages = 'all' } } }
     _Expect 'safety diagnostics: zero body/message capture passes' (Test-SafetyDiagnosticsBodyFree $aiOk $monOk)
@@ -399,6 +411,23 @@ $effectiveGatewaySafetyEnabled = Resolve-GatewaySafetyEnabled `
     $gatewaySafetyProfileSupplied ([bool]$GatewaySafetyEnabled) $policyValue
 if (-not $gatewaySafetyProfileSupplied) {
     Write-Host ("  gatewaySafety       = {0} (inferred from rendered policy)" -f $effectiveGatewaySafetyEnabled)
+}
+if ($effectiveGatewaySafetyEnabled -and [string]::IsNullOrWhiteSpace($ContentSafetyAccountName)) {
+    $ContentSafetyAccountName = Resolve-ContentSafetyAccountName $policyValue
+}
+if ($effectiveGatewaySafetyEnabled -and -not [string]::IsNullOrWhiteSpace($ContentSafetyAccountName) -and
+    [string]::IsNullOrWhiteSpace($ContentSafetyResourceGroup)) {
+    $sameGroupAccount = Invoke-ArmGet "/resourceGroups/$ResourceGroup/providers/Microsoft.CognitiveServices/accounts/$ContentSafetyAccountName?api-version=2023-05-01"
+    if ($null -ne $sameGroupAccount) {
+        $ContentSafetyResourceGroup = $ResourceGroup
+    }
+    else {
+        $accounts = Invoke-ArmGet "/providers/Microsoft.CognitiveServices/accounts?api-version=2023-05-01"
+        $match = @($accounts.value | Where-Object { $_.name -ieq $ContentSafetyAccountName })
+        if ($match.Count -eq 1) {
+            $ContentSafetyResourceGroup = ($match[0].id -split '/resourceGroups/')[1].Split('/')[0]
+        }
+    }
 }
 $routeBackendId = if ($BackendPoolEnabled) { 'retail-pulse-foundry-pool' } else { 'retail-pulse-foundry' }
 Assert "policy: sets backend service ($routeBackendId)" { $policyValue -match ('<set-backend-service\s+backend-id="' + [regex]::Escape($routeBackendId) + '"') } 'policy did not reference the AOAI backend'

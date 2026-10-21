@@ -20,6 +20,7 @@ public partial class ToolPrefetchService
     private readonly SeasonalityFactorsTool _seasonalityTool;
     private readonly DepletionStatsTool _depletionStatsTool;
     private readonly PortfolioDepletionStatsTool _portfolioDepletionStatsTool;
+    private readonly MarketShareTool _marketShareTool;
 #pragma warning restore CS0618
     private readonly ToolResultCache _toolCache;
     private readonly ILogger<ToolPrefetchService> _logger;
@@ -65,6 +66,7 @@ public partial class ToolPrefetchService
         SeasonalityFactorsTool seasonalityTool,
         DepletionStatsTool depletionStatsTool,
         PortfolioDepletionStatsTool portfolioDepletionStatsTool,
+        MarketShareTool marketShareTool,
         ToolResultCache toolCache,
         ILogger<ToolPrefetchService> logger)
     {
@@ -72,6 +74,7 @@ public partial class ToolPrefetchService
         _seasonalityTool = seasonalityTool;
         _depletionStatsTool = depletionStatsTool;
         _portfolioDepletionStatsTool = portfolioDepletionStatsTool;
+        _marketShareTool = marketShareTool;
         _toolCache = toolCache;
         _logger = logger;
     }
@@ -312,6 +315,16 @@ public partial class ToolPrefetchService
                 break;
 
             case ChartDataSource.MarketShare:
+                calls.Add((
+                    "GetMarketShare",
+                    _marketShareTool.GetMarketShare(
+                        brand: null,
+                        category: entities.Category ?? "Grocery",
+                        region: entities.Region ?? "National",
+                        period: null,
+                        cancellationToken: ct)));
+                break;
+
             case ChartDataSource.VariantMix:
             case ChartDataSource.InventoryLevels:
                 break;
@@ -364,19 +377,22 @@ public partial class ToolPrefetchService
         {
             using var doc = JsonDocument.Parse(payload);
             JsonElement root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object
-                || root.TryGetProperty("error", out _)
-                || (root.TryGetProperty("status", out JsonElement status)
-                    && status.ValueKind == JsonValueKind.String
-                    && string.Equals(status.GetString(), "degraded", StringComparison.OrdinalIgnoreCase))
-                || (root.TryGetProperty("complete", out JsonElement complete)
-                    && complete.ValueKind == JsonValueKind.False))
+            string toolName = key.Split(':', 2)[0];
+            bool projectedMarketShare = toolName == "GetMarketShare" && root.ValueKind == JsonValueKind.Array;
+            bool supportedRoot = projectedMarketShare || root.ValueKind == JsonValueKind.Object;
+            if (!supportedRoot)
             {
                 return false;
             }
+            bool invalidMetadata = root.ValueKind == JsonValueKind.Object
+                && (root.TryGetProperty("error", out _)
+                    || (root.TryGetProperty("status", out JsonElement status)
+                        && status.ValueKind == JsonValueKind.String
+                        && string.Equals(status.GetString(), "degraded", StringComparison.OrdinalIgnoreCase))
+                    || (root.TryGetProperty("complete", out JsonElement complete)
+                        && complete.ValueKind == JsonValueKind.False));
 
-            string toolName = key.Split(':', 2)[0];
-            return toolName switch
+            return !invalidMetadata && (toolName switch
             {
                 "GetHistoricalDemand" =>
                     root.TryGetProperty("summary", out JsonElement summary)
@@ -396,8 +412,14 @@ public partial class ToolPrefetchService
                     root.TryGetProperty("brands", out JsonElement brands)
                     && brands.ValueKind == JsonValueKind.Array
                     && brands.GetArrayLength() > 0,
+                "GetMarketShare" =>
+                    (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() >= 2)
+                    || (root.ValueKind == JsonValueKind.Object
+                        && root.TryGetProperty("share_data", out JsonElement shareData)
+                        && shareData.ValueKind == JsonValueKind.Array
+                        && shareData.GetArrayLength() >= 2),
                 _ => false,
-            };
+            });
         }
         catch (JsonException)
         {

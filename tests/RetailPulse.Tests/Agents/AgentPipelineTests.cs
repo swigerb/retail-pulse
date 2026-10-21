@@ -179,6 +179,100 @@ public class AgentPipelineTests
         response.Reply.Should().Be("Custom fallback");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_CompleteCuratedPrefetch_RemovesToolsAndBuildsChart(bool withProgress)
+    {
+        ChatOptions? observedOptions = null;
+        var chatClient = new Mock<IChatClient>();
+        chatClient
+            .Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((_, options, _) => observedOptions = options)
+            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant, "Here is the comparison.")));
+
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        var pipeline = new AgentExecutionPipeline(
+            chatClient.Object,
+            AgentTestFixtures.CreateMockHubContext(),
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+        AIFunction tool = AIFunctionFactory.Create(
+            (string brand) => brand,
+            "GetHistoricalDemand");
+        const string prompt = "Compare Coastline Tacos vs Apex Grill depletions across all regions";
+        var context = new AgentExecutionContext
+        {
+            AgentName = "test-agent",
+            SystemPrompt = "You are a test assistant.",
+            Temperature = 0.2f,
+            ModelName = "test-model",
+            Request = new ChatRequest(prompt),
+            Tools = [tool],
+            PrefetchedData = new Dictionary<string, string>
+            {
+                ["GetHistoricalDemand:Coastline Tacos"] = DemandPayload("Coastline Tacos", 900),
+                ["GetHistoricalDemand:Apex Grill"] = DemandPayload("Apex Grill", 700),
+            },
+        };
+
+        Contracts.ChatResponse response = withProgress
+            ? await pipeline.ExecuteWithProgressAsync(context)
+            : await pipeline.ExecuteAsync(context);
+
+        observedOptions.Should().NotBeNull();
+        observedOptions.Tools.Should().BeEmpty(
+            "a deterministically chart-complete prefetch must make further model tool calls impossible");
+        response.Charts.Should().ContainSingle();
+        response.Charts[0].Type.Should().Be("groupedBar");
+        response.Charts[0].Data.Select(s => s.Legend)
+            .Should().BeEquivalentTo(["Coastline Tacos", "Apex Grill"]);
+    }
+
+    [Fact]
+    public async Task Execute_IncompleteCuratedPrefetch_KeepsRecoveryToolsAvailable()
+    {
+        ChatOptions? observedOptions = null;
+        var chatClient = new Mock<IChatClient>();
+        chatClient
+            .Setup(x => x.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<ChatMessage>, ChatOptions, CancellationToken>((_, options, _) => observedOptions = options)
+            .ReturnsAsync(new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant, "I need the second brand.")));
+
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        var pipeline = new AgentExecutionPipeline(
+            chatClient.Object,
+            AgentTestFixtures.CreateMockHubContext(),
+            config,
+            NullLoggerFactory.Instance.CreateLogger<AgentExecutionPipeline>());
+        AIFunction tool = AIFunctionFactory.Create(
+            (string brand) => brand,
+            "GetHistoricalDemand");
+        const string prompt = "Compare Coastline Tacos vs Apex Grill depletions across all regions";
+        AgentExecutionContext context = CreateContext(request: new ChatRequest(prompt)) with
+        {
+            Tools = [tool],
+            PrefetchedData = new Dictionary<string, string>
+            {
+                ["GetHistoricalDemand:Coastline Tacos"] = DemandPayload("Coastline Tacos", 900),
+            },
+        };
+
+        await pipeline.ExecuteAsync(context);
+
+        observedOptions.Should().NotBeNull();
+        observedOptions.Tools.Should().ContainSingle(
+            "partial prefetch must preserve the normal recovery tool path");
+    }
+
     #endregion
 
     #region Token accounting — model name correctness
@@ -305,6 +399,9 @@ public class AgentPipelineTests
             FallbackReply = fallbackReply,
         };
     }
+
+    private static string DemandPayload(string brand, double volume) =>
+        $$"""{"filters":{"brand":"{{brand}}","region":"National","channel":"All"},"summary":{"total_volume":{{volume * 52}},"total_units":1000,"weeks_of_data":52,"avg_weekly_volume":{{volume}}},"by_region":[{"region":"Northeast","volume":{{volume * 52}},"avg_weekly_volume":{{volume}}},{"region":"Southeast","volume":{{(volume - 10) * 52}},"avg_weekly_volume":{{volume - 10}}},{"region":"Midwest","volume":{{(volume - 20) * 52}},"avg_weekly_volume":{{volume - 20}}},{"region":"Southwest","volume":{{(volume - 30) * 52}},"avg_weekly_volume":{{volume - 30}}},{"region":"West Coast","volume":{{(volume - 40) * 52}},"avg_weekly_volume":{{volume - 40}}},{"region":"Pacific Northwest","volume":{{(volume - 50) * 52}},"avg_weekly_volume":{{volume - 50}}}]}""";
 
     #endregion
 

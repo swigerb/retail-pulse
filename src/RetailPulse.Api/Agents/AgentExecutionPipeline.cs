@@ -138,16 +138,19 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         string sessionId = request.SessionId ?? Guid.NewGuid().ToString("N");
         var collector = new TelemetryCollector(_hubContext, sessionId);
 
+        IReadOnlyList<PrefetchEntry>? compactedPrefetch = CompactPrefetch(context.PrefetchedData);
+        bool chartCompletePrefetch = IsChartCompletePrefetch(request.UserIntentMessage, compactedPrefetch);
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
-            Tools = [.. _anonymousChatPolicy.ApplyToolFilter(context.Tools).Select(t => WrapWithBudget(t is AIFunction fn ? new TimedAIFunction(fn) : t))]
+            Tools = chartCompletePrefetch
+                ? []
+                : [.. _anonymousChatPolicy.ApplyToolFilter(context.Tools).Select(t => WrapWithBudget(t is AIFunction fn ? new TimedAIFunction(fn) : t))]
         };
         _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
-        IReadOnlyList<PrefetchEntry>? compactedPrefetch = CompactPrefetch(context.PrefetchedData);
         string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, compactedPrefetch);
-        if (IsChartCompletePrefetch(request.UserIntentMessage, compactedPrefetch))
+        if (chartCompletePrefetch)
         {
             systemPrompt += "\n\nThe server will render the requested chart deterministically from the pre-loaded data. "
                 + "Do not call data tools or CreateChart for this request. Return only a concise prose summary of the pre-loaded results.";
@@ -472,16 +475,17 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         IEnumerable<AITool> allowedTools = _anonymousChatPolicy.ApplyToolFilter(context.Tools);
         IReadOnlyList<AITool> instrumentedTools = instrumentedToolMiddleware.WrapTools(allowedTools, sessionId);
 
+        IReadOnlyList<PrefetchEntry>? compactedPrefetch = CompactPrefetch(context.PrefetchedData);
+        bool chartCompletePrefetch = IsChartCompletePrefetch(request.UserIntentMessage, compactedPrefetch);
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
-            Tools = [.. instrumentedTools.Select(WrapWithBudget)]
+            Tools = chartCompletePrefetch ? [] : [.. instrumentedTools.Select(WrapWithBudget)]
         };
         _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
-        IReadOnlyList<PrefetchEntry>? compactedPrefetch = CompactPrefetch(context.PrefetchedData);
         string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, compactedPrefetch);
-        if (IsChartCompletePrefetch(request.UserIntentMessage, compactedPrefetch))
+        if (chartCompletePrefetch)
         {
             systemPrompt += "\n\nThe server will render the requested chart deterministically from the pre-loaded data. "
                 + "Do not call data tools or CreateChart for this request. Return only a concise prose summary of the pre-loaded results.";
