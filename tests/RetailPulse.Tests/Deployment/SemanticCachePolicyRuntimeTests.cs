@@ -151,7 +151,7 @@ public sealed partial class SemanticCachePolicyRuntimeTests
         values.Should().BeEquivalentTo("miss", "hit", "bypass", "bypass");
         string all = Module("apim-openai-semantic-cache-outbound.xml") + Module("apim-openai-semantic-cache-inbound.xml");
         all.Should().NotContain("<value>unavailable</value>");
-        // A hit is only claimed when the backend section never ran.
+        // A hit is only claimed when the post-lookup backend marker never ran.
         root.Descendants("when").Skip(1).First().Attribute("condition")!.Value.Should().Contain("!context.Variables.ContainsKey(\"rp-backend-start\")");
     }
 

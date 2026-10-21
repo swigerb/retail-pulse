@@ -63,7 +63,9 @@
                 var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
                 var user = new System.Text.StringBuilder();
                 var docs = new JArray();
-                foreach (var m in (JArray)b[&quot;messages&quot;]) {
+                var msgs = b[&quot;messages&quot;] as JArray;
+                if (msgs == null) { throw new Exception(&quot;messages&quot;); }
+                foreach (var m in msgs) {
                   string role = (string)m[&quot;role&quot;];
                   var content = m[&quot;content&quot;];
                   string t = &quot;&quot;;
@@ -81,8 +83,7 @@
                     }
                   }
                   if (t.Trim().Length == 0) { continue; }
-                  if (role == &quot;user&quot;) { if (user.Length &gt; 0) { user.Append(&quot;
-                &quot;); } user.Append(t); }
+                  if (role == &quot;user&quot;) { if (user.Length &gt; 0) { user.Append(&quot;\n&quot;); } user.Append(t); }
                   else if (role == &quot;tool&quot;) { docs.Add(t); }
                 }
                 string u = user.ToString();
@@ -91,7 +92,9 @@
             <set-variable name="rp-cs-analyze-body" value="@{
                 var b = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
                 var sb = new System.Text.StringBuilder();
-                foreach (var m in (JArray)b[&quot;messages&quot;]) {
+                var msgs = b[&quot;messages&quot;] as JArray;
+                if (msgs == null) { throw new Exception(&quot;messages&quot;); }
+                foreach (var m in msgs) {
                   if ((string)m[&quot;role&quot;] != &quot;user&quot;) { continue; }
                   var content = m[&quot;content&quot;];
                   string t = &quot;&quot;;
@@ -109,8 +112,7 @@
                     }
                   }
                   if (t.Trim().Length == 0) { continue; }
-                  if (sb.Length &gt; 0) { sb.Append(&quot;
-                &quot;); } sb.Append(t);
+                  if (sb.Length &gt; 0) { sb.Append(&quot;\n&quot;); } sb.Append(t);
                 }
                 if (sb.Length == 0) { return &quot;&quot;; }
                 return new JObject(new JProperty(&quot;text&quot;, sb.ToString()), new JProperty(&quot;categories&quot;, new JArray(&quot;Hate&quot;, &quot;SelfHarm&quot;, &quot;Sexual&quot;, &quot;Violence&quot;)), new JProperty(&quot;outputType&quot;, &quot;FourSeverityLevels&quot;)).ToString(Newtonsoft.Json.Formatting.None);
@@ -266,28 +268,28 @@
                         <value>blocked</value>
                     </set-header>
                     <set-header name="x-rp-gw-safety-phase" exists-action="override">
-                        <value>@(context.Variables[&quot;rp-safety-phase&quot;])</value>
+                        <value>@((string)context.Variables[&quot;rp-safety-phase&quot;])</value>
                     </set-header>
                     <set-header name="x-rp-gw-safety-decision" exists-action="override">
-                        <value>@(context.Variables[&quot;rp-safety-decision-public&quot;])</value>
+                        <value>@((string)context.Variables[&quot;rp-safety-decision-public&quot;])</value>
                     </set-header>
                     <set-header name="x-rp-gw-safety-prompt-attack" exists-action="override">
-                        <value>@(context.Variables[&quot;rp-safety-attack&quot;])</value>
+                        <value>@((string)context.Variables[&quot;rp-safety-attack&quot;])</value>
                     </set-header>
                     <set-header name="x-rp-gw-safety-category" exists-action="override">
-                        <value>@(context.Variables[&quot;rp-safety-category&quot;])</value>
+                        <value>@((string)context.Variables[&quot;rp-safety-category&quot;])</value>
                     </set-header>
                     <set-header name="x-rp-gw-safety-severity" exists-action="override">
-                        <value>@(context.Variables[&quot;rp-safety-severity&quot;])</value>
+                        <value>@((string)context.Variables[&quot;rp-safety-severity&quot;])</value>
                     </set-header>
                     <set-header name="x-rp-gw-safety-mode" exists-action="override">
-                        <value>@(context.Variables[&quot;rp-safety-mode&quot;])</value>
+                        <value>@((string)context.Variables[&quot;rp-safety-mode&quot;])</value>
                     </set-header>
                     <set-header name="x-rp-gw-safety-latency-ms" exists-action="override">
                         <value>@(((int)context.Variables[&quot;rp-safety-ms&quot;]).ToString())</value>
                     </set-header>
                     <set-header name="x-rp-gw-safety-output-checked" exists-action="override">
-                        <value>@(context.Variables[&quot;rp-safety-output-checked&quot;])</value>
+                        <value>@((string)context.Variables[&quot;rp-safety-output-checked&quot;])</value>
                     </set-header>
                     <set-body>@((string)context.Variables[&quot;rp-safety-decision&quot;] == &quot;block&quot; ? &quot;{\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;gateway_safety_blocked\&quot;,\&quot;message\&quot;:\&quot;The request was blocked by gateway content safety.\&quot;}}&quot; : (string)context.Variables[&quot;rp-safety-decision&quot;] == &quot;reject&quot; ? &quot;{\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;gateway_safety_rejected\&quot;,\&quot;message\&quot;:\&quot;The request could not be verified by gateway content safety.\&quot;}}&quot; : &quot;{\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;gateway_safety_unavailable\&quot;,\&quot;message\&quot;:\&quot;Content safety could not be verified.\&quot;}}&quot;)</set-body>
                 </return-response>

@@ -124,7 +124,7 @@ public sealed partial class GatewaySafetyPolicyContractTests
 
             foreach (XElement header in doc.Descendants("set-header").Where(h => ((string?)h.Attribute("name"))?.StartsWith("x-rp-gw-safety-", StringComparison.Ordinal) == true))
             {
-                Unescape(header.Value).Should().MatchRegex(@"^@\(context\.Variables\[""rp-safety-[a-z-]+""\](\.ToString\(\)|)\)$|^@\(\(\(int\)context\.Variables\[""rp-safety-ms""\]\)\.ToString\(\)\)$");
+                Unescape(header.Value).Should().MatchRegex(@"^@\(\(string\)context\.Variables\[""rp-safety-[a-z-]+""\]\)$|^@\(\(\(int\)context\.Variables\[""rp-safety-ms""\]\)\.ToString\(\)\)$");
             }
         }
 
@@ -247,6 +247,17 @@ public sealed partial class GatewaySafetyPolicyContractTests
     {
         Unescape(Inbound).Should().NotContain("Func<JToken", "System.Func is not in APIM's policy-expression allow-list");
         Unescape(Outbound).Should().NotContain("Func<JToken", "System.Func is not in APIM's policy-expression allow-list");
+    }
+
+    [Fact]
+    public void PolicyExpressions_DoNotEmbedLiteralNewlinesInsideQuotedAttributeCode()
+    {
+        foreach (string fragment in Directory.GetFiles(Modules, "apim-*.xml"))
+        {
+            File.ReadAllText(fragment).Should().NotMatchRegex(
+                @"&quot;\s*\r?\n\s*&quot;",
+                $"{Path.GetFileName(fragment)} must use an explicit \\n escape because APIM compiles raw attribute text");
+        }
     }
 
     [Fact]

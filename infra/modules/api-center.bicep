@@ -42,6 +42,12 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
 resource apiCenter 'Microsoft.ApiCenter/services@2024-03-01' = {
   name: apiCenterName
   location: location
+  // The live RP returns and requires sku=Free for every supported API version,
+  // although the published Bicep type schema omits the top-level property.
+  #disable-next-line BCP187
+  sku: {
+    name: 'Free'
+  }
   tags: tags
   identity: {
     type: 'SystemAssigned'

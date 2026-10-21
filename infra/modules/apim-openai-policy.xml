@@ -43,6 +43,7 @@
 {demo-inbound}
 {safety-inbound}
 {semantic-cache-inbound}
+        <set-variable name="rp-backend-start" value="@(DateTime.UtcNow)" />
         <set-backend-service backend-id="{backend-id}" />
         <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
         <!-- Scope kind comes only from the APIM product the subscription belongs to (trusted gateway
@@ -62,7 +63,6 @@
         </azure-openai-emit-token-metric>
     </inbound>
     <backend>
-        <set-variable name="rp-backend-start" value="@(DateTime.UtcNow)" />
         {backend-policy}
     </backend>
     <outbound>
@@ -99,7 +99,7 @@
                     <value>allowed</value>
                 </set-header>
                 <set-header name="x-rp-gw-tokens-remaining" exists-action="override">
-                    <value>@(context.Variables["rp-tokens-remaining"].ToString())</value>
+                    <value>@(System.Convert.ToString(context.Variables["rp-tokens-remaining"]))</value>
                 </set-header>
             </when>
         </choose>
@@ -163,16 +163,16 @@
                     </when>
                 </choose>
                 <choose>
-                    <when condition="@(context.Variables.ContainsKey(&quot;rp-budget-retry-after&quot;) &amp;&amp; System.Text.RegularExpressions.Regex.IsMatch(context.Variables[&quot;rp-budget-retry-after&quot;].ToString(), &quot;^[0-9]{1,6}$&quot;))">
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-budget-retry-after&quot;) &amp;&amp; System.Text.RegularExpressions.Regex.IsMatch(System.Convert.ToString(context.Variables[&quot;rp-budget-retry-after&quot;]), &quot;^[0-9]{1,6}$&quot;))">
                         <set-header name="x-rp-gw-retry-after" exists-action="override">
-                            <value>@(context.Variables["rp-budget-retry-after"].ToString())</value>
+                            <value>@(System.Convert.ToString(context.Variables["rp-budget-retry-after"]))</value>
                         </set-header>
                     </when>
                 </choose>
                 <choose>
-                    <when condition="@(context.Variables.ContainsKey(&quot;rp-tokens-remaining&quot;) &amp;&amp; System.Text.RegularExpressions.Regex.IsMatch(context.Variables[&quot;rp-tokens-remaining&quot;].ToString(), &quot;^[0-9]{1,12}$&quot;))">
+                    <when condition="@(context.Variables.ContainsKey(&quot;rp-tokens-remaining&quot;) &amp;&amp; System.Text.RegularExpressions.Regex.IsMatch(System.Convert.ToString(context.Variables[&quot;rp-tokens-remaining&quot;]), &quot;^[0-9]{1,12}$&quot;))">
                         <set-header name="x-rp-gw-tokens-remaining" exists-action="override">
-                            <value>@(context.Variables["rp-tokens-remaining"].ToString())</value>
+                            <value>@(System.Convert.ToString(context.Variables["rp-tokens-remaining"]))</value>
                         </set-header>
                     </when>
                 </choose>
