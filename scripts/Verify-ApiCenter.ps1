@@ -257,7 +257,7 @@ if ($SelfTest) {
         else { Write-Host "[FAIL] self-test: $Name (got $($r.Status): $(($r.Failures + $r.Pending) -join '; '))"; $script:bad++ }
     }
     $ok = Invoke-Sync (New-Store) $tools
-    Expect 'live canonical omitted-state hyphenated APIM graph passes' 'Pass' $ok
+    Expect 'generated-ID synchronized graph passes' 'Pass' $ok
     if ($ok.ApiName -eq 'rp-mcp-9f3a1c' -and $ok.ApiName -ne $McpApiName) { Write-Host '[PASS] self-test: resolved generated API id, not the APIM API id' }
     else { Write-Host "[FAIL] self-test: resolved '$($ok.ApiName)'"; $script:bad++ }
     $explicitActive = New-Store

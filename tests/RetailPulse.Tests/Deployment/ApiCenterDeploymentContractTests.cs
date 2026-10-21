@@ -208,7 +208,7 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
         string script = File.ReadAllText(Path.Combine(_repoRoot, "scripts", "Verify-ApiCenter.ps1"));
         foreach (string probe in new[]
         {
-            "live canonical omitted-state hyphenated APIM graph passes", "resolved generated API id, not the APIM API id",
+            "generated-ID synchronized graph passes", "resolved generated API id, not the APIM API id",
             "explicit active deployment passes case-insensitively",
             "unrelated MCP deployment does not fail a missing target", "missing versions is pending",
             "partial definition sync is pending", "non-production lifecycle fails", "non-APIM environment fails",
