@@ -78,7 +78,7 @@ public class RetailPulseAgentTests
     }
 
     [Fact]
-    public async Task ChatAsync_WhenRateLimited_ReturnsFriendlyResponse()
+    public async Task ChatAsync_WhenRateLimited_RethrowsForEndpoint429Shaping()
     {
         var chatClient = new Mock<IChatClient>();
         chatClient
@@ -86,14 +86,10 @@ public class RetailPulseAgentTests
             .ThrowsAsync(new ClientResultException("Too Many Requests", CreatePipelineResponse(429), null));
 
         RetailPulseAgent agent = CreateAgent(chatClient.Object);
+        Func<Task> act = () => agent.ChatAsync(new ChatRequest("hello", SessionId: "session-429"));
 
-        Contracts.ChatResponse response = await agent.ChatAsync(new ChatRequest("hello", SessionId: "session-429"));
-
-        response.Reply.Should().Be("⏳ The AI service is experiencing high demand. Please wait 30 seconds and try again.");
-        response.SessionId.Should().Be("session-429");
-        response.Spans.Should().BeEmpty();
-        response.Charts.Should().BeNull();
-        response.TotalDurationMs.Should().NotBeNull();
+        ClientResultException exception = (await act.Should().ThrowAsync<ClientResultException>()).Which;
+        exception.Status.Should().Be(429);
     }
 
     [Fact]

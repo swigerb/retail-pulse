@@ -396,7 +396,7 @@ public class CompetitiveIntelAgentTests
     #region Error Handling
 
     [Fact]
-    public async Task HandleAsync_WhenRateLimited_ReturnsFriendlyMessage()
+    public async Task HandleAsync_WhenRateLimited_RethrowsForEndpoint429Shaping()
     {
         var mockClient = new Mock<IChatClient>();
         mockClient
@@ -410,12 +410,10 @@ public class CompetitiveIntelAgentTests
                 null));
 
         CompetitiveIntelAgent agent = CreateAgent(mockClient.Object);
-        Contracts.ChatResponse response = await agent.HandleAsync(
-            new ChatRequest("competitive?", SessionId: "s-429-comp"));
+        Func<Task> act = () => agent.HandleAsync(new ChatRequest("competitive?", SessionId: "s-429-comp"));
 
-        response.Reply.Should().Contain("high demand");
-        response.SessionId.Should().Be("s-429-comp");
-        response.Spans.Should().BeEmpty();
+        ClientResultException exception = (await act.Should().ThrowAsync<ClientResultException>()).Which;
+        exception.Status.Should().Be(429);
     }
 
     [Fact]

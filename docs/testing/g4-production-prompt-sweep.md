@@ -20,6 +20,20 @@ pwsh ./scripts/Invoke-ProductionPromptSweep.ps1 `
 
 Exit code is `0` only when every prompt passes.
 
+For a conservative production acceptance run, add a 30-second delay between
+cases:
+
+```powershell
+pwsh ./scripts/Invoke-ProductionPromptSweep.ps1 `
+    -ApiOrigin https://<api-host> `
+    -InterPromptDelaySeconds 30 `
+    -JsonOut sweep.json
+```
+
+`-InterPromptDelaySeconds` defaults to `0`, must be nonnegative, and sleeps
+only between curated cases. It does not delay the first case or alter the
+existing per-attempt `Retry-After` handling.
+
 Each request attempt gets a new caller-generated `X-Correlation-ID`. With
 `-JsonOut`, every result includes the final `CallerCorrelationId`,
 `ReturnedCorrelationId`, sanitized `GatewayRequestIds`, and an `Attempts`
@@ -49,7 +63,15 @@ The token is never printed or logged.
 
 `/api/chat` is behind the `strict` fixed-window limiter — 10 permits per
 minute, no queue. The runner paces requests ~7s apart and honours
-`Retry-After` on a 429, so a full sweep never trips the limiter.
+`Retry-After` on a 429.
+
+The normal AI gateway budget is 80,000 tokens per minute. A full unpaced
+sweep can still receive a genuine model-token 429 even when the HTTP request
+limiter is satisfied, because each curated case can make multiple model
+calls. Use `-InterPromptDelaySeconds 30` for the conservative acceptance run.
+This pacing is not a quota relaxation and does not erase or reinterpret
+previous failed attempts; their correlation and gateway request IDs remain
+in the recorded sweep evidence.
 
 ## What each prompt must satisfy
 
