@@ -70,7 +70,7 @@ boundary is active even without configuration):
 | --- | --- | --- |
 | `Enabled` | `true` | Master switch. When false, results pass through unchanged. |
 | `MaxResultChars` | `6000` | Max serialized chars for a single result before compaction. |
-| `MaxCumulativeChars` | `24000` | Max cumulative chars of all tool results in one request. |
+| `MaxCumulativeChars` | `9500` | Max cumulative chars of all tool results in one request. Kept below APIM Content Safety's 10,000-character aggregate document limit so model follow-up requests remain valid. |
 | `MaxToolCalls` | `8` | Max distinct (non-deduplicated) tool invocations per request. |
 | `CharsPerToken` | `4` | Divisor for the estimated-token telemetry. |
 | `MaxArrayItems` | `24` | Max elements kept by the generic array compactor. |

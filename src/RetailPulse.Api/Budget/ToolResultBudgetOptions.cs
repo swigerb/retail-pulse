@@ -20,7 +20,7 @@ public sealed class ToolResultBudgetOptions
     /// Once exceeded, further tool results are replaced with a compact diagnostic so the
     /// model context cannot explode.
     /// </summary>
-    public int MaxCumulativeChars { get; set; } = 24_000;
+    public int MaxCumulativeChars { get; set; } = 9_500;
 
     /// <summary>Maximum number of distinct (non-deduplicated) tool invocations per request.</summary>
     public int MaxToolCalls { get; set; } = 8;

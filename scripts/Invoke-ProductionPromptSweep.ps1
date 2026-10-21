@@ -121,6 +121,12 @@ function Get-GatewayRequestIds($body, $headers) {
             $ids.Add([string]$candidate) | Out-Null
         }
     }
+    foreach ($call in @($body.gateway.calls)) {
+        $candidate = $call.gatewayRequestId
+        if (-not [string]::IsNullOrWhiteSpace([string]$candidate)) {
+            $ids.Add([string]$candidate) | Out-Null
+        }
+    }
     return @($ids)
 }
 

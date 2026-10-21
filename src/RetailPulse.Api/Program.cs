@@ -461,12 +461,12 @@ builder.Services.AddSingleton(sp =>
     // source of truth for horizontal-bar ranking coverage (issue #74). The
     // default 6 KB per-tool cap can clip brand rows below the 12-brand roster
     // threshold, which then triggers the fail-closed diagnostic even though
-    // the tool did return complete data. Raise the ceiling ONLY for this tool
-    // to preserve full portfolio coverage; the compactor still strips the
-    // verbose per-brand sentiment narrative so the aggregate stays lean.
+    // the tool did return complete data. Raise the ceiling ONLY for this tool,
+    // but keep it below APIM's 10,000-character aggregate tool-document limit.
+    // The compactor still strips the verbose per-brand sentiment narrative.
     if (!options.PerToolMaxResultChars.ContainsKey("GetPortfolioDepletionStats"))
     {
-        options.PerToolMaxResultChars["GetPortfolioDepletionStats"] = 20_000;
+        options.PerToolMaxResultChars["GetPortfolioDepletionStats"] = 9_500;
     }
     return options;
 });

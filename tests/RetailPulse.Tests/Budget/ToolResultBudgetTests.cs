@@ -11,6 +11,15 @@ namespace RetailPulse.Tests.Budget;
 /// </summary>
 public sealed class ToolResultBudgetTests
 {
+    [Fact]
+    public void ShippedCumulativeBudget_FitsGatewaySafetyDocumentLimit()
+    {
+        var options = new ToolResultBudgetOptions();
+
+        options.MaxCumulativeChars.Should().BePositive().And.BeLessThan(10_000,
+            "APIM rejects a model follow-up when aggregate tool-document content reaches 10,000 characters");
+    }
+
     private static ToolResultBudget CreateBudget() =>
         new(
         [
