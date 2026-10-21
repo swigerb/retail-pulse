@@ -162,9 +162,9 @@ internal sealed class BudgetedAIFunction : AIFunction
         {
             finalJson = Diagnostic(
                 $"Cumulative tool-context budget ({_options.MaxCumulativeChars} chars) reached. "
-                + "The aggregate results already gathered are COMPLETE — synthesize an answer "
-                + "and call CreateChart. Do not describe the data as missing; re-call with a "
-                + "narrower filter only if the user asked for detail outside the aggregate.");
+                + "This tool result was withheld. Use only the results already present, and "
+                + "do not claim they cover data that was not returned. Re-call with a narrower "
+                + "filter only when the omitted detail is required to answer the user.");
             metrics = metrics with
             {
                 ReturnedChars = finalJson.Length,
