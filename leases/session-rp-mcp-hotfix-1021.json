@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "leaseKey": "session-rp-mcp-hotfix-1021",
+  "sessionId": "rp-mcp-hotfix-1021",
+  "repository": "swigerb/retail-pulse",
+  "issueNumber": null,
+  "dispatchSource": "local-cli",
+  "route": "aca-job",
+  "executionMode": "aca-job",
+  "state": "claimed",
+  "attempts": 1,
+  "startedAt": "2026-10-21T12:45:29.646Z",
+  "lastHeartbeatAt": "2026-10-21T12:45:29.646Z",
+  "updatedAt": "2026-10-21T12:45:29.646Z",
+  "terminalReason": null,
+  "executionRef": null
+}
