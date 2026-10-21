@@ -518,8 +518,17 @@ public sealed partial class IntegratedGatewayAcceptanceTests
         Contains("walkthrough-regulated-cache", section, "AZURE_SEMANTIC_CACHE_PRIVATE_ENDPOINT_SUBNET_ID", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "drop the cache-header claim", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "sequential pre-capture", "gateway walkthrough");
-        Contains("walkthrough-regulated-cache", section, "azd env get-value AZURE_APIM_INFERENCE_ENDPOINT)/openai", "gateway walkthrough");
-        Contains("walkthrough-regulated-cache", section, "$APIM_BASE_URL/deployments/", "gateway walkthrough");
+        (string Lang, string Code)[] regulatedBlocks =
+            [.. Blocks(section, "azd env new retailpulse-regulated").Where(b => b.Lang == "bash")];
+        Invariant("walkthrough-regulated-cache", regulatedBlocks.Length == 1,
+            $"expected exactly one regulated pre-capture block, found {regulatedBlocks.Length}");
+        string regulatedBlock = regulatedBlocks[0].Code;
+        int regulatedEndpoint = regulatedBlock.IndexOf(
+            "azd env get-value AZURE_APIM_INFERENCE_ENDPOINT)/openai",
+            StringComparison.Ordinal);
+        int regulatedRequest = regulatedBlock.IndexOf("$APIM_BASE_URL/deployments/", StringComparison.Ordinal);
+        Invariant("walkthrough-regulated-cache", regulatedEndpoint >= 0 && regulatedRequest > regulatedEndpoint,
+            "regulated pre-capture must derive the /openai endpoint before calling its /deployments route");
         Contains("walkthrough-regulated-cache", section, "x-rp-gw-cache: bypass", "gateway walkthrough");
         Contains("walkthrough-regulated-cache", section, "PROBE_BENIGN_PROMPT", "gateway walkthrough");
         int select = section.IndexOf("azd env select <normal-env-name>", StringComparison.Ordinal);
