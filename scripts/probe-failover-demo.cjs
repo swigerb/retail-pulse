@@ -28,7 +28,7 @@
  */
 'use strict';
 const http = require('http');
-const { execFileSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const SPOOF = {
   'x-rp-gw-failover-demo': 'active',
@@ -49,7 +49,7 @@ async function post(cfg, headers) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'api-key': cfg.subscriptionKey, 'content-type': 'application/json', ...headers },
-    body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 }),
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }], max_completion_tokens: 32 }),
   });
   await res.arrayBuffer();
   return res;
@@ -80,19 +80,21 @@ async function runEnabledProbe(cfg, control) {
   const check = (name, ok, detail) => results.push({ name, ok: !!ok, detail });
 
   await control.setArmed(false);
+  await waitForArmedState(cfg, false);
   let r = await post(cfg, { 'x-rp-failover-demo': cfg.demoKey });
   check('disarmed: correct key refused with 403', r.status === 403, `status ${r.status}`);
   check('disarmed: no failover evidence', !hasDemoEvidence(r.headers), 'evidence headers present');
 
   await control.setArmed(true);
+  const authorized = await waitForArmedState(cfg, true);
   r = await post(cfg, { 'x-rp-failover-demo': `${cfg.demoKey}-wrong` });
   check('unauthorized: wrong key refused with 403', r.status === 403, `status ${r.status}`);
   check('unauthorized: no failover evidence', !hasDemoEvidence(r.headers), 'evidence headers present');
   r = await post(cfg, { 'x-rp-failover-demo': '' });
   check('unauthorized: empty key never activates the demo', !hasDemoEvidence(r.headers), 'evidence headers present');
 
-  r = await post(cfg, { 'x-rp-failover-demo': cfg.demoKey });
-  const h = r.headers;
+  r = authorized;
+  const h = authorized.headers;
   const primary = Number(h.get('x-rp-gw-primary-status'));
   check('authorized: final response is 2xx from the secondary', r.status >= 200 && r.status < 300, `status ${r.status}`);
   check('authorized: primary really failed', primary >= 400, `primary-status ${h.get('x-rp-gw-primary-status')}`);
@@ -113,18 +115,54 @@ async function runEnabledProbe(cfg, control) {
   check('spoof: injected evidence with wrong key is refused', r.status === 403 && !hasDemoEvidence(r.headers), `status ${r.status}`);
 
   await control.setArmed(false);
+  await waitForArmedState(cfg, false);
   r = await post(cfg, { 'x-rp-failover-demo': cfg.demoKey });
   check('reset: disarmed again, correct key refused', r.status === 403, `status ${r.status}`);
   return results;
 }
 
+async function waitForArmedState(cfg, expectedArmed) {
+  const attempts = cfg.propagationAttempts ?? 5;
+  const delayMs = cfg.propagationDelayMs ?? 5000;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const r = await post(cfg, { 'x-rp-failover-demo': cfg.demoKey });
+    const observedArmed = r.headers.get('x-rp-gw-failover-demo') === 'active';
+    const observedDisarmed = r.status === 403 && !hasDemoEvidence(r.headers);
+    if ((expectedArmed && observedArmed) || (!expectedArmed && observedDisarmed)) return r;
+    if (attempt < attempts) {
+      const retrySeconds = Number(r.headers.get('retry-after'));
+      const waitMs = r.status === 429 && Number.isFinite(retrySeconds) && retrySeconds > 0
+        ? Math.max(delayMs, retrySeconds * 1000)
+        : delayMs;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+  throw new Error(`failover demo state did not propagate to ${expectedArmed ? 'armed' : 'disarmed'} after ${attempts} observed attempts`);
+}
+
+function assertSafeCmdArg(value) {
+  const text = String(value);
+  if (/[&|<>^%!"\r\n]/.test(text)) throw new Error('Azure CLI argument contains an unsupported shell metacharacter');
+  return text;
+}
+
+function execAz(args) {
+  const isWindows = process.platform === 'win32';
+  const command = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'az';
+  const commandArgs = isWindows
+    ? ['/d', '/s', '/c', 'az.cmd', ...args.map(assertSafeCmdArg)]
+    : args;
+  const result = spawnSync(command, commandArgs, { stdio: ['ignore', 'ignore', 'inherit'], windowsHide: true });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`Azure CLI failed with exit code ${result.status}`);
+}
+
 function azControl(cfg) {
   return {
     async setArmed(on) {
-      execFileSync('az', ['apim', 'nv', 'update', '--service-name', cfg.apimName, '-g', cfg.resourceGroup,
+      execAz(['apim', 'nv', 'update', '--service-name', cfg.apimName, '-g', cfg.resourceGroup,
         '--named-value-id', 'rp-failover-demo-armed', '--value', on ? 'true' : 'false', '--only-show-errors', '-o', 'none'],
-      { stdio: ['ignore', 'ignore', 'inherit'] });
-      await new Promise((r) => setTimeout(r, 5000)); // named-value propagation
+      );
     },
   };
 }
@@ -189,11 +227,20 @@ async function selfTest() {
   ];
   for (const { label, deploymentMode, gatewayMode, shouldPass } of cases) {
     const gw = await startFakeGateway(gatewayMode, deploymentMode);
-    const cfg = { baseUrl: gw.baseUrl, deployment: 'd', apiVersion: 'v', subscriptionKey: 's', demoKey: gw.key, expectSecondary: 'secondary' };
-    const results = deploymentMode === 'disabled'
-      ? await runDisabledProbe(cfg)
-      : await runEnabledProbe(cfg, { async setArmed(on) { gw.state.armed = on; } });
-    gw.server.close();
+    const cfg = {
+      baseUrl: gw.baseUrl, deployment: 'd', apiVersion: 'v', subscriptionKey: 's',
+      demoKey: gw.key, expectSecondary: 'secondary', propagationAttempts: 1, propagationDelayMs: 0,
+    };
+    let results;
+    try {
+      results = deploymentMode === 'disabled'
+        ? await runDisabledProbe(cfg)
+        : await runEnabledProbe(cfg, { async setArmed(on) { gw.state.armed = on; } });
+    } catch (error) {
+      results = [{ name: 'probe execution', ok: false, detail: error.message }];
+    } finally {
+      gw.server.close();
+    }
     const passed = results.every((x) => x.ok);
     const ok = passed === shouldPass;
     console.log(`${ok ? 'PASS' : 'FAIL'} self-test [${label}]: harness ${passed ? 'accepted' : 'rejected'} the gateway (expected ${shouldPass ? 'accept' : 'reject'})`);
@@ -225,7 +272,15 @@ async function main() {
   } else {
     const control = azControl(cfg);
     try { results = await runEnabledProbe(cfg, control); }
-    finally { try { await control.setArmed(false); } catch { console.error('WARNING: could not disarm; run the reset step manually'); } }
+    finally {
+      try {
+        await control.setArmed(false);
+        await waitForArmedState(cfg, false);
+      } catch (error) {
+        console.error('ERROR: could not verify disarm; run the reset step manually');
+        results = [...(results || []), { name: 'cleanup: disarm is effective', ok: false, detail: error.message }];
+      }
+    }
   }
   for (const x of results) console.log(`${x.ok ? 'PASS' : 'FAIL'} ${x.name}${x.ok ? '' : ` (${x.detail})`}`);
   return results.every((x) => x.ok) ? 0 : 1;

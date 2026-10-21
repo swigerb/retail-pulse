@@ -660,13 +660,13 @@ A deterministic, operator-only demonstration of APIM backend failover (#330). It
 2. Arm it: `az apim nv update --service-name <apim> -g <rg> --named-value-id rp-failover-demo-armed --value true`.
 3. Run once, with your APIM subscription key and the demo key (never give the demo key to end users):
 
-   `curl -i -X POST "$APIM/inference/openai/deployments/<deployment>/chat/completions?api-version=<ver>" -H "api-key: $SUB_KEY" -H "x-rp-failover-demo: $DEMO_KEY" -H "content-type: application/json" -d '{"messages":[{"role":"user","content":"ping"}],"max_tokens":5}'`
+   `curl -i -X POST "$APIM/inference/openai/deployments/<deployment>/chat/completions?api-version=<ver>" -H "api-key: $SUB_KEY" -H "x-rp-failover-demo: $DEMO_KEY" -H "content-type: application/json" -d '{"messages":[{"role":"user","content":"ping"}],"max_completion_tokens":32}'`
 
 **Evidence** (real response headers; the Control Room ribbon renders the same fields as *Route* and *Failover* for any call carrying them): `x-rp-gw-primary-status` (primary's actual status), `x-rp-gw-attempts`, `x-rp-gw-fallback` (`used`/`not-used`), `x-rp-gw-backend` (the secondary id the policy chose), and `x-rp-gw-route: failover` only when attempt 2 returned success. If anything is missing the field is omitted and shown as unknown. Note the standard API client does not send the demo header, so chat traffic in the UI is never affected.
 
 **Safeguards.** Every demo-header attempt first emits the `rp.failover.demo.attempt` metric, before any rate limiter, so rate-limited calls are observable too. Attempts are limited to 10 per minute per subscription (excess → 429, attempt metric only). When the feature is deployed, evaluation continues to the `rp.failover.demo.audit` metric with `Outcome` = authorized/denied; a wrong/missing key or enabled-but-disarmed state returns 403 (denied). When the feature is not deployed, APIM strips the trigger and spoofed evidence headers and continues ordinary traffic without demo evidence. Authorized runs are limited to 3 per minute per subscription. No key material is emitted.
 
-**Live probe.** For a deployment with the feature absent, set `FAILOVER_DEMO_DEPLOYMENT=disabled` and run `node scripts/probe-failover-demo.cjs`; this mode never reads or updates `rp-failover-demo-armed` and verifies ordinary traffic plus trigger/spoof attempts remain 2xx with no demo evidence. For a deployed feature, omit that variable (or set it to `enabled`); the probe checks enabled-but-disarmed and unauthorized rejection, an authorized run with a real primary failure and real secondary response/evidence, spoof resistance, and disarm/reset (it always disarms at the end). Environment variables are documented in the script header. `node scripts/probe-failover-demo.cjs --self-test` validates both modes offline and runs in CI.
+**Live probe.** For a deployment with the feature absent, set `FAILOVER_DEMO_DEPLOYMENT=disabled` and run `node scripts/probe-failover-demo.cjs`; this mode never reads or updates `rp-failover-demo-armed` and verifies ordinary traffic plus trigger/spoof attempts remain 2xx with no demo evidence. For a deployed feature, omit that variable (or set it to `enabled`); the probe checks enabled-but-disarmed and unauthorized rejection, an authorized run with a real primary failure and real secondary response/evidence, spoof resistance, and disarm/reset. It observes the effective gateway state rather than trusting ARM update completion, honors numeric `Retry-After` when an observation is throttled, and fails unless the final disarm is effective. Environment variables are documented in the script header. `node scripts/probe-failover-demo.cjs --self-test` validates both modes offline and runs in CI.
 
 **Reset.** Disarm: `az apim nv update ... --named-value-id rp-failover-demo-armed --value false`. Redeploying also resets it to `false`. To disable entirely, run `azd env set AZURE_APIM_FAILOVER_DEMO_ENABLED false`, rotate/remove `AZURE_APIM_FAILOVER_DEMO_KEY`, and reprovision.
 
@@ -735,11 +735,11 @@ foreach ($v in 'APIM_NAME','RESOURCE_GROUP','APIM_BASE_URL','DEPLOYMENT','API_VE
     if (-not [Environment]::GetEnvironmentVariable($v)) { throw "missing required variable $v" }
 }
 $body = Join-Path ([System.IO.Path]::GetTempPath()) 'rp-failover-body.json'
-Set-Content -Path $body -Value '{"messages":[{"role":"user","content":"ping"}],"max_tokens":5}'
+Set-Content -Path $body -Value '{"messages":[{"role":"user","content":"ping"}],"max_completion_tokens":32}'
 try {
     az apim nv update --service-name $env:APIM_NAME -g $env:RESOURCE_GROUP --named-value-id rp-failover-demo-armed --value true
     if ($LASTEXITCODE -ne 0) { throw 'arm failed' }
-    Start-Sleep -Seconds 5 # named-value propagation; matches probe-failover-demo.cjs
+    Start-Sleep -Seconds 30 # manual pause only; use probe-failover-demo.cjs for observed/rate-aware proof
     curl.exe -i -X POST "$($env:APIM_BASE_URL)/deployments/$($env:DEPLOYMENT)/chat/completions?api-version=$($env:API_VERSION)" -H "api-key: $($env:APIM_SUBSCRIPTION_KEY)" -H "x-rp-failover-demo: $($env:FAILOVER_DEMO_KEY)" -H "content-type: application/json" --data-binary "@$body"
 }
 finally {
@@ -756,7 +756,7 @@ finally {
 set -euo pipefail
 : "${APIM_NAME:?}" "${RESOURCE_GROUP:?}" "${APIM_BASE_URL:?}" "${DEPLOYMENT:?}" "${API_VERSION:?}" "${APIM_SUBSCRIPTION_KEY:?}" "${FAILOVER_DEMO_KEY:?}"
 body="$(mktemp)"
-echo '{"messages":[{"role":"user","content":"ping"}],"max_tokens":5}' > "$body"
+echo '{"messages":[{"role":"user","content":"ping"}],"max_completion_tokens":32}' > "$body"
 disarm() {
   az apim nv update --service-name "$APIM_NAME" -g "$RESOURCE_GROUP" --named-value-id rp-failover-demo-armed --value false || true
   state="$(az apim nv show --service-name "$APIM_NAME" -g "$RESOURCE_GROUP" --named-value-id rp-failover-demo-armed --query value -o tsv)"
@@ -765,7 +765,7 @@ disarm() {
 }
 trap disarm EXIT
 az apim nv update --service-name "$APIM_NAME" -g "$RESOURCE_GROUP" --named-value-id rp-failover-demo-armed --value true
-sleep 5 # named-value propagation; matches probe-failover-demo.cjs
+sleep 30 # manual pause only; use probe-failover-demo.cjs for observed/rate-aware proof
 curl -i -X POST "$APIM_BASE_URL/deployments/$DEPLOYMENT/chat/completions?api-version=$API_VERSION" -H "api-key: $APIM_SUBSCRIPTION_KEY" -H "x-rp-failover-demo: $FAILOVER_DEMO_KEY" -H "content-type: application/json" --data-binary "@$body"
 ```
 
@@ -779,7 +779,7 @@ foreach ($v in 'APIM_NAME','RESOURCE_GROUP','APIM_BASE_URL','DEPLOYMENT','API_VE
     if (-not [Environment]::GetEnvironmentVariable($v)) { throw "missing required variable $v" }
 }
 $body = Join-Path ([System.IO.Path]::GetTempPath()) 'rp-quota-body.json'
-Set-Content -Path $body -Value '{"messages":[{"role":"user","content":"ping"}],"max_tokens":512}'
+Set-Content -Path $body -Value '{"messages":[{"role":"user","content":"ping"}],"max_completion_tokens":32}'
 try {
     az apim nv update -g $env:RESOURCE_GROUP -n $env:APIM_NAME --named-value-id rp-budget-demo-armed --value true
     if ($LASTEXITCODE -ne 0) { throw 'arm failed' }
@@ -805,7 +805,7 @@ finally {
 set -euo pipefail
 : "${APIM_NAME:?}" "${RESOURCE_GROUP:?}" "${APIM_BASE_URL:?}" "${DEPLOYMENT:?}" "${API_VERSION:?}" "${SUBSCRIPTION_KEY:?}"
 body="$(mktemp)"
-echo '{"messages":[{"role":"user","content":"ping"}],"max_tokens":512}' > "$body"
+echo '{"messages":[{"role":"user","content":"ping"}],"max_completion_tokens":32}' > "$body"
 reset_and_disarm() {
   az apim nv update -g "$RESOURCE_GROUP" -n "$APIM_NAME" --named-value-id rp-budget-demo-generation --value "$(date +%s)" || true
   az apim nv update -g "$RESOURCE_GROUP" -n "$APIM_NAME" --named-value-id rp-budget-demo-armed --value false || true

@@ -58,7 +58,8 @@ public partial class AgentExecutionPipeline
         string? userMessage,
         Microsoft.Extensions.AI.ChatResponse response,
         List<ChartSpec> charts,
-        string reply)
+        string reply,
+        IReadOnlyList<PrefetchEntry>? prefetchedData = null)
     {
         ChartIntent intent = ChartRequestDetector.Detect(userMessage);
 
@@ -137,7 +138,8 @@ public partial class AgentExecutionPipeline
             if (!alreadyCovers)
             {
                 int minMarks = Math.Max(6, roster.Count);
-                if (DeterministicChartBuilder.TryBuild(response, intent.ChartType, minMarks, roster, out ChartSpec? rebuilt)
+                if (DeterministicChartBuilder.TryBuild(
+                        response, intent.ChartType, minMarks, roster, PrefetchJson(prefetchedData), out ChartSpec? rebuilt)
                     && rebuilt is not null)
                 {
                     _logger.LogInformation(
@@ -201,12 +203,14 @@ public partial class AgentExecutionPipeline
         int targetMarks = Math.Max(typeFloor, intent.MinMarks);
 
         int requiredMarks = targetMarks;
-        if (!DeterministicChartBuilder.TryBuild(response, intent.ChartType, targetMarks, out ChartSpec? deterministic)
+        if (!DeterministicChartBuilder.TryBuild(
+                response, intent.ChartType, targetMarks, PrefetchJson(prefetchedData), out ChartSpec? deterministic)
             || deterministic is null)
         {
             requiredMarks = typeFloor;
             if (targetMarks > typeFloor
-                && DeterministicChartBuilder.TryBuild(response, intent.ChartType, typeFloor, out ChartSpec? relaxed)
+                && DeterministicChartBuilder.TryBuild(
+                    response, intent.ChartType, typeFloor, PrefetchJson(prefetchedData), out ChartSpec? relaxed)
                 && relaxed is not null)
             {
                 _logger.LogInformation(
@@ -306,6 +310,9 @@ public partial class AgentExecutionPipeline
 
         return new ChartFulfillmentResult(charts, updatedReply);
     }
+
+    private static IReadOnlyList<string>? PrefetchJson(IReadOnlyList<PrefetchEntry>? prefetchedData) =>
+        prefetchedData is { Count: > 0 } ? [.. prefetchedData.Select(p => p.Json)] : null;
 
     /// <summary>Total finite datapoints across every series in a chart.</summary>
     private static int CountMarks(ChartSpec? chart)
