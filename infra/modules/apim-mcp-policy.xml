@@ -1,7 +1,7 @@
 <policies>
   <inbound>
     <base />
-    <!-- Caller auth (ADR 017): pinned-issuer Entra v2 token, gateway audience, invoke role. -->
+    <!-- Caller auth (ADR 017): pinned-issuer Entra v2 token, exact client-id audience, invoke role. -->
     <validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-expiration-time="true" require-signed-tokens="true" clock-skew="60" output-token-variable-name="callerJwt">
       <openid-config url="https://login.microsoftonline.com/{{tenantId}}/v2.0/.well-known/openid-configuration" />
       <audiences>

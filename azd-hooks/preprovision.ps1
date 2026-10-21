@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 
 Write-Host 'Checking prerequisites...'
 
-foreach ($command in 'az', 'dotnet', 'node', 'npm') {
+foreach ($command in 'az', 'azd', 'dotnet', 'node', 'npm') {
     if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
         throw "Required command '$command' is not installed or is not on PATH."
     }
@@ -66,6 +66,23 @@ if ($poolEnabled) {
         throw 'The secondary Azure AI account must differ from AZURE_OPENAI_ACCOUNT_NAME.'
     }
     Write-Host "APIM backend pool validated: primary and secondary accounts are distinct."
+}
+
+# The APIM JWT policy validates a v2 token's aud claim, which is the gateway application's
+# client-id GUID rather than its api:// resource identifier. Bootstrap the idempotent app
+# registration before ARM so the first provision has the exact audience and never guesses one.
+$loadedGatewayAudience = $env:AZURE_MCP_GATEWAY_AUDIENCE
+& pwsh -NoProfile -File (Join-Path $PSScriptRoot '..\scripts\Setup-McpGatewayIdentity.ps1') -BootstrapOnly
+if ($LASTEXITCODE -ne 0) {
+    throw "Setup-McpGatewayIdentity.ps1 -BootstrapOnly failed (exit $LASTEXITCODE). Refusing to provision an MCP policy without its exact v2 client-id audience."
+}
+$persistedGatewayAudience = (& azd env get-value AZURE_MCP_GATEWAY_AUDIENCE | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $persistedGatewayAudience -notmatch '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') {
+    throw 'The MCP gateway bootstrap did not persist a valid AZURE_MCP_GATEWAY_AUDIENCE client-id GUID.'
+}
+if ($loadedGatewayAudience -ne $persistedGatewayAudience) {
+    throw "MCP gateway identity bootstrap completed and persisted audience $persistedGatewayAudience. " +
+          'azd does not hot-reload values written by preprovision hooks; rerun the same azd provision/up command so ARM receives the exact client-id audience. No Azure resources were provisioned by this run.'
 }
 
 Write-Host 'All prerequisites met. Proceeding with provisioning...'
