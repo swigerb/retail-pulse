@@ -44,6 +44,17 @@ public sealed partial class McpGatewayDeploymentContractTests
     }
 
     [Fact]
+    public void McpApiChildren_AreSerialized_ToAvoidApimEtagWriteRaces()
+    {
+        McpBicep.Should().Contain("resource toolInventory");
+        McpBicep.Should().Contain("dependsOn: [toolInventory]");
+        McpBicep.Should().Contain("dependsOn: [toolStockout]");
+        McpBicep.Should().Contain("dependsOn: [toolDisruptions]");
+        McpBicep.Should().Contain("dependsOn: [toolForecast, nvApiFqdn");
+        McpBicep.Should().Contain("dependsOn: [mcpPolicy]");
+    }
+
+    [Fact]
     public void Operations_AreGetOnly_Explicit_AndNotWildcard()
     {
         MatchCollection ops = OperationRegex().Matches(McpBicep);

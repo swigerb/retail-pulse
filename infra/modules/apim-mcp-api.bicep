@@ -206,6 +206,7 @@ resource toolInventory 'Microsoft.ApiManagement/service/apis/tools@2025-09-01-pr
 resource toolStockout 'Microsoft.ApiManagement/service/apis/tools@2025-09-01-preview' = {
   parent: mcpServer
   name: 'get_stockout_risk'
+  dependsOn: [toolInventory]
   properties: {
     displayName: 'get_stockout_risk'
     description: 'Stockout risks ordered by urgency. Read-only.'
@@ -216,6 +217,7 @@ resource toolStockout 'Microsoft.ApiManagement/service/apis/tools@2025-09-01-pre
 resource toolDisruptions 'Microsoft.ApiManagement/service/apis/tools@2025-09-01-preview' = {
   parent: mcpServer
   name: 'get_supply_disruptions'
+  dependsOn: [toolStockout]
   properties: {
     displayName: 'get_supply_disruptions'
     description: 'Supply disruptions. Read-only.'
@@ -226,6 +228,7 @@ resource toolDisruptions 'Microsoft.ApiManagement/service/apis/tools@2025-09-01-
 resource toolForecast 'Microsoft.ApiManagement/service/apis/tools@2025-09-01-preview' = {
   parent: mcpServer
   name: 'get_demand_forecast'
+  dependsOn: [toolDisruptions]
   properties: {
     displayName: 'get_demand_forecast'
     description: 'Demand forecast for a brand and region. Read-only.'
@@ -236,7 +239,7 @@ resource toolForecast 'Microsoft.ApiManagement/service/apis/tools@2025-09-01-pre
 resource mcpPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-preview' = {
   parent: mcpServer
   name: 'policy'
-  dependsOn: [nvApiFqdn, nvApiAudience, nvGatewayAudience, nvTenantId]
+  dependsOn: [toolForecast, nvApiFqdn, nvApiAudience, nvGatewayAudience, nvTenantId]
   properties: {
     format: 'rawxml'
     value: loadTextContent('apim-mcp-policy.xml')
@@ -268,6 +271,7 @@ resource productBinding 'Microsoft.ApiManagement/service/products/apis@2025-09-0
 resource mcpDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2025-09-01-preview' = {
   parent: mcpServer
   name: 'applicationinsights'
+  dependsOn: [mcpPolicy]
   properties: {
     loggerId: appInsightsLoggerId
     alwaysLog: 'allErrors'
