@@ -26,6 +26,10 @@ Two typed boundaries cover both semantic compaction and the exact gateway artifa
    tool-message sequence for each model turn and bounds a cloned request to at most
    **5 non-empty tool documents / 9,500 aggregate characters**.
 
+`ChatClientBuilder` applies factories in reverse registration order, so production
+registers function invocation first and the gateway boundary second. The resulting
+runtime stack—not the fluent call order—is:
+
 ```
 raw AIFunction → Timed/Instrumented → Budgeted (outermost) → ChatOptions.Tools
 FunctionInvokingChatClient → GatewayToolDocumentBudgetChatClient → APIM
@@ -105,8 +109,8 @@ carries an explicit hint describing how to retrieve detail:
 
 ## Prefetch contract
 
-`ToolPrefetchService` (DemandForecasting intent only) pre-fetches
-`GetHistoricalDemand` / `GetSeasonalityFactors`. Prefetched results are now run through
+`ToolPrefetchService` pre-fetches `GetHistoricalDemand` / `GetSeasonalityFactors` for
+DemandForecasting requests. Prefetched results are now run through
 the **same** compaction boundary (`CompactPrefetch`) before being injected into the
 system prompt, so prefetch can never smuggle an un-budgeted raw payload into context (or
 re-send it on every iteration). Identical subsequent tool calls the model makes are
