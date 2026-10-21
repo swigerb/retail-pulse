@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using FluentAssertions;
 using RetailPulse.Api.OpenAI.Gateway;
 using RetailPulse.Api.Packs;
@@ -14,7 +15,7 @@ namespace RetailPulse.Tests.Deployment;
 /// evidence parser and pack loader; it never re-implements policy behaviour and never skips. Every failure names the
 /// missing invariant. Live deployment evidence is owned by #341 / #342, not this suite.
 /// </summary>
-public sealed class IntegratedGatewayAcceptanceTests
+public sealed partial class IntegratedGatewayAcceptanceTests
 {
     private static readonly string Root = PackTestPaths.RepoRoot;
 
@@ -33,32 +34,57 @@ public sealed class IntegratedGatewayAcceptanceTests
     private static void Contains(string id, string text, string expected, string where) =>
         Invariant(id, text.Contains(expected, StringComparison.Ordinal), $"'{expected}' not found in {where}");
 
-    private static string RunProbeSelfTest(string id, string script, params string[] expectedMarkers)
+    private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(90);
+
+    private static async Task<(int Exit, string Output)> RunProcessAsync(string id, string tool, params string[] args)
     {
-        string path = Path.Combine(Root, "scripts", script);
-        Invariant(id, File.Exists(path), $"probe scripts/{script} is missing");
-        var psi = new ProcessStartInfo("node", $"\"{path}\" --self-test")
+        var psi = new ProcessStartInfo(tool)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+            WorkingDirectory = Root,
         };
-        string output;
-        int exit;
-        try
+        foreach (string arg in args)
         {
-            using Process p = Process.Start(psi)!;
-            Task<string> err = p.StandardError.ReadToEndAsync();
-            output = p.StandardOutput.ReadToEnd();
-            p.WaitForExit(90_000).Should().BeTrue($"{script} --self-test timed out");
-            exit = p.ExitCode;
-            output += err.Result;
-        }
-        catch (System.ComponentModel.Win32Exception ex)
-        {
-            throw new XunitException($"MISSING INVARIANT [{id}]: node is required to run scripts/{script} --self-test ({ex.Message})");
+            psi.ArgumentList.Add(arg);
         }
 
+        Process p;
+        try
+        {
+            p = Process.Start(psi)!;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException)
+        {
+            throw new XunitException($"MISSING INVARIANT [{id}]: '{tool}' is required on PATH to run {string.Join(' ', args)} ({ex.Message})");
+        }
+
+        using (p)
+        {
+            Task<string> stdout = p.StandardOutput.ReadToEndAsync();
+            Task<string> stderr = p.StandardError.ReadToEndAsync();
+            using var cts = new CancellationTokenSource(ProcessTimeout);
+            try
+            {
+                await p.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                p.Kill(entireProcessTree: true);
+                await p.WaitForExitAsync();
+                throw new XunitException($"MISSING INVARIANT [{id}]: '{tool} {string.Join(' ', args)}' did not finish within {ProcessTimeout.TotalSeconds:0}s and was killed");
+            }
+
+            return (p.ExitCode, await stdout + await stderr);
+        }
+    }
+
+    private static async Task<string> RunProbeSelfTestAsync(string id, string script, params string[] expectedMarkers)
+    {
+        string path = Path.Combine(Root, "scripts", script);
+        Invariant(id, File.Exists(path), $"probe scripts/{script} is missing");
+        (int exit, string output) = await RunProcessAsync(id, "node", path, "--self-test");
         Invariant(id, exit == 0, $"scripts/{script} --self-test exited {exit}: {output}");
         foreach (string marker in expectedMarkers)
         {
@@ -148,9 +174,9 @@ public sealed class IntegratedGatewayAcceptanceTests
     }
 
     [Fact]
-    public void AuthorizedFailover_ProbeProvesRealPrimaryFailureAndSpoofRejection()
+    public async Task AuthorizedFailover_ProbeProvesRealPrimaryFailureAndSpoofRejection()
     {
-        RunProbeSelfTest("authorized-failover", "probe-failover-demo.cjs",
+        await RunProbeSelfTestAsync("authorized-failover", "probe-failover-demo.cjs",
             "[enabled:correct]", "[enabled:spoof]", "[enabled:no-failover]", "[enabled:open]", "[disabled:correct]");
 
         var headers = new Dictionary<string, string>
@@ -169,9 +195,9 @@ public sealed class IntegratedGatewayAcceptanceTests
     }
 
     [Fact]
-    public void PreModelSafetyBlock_ProbeProvesBlockBeforeBackendAndFailClosedRegulated()
+    public async Task PreModelSafetyBlock_ProbeProvesBlockBeforeBackendAndFailClosedRegulated()
     {
-        RunProbeSelfTest("pre-model-safety-block", "probe-gateway-safety.cjs",
+        await RunProbeSelfTestAsync("pre-model-safety-block", "probe-gateway-safety.cjs",
             "[ok]   attack:correct", "[ok]   attack:backend-was-invoked", "[ok]   fault-503:regulated-fail-closed", "[ok]   outbound:correct");
 
         string policy = Read("infra", "modules", "apim-openai-policy.xml");
@@ -182,9 +208,9 @@ public sealed class IntegratedGatewayAcceptanceTests
     }
 
     [Fact]
-    public void TokenQuotaAndReset_ProbeProves429RetryAfterAndGenerationReset()
+    public async Task TokenQuotaAndReset_ProbeProves429RetryAfterAndGenerationReset()
     {
-        RunProbeSelfTest("token-quota-reset", "probe-token-budget.cjs",
+        await RunProbeSelfTestAsync("token-quota-reset", "probe-token-budget.cjs",
             "scenario correct: expected pass", "scenario no-reset: expected failure", "scenario bad-retry: expected failure", "SELFTEST PASS");
 
         string docs = Read("docs", "token-budgets.md");
@@ -193,29 +219,47 @@ public sealed class IntegratedGatewayAcceptanceTests
     }
 
     [Fact]
-    public void ApiCenterAndMcpDiscovery_VerifierAndGovernedToolSurfaceExist()
+    public async Task ApiCenterAndMcpDiscovery_VerifierSelfTestExecutesAndPasses()
     {
-        string verifier = Read("scripts", "Verify-ApiCenter.ps1");
-        foreach (string probe in new[] { "generated-ID synchronized graph passes", "missing endpoint fails closed", "extra APIM tool fails", "write-bound APIM tool fails" })
-        {
-            Contains("api-center-mcp-discovery", verifier, probe, "scripts/Verify-ApiCenter.ps1 self-test");
-        }
+        (int exit, string output) = await RunProcessAsync("api-center-mcp-discovery", "pwsh",
+            "-NoProfile", "-NonInteractive", "-File", Path.Combine(Root, "scripts", "Verify-ApiCenter.ps1"), "-SelfTest");
+        Invariant("api-center-mcp-discovery", exit == 0, $"Verify-ApiCenter.ps1 -SelfTest exited {exit}: {output}");
+        Contains("api-center-mcp-discovery", output, "Self-test passed.", "Verify-ApiCenter.ps1 -SelfTest output");
+        Invariant("api-center-mcp-discovery", !output.Contains("[FAIL]", StringComparison.Ordinal), $"self-test reported a failure: {output}");
+        Contains("api-center-mcp-discovery", output, "[PASS] self-test: generated-ID synchronized graph passes", "Verify-ApiCenter.ps1 -SelfTest output");
 
-        string mcp = Read("infra", "modules", "apim-mcp-api.bicep");
-        Contains("api-center-mcp-discovery", mcp, "subscriptionRequired", "infra/modules/apim-mcp-api.bicep");
+        Contains("api-center-mcp-discovery", Read("infra", "modules", "apim-mcp-api.bicep"), "subscriptionRequired", "infra/modules/apim-mcp-api.bicep");
         Invariant("api-center-mcp-discovery", File.Exists(Path.Combine(Root, "infra", "modules", "api-center.bicep")), "infra/modules/api-center.bicep is missing");
     }
 
     [Fact]
-    public void RegulatedMode_IsMetadataOnlyAndAlwaysBypassesCache()
+    public async Task RegulatedMode_IsMetadataOnlyAndAlwaysBypassesCache()
     {
         string api = Read("infra", "modules", "apim-openai-api.bicep");
         Contains("regulated-metadata-only", api, "var bodiesDisabled = gatewaySafetyEnabled || regulatedRetailMode", "apim-openai-api.bicep");
         Contains("regulated-metadata-only", api, "bytes: bodiesDisabled ? 0 : 8192", "apim-openai-api.bicep");
         Contains("regulated-metadata-only", api, "logs: bodiesDisabled ? 'disabled' : 'enabled'", "apim-openai-api.bicep");
         Contains("regulated-cache-bypass", api, "'{cache-regulated}', string(regulatedRetailMode)", "apim-openai-api.bicep");
-        Contains("regulated-cache-bypass", Read("infra", "modules", "apim-openai-semantic-cache-inbound.xml"), "return &quot;regulated&quot;", "semantic-cache inbound fragment");
         Contains("regulated-fail-closed", api, "regulatedRetailMode ? 'regulated' : gatewaySafetyMode", "apim-openai-api.bicep");
+
+        // Render the real inbound fragment with regulated=true and prove the regulated decision precedes every pattern check.
+        string rendered = Read("infra", "modules", "apim-openai-semantic-cache-inbound.xml")
+            .Replace("{cache-regulated}", "true").Replace("{cache-partition}", "lowes-retail")
+            .Replace("{cache-score-threshold}", "0.05").Replace("{cache-embeddings-backend-id}", "emb");
+        XElement root = XDocument.Parse("<r>" + rendered + "</r>").Root!;
+        string Var(string name) => root.Descendants("set-variable").Single(v => (string?)v.Attribute("name") == name).Attribute("value")!.Value;
+        Invariant("regulated-cache-bypass", Var("rp-cache-regulated") == "true", "rendered regulated fragment must set rp-cache-regulated=true");
+        string decision = Var("rp-cache-decision");
+        int regulated = decision.IndexOf("rp-cache-regulated", StringComparison.Ordinal);
+        int firstOther = MyRegex().Matches(decision).Select(m => m.Index).DefaultIfEmpty(int.MaxValue).Min();
+        Invariant("regulated-cache-bypass", regulated >= 0 && regulated < firstOther && decision.Contains("return \"regulated\"", StringComparison.Ordinal),
+            "regulated bypass must be the first decision and return the closed reason 'regulated'");
+        Invariant("regulated-cache-bypass", Var("rp-cache-partition") == "lowes-retail", "walkthrough partition value must render verbatim");
+
+        // Real offline probes: regulated fail-closed on a safety fault, metadata only.
+        await RunProbeSelfTestAsync("regulated-fail-closed", "probe-gateway-safety.cjs",
+            "[ok]   fault-503:regulated-fail-closed", "[ok]   fault-503:regulated-allowed");
+        await RunProbeSelfTestAsync("regulated-cache-bypass", "probe-semantic-cache.cjs", "PASS self-test: conforming gateway passes");
 
         var headers = new Dictionary<string, string> { [GatewayEvidenceHeaders.Cache] = "bypass", [GatewayEvidenceHeaders.CacheReason] = "regulated" };
         GatewayCallEvidence e = GatewayEvidenceHeaders.Parse(n => headers.GetValueOrDefault(n), 200);
@@ -223,9 +267,9 @@ public sealed class IntegratedGatewayAcceptanceTests
     }
 
     [Fact]
-    public void SemanticCache_ProbeProvesHitWithoutBackendAndClosedVocabularyBypass()
+    public async Task SemanticCache_ProbeProvesHitWithoutBackendAndClosedVocabularyBypass()
     {
-        RunProbeSelfTest("semantic-cache-hit-bypass", "probe-semantic-cache.cjs",
+        await RunProbeSelfTestAsync("semantic-cache-hit-bypass", "probe-semantic-cache.cjs",
             "PASS self-test: conforming gateway passes", "PASS self-test: hit that contacts backend fails",
             "PASS self-test: caller-header partition fails", "PASS self-test: cache-unavailable fall-through passes");
 
@@ -234,17 +278,77 @@ public sealed class IntegratedGatewayAcceptanceTests
             "Control Room parser does not report a cache hit");
     }
 
-    [Fact]
-    public void Walkthrough_DocumentsSevenPrioritiesFourPacksAndExactSetupResetCommands()
+    [GeneratedRegex(@"```(?<lang>powershell|bash)\r?\n(?<code>.*?)```", RegexOptions.Singleline)]
+    private static partial Regex CodeBlockRegex();
+
+    [GeneratedRegex("integrated Azure operating model", RegexOptions.IgnoreCase)]
+    private static partial Regex IntegratedClaimRegex();
+
+    [GeneratedRegex("not exclusive", RegexOptions.IgnoreCase)]
+    private static partial Regex NotExclusiveRegex();
+
+    [GeneratedRegex(@"\b(only|unique(ly)?|exclusive(ly)?)\s+(to\s+)?(Azure|APIM)\b|\bnobody else\b|\bno other (vendor|platform)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ExclusivityRegex();
+
+    [GeneratedRegex(@"\b(sk-[A-Za-z0-9]{16,}|\d{3}-\d{2}-\d{4})\b")]
+    private static partial Regex SecretLikeRegex();
+
+    private static string WalkthroughSection()
     {
         string doc = Read("docs", "demo-walkthrough.md");
         Invariant("walkthrough-section", doc.Contains("## Retailer AI Gateway Walkthrough", StringComparison.Ordinal), "docs/demo-walkthrough.md has no 'Retailer AI Gateway Walkthrough' section");
         string section = doc[doc.IndexOf("## Retailer AI Gateway Walkthrough", StringComparison.Ordinal)..];
         int next = section.IndexOf("\n## ", 5, StringComparison.Ordinal);
-        if (next > 0)
+        return next > 0 ? section[..next] : section;
+    }
+
+    private static (string Lang, string Code)[] Blocks(string section, string marker) =>
+        [.. CodeBlockRegex().Matches(section).Select(m => (Lang: m.Groups["lang"].Value, Code: m.Groups["code"].Value)).Where(b => b.Code.Contains(marker, StringComparison.Ordinal))];
+
+    // Within ONE block: arm only after try/trap is in place, disarm only in finally/trap, bump before disarm, verify after disarm.
+    private static void AssertFailSafeBlock(string id, string lang, string code, string armName, string? bumpName)
+    {
+        string arm = $"--named-value-id {armName} --value true";
+        string disarm = $"--named-value-id {armName} --value false";
+        string show = $"nv show";
+        Invariant(id, code.Split(arm).Length == 2, $"{lang} block must arm {armName} exactly once");
+        int armAt = code.IndexOf(arm, StringComparison.Ordinal);
+        int disarmAt = code.IndexOf(disarm, StringComparison.Ordinal);
+        int verifyAt = code.IndexOf(show, disarmAt < 0 ? 0 : disarmAt, StringComparison.Ordinal);
+        Invariant(id, disarmAt > 0 && verifyAt > disarmAt, $"{lang} block must disarm {armName} and then verify the disarmed state with 'nv show'");
+        if (lang == "powershell")
         {
-            section = section[..next];
+            int tryAt = code.IndexOf("try {", StringComparison.Ordinal);
+            int finallyAt = code.IndexOf("finally {", StringComparison.Ordinal);
+            Invariant(id, tryAt >= 0 && tryAt < armAt && armAt < finallyAt, "PowerShell arm must be inside try, before finally");
+            Invariant(id, finallyAt < disarmAt && disarmAt < verifyAt, "PowerShell disarm and verification must be inside finally");
+            Invariant(id, code.Contains("exit 1", StringComparison.Ordinal) && code.Contains("curl.exe", StringComparison.Ordinal)
+                && code.Contains("[System.IO.Path]::GetTempPath()", StringComparison.Ordinal) && !code.Contains("curl -", StringComparison.Ordinal),
+                "PowerShell block must use curl.exe, Path.GetTempPath and fail when not disarmed");
+            Invariant(id, !code.Contains("$APIM", StringComparison.Ordinal) && code.Contains("$env:", StringComparison.Ordinal), "PowerShell block must use $env: variables");
         }
+        else
+        {
+            int trapAt = code.IndexOf("trap ", StringComparison.Ordinal);
+            Invariant(id, trapAt >= 0 && trapAt < armAt && code.Contains(" EXIT", StringComparison.Ordinal), "bash trap ... EXIT must be set before arming");
+            int fnAt = code.IndexOf("() {", StringComparison.Ordinal);
+            Invariant(id, fnAt >= 0 && fnAt < disarmAt && disarmAt < trapAt && verifyAt < trapAt, "bash disarm and verification must live in the trap handler");
+            Invariant(id, code.Contains("set -euo pipefail", StringComparison.Ordinal) && code.Contains("mktemp", StringComparison.Ordinal), "bash block must fail fast and use mktemp");
+        }
+
+        if (bumpName is not null)
+        {
+            int bumpAt = code.IndexOf($"--named-value-id {bumpName} --value", StringComparison.Ordinal);
+            Invariant(id, bumpAt >= 0 && bumpAt < disarmAt, $"{bumpName} must be bumped before the demo is disarmed");
+            int cleanupStart = lang == "powershell" ? code.IndexOf("finally {", StringComparison.Ordinal) : code.IndexOf("() {", StringComparison.Ordinal);
+            Invariant(id, bumpAt > cleanupStart, "the generation bump must run in the cleanup path so a failed probe still resets");
+        }
+    }
+
+    [Fact]
+    public void Walkthrough_DocumentsSevenPrioritiesFourPacksAndExactSetupResetCommands()
+    {
+        string section = WalkthroughSection();
 
         foreach (string pack in _packs)
         {
@@ -262,17 +366,13 @@ public sealed class IntegratedGatewayAcceptanceTests
 
         foreach (string command in new[]
         {
-            "az apim nv update --service-name <apim> -g <rg> --named-value-id rp-failover-demo-armed --value true",
-            "az apim nv update --service-name <apim> -g <rg> --named-value-id rp-failover-demo-armed --value false",
-            "az apim nv update -g <rg> -n <apim> --named-value-id rp-budget-demo-armed --value true",
-            "az apim nv update -g <rg> -n <apim> --named-value-id rp-budget-demo-generation --value <new number>",
-            "az apim nv update -g <rg> -n <apim> --named-value-id rp-budget-demo-armed --value false",
             "azd env set AZURE_APIM_FAILOVER_DEMO_ENABLED true",
             "azd env set AZURE_APIM_TOKEN_BUDGET_DEMO_ENABLED true",
             "azd env set AZURE_APIM_GATEWAY_SAFETY_ENABLED true",
             "azd env set AZURE_SEMANTIC_CACHE_ENABLED true",
             "azd env set AZURE_APIM_SEMANTIC_CACHE_POLICY_ENABLED true",
             "azd env set AZURE_API_CENTER_ENABLED true",
+            "azd env set AZURE_APIM_SEMANTIC_CACHE_PARTITION lowes-retail",
             "azd env set AZURE_REGULATED_RETAIL_MODE true",
             "azd env set AZURE_REGULATED_RETAIL_MODE false",
             "Packs__Active=",
@@ -280,18 +380,77 @@ public sealed class IntegratedGatewayAcceptanceTests
             "node scripts/probe-gateway-safety.cjs",
             "node scripts/probe-token-budget.cjs",
             "node scripts/probe-semantic-cache.cjs",
-            "./scripts/Verify-ApiCenter.ps1",
+            "pwsh ./scripts/Verify-ApiCenter.ps1 -SelfTest",
         })
         {
             Contains("walkthrough-commands", section, command, "gateway walkthrough");
         }
 
+        foreach (string variable in new[] { "APIM_NAME", "RESOURCE_GROUP", "APIM_BASE_URL", "DEPLOYMENT", "API_VERSION", "APIM_SUBSCRIPTION_KEY", "FAILOVER_DEMO_KEY" })
+        {
+            Contains("walkthrough-env-vars", section, variable, "gateway walkthrough");
+        }
+
         Contains("walkthrough-live-ownership", section, "#341", "gateway walkthrough");
         Contains("walkthrough-live-ownership", section, "#342", "gateway walkthrough");
-        Invariant("walkthrough-claims", Regex.IsMatch(section, "integrated Azure operating model", RegexOptions.IgnoreCase), "claim must be framed as an integrated Azure operating model");
-        Invariant("walkthrough-claims", Regex.IsMatch(section, "not exclusive", RegexOptions.IgnoreCase), "walkthrough must say the capabilities are not exclusive features");
-        Invariant("walkthrough-claims", !Regex.IsMatch(section, @"\b(only|unique(ly)?|exclusive(ly)?)\s+(to\s+)?(Azure|APIM)\b|\bnobody else\b|\bno other (vendor|platform)\b", RegexOptions.IgnoreCase),
-            "walkthrough makes an exclusivity claim");
-        Invariant("walkthrough-no-real-data", !Regex.IsMatch(section, @"\b(sk-[A-Za-z0-9]{16,}|\d{3}-\d{2}-\d{4})\b"), "walkthrough contains a secret or identifier-like value");
+        Invariant("walkthrough-claims", IntegratedClaimRegex().IsMatch(section), "claim must be framed as an integrated Azure operating model");
+        Invariant("walkthrough-claims", NotExclusiveRegex().IsMatch(section), "walkthrough must say the capabilities are not exclusive features");
+        Invariant("walkthrough-claims", !ExclusivityRegex().IsMatch(section), "walkthrough makes an exclusivity claim");
+        Invariant("walkthrough-no-real-data", !SecretLikeRegex().IsMatch(section), "walkthrough contains a secret or identifier-like value");
     }
+
+    [Fact]
+    public void Walkthrough_FailoverAndQuotaBlocksAreFailSafeInPowerShellAndBash()
+    {
+        string section = WalkthroughSection();
+        foreach (string lang in new[] { "powershell", "bash" })
+        {
+            (string Lang, string Code)[] failover = [.. Blocks(section, "rp-failover-demo-armed --value true").Where(b => b.Lang == lang)];
+            Invariant("walkthrough-failover-failsafe", failover.Length == 1, $"expected exactly one {lang} failover block, found {failover.Length}");
+            AssertFailSafeBlock("walkthrough-failover-failsafe", lang, failover[0].Code, "rp-failover-demo-armed", null);
+
+            (string Lang, string Code)[] quota = [.. Blocks(section, "rp-budget-demo-armed --value true").Where(b => b.Lang == lang)];
+            Invariant("walkthrough-quota-failsafe", quota.Length == 1, $"expected exactly one {lang} quota block, found {quota.Length}");
+            AssertFailSafeBlock("walkthrough-quota-failsafe", lang, quota[0].Code, "rp-budget-demo-armed", "rp-budget-demo-generation");
+        }
+
+        Invariant("walkthrough-failsafe-only", CodeBlockRegex().Matches(section).All(m => !m.Groups["code"].Value.Contains("--value true", StringComparison.Ordinal)
+            || m.Groups["code"].Value.Contains("finally {", StringComparison.Ordinal) || m.Groups["code"].Value.Contains("trap ", StringComparison.Ordinal)),
+            "an arm command exists outside a try/finally or trap block");
+    }
+
+    [Fact]
+    public void Walkthrough_RegulatedModeIsSeparateStateAndNeverPrecedesCache()
+    {
+        string section = WalkthroughSection();
+        string[] rows = [.. section.Split('\n').Where(l => (l.StartsWith("| ", StringComparison.Ordinal) && l.Contains("`-retail", StringComparison.Ordinal)) || l.Contains("-retail` |", StringComparison.Ordinal))];
+        int cache = Array.FindIndex(rows, r => r.Contains("7. Semantic cache", StringComparison.Ordinal));
+        int regulated = Array.FindIndex(rows, r => r.Contains("6. Regulated-retail mode", StringComparison.Ordinal));
+        int failover = Array.FindIndex(rows, r => r.Contains("2. Authorized failover", StringComparison.Ordinal));
+        int quota = Array.FindIndex(rows, r => r.Contains("4. Token quota and reset", StringComparison.Ordinal));
+        Invariant("walkthrough-regulated-order", cache >= 0 && regulated >= 0 && failover >= 0 && quota >= 0, "narrative rows for cache, failover, quota and regulated are required");
+        Invariant("walkthrough-regulated-order", cache < regulated && failover < regulated && quota < regulated, "regulated mode must come after every normal-mode step, including the cache demo");
+        Invariant("walkthrough-regulated-order", rows[regulated].Contains("pre-provisioned", StringComparison.OrdinalIgnoreCase) || rows[regulated].Contains("captured", StringComparison.OrdinalIgnoreCase),
+            "the regulated row must say it is pre-provisioned or captured");
+        foreach (string row in rows.Where(r => r.Contains("regulated", StringComparison.OrdinalIgnoreCase) && !ReferenceEquals(r, rows[regulated])))
+        {
+            Invariant("walkthrough-regulated-order", row.Contains("regulated` ", StringComparison.Ordinal) || row.Contains("always bypass", StringComparison.OrdinalIgnoreCase) || row.Contains("regulated mode always", StringComparison.OrdinalIgnoreCase),
+                $"a normal-mode row mentions regulated mode: {row}");
+        }
+
+        foreach (string row in rows)
+        {
+            Invariant("walkthrough-no-live-reprovision", !row.Contains("azd up", StringComparison.OrdinalIgnoreCase) && !row.Contains("reprovision", StringComparison.OrdinalIgnoreCase),
+                "no timed narrative row may imply an azd (re)provision");
+        }
+
+        Contains("walkthrough-regulated-order", section, "never** toggled during the walkthrough", "gateway walkthrough");
+        Contains("walkthrough-regulated-order", section, "azd env new retailpulse-regulated", "gateway walkthrough");
+        int regulatedSetup = section.IndexOf("azd env set AZURE_REGULATED_RETAIL_MODE true", StringComparison.Ordinal);
+        Invariant("walkthrough-regulated-order", regulatedSetup > section.IndexOf("azd env new retailpulse-regulated", StringComparison.Ordinal),
+            "regulated provisioning must happen in its own azd environment");
+    }
+
+    [GeneratedRegex("rp-cache-(?!regulated|decision)[a-z-]+")]
+    private static partial Regex MyRegex();
 }
