@@ -20,6 +20,14 @@ pwsh ./scripts/Invoke-ProductionPromptSweep.ps1 `
 
 Exit code is `0` only when every prompt passes.
 
+Each request attempt gets a new caller-generated `X-Correlation-ID`. With
+`-JsonOut`, every result includes the final `CallerCorrelationId`,
+`ReturnedCorrelationId`, sanitized `GatewayRequestIds`, and an `Attempts`
+array carrying the same fields for retries. These identifiers cover
+successful and failed prompts without persisting auth material, request
+payloads beyond the existing curated prompt name, or tool/model response
+payloads.
+
 ### Authentication
 
 The sweep uses a **delegated** token from the caller's own `az login`
