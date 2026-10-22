@@ -171,6 +171,28 @@ public class ToolPrefetchServiceTests
     }
 
     [Fact]
+    public async Task PrefetchAsync_ThisQuarter_PassesExplicitCurrentQuarterPeriod()
+    {
+        const string prompt =
+            "Create a bar chart comparing Urban Living depletion volume across all regions this quarter";
+        PrefetchEntities entities = _sut.ExtractEntities(prompt);
+
+        await _sut.PrefetchAsync(AgentIntent.DemandForecasting, entities, prompt);
+
+        _httpHandler.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.Is<HttpRequestMessage>(request =>
+                request.RequestUri != null
+                && request.RequestUri.AbsolutePath == "/api/demand/history"
+                && request.RequestUri.Query.Contains("period=current-quarter", StringComparison.Ordinal)
+                && request.RequestUri.Query.Contains("brand=Urban%20Living", StringComparison.Ordinal)
+                && !request.RequestUri.Query.Contains("region=National", StringComparison.Ordinal)
+                && !request.RequestUri.Query.Contains("channel=All", StringComparison.Ordinal)),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
     public async Task PrefetchAsync_CuratedHomeImprovementTable_PrefetchesOnlyManifestBrandsAcrossRegions()
     {
         const string prompt =
@@ -217,7 +239,7 @@ public class ToolPrefetchServiceTests
         _httpHandler.Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",
-                ItExpr.Is<HttpRequestMessage>(r => r.RequestUri!.AbsolutePath == "/api/historical-demand"),
+                ItExpr.Is<HttpRequestMessage>(r => r.RequestUri!.AbsolutePath == "/api/demand/history"),
                 ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -407,8 +429,8 @@ public class ToolPrefetchServiceTests
 
     private static string ResponseFor(string? path) => path switch
     {
-        "/api/historical-demand" => /*lang=json,strict*/
-            """{"filters":{"brand":"Test Brand","region":"Northeast","channel":"All"},"summary":{"total_volume":5200,"total_units":1000,"weeks_of_data":52,"avg_weekly_volume":100},"weekly_data":[{"region":"Northeast","volume":100,"units":20,"week_starting":"2026-01-01"}]}""",
+        "/api/historical-demand" or "/api/demand/history" => /*lang=json,strict*/
+            """{"period":{"label":"last-12-months","start":"2025-05-13","end":"2026-05-13","months":12},"filters":{"brand":"Test Brand","region":"Northeast","channel":"All"},"summary":{"total_volume":5200,"total_units":1000,"weeks_of_data":52,"avg_weekly_volume":100},"weekly_data":[{"region":"Northeast","volume":100,"units":20,"week_starting":"2026-01-01"}]}""",
         "/api/depletion-stats" => /*lang=json,strict*/
             """{"brand":"Test Brand","region":"Northeast","period":"YTD","metrics":{"depletions_yoy":"+3.2%","sell_through_yoy":"+2.1%","inventory_weeks_on_hand":7.2}}""",
         "/api/portfolio-depletion-stats" => /*lang=json,strict*/

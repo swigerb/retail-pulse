@@ -8,13 +8,15 @@ namespace RetailPulse.McpServer.Tools;
 public static class DemandTools
 {
     [McpServerTool(Name = "GetHistoricalDemand")]
-    [Description("Get historical demand/depletion data aggregated by week. Returns volume and units over time, filterable by brand, region, channel, and number of months. Use this for trend analysis, baseline comparisons, and demand pattern identification.")]
+    [Description("Get historical demand/depletion data aggregated by week. Supports explicit dataset-relative periods so requested time ranges are not silently broadened.")]
     public static object GetHistoricalDemand(
         RetailPulseDb data,
         [Description("Brand name to filter (e.g. 'Sierra Gold Tequila', 'FreshMart'). Omit for all brands.")] string? brand = null,
         [Description("Region to filter (e.g. 'Northeast', 'West Coast'). Omit for all regions.")] string? region = null,
         [Description("Channel to filter ('On-Premise', 'Off-Premise', 'E-Commerce'). Omit for all channels.")] string? channel = null,
-        [Description("Number of months of history to return (1-24). Default: 12")] int months = 12) => data.GetHistoricalDemand(brand, region, channel, months);
+        [Description("Number of months of history to return (1-24). Used when period is omitted.")] int months = 12,
+        [Description("Supported period: current-month, current-quarter, current-year, or last-N-months where N is 1..24.")] string? period = null) =>
+        data.GetHistoricalDemand(brand, region, channel, months, period);
 
     [McpServerTool(Name = "GenerateForecast")]
     [Description("Generate a demand forecast for a brand using trailing average + seasonal multipliers + trend analysis. Returns daily predicted volume with ±15% confidence bounds and explanation of which seasonal factors were applied.")]

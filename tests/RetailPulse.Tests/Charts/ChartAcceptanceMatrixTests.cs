@@ -69,6 +69,16 @@ public sealed class ChartAcceptanceMatrixTests
         built.Should().BeTrue($"deterministic builder must produce a chart for prompt '{c.Prompt}'");
         chart.Should().NotBeNull();
         chart.Type.Should().Be(c.ChartType);
+        if (c.ChartType == "line")
+        {
+            chart.XAxisTitle.Should().Be("Period");
+            foreach (ChartDataPoint point in chart.Data.SelectMany(series => series.Values))
+            {
+                point.X.Should().NotBeNull();
+                point.X.Should().Contain("2024-",
+                    "a requested trend must use chronological categories rather than regions");
+            }
+        }
 
         ChartSpecValidator
             .TryGetRenderable(chart, c.MinSeries, c.MinMarks, out ChartSpec? renderable)
@@ -100,6 +110,56 @@ public sealed class ChartAcceptanceMatrixTests
                     $"percent axis for '{c.Prompt}' must produce a bounded, meaningful value");
             }
         }
+    }
+
+    [Fact]
+    public void TemporalLine_WithoutChronologicalEvidence_FailsClosed()
+    {
+        string regionOnly = JsonSerializer.Serialize(new
+        {
+            period = new { label = "last-12-months" },
+            filters = new { brand = "Sierra Gold Tequila" },
+            summary = new { total_volume = 300.0 },
+            by_region = new[]
+            {
+                new { region = "Northeast", volume = 100.0 },
+                new { region = "Southeast", volume = 200.0 }
+            }
+        });
+
+        bool built = DeterministicChartBuilder.TryBuild(
+            ResponseWithToolResults(regionOnly),
+            "line",
+            out ChartSpec? chart);
+
+        built.Should().BeFalse();
+        chart.Should().BeNull();
+    }
+
+    [Fact]
+    public void GroupedComparison_WithConflictingPeriods_FailsClosed()
+    {
+        static string Payload(string brand, string period, double volume) => JsonSerializer.Serialize(new
+        {
+            period = new { label = period },
+            filters = new { brand },
+            summary = new { total_volume = volume },
+            by_region = new[]
+            {
+                new { region = "Northeast", volume },
+                new { region = "Southeast", volume = volume + 1 }
+            }
+        });
+
+        bool built = DeterministicChartBuilder.TryBuild(
+            ResponseWithToolResults(
+                Payload("Foundry Home", "current-quarter", 100),
+                Payload("Urban Living", "last-12-months", 200)),
+            "groupedBar",
+            out ChartSpec? chart);
+
+        built.Should().BeFalse();
+        chart.Should().BeNull();
     }
 
     // ── Fixtures per data source ───────────────────────────────────────────
@@ -384,4 +444,3 @@ public sealed class ChartAcceptanceMatrixTests
         return new MeaiChatResponse(new ChatMessage(ChatRole.Assistant, contents));
     }
 }
-

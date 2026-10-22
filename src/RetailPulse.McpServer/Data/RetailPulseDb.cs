@@ -1162,11 +1162,26 @@ public class RetailPulseDb
 
     // ── Demand Query Methods ─────────────────────────────────────────────
 
-    public object GetHistoricalDemand(string? brand, string? region = null, string? channel = null, int months = 12)
+    public object GetHistoricalDemand(
+        string? brand,
+        string? region = null,
+        string? channel = null,
+        int months = 12,
+        string? period = null)
     {
-        months = Math.Clamp(months, 1, 24);
         var endDate = new DateOnly(2026, 5, 13);
-        DateOnly startDate = endDate.AddMonths(-months);
+        string? canonicalBrand = CanonicalizeDemandBrand(brand);
+        if (!TryResolveDemandPeriod(period, months, endDate, out DateOnly startDate, out string periodLabel, out int periodMonths))
+        {
+            return new
+            {
+                error = $"Unsupported historical-demand period '{period}'.",
+                supported_periods = new[]
+                {
+                    "current-month", "current-quarter", "current-year", "last-N-months (N = 1..24)"
+                }
+            };
+        }
 
         using SqliteConnection conn = OpenConnection();
         conn.Open();
@@ -1180,10 +1195,10 @@ public class RetailPulseDb
         cmd.Parameters.AddWithValue("@start", startDate.ToString("yyyy-MM-dd"));
         cmd.Parameters.AddWithValue("@end", endDate.ToString("yyyy-MM-dd"));
 
-        if (!string.IsNullOrWhiteSpace(brand))
+        if (!string.IsNullOrWhiteSpace(canonicalBrand))
         {
             sql.Append(" AND Brand LIKE @brand");
-            cmd.Parameters.AddWithValue("@brand", $"%{brand.Trim()}%");
+            cmd.Parameters.AddWithValue("@brand", $"%{canonicalBrand.Trim()}%");
         }
         if (!string.IsNullOrWhiteSpace(region))
         {
@@ -1228,7 +1243,12 @@ public class RetailPulseDb
             var dateObj = DateOnly.Parse(d);
             // ISO week start (Monday)
             int daysSinceMonday = ((int)dateObj.DayOfWeek + 6) % 7;
-            string weekStart = dateObj.AddDays(-daysSinceMonday).ToString("yyyy-MM-dd");
+            DateOnly weekStartDate = dateObj.AddDays(-daysSinceMonday);
+            if (weekStartDate < startDate)
+            {
+                weekStartDate = startDate;
+            }
+            string weekStart = weekStartDate.ToString("yyyy-MM-dd");
             string key = $"{b}|{r}|{ch}|{weekStart}";
 
             if (weekBucket.TryGetValue(key, out (string Brand, string Region, string Channel, string WeekStart, double Volume, int Units, int Days) existing))
@@ -1253,8 +1273,14 @@ public class RetailPulseDb
 
         return new
         {
-            period = new { start = startDate.ToString("yyyy-MM-dd"), end = endDate.ToString("yyyy-MM-dd"), months },
-            filters = new { brand = brand ?? "all", region = region ?? "all", channel = channel ?? "all" },
+            period = new
+            {
+                label = periodLabel,
+                start = startDate.ToString("yyyy-MM-dd"),
+                end = endDate.ToString("yyyy-MM-dd"),
+                months = periodMonths
+            },
+            filters = new { brand = canonicalBrand ?? "all", region = region ?? "all", channel = channel ?? "all" },
             summary = new
             {
                 total_volume = Math.Round(totalVolume, 1),
@@ -1264,6 +1290,75 @@ public class RetailPulseDb
             },
             weekly_data = weeklyData
         };
+    }
+
+    private static string? CanonicalizeDemandBrand(string? brand) =>
+        string.Equals(brand?.Trim(), "Foundry Furniture", StringComparison.OrdinalIgnoreCase)
+            ? "Foundry Home"
+            : brand;
+
+    private static bool TryResolveDemandPeriod(
+        string? period,
+        int months,
+        DateOnly endDate,
+        out DateOnly startDate,
+        out string label,
+        out int periodMonths)
+    {
+        string normalized = string.IsNullOrWhiteSpace(period)
+            ? $"last-{Math.Clamp(months, 1, 24)}-months"
+            : period.Trim().ToLowerInvariant().Replace('_', '-').Replace(' ', '-');
+
+        switch (normalized)
+        {
+            case "current-month":
+            case "this-month":
+            case "mtd":
+                startDate = new DateOnly(endDate.Year, endDate.Month, 1);
+                label = "current-month";
+                periodMonths = 1;
+                return true;
+
+            case "current-quarter":
+            case "this-quarter":
+            case "qtd":
+                int quarterStartMonth = ((endDate.Month - 1) / 3 * 3) + 1;
+                startDate = new DateOnly(endDate.Year, quarterStartMonth, 1);
+                label = "current-quarter";
+                periodMonths = 3;
+                return true;
+
+            case "current-year":
+            case "this-year":
+            case "ytd":
+                startDate = new DateOnly(endDate.Year, 1, 1);
+                label = "current-year";
+                periodMonths = endDate.Month;
+                return true;
+
+            default:
+                break;
+        }
+
+        const string prefix = "last-";
+        const string suffix = "-months";
+        if (normalized.StartsWith(prefix, StringComparison.Ordinal)
+            && normalized.EndsWith(suffix, StringComparison.Ordinal)
+            && int.TryParse(
+                normalized.AsSpan(prefix.Length, normalized.Length - prefix.Length - suffix.Length),
+                out int requestedMonths)
+            && requestedMonths is >= 1 and <= 24)
+        {
+            startDate = endDate.AddMonths(-requestedMonths);
+            label = $"last-{requestedMonths}-months";
+            periodMonths = requestedMonths;
+            return true;
+        }
+
+        startDate = default;
+        label = string.Empty;
+        periodMonths = 0;
+        return false;
     }
 
     public object GenerateForecast(string brand, string? region = null, int days = 90)

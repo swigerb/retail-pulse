@@ -142,8 +142,17 @@ public sealed class BudgetedAIFunctionTests
                 region.GetProperty("volume").GetDouble() == expectedRegionVolume
                 && region.GetProperty("units").GetInt32() == expectedRegionUnits,
                 "every compacted region must preserve the exact fixture-derived volume and unit sums");
+            JsonElement temporal = doc.RootElement.GetProperty("by_time");
+            temporal.GetArrayLength().Should().BeLessThanOrEqualTo(12);
+            temporal.EnumerateArray().Sum(interval => interval.GetProperty("volume").GetDouble())
+                .Should().Be(6 * expectedRegionVolume,
+                    "bounded temporal intervals must preserve the exact all-region volume sum");
+            temporal.EnumerateArray().Sum(interval => interval.GetProperty("units").GetInt32())
+                .Should().Be(6 * expectedRegionUnits,
+                    "bounded temporal intervals must preserve the exact all-region unit sum");
             doc.RootElement.TryGetProperty("compaction", out JsonElement compaction).Should().BeTrue();
             compaction.GetProperty("aggregate_complete").GetBoolean().Should().BeTrue();
+            compaction.GetProperty("temporal_complete").GetBoolean().Should().BeTrue();
             result.Should().NotContain("tool_result_over_budget");
         }
 
@@ -159,6 +168,38 @@ public sealed class BudgetedAIFunctionTests
         RequestToolContext.Current.Metrics.Count(metric => metric.Deduplicated).Should().Be(2);
         RequestToolContext.Current.Metrics.Where(metric => !metric.Deduplicated).Should().OnlyContain(metric =>
             metric.Compacted && !metric.Truncated && !metric.BudgetExceeded);
+    }
+
+    [Fact]
+    public async Task HistoricalDemand_FactoryPeriodArgument_PreservesQuarterTemporalEvidence()
+    {
+        string payload = BuildHistoricalDemandPayload("Urban Living", weeks: 7, periodLabel: "current-quarter");
+        string? invokedPeriod = null;
+        AIFunction inner = AIFunctionFactory.Create(
+            (string brand, string period) =>
+            {
+                invokedPeriod = period;
+                return payload;
+            },
+            "GetHistoricalDemand");
+        BudgetedAIFunction fn = Wrap(inner, Options(maxCumulative: 9_500, maxCalls: 5));
+
+        using IDisposable scope = RequestToolContext.Begin("quarter-chart", isChartIntent: true);
+        string result = (string)(await fn.InvokeAsync(Args(
+            ("brand", "Urban Living"),
+            ("period", "current-quarter"))))!;
+
+        invokedPeriod.Should().Be("current-quarter");
+        using var doc = JsonDocument.Parse(result);
+        doc.RootElement.GetProperty("period").GetProperty("label").GetString()
+            .Should().Be("current-quarter");
+        JsonElement temporal = doc.RootElement.GetProperty("by_time");
+        temporal.GetArrayLength().Should().Be(7);
+        temporal.EnumerateArray().Select(row => row.GetProperty("start_week").GetString())
+            .Should().BeInAscendingOrder();
+        temporal.EnumerateArray().Sum(row => row.GetProperty("volume").GetDouble())
+            .Should().Be(doc.RootElement.GetProperty("summary").GetProperty("total_volume").GetDouble());
+        result.Should().NotContain("tool_result_over_budget");
     }
 
     [Fact]
@@ -284,7 +325,10 @@ public sealed class BudgetedAIFunctionTests
         inner.Invocations.Should().Be(2, "a new request scope starts with an empty dedup cache");
     }
 
-    private static string BuildHistoricalDemandPayload(string brand)
+    private static string BuildHistoricalDemandPayload(
+        string brand,
+        int weeks = 52,
+        string periodLabel = "last-12-months")
     {
         string[] regions =
         [
@@ -299,12 +343,15 @@ public sealed class BudgetedAIFunctionTests
         var rows = new List<object>();
         double totalVolume = 0;
         int totalUnits = 0;
+        DateOnly firstWeek = periodLabel == "current-quarter"
+            ? new DateOnly(2026, 4, 1)
+            : new DateOnly(2025, 5, 19);
 
         foreach (string region in regions)
         {
             foreach (string channel in channels)
             {
-                for (int week = 0; week < 52; week++)
+                for (int week = 0; week < weeks; week++)
                 {
                     double volume = 1000 + week;
                     int units = 100 + week;
@@ -315,7 +362,7 @@ public sealed class BudgetedAIFunctionTests
                         brand,
                         region,
                         channel,
-                        week_starting = new DateOnly(2025, 5, 19).AddDays(week * 7).ToString("yyyy-MM-dd"),
+                        week_starting = firstWeek.AddDays(week * 7).ToString("yyyy-MM-dd"),
                         volume,
                         units,
                         avg_daily_volume = Math.Round(volume / 7, 1)
@@ -326,14 +373,20 @@ public sealed class BudgetedAIFunctionTests
 
         return JsonSerializer.Serialize(new
         {
-            period = new { start = "2025-05-13", end = "2026-05-13", months = 12 },
+            period = new
+            {
+                label = periodLabel,
+                start = periodLabel == "current-quarter" ? "2026-04-01" : "2025-05-13",
+                end = "2026-05-13",
+                months = periodLabel == "current-quarter" ? 3 : 12
+            },
             filters = new { brand, region = "all", channel = "all" },
             summary = new
             {
                 total_volume = totalVolume,
                 total_units = totalUnits,
                 weeks_of_data = rows.Count,
-                avg_weekly_volume = Math.Round(totalVolume / 52, 1)
+                avg_weekly_volume = Math.Round(totalVolume / weeks, 1)
             },
             weekly_data = rows
         });

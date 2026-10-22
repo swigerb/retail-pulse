@@ -183,6 +183,7 @@ public partial class ToolPrefetchService
         var sw = Stopwatch.StartNew();
         var results = new Dictionary<string, string>();
         var tasks = new List<(string ToolName, Task<string> ResultTask)>();
+        string demandPeriod = ResolveHistoricalDemandPeriod(userMessage);
 
         if (string.Equals(intent, AgentIntent.DemandForecasting, StringComparison.OrdinalIgnoreCase))
         {
@@ -193,7 +194,8 @@ public partial class ToolPrefetchService
                 {
                     ["brand"] = entities.Brand,
                     ["region"] = entities.Region ?? "National",
-                    ["channel"] = entities.Channel ?? "All"
+                    ["channel"] = entities.Channel ?? "All",
+                    ["period"] = demandPeriod
                 };
 
                 string? cached = _toolCache.TryGet("GetHistoricalDemand", args);
@@ -207,6 +209,7 @@ public partial class ToolPrefetchService
                         entities.Brand,
                         entities.Region ?? "National",
                         entities.Channel ?? "All",
+                        demandPeriod,
                         ct)));
                 }
             }
@@ -255,7 +258,7 @@ public partial class ToolPrefetchService
                     results[toolName] = resultTask.Result;
 
                     // Store in tool cache for subsequent LLM tool calls
-                    Dictionary<string, object?> cacheArgs = BuildCacheArgs(toolName, entities);
+                    Dictionary<string, object?> cacheArgs = BuildCacheArgs(toolName, entities, demandPeriod);
                     _toolCache.Set(toolName, cacheArgs, resultTask.Result);
                 }
                 else if (resultTask.IsFaulted)
@@ -306,11 +309,12 @@ public partial class ToolPrefetchService
 
             case ChartDataSource.HistoricalDemand:
                 string demandRegion = entities.Region ?? "National";
+                string demandPeriod = ResolveHistoricalDemandPeriod(chart.Prompt);
                 foreach (string brand in chart.RequiredEntities)
                 {
                     calls.Add((
                         $"GetHistoricalDemand:{brand}",
-                        _historicalDemandTool.GetHistoricalDemand(brand, demandRegion, "All", ct)));
+                        _historicalDemandTool.GetHistoricalDemand(brand, demandRegion, "All", demandPeriod, ct)));
                 }
                 break;
 
@@ -443,14 +447,51 @@ public partial class ToolPrefetchService
     [GeneratedRegex(@"\s+")]
     private static partial Regex PromptWhitespaceRegex();
 
-    private static Dictionary<string, object?> BuildCacheArgs(string toolName, PrefetchEntities entities) =>
+    private static string ResolveHistoricalDemandPeriod(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return "last-12-months";
+
+        if (message.Contains("this quarter", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("current quarter", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("quarter to date", StringComparison.OrdinalIgnoreCase))
+        {
+            return "current-quarter";
+        }
+
+        if (message.Contains("this month", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("month to date", StringComparison.OrdinalIgnoreCase))
+        {
+            return "current-month";
+        }
+
+        if (message.Contains("this year", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("year to date", StringComparison.OrdinalIgnoreCase))
+        {
+            return "current-year";
+        }
+
+        Match trailingMonths = TrailingMonthsRegex().Match(message);
+        return trailingMonths.Success
+            ? $"last-{trailingMonths.Groups[1].Value}-months"
+            : "last-12-months";
+    }
+
+    [GeneratedRegex(@"\b(?:last|past)\s+([1-9]|1\d|2[0-4])\s+months?\b", RegexOptions.IgnoreCase)]
+    private static partial Regex TrailingMonthsRegex();
+
+    private static Dictionary<string, object?> BuildCacheArgs(
+        string toolName,
+        PrefetchEntities entities,
+        string demandPeriod) =>
         toolName switch
         {
             "GetHistoricalDemand" => new Dictionary<string, object?>
             {
                 ["brand"] = entities.Brand,
                 ["region"] = entities.Region ?? "National",
-                ["channel"] = entities.Channel ?? "All"
+                ["channel"] = entities.Channel ?? "All",
+                ["period"] = demandPeriod
             },
             "GetSeasonalityFactors" => new Dictionary<string, object?>
             {

@@ -15,16 +15,26 @@ public class HistoricalDemandTool
         _logger = logger;
     }
 
-    [Description("Get 12 months of historical depletion/demand data for a brand. Returns monthly volume and units for trend analysis, seasonality detection, and forecasting.")]
+    [Description("Get historical depletion/demand data for a brand with an explicit dataset-relative period. Returns weekly source data that is compacted into bounded temporal and regional summaries.")]
     public async Task<string> GetHistoricalDemand(
         [Description("The brand name, e.g. 'Sierra Gold Tequila'")] string brand,
         [Description("The region, e.g. 'Northeast', 'National'. Defaults to 'National'.")] string region = "National",
         [Description("The channel, e.g. 'On-Premise', 'Off-Premise', 'E-Commerce', 'All'. Defaults to 'All'.")] string channel = "All",
+        [Description("Supported period: current-month, current-quarter, current-year, or last-N-months where N is 1..24. Use current-quarter for 'this quarter'. Never substitute a broader period.")] string period = "last-12-months",
         CancellationToken cancellationToken = default)
     {
         try
         {
-            string url = $"/api/historical-demand?brand={Uri.EscapeDataString(brand)}&region={Uri.EscapeDataString(region)}&channel={Uri.EscapeDataString(channel)}";
+            string url = $"/api/demand/history?brand={Uri.EscapeDataString(brand)}"
+                + $"&period={Uri.EscapeDataString(period)}";
+            if (!string.Equals(region, "National", StringComparison.OrdinalIgnoreCase))
+            {
+                url += $"&region={Uri.EscapeDataString(region)}";
+            }
+            if (!string.Equals(channel, "All", StringComparison.OrdinalIgnoreCase))
+            {
+                url += $"&channel={Uri.EscapeDataString(channel)}";
+            }
             HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
@@ -37,6 +47,7 @@ public class HistoricalDemandTool
                 brand,
                 region,
                 channel,
+                period,
                 error = "Historical demand data unavailable — MCP server not reachable.",
                 monthly_data = Array.Empty<object>()
             });

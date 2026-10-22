@@ -135,6 +135,52 @@ public class DemandToolTests : IDisposable
         result.GetProperty("period").GetProperty("months").GetInt32().Should().Be(3);
     }
 
+    [Fact]
+    public void GetHistoricalDemand_CurrentQuarter_UsesDatasetQuarterBoundary()
+    {
+        JsonElement result = Parse(_db.GetHistoricalDemand(
+            "Sierra Gold Tequila",
+            period: "current-quarter"));
+
+        JsonElement period = result.GetProperty("period");
+        period.GetProperty("label").GetString().Should().Be("current-quarter");
+        period.GetProperty("start").GetString().Should().Be("2026-04-01");
+        period.GetProperty("end").GetString().Should().Be("2026-05-13");
+        foreach (JsonElement row in result.GetProperty("weekly_data").EnumerateArray())
+        {
+            var week = DateOnly.Parse(row.GetProperty("week_starting").GetString()!);
+            week.Should().BeOnOrAfter(new DateOnly(2026, 4, 1));
+            week.Should().BeOnOrBefore(new DateOnly(2026, 5, 13));
+        }
+    }
+
+    [Fact]
+    public void GetHistoricalDemand_UnsupportedPeriod_ReturnsSupportedValuesWithoutData()
+    {
+        JsonElement result = Parse(_db.GetHistoricalDemand(
+            "Sierra Gold Tequila",
+            period: "previous-fiscal-quarter"));
+
+        result.GetProperty("error").GetString().Should().Contain("Unsupported");
+        result.GetProperty("supported_periods").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain("current-quarter");
+        result.TryGetProperty("weekly_data", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetHistoricalDemand_FoundryFurnitureAlias_UsesCanonicalBrand()
+    {
+        JsonElement result = Parse(_db.GetHistoricalDemand(
+            "Foundry Furniture",
+            period: "current-quarter"));
+
+        result.GetProperty("filters").GetProperty("brand").GetString().Should().Be("Foundry Home");
+        result.GetProperty("summary").GetProperty("total_volume").GetDouble().Should().BeGreaterThan(0);
+        result.GetProperty("weekly_data").EnumerateArray().Should().OnlyContain(row =>
+            row.GetProperty("brand").GetString() == "Foundry Home");
+    }
+
     #endregion
 
     #region GenerateForecast
