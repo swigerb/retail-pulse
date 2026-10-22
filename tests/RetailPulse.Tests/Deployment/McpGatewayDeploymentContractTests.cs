@@ -204,14 +204,13 @@ public sealed partial class McpGatewayDeploymentContractTests
     }
 
     [Fact]
-    public void McpPolicy_AllowsNativeTransportRequestsBeforeToolDispatch()
+    public void McpPolicy_DoesNotAuthorizeTransportByBackingOperationId()
     {
         var doc = System.Xml.Linq.XDocument.Parse(McpPolicy);
         string[] conditions = [.. doc.Descendants("when").Select(w => (string)w.Attribute("condition")!)];
         conditions.Should().Contain(c => c.Contains("&&") && c.Contains("\"DELETE\""));
         conditions.Should().NotContain(c => c.Contains("context.Operation"),
-            "the MCP-scope policy also evaluates initialize and other native transport requests, whose operation id is not a backing REST operation");
-        McpPolicy.Should().Contain("native MCP").And.Contain("app-only route allow-list");
+            "tool authorization is already enforced by explicit MCP tool resources, GET-only backing operations, and the API route allow-list");
     }
 
     [Fact]

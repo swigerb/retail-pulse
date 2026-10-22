@@ -816,10 +816,9 @@ Retail Pulse API with its managed identity.
 - **Route allow-list:** `McpGateway:Clients:{i}` (`ClientId` + its own `Operations`, e.g. `"GET /api/supply/inventory"` for APIM only, `"POST /api/chat"` for the bot) is enforced by
   `AppOnlyRouteAllowListMiddleware` after authorization; an empty list denies every app-only request. The Teams bot
   keeps `POST /api/chat` when a bot is configured.
-- **Native transport:** the MCP-scope policy authenticates and limits the whole protocol connection, including
-  `initialize`. It does not compare the transport request's `context.Operation.Id` with backing REST operation IDs.
-  The four explicit MCP tool resources, their GET-only backing operations, and the API route allow-list enforce the
-  approved tool boundary without blocking the protocol handshake.
+- **Operation authorization:** the MCP-scope policy does not compare `context.Operation.Id` with backing REST
+  operation IDs; APIM does not document those values as a shared authorization namespace. The four explicit MCP
+  tool resources, their GET-only backing operations, and the API route allow-list enforce the approved tool boundary.
 - **Provisioning:** azd `preprovision` calls `scripts/Setup-McpGatewayIdentity.ps1 -BootstrapOnly` to create or
   repair the gateway app with `api.requestedAccessTokenVersion=2` and emit its client ID before ARM runs.
   `postprovision` completes the APIM identity's `RetailPulse.User` assignment idempotently. It needs Graph
