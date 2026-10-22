@@ -190,6 +190,33 @@ async function seedConversation(user: ReturnType<typeof userEvent.setup>, prompt
   await waitFor(() => expect(screen.getByTestId('chart-renderer-mock')).toBeInTheDocument());
 }
 
+async function clickView(user: ReturnType<typeof userEvent.setup>, name: RegExp | string) {
+  const directButton = screen.queryByRole('button', { name });
+  if (directButton) {
+    await user.click(directButton);
+    return;
+  }
+
+  await user.click(screen.getByRole('button', { name: 'Views' }));
+  await user.click(screen.getByRole('menuitem', { name }));
+}
+
+async function clickAction(user: ReturnType<typeof userEvent.setup>, name: RegExp | string) {
+  const directButton = screen.queryByRole('button', { name });
+  if (directButton) {
+    await user.click(directButton);
+    return;
+  }
+
+  await user.click(screen.getByRole('button', { name: 'Actions' }));
+  await user.click(screen.getByRole('menuitem', { name }));
+}
+
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  window.dispatchEvent(new Event('resize'));
+}
+
 const pendingApproval: ApprovalRequest = {
   id: 'ap-1',
   action: 'Send promotional email to 10,000 customers',
@@ -214,6 +241,7 @@ beforeEach(() => {
   connectTelemetryHubMock.mockClear();
   for (const k of Object.keys(hubHandlers)) delete hubHandlers[k];
   Element.prototype.scrollIntoView = vi.fn();
+  setViewportWidth(1024);
 });
 
 afterEach(() => {
@@ -233,11 +261,11 @@ describe('Dashboard — chat persists across navigation (issue #46)', () => {
     const sessionId = joinTelemetrySessionMock.mock.calls[0][0];
 
     // Navigate to Observability.
-    await user.click(screen.getByRole('button', { name: 'Observability' }));
+    await clickView(user, 'Observability');
     expect(screen.getByTestId('observability')).toBeInTheDocument();
 
     // Return to Chat.
-    await user.click(screen.getByRole('button', { name: /Back to Chat/i }));
+    await clickView(user, /Back to Chat/i);
 
     // Conversation is intact — same DOM nodes, never refetched or rejoined.
     expect(screen.getByText(CHART_RESPONSE.reply)).toBeInTheDocument();
@@ -260,7 +288,7 @@ describe('Dashboard — chat persists across navigation (issue #46)', () => {
     await user.click(screen.getByRole('button', { name: /Send message/i }));
 
     // Navigate away while the request is still in flight.
-    await user.click(screen.getByRole('button', { name: 'Observability' }));
+    await clickView(user, 'Observability');
     expect(screen.getByTestId('observability')).toBeInTheDocument();
 
     // The promise resolves while the chat host is hidden but still mounted.
@@ -270,7 +298,7 @@ describe('Dashboard — chat persists across navigation (issue #46)', () => {
     });
 
     // Returning shows the completed answer + chart — no replay, no lost result.
-    await user.click(screen.getByRole('button', { name: /Back to Chat/i }));
+    await clickView(user, /Back to Chat/i);
     expect(await screen.findByText(CHART_RESPONSE.reply)).toBeInTheDocument();
     expect(screen.getByTestId('chart-renderer-mock')).toBeInTheDocument();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
@@ -287,12 +315,13 @@ describe('Dashboard — chat persists across navigation (issue #46)', () => {
       hubHandlers['approval_requested']?.(pendingApproval);
       await Promise.resolve();
     });
-    expect(screen.getByTestId('pending-count-badge')).toHaveTextContent('1');
+    await user.click(screen.getByRole('button', { name: 'Actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Approvals (1)' })).toBeInTheDocument();
     // It renders inline in the chat stream too.
     expect(screen.getAllByTestId('approval-card').length).toBeGreaterThan(0);
 
     // Open the Approvals / telemetry overlay.
-    await user.click(screen.getByTestId('pending-approvals-button'));
+    await user.click(screen.getByRole('menuitem', { name: 'Approvals (1)' }));
 
     // Chat is untouched: still visible, still holding its message + chart.
     const host = screen.getByTestId('chat-host');
@@ -317,7 +346,7 @@ describe('Dashboard — New Chat is the only reset (issue #46)', () => {
     expect(joinTelemetrySessionMock).toHaveBeenCalledTimes(1);
     const firstSession = joinTelemetrySessionMock.mock.calls[0][0];
 
-    await user.click(screen.getByRole('button', { name: /New Chat/i }));
+    await clickAction(user, /New Chat/i);
 
     // Fresh chat: welcome prompts return, prior message + chart are gone.
     expect(await screen.findByText(/Welcome to Retail Pulse/i)).toBeInTheDocument();
@@ -343,7 +372,7 @@ describe('Dashboard — accessibility of the persistent chat host (issue #46)', 
     expect(host).not.toHaveAttribute('inert');
 
     // Switch to Observability: chat host removed from tab order + SR tree.
-    await user.click(screen.getByRole('button', { name: 'Observability' }));
+    await clickView(user, 'Observability');
     expect(host).toHaveAttribute('aria-hidden', 'true');
     expect(host).toHaveAttribute('inert');
     expect(host).toHaveStyle({ display: 'none' });
@@ -353,9 +382,24 @@ describe('Dashboard — accessibility of the persistent chat host (issue #46)', 
     expect(within(host).queryByPlaceholderText(/Ask about retail performance/i)).toBeInTheDocument();
 
     // Return: host restored to the accessibility tree.
-    await user.click(screen.getByRole('button', { name: /Back to Chat/i }));
+    await clickView(user, /Back to Chat/i);
     expect(host).not.toHaveAttribute('aria-hidden');
     expect(host).not.toHaveAttribute('inert');
     expect(screen.getByPlaceholderText(/Ask about retail performance/i)).toBeVisible();
+  });
+});
+
+describe('Dashboard — pending approval count across responsive headers', () => {
+  it('retains the standard-layout badge semantics', async () => {
+    setViewportWidth(1920);
+    renderDashboard();
+
+    await act(async () => {
+      hubHandlers['approval_requested']?.(pendingApproval);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('pending-count-badge')).toHaveTextContent('1');
+    expect(screen.getByTestId('pending-approvals-button')).toBeInTheDocument();
   });
 });

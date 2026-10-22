@@ -10,6 +10,7 @@
     "test:provider-matrix": "node scripts/provider-build-matrix.mjs",
     "test:provider-matrix:full": "node scripts/provider-build-matrix.mjs --full",
     "test:provider-matrix:gate": "node scripts/provider-build-matrix.mjs --gate-only",
+    "test:dashboard-layout": "node scripts/dashboard-layout-browser.mjs",
     "prebuild": "node scripts/validate-auth-config.mjs",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
