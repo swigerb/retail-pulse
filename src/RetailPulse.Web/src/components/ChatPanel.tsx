@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, useCallback, useId, lazy, Suspense } from 'react';
 import { ErrorBoundary } from './ErrorBoundary';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -10,6 +10,7 @@ import {
   Spinner,
   Text,
   makeStyles,
+  mergeClasses,
 } from '@fluentui/react-components';
 import { Send24Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, ChatHistoryMessage, ChartSpec, RoutingInfo, TokenUsage, MemoryContext, GatewayEvidence, ApprovalRequest, ApprovalDecision, CacheInfo, ForceableExecutionPath } from '../types';
@@ -32,6 +33,7 @@ import { ProgressIndicator } from './ProgressIndicator';
 import type { ProgressStep } from './ProgressIndicator';
 import { BlockedRequestMessage, WithheldOutputMessage } from './guardrails';
 import { detectSafetyRefusal } from '../utils/safetyDisplay';
+import { buildGatewayRibbon } from '../utils/gatewayRibbon';
 import type { SafetyBlockDisplayModel } from '../types';
 import { PromptLibrary } from './PromptLibrary';
 import { PROMPT_CATEGORIES, type PromptCategory } from '../constants/prompts';
@@ -148,26 +150,54 @@ const ASSISTANT_AVATAR_ICON = { children: 'R' } as const;
 const useSpanStyles = makeStyles({
   summary: {
     marginTop: '6px',
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
+    minWidth: 0,
   },
   toggle: {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
+    justifyContent: 'space-between',
+    gap: '12px',
+    width: '100%',
     fontSize: '11px',
-    color: 'var(--brand-accent)',
-    backgroundColor: 'var(--brand-accent-soft)',
-    padding: '5px 12px',
-    borderRadius: '20px',
-    border: '1px solid var(--brand-accent-border)',
+    color: 'var(--color-text-muted)',
+    backgroundColor: 'var(--colorNeutralBackground3, rgba(255,255,255,0.04))',
+    padding: '8px 10px',
+    borderRadius: '8px',
+    border: '1px solid var(--colorNeutralStroke2, rgba(255,255,255,0.12))',
     cursor: 'pointer',
-    transition: 'background 0.2s ease',
+    textAlign: 'left',
+    transition: 'background 0.2s ease, border-color 0.2s ease',
     ':hover': {
-      backgroundColor: 'var(--brand-accent-soft-hover)',
+      backgroundColor: 'var(--color-surface-hover)',
+      border: '1px solid var(--brand-accent-border)',
+    },
+    ':focus-visible': {
+      outline: '2px solid var(--brand-accent)',
+      outlineOffset: '2px',
     },
   },
+  summaryText: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '4px 8px',
+    minWidth: 0,
+  },
+  summaryLabel: {
+    fontWeight: 700,
+    color: 'var(--color-text)',
+  },
+  statusWarning: {
+    color: '#facc15',
+    fontWeight: 700,
+  },
+  statusDanger: {
+    color: '#f87171',
+    fontWeight: 700,
+  },
   chevron: {
-    fontSize: '9px',
+    flexShrink: 0,
     transition: 'transform 0.2s ease',
   },
   chevronExpanded: {
@@ -178,8 +208,24 @@ const useSpanStyles = makeStyles({
     backgroundColor: 'var(--color-surface)',
     border: '1px solid var(--color-border)',
     borderRadius: '8px',
-    padding: '8px',
+    padding: '10px',
     fontSize: '12px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  sectionTitle: {
+    margin: 0,
+    fontSize: '11px',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.7px',
+    color: 'var(--color-text-subtle)',
   },
   spanRow: {
     display: 'flex',
@@ -216,14 +262,66 @@ const useSpanStyles = makeStyles({
   },
 });
 
-function SpansSummary({ spans, totalDurationMs, tokenUsage }: { spans: AgentSpan[]; totalDurationMs?: number; tokenUsage?: TokenUsage }) {
+function ResponseDiagnostics({
+  spans = [],
+  totalDurationMs,
+  tokenUsage,
+  gateway,
+}: {
+  spans?: AgentSpan[];
+  totalDurationMs?: number;
+  tokenUsage?: TokenUsage;
+  gateway?: GatewayEvidence | null;
+}) {
   const [expanded, setExpanded] = useState(false);
   const styles = useSpanStyles();
+  const contentId = useId();
+  const summaryId = useId();
   const totalMs = totalDurationMs ?? spans.reduce((sum, s) => sum + s.durationMs, 0);
   const toolCalls = spans.filter(s => s.type === 'tool_call');
   const agentCalls = spans.filter(s => s.type === 'agent_call' || s.type === 'agent_delegation');
+  const gatewayModel = gateway !== undefined ? buildGatewayRibbon(gateway) : null;
+  const gatewaySafety = gatewayModel?.items.find(item => item.key === 'gatewaySafety');
+  const hasPartialOrUnknownGatewayEvidence = gatewayModel?.items.some(item =>
+    item.state === 'unknown'
+    || item.state === 'unavailable'
+    || item.value.toLowerCase().includes('partial'),
+  ) ?? false;
+  const gatewaySummary = gatewayModel ? [
+    gatewayModel.state === 'blocked'
+      ? { text: 'Gateway blocked', className: styles.statusDanger }
+      : gatewayModel.state === 'failed'
+        ? { text: 'Gateway failed', className: styles.statusDanger }
+        : gatewayModel.state === 'throttled'
+          ? { text: 'Gateway throttled', className: styles.statusWarning }
+          : gatewayModel.state === 'unavailable'
+            ? { text: 'Gateway metadata unavailable', className: undefined }
+            : gatewayModel.state === 'bypassed'
+              ? { text: 'Gateway bypassed', className: undefined }
+              : gatewayModel.state === 'unknown'
+                ? { text: 'Gateway unknown', className: undefined }
+                : null,
+    gatewaySafety?.state === 'blocked'
+      ? { text: `Safety blocked: ${gatewaySafety.value}`, className: styles.statusDanger }
+      : gatewaySafety?.state === 'warning'
+        ? { text: `Safety warning: ${gatewaySafety.value}`, className: styles.statusWarning }
+        : null,
+    gateway?.truncated
+      ? { text: 'Gateway evidence truncated', className: styles.statusWarning }
+      : null,
+    gatewayModel.state !== 'unavailable'
+      && gatewayModel.state !== 'bypassed'
+      && gatewayModel.state !== 'unknown'
+      && hasPartialOrUnknownGatewayEvidence
+      ? { text: 'Gateway details partial or unknown', className: styles.statusWarning }
+      : null,
+  ].filter((item): item is NonNullable<typeof item> => item != null) : [];
 
-  const summary = [
+  if (gatewayModel?.state === 'observed' && gatewaySummary.length === 0) {
+    gatewaySummary.push({ text: 'Gateway observed', className: undefined });
+  }
+
+  const telemetrySummary = [
     `📊 ${spans.length} spans`,
     toolCalls.length > 0 ? `🔧 ${toolCalls.length} tool call${toolCalls.length > 1 ? 's' : ''}` : '',
     agentCalls.length > 0 ? `${agentCalls.length} agent call${agentCalls.length > 1 ? 's' : ''}` : '',
@@ -233,31 +331,51 @@ function SpansSummary({ spans, totalDurationMs, tokenUsage }: { spans: AgentSpan
   ].filter(Boolean).join(' · ');
 
   return (
-    <div className={styles.summary}>
+    <section className={styles.summary} data-testid="response-diagnostics">
       <button
+        type="button"
         className={styles.toggle}
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
-        aria-label={expanded ? 'Collapse span details' : 'Expand span details'}
+        aria-controls={contentId}
+        aria-describedby={summaryId}
+        aria-label={expanded ? 'Collapse response information' : 'Expand response information'}
       >
-        <span>{summary}</span>
-        <span className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ''}`}>
+        <span id={summaryId} className={styles.summaryText}>
+          <span className={styles.summaryLabel}>Response information</span>
+          {spans.length > 0 && <span>{telemetrySummary}</span>}
+          {gatewaySummary.map(item => (
+            <span key={item.text} className={item.className}>{item.text}</span>
+          ))}
+        </span>
+        <span className={mergeClasses(styles.chevron, expanded ? styles.chevronExpanded : undefined)}>
           <ChevronRight16Regular />
         </span>
       </button>
       {expanded && (
-        <div className={styles.detail}>
-          {spans.map((span, i) => (
-            <div key={`span-${span.name}-${i}`} className={styles.spanRow}>
-              <span className={styles.spanIcon}>{SPAN_ICONS[span.type] ?? '📌'}</span>
-              <span className={styles.spanName}>{span.name}</span>
-              <span className={styles.spanDuration}>{span.durationMs > 0 ? `${span.durationMs}ms` : '—'}</span>
-              {span.detail && <span className={styles.spanDetail}>{span.detail}</span>}
+        <div id={contentId} className={styles.detail}>
+          {spans.length > 0 && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>Run telemetry</h3>
+              {spans.map((span, i) => (
+                <div key={`span-${span.name}-${i}`} className={styles.spanRow}>
+                  <span className={styles.spanIcon}>{SPAN_ICONS[span.type] ?? '📌'}</span>
+                  <span className={styles.spanName}>{span.name}</span>
+                  <span className={styles.spanDuration}>{span.durationMs > 0 ? `${span.durationMs}ms` : '—'}</span>
+                  {span.detail && <span className={styles.spanDetail}>{span.detail}</span>}
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+          {gateway !== undefined && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>Gateway and policy</h3>
+              <GatewayControlRoom gateway={gateway} />
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -1022,18 +1140,21 @@ export function ChatPanel({
               {msg.approval && (
                 <ApprovalCard approval={msg.approval} onResolved={onApprovalResolved} />
               )}
-              {msg.spans && msg.spans.length > 0 && !msg.planId && (
-                <SpansSummary spans={msg.spans} totalDurationMs={msg.totalDurationMs} tokenUsage={msg.tokenUsage} />
-              )}
-              {msg.role === 'assistant' && msg.gateway !== undefined && (
-                <GatewayControlRoom gateway={msg.gateway} />
-              )}
               {msg.charts && msg.charts.length > 0 && !msg.planId && (
                 <ErrorBoundary fallback={<div className={styles.loadingContainer}>Chart failed to load.</div>}>
                   <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
                     <ChartRenderer charts={msg.charts} />
                   </Suspense>
                 </ErrorBoundary>
+              )}
+              {msg.role === 'assistant'
+                && ((msg.spans?.length ?? 0) > 0 || msg.gateway !== undefined) && (
+                <ResponseDiagnostics
+                  spans={msg.spans}
+                  totalDurationMs={msg.totalDurationMs}
+                  tokenUsage={msg.tokenUsage}
+                  gateway={msg.gateway}
+                />
               )}
             </div>
           </div>

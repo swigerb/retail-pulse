@@ -218,7 +218,7 @@ Compact gradient "RP" mark with optional "RETAIL PULSE" wordmark. Used in the he
 ### Chat & Streaming
 
 #### `ChatPanel`
-The main chat interface. Sends user messages to the backend, renders assistant replies with markdown, charts, routing indicators, memory chips, approval cards, and streaming tokens. Handles welcome state with hero logo.
+The main chat interface. Sends user messages to the backend, renders assistant replies with markdown, charts, routing indicators, memory chips, approval cards, and streaming tokens. Handles welcome state with hero logo. Per-response telemetry and APIM gateway evidence are consolidated into a collapsed **Response information** disclosure beneath the complete assistant output, including charts. Independent safety, availability, throttling, truncation, and partial/unknown signals remain visible together in the closed summary, while the expanded panel preserves route, token, budget, cache, safety, failover, policy, request-ID, and span detail.
 
 - **State:** `messages`, `input`, `loading`, `streamingTokens`, `isStreaming`, `sessionId`, `selectedCategory`
 - **Services:** `sendMessage()` → `POST /api/chat`; `joinTelemetrySession()` via SignalR
@@ -616,7 +616,7 @@ Trace list with summary statistics and embedded trace timelines. Limits display 
 ### Telemetry
 
 #### `TelemetryPanel`
-Side drawer showing live telemetry: connection status, total duration, token count, and the `SpanTimeline`.
+Side drawer showing live telemetry: connection status, total duration, token count, and the `SpanTimeline`. Spans are grouped into accessible per-prompt disclosures. The newest turn opens automatically and the previous turn collapses when a new prompt begins; every turn remains independently expandable by keyboard or pointer.
 
 - **Props:** `connected?`, `liveSpans`, `totalDurationMs?`, `totalTokenUsage?`, `onClear`
 

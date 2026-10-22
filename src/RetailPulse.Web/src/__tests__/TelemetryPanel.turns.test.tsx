@@ -76,7 +76,8 @@ const twoTurnSpans: AgentSpan[] = [
 ];
 
 describe('TelemetryPanel — per-turn boundaries (issue #303)', () => {
-  it('groups spans under the prompt that produced them and never mixes turns', () => {
+  it('groups spans under the prompt that produced them and never mixes turns', async () => {
+    const user = userEvent.setup();
     renderPanel({ liveSpans: twoTurnSpans, turns: [turn1, turn2], onClear: vi.fn() });
 
     // Both turn regions are present as accessible landmarks.
@@ -85,8 +86,13 @@ describe('TelemetryPanel — per-turn boundaries (issue #303)', () => {
 
     const [firstTurn, secondTurn] = groups;
 
-    // Turn 1 shows the earlier prompt and only its two spans.
+    // The previous turn is collapsed when a newer turn exists. Reopening it
+    // exposes only the spans owned by that earlier prompt.
     expect(within(firstTurn).getByText(/Turn 1/i)).toBeInTheDocument();
+    const firstTurnToggle = within(firstTurn).getByRole('button', { name: /Turn 1/i });
+    expect(firstTurnToggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(firstTurnToggle);
+    expect(firstTurnToggle).toHaveAttribute('aria-expanded', 'true');
     expect(
       within(firstTurn).getByText(/Compare Harvest Table vs FreshMart/i),
     ).toBeInTheDocument();
@@ -104,6 +110,8 @@ describe('TelemetryPanel — per-turn boundaries (issue #303)', () => {
     // (Harvest Table / FreshMart spans appearing next to a Coastline Tacos
     // answer) is now structurally impossible.
     expect(within(secondTurn).getByText(/Turn 2/i)).toBeInTheDocument();
+    expect(within(secondTurn).getByRole('button', { name: /Turn 2/i }))
+      .toHaveAttribute('aria-expanded', 'true');
     // The prompt shows up in the header as an accessible label — verify
     // Turn 2 owns the Coastline Tacos prompt itself.
     expect(
@@ -135,6 +143,30 @@ describe('TelemetryPanel — per-turn boundaries (issue #303)', () => {
     expect(groups[1]).toHaveAttribute('aria-current', 'true');
     expect(groups[1]).toHaveAttribute('data-turn-current', 'true');
     expect(within(groups[1]).getByText(/^Current$/i)).toBeInTheDocument();
+  });
+
+  it('supports independent keyboard-accessible disclosure controls for each turn', async () => {
+    const user = userEvent.setup();
+    renderPanel({ liveSpans: twoTurnSpans, turns: [turn1, turn2], onClear: vi.fn() });
+
+    const [firstTurn, secondTurn] = screen.getAllByRole('region');
+    const firstToggle = within(firstTurn).getByRole('button', { name: /Turn 1/i });
+    const secondToggle = within(secondTurn).getByRole('button', { name: /Turn 2/i });
+
+    expect(firstToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(secondToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(firstToggle).toHaveAttribute('aria-controls', expect.stringContaining('telemetry-turn-content-'));
+    expect(secondToggle).toHaveAttribute('aria-controls', expect.stringContaining('telemetry-turn-content-'));
+
+    firstToggle.focus();
+    await user.keyboard('{Enter}');
+    expect(firstToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(secondToggle).toHaveAttribute('aria-expanded', 'true');
+
+    secondToggle.focus();
+    await user.keyboard(' ');
+    expect(secondToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(firstToggle).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('preserves cumulative header totals (spans count and tool calls) across turns', () => {
