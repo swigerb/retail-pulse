@@ -8,12 +8,13 @@ namespace RetailPulse.McpServer.Tools;
 public static class GetHistoricalDemandTool
 {
     [McpServerTool(Name = "GetHistoricalDemand")]
-    [Description("Get 12 months of historical depletion/demand data for a brand, optionally filtered by region and channel. Returns monthly volume and units for trend analysis.")]
+    [Description("Get historical depletion/demand data for a brand over an explicit dataset-relative period.")]
     public static object GetHistoricalDemand(
         RetailPulseDb data,
         [Description("Brand name (e.g. 'Sierra Gold Tequila')")] string brand,
         [Description("Region (e.g. 'Northeast', 'National'). Defaults to 'National'.")] string region = "National",
-        [Description("Channel (e.g. 'On-Premise', 'Off-Premise', 'E-Commerce', 'All'). Defaults to 'All'.")] string channel = "All")
+        [Description("Channel (e.g. 'On-Premise', 'Off-Premise', 'E-Commerce', 'All'). Defaults to 'All'.")] string channel = "All",
+        [Description("Supported period: current-month, current-quarter, current-year, or last-N-months where N is 1..24.")] string period = "last-12-months")
     {
         if (string.IsNullOrWhiteSpace(brand))
             return new { error = "Parameter 'brand' is required." };
@@ -21,6 +22,6 @@ public static class GetHistoricalDemandTool
         string? effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
         string? effectiveChannel = string.Equals(channel, "All", StringComparison.OrdinalIgnoreCase) ? null : channel;
 
-        return data.GetHistoricalDemand(brand, effectiveRegion, effectiveChannel);
+        return data.GetHistoricalDemand(brand, effectiveRegion, effectiveChannel, period: period);
     }
 }

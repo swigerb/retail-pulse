@@ -155,13 +155,13 @@ app.MapGet("/api/variant-mix", (string brand, RetailPulseDb data, string region 
 .WithName("GetVariantMix");
 
 // ── Legacy demand routes (deprecated — use /api/demand/* instead) ────
-app.MapGet("/api/historical-demand", (HttpContext ctx, string brand, RetailPulseDb data, string region = "National", string channel = "All") =>
+app.MapGet("/api/historical-demand", (HttpContext ctx, string brand, RetailPulseDb data, string region = "National", string channel = "All", string? period = null) =>
 {
     ctx.Response.Headers["X-Deprecated"] = "true";
     ctx.Response.Headers["Sunset"] = "2026-12-31";
     string? effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
     string? effectiveChannel = string.Equals(channel, "All", StringComparison.OrdinalIgnoreCase) ? null : channel;
-    object result = data.GetHistoricalDemand(brand, effectiveRegion, effectiveChannel);
+    object result = data.GetHistoricalDemand(brand, effectiveRegion, effectiveChannel, period: period);
     return Results.Ok(result);
 })
 .WithName("GetHistoricalDemand_Legacy");
@@ -197,9 +197,11 @@ app.MapGet("/api/demand-risks", (HttpContext ctx, string brand, RetailPulseDb da
 .WithName("IdentifyDemandRisks_Legacy");
 
 // ── Current demand routes ────────────────────────────────────────────
-app.MapGet("/api/demand/history", (RetailPulseDb data, string? brand = null, string? region = null, string? channel = null, int months = 12) =>
+app.MapGet("/api/demand/history", (RetailPulseDb data, string? brand = null, string? region = null, string? channel = null, int months = 12, string? period = null) =>
 {
-    object result = data.GetHistoricalDemand(brand, region, channel, months);
+    string? effectiveRegion = string.Equals(region, "National", StringComparison.OrdinalIgnoreCase) ? null : region;
+    string? effectiveChannel = string.Equals(channel, "All", StringComparison.OrdinalIgnoreCase) ? null : channel;
+    object result = data.GetHistoricalDemand(brand, effectiveRegion, effectiveChannel, months, period);
     return Results.Ok(result);
 })
 .WithName("GetDemandHistory");

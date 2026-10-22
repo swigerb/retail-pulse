@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -10,15 +11,14 @@ namespace RetailPulse.Api.Budget;
 ///
 /// This projection preserves the canonical <c>period</c>, <c>filters</c>, and
 /// <c>summary</c> (total volume/units, weeks-of-data, avg weekly volume) and replaces
-/// the raw weekly rows with an aligned <c>by_region</c> rollup — a COMPLETE aggregate
-/// that fully answers totals, depletion-velocity, and cross-brand/region comparison
-/// questions. It flags <c>aggregate_complete: true</c> so the model trusts the summary
-/// instead of mistaking the rollup for truncated/unusable data, and only narrows
-/// week-level/per-channel detail (recoverable via a narrower re-call). It never fabricates
-/// values.
+/// the raw weekly rows with aligned <c>by_region</c> and bounded chronological
+/// <c>by_time</c> rollups. Both projections retain exact source sums while keeping
+/// year-scale all-region responses inside the gateway budget.
 /// </summary>
 public sealed class HistoricalDemandCompactor : IToolResultCompactor
 {
+    private const int _maxTemporalIntervals = 12;
+
     public bool CanCompact(string toolName) =>
         string.Equals(toolName, "GetHistoricalDemand", StringComparison.OrdinalIgnoreCase);
 
@@ -41,13 +41,18 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
 
         int originalRows = weekly.Count;
 
-        // Aggregate weekly rows into per-region rollups. Distinct week labels feed a
-        // faithful avg-weekly per region (matching the source's own averaging basis).
+        // Aggregate weekly rows into per-region and chronological rollups. Distinct week
+        // labels feed faithful averages and bounded temporal intervals.
         var byRegion = new Dictionary<string, RegionAgg>(StringComparer.OrdinalIgnoreCase);
+        var byWeek = new SortedDictionary<DateOnly, TemporalAgg>();
+        int invalidTemporalRows = 0;
         foreach (JsonNode? rowNode in weekly)
         {
             if (rowNode is not JsonObject row)
+            {
+                invalidTemporalRows++;
                 continue;
+            }
 
             string region = row["region"]?.GetValue<string>() ?? "Unknown";
             double volume = ReadDouble(row["volume"]);
@@ -61,8 +66,29 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
             }
             agg.Volume += volume;
             agg.Units += units;
-            if (week is not null)
+            if (!string.IsNullOrWhiteSpace(week))
+            {
                 agg.Weeks.Add(week);
+                if (DateOnly.TryParse(week, out DateOnly weekStarting))
+                {
+                    if (!byWeek.TryGetValue(weekStarting, out TemporalAgg? temporal))
+                    {
+                        temporal = new TemporalAgg();
+                        byWeek[weekStarting] = temporal;
+                    }
+                    temporal.Volume += volume;
+                    temporal.Units += units;
+                    temporal.SourceRows++;
+                }
+                else
+                {
+                    invalidTemporalRows++;
+                }
+            }
+            else
+            {
+                invalidTemporalRows++;
+            }
         }
 
         var byRegionArray = new JsonArray();
@@ -79,42 +105,52 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
             });
         }
 
+        bool temporalComplete = originalRows > 0
+            && invalidTemporalRows == 0
+            && byWeek.Count > 0;
+        JsonArray byTimeArray = temporalComplete ? BuildTemporalIntervals(byWeek) : [];
         var projected = new JsonObject
         {
             ["period"] = obj["period"]?.DeepClone(),
             ["filters"] = obj["filters"]?.DeepClone(),
             ["summary"] = obj["summary"]?.DeepClone(),
+            ["by_time"] = byTimeArray,
             ["by_region"] = byRegionArray,
             ["compaction"] = new JsonObject
             {
                 ["compacted"] = true,
-                // The aggregate (totals, average weekly/daily velocity, per-region rollup)
-                // is COMPLETE and faithful — only the per-week/per-channel detail rows were
-                // rolled up. Callers answering an aggregate question (totals, depletion
-                // velocity, cross-brand or cross-region comparison) have everything they
-                // need and MUST proceed. This is NOT a truncated/unusable result.
                 ["aggregate_complete"] = true,
+                ["regional_complete"] = byRegionArray.Count > 0,
+                ["temporal_complete"] = temporalComplete && byTimeArray.Count > 0,
+                ["invalid_temporal_rows"] = invalidTemporalRows,
+                ["temporal_granularity"] = byWeek.Count <= _maxTemporalIntervals
+                    ? "week"
+                    : "bounded_week_interval",
                 ["original_weekly_rows"] = originalRows,
+                ["original_weeks"] = byWeek.Count,
+                ["returned_temporal_intervals"] = byTimeArray.Count,
                 ["returned_region_rows"] = byRegionArray.Count,
                 ["sufficient_for"] = new JsonArray
                 {
                     "total volume and units",
                     "average weekly/daily depletion velocity",
+                    "temporal depletion trend",
                     "cross-brand comparison",
                     "cross-region comparison",
-                    "chart of totals or velocity by brand/region"
+                    "chart of totals or velocity by time/brand/region"
                 },
                 ["narrowed_detail"] = new JsonArray
                 {
-                    "individual week-over-week trend",
+                    "individual source rows",
                     "per-channel breakdown",
-                    "single-week anomaly detection"
+                    "single-week anomaly detection when temporal intervals span multiple weeks"
                 },
-                ["detail_hint"] = "Weekly rows were rolled up per region. The summary and by_region "
-                    + "figures are complete and sufficient for totals, depletion-velocity, and "
-                    + "brand/region comparisons — proceed and build the chart. Only re-call "
-                    + "GetHistoricalDemand with an explicit single region and a smaller months window "
-                    + "if you specifically need week-level trend or per-channel detail."
+                ["detail_hint"] = temporalComplete
+                    ? "Weekly rows were rolled up into exact chronological intervals and per-region totals. "
+                        + "Both aggregates are complete and sufficient; proceed with temporal trends or "
+                        + "brand/region comparisons using the matching projection."
+                    : "Per-region totals are complete, but one or more source rows lacked a valid date. "
+                        + "Temporal evidence is incomplete; do not create a time-series chart."
             }
         };
 
@@ -127,7 +163,37 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
             // keeps telemetry honest and avoids signalling "data unusable" downstream.
             Truncated: false,
             OriginalItems: originalRows,
-            ReturnedItems: byRegionArray.Count);
+            ReturnedItems: byRegionArray.Count + byTimeArray.Count);
+    }
+
+    private static JsonArray BuildTemporalIntervals(SortedDictionary<DateOnly, TemporalAgg> byWeek)
+    {
+        var result = new JsonArray();
+        if (byWeek.Count == 0)
+            return result;
+
+        KeyValuePair<DateOnly, TemporalAgg>[] weeks = [.. byWeek];
+        int intervalSize = (int)Math.Ceiling(weeks.Length / (double)_maxTemporalIntervals);
+        for (int index = 0; index < weeks.Length; index += intervalSize)
+        {
+            KeyValuePair<DateOnly, TemporalAgg>[] interval = [.. weeks.Skip(index).Take(intervalSize)];
+            DateOnly start = interval[0].Key;
+            DateOnly end = interval[^1].Key;
+            string startLabel = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            string endLabel = end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            result.Add(new JsonObject
+            {
+                ["start_week"] = startLabel,
+                ["end_week"] = endLabel,
+                ["label"] = start == end ? startLabel : $"{startLabel} to {endLabel}",
+                ["volume"] = Math.Round(interval.Sum(item => item.Value.Volume), 1),
+                ["units"] = interval.Sum(item => item.Value.Units),
+                ["weeks"] = interval.Length,
+                ["source_rows"] = interval.Sum(item => item.Value.SourceRows)
+            });
+        }
+
+        return result;
     }
 
     private static double ReadDouble(JsonNode? node)
@@ -152,5 +218,12 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
         public double Volume;
         public int Units;
         public HashSet<string> Weeks { get; } = new(StringComparer.Ordinal);
+    }
+
+    private sealed class TemporalAgg
+    {
+        public double Volume;
+        public int Units;
+        public int SourceRows;
     }
 }
