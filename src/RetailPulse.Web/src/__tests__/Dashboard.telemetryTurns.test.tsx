@@ -291,8 +291,11 @@ describe('Dashboard — Live Spans panel groups spans by chat turn (issue #303)'
     expect(turnTwo).toHaveAttribute('aria-current', 'true');
     expect(turnTwo).toHaveAttribute('data-turn-index', '2');
 
-    // Turn 1 still owns its Harvest Table / FreshMart spans and never sees
-    // Coastline Tacos data. The prompt label is scoped to Turn 1 too.
+    // The previous turn collapses when Turn 2 becomes current. Reopening it
+    // still exposes only its Harvest Table / FreshMart spans.
+    const turnOneToggle = within(turnOne).getByRole('button', { name: /Turn 1/i });
+    expect(turnOneToggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(turnOneToggle);
     expect(within(turnOne).getByLabelText(/^Prompt:.*Harvest Table/i)).toBeInTheDocument();
     expect(within(turnOne).getByText(/"brand":"Harvest Table"/)).toBeInTheDocument();
     expect(within(turnOne).getByText(/"brand":"FreshMart"/)).toBeInTheDocument();

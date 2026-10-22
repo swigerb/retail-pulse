@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Text, makeStyles, mergeClasses } from '@fluentui/react-components';
+import { ChevronRight16Regular } from '@fluentui/react-icons';
 import type { AgentSpan, TelemetryTurn } from '../types';
 import { SpanTimeline } from './SpanTimeline';
 
@@ -32,11 +34,32 @@ const useStyles = makeStyles({
     background: 'var(--color-surface, var(--color-bg-elevated))',
   },
   header: {
+    width: '100%',
     display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
+    alignItems: 'center',
+    gap: '8px',
     paddingBottom: '6px',
     borderBottom: '1px solid var(--color-border)',
+    borderTop: 0,
+    borderRight: 0,
+    borderLeft: 0,
+    background: 'transparent',
+    color: 'inherit',
+    font: 'inherit',
+    textAlign: 'left',
+    cursor: 'pointer',
+    ':focus-visible': {
+      outline: '2px solid var(--brand-accent)',
+      outlineOffset: '3px',
+      borderRadius: '4px',
+    },
+  },
+  headerContent: {
+    display: 'flex',
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: '2px',
   },
   headerRow: {
     display: 'flex',
@@ -75,6 +98,17 @@ const useStyles = makeStyles({
     fontSize: '11px',
     color: 'var(--color-text-subtle)',
   },
+  chevron: {
+    flexShrink: 0,
+    color: 'var(--color-text-subtle)',
+    transition: 'transform 0.2s ease',
+  },
+  chevronExpanded: {
+    transform: 'rotate(90deg)',
+  },
+  content: {
+    paddingTop: '2px',
+  },
   emptyDetail: {
     fontSize: '12px',
     color: 'var(--color-text-subtle)',
@@ -94,11 +128,17 @@ const useStyles = makeStyles({
 export function TelemetryTurnGroup({ turn, spans, isCurrent }: Props) {
   const styles = useStyles();
   const headingId = `telemetry-turn-heading-${turn.id}`;
+  const contentId = `telemetry-turn-content-${turn.id}`;
+  const [expanded, setExpanded] = useState(isCurrent);
   const spanCount = spans.length;
   const startedAt = new Date(turn.startedAt);
   const startedLabel = Number.isNaN(startedAt.getTime())
     ? turn.startedAt
     : startedAt.toLocaleTimeString();
+
+  useEffect(() => {
+    setExpanded(isCurrent);
+  }, [isCurrent]);
 
   return (
     <section
@@ -110,37 +150,55 @@ export function TelemetryTurnGroup({ turn, spans, isCurrent }: Props) {
       data-turn-current={isCurrent ? 'true' : 'false'}
       className={mergeClasses(styles.group, isCurrent ? styles.groupCurrent : undefined)}
     >
-      <header className={styles.header}>
-        <div className={styles.headerRow}>
+      <button
+        type="button"
+        id={headingId}
+        className={styles.header}
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        onClick={() => setExpanded(value => !value)}
+      >
+        <span className={styles.headerContent}>
+          <span className={styles.headerRow}>
+            <Text
+              className={mergeClasses(styles.turnIndex, isCurrent ? styles.turnIndexCurrent : undefined)}
+            >
+              Turn {turn.index}
+            </Text>
+            {isCurrent && (
+              <span className={styles.currentBadge} aria-hidden="true">
+                Current
+              </span>
+            )}
+          </span>
           <Text
-            id={headingId}
-            className={mergeClasses(styles.turnIndex, isCurrent ? styles.turnIndexCurrent : undefined)}
+            className={styles.label}
+            title={turn.label}
+            aria-label={`Prompt: ${turn.label}`}
           >
-            Turn {turn.index}
+            {turn.label}
           </Text>
-          {isCurrent && (
-            <span className={styles.currentBadge} aria-hidden="true">
-              Current
-            </span>
+          <Text className={styles.meta}>
+            {startedLabel} · {spanCount} {spanCount === 1 ? 'span' : 'spans'}
+          </Text>
+        </span>
+        <span
+          className={mergeClasses(styles.chevron, expanded ? styles.chevronExpanded : undefined)}
+          aria-hidden="true"
+        >
+          <ChevronRight16Regular />
+        </span>
+      </button>
+      {expanded && (
+        <div id={contentId} className={styles.content}>
+          {spanCount === 0 ? (
+            <Text className={styles.emptyDetail}>
+              Waiting for spans for this turn…
+            </Text>
+          ) : (
+            <SpanTimeline spans={spans} />
           )}
         </div>
-        <Text
-          className={styles.label}
-          title={turn.label}
-          aria-label={`Prompt: ${turn.label}`}
-        >
-          {turn.label}
-        </Text>
-        <Text className={styles.meta}>
-          {startedLabel} · {spanCount} {spanCount === 1 ? 'span' : 'spans'}
-        </Text>
-      </header>
-      {spanCount === 0 ? (
-        <Text className={styles.emptyDetail}>
-          Waiting for spans for this turn…
-        </Text>
-      ) : (
-        <SpanTimeline spans={spans} />
       )}
     </section>
   );
