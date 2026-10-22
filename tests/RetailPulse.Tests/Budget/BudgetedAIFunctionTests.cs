@@ -96,6 +96,60 @@ public sealed class BudgetedAIFunctionTests
     }
 
     [Fact]
+    public async Task HistoricalDemand_StringJsonFromFactory_CompactsBothFurnitureBrandsWithinAggregateBudget()
+    {
+        string urbanPayload = BuildHistoricalDemandPayload("Urban Living");
+        string foundryPayload = BuildHistoricalDemandPayload("Foundry Home");
+        urbanPayload.Length.Should().BeGreaterThan(200_000);
+        foundryPayload.Length.Should().BeGreaterThan(200_000);
+        var invocations = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        AIFunction inner = AIFunctionFactory.Create(
+            (string brand) =>
+            {
+                invocations[brand] = invocations.GetValueOrDefault(brand) + 1;
+                return brand switch
+                {
+                    "Urban Living" => urbanPayload,
+                    "Foundry Furniture" or "Foundry Home" => foundryPayload,
+                    _ => throw new InvalidOperationException($"Unexpected brand {brand}")
+                };
+            },
+            "GetHistoricalDemand");
+        BudgetedAIFunction fn = Wrap(inner, Options(maxCumulative: 9_500, maxCalls: 5));
+
+        using IDisposable scope = RequestToolContext.Begin(
+            "furniture-chart",
+            isChartIntent: true);
+        string urban = (string)(await fn.InvokeAsync(Args(("brand", "Urban Living"))))!;
+        string foundry = (string)(await fn.InvokeAsync(Args(("brand", "Foundry Furniture"))))!;
+        string repeatedUrban = (string)(await fn.InvokeAsync(Args(("brand", "Urban Living"))))!;
+        string repeatedFoundry = (string)(await fn.InvokeAsync(Args(("brand", "Foundry Furniture"))))!;
+
+        foreach (string result in new[] { urban, foundry })
+        {
+            using var doc = JsonDocument.Parse(result);
+            doc.RootElement.TryGetProperty("by_region", out JsonElement regions).Should().BeTrue();
+            regions.GetArrayLength().Should().Be(6);
+            doc.RootElement.TryGetProperty("compaction", out JsonElement compaction).Should().BeTrue();
+            compaction.GetProperty("aggregate_complete").GetBoolean().Should().BeTrue();
+            result.Should().NotContain("tool_result_over_budget");
+        }
+
+        repeatedUrban.Should().Be(urban);
+        repeatedFoundry.Should().Be(foundry);
+        invocations.Should().BeEquivalentTo(new Dictionary<string, int>
+        {
+            ["Urban Living"] = 1,
+            ["Foundry Furniture"] = 1
+        }, "the model's repeated calls in the observed live loop must reuse compact results");
+        RequestToolContext.Current!.CumulativeChars.Should().BeLessThanOrEqualTo(9_500);
+        RequestToolContext.Current.Metrics.Should().HaveCount(4);
+        RequestToolContext.Current.Metrics.Count(metric => metric.Deduplicated).Should().Be(2);
+        RequestToolContext.Current.Metrics.Where(metric => !metric.Deduplicated).Should().OnlyContain(metric =>
+            metric.Compacted && !metric.Truncated && !metric.BudgetExceeded);
+    }
+
+    [Fact]
     public async Task ArgumentOrder_DoesNotDefeatDedup()
     {
         var inner = new CountingFunction("GetDepletionStats",
@@ -195,5 +249,60 @@ public sealed class BudgetedAIFunctionTests
         }
 
         inner.Invocations.Should().Be(2, "a new request scope starts with an empty dedup cache");
+    }
+
+    private static string BuildHistoricalDemandPayload(string brand)
+    {
+        string[] regions =
+        [
+            "Midwest", "Northeast", "Pacific Northwest",
+            "Southeast", "Southwest", "West Coast"
+        ];
+        string[] channels =
+        [
+            "On-Premise", "Off-Premise", "E-Commerce",
+            "Direct", "Distributor", "Marketplace"
+        ];
+        var rows = new List<object>();
+        double totalVolume = 0;
+        int totalUnits = 0;
+
+        foreach (string region in regions)
+        {
+            foreach (string channel in channels)
+            {
+                for (int week = 0; week < 52; week++)
+                {
+                    double volume = 1000 + week;
+                    int units = 100 + week;
+                    totalVolume += volume;
+                    totalUnits += units;
+                    rows.Add(new
+                    {
+                        brand,
+                        region,
+                        channel,
+                        week_starting = new DateOnly(2025, 5, 19).AddDays(week * 7).ToString("yyyy-MM-dd"),
+                        volume,
+                        units,
+                        avg_daily_volume = Math.Round(volume / 7, 1)
+                    });
+                }
+            }
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            period = new { start = "2025-05-13", end = "2026-05-13", months = 12 },
+            filters = new { brand, region = "all", channel = "all" },
+            summary = new
+            {
+                total_volume = totalVolume,
+                total_units = totalUnits,
+                weeks_of_data = rows.Count,
+                avg_weekly_volume = Math.Round(totalVolume / 52, 1)
+            },
+            weekly_data = rows
+        });
     }
 }
