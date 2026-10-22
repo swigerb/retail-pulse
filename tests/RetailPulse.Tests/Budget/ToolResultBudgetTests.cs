@@ -134,6 +134,37 @@ public sealed class ToolResultBudgetTests
         volumes["East"].Should().Be(50.0);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-date")]
+    public void HistoricalDemand_InvalidOrMissingDate_PreservesRegionalTotalsButFailsTemporalClosed(string? date)
+    {
+        var compactor = new HistoricalDemandCompactor();
+        string raw = JsonSerializer.Serialize(new
+        {
+            period = new { label = "last-12-months", start = "2025-05-13", end = "2026-05-13", months = 12 },
+            filters = new { brand = "Apex Grill", region = "all", channel = "all" },
+            summary = new { total_volume = 300.0, total_units = 30, weeks_of_data = 2, avg_weekly_volume = 150.0 },
+            weekly_data = new object[]
+            {
+                new { brand = "Apex Grill", region = "West", channel = "Retail", week_starting = "2025-05-13", volume = 100.0, units = 10 },
+                new { brand = "Apex Grill", region = "West", channel = "Retail", week_starting = date, volume = 200.0, units = 20 }
+            }
+        });
+
+        ToolCompactionOutcome outcome = compactor.Compact("GetHistoricalDemand", raw, Options());
+
+        using var doc = JsonDocument.Parse(outcome.Json);
+        JsonElement region = doc.RootElement.GetProperty("by_region").EnumerateArray().Single();
+        region.GetProperty("volume").GetDouble().Should().Be(300.0);
+        region.GetProperty("units").GetInt32().Should().Be(30);
+        doc.RootElement.GetProperty("by_time").GetArrayLength().Should().Be(0);
+        JsonElement compaction = doc.RootElement.GetProperty("compaction");
+        compaction.GetProperty("temporal_complete").GetBoolean().Should().BeFalse();
+        compaction.GetProperty("invalid_temporal_rows").GetInt32().Should().Be(1);
+    }
+
     [Fact]
     public void HistoricalDemand_Compaction_MarksAggregateComplete_NotTruncated()
     {
@@ -515,7 +546,7 @@ public sealed class ToolResultBudgetTests
                     brand = "Apex Grill",
                     region,
                     channel = "Retail",
-                    week_starting = $"2024-W{w:00}",
+                    week_starting = new DateOnly(2024, 1, 1).AddDays(w * 7).ToString("yyyy-MM-dd"),
                     volume = 100.0 + w,
                     units = 10 + w,
                     avg_daily_volume = 14.3
@@ -549,7 +580,7 @@ public sealed class ToolResultBudgetTests
                     brand,
                     region,
                     channel = channelNames[c % channelNames.Length],
-                    week_starting = $"2024-W{w:00}",
+                    week_starting = new DateOnly(2024, 1, 1).AddDays(w * 7).ToString("yyyy-MM-dd"),
                     volume,
                     units = 10 + w,
                     avg_daily_volume = Math.Round(volume / 7, 1)

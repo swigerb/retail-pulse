@@ -177,6 +177,58 @@ internal static class DeterministicChartBuilder
         return true;
     }
 
+    public static bool HasHistoricalDemandEvidence(
+        Microsoft.Extensions.AI.ChatResponse response,
+        IReadOnlyList<string>? supplementalPayloads)
+    {
+        foreach (JsonElement payload in CollectToolPayloads(response, supplementalPayloads))
+        {
+            if (payload.ValueKind == JsonValueKind.Object
+                && payload.TryGetProperty("summary", out JsonElement summary)
+                && summary.ValueKind == JsonValueKind.Object
+                && summary.TryGetProperty("total_volume", out _)
+                && (payload.TryGetProperty("by_region", out _)
+                    || payload.TryGetProperty("by_time", out _)
+                    || payload.TryGetProperty("weekly_data", out _)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool HasConflictingHistoricalDemandPeriods(
+        Microsoft.Extensions.AI.ChatResponse response,
+        IReadOnlyList<string>? supplementalPayloads) =>
+        HasConflictingDemandPeriods(CollectToolPayloads(response, supplementalPayloads));
+
+    public static bool HasHistoricalDemandPeriodMismatch(
+        Microsoft.Extensions.AI.ChatResponse response,
+        IReadOnlyList<string>? supplementalPayloads,
+        string requiredPeriodLabel)
+    {
+        foreach (JsonElement payload in CollectToolPayloads(response, supplementalPayloads))
+        {
+            if (!IsHistoricalDemandPayload(payload))
+                continue;
+
+            if (!string.Equals(ReadPeriodLabel(payload), requiredPeriodLabel, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsHistoricalDemandPayload(JsonElement payload) =>
+        payload.ValueKind == JsonValueKind.Object
+        && payload.TryGetProperty("summary", out JsonElement summary)
+        && summary.ValueKind == JsonValueKind.Object
+        && summary.TryGetProperty("total_volume", out _)
+        && (payload.TryGetProperty("by_region", out _)
+            || payload.TryGetProperty("by_time", out _)
+            || payload.TryGetProperty("weekly_data", out _));
+
     /// <summary>
     /// Chooses the deterministic builder that matches the requested chart type, falling
     /// back through the other shape-driven builders when the primary data shape is absent.
@@ -191,7 +243,9 @@ internal static class DeterministicChartBuilder
         bool isHorizontalRanking = false)
     {
         _ = isHorizontalRanking; // reserved: caller signals the ranking contract via the outer TryBuild
-        return gaugeFirst
+        return HasConflictingDemandPeriods(payloads)
+            ? null
+            : gaugeFirst
             ? TryBuildGauge(payloads) ?? TryBuildDemandBar(payloads, requestedType)
             : (requestedType?.ToLowerInvariant()) switch
             {
@@ -206,8 +260,9 @@ internal static class DeterministicChartBuilder
                     ?? TryBuildDepletionStatsGrouped(payloads, requestedType)
                     ?? TryBuildDemandBar(payloads, requestedType)
                     ?? TryBuildDepletionStatsBar(payloads, requestedType),
-                "line" => TryBuildDemandLine(payloads)
-                    ?? TryBuildDemandBar(payloads, "line"),
+                // A temporal line requires chronological evidence. Never relabel a
+                // category/region bar as a trend when by_time is unavailable.
+                "line" => TryBuildDemandLine(payloads),
                 // Pie/donut and table are their own structural families (share/mix
                 // proportions; a row grid). Falling through to a bar here produced a
                 // chart in a DIFFERENT family from the one the user asked for — the
@@ -221,6 +276,32 @@ internal static class DeterministicChartBuilder
                     ?? TryBuildDepletionStatsBar(payloads, requestedType)
                     ?? TryBuildGauge(payloads),
             };
+    }
+
+    private static bool HasConflictingDemandPeriods(IReadOnlyList<JsonElement> payloads)
+    {
+        var periods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool invalidDemandPeriod = false;
+        foreach (JsonElement payload in payloads)
+        {
+            if (payload.ValueKind != JsonValueKind.Object
+                || (!payload.TryGetProperty("by_region", out _)
+                    && !payload.TryGetProperty("by_time", out _)))
+            {
+                continue;
+            }
+
+            if (ReadPeriodDescriptor(payload) is string period)
+            {
+                periods.Add(period);
+            }
+            else
+            {
+                invalidDemandPeriod = true;
+            }
+        }
+
+        return invalidDemandPeriod || periods.Count > 1;
     }
 
     private static List<JsonElement> CollectToolPayloads(
@@ -500,6 +581,7 @@ internal static class DeterministicChartBuilder
         var byBrand = new Dictionary<string, List<ChartDataPoint>>(StringComparer.OrdinalIgnoreCase);
         var order = new List<string>();
         var seenRegionPerBrand = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var periods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (JsonElement payload in payloads)
         {
@@ -509,6 +591,10 @@ internal static class DeterministicChartBuilder
                 continue;
             if (!payload.TryGetProperty("summary", out JsonElement summary) || summary.ValueKind != JsonValueKind.Object)
                 continue;
+
+            string? period = ReadPeriodDescriptor(payload);
+            if (period is not null)
+                periods.Add(period);
 
             string brand = ReadBrand(payload) ?? $"Series {order.Count + 1}";
 
@@ -550,18 +636,19 @@ internal static class DeterministicChartBuilder
         }
 
         // A grouped/region comparison needs at least two brand series to be meaningful.
-        if (series.Count < 2)
+        if (series.Count < 2 || periods.Count > 1)
             return null;
 
         string type = string.Equals(requestedType, "stackedBar", StringComparison.OrdinalIgnoreCase)
             ? "stackedBar"
             : "groupedBar";
         string brands = string.Join(" vs ", series.Select(s => s.Legend));
+        string periodSuffix = periods.Count == 1 ? $" ({periods.Single()})" : string.Empty;
 
         return new ChartSpec
         {
             Type = type,
-            Title = $"{brands} — Depletion Volume by Region",
+            Title = $"{brands} — Depletion Volume by Region{periodSuffix}",
             XAxisTitle = "Region",
             YAxisTitle = "Depletion Volume",
             Data = series,
@@ -569,9 +656,8 @@ internal static class DeterministicChartBuilder
     }
 
     /// <summary>
-    /// Build a line of depletion volume across regions from a single brand's compacted
-    /// <c>by_region</c> rollup ("depletion trends across all regions"). One series, one
-    /// finite point per region. Missing region volumes are skipped, never zero-filled.
+    /// Build a temporal line from a single brand's compacted <c>by_time</c> rollup.
+    /// Region categories are deliberately not accepted as a substitute for time.
     /// </summary>
     private static ChartSpec? TryBuildDemandLine(IReadOnlyList<JsonElement> payloads)
     {
@@ -579,21 +665,36 @@ internal static class DeterministicChartBuilder
         {
             if (payload.ValueKind != JsonValueKind.Object)
                 continue;
-            if (!payload.TryGetProperty("by_region", out JsonElement byRegion) || byRegion.ValueKind != JsonValueKind.Array)
+            if (!payload.TryGetProperty("by_time", out JsonElement byTime) || byTime.ValueKind != JsonValueKind.Array)
                 continue;
             if (!payload.TryGetProperty("summary", out JsonElement summary) || summary.ValueKind != JsonValueKind.Object)
                 continue;
+            if (!HasCompleteTemporalEvidence(payload))
+                continue;
 
             var points = new List<ChartDataPoint>();
-            foreach (JsonElement row in byRegion.EnumerateArray())
+            DateOnly? previousEnd = null;
+            foreach (JsonElement row in byTime.EnumerateArray())
             {
                 if (row.ValueKind != JsonValueKind.Object)
-                    continue;
-                if (!row.TryGetProperty("region", out JsonElement regionEl) || regionEl.ValueKind != JsonValueKind.String)
-                    continue;
+                    return null;
+                string? startText = ReadNestedString(row, "start_week");
+                string? endText = ReadNestedString(row, "end_week");
+                if (!DateOnly.TryParse(startText, out DateOnly start)
+                    || !DateOnly.TryParse(endText, out DateOnly end)
+                    || start > end
+                    || (previousEnd is not null && start <= previousEnd.Value))
+                {
+                    return null;
+                }
                 if (!TryReadDouble(row, "volume", out double volume) || !double.IsFinite(volume))
-                    continue;
-                points.Add(new ChartDataPoint { X = regionEl.GetString()!, Y = Math.Round(volume, 1) });
+                    return null;
+
+                string label = start == end
+                    ? start.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+                    : $"{start:yyyy-MM-dd} to {end:yyyy-MM-dd}";
+                points.Add(new ChartDataPoint { X = label, Y = Math.Round(volume, 1) });
+                previousEnd = end;
             }
 
             if (points.Count >= 2)
@@ -602,8 +703,9 @@ internal static class DeterministicChartBuilder
                 return new ChartSpec
                 {
                     Type = "line",
-                    Title = $"{brand} Depletion Trend by Region",
-                    XAxisTitle = "Region",
+                    Title = $"{brand} Depletion Trend"
+                        + (ReadPeriodDescriptor(payload) is string period ? $" ({period})" : string.Empty),
+                    XAxisTitle = "Period",
                     YAxisTitle = "Depletion Volume",
                     Data = [new ChartSeries { Legend = brand, Values = points }],
                 };
@@ -612,6 +714,39 @@ internal static class DeterministicChartBuilder
 
         return null;
     }
+
+    private static string? ReadPeriodDescriptor(JsonElement payload)
+    {
+        if (payload.TryGetProperty("period", out JsonElement period)
+            && period.ValueKind == JsonValueKind.Object)
+        {
+            string? label = ReadNestedString(period, "label");
+            string? start = ReadNestedString(period, "start");
+            string? end = ReadNestedString(period, "end");
+            if (start is not null && end is not null)
+            {
+                return string.IsNullOrWhiteSpace(label)
+                    ? $"{start} to {end}"
+                    : $"{label}: {start} to {end}";
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadPeriodLabel(JsonElement payload)
+    {
+        return payload.TryGetProperty("period", out JsonElement period)
+            && period.ValueKind == JsonValueKind.Object
+            ? ReadNestedString(period, "label")
+            : null;
+    }
+
+    private static bool HasCompleteTemporalEvidence(JsonElement payload) =>
+        payload.TryGetProperty("compaction", out JsonElement compaction)
+        && compaction.ValueKind == JsonValueKind.Object
+        && compaction.TryGetProperty("temporal_complete", out JsonElement complete)
+        && complete.ValueKind == JsonValueKind.True;
 
     /// <summary>
     /// Build a horizontal bar ranking every portfolio brand by depletion growth rate
