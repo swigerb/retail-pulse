@@ -177,6 +177,58 @@ internal static class DeterministicChartBuilder
         return true;
     }
 
+    public static bool HasHistoricalDemandEvidence(
+        Microsoft.Extensions.AI.ChatResponse response,
+        IReadOnlyList<string>? supplementalPayloads)
+    {
+        foreach (JsonElement payload in CollectToolPayloads(response, supplementalPayloads))
+        {
+            if (payload.ValueKind == JsonValueKind.Object
+                && payload.TryGetProperty("summary", out JsonElement summary)
+                && summary.ValueKind == JsonValueKind.Object
+                && summary.TryGetProperty("total_volume", out _)
+                && (payload.TryGetProperty("by_region", out _)
+                    || payload.TryGetProperty("by_time", out _)
+                    || payload.TryGetProperty("weekly_data", out _)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool HasConflictingHistoricalDemandPeriods(
+        Microsoft.Extensions.AI.ChatResponse response,
+        IReadOnlyList<string>? supplementalPayloads) =>
+        HasConflictingDemandPeriods(CollectToolPayloads(response, supplementalPayloads));
+
+    public static bool HasHistoricalDemandPeriodMismatch(
+        Microsoft.Extensions.AI.ChatResponse response,
+        IReadOnlyList<string>? supplementalPayloads,
+        string requiredPeriodLabel)
+    {
+        foreach (JsonElement payload in CollectToolPayloads(response, supplementalPayloads))
+        {
+            if (!IsHistoricalDemandPayload(payload))
+                continue;
+
+            if (!string.Equals(ReadPeriodLabel(payload), requiredPeriodLabel, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsHistoricalDemandPayload(JsonElement payload) =>
+        payload.ValueKind == JsonValueKind.Object
+        && payload.TryGetProperty("summary", out JsonElement summary)
+        && summary.ValueKind == JsonValueKind.Object
+        && summary.TryGetProperty("total_volume", out _)
+        && (payload.TryGetProperty("by_region", out _)
+            || payload.TryGetProperty("by_time", out _)
+            || payload.TryGetProperty("weekly_data", out _));
+
     /// <summary>
     /// Chooses the deterministic builder that matches the requested chart type, falling
     /// back through the other shape-driven builders when the primary data shape is absent.
@@ -229,6 +281,7 @@ internal static class DeterministicChartBuilder
     private static bool HasConflictingDemandPeriods(IReadOnlyList<JsonElement> payloads)
     {
         var periods = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool invalidDemandPeriod = false;
         foreach (JsonElement payload in payloads)
         {
             if (payload.ValueKind != JsonValueKind.Object
@@ -242,9 +295,13 @@ internal static class DeterministicChartBuilder
             {
                 periods.Add(period);
             }
+            else
+            {
+                invalidDemandPeriod = true;
+            }
         }
 
-        return periods.Count > 1;
+        return invalidDemandPeriod || periods.Count > 1;
     }
 
     private static List<JsonElement> CollectToolPayloads(
@@ -612,17 +669,32 @@ internal static class DeterministicChartBuilder
                 continue;
             if (!payload.TryGetProperty("summary", out JsonElement summary) || summary.ValueKind != JsonValueKind.Object)
                 continue;
+            if (!HasCompleteTemporalEvidence(payload))
+                continue;
 
             var points = new List<ChartDataPoint>();
+            DateOnly? previousEnd = null;
             foreach (JsonElement row in byTime.EnumerateArray())
             {
                 if (row.ValueKind != JsonValueKind.Object)
-                    continue;
-                if (!row.TryGetProperty("label", out JsonElement labelEl) || labelEl.ValueKind != JsonValueKind.String)
-                    continue;
+                    return null;
+                string? startText = ReadNestedString(row, "start_week");
+                string? endText = ReadNestedString(row, "end_week");
+                if (!DateOnly.TryParse(startText, out DateOnly start)
+                    || !DateOnly.TryParse(endText, out DateOnly end)
+                    || start > end
+                    || (previousEnd is not null && start <= previousEnd.Value))
+                {
+                    return null;
+                }
                 if (!TryReadDouble(row, "volume", out double volume) || !double.IsFinite(volume))
-                    continue;
-                points.Add(new ChartDataPoint { X = labelEl.GetString()!, Y = Math.Round(volume, 1) });
+                    return null;
+
+                string label = start == end
+                    ? start.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+                    : $"{start:yyyy-MM-dd} to {end:yyyy-MM-dd}";
+                points.Add(new ChartDataPoint { X = label, Y = Math.Round(volume, 1) });
+                previousEnd = end;
             }
 
             if (points.Count >= 2)
@@ -645,23 +717,36 @@ internal static class DeterministicChartBuilder
 
     private static string? ReadPeriodDescriptor(JsonElement payload)
     {
-        if (!payload.TryGetProperty("period", out JsonElement period)
-            || period.ValueKind != JsonValueKind.Object)
+        if (payload.TryGetProperty("period", out JsonElement period)
+            && period.ValueKind == JsonValueKind.Object)
         {
-            return null;
+            string? label = ReadNestedString(period, "label");
+            string? start = ReadNestedString(period, "start");
+            string? end = ReadNestedString(period, "end");
+            if (start is not null && end is not null)
+            {
+                return string.IsNullOrWhiteSpace(label)
+                    ? $"{start} to {end}"
+                    : $"{label}: {start} to {end}";
+            }
         }
 
-        if (period.TryGetProperty("label", out JsonElement label)
-            && label.ValueKind == JsonValueKind.String
-            && !string.IsNullOrWhiteSpace(label.GetString()))
-        {
-            return label.GetString();
-        }
-
-        string? start = ReadNestedString(period, "start");
-        string? end = ReadNestedString(period, "end");
-        return start is not null && end is not null ? $"{start} to {end}" : null;
+        return null;
     }
+
+    private static string? ReadPeriodLabel(JsonElement payload)
+    {
+        return payload.TryGetProperty("period", out JsonElement period)
+            && period.ValueKind == JsonValueKind.Object
+            ? ReadNestedString(period, "label")
+            : null;
+    }
+
+    private static bool HasCompleteTemporalEvidence(JsonElement payload) =>
+        payload.TryGetProperty("compaction", out JsonElement compaction)
+        && compaction.ValueKind == JsonValueKind.Object
+        && compaction.TryGetProperty("temporal_complete", out JsonElement complete)
+        && complete.ValueKind == JsonValueKind.True;
 
     /// <summary>
     /// Build a horizontal bar ranking every portfolio brand by depletion growth rate

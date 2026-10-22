@@ -293,6 +293,168 @@ public sealed class ChartFulfillmentTests
     }
 
     [Fact]
+    public void EnforceChartFulfillment_ReplacesRenderableRegionAxisLineWithChronologicalSourceChart()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            TemporalDemand("Sierra Gold Tequila", "last-12-months", "2025-05-13", "2026-05-13"));
+        var wrongModelChart = new ChartSpec
+        {
+            Type = "line",
+            Title = "Regional trend",
+            XAxisTitle = "Region",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "Sierra Gold Tequila",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Midwest", Y = 100 },
+                        new ChartDataPoint { X = "Northeast", Y = 120 },
+                        new ChartDataPoint { X = "West Coast", Y = 140 },
+                    ],
+                },
+            ],
+        };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a line chart showing Sierra Gold Tequila depletion trends across all regions",
+            response, [wrongModelChart], "Done.");
+
+        result.Charts.Should().ContainSingle();
+        ChartSpec chart = result.Charts[0];
+        chart.Should().NotBeSameAs(wrongModelChart);
+        chart.XAxisTitle.Should().Be("Period");
+        chart.Title.Should().Contain("2025-05-13 to 2026-05-13");
+        chart.Data.Single().Values.Select(point => point.X).Should().Equal(
+            "2025-05-13 to 2025-05-19",
+            "2025-05-20 to 2025-05-26",
+            "2025-05-27 to 2025-06-02");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_QuarterRequestRejectsRenderableTwelveMonthModelChart()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactedDemand("Urban Living", "Northeast", 800),
+            CompactedDemand("Foundry Home", "Northeast", 900));
+        var wrongModelChart = new ChartSpec
+        {
+            Type = "groupedBar",
+            Title = "This quarter",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "Urban Living",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Northeast", Y = 800 },
+                        new ChartDataPoint { X = "Midwest", Y = 700 },
+                    ],
+                },
+                new ChartSeries
+                {
+                    Legend = "Foundry Home",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Northeast", Y = 900 },
+                        new ChartDataPoint { X = "Midwest", Y = 850 },
+                    ],
+                },
+            ],
+        };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a bar chart comparing Foundry Furniture and Urban Living depletion volume across all regions this quarter",
+            response, [wrongModelChart], "Done.");
+
+        result.Charts.Should().BeEmpty("12-month evidence cannot fulfill a current-quarter request");
+        result.Reply.Should().Contain("source evidence does not match");
+    }
+
+    [Theory]
+    [InlineData("last quarter")]
+    [InlineData("Q1")]
+    [InlineData("last 25 months")]
+    public void EnforceChartFulfillment_UnsupportedExplicitPeriodRejectsRenderableModelChart(string period)
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        var modelChart = new ChartSpec
+        {
+            Type = "line",
+            Title = "Model chart",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "Sierra Gold Tequila",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "A", Y = 1 },
+                        new ChartDataPoint { X = "B", Y = 2 },
+                    ],
+                },
+            ],
+        };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            $"Create a line chart for Sierra Gold Tequila for {period}",
+            ResponseWithToolResults(), [modelChart], "Done.");
+
+        result.Charts.Should().BeEmpty();
+        result.Reply.Should().Contain("explicit but unsupported");
+        result.Reply.Should().Contain("No broader default period was substituted");
+    }
+
+    [Fact]
+    public void EnforceChartFulfillment_SamePeriodLabelWithDifferentBoundsFailsClosed()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            TemporalDemand("Urban Living", "current-quarter", "2026-04-01", "2026-05-13"),
+            TemporalDemand("Foundry Home", "current-quarter", "2026-01-01", "2026-03-31"));
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a bar chart comparing Foundry Furniture and Urban Living depletion volume across all regions this quarter",
+            response,
+            [
+                new ChartSpec
+                {
+                    Type = "groupedBar",
+                    Title = "Model chart",
+                    Data =
+                    [
+                        new ChartSeries
+                        {
+                            Legend = "Urban Living",
+                            Values =
+                            [
+                                new ChartDataPoint { X = "Northeast", Y = 1 },
+                                new ChartDataPoint { X = "Midwest", Y = 2 },
+                            ],
+                        },
+                        new ChartSeries
+                        {
+                            Legend = "Foundry Home",
+                            Values =
+                            [
+                                new ChartDataPoint { X = "Northeast", Y = 3 },
+                                new ChartDataPoint { X = "Midwest", Y = 4 },
+                            ],
+                        },
+                    ],
+                },
+            ],
+            "Done.");
+
+        result.Charts.Should().BeEmpty();
+        result.Reply.Should().Contain("one consistent requested period and concrete date range");
+    }
+
+    [Fact]
     public void EnforceChartFulfillment_UnderPopulatedModelChart_IsDroppedRatherThanRendered()
     {
         // An under-populated chart is worse than no chart: it renders, so it looks
@@ -566,6 +728,31 @@ public sealed class ChartFulfillmentTests
                 new { region, volume = avgWeekly * 52, units = 1000, avg_weekly_volume = avgWeekly, weeks = 52 }
             },
             compaction = new { compacted = true, aggregate_complete = true }
+        });
+
+    private static string TemporalDemand(string brand, string label, string start, string end) =>
+        JsonSerializer.Serialize(new
+        {
+            period = new { label, start, end, months = label == "current-quarter" ? 3 : 12 },
+            filters = new { brand, region = "all", channel = "all" },
+            summary = new { total_volume = 600.0, total_units = 60, weeks_of_data = 3, avg_weekly_volume = 200.0 },
+            by_time = new object[]
+            {
+                new { start_week = "2025-05-13", end_week = "2025-05-19", label = "untrusted", volume = 100.0, units = 10, weeks = 1, source_rows = 6 },
+                new { start_week = "2025-05-20", end_week = "2025-05-26", label = "untrusted", volume = 200.0, units = 20, weeks = 1, source_rows = 6 },
+                new { start_week = "2025-05-27", end_week = "2025-06-02", label = "untrusted", volume = 300.0, units = 30, weeks = 1, source_rows = 6 },
+            },
+            by_region = new object[]
+            {
+                new { region = "Northeast", volume = 600.0, units = 60, avg_weekly_volume = 200.0, weeks = 3 }
+            },
+            compaction = new
+            {
+                compacted = true,
+                aggregate_complete = true,
+                regional_complete = true,
+                temporal_complete = true
+            }
         });
 
     private static string DepletionStats(string brand, string region, string depletionsYoy) =>

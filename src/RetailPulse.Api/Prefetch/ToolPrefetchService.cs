@@ -183,7 +183,7 @@ public partial class ToolPrefetchService
         var sw = Stopwatch.StartNew();
         var results = new Dictionary<string, string>();
         var tasks = new List<(string ToolName, Task<string> ResultTask)>();
-        string demandPeriod = ResolveHistoricalDemandPeriod(userMessage);
+        string demandPeriod = HistoricalDemandPeriodResolver.ResolveUserMessage(userMessage).Period;
 
         if (string.Equals(intent, AgentIntent.DemandForecasting, StringComparison.OrdinalIgnoreCase))
         {
@@ -309,7 +309,7 @@ public partial class ToolPrefetchService
 
             case ChartDataSource.HistoricalDemand:
                 string demandRegion = entities.Region ?? "National";
-                string demandPeriod = ResolveHistoricalDemandPeriod(chart.Prompt);
+                string demandPeriod = HistoricalDemandPeriodResolver.ResolveUserMessage(chart.Prompt).Period;
                 foreach (string brand in chart.RequiredEntities)
                 {
                     calls.Add((
@@ -446,39 +446,6 @@ public partial class ToolPrefetchService
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex PromptWhitespaceRegex();
-
-    private static string ResolveHistoricalDemandPeriod(string? message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-            return "last-12-months";
-
-        if (message.Contains("this quarter", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("current quarter", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("quarter to date", StringComparison.OrdinalIgnoreCase))
-        {
-            return "current-quarter";
-        }
-
-        if (message.Contains("this month", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("month to date", StringComparison.OrdinalIgnoreCase))
-        {
-            return "current-month";
-        }
-
-        if (message.Contains("this year", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("year to date", StringComparison.OrdinalIgnoreCase))
-        {
-            return "current-year";
-        }
-
-        Match trailingMonths = TrailingMonthsRegex().Match(message);
-        return trailingMonths.Success
-            ? $"last-{trailingMonths.Groups[1].Value}-months"
-            : "last-12-months";
-    }
-
-    [GeneratedRegex(@"\b(?:last|past)\s+([1-9]|1\d|2[0-4])\s+months?\b", RegexOptions.IgnoreCase)]
-    private static partial Regex TrailingMonthsRegex();
 
     private static Dictionary<string, object?> BuildCacheArgs(
         string toolName,

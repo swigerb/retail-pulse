@@ -444,7 +444,7 @@ public class AgentPipelineTests
     }
 
     private static string DemandPayload(string brand, double volume) =>
-        $$"""{"filters":{"brand":"{{brand}}","region":"National","channel":"All"},"summary":{"total_volume":{{volume * 52}},"total_units":1000,"weeks_of_data":52,"avg_weekly_volume":{{volume}}},"by_region":[{"region":"Northeast","volume":{{volume * 52}},"avg_weekly_volume":{{volume}}},{"region":"Southeast","volume":{{(volume - 10) * 52}},"avg_weekly_volume":{{volume - 10}}},{"region":"Midwest","volume":{{(volume - 20) * 52}},"avg_weekly_volume":{{volume - 20}}},{"region":"Southwest","volume":{{(volume - 30) * 52}},"avg_weekly_volume":{{volume - 30}}},{"region":"West Coast","volume":{{(volume - 40) * 52}},"avg_weekly_volume":{{volume - 40}}},{"region":"Pacific Northwest","volume":{{(volume - 50) * 52}},"avg_weekly_volume":{{volume - 50}}}]}""";
+        $$"""{"period":{"label":"last-12-months","start":"2025-05-13","end":"2026-05-13","months":12},"filters":{"brand":"{{brand}}","region":"National","channel":"All"},"summary":{"total_volume":{{volume * 52}},"total_units":1000,"weeks_of_data":52,"avg_weekly_volume":{{volume}}},"by_region":[{"region":"Northeast","volume":{{volume * 52}},"avg_weekly_volume":{{volume}}},{"region":"Southeast","volume":{{(volume - 10) * 52}},"avg_weekly_volume":{{volume - 10}}},{"region":"Midwest","volume":{{(volume - 20) * 52}},"avg_weekly_volume":{{volume - 20}}},{"region":"Southwest","volume":{{(volume - 30) * 52}},"avg_weekly_volume":{{volume - 30}}},{"region":"West Coast","volume":{{(volume - 40) * 52}},"avg_weekly_volume":{{volume - 40}}},{"region":"Pacific Northwest","volume":{{(volume - 50) * 52}},"avg_weekly_volume":{{volume - 50}}}]}""";
 
     #endregion
 

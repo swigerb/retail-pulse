@@ -192,6 +192,30 @@ public class ToolPrefetchServiceTests
             ItExpr.IsAny<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData("last quarter")]
+    [InlineData("Q1")]
+    [InlineData("last 25 months")]
+    public async Task PrefetchAsync_UnsupportedExplicitPeriod_DoesNotSubstituteTwelveMonths(string period)
+    {
+        string prompt = $"Create a line chart showing Sierra Gold Tequila demand for {period}";
+        PrefetchEntities entities = _sut.ExtractEntities(prompt);
+
+        IReadOnlyDictionary<string, string> results = await _sut.PrefetchAsync(
+            AgentIntent.DemandForecasting, entities, prompt);
+
+        results.Should().ContainKey("GetHistoricalDemand");
+        results["GetHistoricalDemand"].Should().Contain("Unsupported historical-demand period");
+        results["GetHistoricalDemand"].Should().NotContain("\"period\":\"last-12-months\"");
+        _httpHandler.Protected().Verify(
+            "SendAsync",
+            Times.Never(),
+            ItExpr.Is<HttpRequestMessage>(request =>
+                request.RequestUri != null
+                && request.RequestUri.Query.Contains("period=last-12-months", StringComparison.Ordinal)),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
     [Fact]
     public async Task PrefetchAsync_CuratedHomeImprovementTable_PrefetchesOnlyManifestBrandsAcrossRegions()
     {

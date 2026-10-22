@@ -23,6 +23,22 @@ public class HistoricalDemandTool
         [Description("Supported period: current-month, current-quarter, current-year, or last-N-months where N is 1..24. Use current-quarter for 'this quarter'. Never substitute a broader period.")] string period = "last-12-months",
         CancellationToken cancellationToken = default)
     {
+        if (!HistoricalDemandPeriodResolver.IsSupportedToolPeriod(period))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                brand,
+                region,
+                channel,
+                period,
+                error = $"Unsupported historical-demand period '{period}'. No default period was substituted.",
+                supported_periods = new[]
+                {
+                    "current-month", "current-quarter", "current-year", "last-N-months (N = 1..24)"
+                }
+            });
+        }
+
         try
         {
             string url = $"/api/demand/history?brand={Uri.EscapeDataString(brand)}"

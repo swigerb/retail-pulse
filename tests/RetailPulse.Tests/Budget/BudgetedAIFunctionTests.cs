@@ -1,8 +1,13 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using RetailPulse.Api.Agents;
 using RetailPulse.Api.Budget;
+using RetailPulse.Api.Charts;
+using RetailPulse.Contracts;
+using RetailPulse.Tests.Fixtures;
 using Xunit;
 
 namespace RetailPulse.Tests.Budget;
@@ -150,6 +155,29 @@ public sealed class BudgetedAIFunctionTests
             temporal.EnumerateArray().Sum(interval => interval.GetProperty("units").GetInt32())
                 .Should().Be(6 * expectedRegionUnits,
                     "bounded temporal intervals must preserve the exact all-region unit sum");
+            JsonElement[] intervals = [.. temporal.EnumerateArray()];
+            intervals.Should().HaveCount(11);
+            for (int intervalIndex = 0; intervalIndex < intervals.Length; intervalIndex++)
+            {
+                int firstWeekIndex = intervalIndex * 5;
+                int weeksInInterval = Math.Min(5, 52 - firstWeekIndex);
+                DateOnly expectedStart = new DateOnly(2025, 5, 19).AddDays(firstWeekIndex * 7);
+                DateOnly expectedEnd = expectedStart.AddDays((weeksInInterval - 1) * 7);
+                double expectedVolume = 36 * Enumerable.Range(firstWeekIndex, weeksInInterval)
+                    .Sum(week => 1000 + week);
+                int expectedUnits = 36 * Enumerable.Range(firstWeekIndex, weeksInInterval)
+                    .Sum(week => 100 + week);
+
+                intervals[intervalIndex].GetProperty("start_week").GetString()
+                    .Should().Be(expectedStart.ToString("yyyy-MM-dd"));
+                intervals[intervalIndex].GetProperty("end_week").GetString()
+                    .Should().Be(expectedEnd.ToString("yyyy-MM-dd"));
+                intervals[intervalIndex].GetProperty("weeks").GetInt32().Should().Be(weeksInInterval);
+                intervals[intervalIndex].GetProperty("source_rows").GetInt32()
+                    .Should().Be(36 * weeksInInterval);
+                intervals[intervalIndex].GetProperty("volume").GetDouble().Should().Be(expectedVolume);
+                intervals[intervalIndex].GetProperty("units").GetInt32().Should().Be(expectedUnits);
+            }
             doc.RootElement.TryGetProperty("compaction", out JsonElement compaction).Should().BeTrue();
             compaction.GetProperty("aggregate_complete").GetBoolean().Should().BeTrue();
             compaction.GetProperty("temporal_complete").GetBoolean().Should().BeTrue();
@@ -200,6 +228,85 @@ public sealed class BudgetedAIFunctionTests
         temporal.EnumerateArray().Sum(row => row.GetProperty("volume").GetDouble())
             .Should().Be(doc.RootElement.GetProperty("summary").GetProperty("total_volume").GetDouble());
         result.Should().NotContain("tool_result_over_budget");
+    }
+
+    [Fact]
+    public async Task HistoricalDemand_RealFactoryBudgetAndFulfillment_ReplaceWrongRenderableModelChart()
+    {
+        string urbanPayload = BuildHistoricalDemandPayload(
+            "Urban Living", weeks: 7, periodLabel: "current-quarter");
+        string foundryPayload = BuildHistoricalDemandPayload(
+            "Foundry Home", weeks: 7, periodLabel: "current-quarter");
+        AIFunction inner = AIFunctionFactory.Create(
+            (string brand, string period) => brand switch
+            {
+                "Urban Living" => urbanPayload,
+                "Foundry Furniture" => foundryPayload,
+                _ => throw new InvalidOperationException($"Unexpected brand {brand}")
+            },
+            "GetHistoricalDemand");
+        BudgetedAIFunction fn = Wrap(inner, Options(maxCumulative: 9_500, maxCalls: 5));
+
+        using IDisposable scope = RequestToolContext.Begin("quarter-fulfillment", isChartIntent: true);
+        string urban = (string)(await fn.InvokeAsync(Args(
+            ("brand", "Urban Living"), ("period", "current-quarter"))))!;
+        string foundry = (string)(await fn.InvokeAsync(Args(
+            ("brand", "Foundry Furniture"), ("period", "current-quarter"))))!;
+
+        IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        var pipeline = new AgentExecutionPipeline(
+            AgentTestFixtures.CreateMockChatClient("{}"),
+            AgentTestFixtures.CreateMockHubContext(),
+            config,
+            NullLogger<AgentExecutionPipeline>.Instance);
+        var wrongModelChart = new ChartSpec
+        {
+            Type = "groupedBar",
+            Title = "Model-created comparison",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "Urban Living",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Northeast", Y = 1 },
+                        new ChartDataPoint { X = "Midwest", Y = 2 },
+                    ],
+                },
+                new ChartSeries
+                {
+                    Legend = "Foundry Furniture",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Northeast", Y = 3 },
+                        new ChartDataPoint { X = "Midwest", Y = 4 },
+                    ],
+                },
+            ],
+        };
+        PrefetchEntry[] prefetched =
+        [
+            new("GetHistoricalDemand:Urban Living", urban, true, false, null, null),
+            new("GetHistoricalDemand:Foundry Furniture", foundry, true, false, null, null),
+        ];
+
+        AgentExecutionPipeline.ChartFulfillmentResult fulfilled = pipeline.EnforceChartFulfillment(
+            "Create a grouped bar chart comparing Foundry Furniture and Urban Living depletion volume across all regions this quarter",
+            new Microsoft.Extensions.AI.ChatResponse(
+                new ChatMessage(ChatRole.Assistant, [])),
+            [wrongModelChart],
+            "Done.",
+            prefetched);
+
+        fulfilled.Charts.Should().ContainSingle();
+        ChartSpec chart = fulfilled.Charts.Single();
+        chart.Should().NotBeSameAs(wrongModelChart);
+        chart.Title.Should().Contain("current-quarter: 2026-04-01 to 2026-05-13");
+        chart.Data.Select(series => series.Legend).Should().Equal("Urban Living", "Foundry Home");
+        chart.Data.Should().OnlyContain(series => series.Values.Count == 6);
+        RequestToolContext.Current!.CumulativeChars.Should().BeLessThanOrEqualTo(9_500);
+        RequestToolContext.Current.DistinctCalls.Should().Be(2);
     }
 
     [Fact]

@@ -45,10 +45,14 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
         // labels feed faithful averages and bounded temporal intervals.
         var byRegion = new Dictionary<string, RegionAgg>(StringComparer.OrdinalIgnoreCase);
         var byWeek = new SortedDictionary<DateOnly, TemporalAgg>();
+        int invalidTemporalRows = 0;
         foreach (JsonNode? rowNode in weekly)
         {
             if (rowNode is not JsonObject row)
+            {
+                invalidTemporalRows++;
                 continue;
+            }
 
             string region = row["region"]?.GetValue<string>() ?? "Unknown";
             double volume = ReadDouble(row["volume"]);
@@ -62,7 +66,7 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
             }
             agg.Volume += volume;
             agg.Units += units;
-            if (week is not null)
+            if (!string.IsNullOrWhiteSpace(week))
             {
                 agg.Weeks.Add(week);
                 if (DateOnly.TryParse(week, out DateOnly weekStarting))
@@ -76,6 +80,14 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
                     temporal.Units += units;
                     temporal.SourceRows++;
                 }
+                else
+                {
+                    invalidTemporalRows++;
+                }
+            }
+            else
+            {
+                invalidTemporalRows++;
             }
         }
 
@@ -93,7 +105,10 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
             });
         }
 
-        var byTimeArray = BuildTemporalIntervals(byWeek);
+        bool temporalComplete = originalRows > 0
+            && invalidTemporalRows == 0
+            && byWeek.Count > 0;
+        JsonArray byTimeArray = temporalComplete ? BuildTemporalIntervals(byWeek) : [];
         var projected = new JsonObject
         {
             ["period"] = obj["period"]?.DeepClone(),
@@ -106,7 +121,8 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
                 ["compacted"] = true,
                 ["aggregate_complete"] = true,
                 ["regional_complete"] = byRegionArray.Count > 0,
-                ["temporal_complete"] = byTimeArray.Count > 0,
+                ["temporal_complete"] = temporalComplete && byTimeArray.Count > 0,
+                ["invalid_temporal_rows"] = invalidTemporalRows,
                 ["temporal_granularity"] = byWeek.Count <= _maxTemporalIntervals
                     ? "week"
                     : "bounded_week_interval",
@@ -129,9 +145,12 @@ public sealed class HistoricalDemandCompactor : IToolResultCompactor
                     "per-channel breakdown",
                     "single-week anomaly detection when temporal intervals span multiple weeks"
                 },
-                ["detail_hint"] = "Weekly rows were rolled up into exact chronological intervals "
-                    + "and per-region totals. Both aggregates are complete and sufficient; proceed with temporal "
-                    + "trends or brand/region comparisons using the matching projection."
+                ["detail_hint"] = temporalComplete
+                    ? "Weekly rows were rolled up into exact chronological intervals and per-region totals. "
+                        + "Both aggregates are complete and sufficient; proceed with temporal trends or "
+                        + "brand/region comparisons using the matching projection."
+                    : "Per-region totals are complete, but one or more source rows lacked a valid date. "
+                        + "Temporal evidence is incomplete; do not create a time-series chart."
             }
         };
 

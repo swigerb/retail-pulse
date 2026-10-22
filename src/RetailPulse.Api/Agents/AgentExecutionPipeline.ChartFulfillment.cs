@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using RetailPulse.Api.Charts;
+using RetailPulse.Api.Tools;
 using RetailPulse.Contracts;
 
 namespace RetailPulse.Api.Agents;
@@ -86,6 +87,37 @@ public partial class AgentExecutionPipeline
             return new ChartFulfillmentResult(charts, reply);
         }
 
+        HistoricalDemandPeriodResolution periodResolution =
+            HistoricalDemandPeriodResolver.ResolveUserMessage(userMessage);
+        if (periodResolution.HasExplicitPeriod && !periodResolution.IsSupported)
+        {
+            charts.Clear();
+            string periodDiagnostic = BuildUnsupportedHistoricalDemandPeriodDiagnostic();
+            string scrubbed = StripFallbackClaims(reply);
+            string updated = string.IsNullOrWhiteSpace(scrubbed)
+                ? periodDiagnostic
+                : $"{scrubbed}\n\n{periodDiagnostic}";
+            return new ChartFulfillmentResult(charts, updated);
+        }
+
+        IReadOnlyList<string>? supplementalPayloads = PrefetchJson(prefetchedData);
+        bool hasHistoricalDemandEvidence =
+            DeterministicChartBuilder.HasHistoricalDemandEvidence(response, supplementalPayloads);
+        if (hasHistoricalDemandEvidence
+            && (DeterministicChartBuilder.HasConflictingHistoricalDemandPeriods(response, supplementalPayloads)
+                || (periodResolution.HasExplicitPeriod
+                    && DeterministicChartBuilder.HasHistoricalDemandPeriodMismatch(
+                        response, supplementalPayloads, periodResolution.Period))))
+        {
+            charts.Clear();
+            string evidenceDiagnostic = BuildHistoricalDemandPeriodMismatchDiagnostic();
+            string scrubbed = StripFallbackClaims(reply);
+            string updated = string.IsNullOrWhiteSpace(scrubbed)
+                ? evidenceDiagnostic
+                : $"{scrubbed}\n\n{evidenceDiagnostic}";
+            return new ChartFulfillmentResult(charts, updated);
+        }
+
         // ── GROUP D (issue #76): family-aware chart-type enforcement ──────────
         // ChartRequestDetector.Detect() captured the requested type. Validate
         // every model-emitted chart against that request:
@@ -139,7 +171,7 @@ public partial class AgentExecutionPipeline
             {
                 int minMarks = Math.Max(6, roster.Count);
                 if (DeterministicChartBuilder.TryBuild(
-                        response, intent.ChartType, minMarks, roster, PrefetchJson(prefetchedData), out ChartSpec? rebuilt)
+                        response, intent.ChartType, minMarks, roster, supplementalPayloads, out ChartSpec? rebuilt)
                     && rebuilt is not null)
                 {
                     _logger.LogInformation(
@@ -204,13 +236,13 @@ public partial class AgentExecutionPipeline
 
         int requiredMarks = targetMarks;
         if (!DeterministicChartBuilder.TryBuild(
-                response, intent.ChartType, targetMarks, PrefetchJson(prefetchedData), out ChartSpec? deterministic)
+                response, intent.ChartType, targetMarks, supplementalPayloads, out ChartSpec? deterministic)
             || deterministic is null)
         {
             requiredMarks = typeFloor;
             if (targetMarks > typeFloor
                 && DeterministicChartBuilder.TryBuild(
-                    response, intent.ChartType, typeFloor, PrefetchJson(prefetchedData), out ChartSpec? relaxed)
+                    response, intent.ChartType, typeFloor, supplementalPayloads, out ChartSpec? relaxed)
                 && relaxed is not null)
             {
                 _logger.LogInformation(
@@ -232,8 +264,12 @@ public partial class AgentExecutionPipeline
             ChartSpec? modelRival = charts.FirstOrDefault(c => c is not null
                 && string.Equals(c.Type, deterministic.Type, StringComparison.OrdinalIgnoreCase));
 
+            bool requiresSourceBackedDemandSemantics = hasHistoricalDemandEvidence
+                && (string.Equals(intent.ChartType, "line", StringComparison.OrdinalIgnoreCase)
+                    || periodResolution.HasExplicitPeriod);
             ChartSpec? richerModelChart = null;
-            if (modelRival is not null
+            if (!requiresSourceBackedDemandSemantics
+                && modelRival is not null
                 && ChartSpecValidator.TryGetRenderable(modelRival, minSeries: 1, minMarks: requiredMarks, out ChartSpec? cleanedRival)
                 && cleanedRival is not null
                 && CountMarks(cleanedRival) > CountMarks(deterministic))
@@ -310,6 +346,15 @@ public partial class AgentExecutionPipeline
 
         return new ChartFulfillmentResult(charts, updatedReply);
     }
+
+    private static string BuildUnsupportedHistoricalDemandPeriodDiagnostic() =>
+        "Chart unavailable: the requested historical-demand period is explicit but unsupported. "
+        + "No broader default period was substituted. Supported periods are current month, "
+        + "current quarter, current year, or the last 1–24 months.";
+
+    private static string BuildHistoricalDemandPeriodMismatchDiagnostic() =>
+        "Chart unavailable: the historical-demand source evidence does not match one consistent "
+        + "requested period and concrete date range. No model-rendered chart was accepted.";
 
     private static IReadOnlyList<string>? PrefetchJson(IReadOnlyList<PrefetchEntry>? prefetchedData) =>
         prefetchedData is { Count: > 0 } ? [.. prefetchedData.Select(p => p.Json)] : null;
