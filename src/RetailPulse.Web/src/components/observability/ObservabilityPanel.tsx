@@ -96,7 +96,7 @@ export default function ObservabilityPanel() {
   return (
     <div className={styles.container} data-testid="observability-panel">
       <div className={styles.header}>
-        <div className={styles.title}>🔭 Observability</div>
+        <h1 className={styles.title}>🔭 Observability</h1>
       </div>
       <div className={styles.subtitle}>AI Cost Tracking · Audit Logs · Conversation Export</div>
 

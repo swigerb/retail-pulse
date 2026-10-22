@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import type { ProviderCapabilities } from '../auth/session/types';
 import { FULL_CAPABILITIES, ANONYMOUS_CAPABILITIES } from '../auth/session/types';
@@ -16,9 +17,9 @@ const mockCaps: { value: ProviderCapabilities; mode: 'entra' | 'github' | 'anony
   mode: 'entra',
 };
 
-const connectTelemetryHub = vi.fn((..._args: unknown[]) => ({ on: vi.fn(), off: vi.fn() }));
+const connectTelemetryHub = vi.fn(() => ({ on: vi.fn(), off: vi.fn() }));
 vi.mock('../services/telemetryHub', () => ({
-  connectTelemetryHub: (...args: unknown[]) => connectTelemetryHub(...args),
+  connectTelemetryHub: () => connectTelemetryHub(),
   subscribeHubEvent: vi.fn(() => () => {}),
   joinTelemetrySession: vi.fn(() => Promise.resolve()),
   onProgress: vi.fn(() => () => {}),
@@ -91,7 +92,9 @@ vi.mock('../components/guardrails', () => ({
   GuardrailsConfig: stub('guardrails-config'),
 }));
 vi.mock('../components/cards', () => ({ AdaptiveCardPanel: stub('cards') }));
-vi.mock('../components/observability', () => ({ ObservabilityPanel: stub('observability') }));
+vi.mock('../components/observability', () => ({
+  ObservabilityPanel: () => <section data-testid="observability"><h1>Observability</h1></section>,
+}));
 vi.mock('../components/stores', () => ({
   StoreHeatmap: stub('store-heatmap'),
   StockoutAlert: stub('stockout'),
@@ -118,8 +121,14 @@ function renderDashboard() {
   );
 }
 
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  window.dispatchEvent(new Event('resize'));
+}
+
 beforeEach(() => {
   connectTelemetryHub.mockClear();
+  setViewportWidth(1920);
 });
 
 afterEach(() => {
@@ -144,6 +153,26 @@ describe('Dashboard — full capabilities (Entra/GitHub)', () => {
     expect(screen.getByRole('button', { name: /Competitive/i })).toBeInTheDocument();
     expect(screen.queryByTestId('anon-session-banner')).not.toBeInTheDocument();
   });
+
+  it.each([957, 390])(
+    'keeps every compact navigation action reachable at %ipx',
+    async (width) => {
+      setViewportWidth(width);
+      const user = userEvent.setup();
+      renderDashboard();
+
+      await user.click(screen.getByRole('button', { name: 'Views' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Observability' }));
+
+      expect(screen.getByRole('heading', { name: 'Observability' })).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Actions' }));
+      expect(screen.getByRole('menuitem', { name: 'New Chat' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Tour' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Demo Mode' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Real-Time Telemetry' })).toBeInTheDocument();
+    },
+  );
 });
 
 describe('Dashboard — anonymous capabilities (limited demo)', () => {
