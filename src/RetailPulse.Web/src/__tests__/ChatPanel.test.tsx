@@ -118,6 +118,115 @@ describe('ChatPanel', () => {
     expect(await screen.findByText(/Sales were up 12% in Q1\./)).toBeInTheDocument();
   });
 
+  it('collapses response telemetry and APIM evidence while keeping safety warnings visible', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({ kind: 'complete', response: {
+      reply: 'The requested summary is ready.',
+      sessionId: 'sess-diagnostics',
+      spans: [{
+        name: 'GetHistoricalDemand',
+        type: 'tool_call',
+        detail: '{"region":"National"}',
+        durationMs: 42,
+        timestamp: '2026-10-22T17:00:00.000Z',
+      }],
+      totalDurationMs: 1200,
+      tokenUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150, estimatedCostUsd: 0.001 },
+      gateway: {
+        status: 'observed',
+        observed: true,
+        truncated: false,
+        droppedCalls: 0,
+        callCount: 1,
+        totalTokensConsumed: 150,
+        tokensRemaining: 850,
+        calls: [{
+          gatewayRequestId: 'req-warning',
+          backendAlias: 'retail-pulse-foundry-pool',
+          route: 'primary',
+          tokensConsumed: 150,
+          tokensRemaining: 850,
+          quota: 'allowed',
+          cache: 'unknown',
+          safety: 'passed',
+          gatewaySafety: {
+            phase: 'input',
+            decision: 'allow',
+            promptAttack: false,
+            category: null,
+            severity: null,
+            mode: 'demo',
+            latencyMs: 12,
+            outputChecked: false,
+          },
+          policyVersion: '2026-10-rp332-v1',
+          status: 'observed',
+        }],
+      },
+    } });
+
+    renderPanel();
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'Summarize demand');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    expect(await screen.findByText('The requested summary is ready.')).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Expand response information' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveTextContent('Safety warning: Allowed — output not checked');
+    expect(toggle).toHaveAccessibleDescription(/Safety warning: Allowed — output not checked/);
+    expect(screen.queryByText('GetHistoricalDemand')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('gateway-control-room')).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(screen.getByRole('button', { name: 'Collapse response information' }))
+      .toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('GetHistoricalDemand')).toBeInTheDocument();
+    expect(screen.getByTestId('gateway-control-room')).toBeInTheDocument();
+    expect(screen.getByTestId('gateway-item-correlation')).toHaveTextContent('req-warning');
+    expect(screen.getByTestId('gateway-item-policy')).toHaveTextContent('2026-10-rp332-v1');
+  });
+
+  it('does not summarize partial or unknown gateway evidence as fully observed', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({ kind: 'complete', response: {
+      reply: 'Partial gateway evidence was returned.',
+      sessionId: 'sess-partial',
+      spans: [],
+      gateway: {
+        status: 'observed',
+        observed: true,
+        truncated: false,
+        droppedCalls: 0,
+        callCount: 1,
+        totalTokensConsumed: 10,
+        tokensRemaining: null,
+        calls: [{
+          gatewayRequestId: null,
+          backendAlias: null,
+          route: 'unknown',
+          tokensConsumed: 10,
+          tokensRemaining: null,
+          quota: 'allowed',
+          cache: 'unknown',
+          safety: 'passed',
+          policyVersion: null,
+          status: 'observed',
+        }],
+      },
+    } });
+
+    renderPanel();
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'Check gateway state');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    expect(await screen.findByText('Partial gateway evidence was returned.')).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Expand response information' });
+    expect(toggle).toHaveTextContent('Gateway details partial or unknown');
+    expect(toggle).not.toHaveTextContent('Gateway observed');
+    expect(toggle).toHaveAccessibleDescription(/Gateway details partial or unknown/);
+  });
+
   it('exposes an Execution path selector defaulting to Auto', () => {
     renderPanel();
 
@@ -568,6 +677,9 @@ describe('ChatPanel', () => {
       expect.objectContaining({ planId: 'plan-77', sessionId: 'sess-77' }),
     );
     expect(await screen.findByText(/awaiting reviewer input/i)).toBeInTheDocument();
+    const diagnostics = screen.getByRole('button', { name: 'Expand response information' });
+    expect(diagnostics).toHaveTextContent('Gateway metadata unavailable');
+    await user.click(diagnostics);
     expect(screen.getByRole('group', { name: 'Gateway Control Room: Metadata unavailable' }))
       .toBeInTheDocument();
   });
