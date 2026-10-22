@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
+import type { GatewayCallEvidence, GatewayEvidence } from '../types';
 
 // --- Mocks -----------------------------------------------------------------
 // Stable mocks for the API + telemetry hub so ChatPanel can mount cleanly in
@@ -67,6 +68,44 @@ function renderPanel(props: Partial<React.ComponentProps<typeof ChatPanel>> = {}
       <ChatPanel {...props} />
     </FluentProvider>,
   );
+}
+
+function gatewayCall(overrides: Partial<GatewayCallEvidence> = {}): GatewayCallEvidence {
+  return {
+    gatewayRequestId: 'req-summary',
+    backendAlias: 'retail-pulse-foundry-pool',
+    route: 'primary',
+    tokensConsumed: 10,
+    tokensRemaining: 90,
+    quota: 'allowed',
+    cache: 'miss',
+    safety: 'passed',
+    gatewaySafety: {
+      phase: 'output',
+      decision: 'allow',
+      outputChecked: true,
+    },
+    policyVersion: '2026-10-rp332-v1',
+    status: 'observed',
+    ...overrides,
+  };
+}
+
+function gatewayEvidence(
+  overrides: Partial<GatewayEvidence> = {},
+  calls: GatewayCallEvidence[] = [gatewayCall()],
+): GatewayEvidence {
+  return {
+    status: 'observed',
+    observed: true,
+    truncated: false,
+    droppedCalls: 0,
+    callCount: calls.length,
+    totalTokensConsumed: 10,
+    tokensRemaining: 90,
+    calls,
+    ...overrides,
+  };
 }
 
 describe('ChatPanel', () => {
@@ -225,6 +264,103 @@ describe('ChatPanel', () => {
     expect(toggle).toHaveTextContent('Gateway details partial or unknown');
     expect(toggle).not.toHaveTextContent('Gateway observed');
     expect(toggle).toHaveAccessibleDescription(/Gateway details partial or unknown/);
+  });
+
+  it('renders response information after the complete prose and chart output', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({ kind: 'complete', response: {
+      reply: 'The chart follows this explanation.',
+      sessionId: 'sess-chart-order',
+      spans: [],
+      charts: [{
+        type: 'bar',
+        title: 'Regional sales',
+        data: [{ legend: 'Sales', values: [{ x: 'North', y: 42 }] }],
+      }],
+      gateway: gatewayEvidence(),
+    } });
+
+    renderPanel();
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'Show regional sales');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    expect(await screen.findByText('The chart follows this explanation.')).toBeInTheDocument();
+    const chart = await screen.findByTestId('chart-renderer-mock');
+    const diagnostics = screen.getByTestId('response-diagnostics');
+    expect(chart.compareDocumentPosition(diagnostics) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('keeps safety warning and truncation signals together in the collapsed summary', async () => {
+    const user = userEvent.setup();
+    const unchecked = gatewayCall({
+      gatewaySafety: { phase: 'input', decision: 'allow', outputChecked: false },
+    });
+    sendMessageMock.mockResolvedValue({ kind: 'complete', response: {
+      reply: 'Some gateway calls were omitted.',
+      sessionId: 'sess-warning-truncated',
+      spans: [],
+      gateway: gatewayEvidence({ truncated: true, droppedCalls: 2, callCount: 3 }, [unchecked]),
+    } });
+
+    renderPanel();
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'Check truncated evidence');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    expect(await screen.findByText('Some gateway calls were omitted.')).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Expand response information' });
+    expect(toggle).toHaveTextContent('Safety warning: Allowed — output not checked');
+    expect(toggle).toHaveTextContent('Gateway evidence truncated');
+  });
+
+  it('keeps throttling and unchecked-output safety signals together in the collapsed summary', async () => {
+    const user = userEvent.setup();
+    const throttledUnchecked = gatewayCall({
+      quota: 'throttled',
+      tokensRemaining: 0,
+      gatewaySafety: { phase: 'input', decision: 'allow', outputChecked: false },
+    });
+    sendMessageMock.mockResolvedValue({ kind: 'complete', response: {
+      reply: 'The gateway rate limit was reached.',
+      sessionId: 'sess-throttled-unchecked',
+      spans: [],
+      gateway: gatewayEvidence({ tokensRemaining: 0 }, [throttledUnchecked]),
+    } });
+
+    renderPanel();
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'Check quota state');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    expect(await screen.findByText('The gateway rate limit was reached.')).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Expand response information' });
+    expect(toggle).toHaveTextContent('Gateway throttled');
+    expect(toggle).toHaveTextContent('Safety warning: Allowed — output not checked');
+  });
+
+  it('keeps partial gateway evidence and a safety warning together in the collapsed summary', async () => {
+    const user = userEvent.setup();
+    const partialUnchecked = gatewayCall({
+      gatewayRequestId: null,
+      backendAlias: null,
+      route: 'unknown',
+      cache: 'unknown',
+      policyVersion: null,
+      gatewaySafety: { phase: 'input', decision: 'allow', outputChecked: false },
+    });
+    sendMessageMock.mockResolvedValue({ kind: 'complete', response: {
+      reply: 'The gateway returned incomplete evidence.',
+      sessionId: 'sess-partial-warning',
+      spans: [],
+      gateway: gatewayEvidence({}, [partialUnchecked]),
+    } });
+
+    renderPanel();
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'Check incomplete evidence');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+
+    expect(await screen.findByText('The gateway returned incomplete evidence.')).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Expand response information' });
+    expect(toggle).toHaveTextContent('Safety warning: Allowed — output not checked');
+    expect(toggle).toHaveTextContent('Gateway details partial or unknown');
   });
 
   it('exposes an Execution path selector defaulting to Auto', () => {

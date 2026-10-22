@@ -287,18 +287,39 @@ function ResponseDiagnostics({
     || item.state === 'unavailable'
     || item.value.toLowerCase().includes('partial'),
   ) ?? false;
-  const gatewaySummary = gatewayModel
-    ? gatewayModel.state === 'warning' && gatewaySafety
-      ? `${gatewayModel.statusLabel}: ${gatewaySafety.value}`
-      : gatewayModel.state === 'observed' && hasPartialOrUnknownGatewayEvidence
-        ? 'Gateway details partial or unknown'
-      : `Gateway ${gatewayModel.statusLabel.toLowerCase()}`
-    : '';
-  const gatewayStatusClass = gatewayModel?.state === 'blocked' || gatewayModel?.state === 'failed'
-    ? styles.statusDanger
-    : gatewayModel?.state === 'warning' || gatewayModel?.state === 'truncated' || gatewayModel?.state === 'throttled'
-      ? styles.statusWarning
-      : undefined;
+  const gatewaySummary = gatewayModel ? [
+    gatewayModel.state === 'blocked'
+      ? { text: 'Gateway blocked', className: styles.statusDanger }
+      : gatewayModel.state === 'failed'
+        ? { text: 'Gateway failed', className: styles.statusDanger }
+        : gatewayModel.state === 'throttled'
+          ? { text: 'Gateway throttled', className: styles.statusWarning }
+          : gatewayModel.state === 'unavailable'
+            ? { text: 'Gateway metadata unavailable', className: undefined }
+            : gatewayModel.state === 'bypassed'
+              ? { text: 'Gateway bypassed', className: undefined }
+              : gatewayModel.state === 'unknown'
+                ? { text: 'Gateway unknown', className: undefined }
+                : null,
+    gatewaySafety?.state === 'blocked'
+      ? { text: `Safety blocked: ${gatewaySafety.value}`, className: styles.statusDanger }
+      : gatewaySafety?.state === 'warning'
+        ? { text: `Safety warning: ${gatewaySafety.value}`, className: styles.statusWarning }
+        : null,
+    gateway?.truncated
+      ? { text: 'Gateway evidence truncated', className: styles.statusWarning }
+      : null,
+    gatewayModel.state !== 'unavailable'
+      && gatewayModel.state !== 'bypassed'
+      && gatewayModel.state !== 'unknown'
+      && hasPartialOrUnknownGatewayEvidence
+      ? { text: 'Gateway details partial or unknown', className: styles.statusWarning }
+      : null,
+  ].filter((item): item is NonNullable<typeof item> => item != null) : [];
+
+  if (gatewayModel?.state === 'observed' && gatewaySummary.length === 0) {
+    gatewaySummary.push({ text: 'Gateway observed', className: undefined });
+  }
 
   const telemetrySummary = [
     `📊 ${spans.length} spans`,
@@ -323,7 +344,9 @@ function ResponseDiagnostics({
         <span id={summaryId} className={styles.summaryText}>
           <span className={styles.summaryLabel}>Response information</span>
           {spans.length > 0 && <span>{telemetrySummary}</span>}
-          {gatewaySummary && <span className={gatewayStatusClass}>{gatewaySummary}</span>}
+          {gatewaySummary.map(item => (
+            <span key={item.text} className={item.className}>{item.text}</span>
+          ))}
         </span>
         <span className={mergeClasses(styles.chevron, expanded ? styles.chevronExpanded : undefined)}>
           <ChevronRight16Regular />
@@ -1117,6 +1140,13 @@ export function ChatPanel({
               {msg.approval && (
                 <ApprovalCard approval={msg.approval} onResolved={onApprovalResolved} />
               )}
+              {msg.charts && msg.charts.length > 0 && !msg.planId && (
+                <ErrorBoundary fallback={<div className={styles.loadingContainer}>Chart failed to load.</div>}>
+                  <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
+                    <ChartRenderer charts={msg.charts} />
+                  </Suspense>
+                </ErrorBoundary>
+              )}
               {msg.role === 'assistant'
                 && ((msg.spans?.length ?? 0) > 0 || msg.gateway !== undefined) && (
                 <ResponseDiagnostics
@@ -1125,13 +1155,6 @@ export function ChatPanel({
                   tokenUsage={msg.tokenUsage}
                   gateway={msg.gateway}
                 />
-              )}
-              {msg.charts && msg.charts.length > 0 && !msg.planId && (
-                <ErrorBoundary fallback={<div className={styles.loadingContainer}>Chart failed to load.</div>}>
-                  <Suspense fallback={<div className={styles.loadingContainer}><Spinner size="tiny" />Loading charts…</div>}>
-                    <ChartRenderer charts={msg.charts} />
-                  </Suspense>
-                </ErrorBoundary>
               )}
             </div>
           </div>
