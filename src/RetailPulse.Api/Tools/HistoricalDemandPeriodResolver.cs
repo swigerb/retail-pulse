@@ -26,16 +26,20 @@ internal static partial class HistoricalDemandPeriodResolver
             return new("current-year", HasExplicitPeriod: true, IsSupported: true);
 
         Match trailingMonths = TrailingMonthsRegex().Match(message);
-        if (trailingMonths.Success)
-        {
-            int months = int.Parse(trailingMonths.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            return months is >= 1 and <= 24
+        int months = 0;
+        bool supportedTrailingMonths = trailingMonths.Success
+            && int.TryParse(
+                    trailingMonths.Groups[1].Value,
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out months)
+            && months is >= 1 and <= 24;
+        return trailingMonths.Success
+            ? supportedTrailingMonths
                 ? new($"last-{months}-months", HasExplicitPeriod: true, IsSupported: true)
-                : new(UnsupportedExplicitPeriod, HasExplicitPeriod: true, IsSupported: false);
-        }
-
-        return UnsupportedQuarterRegex().IsMatch(message)
-            || ExplicitDateRangeRegex().IsMatch(message)
+                : new(UnsupportedExplicitPeriod, HasExplicitPeriod: true, IsSupported: false)
+            : UnsupportedQuarterRegex().IsMatch(message)
+                || ExplicitDateRangeRegex().IsMatch(message)
             ? new(UnsupportedExplicitPeriod, HasExplicitPeriod: true, IsSupported: false)
             : new("last-12-months", HasExplicitPeriod: false, IsSupported: true);
     }
@@ -62,7 +66,7 @@ internal static partial class HistoricalDemandPeriodResolver
     private static bool ContainsAny(string value, params string[] candidates) =>
         candidates.Any(candidate => value.Contains(candidate, StringComparison.OrdinalIgnoreCase));
 
-    [GeneratedRegex(@"\b(?:last|past)\s+(\d+)\s+months?\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:last|past)\s*(\d+)\s*months?\b", RegexOptions.IgnoreCase)]
     private static partial Regex TrailingMonthsRegex();
 
     [GeneratedRegex(@"^last-(\d+)-months$", RegexOptions.IgnoreCase)]

@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using RetailPulse.Api.Charts;
 using RetailPulse.Api.Tools;
 using RetailPulse.Contracts;
+using RetailPulse.Contracts.Routing;
 
 namespace RetailPulse.Api.Agents;
 
@@ -89,7 +90,14 @@ public partial class AgentExecutionPipeline
 
         HistoricalDemandPeriodResolution periodResolution =
             HistoricalDemandPeriodResolver.ResolveUserMessage(userMessage);
-        if (periodResolution.HasExplicitPeriod && !periodResolution.IsSupported)
+        IReadOnlyList<string>? supplementalPayloads = PrefetchJson(prefetchedData);
+        bool hasHistoricalDemandEvidence =
+            DeterministicChartBuilder.HasHistoricalDemandEvidence(response, supplementalPayloads);
+        bool isHistoricalDemandChartSurface =
+            hasHistoricalDemandEvidence || IsHistoricalDemandChartSurface(userMessage, intent);
+        if (isHistoricalDemandChartSurface
+            && periodResolution.HasExplicitPeriod
+            && !periodResolution.IsSupported)
         {
             charts.Clear();
             string periodDiagnostic = BuildUnsupportedHistoricalDemandPeriodDiagnostic();
@@ -100,9 +108,6 @@ public partial class AgentExecutionPipeline
             return new ChartFulfillmentResult(charts, updated);
         }
 
-        IReadOnlyList<string>? supplementalPayloads = PrefetchJson(prefetchedData);
-        bool hasHistoricalDemandEvidence =
-            DeterministicChartBuilder.HasHistoricalDemandEvidence(response, supplementalPayloads);
         if (hasHistoricalDemandEvidence
             && (DeterministicChartBuilder.HasConflictingHistoricalDemandPeriods(response, supplementalPayloads)
                 || (periodResolution.HasExplicitPeriod
@@ -264,11 +269,9 @@ public partial class AgentExecutionPipeline
             ChartSpec? modelRival = charts.FirstOrDefault(c => c is not null
                 && string.Equals(c.Type, deterministic.Type, StringComparison.OrdinalIgnoreCase));
 
-            bool requiresSourceBackedDemandSemantics = hasHistoricalDemandEvidence
-                && (string.Equals(intent.ChartType, "line", StringComparison.OrdinalIgnoreCase)
-                    || periodResolution.HasExplicitPeriod);
             ChartSpec? richerModelChart = null;
-            if (!requiresSourceBackedDemandSemantics
+            if (!RequiresSourceBackedHistoricalDemandSemantics(
+                    hasHistoricalDemandEvidence, intent, periodResolution)
                 && modelRival is not null
                 && ChartSpecValidator.TryGetRenderable(modelRival, minSeries: 1, minMarks: requiredMarks, out ChartSpec? cleanedRival)
                 && cleanedRival is not null
@@ -287,6 +290,22 @@ public partial class AgentExecutionPipeline
                 || string.Equals(c.Type, deterministic.Type, StringComparison.OrdinalIgnoreCase));
             charts.Insert(0, chosen);
             return new ChartFulfillmentResult(charts, StripFallbackClaims(reply));
+        }
+
+        // Historical temporal and explicit-period charts are only truthful when they
+        // can be reconstructed from the authoritative demand payload. A renderable
+        // model chart is not an acceptable substitute when that payload is incomplete
+        // (for example, temporal_complete=false or an empty by_time array).
+        if (RequiresSourceBackedHistoricalDemandSemantics(
+                hasHistoricalDemandEvidence, intent, periodResolution))
+        {
+            charts.Clear();
+            string evidenceDiagnostic = BuildHistoricalDemandEvidenceUnavailableDiagnostic();
+            string scrubbed = StripFallbackClaims(reply);
+            string updated = string.IsNullOrWhiteSpace(scrubbed)
+                ? evidenceDiagnostic
+                : $"{scrubbed}\n\n{evidenceDiagnostic}";
+            return new ChartFulfillmentResult(charts, updated);
         }
 
         // Already fulfilled by the model / inline recovery.
@@ -355,6 +374,48 @@ public partial class AgentExecutionPipeline
     private static string BuildHistoricalDemandPeriodMismatchDiagnostic() =>
         "Chart unavailable: the historical-demand source evidence does not match one consistent "
         + "requested period and concrete date range. No model-rendered chart was accepted.";
+
+    private static string BuildHistoricalDemandEvidenceUnavailableDiagnostic() =>
+        "Chart unavailable: the historical-demand source evidence is incomplete for the requested "
+        + "temporal or explicit-period semantics. No model-rendered chart was accepted.";
+
+    private static bool RequiresSourceBackedHistoricalDemandSemantics(
+        bool hasHistoricalDemandEvidence,
+        ChartIntent intent,
+        HistoricalDemandPeriodResolution periodResolution) =>
+        hasHistoricalDemandEvidence
+        && (string.Equals(intent.ChartType, "line", StringComparison.OrdinalIgnoreCase)
+            || periodResolution.HasExplicitPeriod);
+
+    private static bool IsHistoricalDemandChartSurface(string? userMessage, ChartIntent intent)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage)
+            || !string.Equals(intent.RoutedIntent, AgentIntent.DemandForecasting, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (userMessage.Contains("historical demand", StringComparison.OrdinalIgnoreCase)
+            || userMessage.Contains("demand history", StringComparison.OrdinalIgnoreCase)
+            || userMessage.Contains("demand over time", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        bool mentionsDemandMeasure = userMessage.Contains("depletion", StringComparison.OrdinalIgnoreCase)
+            || userMessage.Contains("demand", StringComparison.OrdinalIgnoreCase);
+        if (!mentionsDemandMeasure)
+            return false;
+
+        if (string.Equals(intent.ChartType, "line", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        bool groupedRegionSurface =
+            string.Equals(intent.ChartType, "groupedBar", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(intent.ChartType, "stackedBar", StringComparison.OrdinalIgnoreCase);
+        return groupedRegionSurface
+            && userMessage.Contains("across all regions", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static IReadOnlyList<string>? PrefetchJson(IReadOnlyList<PrefetchEntry>? prefetchedData) =>
         prefetchedData is { Count: > 0 } ? [.. prefetchedData.Select(p => p.Json)] : null;

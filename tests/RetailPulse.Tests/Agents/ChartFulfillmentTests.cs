@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using RetailPulse.Api.Agents;
+using RetailPulse.Api.Budget;
 using RetailPulse.Api.Charts;
 using RetailPulse.Contracts;
 using RetailPulse.Contracts.Routing;
@@ -334,6 +335,43 @@ public sealed class ChartFulfillmentTests
     }
 
     [Fact]
+    public void EnforceChartFulfillment_IncompleteTemporalEvidenceRejectsRenderableRegionAxisModelLine()
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = ResponseWithToolResults(
+            CompactDemandWithInvalidDates(
+                "Sierra Gold Tequila", "last-12-months", "2025-05-13", "2026-05-13"));
+        var wrongModelChart = new ChartSpec
+        {
+            Type = "line",
+            Title = "Regional trend",
+            XAxisTitle = "Region",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "Sierra Gold Tequila",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Midwest", Y = 100 },
+                        new ChartDataPoint { X = "Northeast", Y = 120 },
+                        new ChartDataPoint { X = "West Coast", Y = 140 },
+                    ],
+                },
+            ],
+        };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a line chart showing Sierra Gold Tequila depletion trends across all regions",
+            response, [wrongModelChart], "Done.");
+
+        result.Charts.Should().BeEmpty(
+            "a renderable Region-axis model line cannot replace incomplete authoritative temporal evidence");
+        result.Reply.Should().Contain("source evidence is incomplete");
+        result.Reply.Should().Contain("No model-rendered chart was accepted");
+    }
+
+    [Fact]
     public void EnforceChartFulfillment_QuarterRequestRejectsRenderableTwelveMonthModelChart()
     {
         AgentExecutionPipeline pipeline = CreatePipeline();
@@ -379,6 +417,8 @@ public sealed class ChartFulfillmentTests
     [InlineData("last quarter")]
     [InlineData("Q1")]
     [InlineData("last 25 months")]
+    [InlineData("last 999999999999 months")]
+    [InlineData("last999999999999months")]
     public void EnforceChartFulfillment_UnsupportedExplicitPeriodRejectsRenderableModelChart(string period)
     {
         AgentExecutionPipeline pipeline = CreatePipeline();
@@ -401,12 +441,47 @@ public sealed class ChartFulfillmentTests
         };
 
         AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
-            $"Create a line chart for Sierra Gold Tequila for {period}",
+            $"Create a line chart of historical demand for Sierra Gold Tequila for {period}",
             ResponseWithToolResults(), [modelChart], "Done.");
 
         result.Charts.Should().BeEmpty();
         result.Reply.Should().Contain("explicit but unsupported");
         result.Reply.Should().Contain("No broader default period was substituted");
+    }
+
+    [Theory]
+    [InlineData("Create a table showing depletion stats by region for Q1", "table")]
+    [InlineData("Show a gauge chart for inventory health last quarter", "gauge")]
+    public void EnforceChartFulfillment_NonHistoricalExplicitPeriodKeepsRenderableModelChart(
+        string prompt,
+        string chartType)
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        var modelChart = new ChartSpec
+        {
+            Type = chartType,
+            Title = "Existing non-historical chart",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "Series",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "A", Y = 1 },
+                        new ChartDataPoint { X = "B", Y = 2 },
+                    ],
+                },
+            ],
+        };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            prompt, ResponseWithToolResults(), [modelChart], "Done.");
+
+        result.Charts.Should().ContainSingle();
+        result.Charts[0].Type.Should().Be(chartType);
+        result.Reply.Should().Be("Done.");
+        result.Reply.Should().NotContain("historical-demand period");
     }
 
     [Fact]
@@ -754,6 +829,29 @@ public sealed class ChartFulfillmentTests
                 temporal_complete = true
             }
         });
+
+    private static string CompactDemandWithInvalidDates(string brand, string label, string start, string end)
+    {
+        string raw = JsonSerializer.Serialize(new
+        {
+            period = new { label, start, end, months = 12 },
+            filters = new { brand, region = "all", channel = "all" },
+            summary = new { total_volume = 600.0, total_units = 60, weeks_of_data = 2, avg_weekly_volume = 300.0 },
+            weekly_data = new object[]
+            {
+                new { region = "Northeast", week_starting = "not-a-date", volume = 250.0, units = 25 },
+                new { region = "Midwest", week_starting = (string?)null, volume = 350.0, units = 35 },
+            }
+        });
+
+        ToolCompactionOutcome compacted = new HistoricalDemandCompactor().Compact(
+            "GetHistoricalDemand", raw, new ToolResultBudgetOptions());
+        using var document = JsonDocument.Parse(compacted.Json);
+        document.RootElement.GetProperty("by_time").GetArrayLength().Should().Be(0);
+        document.RootElement.GetProperty("compaction").GetProperty("temporal_complete")
+            .GetBoolean().Should().BeFalse();
+        return compacted.Json;
+    }
 
     private static string DepletionStats(string brand, string region, string depletionsYoy) =>
         JsonSerializer.Serialize(new
