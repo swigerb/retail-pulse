@@ -208,8 +208,31 @@ public static partial class ChartRequestDetector
             return new ChartIntent(false, null, AgentIntent.General);
         }
 
+        chartType = ResolveRequestedShape(message, chartType);
         string routedIntent = ResolveDomainIntent(message);
         return new ChartIntent(true, chartType, routedIntent);
+    }
+
+    private static string? ResolveRequestedShape(string message, string? chartType)
+    {
+        if (!string.Equals(chartType, "bar", StringComparison.OrdinalIgnoreCase))
+        {
+            return chartType;
+        }
+
+        bool requestsTotalVolume = message.Contains("volume", StringComparison.OrdinalIgnoreCase)
+            && (message.Contains("depletion", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("demand", StringComparison.OrdinalIgnoreCase));
+        bool requestsRegionalDimension = message.Contains("by region", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("across all regions", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("across regions", StringComparison.OrdinalIgnoreCase);
+        bool requestsComparison = message.Contains("compar", StringComparison.OrdinalIgnoreCase)
+            || message.Contains(" vs ", StringComparison.OrdinalIgnoreCase)
+            || message.Contains(" versus ", StringComparison.OrdinalIgnoreCase);
+
+        return requestsTotalVolume && requestsRegionalDimension && requestsComparison
+            ? "groupedBar"
+            : chartType;
     }
 
     /// <summary>

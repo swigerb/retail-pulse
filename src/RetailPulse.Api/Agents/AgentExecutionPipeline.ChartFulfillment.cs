@@ -101,11 +101,7 @@ public partial class AgentExecutionPipeline
         {
             charts.Clear();
             string periodDiagnostic = BuildUnsupportedHistoricalDemandPeriodDiagnostic();
-            string scrubbed = StripFallbackClaims(reply);
-            string updated = string.IsNullOrWhiteSpace(scrubbed)
-                ? periodDiagnostic
-                : $"{scrubbed}\n\n{periodDiagnostic}";
-            return new ChartFulfillmentResult(charts, updated);
+            return new ChartFulfillmentResult(charts, periodDiagnostic);
         }
 
         if (hasHistoricalDemandEvidence
@@ -271,7 +267,7 @@ public partial class AgentExecutionPipeline
 
             ChartSpec? richerModelChart = null;
             if (!RequiresSourceBackedHistoricalDemandSemantics(
-                    hasHistoricalDemandEvidence, intent, periodResolution)
+                    isHistoricalDemandChartSurface, intent, periodResolution)
                 && modelRival is not null
                 && ChartSpecValidator.TryGetRenderable(modelRival, minSeries: 1, minMarks: requiredMarks, out ChartSpec? cleanedRival)
                 && cleanedRival is not null
@@ -297,15 +293,11 @@ public partial class AgentExecutionPipeline
         // model chart is not an acceptable substitute when that payload is incomplete
         // (for example, temporal_complete=false or an empty by_time array).
         if (RequiresSourceBackedHistoricalDemandSemantics(
-                hasHistoricalDemandEvidence, intent, periodResolution))
+                isHistoricalDemandChartSurface, intent, periodResolution))
         {
             charts.Clear();
             string evidenceDiagnostic = BuildHistoricalDemandEvidenceUnavailableDiagnostic();
-            string scrubbed = StripFallbackClaims(reply);
-            string updated = string.IsNullOrWhiteSpace(scrubbed)
-                ? evidenceDiagnostic
-                : $"{scrubbed}\n\n{evidenceDiagnostic}";
-            return new ChartFulfillmentResult(charts, updated);
+            return new ChartFulfillmentResult(charts, evidenceDiagnostic);
         }
 
         // Already fulfilled by the model / inline recovery.
