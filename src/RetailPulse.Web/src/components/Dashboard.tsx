@@ -43,7 +43,7 @@ import type { PackTheme } from '../types/pack';
 import { buildScorecardExplanation } from '../scorecardModel';
 
 const DRAWER_WIDTH_PX = 560;
-const DRAWER_BREAKPOINT_PX = 768;
+const COMPACT_HEADER_BREAKPOINT_PX = 1600;
 
 const drawerStyle: React.CSSProperties = {
   width: `min(${DRAWER_WIDTH_PX}px, 100vw)`,
@@ -64,13 +64,20 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     height: '100vh',
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
     backgroundColor: 'var(--color-bg)',
-    overflow: 'hidden',
+    overflow: 'clip',
   },
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexShrink: 0,
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
     padding: '0 28px',
     height: '64px',
     backgroundColor: 'var(--color-bg-elevated)',
@@ -95,7 +102,7 @@ const useStyles = makeStyles({
     letterSpacing: '0.5px',
     textTransform: 'uppercase',
     whiteSpace: 'nowrap',
-    '@media (max-width: 1500px)': {
+    '@media (max-width: 1900px)': {
       display: 'none',
     },
   },
@@ -111,7 +118,7 @@ const useStyles = makeStyles({
     background: 'var(--brand-accent-soft)',
     border: '1px solid var(--brand-accent-border)',
     whiteSpace: 'nowrap',
-    '@media (max-width: 1250px)': {
+    '@media (max-width: 1750px)': {
       display: 'none',
     },
   },
@@ -119,17 +126,33 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
+    minWidth: 0,
+    marginLeft: 'auto',
     transition: 'margin-right 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
   },
   headerActionsOpen: {
     marginRight: `${DRAWER_WIDTH_PX}px`,
-    [`@media (max-width: ${DRAWER_BREAKPOINT_PX}px)`]: {
+    [`@media (max-width: ${COMPACT_HEADER_BREAKPOINT_PX}px)`]: {
       marginRight: '0',
     },
+  },
+  standardHeaderControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    minWidth: 0,
+  },
+  compactHeaderControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
   },
   main: {
     display: 'flex',
     flex: '1',
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -140,7 +163,7 @@ const useStyles = makeStyles({
   },
   chatContainerOpen: {
     marginRight: `${DRAWER_WIDTH_PX}px`,
-    [`@media (max-width: ${DRAWER_BREAKPOINT_PX}px)`]: {
+    [`@media (max-width: ${COMPACT_HEADER_BREAKPOINT_PX}px)`]: {
       marginRight: '0',
     },
   },
@@ -192,11 +215,32 @@ const VIEW_LABELS: Readonly<Record<string, string>> = {
  * headline capabilities.
  */
 const MAX_INLINE_NAV_ITEMS = 4;
+const COMPACT_HEADER_MEDIA_QUERY = `(max-width: ${COMPACT_HEADER_BREAKPOINT_PX}px)`;
 
 /** The dashboard views the header can navigate between. */
 type ActiveView =
   | 'chat' | 'promo' | 'competitive' | 'knowledge' | 'council' | 'security'
   | 'cards' | 'observability' | 'stores' | 'financials' | 'portfolio';
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(query).matches
+      : false,
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+
+    const mediaQuery = window.matchMedia(query);
+    const handleChange = (event: MediaQueryListEvent) => setMatches(event.matches);
+    setMatches(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [query]);
+
+  return matches;
+}
 
 // CSS custom properties overridden from the active pack's theme block.
 // We intentionally stop at the two primary brand tokens; App.css already
@@ -269,6 +313,7 @@ export function Dashboard() {
   const [explanationOpen, setExplanationOpen] = useState(false);
   const [explanationData, setExplanationData] = useState<ExplanationData | null>(null);
   const styles = useStyles();
+  const compactHeader = useMediaQuery(COMPACT_HEADER_MEDIA_QUERY);
 
   // Active content pack. `useActivePack` starts with the built-in prompt
   // categories so the welcome-state chip grid renders on the first paint,
@@ -766,7 +811,7 @@ export function Dashboard() {
   );
 
   return (
-    <div className={styles.dashboard}>
+    <div className={styles.dashboard} data-testid="dashboard-shell">
       {activeAuthMode === 'anonymous' && (
         <AnonymousSessionBanner
           provider={getActiveProvider() as unknown as AnonymousSessionProvider}
@@ -788,46 +833,20 @@ export function Dashboard() {
           )}
         </div>
         <div className={`${styles.headerActions} ${telemetryOpen ? styles.headerActionsOpen : ''}`}>
-          {capabilities.approvals && (
-            <PendingApprovals
-              pendingApprovals={pendingApprovals}
-              onClick={() => setTelemetryOpen(true)}
-            />
-          )}
-          {/* View navigation.
-              These were ten individually-rendered buttons, which overflowed and
-              crushed the header once every feature flag was enabled. They are now
-              data-driven: the first few stay visible for discoverability and the
-              remainder collapse into a "More" menu, so the header fits regardless
-              of how many views a deployment enables. The active view is always
-              promoted out of the overflow so the operator can see where they are
-              and click back. */}
-          {capabilities.alternateViews || capabilities.observability ? (
-            <>
-              {primaryNavItems.map(item => (
-                <Button
-                  key={item.view}
-                  appearance={activeView === item.view ? 'primary' : 'subtle'}
-                  icon={item.icon}
-                  onClick={() => setActiveView(prev => (prev === item.view ? 'chat' : item.view))}
-                  style={activeView === item.view ? { backgroundColor: item.color, borderColor: item.color } : undefined}
-                >
-                  {activeView === item.view ? 'Back to Chat' : item.label}
-                </Button>
-              ))}
-              {overflowNavItems.length > 0 && (
+          {compactHeader ? (
+            <div className={styles.compactHeaderControls}>
+              {navItems.length > 0 && (
                 <Menu>
                   <MenuTrigger disableButtonEnhancement>
-                    <MenuButton appearance="subtle" data-testid="nav-more">More</MenuButton>
+                    <MenuButton appearance="subtle" data-testid="compact-nav-menu">Views</MenuButton>
                   </MenuTrigger>
                   <MenuPopover>
                     <MenuList>
-                      {overflowNavItems.map(item => (
-                        <MenuItem
-                          key={item.view}
-                          icon={item.icon}
-                          onClick={() => setActiveView(item.view)}
-                        >
+                      {activeView !== 'chat' && (
+                        <MenuItem onClick={() => setActiveView('chat')}>Back to Chat</MenuItem>
+                      )}
+                      {navItems.map(item => (
+                        <MenuItem key={item.view} icon={item.icon} onClick={() => setActiveView(item.view)}>
                           {item.label}
                         </MenuItem>
                       ))}
@@ -835,48 +854,119 @@ export function Dashboard() {
                   </MenuPopover>
                 </Menu>
               )}
-            </>
-          ) : null}
-          <Button
-            appearance="subtle"
-            icon={<Add24Regular />}
-            onClick={handleNewChat}
-          >
-            New Chat
-          </Button>
-          <Button
-            appearance={tourOpen ? 'primary' : 'subtle'}
-            icon={<BookInformation24Regular />}
-            onClick={() => { setDemoOpen(false); setTourOpen(true); }}
-            data-testid="tour-button"
-            title="Step through every capability at your own pace"
-          >
-            Tour
-          </Button>
-          <Button
-            appearance={demoOpen ? 'primary' : 'subtle'}
-            icon={<Play24Regular />}
-            onClick={() => { setTourOpen(false); setDemoOpen(true); }}
-            data-testid="demo-mode-button"
-            title="Run a live, self-driving demo against the real system"
-          >
-            Demo Mode
-          </Button>
-          {capabilities.telemetryPanel && (
-            <Button
-              appearance={telemetryOpen ? 'primary' : 'subtle'}
-              icon={telemetryOpen ? <Dismiss24Regular /> : <DataUsage24Regular />}
-              onClick={() => setTelemetryOpen(prev => !prev)}
-              aria-expanded={telemetryOpen}
-              aria-controls="telemetry-drawer"
-            >
-              {telemetryOpen ? 'Close' : 'Real-Time Telemetry'}
-            </Button>
+              <Menu>
+                <MenuTrigger disableButtonEnhancement>
+                  <MenuButton appearance="subtle" data-testid="compact-actions-menu">Actions</MenuButton>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    {capabilities.approvals && (
+                      <MenuItem onClick={() => setTelemetryOpen(true)}>
+                        Approvals{pendingApprovals.length > 0 ? ` (${pendingApprovals.length})` : ''}
+                      </MenuItem>
+                    )}
+                    <MenuItem icon={<Add24Regular />} onClick={handleNewChat}>New Chat</MenuItem>
+                    <MenuItem
+                      icon={<BookInformation24Regular />}
+                      onClick={() => { setDemoOpen(false); setTourOpen(true); }}
+                    >
+                      Tour
+                    </MenuItem>
+                    <MenuItem
+                      icon={<Play24Regular />}
+                      onClick={() => { setTourOpen(false); setDemoOpen(true); }}
+                    >
+                      Demo Mode
+                    </MenuItem>
+                    {capabilities.telemetryPanel && (
+                      <MenuItem
+                        icon={telemetryOpen ? <Dismiss24Regular /> : <DataUsage24Regular />}
+                        onClick={() => setTelemetryOpen(prev => !prev)}
+                      >
+                        {telemetryOpen ? 'Close Telemetry' : 'Real-Time Telemetry'}
+                      </MenuItem>
+                    )}
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            </div>
+          ) : (
+            <div className={styles.standardHeaderControls}>
+              {capabilities.approvals && (
+                <PendingApprovals
+                  pendingApprovals={pendingApprovals}
+                  onClick={() => setTelemetryOpen(true)}
+                />
+              )}
+              {capabilities.alternateViews || capabilities.observability ? (
+                <>
+                  {primaryNavItems.map(item => (
+                    <Button
+                      key={item.view}
+                      appearance={activeView === item.view ? 'primary' : 'subtle'}
+                      icon={item.icon}
+                      onClick={() => setActiveView(prev => (prev === item.view ? 'chat' : item.view))}
+                      style={activeView === item.view ? { backgroundColor: item.color, borderColor: item.color } : undefined}
+                    >
+                      {activeView === item.view ? 'Back to Chat' : item.label}
+                    </Button>
+                  ))}
+                  {overflowNavItems.length > 0 && (
+                    <Menu>
+                      <MenuTrigger disableButtonEnhancement>
+                        <MenuButton appearance="subtle" data-testid="nav-more">More</MenuButton>
+                      </MenuTrigger>
+                      <MenuPopover>
+                        <MenuList>
+                          {overflowNavItems.map(item => (
+                            <MenuItem key={item.view} icon={item.icon} onClick={() => setActiveView(item.view)}>
+                              {item.label}
+                            </MenuItem>
+                          ))}
+                        </MenuList>
+                      </MenuPopover>
+                    </Menu>
+                  )}
+                </>
+              ) : null}
+              <Button appearance="subtle" icon={<Add24Regular />} onClick={handleNewChat}>
+                New Chat
+              </Button>
+              <Button
+                appearance={tourOpen ? 'primary' : 'subtle'}
+                icon={<BookInformation24Regular />}
+                onClick={() => { setDemoOpen(false); setTourOpen(true); }}
+                data-testid="tour-button"
+                title="Step through every capability at your own pace"
+              >
+                Tour
+              </Button>
+              <Button
+                appearance={demoOpen ? 'primary' : 'subtle'}
+                icon={<Play24Regular />}
+                onClick={() => { setTourOpen(false); setDemoOpen(true); }}
+                data-testid="demo-mode-button"
+                title="Run a live, self-driving demo against the real system"
+              >
+                Demo Mode
+              </Button>
+              {capabilities.telemetryPanel && (
+                <Button
+                  appearance={telemetryOpen ? 'primary' : 'subtle'}
+                  icon={telemetryOpen ? <Dismiss24Regular /> : <DataUsage24Regular />}
+                  onClick={() => setTelemetryOpen(prev => !prev)}
+                  aria-expanded={telemetryOpen}
+                  aria-controls="telemetry-drawer"
+                >
+                  {telemetryOpen ? 'Close' : 'Real-Time Telemetry'}
+                </Button>
+              )}
+            </div>
           )}
         </div>
       </header>
 
-      <main className={styles.main}>
+      <main className={styles.main} data-testid="dashboard-main">
         <div className={`${styles.chatContainer} ${telemetryOpen ? styles.chatContainerOpen : ''}`}>
           {/*
             Persistent chat surface. A single ChatPanel instance stays mounted for the
