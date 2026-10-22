@@ -125,11 +125,23 @@ public sealed class BudgetedAIFunctionTests
         string repeatedUrban = (string)(await fn.InvokeAsync(Args(("brand", "Urban Living"))))!;
         string repeatedFoundry = (string)(await fn.InvokeAsync(Args(("brand", "Foundry Furniture"))))!;
 
-        foreach (string result in new[] { urban, foundry })
+        foreach ((string result, string expectedBrand) in new[]
+        {
+            (urban, "Urban Living"),
+            (foundry, "Foundry Home")
+        })
         {
             using var doc = JsonDocument.Parse(result);
             doc.RootElement.TryGetProperty("by_region", out JsonElement regions).Should().BeTrue();
             regions.GetArrayLength().Should().Be(6);
+            doc.RootElement.GetProperty("filters").GetProperty("brand").GetString()
+                .Should().Be(expectedBrand);
+            double expectedRegionVolume = 6 * Enumerable.Range(0, 52).Sum(week => 1000 + week);
+            int expectedRegionUnits = 6 * Enumerable.Range(0, 52).Sum(week => 100 + week);
+            regions.EnumerateArray().Should().OnlyContain(region =>
+                region.GetProperty("volume").GetDouble() == expectedRegionVolume
+                && region.GetProperty("units").GetInt32() == expectedRegionUnits,
+                "every compacted region must preserve the exact fixture-derived volume and unit sums");
             doc.RootElement.TryGetProperty("compaction", out JsonElement compaction).Should().BeTrue();
             compaction.GetProperty("aggregate_complete").GetBoolean().Should().BeTrue();
             result.Should().NotContain("tool_result_over_budget");
@@ -147,6 +159,27 @@ public sealed class BudgetedAIFunctionTests
         RequestToolContext.Current.Metrics.Count(metric => metric.Deduplicated).Should().Be(2);
         RequestToolContext.Current.Metrics.Where(metric => !metric.Deduplicated).Should().OnlyContain(metric =>
             metric.Compacted && !metric.Truncated && !metric.BudgetExceeded);
+    }
+
+    [Fact]
+    public async Task FactoryResultShapes_PreservePlainTextAndObjectJson()
+    {
+        BudgetedAIFunction plainText = Wrap(
+            AIFunctionFactory.Create(() => "Historical demand unavailable.", "PlainText"),
+            Options());
+        BudgetedAIFunction objectJson = Wrap(
+            AIFunctionFactory.Create(() => new { status = "ok", count = 2 }, "ObjectJson"),
+            Options());
+
+        using IDisposable scope = RequestToolContext.Begin("result-shapes");
+        object? textResult = await plainText.InvokeAsync(Args());
+        object? objectResult = await objectJson.InvokeAsync(Args());
+
+        textResult.Should().Be("Historical demand unavailable.");
+        using var doc = JsonDocument.Parse((string)objectResult!);
+        doc.RootElement.ValueKind.Should().Be(JsonValueKind.Object);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("ok");
+        doc.RootElement.GetProperty("count").GetInt32().Should().Be(2);
     }
 
     [Fact]
