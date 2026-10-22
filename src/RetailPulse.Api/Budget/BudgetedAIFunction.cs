@@ -183,6 +183,8 @@ internal sealed class BudgetedAIFunction : AIFunction
     {
         if (result is null) return "null";
         if (result is string s) return s;
+        if (result is JsonElement { ValueKind: JsonValueKind.String } stringElement)
+            return stringElement.GetString() ?? string.Empty;
         try
         {
             return JsonSerializer.Serialize(result, _argSerialization);
