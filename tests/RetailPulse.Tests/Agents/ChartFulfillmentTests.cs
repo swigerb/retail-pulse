@@ -26,6 +26,8 @@ public sealed class ChartFulfillmentTests
     // Exact P0 prompts.
     [InlineData("Show me a bar chart comparing depletion velocity for all spirits brands in the Northeast",
         "bar", AgentIntent.DemandForecasting)]
+    [InlineData("Create a bar chart comparing Brand A and Brand B depletion volume across all regions this quarter",
+        "groupedBar", AgentIntent.DemandForecasting)]
     [InlineData("Show a gauge chart for Pinnacle Hardware inventory health in the Midwest",
         "gauge", AgentIntent.SupplyShipments)]
     // Generic type + domain cues.
@@ -414,6 +416,53 @@ public sealed class ChartFulfillmentTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EnforceChartFulfillment_ExactRegionalVolumePrompt_RejectsAbsentOrPartialEvidence(
+        bool includeOneBrand)
+    {
+        AgentExecutionPipeline pipeline = CreatePipeline();
+        MeaiChatResponse response = includeOneBrand
+            ? ResponseWithToolResults(
+                TemporalDemand("Urban Living", "current-quarter", "2026-04-01", "2026-05-13"))
+            : ResponseWithToolResults();
+        var modelChart = new ChartSpec
+        {
+            Type = "groupedBar",
+            Title = "Model chart",
+            Data =
+            [
+                new ChartSeries
+                {
+                    Legend = "Urban Living",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Northeast", Y = 1 },
+                        new ChartDataPoint { X = "Midwest", Y = 2 },
+                    ],
+                },
+                new ChartSeries
+                {
+                    Legend = "Foundry Home",
+                    Values =
+                    [
+                        new ChartDataPoint { X = "Northeast", Y = 3 },
+                        new ChartDataPoint { X = "Midwest", Y = 4 },
+                    ],
+                },
+            ],
+        };
+
+        AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
+            "Create a bar chart comparing Foundry Furniture and Urban Living depletion volume across all regions this quarter",
+            response, [modelChart], "The chart above shows the requested comparison.");
+
+        result.Charts.Should().BeEmpty();
+        result.Reply.Should().Contain("source evidence is incomplete");
+        result.Reply.Should().NotContain("chart above");
+    }
+
+    [Theory]
     [InlineData("last quarter")]
     [InlineData("Q1")]
     [InlineData("last 25 months")]
@@ -440,13 +489,17 @@ public sealed class ChartFulfillmentTests
             ],
         };
 
+        const string misleadingReply =
+            "Sierra Gold Tequila depletion increased this quarter. The line chart above shows the quarter's weekly depletion pattern.";
         AgentExecutionPipeline.ChartFulfillmentResult result = pipeline.EnforceChartFulfillment(
             $"Create a line chart of historical demand for Sierra Gold Tequila for {period}",
-            ResponseWithToolResults(), [modelChart], "Done.");
+            ResponseWithToolResults(), [modelChart], misleadingReply);
 
         result.Charts.Should().BeEmpty();
         result.Reply.Should().Contain("explicit but unsupported");
         result.Reply.Should().Contain("No broader default period was substituted");
+        result.Reply.Should().NotContain("this quarter");
+        result.Reply.Should().NotContain("chart above");
     }
 
     [Theory]

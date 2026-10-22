@@ -231,12 +231,12 @@ public sealed class BudgetedAIFunctionTests
     }
 
     [Fact]
-    public async Task HistoricalDemand_RealFactoryBudgetAndFulfillment_ReplaceWrongRenderableModelChart()
+    public async Task HistoricalDemand_ExactBarPrompt_MixedEvidenceBuildsRegionalTotalVolumeChart()
     {
         string urbanPayload = BuildHistoricalDemandPayload(
-            "Urban Living", weeks: 7, periodLabel: "current-quarter");
+            "Urban Living", weeks: 7, periodLabel: "current-quarter", targetTotalVolume: 59_306.9);
         string foundryPayload = BuildHistoricalDemandPayload(
-            "Foundry Home", weeks: 7, periodLabel: "current-quarter");
+            "Foundry Home", weeks: 7, periodLabel: "current-quarter", targetTotalVolume: 68_046.9);
         AIFunction inner = AIFunctionFactory.Create(
             (string brand, string period) => brand switch
             {
@@ -287,14 +287,14 @@ public sealed class BudgetedAIFunctionTests
         };
         PrefetchEntry[] prefetched =
         [
-            new("GetHistoricalDemand:Urban Living", urban, true, false, null, null),
             new("GetHistoricalDemand:Foundry Furniture", foundry, true, false, null, null),
         ];
 
         AgentExecutionPipeline.ChartFulfillmentResult fulfilled = pipeline.EnforceChartFulfillment(
-            "Create a grouped bar chart comparing Foundry Furniture and Urban Living depletion volume across all regions this quarter",
+            "Create a bar chart comparing Foundry Furniture and Urban Living depletion volume across all regions this quarter",
             new Microsoft.Extensions.AI.ChatResponse(
-                new ChatMessage(ChatRole.Assistant, [])),
+                new ChatMessage(ChatRole.Assistant,
+                    [new FunctionResultContent("urban-call", urban)])),
             [wrongModelChart],
             "Done.",
             prefetched);
@@ -302,9 +302,22 @@ public sealed class BudgetedAIFunctionTests
         fulfilled.Charts.Should().ContainSingle();
         ChartSpec chart = fulfilled.Charts.Single();
         chart.Should().NotBeSameAs(wrongModelChart);
+        chart.Type.Should().Be("groupedBar");
         chart.Title.Should().Contain("current-quarter: 2026-04-01 to 2026-05-13");
+        chart.XAxisTitle.Should().Be("Region");
+        chart.YAxisTitle.Should().Be("Depletion Volume");
         chart.Data.Select(series => series.Legend).Should().Equal("Urban Living", "Foundry Home");
         chart.Data.Should().OnlyContain(series => series.Values.Count == 6);
+        foreach (ChartSeries series in chart.Data)
+        {
+            series.Values.Select(point => point.X).Should().BeEquivalentTo(
+                "Midwest", "Northeast", "Pacific Northwest",
+                "Southeast", "Southwest", "West Coast");
+        }
+        chart.Data.Single(series => series.Legend == "Urban Living").Values.Sum(point => point.Y)
+            .Should().BeApproximately(59_306.9, 0.1);
+        chart.Data.Single(series => series.Legend == "Foundry Home").Values.Sum(point => point.Y)
+            .Should().BeApproximately(68_046.9, 0.1);
         RequestToolContext.Current!.CumulativeChars.Should().BeLessThanOrEqualTo(9_500);
         RequestToolContext.Current.DistinctCalls.Should().Be(2);
     }
@@ -435,7 +448,8 @@ public sealed class BudgetedAIFunctionTests
     private static string BuildHistoricalDemandPayload(
         string brand,
         int weeks = 52,
-        string periodLabel = "last-12-months")
+        string periodLabel = "last-12-months",
+        double? targetTotalVolume = null)
     {
         string[] regions =
         [
@@ -454,13 +468,24 @@ public sealed class BudgetedAIFunctionTests
             ? new DateOnly(2026, 4, 1)
             : new DateOnly(2025, 5, 19);
 
-        foreach (string region in regions)
+        double[]? regionalTargets = null;
+        if (targetTotalVolume is double target)
         {
+            double baseRegion = Math.Floor(target / regions.Length * 10) / 10;
+            regionalTargets = [.. Enumerable.Repeat(baseRegion, regions.Length)];
+            regionalTargets[^1] = Math.Round(target - (baseRegion * (regions.Length - 1)), 1);
+        }
+
+        for (int regionIndex = 0; regionIndex < regions.Length; regionIndex++)
+        {
+            string region = regions[regionIndex];
             foreach (string channel in channels)
             {
                 for (int week = 0; week < weeks; week++)
                 {
-                    double volume = 1000 + week;
+                    double volume = regionalTargets is not null
+                        ? regionalTargets[regionIndex] / (channels.Length * weeks)
+                        : 1000 + week;
                     int units = 100 + week;
                     totalVolume += volume;
                     totalUnits += units;
