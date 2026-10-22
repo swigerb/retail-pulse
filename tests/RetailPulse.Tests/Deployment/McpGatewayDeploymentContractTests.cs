@@ -117,15 +117,11 @@ public sealed partial class McpGatewayDeploymentContractTests
     }
 
     [Fact]
-    public void Policy_HasQuotasAllowListAndNeverReadsResponseBody()
+    public void Policy_HasQuotasAndNeverReadsResponseBody()
     {
         McpPolicy.Should().Contain("<rate-limit-by-key calls=\"30\" renewal-period=\"60\"");
         McpPolicy.Should().Contain("<quota-by-key calls=\"2000\" bandwidth=\"20480\" renewal-period=\"86400\"");
         McpPolicy.Should().Contain("context.Subscription.Id");
-        foreach (string tool in ApprovedTools)
-        {
-            McpPolicy.Should().Contain($"&quot;{tool}&quot;");
-        }
 
         McpPolicy.Should().NotContain("context.Response.Body", "MCP server policies must not buffer the response");
         BackingPolicy.Should().NotContain("context.Response.Body");
@@ -208,16 +204,14 @@ public sealed partial class McpGatewayDeploymentContractTests
     }
 
     [Fact]
-    public void McpPolicy_LogicalAndsAndOperationCheckSurviveParsing()
+    public void McpPolicy_AllowsNativeTransportRequestsBeforeToolDispatch()
     {
         var doc = System.Xml.Linq.XDocument.Parse(McpPolicy);
         string[] conditions = [.. doc.Descendants("when").Select(w => (string)w.Attribute("condition")!)];
         conditions.Should().Contain(c => c.Contains("&&") && c.Contains("\"DELETE\""));
-        string operationGuard = conditions.Single(c => c.Contains("context.Operation"));
-        foreach (string tool in ApprovedTools)
-        {
-            operationGuard.Should().Contain($"\"{tool}\"");
-        }
+        conditions.Should().NotContain(c => c.Contains("context.Operation"),
+            "the MCP-scope policy also evaluates initialize and other native transport requests, whose operation id is not a backing REST operation");
+        McpPolicy.Should().Contain("native MCP").And.Contain("app-only route allow-list");
     }
 
     [Fact]
