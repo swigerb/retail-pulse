@@ -7,6 +7,11 @@ const projectRoot = process.cwd();
 const scratchRoot = path.join(projectRoot, 'node_modules', '.cache', `dashboard-layout-${process.pid}`);
 const chromeBinary = process.env.CHROME_BIN || 'google-chrome';
 const children = [];
+const CHECK_TIMEOUT_MS = 3_000;
+const CLEANUP_TIMEOUT_MS = 3_000;
+let cdpClient;
+
+class FatalHarnessError extends Error {}
 
 function assert(condition, message, details) {
   if (!condition) {
@@ -25,14 +30,36 @@ async function allocatePort() {
   });
 }
 
+async function withTimeout(promise, timeoutMs, description) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Timed out after ${timeoutMs}ms: ${description}`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function waitFor(check, description, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const value = await check();
+      const value = await withTimeout(
+        Promise.resolve().then(check),
+        Math.min(CHECK_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
+        `${description} check`,
+      );
       if (value) return value;
     } catch (error) {
+      if (error instanceof FatalHarnessError) throw error;
       lastError = error;
     }
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -48,10 +75,12 @@ class CdpClient {
   }
 
   async connect() {
-    await new Promise((resolve, reject) => {
+    await withTimeout(new Promise((resolve, reject) => {
+      const fail = event => reject(new Error(`CDP WebSocket failed to connect: ${event.type}`));
       this.socket.addEventListener('open', resolve, { once: true });
-      this.socket.addEventListener('error', reject, { once: true });
-    });
+      this.socket.addEventListener('error', fail, { once: true });
+      this.socket.addEventListener('close', fail, { once: true });
+    }), CHECK_TIMEOUT_MS, 'CDP WebSocket connection');
     this.socket.addEventListener('message', event => {
       const message = JSON.parse(event.data);
       if (!message.id) return;
@@ -61,12 +90,23 @@ class CdpClient {
       if (message.error) pending.reject(new Error(message.error.message));
       else pending.resolve(message.result);
     });
+    const rejectPending = event => {
+      const error = new Error(`CDP WebSocket ${event.type} with ${this.pending.size} operation(s) pending`);
+      for (const pending of this.pending.values()) pending.reject(error);
+      this.pending.clear();
+    };
+    this.socket.addEventListener('error', rejectPending);
+    this.socket.addEventListener('close', rejectPending);
   }
 
   send(method, params = {}) {
     const id = this.nextId++;
     this.socket.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    return withTimeout(
+      new Promise((resolve, reject) => this.pending.set(id, { resolve, reject })),
+      CHECK_TIMEOUT_MS,
+      `CDP ${method}`,
+    ).finally(() => this.pending.delete(id));
   }
 
   async evaluate(expression) {
@@ -81,20 +121,41 @@ class CdpClient {
     return result.result.value;
   }
 
-  close() {
+  async close() {
+    if (this.socket.readyState === WebSocket.CLOSED) return;
+    const closed = new Promise(resolve => this.socket.addEventListener('close', resolve, { once: true }));
     this.socket.close();
+    await withTimeout(closed, CLEANUP_TIMEOUT_MS, 'CDP WebSocket close');
   }
 }
 
-async function clickByText(client, selector, text) {
-  const clicked = await client.evaluate(`(() => {
+async function activateByText(client, selector, text) {
+  const target = await client.evaluate(`(() => {
     const target = [...document.querySelectorAll(${JSON.stringify(selector)})]
       .find(element => element.textContent?.trim() === ${JSON.stringify(text)});
-    if (!target) return false;
-    target.click();
-    return true;
+    if (!target) return null;
+    target.focus();
+    if (document.activeElement !== target) return null;
+    const bounds = target.getBoundingClientRect();
+    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
   })()`);
-  assert(clicked, `Could not find ${selector} with text "${text}"`);
+  assert(target, `Could not focus ${selector} with text "${text}"`);
+  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: target.x, y: target.y, button: 'left', clickCount: 1 });
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: target.x, y: target.y, button: 'left', clickCount: 1 });
+}
+
+async function activateSelector(client, selector) {
+  const target = await client.evaluate(`(() => {
+    const target = document.querySelector(${JSON.stringify(selector)});
+    if (!target) return null;
+    target.focus();
+    if (document.activeElement !== target) return null;
+    const bounds = target.getBoundingClientRect();
+    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+  })()`);
+  assert(target, `Could not focus ${selector}`);
+  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: target.x, y: target.y, button: 'left', clickCount: 1 });
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: target.x, y: target.y, button: 'left', clickCount: 1 });
 }
 
 async function waitForSelector(client, selector) {
@@ -122,9 +183,9 @@ async function resetToChat(client) {
 }
 
 async function selectObservability(client) {
-  await clickByText(client, 'button', 'Views');
+  await activateByText(client, 'button', 'Views');
   await waitForSelector(client, '[role="menuitem"]');
-  await clickByText(client, '[role="menuitem"]', 'Observability');
+  await activateByText(client, '[role="menuitem"]', 'Observability');
   await waitForSelector(client, '[data-testid="observability-panel"]');
 }
 
@@ -181,7 +242,7 @@ async function verifyCompactNavigation(client, width, height) {
 }
 
 async function openTelemetry(client) {
-  await clickByText(client, 'button', 'Real-Time Telemetry');
+  await activateByText(client, 'button', 'Real-Time Telemetry');
   await waitForSelector(client, '#telemetry-drawer');
   await waitFor(
     () => client.evaluate(`(() => {
@@ -213,7 +274,7 @@ async function verifyWideTelemetry(client, width) {
     geometry,
   );
 
-  await clickByText(client, 'button', 'Actions');
+  await activateByText(client, 'button', 'Actions');
   for (const label of ['New Chat', 'Tour', 'Demo Mode', 'Close Telemetry']) {
     assert(
       await client.evaluate(`Boolean([...document.querySelectorAll('[role="menuitem"]')]
@@ -223,13 +284,7 @@ async function verifyWideTelemetry(client, width) {
   }
   await client.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
 
-  const closeClicked = await client.evaluate(`(() => {
-    const button = document.querySelector('button[aria-label="Close telemetry panel"]');
-    if (!button) return false;
-    button.click();
-    return true;
-  })()`);
-  assert(closeClicked, 'Telemetry drawer close button is unreachable');
+  await activateSelector(client, 'button[aria-label="Close telemetry panel"]');
   await waitFor(
     () => client.evaluate(`!document.querySelector('[data-testid="compact-actions-menu"]')`),
     'wide controls after closing telemetry',
@@ -248,10 +303,16 @@ async function main() {
     { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   children.push(vite);
+  vite.spawnError = null;
+  vite.on('error', error => { vite.spawnError = error; });
   let viteOutput = '';
   vite.stdout.on('data', chunk => { viteOutput += chunk; });
   vite.stderr.on('data', chunk => { viteOutput += chunk; });
-  await waitFor(async () => (await fetch(`http://127.0.0.1:${vitePort}`)).ok, 'Vite dev server');
+  await waitFor(async () => {
+    if (vite.spawnError) throw new FatalHarnessError(`Vite failed to spawn: ${vite.spawnError.message}\n${viteOutput}`);
+    if (vite.exitCode !== null) throw new FatalHarnessError(`Vite exited with code ${vite.exitCode}\n${viteOutput}`);
+    return (await fetch(`http://127.0.0.1:${vitePort}`, { signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) })).ok;
+  }, 'Vite dev server');
 
   const chrome = spawn(chromeBinary, [
     '--headless=new',
@@ -263,17 +324,24 @@ async function main() {
     `http://127.0.0.1:${vitePort}`,
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
   children.push(chrome);
+  chrome.spawnError = null;
+  chrome.on('error', error => { chrome.spawnError = error; });
   let chromeOutput = '';
   chrome.stderr.on('data', chunk => { chromeOutput += chunk; });
 
   const page = await waitFor(async () => {
-    const response = await fetch(`http://127.0.0.1:${debugPort}/json`);
+    if (chrome.spawnError) throw new FatalHarnessError(`Chrome failed to spawn: ${chrome.spawnError.message}\n${chromeOutput}`);
+    if (chrome.exitCode !== null) throw new FatalHarnessError(`Chrome exited with code ${chrome.exitCode}\n${chromeOutput}`);
+    const response = await fetch(`http://127.0.0.1:${debugPort}/json`, {
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
+    });
     if (!response.ok) return null;
     const targets = await response.json();
     return targets.find(target => target.type === 'page' && target.url.startsWith(`http://127.0.0.1:${vitePort}`));
   }, 'Chromium page');
 
   const client = new CdpClient(page.webSocketDebuggerUrl);
+  cdpClient = client;
   await client.connect();
   await client.send('Page.enable');
   await client.send('Runtime.enable');
@@ -294,7 +362,18 @@ async function main() {
 
   console.log(JSON.stringify(results, null, 2));
   console.log('PASS dashboard real-browser overflow regression');
-  client.close();
+}
+
+async function stopChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null || child.spawnError) return;
+  const exited = new Promise(resolve => child.once('exit', resolve));
+  child.kill('SIGTERM');
+  try {
+    await withTimeout(exited, CLEANUP_TIMEOUT_MS, `${child.spawnfile || 'child process'} SIGTERM`);
+  } catch {
+    if (child.pid) child.kill('SIGKILL');
+    await withTimeout(exited, CLEANUP_TIMEOUT_MS, `${child.spawnfile || 'child process'} SIGKILL`);
+  }
 }
 
 try {
@@ -303,11 +382,24 @@ try {
   console.error(error);
   throw error;
 } finally {
-  for (const child of children.reverse()) {
-    if (child.exitCode === null) {
-      child.kill('SIGTERM');
-      await new Promise(resolve => child.once('exit', resolve));
+  const cleanupErrors = [];
+  if (cdpClient) {
+    try {
+      await cdpClient.close();
+    } catch (error) {
+      cleanupErrors.push(error);
     }
   }
-  await rm(scratchRoot, { recursive: true, force: true });
+  const childResults = await Promise.allSettled(children.reverse().map(stopChild));
+  cleanupErrors.push(...childResults.filter(result => result.status === 'rejected').map(result => result.reason));
+  try {
+    await withTimeout(
+      rm(scratchRoot, { recursive: true, force: true }),
+      CLEANUP_TIMEOUT_MS,
+      'Chrome profile cleanup',
+    );
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  for (const error of cleanupErrors) console.error(`Cleanup failure: ${error.message}`);
 }

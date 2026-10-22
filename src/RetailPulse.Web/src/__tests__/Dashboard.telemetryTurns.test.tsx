@@ -192,6 +192,17 @@ async function submitPrompt(user: ReturnType<typeof userEvent.setup>, prompt: st
   await screen.findByText(replyText);
 }
 
+async function clickAction(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+  const directButton = screen.queryByRole('button', { name });
+  if (directButton) {
+    await user.click(directButton);
+    return;
+  }
+
+  await user.click(screen.getByRole('button', { name: 'Actions' }));
+  await user.click(screen.getByRole('menuitem', { name }));
+}
+
 function pushSpan(partial: Partial<AgentSpan> & { name: string; detail: string }) {
   const span: AgentSpan = {
     name: partial.name,
@@ -236,7 +247,7 @@ describe('Dashboard — Live Spans panel groups spans by chat turn (issue #303)'
 
     // Open the telemetry drawer so the panel actually renders. The button
     // label toggles once the drawer opens.
-    await user.click(screen.getByRole('button', { name: /Real-Time Telemetry/i }));
+    await clickAction(user, /Real-Time Telemetry/i);
 
     // --- Turn 1: user submits the "Harvest Table vs FreshMart" prompt ------
     await submitPrompt(user, TURN1_PROMPT, turn1Response.reply);
@@ -314,7 +325,7 @@ describe('Dashboard — Live Spans panel groups spans by chat turn (issue #303)'
 
     renderDashboard();
     await waitFor(() => expect(spanCallbacks.length).toBeGreaterThan(0));
-    await user.click(screen.getByRole('button', { name: /Real-Time Telemetry/i }));
+    await clickAction(user, /Real-Time Telemetry/i);
 
     await submitPrompt(user, TURN1_PROMPT, turn1Response.reply);
     pushSpan({ name: 'GetHistoricalDemand', detail: '{"brand":"Harvest Table","region":"National"}' });
@@ -353,14 +364,14 @@ describe('Dashboard — Live Spans panel groups spans by chat turn (issue #303)'
 
     renderDashboard();
     await waitFor(() => expect(spanCallbacks.length).toBeGreaterThan(0));
-    await user.click(screen.getByRole('button', { name: /Real-Time Telemetry/i }));
+    await clickAction(user, /Real-Time Telemetry/i);
 
     await submitPrompt(user, TURN1_PROMPT, turn1Response.reply);
     pushSpan({ name: 'GetHistoricalDemand', detail: '{"brand":"Harvest Table","region":"National"}' });
     await waitFor(() => expect(screen.getAllByRole('region')).toHaveLength(1));
 
     // New Chat wipes turns too — same reset semantics as Clear Telemetry.
-    await user.click(screen.getByRole('button', { name: /New Chat/i }));
+    await clickAction(user, /New Chat/i);
     await waitFor(() => expect(screen.queryAllByRole('region')).toHaveLength(0));
 
     await submitPrompt(user, TURN2_PROMPT, turn2Response.reply);
