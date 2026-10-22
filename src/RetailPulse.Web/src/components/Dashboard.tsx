@@ -44,6 +44,7 @@ import { buildScorecardExplanation } from '../scorecardModel';
 
 const DRAWER_WIDTH_PX = 560;
 const COMPACT_HEADER_BREAKPOINT_PX = 1600;
+const DRAWER_RESERVATION_BREAKPOINT_PX = 1400;
 
 const drawerStyle: React.CSSProperties = {
   width: `min(${DRAWER_WIDTH_PX}px, 100vw)`,
@@ -132,9 +133,6 @@ const useStyles = makeStyles({
   },
   headerActionsOpen: {
     marginRight: `${DRAWER_WIDTH_PX}px`,
-    [`@media (max-width: ${COMPACT_HEADER_BREAKPOINT_PX}px)`]: {
-      marginRight: '0',
-    },
   },
   standardHeaderControls: {
     display: 'flex',
@@ -163,9 +161,6 @@ const useStyles = makeStyles({
   },
   chatContainerOpen: {
     marginRight: `${DRAWER_WIDTH_PX}px`,
-    [`@media (max-width: ${COMPACT_HEADER_BREAKPOINT_PX}px)`]: {
-      marginRight: '0',
-    },
   },
   chatHost: {
     height: '100%',
@@ -215,31 +210,26 @@ const VIEW_LABELS: Readonly<Record<string, string>> = {
  * headline capabilities.
  */
 const MAX_INLINE_NAV_ITEMS = 4;
-const COMPACT_HEADER_MEDIA_QUERY = `(max-width: ${COMPACT_HEADER_BREAKPOINT_PX}px)`;
 
 /** The dashboard views the header can navigate between. */
 type ActiveView =
   | 'chat' | 'promo' | 'competitive' | 'knowledge' | 'council' | 'security'
   | 'cards' | 'observability' | 'stores' | 'financials' | 'portfolio';
 
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia(query).matches
-      : false,
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth : COMPACT_HEADER_BREAKPOINT_PX,
   );
 
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    if (typeof window === 'undefined') return;
+    const handleResize = () => setWidth(window.innerWidth);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
-    const mediaQuery = window.matchMedia(query);
-    const handleChange = (event: MediaQueryListEvent) => setMatches(event.matches);
-    setMatches(mediaQuery.matches);
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [query]);
-
-  return matches;
+  return width;
 }
 
 // CSS custom properties overridden from the active pack's theme block.
@@ -313,7 +303,12 @@ export function Dashboard() {
   const [explanationOpen, setExplanationOpen] = useState(false);
   const [explanationData, setExplanationData] = useState<ExplanationData | null>(null);
   const styles = useStyles();
-  const compactHeader = useMediaQuery(COMPACT_HEADER_MEDIA_QUERY);
+  const viewportWidth = useViewportWidth();
+  const reserveDrawerSpace =
+    telemetryOpen && viewportWidth >= DRAWER_RESERVATION_BREAKPOINT_PX;
+  const availableHeaderWidth =
+    viewportWidth - (reserveDrawerSpace ? DRAWER_WIDTH_PX : 0);
+  const compactHeader = availableHeaderWidth <= COMPACT_HEADER_BREAKPOINT_PX;
 
   // Active content pack. `useActivePack` starts with the built-in prompt
   // categories so the welcome-state chip grid renders on the first paint,
@@ -817,7 +812,7 @@ export function Dashboard() {
           provider={getActiveProvider() as unknown as AnonymousSessionProvider}
         />
       )}
-      <header className={styles.header}>
+      <header className={styles.header} data-testid="dashboard-header">
         <div className={styles.headerBrand}>
           <BrandLogo size={36} />
           <span className={styles.headerTagline}>Brand Intelligence Platform</span>
@@ -832,7 +827,10 @@ export function Dashboard() {
             </span>
           )}
         </div>
-        <div className={`${styles.headerActions} ${telemetryOpen ? styles.headerActionsOpen : ''}`}>
+        <div
+          className={`${styles.headerActions} ${reserveDrawerSpace ? styles.headerActionsOpen : ''}`}
+          data-testid="dashboard-header-actions"
+        >
           {compactHeader ? (
             <div className={styles.compactHeaderControls}>
               {navItems.length > 0 && (
@@ -967,7 +965,7 @@ export function Dashboard() {
       </header>
 
       <main className={styles.main} data-testid="dashboard-main">
-        <div className={`${styles.chatContainer} ${telemetryOpen ? styles.chatContainerOpen : ''}`}>
+        <div className={`${styles.chatContainer} ${reserveDrawerSpace ? styles.chatContainerOpen : ''}`}>
           {/*
             Persistent chat surface. A single ChatPanel instance stays mounted for the
             lifetime of the Dashboard (or until New Chat remounts it via `chatKey`), so
