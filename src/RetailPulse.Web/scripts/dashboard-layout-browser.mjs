@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const projectRoot = process.cwd();
@@ -292,6 +292,119 @@ async function verifyWideTelemetry(client, width) {
   return geometry;
 }
 
+async function verifyPackColors(client) {
+  await setViewport(client, 1920, 1000);
+  const results = {};
+  let baseline;
+  for (const key of ['default', 'walgreens-retail', 'kroger-retail', 'staples-retail', 'lowes-retail']) {
+    const manifest = await readFile(path.join(projectRoot, '../../packs', key, 'pack.yaml'), 'utf8');
+    const theme = Object.fromEntries(['primaryColor', 'accentColor', 'fontFamily'].map(field => {
+      const match = manifest.match(new RegExp(`^    ${field}: "([^"]+)"`, 'm'));
+      assert(match, `${key} is missing ${field}`);
+      return [field, match[1]];
+    }));
+    // Exercise useActivePack -> Dashboard.applyPackTheme, not a manual CSS override.
+    const { identifier } = await client.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, options) => {
+          const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+          if (url.pathname === '/api/pack') return Promise.resolve(Response.json({
+            key: ${JSON.stringify(key)}, displayName: ${JSON.stringify(key)},
+            tenant: { company: ${JSON.stringify(key)}, theme: ${JSON.stringify(theme)} }
+          }));
+          if (url.pathname === '/api/pack/starting-tasks') return Promise.resolve(Response.json({
+            packKey: ${JSON.stringify(key)}, categories: []
+          }));
+          if (url.pathname.includes('/chat')) throw new Error('Color checks must never submit a model prompt');
+          return originalFetch(input, options);
+        };
+      })();`,
+    });
+    try {
+      await resetToChat(client);
+      await waitFor(() => client.evaluate(
+        `document.documentElement.style.getPropertyValue('--brand-accent') === ${JSON.stringify(theme.accentColor)}`,
+      ), `${key} pack theme`);
+
+      const readColors = () => client.evaluate(`(() => {
+        const send = document.querySelector('[data-testid="chat-send-button"]');
+        const style = getComputedStyle(send);
+        return {
+          logos: [...document.querySelectorAll('.brand-logo > div:first-child')]
+            .map(logo => getComputedStyle(logo).backgroundImage),
+          gradient: style.backgroundImage, color: style.color,
+          disabled: send.disabled, focused: document.activeElement === send,
+          focusVisible: send.hasAttribute('data-fui-focus-visible'),
+          focusShadow: style.boxShadow,
+          headerBorder: getComputedStyle(document.querySelector('header')).borderBottomColor,
+          accentSoft: getComputedStyle(document.documentElement).getPropertyValue('--brand-accent-soft').trim(),
+        };
+      })()`);
+      const disabled = await readColors();
+      assert(disabled.disabled, `${key}: empty Send must remain disabled`);
+
+      await client.evaluate(`document.querySelector('#chat-input').focus()`);
+      await client.send('Input.insertText', { text: 'Unsent color regression check' });
+      await waitFor(() => client.evaluate(
+        `!document.querySelector('[data-testid="chat-send-button"]').disabled`,
+      ), 'enabled Send');
+      const enabled = await readColors();
+      const bounds = await client.evaluate(`(() => {
+        const r = document.querySelector('[data-testid="chat-send-button"]').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`);
+      await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...bounds });
+      const hover = await readColors();
+      await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+      await client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+      await client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+      const focus = await readColors();
+      assert(focus.focused, `${key}: keyboard Tab must reach enabled Send`, focus);
+      assert(focus.focusVisible && focus.focusShadow.includes('inset'),
+        `${key}: Fluent keyboard focus ring must remain visible`, focus);
+
+      if (process.env.BRAND_SCREENSHOT_DIR && ['default', 'walgreens-retail'].includes(key)) {
+        await mkdir(process.env.BRAND_SCREENSHOT_DIR, { recursive: true });
+        const image = await client.send('Page.captureScreenshot', { format: 'png' });
+        await writeFile(path.join(process.env.BRAND_SCREENSHOT_DIR, `${key}.png`), Buffer.from(image.data, 'base64'));
+      }
+
+      for (const [state, colors] of Object.entries({ disabled, enabled, hover, focus })) {
+        assert(colors.logos.length >= 1 && colors.logos.every(gradient =>
+          gradient === 'linear-gradient(135deg, rgb(21, 101, 192), rgb(66, 165, 245))'),
+        `${key}/${state}: RP must retain Retail Pulse blue`, colors);
+        assert(colors.gradient === 'linear-gradient(135deg, rgb(21, 101, 192) 0%, rgb(66, 165, 245) 100%)',
+          `${key}/${state}: Send must retain Retail Pulse blue`, colors);
+        assert(colors.color === 'rgb(255, 255, 255)', `${key}/${state}: Send text color changed`, colors);
+        if (baseline) {
+          assert(colors.focusVisible === baseline[state].focusVisible && colors.focusShadow === baseline[state].focusShadow,
+            `${key}/${state}: Send focus styling changed across packs`, colors);
+        }
+      }
+      const expectedAccent = await client.evaluate(`(() => {
+        const probe = document.createElement('div');
+        probe.style.color = ${JSON.stringify(theme.accentColor)};
+        document.body.append(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      })()`);
+      assert(enabled.headerBorder === expectedAccent, `${key}: retailer header accent must still apply`, enabled);
+      if (key !== 'default') {
+        assert(enabled.accentSoft !== baseline.enabled.accentSoft,
+          `${key}: derived retailer accents must still change`, enabled);
+      }
+      const states = { disabled, enabled, hover, focus };
+      baseline ??= states;
+      results[key] = { theme, ...states };
+    } finally {
+      await client.send('Page.removeScriptToEvaluateOnNewDocument', { identifier });
+    }
+  }
+  return results;
+}
+
 async function main() {
   const vitePort = await allocatePort();
   const debugPort = await allocatePort();
@@ -352,6 +465,7 @@ async function main() {
     '390x844': await verifyCompactNavigation(client, 390, 844),
     '1700x1000-telemetry': await verifyWideTelemetry(client, 1700),
     '1920x1000-telemetry': await verifyWideTelemetry(client, 1920),
+    'pack-colors': await verifyPackColors(client),
   };
 
   await setViewport(client, 957, 1308);
@@ -361,7 +475,7 @@ async function main() {
   );
 
   console.log(JSON.stringify(results, null, 2));
-  console.log('PASS dashboard real-browser overflow regression');
+  console.log('PASS dashboard real-browser overflow and pack-color regressions');
 }
 
 async function stopChild(child) {

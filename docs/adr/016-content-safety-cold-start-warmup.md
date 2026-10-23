@@ -179,3 +179,101 @@ Retrying was not the only thing rejected. Suppressing the fail-open row was too:
 row means content passed unscanned, and hiding it would trade a visible security
 signal for a tidy dashboard. The policy remains fail-open and the row remains
 visible if the warm-up does not win the race.
+
+## Follow-up: regulated startup diagnostic gap (issue #337)
+
+The bounded regulated activation on 2026-10-23 still refused startup at
+`general/SystemPrompt`: 16 definitions, 71 field evaluations, one unavailable
+result. The original normal profile was restored; this source-only investigation
+does not change the deployed configuration or constitute regulated acceptance.
+See [the activation evidence](https://github.com/swigerb/retail-pulse/issues/337#issuecomment-6371493796).
+
+**What is now proven.** The startup mini-provider registered logging configuration
+but no logging provider. Its token warm-up, transport warm-up, and evaluator
+warnings therefore disappeared, even though the validator's separate console
+logger printed the aggregate refusal. The mini-provider now shares that console
+logger factory. Fail-closed violations and their audit rows retain the failure
+classification, and each unavailable field emits its agent, field, latency and
+effective policy before startup can fail. The exception directs operators to
+startup logs, not solely to an audit endpoint that a refused host cannot serve.
+
+Evaluator warnings name `Operation` (`Token`, `PromptShield`, `AnalyzeText`),
+`FailureReason`, exception/cause **type names**, numeric HTTP status when known,
+HTTP request error and socket error when available, elapsed time and effective
+scan/token limits. Warm-up logs report the token outcome and transport outcome.
+They do not log exception objects/messages, request/response bodies, bearer tokens,
+or endpoint values. In particular, an SDK `RequestFailedException` may embed a
+response body; logging the exception object is not safe for this diagnostic path.
+No new body capture is enabled.
+
+**What this does not prove.** The earlier transport diagnosis above overstated
+what the audit classification establishes. `Transport` covers connection errors
+**and** selected HTTP failure statuses, so the existing "connection failed before
+a response" audit wording alone does not prove DNS/TCP/TLS failure. A successful
+unauthenticated root GET proves only that request reached an HTTP response, not
+authenticated POST readiness, connection reuse, or future availability.
+`general/SystemPrompt` is field 29, not the first field in the shipped default
+roster (also verified on the loopback wire).
+Neither a cold first POST nor authentication failure has been established as the
+production root cause. There is no justified transport repair in this change.
+
+**Offline regression evidence.** `ContentSafetyStartupHostTests` runs the actual
+API entrypoint in a child process in Production, with cleared inherited
+configuration, temporary storage, a process-local certificate trust file, a
+loopback HTTPS Content Safety double and a loopback managed-identity double.
+It uses only the shipped synthetic default roster, with normal hydration, and
+never calls Azure, models, MCP or live identity providers. Production
+authentication remains enabled; audit requests use a locally signed synthetic
+test session. The tests prove:
+
+- Healthy regulated startup evaluates all 71 nonempty fields across 16 definitions.
+  Hash multisets verify the exact submitted fields and every moderation segment,
+  rather than relying only on the aggregate count.
+- A successful root GET followed by a controlled connection abort specifically
+  at `general/SystemPrompt` still scans the remaining fields and refuses regulated
+  startup before listening. The same fault in normal fail-open mode starts with
+  exactly the unavailable audit signal; it is not a genuine safety pass.
+- Persistent POST connection failures still refuse startup and open the existing
+  circuit breaker. All 71 field evaluations are attempted, including those
+  short-circuited by the breaker; the wire is not hammered until one passes.
+- Real evaluator/SDK error responses distinguish Prompt Shields from moderation,
+  preserve status/classification, and omit synthetic body/token canaries and
+  exception objects from structured log state.
+
+During this investigation, temporary mutations of the real production source
+proved the gates turn red: removing the regulated fail-closed pin failed both
+regulated refusal cases (2/4 host cases failed); skipping the definition whose
+effective key is `general` reduced the scan to 68 fields and failed all four host
+cases. Both mutations were removed before the final regression run.
+
+### Host-test platform prerequisite
+
+The four `ContentSafetyStartupHostTests` cases are explicitly categorized
+`LinuxOpenSslIntegration`. They require Linux, the .NET 10 SDK/runtime, OpenSSL
+certificate validation honoring `SSL_CERT_FILE`, and available loopback HTTP/TLS
+ports. Run the following from the repository root on Linux (including Linux CI
+or an appropriately configured WSL/Linux container checkout):
+
+```sh
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj --configuration Release --filter FullyQualifiedName~ContentSafetyStartupHostTests
+```
+
+The existing Ubuntu `Build & Test (.NET)` CI job runs these cases through the
+full suite; an unsupported-host skip is not a substitute for that Linux result.
+Windows Schannel and macOS native trust do not use this fixture's temporary PEM
+as their process-local trust root. On those platforms the four cases are
+**visibly skipped at discovery with a prerequisite reason**, not reported as
+passed and not allowed to fail later as misleading token timeouts. Portable
+evaluator, validator, fail-policy and diagnostic tests continue to run normally.
+No system/current-user trust store is modified, TLS verification is not disabled,
+and no production hook or transport configuration is introduced.
+
+**Remaining blocker.** Issue #337 remains open. A future, separately authorized
+bounded activation must collect these startup phase/status/error diagnostics
+at a pinned deployed revision to distinguish token, POST transport, SDK moderation,
+timeout and breaker failure. Reproduce the identified mechanism before changing
+transport behavior. Preserve fail-closed refusal, all real definition checks,
+thresholds, existing token/scan/warm-up budgets and bounded warm-up attempts.
+Do not add retries-until-pass or treat a warm-up success as validation. This work
+does not authorize deployment, merge, sign-off, issue closure, live prompts or
+patient data; synthetic demonstrations must not provide clinical advice.

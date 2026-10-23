@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import type { ProviderCapabilities } from '../auth/session/types';
 import { FULL_CAPABILITIES, ANONYMOUS_CAPABILITIES } from '../auth/session/types';
+import type { PackTheme } from '../types/pack';
 
 /**
  * Dashboard capability-gating integration test. The Dashboard reads a build-time `capabilities`
@@ -18,6 +19,13 @@ const mockCaps: { value: ProviderCapabilities; mode: 'entra' | 'github' | 'anony
 };
 
 const connectTelemetryHub = vi.fn(() => ({ on: vi.fn(), off: vi.fn() }));
+const activePack: { theme: PackTheme | null } = { theme: null };
+vi.mock('../hooks/useActivePack', () => ({
+  useActivePack: () => ({
+    pack: activePack.theme ? { tenant: { theme: activePack.theme } } : null,
+    categories: [],
+  }),
+}));
 vi.mock('../services/telemetryHub', () => ({
   connectTelemetryHub: () => connectTelemetryHub(),
   subscribeHubEvent: vi.fn(() => () => {}),
@@ -128,7 +136,49 @@ function setViewportWidth(width: number) {
 
 beforeEach(() => {
   connectTelemetryHub.mockClear();
+  activePack.theme = null;
   setViewportWidth(1920);
+});
+
+describe('Dashboard pack theme lifecycle', () => {
+  it.each([false, true])('restores prior theme properties on unmount (inline overrides: %s)', (hasOverrides) => {
+    const root = document.documentElement;
+    const properties = ['--brand-primary', '--brand-accent', '--brand-font-family'];
+    const original = root.style.cssText;
+    try {
+      for (const prop of properties) root.style.removeProperty(prop);
+      if (hasOverrides) {
+        root.style.setProperty('--brand-primary', '#112233');
+        root.style.setProperty('--brand-accent', '#445566');
+        root.style.setProperty('--brand-font-family', 'serif');
+      }
+      const previous = properties.map(prop => root.style.getPropertyValue(prop));
+      activePack.theme = {
+        primaryColor: '#B3282D', accentColor: '#F4E3E3', fontFamily: 'Inter, Arial, sans-serif', logoPath: '',
+      };
+      const { rerender, unmount } = renderDashboard();
+      expect(properties.map(prop => root.style.getPropertyValue(prop))).toEqual([
+        '#B3282D', '#F4E3E3', 'Inter, Arial, sans-serif',
+      ]);
+
+      // A partial replacement must not retain the previous pack's accent or font.
+      activePack.theme = { primaryColor: '#1F4E8C', accentColor: '', fontFamily: '', logoPath: '' };
+      rerender(<FluentProvider theme={teamsDarkTheme}><Dashboard /></FluentProvider>);
+      expect(properties.map(prop => root.style.getPropertyValue(prop))).toEqual([
+        '#1F4E8C', previous[1], previous[2],
+      ]);
+      activePack.theme = null;
+      rerender(<FluentProvider theme={teamsDarkTheme}><Dashboard /></FluentProvider>);
+      expect(properties.map(prop => root.style.getPropertyValue(prop))).toEqual(previous);
+
+      activePack.theme = { primaryColor: '#B3202A', accentColor: '#2B2B2B', fontFamily: '', logoPath: '' };
+      rerender(<FluentProvider theme={teamsDarkTheme}><Dashboard /></FluentProvider>);
+      unmount();
+      expect(properties.map(prop => root.style.getPropertyValue(prop))).toEqual(previous);
+    } finally {
+      root.style.cssText = original;
+    }
+  });
 });
 
 afterEach(() => {
