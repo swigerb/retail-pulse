@@ -8,13 +8,14 @@ namespace RetailPulse.McpServer.Tools;
 public static class SupplyTools
 {
     [McpServerTool(Name = "GetInventoryLevels")]
-    [Description("Get current inventory levels by brand, region, and category. Returns SKU-level stock, safety stock, days of supply, and status (healthy/low/critical/out_of_stock). Use for inventory health checks and stockout risk identification.")]
+    [Description("Get current inventory levels by brand, region, category, and variant. Returns SKU-level stock, safety stock, days of supply, variant, and status (healthy/low/critical/out_of_stock). Use for inventory health checks and stockout risk identification.")]
     public static object GetInventoryLevels(
         RetailPulseDb data,
         [Description("Brand name to filter (e.g. 'Sierra Gold Tequila', 'FreshMart'). Omit for all brands.")] string? brand = null,
         [Description("Region to filter (e.g. 'Northeast', 'West Coast'). Omit for all regions.")] string? region = null,
         [Description("Category to filter (e.g. 'Spirits', 'Grocery'). Omit for all categories.")] string? category = null,
-        [Description("Status filter: 'healthy', 'low', 'critical', 'out_of_stock'. Omit for all.")] string? status = null) => data.GetInventoryLevels(brand, region, category, status);
+        [Description("Status filter: 'healthy', 'low', 'critical', 'out_of_stock'. Omit for all.")] string? status = null,
+        [Description("Exact variant name within a brand (e.g. 'Paper & Toner'). Not a category. Omit for all variants.")] string? variant = null) => data.GetInventoryLevels(brand, region, category, status, variant);
 
     [McpServerTool(Name = "GetSupplyDisruptions")]
     [Description("Get active supply chain disruptions. Returns disruption type (logistics/supplier/weather/demand_surge), severity, impacted SKUs, and estimated resolution. Use for risk assessment and supply chain visibility.")]

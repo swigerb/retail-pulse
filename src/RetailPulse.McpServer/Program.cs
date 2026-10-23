@@ -302,9 +302,9 @@ app.MapGet("/api/competitive/landscape", (string category, string region, Retail
 .WithName("GetCompetitiveLandscape");
 
 // ── Supply Chain REST endpoints ──────────────────────────────────────
-app.MapGet("/api/supply/inventory", (RetailPulseDb data, string? brand = null, string? region = null, string? category = null, string? status = null) =>
+app.MapGet("/api/supply/inventory", (RetailPulseDb data, string? brand = null, string? region = null, string? category = null, string? status = null, string? variant = null) =>
 {
-    object result = data.GetInventoryLevels(brand, region, category, status);
+    object result = data.GetInventoryLevels(brand, region, category, status, variant);
     return Results.Ok(result);
 })
 .WithName("GetInventoryLevels");
