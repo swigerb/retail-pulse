@@ -87,6 +87,10 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
         long startTicks = Stopwatch.GetTimestamp();
         string operation = "Token";
+        List<ContentSafetyCategoryHit> hits = [];
+        bool jailbreak = false;
+        bool indirect = false;
+        string? correlation = null;
 
         // Acquire the managed-identity bearer on its own budget, separate from the
         // scan timeout. The first token fetch after start is unprimed and must
@@ -118,18 +122,16 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
         try
         {
-            List<ContentSafetyCategoryHit> hits = [];
-            bool jailbreak = false;
-            bool indirect = false;
-            string? correlation = null;
-
             if (context.CheckPromptShield && config.PromptShieldsEnabled)
             {
                 operation = "PromptShield";
-                PromptShieldResult shield = await CallPromptShieldAsync(text, stage, bearer, cts.Token).ConfigureAwait(false);
-                jailbreak = shield.UserPromptAttackDetected;
-                indirect = shield.DocumentAttackDetected;
-                correlation = shield.CorrelationId;
+                foreach (string segment in SegmentForAnalysis(text))
+                {
+                    PromptShieldResult shield = await CallPromptShieldAsync(segment, stage, bearer, cts.Token).ConfigureAwait(false);
+                    jailbreak |= shield.UserPromptAttackDetected;
+                    indirect |= shield.DocumentAttackDetected;
+                    correlation ??= shield.CorrelationId;
+                }
             }
 
             // Azure Content Safety rejects any single AnalyzeText request over 10,000
@@ -192,6 +194,10 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         {
             return ReportUnavailable(ContentSafetyFailureReason.Authentication, ex);
         }
+        catch (RequestFailedException ex) when (ex.Status == 400)
+        {
+            return ReportUnavailable(ContentSafetyFailureReason.RequestRejected, ex);
+        }
         catch (RequestFailedException ex) when (IsServiceUnavailable(ex))
         {
             return ReportUnavailable(ContentSafetyFailureReason.Transport, ex);
@@ -211,6 +217,10 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         catch (HttpRequestException ex) when (IsAuthStatus(ex.StatusCode))
         {
             return ReportUnavailable(ContentSafetyFailureReason.Authentication, ex);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
+        {
+            return ReportUnavailable(ContentSafetyFailureReason.RequestRejected, ex);
         }
         catch (HttpRequestException ex)
         {
@@ -236,6 +246,13 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
                 (exception.GetBaseException() as SocketException)?.SocketErrorCode,
                 (int)Stopwatch.GetElapsedTime(startTicks).TotalMilliseconds,
                 Math.Max(200, config.TimeoutMs), Math.Max(200, config.TokenTimeoutMs));
+            if (jailbreak || indirect)
+            {
+                // A later dependency failure must not turn an already confirmed attack into a fail-open pass.
+                ContentSafetyResult blocked = Decide(config, hits, jailbreak, indirect, startTicks, correlation);
+                AnnotateActivity(activity, blocked);
+                return blocked;
+            }
             return Unavailable(activity, reason, startTicks);
         }
     }
@@ -269,6 +286,8 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
                 break;
             case ContentSafetyFailureReason.CircuitOpen:
                 activity?.SetTag("guardrails.contentsafety.breaker_open", true);
+                break;
+            case ContentSafetyFailureReason.RequestRejected:
                 break;
             default:
                 break;
@@ -396,7 +415,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         template with { Latency = Stopwatch.GetElapsedTime(startTicks) };
 
     /// <summary>
-    /// Splits text into segments the Content Safety AnalyzeText API will accept.
+    /// Splits text into overlapping segments below both Content Safety text API limits.
     /// </summary>
     /// <remarks>
     /// The service rejects any single request over 10,000 characters with a 400, and the
@@ -421,19 +440,29 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         while (start < text.Length)
         {
             int length = Math.Min(_maxAnalyzeChars, text.Length - start);
+            if (start + length < text.Length
+                && char.IsHighSurrogate(text[start + length - 1])
+                && char.IsLowSurrogate(text[start + length]))
+            {
+                length--;
+            }
             yield return text.Substring(start, length);
 
             if (start + length >= text.Length) yield break;
 
             // Step forward by less than a full segment so a phrase spanning the cut is
             // present in its entirety in the following segment.
-            start += _maxAnalyzeChars - _segmentOverlapChars;
+            start += length - _segmentOverlapChars;
+            if (char.IsLowSurrogate(text[start]) && char.IsHighSurrogate(text[start - 1]))
+            {
+                start--;
+            }
         }
     }
 
     /// <summary>
-    /// Segment size, held below the service's 10,000-character request limit so a
-    /// multi-byte boundary or future header cannot push a request over it.
+    /// Conservative UTF-16 bound for the documented 10K-character shield prompt
+    /// and document-total limits, as well as AnalyzeText. Surrogate pairs stay intact.
     /// </summary>
     private const int _maxAnalyzeChars = 9_000;
 

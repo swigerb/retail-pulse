@@ -26,6 +26,7 @@ public class ContentSafetyUnavailableReasonTests
     [InlineData(ContentSafetyFailureReason.Authentication, "authentication")]
     [InlineData(ContentSafetyFailureReason.Transport, "connection")]
     [InlineData(ContentSafetyFailureReason.CircuitOpen, "circuit breaker")]
+    [InlineData(ContentSafetyFailureReason.RequestRejected, "HTTP 400")]
     public void ClassifiedReason_NamesTheFailure_AndStaysUnreachable(
         ContentSafetyFailureReason reason, string expectedFragment)
     {
@@ -46,6 +47,7 @@ public class ContentSafetyUnavailableReasonTests
             GuardrailAuditFields.UnavailableReason(ContentSafetyFailureReason.Authentication, "x"),
             GuardrailAuditFields.UnavailableReason(ContentSafetyFailureReason.Transport, "x"),
             GuardrailAuditFields.UnavailableReason(ContentSafetyFailureReason.CircuitOpen, "x"),
+            GuardrailAuditFields.UnavailableReason(ContentSafetyFailureReason.RequestRejected, "x"),
             GuardrailAuditFields.UnavailableReason(null, "x"),
         ];
 

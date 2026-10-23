@@ -110,6 +110,7 @@ public class AgentDefinitionValidatorAuditTests
     [InlineData(ContentSafetyFailureReason.Authentication, "authentication was rejected")]
     [InlineData(ContentSafetyFailureReason.Timeout, "timed out")]
     [InlineData(ContentSafetyFailureReason.CircuitOpen, "circuit breaker was open")]
+    [InlineData(ContentSafetyFailureReason.RequestRejected, "rejected the safety request with HTTP 400")]
     public async Task FailClosed_PreservesClassification_InExceptionAuditAndLogs(
         ContentSafetyFailureReason reason, string expected)
     {
