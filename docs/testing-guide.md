@@ -159,6 +159,24 @@ are scripted. A future separately authorized live check must establish complete
 tool-backed regional values and scope adherence; HTTP 200 alone is insufficient.
 No deployment, live retry, merge, sign-off or issue closure is part of this repair.
 
+### Lowe's plywood inventory regression (issue #452)
+
+```bash
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
+  --filter "FullyQualifiedName~LowesInventoryScenarioTests|FullyQualifiedName~LowesRetailPackContractTests"
+```
+
+The Lowe's fulfillment instructions map `Building Materials` / `Lumber & Building`
+/ `Plywood`, keep explicit region and status filters, and do not broaden empty
+results. `LowesInventoryScenarioTests` sends the exact all-region prompt and a
+region/status-scoped variant through the configured agent, real
+`AIFunctionFactory` inventory tool, and the Lowe's SQLite seed. The invalid
+brand/category assignment remains empty. The scripted `IChatClient` proves
+prompt delivery, tool arguments, and seeded results returned to the model; it
+does not prove an external model will select the tool, follow the guidance, or
+write correct prose/charts. This is offline source and seed coverage, not a
+production replay or visual/live-model acceptance.
+
 ### Run Tests with Coverage (if configured)
 
 ```bash
