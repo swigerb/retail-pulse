@@ -37,6 +37,44 @@ App.tsx
 - **Centralized constants** — `constants/agentRouting.ts` holds all agent colors, emojis, labels, and domain configs
 - **Type-safe contracts** — `types/index.ts` defines all shared interfaces aligned with backend API responses
 
+### Portfolio assessment availability
+
+Portfolio cards show **Assessment unavailable** or **Partial assessment — overall
+score unavailable** when specialist evidence is missing. Missing dimension
+scores and weighted contributions remain `null`, displayed as `N/A`; they are
+never coerced to 0 or 50. Available dimensions remain visible at their original
+weights. Incomplete brands have no composite ring, score-band arrow, radar, or
+derived weakest/strongest business pills, and sort after complete scores.
+The explanation panel describes availability and counts only valid specialist
+assessments in its coverage indicator. Coverage is not factual confidence.
+
+The client also recognizes legacy timeout/failure/placeholder assessments during
+rolling upgrades, even if an older API supplied a neutral numeric fallback.
+Focused offline regression coverage uses the actual orchestrator and mapped HTTP
+endpoint (`ScorecardAvailabilityTests`) plus client mapping/rendering/explanation
+tests (`ScorecardAvailability.test.tsx`). These tests do not establish the cause
+of a live specialist failure or replace production browser acceptance.
+
+**Repair validation for #459 (2026-10-23, offline):** 46 focused .NET tests
+(scorecard and API/client contract fixtures) and 30 client tests
+(`ScorecardAvailability`, `ScorecardExplanation`, `PortfolioScorecard`,
+`apiClientContract`) pass. Client typecheck, production build, and lint of changed
+client files pass. Restoring the real orchestrator's neutral `5.0` fallback made
+all three partial-assessment failure-path tests fail; restoring nulls passes.
+An isolated Chrome fixture rendered healthy, partial, and unavailable cards and
+activated brand/dimension explanations at 1280px and 390px: six checks, no runtime
+exceptions or external requests. This was component-level browser validation
+with offline data and DOM button activation, not live production acceptance.
+
+Broader host checks were not green: the full client suite reported 1022 passes
+and eight failures in `AnonymousAuthGate`, `GitHubAuthGate`, and
+`sessionCredentialStore` because `window.localStorage` was undefined; those same
+eight failures reproduce when run without scorecard tests. Repository-wide lint
+also reports seven errors in unrelated files. These are not changed or waived by
+this repair. Independent review, normal CI, promotion/deployment, and bounded
+production acceptance remain required; no live model requests, budget/timeout
+changes, Azure/configuration changes, or deployments were made for this check.
+
 ## Authentication & sign-in (provider-neutral)
 
 The SPA is **provider-neutral**: it renders exactly one sign-in UX chosen at build

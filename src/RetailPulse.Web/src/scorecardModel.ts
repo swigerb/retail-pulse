@@ -80,9 +80,9 @@ export function getDimensionBand(score: number): string {
   return 'critical';
 }
 
-function isGroundedAssessment(assessment: string | undefined): assessment is string {
-  if (!assessment?.trim()) return false;
-  return !/^(agent unavailable|assessment timed out|assessment failed|no assessment provided)/i.test(assessment.trim());
+export function isGroundedAssessment(assessment: unknown): assessment is string {
+  if (typeof assessment !== 'string' || !assessment.trim()) return false;
+  return !/^(agent unavailable|assessment timed out|assessment failed|no assessment provided|no grounded specialist assessment|no valid specialist score)/i.test(assessment.trim());
 }
 
 function cleanAssessment(assessment: string): string {
@@ -96,7 +96,7 @@ export function getBrandDimensionDetails(brand: BrandScore): BrandScoreDimension
   return keys.map(key => {
     const config = SCORECARD_DIMENSION_CONFIG[key];
     const fromPayload = brand.dimensionDetails?.[key];
-    const score = fromPayload?.score ?? brand.dimensions[key] ?? 0;
+    const score = fromPayload ? fromPayload.score : brand.dimensions[key] ?? null;
     return {
       key,
       label: fromPayload?.label ?? config.label,
@@ -104,7 +104,7 @@ export function getBrandDimensionDetails(brand: BrandScore): BrandScoreDimension
       agentKey: fromPayload?.agentKey ?? config.agentKey,
       score,
       weight: fromPayload?.weight ?? config.weight,
-      weightedScore: fromPayload?.weightedScore ?? score * config.weight,
+      weightedScore: score === null ? null : fromPayload?.weightedScore ?? score * config.weight,
       assessment: fromPayload?.assessment,
     };
   });
@@ -114,17 +114,23 @@ export function formatWeightPercent(weight: number): string {
   return `${Math.round(weight * 100)}%`;
 }
 
-export function formatCompositeCalculation(details: BrandScoreDimensionDetail[], roundedScore: number): string {
+export function formatCompositeCalculation(details: BrandScoreDimensionDetail[], roundedScore: number | null): string {
+  if (roundedScore === null || details.some(d => d.score === null)) {
+    return 'Overall score unavailable: all configured dimensions are required. Available dimensions retain their original weights; missing evidence is not scored as zero or neutral.';
+  }
   const weights = details
     .map(d => `${d.shortLabel} ${formatWeightPercent(d.weight)}`)
     .join(', ');
   const contributions = details
-    .map(d => `${d.shortLabel} ${d.weightedScore.toFixed(1)}`)
+    .map(d => `${d.shortLabel} ${d.weightedScore?.toFixed(1)}`)
     .join(' + ');
   return `The composite multiplies each 0 to 100 dimension score by its weight and adds the weighted points. Weights are ${weights}; for this brand that is ${contributions}, rounded to ${roundedScore}.`;
 }
 
 export function describeDimension(detail: BrandScoreDimensionDetail, brandName: string): string {
+  if (detail.score === null) {
+    return `${detail.shortLabel} assessment unavailable. ${detail.assessment || 'No valid specialist score and assessment were returned.'}`;
+  }
   const band = getDimensionBand(detail.score);
   const base = `${detail.shortLabel} measures ${SCORECARD_DIMENSION_CONFIG[detail.key].measures}; at ${Math.round(detail.score)}/100, ${brandName} is in the ${band} band for this dimension`;
   const assessment = detail.assessment;
@@ -135,6 +141,7 @@ export function describeDimension(detail: BrandScoreDimensionDetail, brandName: 
 }
 
 export function getTrendDisclosure(brand: BrandScore): string {
+  if (brand.healthScore === null) return 'No score-band indicator is available for an incomplete assessment.';
   const label = brand.trend === 'up' ? 'up' : brand.trend === 'down' ? 'down' : 'steady';
   return `Arrow: ${label}. The scorecard payload does not include a measured baseline, magnitude, or time period, so this arrow should be read as a current score-band indicator rather than a period-over-period trend.`;
 }
@@ -146,10 +153,25 @@ export function buildScorecardExplanation(
   const dimensionKey = normalizeDimensionKey(requestedDimension);
   const details = getBrandDimensionDetails(brand);
   const selected = dimensionKey ? details.find(d => d.key === dimensionKey) : undefined;
-  const grounded = details.filter(d => isGroundedAssessment(d.assessment));
+  const grounded = details.filter(d => d.score !== null && isGroundedAssessment(d.assessment));
   const coverage = details.length > 0 ? Math.round((grounded.length / details.length) * 100) : 0;
 
   if (selected) {
+    if (selected.score === null) {
+      return {
+        question: `Why is ${brand.brandName}'s ${selected.shortLabel} assessment unavailable?`,
+        answer: describeDimension(selected, brand.brandName),
+        steps: [{
+          toolName: selected.agentKey,
+          inputSummary: `${brand.brandName} assessment for ${selected.label}`,
+          outputSummary: 'Unavailable; no score or weighted contribution',
+          reasoning: selected.assessment || 'No valid specialist score and assessment were returned.',
+        }],
+        confidence: 0,
+        dataSources: [],
+        generatedAt: new Date().toISOString(),
+      };
+    }
     const band = getDimensionBand(selected.score);
     const selectedAssessment = selected.assessment;
     const groundedSelected = isGroundedAssessment(selectedAssessment);
@@ -173,21 +195,26 @@ export function buildScorecardExplanation(
   }
 
   return {
-    question: `Why is ${brand.brandName}'s portfolio score ${brand.healthScore}?`,
-    answer: `${brand.brandName} scores ${brand.healthScore}/100, which is ${getCompositeBand(brand.healthScore).label}. ${formatCompositeCalculation(details, brand.healthScore)} ${getTrendDisclosure(brand)}`,
+    question: brand.healthScore === null
+      ? `Why is ${brand.brandName}'s portfolio score unavailable?`
+      : `Why is ${brand.brandName}'s portfolio score ${brand.healthScore}?`,
+    answer: brand.healthScore === null
+      ? `${brand.brandName} has ${grounded.length > 0 ? 'a partial assessment' : 'no available assessments'}. ${formatCompositeCalculation(details, null)}`
+      : `${brand.brandName} scores ${brand.healthScore}/100, which is ${getCompositeBand(brand.healthScore).label}. ${formatCompositeCalculation(details, brand.healthScore)} ${getTrendDisclosure(brand)}`,
     steps: details.map(d => ({
       toolName: d.agentKey,
       inputSummary: `${brand.brandName} scored for ${d.label}`,
-      outputSummary: `${Math.round(d.score)}/100 contributes ${d.weightedScore.toFixed(1)} points`,
+      outputSummary: d.score === null ? 'Unavailable; no score or weighted contribution'
+        : `${Math.round(d.score)}/100 contributes ${d.weightedScore?.toFixed(1)} points`,
       reasoning: (() => {
         const assessment = d.assessment;
-        return isGroundedAssessment(assessment)
+        return d.score !== null && isGroundedAssessment(assessment)
           ? cleanAssessment(assessment)
-          : 'No grounded specialist assessment was returned for this dimension.';
+          : assessment || 'No grounded specialist assessment was returned for this dimension.';
       })(),
     })),
     confidence: coverage,
-    dataSources: details.map(d => ({ name: `${d.label} specialist output (${d.agentKey})` })),
+    dataSources: grounded.map(d => ({ name: `${d.label} specialist output (${d.agentKey})` })),
     generatedAt: new Date().toISOString(),
   };
 }

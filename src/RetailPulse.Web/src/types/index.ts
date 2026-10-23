@@ -917,18 +917,19 @@ export interface BrandScoreDimensionDetail {
   key: ScorecardDimensionKey;
   label: string;
   shortLabel: string;
-  score: number;
+  score: number | null;
   weight: number;
-  weightedScore: number;
+  weightedScore: number | null;
   assessment?: string;
   agentKey: string;
 }
 
 export interface BrandScore {
   brandName: string;
-  healthScore: number;
+  healthScore: number | null;
+  status?: 'complete' | 'partial' | 'unavailable';
   trend: 'up' | 'down' | 'stable';
-  dimensions: Record<ScorecardDimensionKey, number>;
+  dimensions: Record<ScorecardDimensionKey, number | null>;
   dimensionDetails?: Partial<Record<ScorecardDimensionKey, BrandScoreDimensionDetail>>;
   summary?: string;
   actionItems?: string[];

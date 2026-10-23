@@ -10,7 +10,8 @@
           "weight": 0.25,
           "weightedScore": 1.875,
           "assessment": "Strong sell-through.",
-          "agentKey": "demand-forecasting"
+          "agentKey": "demand-forecasting",
+          "status": "available"
         },
         "Competitive Position": {
           "dimension": "Competitive Position",
@@ -18,7 +19,8 @@
           "weight": 0.2,
           "weightedScore": 1.2,
           "assessment": "Holding share.",
-          "agentKey": "competitive-intel"
+          "agentKey": "competitive-intel",
+          "status": "available"
         },
         "Supply Reliability": {
           "dimension": "Supply Reliability",
@@ -26,7 +28,8 @@
           "weight": 0.2,
           "weightedScore": 1.1,
           "assessment": "Some stockout risk.",
-          "agentKey": "supply-chain"
+          "agentKey": "supply-chain",
+          "status": "available"
         },
         "Store Execution": {
           "dimension": "Store Execution",
@@ -34,7 +37,8 @@
           "weight": 0.2,
           "weightedScore": 1.3,
           "assessment": "Good placement.",
-          "agentKey": "store-ops"
+          "agentKey": "store-ops",
+          "status": "available"
         },
         "Margin Health": {
           "dimension": "Margin Health",
@@ -42,7 +46,8 @@
           "weight": 0.15,
           "weightedScore": 0.675,
           "assessment": "Cost pressure.",
-          "agentKey": "margin-analysis"
+          "agentKey": "margin-analysis",
+          "status": "available"
         }
       },
       "summary": "Contoso is mixed: strong demand, soft margin.",
@@ -50,7 +55,8 @@
         "Protect margin on hero SKUs.",
         "Lean into demand momentum."
       ],
-      "durationMs": 8421
+      "durationMs": 8421,
+      "status": "complete"
     }
   ],
   "executiveSummary": "",
