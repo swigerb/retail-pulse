@@ -4,10 +4,14 @@
    ============================================ */
 
 :root {
-  /* Brand palette */
-  --brand-primary: #1565C0;
+  /* Application identity stays blue when a retailer pack overrides its theme. */
+  --retail-pulse-primary: #1565C0;
+  --retail-pulse-accent: #42A5F5;
+
+  /* Pack palette */
+  --brand-primary: var(--retail-pulse-primary);
   --brand-primary-light: #1E88E5;
-  --brand-accent: #42A5F5;
+  --brand-accent: var(--retail-pulse-accent);
   --brand-accent-light: #64B5F6;
   --brand-deep-black: #080808;
 
