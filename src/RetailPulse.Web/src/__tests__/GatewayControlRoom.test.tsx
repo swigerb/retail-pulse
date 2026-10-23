@@ -183,6 +183,78 @@ describe('GatewayControlRoom gateway safety (#331)', () => {
     renderRibbon(withSafety(safety({ outputChecked: false })));
     expect(item('gatewaySafety')).toHaveAttribute('data-item-state', 'warning');
     expect(item('gatewaySafety')).toHaveTextContent('Allowed — output not checked');
+    expect(item('safety')).toHaveTextContent('Not fully verified');
+    expect(item('safety')).not.toHaveTextContent('Passed');
+  });
+
+  it('reports checked text plus a no-text call without claiming tool arguments were checked', () => {
+    renderRibbon(evidence({}, [
+      call({ safety: 'unknown', gatewaySafety: safety({ outputChecked: false, outputCheckReason: 'no-text' }) }),
+      call({ gatewaySafety: safety({ phase: 'output' }) }),
+    ]));
+    expect(item('gatewaySafety')).toHaveTextContent('Input checked; output text checked; 1 call had no output text (tool arguments not checked)');
+    expect(item('gatewaySafety')).toHaveAttribute('data-item-state', 'neutral');
+    expect(item('safety')).toHaveTextContent('Text checks only');
+    expect(item('safety')).not.toHaveTextContent('Passed');
+  });
+
+  it.each(['streaming', 'backend-error', 'unavailable'])('keeps %s output unchecked even when another call was checked', reason => {
+    const m = buildGatewayRibbon(evidence({}, [
+      call({ gatewaySafety: safety({ outputChecked: false, outputCheckReason: reason }) }),
+      call({ gatewaySafety: safety() }),
+    ]));
+    const gs = m.items.find(i => i.key === 'gatewaySafety')!;
+    expect(gs.state).toBe('warning');
+    expect(gs.value).toContain('output not checked');
+    expect(gs.value).toContain('1 other call checked');
+  });
+
+  it('keeps blocked and unavailable distinct from a passed check', () => {
+    renderRibbon(evidence({ status: 'blocked' }, [
+      call({ statusCode: 503, safety: 'blocked', gatewaySafety: safety({ phase: 'output', decision: 'block', outputChecked: false, outputCheckReason: 'unavailable' }) }),
+    ]));
+    expect(item('gatewaySafety')).toHaveTextContent('Unavailable (output; request stopped)');
+    expect(item('gatewaySafety')).not.toHaveTextContent('Passed');
+  });
+
+  it('does not hide a reported harmful-content block behind an earlier unavailable attempt', () => {
+    const m = buildGatewayRibbon(evidence({ status: 'blocked' }, [
+      call({ statusCode: 503, gatewaySafety: safety({ decision: 'block', outputChecked: false }) }),
+      call({ statusCode: 403, gatewaySafety: safety({ decision: 'block', category: 'Violence', severity: 6, outputChecked: true }) }),
+    ]));
+    expect(m.items.find(i => i.key === 'gatewaySafety')).toMatchObject({ state: 'blocked', value: 'Blocked (input, Violence severity 6)' });
+    expect(m.items.find(i => i.key === 'safety')?.state).toBe('blocked');
+  });
+
+  it('does not turn truncated checked calls into a full verification claim', () => {
+    const m = buildGatewayRibbon(evidence({ truncated: true, droppedCalls: 1 }, [call({ gatewaySafety: safety() })]));
+    expect(m.items.find(i => i.key === 'gatewaySafety')).toMatchObject({ state: 'warning', value: 'Allowed (partial: some calls not reported)' });
+    expect(m.truncatedNote).toBe('1 gateway call not listed');
+  });
+
+  it('preserves known safety evidence when another call has no metadata', () => {
+    const m = buildGatewayRibbon(evidence({ status: 'unavailable' }, [
+      call({ gatewaySafety: safety({ outputChecked: false }) }),
+      call({ status: 'unavailable', gatewaySafety: null, safety: 'unknown' }),
+    ]));
+    expect(m.items.find(i => i.key === 'gatewaySafety')).toMatchObject({ state: 'warning' });
+    expect(m.items.find(i => i.key === 'gatewaySafety')?.value).toContain('partial');
+  });
+
+  it('distinguishes disabled and not-applicable cache from absent evidence and pool from selection', () => {
+    const model = (cache: GatewayCallEvidence['cache']) => buildGatewayRibbon(evidence({}, [
+      call({ cache, backendAlias: 'retail-pulse-foundry-pool', backendKind: 'pool', route: 'unknown' }),
+    ]));
+    expect(model('disabled').items.find(i => i.key === 'cache')?.value).toBe('Disabled');
+    expect(model('not-applicable').items.find(i => i.key === 'cache')?.value).toBe('Not applicable');
+    expect(model('unknown').items.find(i => i.key === 'cache')).toMatchObject({ value: 'Unknown', state: 'unknown' });
+    expect(model('disabled').items.find(i => i.key === 'route')?.value).toContain('(Pool; selected backend not reported)');
+    expect(model('disabled').items.find(i => i.key === 'failover')?.value).toBe('Unknown');
+  });
+
+  it('does not describe explicitly disabled gateway checks as a pass', () => {
+    const m = buildGatewayRibbon(withSafety(null, { safety: 'not-applicable' }));
+    expect(m.items.find(i => i.key === 'gatewaySafety')).toMatchObject({ value: 'Not applicable — gateway checks disabled', state: 'neutral' });
   });
 
   it('treats a valid allow with both phases checked as neutral', () => {
@@ -207,7 +279,7 @@ describe('GatewayControlRoom gateway safety (#331)', () => {
     expect(none.value).toBe('Not reported');
   });
 
-  it('keeps the legacy safety item distinct from gateway safety', () => {
+  it('keeps the coarse gateway signal distinct from its detailed coverage', () => {
     renderRibbon(withSafety(safety()));
     expect(item('safety')).toHaveTextContent('Passed');
     expect(item('gatewaySafety')).not.toBe(item('safety'));

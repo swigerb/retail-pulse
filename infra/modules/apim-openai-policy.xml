@@ -13,6 +13,7 @@
         <set-query-parameter name="api-key" exists-action="delete" />
         <set-header name="x-rp-gw-request-id" exists-action="delete" />
         <set-header name="x-rp-gw-backend" exists-action="delete" />
+        <set-header name="x-rp-gw-backend-kind" exists-action="delete" />
         <set-header name="x-rp-gw-route" exists-action="delete" />
         <set-header name="x-rp-gw-tokens-consumed" exists-action="delete" />
         <set-header name="x-rp-gw-tokens-remaining" exists-action="delete" />
@@ -29,6 +30,7 @@
         <set-header name="x-rp-gw-safety-mode" exists-action="delete" />
         <set-header name="x-rp-gw-safety-latency-ms" exists-action="delete" />
         <set-header name="x-rp-gw-safety-output-checked" exists-action="delete" />
+        <set-header name="x-rp-gw-safety-output-reason" exists-action="delete" />
         <set-header name="x-rp-gw-latency-ms" exists-action="delete" />
         <set-header name="x-rp-gw-backend-latency-ms" exists-action="delete" />
         <set-header name="x-rp-gw-failover-demo" exists-action="delete" />
@@ -77,6 +79,9 @@
         </set-header>
         <set-header name="x-rp-gw-backend" exists-action="override">
             <value>{backend-id}</value>
+        </set-header>
+        <set-header name="x-rp-gw-backend-kind" exists-action="override">
+            <value>{backend-kind}</value>
         </set-header>
         <choose>
             <when condition="@(context.Variables.ContainsKey(&quot;rp-route&quot;))">

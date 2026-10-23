@@ -15,6 +15,7 @@ public static class GatewayEvidenceHeaders
     public const string Prefix = "x-rp-gw-";
     public const string RequestId = "x-rp-gw-request-id";
     public const string Backend = "x-rp-gw-backend";
+    public const string BackendKind = "x-rp-gw-backend-kind";
     public const string Route = "x-rp-gw-route";
     public const string TokensConsumed = "x-rp-gw-tokens-consumed";
     public const string TokensRemaining = "x-rp-gw-tokens-remaining";
@@ -39,6 +40,7 @@ public static class GatewayEvidenceHeaders
     public const string SafetyMode = "x-rp-gw-safety-mode";
     public const string SafetyLatencyMs = "x-rp-gw-safety-latency-ms";
     public const string SafetyOutputChecked = "x-rp-gw-safety-output-checked";
+    public const string SafetyOutputReason = "x-rp-gw-safety-output-reason";
 
     public const string BudgetScope = "x-rp-gw-budget-scope";
     public const string BudgetMode = "x-rp-gw-budget-mode";
@@ -56,7 +58,7 @@ public static class GatewayEvidenceHeaders
         RequestId, Backend, Route, TokensConsumed, TokensRemaining, Quota, Cache, CacheReason,
         Safety, PolicyVersion, LatencyMs, BackendLatencyMs, FailoverDemo, PrimaryStatus, Attempts, Fallback,
         SafetyPhase, SafetyDecision, SafetyPromptAttack, SafetyCategory, SafetySeverity, SafetyMode,
-        SafetyLatencyMs, SafetyOutputChecked, BudgetScope, BudgetMode, RetryAfter,
+        SafetyLatencyMs, SafetyOutputChecked, SafetyOutputReason, BackendKind, BudgetScope, BudgetMode, RetryAfter,
     ];
 
     public static GatewayCallEvidence Parse(PipelineResponse response)
@@ -83,7 +85,13 @@ public static class GatewayEvidenceHeaders
             statusCode,
             FailoverDemo: ParseFailoverDemo(getHeader),
             GatewaySafety: ParseSafety(getHeader),
-            Budget: ParseBudget(getHeader));
+            Budget: ParseBudget(getHeader),
+            BackendKind: getHeader(BackendKind)?.Trim().ToLowerInvariant() switch
+            {
+                "pool" => GatewayBackendKind.Pool,
+                "backend" => GatewayBackendKind.Backend,
+                _ => GatewayBackendKind.Unknown,
+            });
 
         GatewayEvidenceStatus status = evidence.IsEmpty
             ? GatewayEvidenceStatus.Unavailable
@@ -124,7 +132,15 @@ public static class GatewayEvidenceHeaders
             severity is <= 7 ? (int?)severity : null,
             mode is "demo" or "regulated" ? mode : null,
             ParseCount(getHeader(SafetyLatencyMs)),
-            ParseBool(getHeader(SafetyOutputChecked)));
+            ParseBool(getHeader(SafetyOutputChecked)),
+            getHeader(SafetyOutputReason)?.Trim().ToLowerInvariant() switch
+            {
+                "no-text" => GatewayOutputCheckReason.NoText,
+                "streaming" => GatewayOutputCheckReason.Streaming,
+                "backend-error" => GatewayOutputCheckReason.BackendError,
+                "unavailable" => GatewayOutputCheckReason.Unavailable,
+                _ => GatewayOutputCheckReason.Unknown,
+            });
     }
 
     // Budget detail is trusted only when scope kind and mode are both from the fixed vocabulary.
@@ -223,6 +239,7 @@ public static class GatewayEvidenceHeaders
             "hit" => GatewayOutcome.Hit,
             "miss" => GatewayOutcome.Miss,
             "bypass" => GatewayOutcome.Bypass,
+            "disabled" => GatewayOutcome.Disabled,
             "not-applicable" => GatewayOutcome.NotApplicable,
             _ => GatewayOutcome.Unknown,
         };

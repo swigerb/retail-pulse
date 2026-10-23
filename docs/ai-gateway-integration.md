@@ -47,8 +47,42 @@ tool-result checks (all of which remain). Enable with `AZURE_CONTENT_SAFETY_ENAB
   (`x-rp-gw-safety-output-checked: false`). Once chunks are emitted the gateway never claims a final 403 or a
   `passed` result; regulated deployments should disable streaming.
 - **Evidence:** only phase, decision (`allow`/`block`/`allowed_on_safety_error`), prompt-attack flag, highest
-  category/severity, mode, latency and the existing request id/policy version are emitted through the
+  category/severity, mode, latency, output-check coverage/reason and the existing request id/policy version are emitted through the
   `x-rp-gw-*` contract. Prompts, completions, documents, raw safety bodies, auth headers and matched text are never logged or echoed.
+
+### Reading response evidence
+
+Evidence is captured for each model attempt (including routing and tool-loop calls), retained up to 32
+calls, attached to the chat/error DTO, and validated again by the web client. "Observed" means headers
+were received, not that every control passed. The coarse `x-rp-gw-safety` header and detailed
+`x-rp-gw-safety-*` fields describe the **same gateway layer**, not separate application checks.
+
+- `allow` is a decision to continue, **not proof of output analysis**. Only
+  `output-checked=true` proves a successful output analysis. A valid buffered message with no text
+  (including a tool-call-only response) reports `output-checked=false`, `output-reason=no-text`.
+  Tool arguments are not analyzed by this text check. Mixed no-text and checked-text calls display
+  that scoped coverage, never "Passed (partial)" beside a warning that all output was unchecked.
+- Unchecked streaming output reports `output-reason=streaming`; a non-200 backend response reports
+  `backend-error`; unsuccessful output analysis reports `unavailable`. Missing/older reason headers
+  remain unknown and retain the warning. A 503 safety-unavailable response is a stopped request,
+  not proof that harmful content was detected. Truncated/missing call evidence cannot establish
+  complete coverage. Safety, throttling, truncation and partial-evidence disclosure remain independent.
+- When the Bicep render omits semantic-cache lookup/store, it emits `x-rp-gw-cache=disabled`.
+  This is **policy disabled**, not a cache miss or a claim about Redis availability. Active cache
+  policies retain `hit`, `miss`, and `bypass`; `not-applicable` remains distinct. An absent header
+  still means unknown/not reported; the API does not infer deployment configuration.
+- `x-rp-gw-backend-kind=pool` identifies a configured target pool, **not the selected member**.
+  A backend alias with kind `backend` likewise names a target, not proof of a successful response.
+  The normal priority pool publishes no per-request route decision, so failover stays unknown.
+  Only explicit route evidence establishes primary/no-failover or successful failover; missing or
+  truncated route evidence never becomes "None". The authorized demo can publish its actual backend
+  and attempt evidence, but those observations do not describe automatic pool failover.
+- With gateway safety disabled, rendered responses explicitly report `safety=not-applicable`.
+  That does not disable, report, or certify the application's independent safety checks.
+
+These new headers require a separately approved policy deployment before they appear at runtime.
+Source tests execute the checked-in safety expressions with fake dependencies; they do not simulate
+Azure APIM routing, Content Safety services, cache availability or the exact production response.
 
 ## Regulated-retail mode (#337)
 

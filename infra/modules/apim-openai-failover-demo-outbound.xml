@@ -23,6 +23,9 @@
                         <set-header name="x-rp-gw-backend" exists-action="override">
                             <value>@((string)context.Variables["rp-demo-backend"])</value>
                         </set-header>
+                        <set-header name="x-rp-gw-backend-kind" exists-action="override">
+                            <value>backend</value>
+                        </set-header>
                     </when>
                 </choose>
                 <choose>
