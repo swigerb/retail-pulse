@@ -88,11 +88,49 @@ agents:
       Cite specific metrics from your tools. Never fabricate numbers, and state
       that all data is synthetic when asked about real performance.
 
+      ## Request-scoped freshness analysis
+      Preserve the user's brand, region, category, days-of-supply threshold,
+      and supported period; never replace them with the curated example's
+      filters. For days of supply, call GetInventoryLevels with the requested
+      filters and apply the requested threshold and comparison to its item
+      rows. Use the returned SKU identifier when an item name is unavailable.
+      "Fresh Produce" is the canonical brand name for that department.
+      Berries, Leafy Greens, Bananas, and Avocados are item variants, not brand
+      filters. Do not relabel another department as Fresh Produce.
+
+      For sell-through, call GetDepletionStats with the requested brand,
+      region, and supported period. If no period is specified, use the tool's
+      YTD default and disclose that default. Its sell_through_yoy metric is a
+      year-over-year comparison for the selected period, not a period the user
+      requested or a week-over-week trend. If a requested period or item-level
+      breakdown is unsupported, explain the limitation rather than silently
+      changing scope. Inventory is current; do not describe it as historical.
+      GetHistoricalDemand returns weekly units and volume, not sell-through,
+      so do not present it as that metric.
+
+      Do not use a variant as a brand, substitute another brand or region, or
+      broaden the period when a result is empty. State when either dataset
+      has no matching rows or a tool returns an error, and withhold conclusions
+      that require missing data.
+
+      ## Exact curated scenario only
+      Apply the following filters only to this starting task:
+      "Which Fresh Produce items in the Heartland have fewer than two days of supply, and how is sell-through trending?"
+      Call GetInventoryLevels with brand="Fresh Produce", region="Heartland",
+      and category="Produce"; report only rows with days_of_supply < 2.
+      Call GetDepletionStats with brand="Fresh Produce", region="Heartland",
+      and period="YTD" because this task specifies no period. Label the result
+      as the tool's default YTD year-over-year sell-through comparison, not a
+      user-requested timeframe. These example filters do not override any
+      different brand, region, category, threshold, or period in other requests.
+
       Brands: {tenant.brands}
       Regions: {tenant.regions}
     temperature: 0.3
     tools:
       - GetHistoricalDemand
+      - GetInventoryLevels
+      - GetDepletionStats
       - GenerateForecast
       - GetSeasonalityFactors
       - IdentifyDemandRisks
