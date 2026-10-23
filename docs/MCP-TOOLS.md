@@ -412,7 +412,7 @@ Get a full competitive overview for a category and region.
 
 ### GetInventoryLevels
 
-Get current inventory levels by brand, region, and category.
+Get current inventory levels by brand, region, category, status, and variant.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -420,26 +420,60 @@ Get current inventory levels by brand, region, and category.
 | `region` | string | | all | Region |
 | `category` | string | | all | Category |
 | `status` | string | | all | `"healthy"`, `"low"`, `"critical"`, `"out_of_stock"` |
+| `variant` | string | | all | Exact, case-insensitive variant name; surrounding whitespace is trimmed |
 
-**Returns:** SKU-level stock, safety stock, days of supply, and status.
+Filters combine with AND. A variant is not a brand or category: in the
+synthetic Staples pack, use `brand="Contract Catalog"`,
+`category="Office Essentials"`, and `variant="Paper & Toner"` for the named
+variant. Omit `region` for all regions; do not pass `Paper & Toner` as a category
+or drop the variant filter to obtain unrelated inventory.
 
-**Example Output:**
+**Returns:** An object with `items`, `total_items`, `status_breakdown`, and
+`filters_applied`. Each SKU item includes its `variant`, stock, safety stock,
+days of supply, status, and update timestamp. Empty results indicate missing
+matching data, not zero days of supply. Inventory is a current snapshot, not a
+historical series; this tool has no timeframe argument.
+
+**Example output shape** (illustrative synthetic item, not live evidence):
 
 ```json
 {
-  "inventory": [
+  "items": [
     {
-      "sku_id": "SKU-001",
-      "brand": "Sierra Gold Tequila",
-      "region": "Northeast",
+      "brand": "Contract Catalog",
+      "region": "Atlantic Corridor",
+      "category": "Office Essentials",
+      "sku": "SKU-EXAMPLE",
+      "variant": "Paper & Toner",
       "current_stock": 2400,
       "safety_stock": 500,
       "days_of_supply": 18,
-      "status": "healthy"
+      "status": "healthy",
+      "last_updated": "2026-10-23T12:00:00Z"
     }
-  ]
+  ],
+  "total_items": 1,
+  "status_breakdown": {
+    "healthy": 1,
+    "low": 0,
+    "critical": 0,
+    "out_of_stock": 0
+  },
+  "filters_applied": {
+    "brand": "Contract Catalog",
+    "region": "Atlantic Corridor",
+    "category": "Office Essentials",
+    "status": null,
+    "variant": "Paper & Toner"
+  }
 }
 ```
+
+**Surface boundary:** This optional argument applies to the MCP runtime
+`GetInventoryLevels`, the API AIFunction of the same name, and direct inventory
+REST routes. The separate governed APIM v1
+[`get_inventory`](#governed-apim-mcp-gateway-adr-017) published schema does not
+expose `variant`; do not assume runtime and governed tool schemas are identical.
 
 ---
 
@@ -805,6 +839,13 @@ Retail Pulse API with its managed identity.
 | `get_stockout_risk` | `GET /api/stores/stockout-risks` (`limit` clamped 1–50) |
 | `get_supply_disruptions` | `GET /api/supply/disruptions` |
 | `get_demand_forecast` | `GET /api/demand/forecast?brand=&region=` (`brand` required, `region` defaults to `National`) |
+
+The published v1 `get_inventory` request schema in
+`infra/modules/apim-mcp-api.bicep` lists only optional `brand`, `region`,
+`category`, and `status`. It does not declare `variant`, even though direct REST,
+the API AIFunction, and MCP runtime `GetInventoryLevels` support that optional
+filter and return a `variant` item field. The runtime addition does not expand
+the governed v1 request schema; its existing arguments remain unchanged.
 
 - **Caller auth:** `Ocp-Apim-Subscription-Key` (product `retailpulse-mcp`, approval required) plus an Entra
   v2 token requested for `AZURE_MCP_GATEWAY_RESOURCE_IDENTIFIER/.default` (default resource identifier

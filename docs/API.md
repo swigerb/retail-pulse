@@ -547,8 +547,33 @@ Get current inventory levels.
 | `region` | string | Filter by region |
 | `category` | string | Filter by category |
 | `status` | string | Filter: `healthy`, `low`, `critical`, `out_of_stock` |
+| `variant` | string | Optional exact, case-insensitive variant name; surrounding whitespace is trimmed. Omit for all variants. |
 
-**Response (200):** Array of inventory records with stock levels, safety stock, and days of supply.
+All filters are optional and combine with AND. A variant is distinct from its
+parent brand and category. In the synthetic Staples pack, `Paper & Toner` is a
+variant of brand `Contract Catalog` in category `Office Essentials`, not a
+category itself. For that variant across regions, use:
+
+```http
+GET /api/supply/inventory?brand=Contract%20Catalog&category=Office%20Essentials&variant=Paper%20%26%20Toner
+```
+
+**Response (200):** Object containing `items`, `total_items`, `status_breakdown`,
+and `filters_applied` (including `variant`). Each item includes `brand`, `region`,
+`category`, `sku`, `variant`, `current_stock`, `safety_stock`, `days_of_supply`,
+`status`, and `last_updated`. No matching rows means `items: []` and
+`total_items: 0`; it does not mean zero days of supply.
+
+Inventory is a current snapshot. This endpoint has no historical timeframe
+filter; do not describe its values as inventory for a requested past period.
+
+**Surface boundary:** Direct REST (API proxy and internal MCP REST), the API
+`GetInventoryLevels` AIFunction, and the MCP runtime `GetInventoryLevels` tool
+support `variant`. The governed APIM v1 `get_inventory` published schema in
+`infra/modules/apim-mcp-api.bicep` declares only `brand`, `region`, `category`,
+and `status`; it does **not** expose a variant argument. The optional runtime
+addition leaves those v1 arguments unchanged. See the
+[governed MCP gateway reference](MCP-TOOLS.md#governed-apim-mcp-gateway-adr-017).
 
 ---
 
