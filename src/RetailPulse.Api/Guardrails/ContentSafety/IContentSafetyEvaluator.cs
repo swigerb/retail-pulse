@@ -66,7 +66,7 @@ public enum ContentSafetyDecision
     /// <summary>Content is under thresholds but flagged; caller may audit but not block.</summary>
     Flagged,
 
-    /// <summary>The remote layer was unreachable — caller applies the configured fail policy.</summary>
+    /// <summary>The remote layer could not complete evaluation — caller applies the configured fail policy.</summary>
     ServiceUnavailable,
 }
 
@@ -89,6 +89,9 @@ public enum ContentSafetyFailureReason
 
     /// <summary>The resilience circuit breaker was open and short-circuited the call.</summary>
     CircuitOpen,
+
+    /// <summary>The service returned HTTP 400; validation failed, not a connection failure.</summary>
+    RequestRejected,
 }
 
 /// <summary>Structured decision + evidence used for auditing and telemetry.</summary>

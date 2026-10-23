@@ -268,6 +268,37 @@ evaluator, validator, fail-policy and diagnostic tests continue to run normally.
 No system/current-user trust store is modified, TLS verification is not disabled,
 and no production hook or transport configuration is introduced.
 
+### Full-suite scheduling isolation
+
+At dev `7aea2cde3e0692cb10429e7e9f9ef978e3595b43`, the Ubuntu full-suite
+coverage [run 40012088543](https://github.com/swigerb/retail-pulse/actions/runs/40012088543/job/120614889483)
+failed the persistent-disconnect row: both root GET attempts timed out, the
+warm-up reported no connection, and the first shield POST timed out before
+the later controlled aborts / breaker behavior. The warm-up-success assertion
+correctly failed (4,161 passed, one failed, nine skipped).
+The separate, non-rerun [run 40012201531](https://github.com/swigerb/retail-pulse/actions/runs/40012201531/job/120615143587)
+passed all 4,162 tests with nine skips at the identical source SHA, also with
+coverage. That comparison establishes intermittent fixture behavior, not a
+production repair or permission to disregard the failed run.
+
+The fixture previously ran alongside unrelated xUnit collections, including
+other real-process host tests. Its HTTPS dependency runs inside the test
+process while the real API child enforces the existing short safety deadlines.
+`ContentSafetyStartupCollection` now uses xUnit's `DisableParallelization`
+boundary, so these four rows run serially and do not overlap any other
+collection in this test assembly. Merely putting the rows in one collection
+without disabling parallelization would not exclude unrelated collections.
+The rest of the suite keeps its existing parallel scheduling.
+
+This is test-scheduling isolation, not proof that the earlier failure was caused
+by thread-pool starvation, and it cannot eliminate machine-wide contention.
+All four Linux rows, root warm-up success, exact roster/window hashes, input cap,
+authentication, cancellation, fail-closed refusal and persistent-breaker checks
+remain intact. No product code, configured timeout, retry, trust handling or
+unsupported-platform skip changes. A targeted pass alone is insufficient:
+validate this boundary in the real Ubuntu full-suite coverage job, without
+retrying until green.
+
 **Remaining blocker.** Issue #337 remains open. A future, separately authorized
 bounded activation must collect these startup phase/status/error diagnostics
 at a pinned deployed revision to distinguish token, POST transport, SDK moderation,
@@ -277,3 +308,90 @@ thresholds, existing token/scan/warm-up budgets and bounded warm-up attempts.
 Do not add retries-until-pass or treat a warm-up success as validation. This work
 does not authorize deployment, merge, sign-off, issue closure, live prompts or
 patient data; synthetic demonstrations must not provide clinical advice.
+
+## Follow-up: oversized Prompt Shields input (issue #337)
+
+After the diagnostic-only repair, the bounded activation at API revision
+`0000043` recorded `Operation=PromptShield`, HTTP `400`, 12 ms elapsed, with the
+same `general/SystemPrompt` refusal (16 definitions, 71 field evaluations).
+That response is evidence of a rejected HTTP request, not DNS/TLS failure or
+token cold start. It does not, by itself, establish the service's exact rejection
+reason: no response body was captured.
+
+The documented contract supports a specific source defect. The official
+[region availability and limits page](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/region-availability#service-limits),
+under **Service limits / Input limits for Azure AI Content Safety**, states:
+
+> **Prompt Shields API**: Maximum prompt length: 10K characters. Up to five
+> documents with a total of 10K characters.
+
+The coordinating production investigation retrieved that page updated
+2026-09-18, documentation commit `215dd53ffbd9bd69b62e358605c95006802af884`.
+The REST 2024-09-01 OpenAPI schema independently verifies `userPrompt` as a
+string and `documents` as a string array, but does not encode the character
+limit as `maxLength`; shape validation alone would miss this defect.
+
+Loading and hydrating the **unchanged shipped default pack** through its real
+loader/template engine yields an 11,581-character `general/SystemPrompt`
+(11,581 Unicode scalars; 11,627 UTF-8 bytes). Before repair, the real evaluator
+submitted that entire field as one `userPrompt` to
+`text:shieldPrompt?api-version=2024-09-01`; the JSON request was 13,571 bytes.
+That is a supported oversize-input contract violation. It is the only field
+over 10K in the 71-field roster. Existing 9,000-character moderation segmentation
+ran **after** the shield call, so could not protect the shield request.
+An enforcing local handler reproduces exactly one rejected field and the
+resulting refusal, without making a live request. The previous permissive
+loopback double did not enforce this input cap.
+
+### Repair and preserved invariants
+
+Prompt Shields now uses the existing overlapping segmentation before submitting
+the field, under the **same single scan cancellation/deadline** already covering
+shields and moderation. Each window has at most 9,000 UTF-16 code units; 500-code
+unit overlaps retain local boundary context. End/start cuts move backwards if
+necessary to avoid bisecting a surrogate pair, conservatively bounding Unicode
+scalar counts too. The original text is not normalized, truncated, shortened or
+rewritten. Overlap is not a claim that a service can reason about arbitrary
+long-distance relationships across windows.
+
+User-input/agent-definition windows remain `userPrompt`. Tool-result and retrieved
+knowledge windows remain individual `documents` entries, one per request, so the
+10K aggregate document bound is also respected. They are not relabeled as user
+prompts or concatenated into an oversized multi-document request. A field can
+pass only after every shield and moderation window succeeds. Any detected
+attack remains blocked, including when a later window is clean or a later
+dependency call fails. If no attack is already established, any unavailable
+window returns unavailable for the existing fail-open/fail-closed policy.
+Caller cancellation still propagates. The extra window is work, not a retry;
+it does not acquire a fresh scan budget.
+
+For the real general field the windows are exactly 9,000 and 3,081 characters
+(500 overlap); the complete roster still has 16 definitions / 71 logical field
+evaluations, now 72 shield and 72 moderation requests on the healthy local path.
+Short inputs still make one shield request and retain their original stage
+semantics. Thresholds, token/scan/warm-up budgets, retry/breaker behavior,
+fail-closed enforcement, and pack source are unchanged.
+
+HTTP 400 now carries the explicit `RequestRejected` failure reason in both raw
+shield and SDK moderation paths. Body-free diagnostics and audit reasons say the
+service rejected the request; they do not call it a connection failure or guess
+that length was the cause of every 400. Outcome/fail policy is unchanged.
+
+### Regression evidence and remaining limits
+
+The portable enforcing-handler tests execute the actual evaluator with the
+actual hydrated field, verifying its pinned hash/length, per-window cap, exact
+hash reassembly, late and boundary-spanning attacks, first-window attack retention,
+late unavailability under both fail policies across the complete real roster,
+shared budget expiration, caller cancellation, short-input stage semantics, and
+surrogate-pair preservation. The Linux Production-entrypoint double also enforces
+the shield cap and verifies exact per-window hash inventories.
+Temporarily replacing the real shield loop with its original unsegmented
+submission makes the pinned shipped-field regression fail (local HTTP 400 /
+unavailable instead of passed). The mutation is removed before final validation.
+
+These are offline contract and source-regression results, **not live acceptance**
+and not absolute attribution of the production 400 response body. Issue #337
+remains open pending independent review and separately authorized deployment /
+bounded regulated validation. No Azure changes, live prompts, model requests,
+patient data, merge, sign-off or closure are part of this source repair.

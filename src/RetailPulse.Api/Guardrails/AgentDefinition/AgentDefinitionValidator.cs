@@ -490,6 +490,7 @@ public sealed class AgentDefinitionValidator
             ContentSafetyFailureReason.Authentication => "Managed-identity authentication was rejected.",
             ContentSafetyFailureReason.Transport => "The connection failed before a response.",
             ContentSafetyFailureReason.CircuitOpen => "The circuit breaker was open.",
+            ContentSafetyFailureReason.RequestRejected => "The service rejected the safety request with HTTP 400.",
             _ => null,
         };
 

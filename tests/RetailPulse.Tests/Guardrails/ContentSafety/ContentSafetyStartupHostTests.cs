@@ -24,6 +24,7 @@ using Xunit.Abstractions;
 
 namespace RetailPulse.Tests.Guardrails.ContentSafety;
 
+[Collection("ContentSafetyStartup")]
 public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
 {
     [LinuxOpenSslTheory]
@@ -52,6 +53,7 @@ public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
         var analyses = new ConcurrentQueue<string>();
         List<(string Agent, string Field, string Text)> fields = [.. ExpectedFields()];
         string generalPrompt = fields.Single(f => f.Agent == "general" && f.Field == "SystemPrompt").Text;
+        string generalFirstSegment = Api.Guardrails.ContentSafety.AzureContentSafetyEvaluator.SegmentForAnalysis(generalPrompt).First();
         fields.FindIndex(f => f.Agent == "general" && f.Field == "SystemPrompt").Should().BeGreaterThan(0,
             "general/SystemPrompt is not the first scan in the shipped default roster");
         int roots = 0;
@@ -92,7 +94,12 @@ public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
                 using JsonDocument body = await JsonDocument.ParseAsync(context.Request.Body);
                 string text = body.RootElement.GetProperty("userPrompt").GetString()!;
                 shields.Enqueue(Hash(text));
-                if (disconnect && (persistent || text == generalPrompt))
+                if (text.Length > 10_000)
+                {
+                    context.Response.StatusCode = 400;
+                    return;
+                }
+                if (disconnect && (persistent || text == generalFirstSegment))
                 {
                     context.Abort();
                     return;
@@ -266,10 +273,13 @@ public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
             missingBearer.Should().Be(0);
             if (!persistent)
             {
-                shields.Should().HaveCount(71, "a failed real scan is not retried or skipped");
-                shields.Should().BeEquivalentTo(fields.Select(f => Hash(f.Text)),
-                    "every nonempty field of every hydrated definition must reach the real evaluator");
-                shields.ToList().IndexOf(Hash(generalPrompt)).Should().Be(28,
+                shields.Should().HaveCount(disconnect ? 71 : 72, "every required shield window is checked once; failures are not retried");
+                shields.Should().BeEquivalentTo(fields.SelectMany(f =>
+                {
+                    IEnumerable<string> segments = Api.Guardrails.ContentSafety.AzureContentSafetyEvaluator.SegmentForAnalysis(f.Text);
+                    return disconnect && f.Agent == "general" && f.Field == "SystemPrompt" ? segments.Take(1) : segments;
+                }).Select(Hash), "every field must reach the evaluator; only a failed field may stop before its next segment");
+                shields.ToList().IndexOf(Hash(generalFirstSegment)).Should().Be(28,
                     "the observed general/SystemPrompt request is field 29, not a cold first POST");
                 analyses.Should().BeEquivalentTo(fields
                     .Where(f => !disconnect || f.Agent != "general" || f.Field != "SystemPrompt")

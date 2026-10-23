@@ -108,6 +108,8 @@ internal static class GuardrailAuditFields
             $"Content Safety was unreachable while checking {target}: the connection failed before a response.",
         ContentSafetyFailureReason.CircuitOpen =>
             $"Content Safety was unreachable while checking {target}: the circuit breaker was open.",
+        ContentSafetyFailureReason.RequestRejected =>
+            $"Content Safety was unreachable for evaluation while checking {target}: the service rejected the safety request with HTTP 400.",
         _ => $"Content Safety was unreachable while checking {target}.",
     };
 
