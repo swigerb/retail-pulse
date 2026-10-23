@@ -163,7 +163,7 @@ No deployment, live retry, merge, sign-off or issue closure is part of this repa
 
 ```bash
 dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
-  --filter "FullyQualifiedName~LowesInventoryScenarioTests|FullyQualifiedName~LowesRetailPackContractTests"
+  --filter "FullyQualifiedName~LowesInventoryScenarioTests|FullyQualifiedName~LowesRetailPackContractTests|FullyQualifiedName~SupplyToolTests|FullyQualifiedName~ToolCatalogContractTests|FullyQualifiedName~McpToolContractTests|FullyQualifiedName~SeededGatewayToolDocumentBudgetTests|FullyQualifiedName~StaplesInventoryScenarioTests|FullyQualifiedName~PackAgentSafetyGateTests"
 ```
 
 The Lowe's fulfillment instructions map `Building Materials` / `Lumber & Building`
@@ -176,6 +176,41 @@ prompt delivery, tool arguments, and seeded results returned to the model; it
 does not prove an external model will select the tool, follow the guidance, or
 write correct prose/charts. This is offline source and seed coverage, not a
 production replay or visual/live-model acceptance.
+
+The [2026-10-23 production observation](https://github.com/swigerb/retail-pulse/issues/452#issuecomment-6373879222)
+confirmed correct canonical tool selection and four rows: Coastal South **6.8,
+critical**; Mountain West **31.2, healthy**; Atlantic Seaboard **32.7, healthy**;
+Central Plains **38.2, healthy**. However, the answer added an unsupported
+"4.0-day healthy threshold." The inventory payload supplies stock, safety stock,
+days of supply and status, **not** numeric classification thresholds or business
+rules. Correct values alone therefore did not establish answer acceptance.
+
+The followthrough adds explicit grounding guidance to both inventory tool
+descriptions and the loaded Lowe's fulfillment instructions: supplied status is
+authoritative, classification rules must not be inferred or invented, and an
+unavailable rule must be identified as unavailable. User-requested numeric
+comparisons remain separate from official status; canonical filters are unchanged.
+Focused tests inspect the actual API `AIFunction` description and system prompt
+delivered through the configured agent, plus the MCP method's description. They
+exercise the original request, an unavailable-rule question, an adversarial
+4.0-day/relabeling request, and a user-specified 40-day comparison. Tool calls and
+answers remain scripted: these cases prove guidance delivery and payload
+preservation, not that a model refuses the adversarial request or performs the
+comparison. A temporary SQLite-only mutation pairs a critical status with 40 days
+and healthy statuses with 1 day; the real API tool and MCP method must preserve
+those supplied statuses and values, without recalculating classifications. Exact
+payload field assertions establish that no numeric classification rule is supplied.
+
+The focused inventory/tool contracts passed **48/48**; adjacent Staples inventory,
+pack safety and seeded gateway document-budget checks passed **15/15**. Removing
+the unsupported-cutoff prohibition from the real pack instructions made the new
+grounding contract test fail; restoring it returned the combined suite to green.
+These are offline regression checks, not live-model acceptance.
+
+No live prompts, production changes, deployment, merge, sign-off or closure are
+part of this source followthrough. Independent review and a separately authorized
+post-deployment live acceptance must still verify grounded prose with no invented
+cutoff or business rule, as well as the four correct regional values and statuses.
 
 ### Run Tests with Coverage (if configured)
 
