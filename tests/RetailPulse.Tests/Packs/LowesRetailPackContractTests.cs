@@ -47,6 +47,24 @@ public sealed class LowesRetailPackContractTests
     }
 
     [Fact]
+    public void FulfillmentInstructions_KeepPlywoodBrandCategoryAndVariantDistinct()
+    {
+        LoadedPack pack = Load();
+        string prompt = pack.Agents.Agents["fulfillment-continuity"].SystemPrompt;
+
+        prompt.Should().Contain("Building Materials / Lumber & Building: Plywood");
+        prompt.Should().Contain("brand=\"Building Materials\"");
+        prompt.Should().Contain("category=\"Lumber & Building\"");
+        prompt.Should().Contain("variant=\"Plywood\"");
+        prompt.Should().Contain("preserve every");
+        prompt.Should().Contain("Never replace an explicit conflicting filter");
+        prompt.Should().Contain("Do not broaden filters");
+        pack.StartingTasks.Single(category => category.Id == "storm-demand").Tasks
+            .Single(task => task.Name == "Plywood days of supply").Prompt
+            .Should().Be("Show days of supply for plywood across all regions");
+    }
+
+    [Fact]
     public void Tenant_HasNoLogoPath_AndUsesNeutralColors()
     {
         LoadedPack pack = Load();
