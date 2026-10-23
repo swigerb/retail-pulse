@@ -2,15 +2,17 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using FluentAssertions;
+using RetailPulse.Api.OpenAI.Gateway;
+using RetailPulse.Contracts.Gateway;
 
 namespace RetailPulse.Tests.Deployment;
 
 /// <summary>
 /// Issue #339 — acceptance evidence for the APIM llm-semantic-cache policy path is the RENDERED policy XML (structure
 /// and the classifier patterns, read from the XML and evaluated with the same .NET regex engine APIM expressions use)
-/// plus the live probe contract (scripts/probe-semantic-cache.cjs, issue #342). There is deliberately NO behavioural
-/// model of APIM or the cache here: the classifier-order evaluator below only applies patterns taken verbatim from
-/// the XML in the order the XML's decision expression applies them, so an XML bug changes these results.
+/// plus the live probe contract (scripts/probe-semantic-cache.cjs, issue #342). The classifier-order evaluator applies
+/// patterns taken verbatim from the XML. The bounded outbound interpreter models only choose/header execution and
+/// the post-store continuation observed in #466, not APIM, Redis, embeddings, safety services or cache matching.
 /// </summary>
 public sealed partial class SemanticCachePolicyRuntimeTests
 {
@@ -159,14 +161,159 @@ public sealed partial class SemanticCachePolicyRuntimeTests
         XElement store = root.Descendants("when").First();
         string cond = (string)store.Attribute("condition")!;
         cond.Should().Contain("== \"eligible\"").And.Contain("StatusCode == 200").And.Contain("rp-backend-start")
-            .And.Contain("rp-safety-output-checked");
+            .And.Contain("rp-safety-output-checked").And.Contain("== \"true\"");
         store.Descendants("llm-semantic-cache-store").Should().ContainSingle();
+        store.Elements().Select(e => e.Name.LocalName).Should().Equal(["llm-semantic-cache-store"],
+            "a hit resumes after store inside this branch, so request evidence must not be in it");
+        XElement[] choices = [.. root.Elements("choose")];
+        choices.Should().HaveCount(2);
+        store.Parent.Should().BeSameAs(choices[0]);
+        choices[1].Descendants("set-header").Where(h => (string?)h.Attribute("name") == "x-rp-gw-cache")
+            .Should().HaveCount(4);
+        choices[1].Elements("when").First().Attribute("condition")!.Value.Should().Be(cond,
+            "miss evidence must retain the same safety-checked backend-200 gate as the store");
         string[] values = [.. root.Descendants("set-header").Where(h => (string?)h.Attribute("name") == "x-rp-gw-cache").Select(h => h.Value.Trim())];
         values.Should().BeEquivalentTo("miss", "hit", "bypass", "bypass");
         string all = Module("apim-openai-semantic-cache-outbound.xml") + Module("apim-openai-semantic-cache-inbound.xml");
         all.Should().NotContain("<value>unavailable</value>");
         // A hit is only claimed when the post-lookup backend marker never ran.
-        root.Descendants("when").Skip(1).First().Attribute("condition")!.Value.Should().Contain("!context.Variables.ContainsKey(\"rp-backend-start\")");
+        choices[1].Elements("when").Skip(1).First().Attribute("condition")!.Value.Should().Contain("!context.Variables.ContainsKey(\"rp-backend-start\")");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("false")]
+    [InlineData("true")]
+    public void CacheHit_ResumesAfterStore_AndOverwritesCachedMissWithoutBackendOrFreshSafety(string? outputChecked)
+    {
+        var execution = new OutboundExecution("eligible", 200, false, outputChecked);
+        execution.Headers["x-rp-gw-cache"] = "miss";
+        execution.Headers["apim-request-id"] = "130d3fee-5938-4407-81a3-cdaeb72acb80";
+        string[] safetyHeaders = [.. GatewayEvidenceHeaders.AllNames.Where(n => n.StartsWith("x-rp-gw-safety", StringComparison.Ordinal))];
+        foreach (string header in safetyHeaders)
+            execution.Headers[header] = "stale";
+        execution.Headers[GatewayEvidenceHeaders.Safety] = "passed";
+        execution.Headers[GatewayEvidenceHeaders.SafetyPhase] = "output";
+        execution.Headers[GatewayEvidenceHeaders.SafetyDecision] = "allow";
+        execution.Headers[GatewayEvidenceHeaders.SafetyLatencyMs] = "230";
+        execution.Headers[GatewayEvidenceHeaders.SafetyOutputChecked] = "true";
+        XElement store = Outbound().Descendants("llm-semantic-cache-store").Single();
+
+        // APIM resumes inside the already-selected store branch; it does not select that branch again.
+        execution.ResumeAfter(store);
+
+        execution.Headers["x-rp-gw-cache"].Should().Be("hit");
+        execution.Headers.Should().NotContainKey("x-rp-gw-cache-reason");
+        execution.Stores.Should().Be(0);
+        execution.Headers["apim-request-id"].Should().Be(execution.RequestId.ToString());
+        foreach (string header in safetyHeaders)
+            execution.Headers.Should().NotContainKey(header, "cached safety evidence is not a fresh evaluation");
+        GatewayCallEvidence parsed = GatewayEvidenceHeaders.Parse(n => execution.Headers.GetValueOrDefault(n), 200);
+        parsed.Cache.Should().Be(GatewayOutcome.Hit);
+        parsed.Safety.Should().Be(GatewayOutcome.Unknown);
+        parsed.GatewaySafety.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("eligible", 200, true, "true", "miss", null, 1)]
+    [InlineData("eligible", 200, true, "false", "bypass", "unsafe", 0)]
+    [InlineData("eligible", 200, true, null, "bypass", "unsafe", 0)]
+    [InlineData("eligible", 500, true, "true", "bypass", "failed", 0)]
+    [InlineData("eligible", 429, false, null, "bypass", "failed", 0)]
+    [InlineData("regulated", 200, true, "true", "bypass", "regulated", 0)]
+    [InlineData("dynamic-intent", 200, true, "true", "bypass", "dynamic-intent", 0)]
+    [InlineData("sensitive-intent", 200, true, "true", "bypass", "sensitive-intent", 0)]
+    public void OutboundExecution_PreservesStoreGatesAndFailureEvidence(
+        string decision, int status, bool backendStarted, string? outputChecked,
+        string outcome, string? reason, int stores)
+    {
+        var execution = new OutboundExecution(decision, status, backendStarted, outputChecked);
+        execution.Headers[GatewayEvidenceHeaders.SafetyOutputChecked] = outputChecked ?? "false";
+        execution.Run(Outbound().Elements());
+
+        execution.Stores.Should().Be(stores);
+        execution.Headers["x-rp-gw-cache"].Should().Be(outcome);
+        execution.Headers[GatewayEvidenceHeaders.SafetyOutputChecked].Should().Be(outputChecked ?? "false",
+            "non-hit paths retain their actual safety evidence");
+        if (reason is null)
+            execution.Headers.Should().NotContainKey("x-rp-gw-cache-reason");
+        else
+            execution.Headers["x-rp-gw-cache-reason"].Should().Be(reason);
+    }
+
+    // Only interprets the outbound fragment's explicit expression subset; unknown syntax fails the test.
+    private sealed class OutboundExecution(string decision, int status, bool backendStarted, string? outputChecked)
+    {
+        public Dictionary<string, string> Headers { get; } = [];
+        public int Stores { get; private set; }
+        public Guid RequestId { get; } = Guid.Parse("bd9a0304-3a23-445c-9e25-ac4c5edd81f9");
+
+        public void ResumeAfter(XElement store)
+        {
+            for (XElement? cursor = store; cursor?.Parent is not null; cursor = cursor.Parent)
+            {
+                if (cursor.Parent.Name != "choose")
+                    Run(cursor.ElementsAfterSelf());
+            }
+        }
+
+        public void Run(IEnumerable<XElement> elements)
+        {
+            foreach (XElement element in elements)
+            {
+                switch (element.Name.LocalName)
+                {
+                    case "choose":
+                        XElement? branch = element.Elements().FirstOrDefault(e =>
+                            e.Name == "otherwise" || Condition(e.Attribute("condition")!.Value));
+                        if (branch is not null)
+                            Run(branch.Elements());
+                        break;
+                    case "llm-semantic-cache-store":
+                        Stores++;
+                        break;
+                    case "set-header":
+                        string name = element.Attribute("name")!.Value;
+                        string action = element.Attribute("exists-action")!.Value;
+                        if (action == "delete")
+                        {
+                            Headers.Remove(name);
+                        }
+                        else
+                        {
+                            action.Should().Be("override");
+                            Headers[name] = Value(element.Element("value")!.Value);
+                        }
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Unsupported outbound policy: {element.Name}");
+                }
+            }
+        }
+
+        private bool Condition(string expression)
+        {
+            expression.Should().StartWith("@(").And.EndWith(")");
+            return expression[2..^1].Split(" && ", StringSplitOptions.None).All(term => term switch
+            {
+                "((string)context.Variables[\"rp-cache-decision\"]) == \"eligible\"" => decision == "eligible",
+                "context.Response.StatusCode == 200" => status == 200,
+                "context.Variables.ContainsKey(\"rp-backend-start\")" => backendStarted,
+                "!context.Variables.ContainsKey(\"rp-backend-start\")" => !backendStarted,
+                "context.Variables.ContainsKey(\"rp-safety-output-checked\")" => outputChecked is not null,
+                "((string)context.Variables[\"rp-safety-output-checked\"]) == \"true\"" => outputChecked == "true",
+                _ => throw new InvalidOperationException($"Unsupported outbound condition: {term}")
+            });
+        }
+
+        private string Value(string expression) => expression switch
+        {
+            "hit" or "miss" or "bypass" => expression,
+            "@(context.Response.StatusCode == 200 ? \"unsafe\" : \"failed\")" => status == 200 ? "unsafe" : "failed",
+            "@((string)context.Variables[\"rp-cache-decision\"])" => decision,
+            "@(context.RequestId.ToString())" => RequestId.ToString(),
+            _ => throw new InvalidOperationException($"Unsupported outbound header value: {expression}")
+        };
     }
 
     [Fact]

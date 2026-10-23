@@ -18,6 +18,7 @@ using RetailPulse.Api.Security.GitHub;
 
 namespace RetailPulse.Tests.Packs;
 
+[Collection("ContentSafetyStartup")]
 public sealed class PackHostStartupTests
 {
     public static IEnumerable<object[]> PackAuthMatrix()
