@@ -227,6 +227,19 @@ public sealed partial class IntegratedGatewayAcceptanceTests
         Contains("api-center-mcp-discovery", output, "Self-test passed.", "Verify-ApiCenter.ps1 -SelfTest output");
         Invariant("api-center-mcp-discovery", !output.Contains("[FAIL]", StringComparison.Ordinal), $"self-test reported a failure: {output}");
         Contains("api-center-mcp-discovery", output, "[PASS] self-test: generated-ID synchronized graph passes", "Verify-ApiCenter.ps1 -SelfTest output");
+        foreach (string probe in new[]
+        {
+            "syncing with complete graph passes", "syncing with missing API is pending",
+            "syncing with partial definitions is pending", "syncing with wrong endpoint fails",
+            "syncing with extra tool fails", "initializing with complete graph stays pending",
+            "error with complete graph fails", "deleting with complete graph fails",
+            "missing state with complete graph fails", "unknown state with complete graph fails",
+            "link error takes precedence over incomplete graph",
+            "link-state timestamp and catalog readiness are distinct",
+        })
+        {
+            Contains("api-center-mcp-discovery", output, $"[PASS] self-test: {probe}", "Verify-ApiCenter.ps1 -SelfTest output");
+        }
 
         Contains("api-center-mcp-discovery", Read("infra", "modules", "apim-mcp-api.bicep"), "subscriptionRequired", "infra/modules/apim-mcp-api.bicep");
         Invariant("api-center-mcp-discovery", File.Exists(Path.Combine(Root, "infra", "modules", "api-center.bicep")), "infra/modules/api-center.bicep is missing");
