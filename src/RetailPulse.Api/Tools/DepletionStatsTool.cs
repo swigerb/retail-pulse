@@ -32,7 +32,7 @@ public class DepletionStatsTool
         catch (Exception ex)
         {
             // Keep transport failures explicit so callers cannot mistake them for metrics.
-            _logger?.LogWarning(ex, "DepletionStatsTool failed for brand {Brand}/{Region}/{Period} — returning fallback", brand, region, period);
+            _logger?.LogWarning(ex, "DepletionStatsTool failed for brand {Brand}/{Region}/{Period} — returning explicit error", brand, region, period);
             return JsonSerializer.Serialize(new
             {
                 brand,

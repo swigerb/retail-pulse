@@ -63,7 +63,7 @@ public class ToolTests
     }
 
     [Fact]
-    public async Task DepletionStatsTool_WhenServerUnreachable_ReturnsFallback()
+    public async Task DepletionStatsTool_WhenServerUnreachable_ReturnsExplicitError()
     {
         HttpClient httpClient = CreateFailingHttpClient();
         var tool = new DepletionStatsTool(httpClient);
@@ -80,7 +80,7 @@ public class ToolTests
     }
 
     [Fact]
-    public async Task DepletionStatsTool_WhenServerReturns500_ReturnsFallback()
+    public async Task DepletionStatsTool_WhenServerReturns500_ReturnsExplicitError()
     {
         HttpClient httpClient = CreateMockHttpClient(HttpStatusCode.InternalServerError, "Server Error");
         var tool = new DepletionStatsTool(httpClient);

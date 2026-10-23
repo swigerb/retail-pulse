@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Primitives;
 using Moq;
 using RetailPulse.Api.Agents;
 using RetailPulse.Api.Agents.Specialists;
@@ -46,10 +47,15 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
         SqliteTestCleanup.ReleaseAndDelete(_dbPath);
     }
 
-    [Fact]
-    public async Task CuratedFreshnessTask_UsesCanonicalSeededFiltersThroughConfiguredAgentPipeline()
+    [Theory]
+    [InlineData("Fresh Produce", "Heartland", "Produce", "YTD", 2,
+        "Which Fresh Produce items in the Heartland have fewer than two days of supply, and how is sell-through trending?")]
+    [InlineData("Dairy & Eggs", "Desert Basin", "Dairy", "Q1", 7,
+        "Which Dairy & Eggs items in the Desert Basin, category Dairy, have fewer than seven days of supply, and how is sell-through trending for Q1?")]
+    public async Task ScriptedToolCalls_PreserveFiltersThroughConfiguredAgentPipeline(
+        string brand, string region, string category, string period, double threshold, string userPrompt)
     {
-        const string expectedReply = "Both seeded Fresh Produce results were returned.";
+        const string expectedReply = "Both seeded tool results were returned.";
         var handler = new KrogerApiHandler(_db);
         using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://retailpulse.test") };
 
@@ -69,7 +75,7 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
             .Which.Prompt.Should().Be(
                 "Which Fresh Produce items in the Heartland have fewer than two days of supply, and how is sell-through trending?");
 
-        var toolRegistry = new AgentToolRegistry()
+        AgentToolRegistry toolRegistry = new AgentToolRegistry()
             .Register("GetHistoricalDemand", _ => AIFunctionFactory.Create(historicalDemandTool.GetHistoricalDemand))
             .Register("GetInventoryLevels", _ => AIFunctionFactory.Create(inventoryTool.GetInventoryLevels))
             .Register("GetDepletionStats", _ => AIFunctionFactory.Create(depletionStatsTool.GetDepletionStats));
@@ -78,13 +84,15 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
                      StringComparer.OrdinalIgnoreCase))
         {
             toolRegistry.Register(toolName, _ => AIFunctionFactory.Create(
-                () => "Not used by the curated freshness task.", toolName));
+                () => "Not used by the scripted freshness test.", toolName));
         }
 
         using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
         IReadOnlyList<AITool> tools = toolRegistry.Resolve(definition.Tools, services);
         IReadOnlyList<string> modelToolResults = [];
-        IChatClient model = CreateToolCallingClient(expectedReply, results => modelToolResults = results);
+        IChatClient model = CreateScriptedToolCallingClient(
+            brand, region, category, period, userPrompt, definition.SystemPrompt,
+            expectedReply, results => modelToolResults = results);
         using var functionClient = new FunctionInvokingChatClient(model)
         {
             MaximumIterationsPerRequest = 3
@@ -98,8 +106,7 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
         var agent = new ConfiguredSpecialistAgent(pipeline, definition, tools);
 
         ChatResponse response = await agent.HandleAsync(new ChatRequest(
-            _pack.StartingTasks.SelectMany(category => category.Tasks)
-                .Single(task => task.Name == "Produce days of supply").Prompt,
+            userPrompt,
             SessionId: "kroger-freshness-seeded-regression"));
 
         response.Reply.Should().Be(expectedReply);
@@ -107,23 +114,23 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
         modelToolResults.Should().HaveCount(2, "the specialist must receive both real tool results before synthesizing its reply");
 
         JsonElement inventory = handler.Results["/api/supply/inventory"];
-        inventory.GetProperty("filters_applied").GetProperty("brand").GetString().Should().Be("Fresh Produce");
-        inventory.GetProperty("filters_applied").GetProperty("region").GetString().Should().Be("Heartland");
-        inventory.GetProperty("filters_applied").GetProperty("category").GetString().Should().Be("Produce");
+        inventory.GetProperty("filters_applied").GetProperty("brand").GetString().Should().Be(brand);
+        inventory.GetProperty("filters_applied").GetProperty("region").GetString().Should().Be(region);
+        inventory.GetProperty("filters_applied").GetProperty("category").GetString().Should().Be(category);
         inventory.GetProperty("total_items").GetInt32().Should().BeGreaterThan(0);
         inventory.GetProperty("items").EnumerateArray().Should().OnlyContain(item =>
-            item.GetProperty("brand").GetString() == "Fresh Produce"
-            && item.GetProperty("region").GetString() == "Heartland"
-            && item.GetProperty("category").GetString() == "Produce");
+            item.GetProperty("brand").GetString() == brand
+            && item.GetProperty("region").GetString() == region
+            && item.GetProperty("category").GetString() == category);
         inventory.GetProperty("items").EnumerateArray()
-            .Should().Contain(item => item.GetProperty("days_of_supply").GetDouble() < 2,
-                "the exact curated threshold must match at least one seeded Fresh Produce item");
-        modelToolResults.Any(ContainsInventoryBelowThreshold).Should().BeTrue();
+            .Should().Contain(item => item.GetProperty("days_of_supply").GetDouble() < threshold,
+                "the requested threshold must match at least one seeded item in this fixture");
+        modelToolResults.Any(result => ContainsInventoryBelowThreshold(result, threshold)).Should().BeTrue();
 
         JsonElement depletion = handler.Results["/api/depletion-stats"];
-        depletion.GetProperty("brand").GetString().Should().Be("Fresh Produce");
-        depletion.GetProperty("region").GetString().Should().Be("Heartland");
-        depletion.GetProperty("period").GetString().Should().Be("YTD");
+        depletion.GetProperty("brand").GetString().Should().Be(brand);
+        depletion.GetProperty("region").GetString().Should().Be(region);
+        depletion.GetProperty("period").GetString().Should().Be(period);
         depletion.TryGetProperty("error", out _).Should().BeFalse();
         depletion.GetProperty("metrics").GetProperty("sell_through_yoy").GetString()
             .Should().MatchRegex(@"^[+-]\d+\.\d+%$");
@@ -147,7 +154,14 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
         depletion.RootElement.TryGetProperty("metrics", out _).Should().BeFalse();
     }
 
-    private static IChatClient CreateToolCallingClient(
+    // Calls and final prose are scripted: this proves wiring and seed availability, not model adherence.
+    private static IChatClient CreateScriptedToolCallingClient(
+        string brand,
+        string region,
+        string category,
+        string period,
+        string userPrompt,
+        string systemPrompt,
         string finalReply,
         Action<IReadOnlyList<string>> onSynthesis)
     {
@@ -161,6 +175,8 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
             {
                 if (Interlocked.Increment(ref requestCount) == 1)
                 {
+                    messages.Should().Contain(message => message.Role == ChatRole.User && message.Text == userPrompt);
+                    messages.Should().Contain(message => message.Role == ChatRole.System && message.Text.Contains(systemPrompt));
                     return new Microsoft.Extensions.AI.ChatResponse(new ChatMessage(ChatRole.Assistant,
                     [
                         new FunctionCallContent(
@@ -168,18 +184,18 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
                             "GetInventoryLevels",
                             new Dictionary<string, object?>
                             {
-                                ["brand"] = "Fresh Produce",
-                                ["region"] = "Heartland",
-                                ["category"] = "Produce"
+                                ["brand"] = brand,
+                                ["region"] = region,
+                                ["category"] = category
                             }),
                         new FunctionCallContent(
                             "demand-call",
                             "GetDepletionStats",
                             new Dictionary<string, object?>
                             {
-                                ["brand"] = "Fresh Produce",
-                                ["region"] = "Heartland",
-                                ["period"] = "YTD"
+                                ["brand"] = brand,
+                                ["region"] = region,
+                                ["period"] = period
                             })
                     ]));
                 }
@@ -201,11 +217,11 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
         return client.Object;
     }
 
-    private static bool ContainsInventoryBelowThreshold(string result)
+    private static bool ContainsInventoryBelowThreshold(string result, double threshold)
     {
         using var document = JsonDocument.Parse(result);
         return document.RootElement.TryGetProperty("items", out JsonElement items)
-            && items.EnumerateArray().Any(item => item.GetProperty("days_of_supply").GetDouble() < 2);
+            && items.EnumerateArray().Any(item => item.GetProperty("days_of_supply").GetDouble() < threshold);
     }
 
     private static bool ContainsSellThroughMetric(string result)
@@ -227,7 +243,7 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
             Uri uri = request.RequestUri
                 ?? throw new InvalidOperationException("The test API request did not include a URI.");
             Requests.Enqueue(uri);
-            var query =
+            Dictionary<string, StringValues> query =
                 QueryHelpers.ParseQuery(uri.Query);
 
             object result = uri.AbsolutePath switch
