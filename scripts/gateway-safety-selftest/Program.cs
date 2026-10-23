@@ -167,7 +167,7 @@ public static class Program
         if (!ok) { failures++; Console.WriteLine($"FAIL [{scenario}] {what}"); }
     }
 
-    static void Expect(Scenario s, int status, string decision, string? outChecked = null, bool? modelCalled = null, string? safety = null, int? csCalls = null)
+    static void Expect(Scenario s, int status, string decision, string? outChecked = null, bool? modelCalled = null, string? safety = null, int? csCalls = null, string? outputReason = null)
     {
         var r = Execute(s);
         Check(s.Name, r.Status == status, $"status {r.Status} != {status}");
@@ -176,6 +176,7 @@ public static class Program
         if (modelCalled != null) Check(s.Name, r.ModelCalled == modelCalled, $"modelCalled {r.ModelCalled} != {modelCalled}");
         if (safety != null) Check(s.Name, r.H("x-rp-gw-safety") == safety, $"x-rp-gw-safety '{r.H("x-rp-gw-safety")}' != '{safety}'");
         if (csCalls != null) Check(s.Name, r.CsCalls.Count == csCalls, $"cs calls {r.CsCalls.Count} != {csCalls}");
+        if (outputReason != null) Check(s.Name, r.H("x-rp-gw-safety-output-reason") == outputReason, $"output reason '{r.H("x-rp-gw-safety-output-reason")}' != '{outputReason}'");
         if (status >= 400 && !r.ModelCalled)
         {
             string wire = r.Body + string.Join("|", r.Headers.Select(h => h.Key + h.Value));
@@ -269,12 +270,23 @@ public static class Program
         }
         Expect(S("closed:output-not-json", benign, OkShield, OkAnalyze, s => s.ModelBody = "<html/>"), 503, "block", "false", true, "blocked");
         Expect(S("closed:output-no-choices", benign, OkShield, OkAnalyze, s => s.ModelBody = "{\"id\":\"x\"}"), 503, "block", "false", true, "blocked");
+        Expect(S("closed:output-empty-choices", benign, OkShield, OkAnalyze, s => s.ModelBody = "{\"choices\":[]}"), 503, "block", "false", true, "blocked", 2, "unavailable");
+        Expect(S("closed:output-no-message", benign, OkShield, OkAnalyze, s => s.ModelBody = "{\"choices\":[{}]}"), 503, "block", "false", true, "blocked", 2, "unavailable");
+        Expect(S("output:tool-only", benign, OkShield, OkAnalyze, s => s.ModelBody = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"type\":\"function\",\"function\":{\"name\":\"inventory\",\"arguments\":\"{}\"}}]}}]}"),
+            200, "allow", "false", true, "", 2, "no-text");
+        Expect(S("output:stream-reason", benign.TrimEnd('}') + ",\"stream\":true}", OkShield, OkAnalyze),
+            200, "allow", "false", true, "", 2, "streaming");
+        Expect(S("output:checked-reason", benign, OkShield, OkAnalyze),
+            200, "allow", "true", true, "passed", 3, "unknown");
+        Expect(S("output:unavailable-reason", benign, OkShield, OkAnalyze,
+            s => s.Cs = (u, b) => u.Contains("shieldPrompt") ? OkShield : b.Contains("Q3 sales were") ? new Cs(503, "") : OkAnalyze),
+            200, "allowed_on_safety_error", "false", true, "", 3, "unavailable");
         // empty completion (e.g. tool-call only): nothing to analyse -> never claim checked/passed
         var emp = Execute(S("output:empty", benign, OkShield, OkAnalyze, s => s.ModelBody = Out("")));
-        Check("output:empty", emp.Status == 200 && emp.H("x-rp-gw-safety-output-checked") == "false" && emp.H("x-rp-gw-safety") != "passed", "empty output must not be reported as checked/passed");
+        Check("output:empty", emp.Status == 200 && emp.H("x-rp-gw-safety-output-checked") == "false" && emp.H("x-rp-gw-safety") != "passed" && emp.H("x-rp-gw-safety-output-reason") == "no-text", "empty output must report no-text, not checked/passed");
         // non-200 model responses are not analysed and never claim output-checked
         var m500 = Execute(S("output:model-500", benign, OkShield, OkAnalyze, s => { s.ModelStatus = 500; s.ModelBody = "{}"; }));
-        Check("output:model-500", m500.H("x-rp-gw-safety-output-checked") == "false" && m500.H("x-rp-gw-safety") != "passed", "non-200 must not claim output checked");
+        Check("output:model-500", m500.H("x-rp-gw-safety-output-checked") == "false" && m500.H("x-rp-gw-safety") != "passed" && m500.H("x-rp-gw-safety-output-reason") == "backend-error", "non-200 must report backend-error, not output checked");
         // 9. no payload leakage anywhere in evidence
         var leak = Execute(S("leak", Chat(("user", Secret)), OkShield, OkAnalyze, s => s.ModelBody = Out(Secret)));
         Check("leak", !string.Join("|", leak.Headers.Select(h => h.Key + "=" + h.Value)).Contains(Secret), "payload leaked into evidence headers");

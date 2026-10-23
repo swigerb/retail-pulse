@@ -143,7 +143,7 @@ var safetyInboundFragment = gatewaySafetyEnabled
   : ''
 var safetyOutboundFragment = gatewaySafetyEnabled
   ? replace(replace(replace(loadTextContent('apim-openai-safety-outbound.xml'), '{cs-endpoint}', safetyEndpointNormalized), '{safety-mode}', effectiveSafetyMode), '{severity-threshold}', string(gatewaySafetySeverityThreshold))
-  : ''
+  : '        <set-header name="x-rp-gw-safety" exists-action="override"><value>not-applicable</value></set-header>'
 
 var semanticCachePartitionChars = map(range(0, length(semanticCachePartition)), i => substring(semanticCachePartition, i, 1))
 var semanticCachePartitionValid = length(semanticCachePartition) >= 1 && length(semanticCachePartition) <= 63 && empty(filter(semanticCachePartitionChars, c => !contains('abcdefghijklmnopqrstuvwxyz0123456789-', c))) && !startsWith(semanticCachePartition, '-')
@@ -154,7 +154,7 @@ var semanticCacheInboundFragment = semanticCachePolicyActive
   : ''
 var semanticCacheOutboundFragment = semanticCachePolicyActive
   ? replace(loadTextContent('apim-openai-semantic-cache-outbound.xml'), '{cache-ttl}', string(semanticCacheTtlSeconds))
-  : ''
+  : '        <set-header name="x-rp-gw-cache" exists-action="override"><value>disabled</value></set-header>'
 
 var poolEnabled = backendPoolEnabled
 var primaryBackendName = 'retail-pulse-foundry'
@@ -169,7 +169,7 @@ var budgetLimitFragment = replace(
   '{tokens-per-minute}',
   string(tokensPerMinute))
 var inferencePolicyBudgeted = replace(loadTextContent('apim-openai-policy.xml'), '{budget-limit}', budgetLimitFragment)
-var inferencePolicyBase = replace(replace(inferencePolicyBudgeted, '{semantic-cache-inbound}', semanticCacheInboundFragment), '{semantic-cache-outbound}', semanticCacheOutboundFragment)
+var inferencePolicyBase = replace(replace(replace(inferencePolicyBudgeted, '{semantic-cache-inbound}', semanticCacheInboundFragment), '{semantic-cache-outbound}', semanticCacheOutboundFragment), '{backend-kind}', poolEnabled ? 'pool' : 'backend')
 
 var failoverDemoActive = failoverDemoEnabled && poolEnabled && length(failoverDemoKey) >= 32
 

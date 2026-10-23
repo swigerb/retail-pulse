@@ -35,6 +35,42 @@ public sealed class GatewayEvidenceTests
     }
 
     [Fact]
+    public void ExplicitDisabled_IsCacheOnly_AndMissingEvidenceStaysUnknown()
+    {
+        GatewayCallEvidence e = Parse(new()
+        {
+            [GatewayEvidenceHeaders.Cache] = "disabled",
+            [GatewayEvidenceHeaders.Quota] = "disabled",
+            [GatewayEvidenceHeaders.Safety] = "disabled",
+            [GatewayEvidenceHeaders.BackendKind] = "pool",
+        });
+        e.Cache.Should().Be(GatewayOutcome.Disabled);
+        e.Quota.Should().Be(GatewayOutcome.Unknown);
+        e.Safety.Should().Be(GatewayOutcome.Unknown);
+        e.Route.Should().Be(GatewayRouteState.Unknown);
+        e.BackendKind.Should().Be(GatewayBackendKind.Pool);
+        Parse([]).Cache.Should().Be(GatewayOutcome.Unknown);
+    }
+
+    [Theory]
+    [InlineData("no-text", GatewayOutputCheckReason.NoText)]
+    [InlineData("streaming", GatewayOutputCheckReason.Streaming)]
+    [InlineData("backend-error", GatewayOutputCheckReason.BackendError)]
+    [InlineData("unavailable", GatewayOutputCheckReason.Unavailable)]
+    [InlineData("untrusted text", GatewayOutputCheckReason.Unknown)]
+    public void OutputReasons_AreAllowlisted_AndNeverImplyACheck(string raw, GatewayOutputCheckReason expected)
+    {
+        GatewayCallEvidence e = Parse(new()
+        {
+            [GatewayEvidenceHeaders.SafetyPhase] = "input",
+            [GatewayEvidenceHeaders.SafetyDecision] = "allow",
+            [GatewayEvidenceHeaders.SafetyOutputReason] = raw,
+        });
+        e.GatewaySafety!.OutputCheckReason.Should().Be(expected);
+        e.GatewaySafety.OutputChecked.Should().BeNull();
+    }
+
+    [Fact]
     public void Parse_NoHeaders_YieldsExplicitUnknownNotSuccess()
     {
         GatewayCallEvidence e = Parse([]);

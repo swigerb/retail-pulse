@@ -48,8 +48,9 @@ public sealed class GatewayErrorShaperTests
         using var doc = JsonDocument.Parse(json);
         JsonElement safety = doc.RootElement.GetProperty("gateway").GetProperty("calls")[0].GetProperty("gatewaySafety");
         safety.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            "phase", "decision", "promptAttack", "category", "severity", "mode", "latencyMs", "outputChecked");
+            "phase", "decision", "promptAttack", "category", "severity", "mode", "latencyMs", "outputChecked", "outputCheckReason");
         safety.GetProperty("decision").GetString().Should().Be("block");
+        safety.GetProperty("outputCheckReason").GetString().Should().Be("unknown");
     }
 
     [Fact]

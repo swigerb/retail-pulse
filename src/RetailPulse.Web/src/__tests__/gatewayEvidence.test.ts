@@ -36,9 +36,19 @@ describe('normalizeGatewayEvidence', () => {
       calls: [{ status: 'blocked', gatewaySafety: { phase: 'input', decision: 'block', promptAttack: true, category: 'Violence', severity: 4, mode: 'regulated', latencyMs: 12, outputChecked: false, prompt: 'secret text' } }],
     });
     expect(e?.calls[0].gatewaySafety).toEqual({
-      phase: 'input', decision: 'block', promptAttack: true, category: 'Violence', severity: 4, mode: 'regulated', latencyMs: 12, outputChecked: false,
+      phase: 'input', decision: 'block', promptAttack: true, category: 'Violence', severity: 4, mode: 'regulated', latencyMs: 12, outputChecked: false, outputCheckReason: 'unknown',
     });
     expect(JSON.stringify(e)).not.toContain('secret text');
+  });
+
+  it('preserves explicit disabled cache, pool and output reason without inferring route or checks', () => {
+    const g = normalizeGatewayEvidence({ status: 'observed', calls: [{
+      cache: 'disabled', backendKind: 'pool',
+      gatewaySafety: { phase: 'output', decision: 'allow', outputChecked: false, outputCheckReason: 'no-text' },
+    }, { backendKind: 'untrusted', gatewaySafety: { phase: 'input', decision: 'allow', outputCheckReason: 'secret text' } }] });
+    expect(g?.calls[0]).toMatchObject({ cache: 'disabled', backendKind: 'pool', route: 'unknown', gatewaySafety: { outputChecked: false, outputCheckReason: 'no-text' } });
+    expect(g?.calls[1]).toMatchObject({ cache: 'unknown', backendKind: 'unknown', gatewaySafety: { outputChecked: null, outputCheckReason: 'unknown' } });
+    expect(JSON.stringify(g)).not.toContain('secret text');
   });
 
   it('never fabricates safety evidence from unknown phase/decision or free-text category', () => {
