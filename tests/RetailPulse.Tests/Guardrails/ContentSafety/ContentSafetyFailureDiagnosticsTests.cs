@@ -68,7 +68,7 @@ public sealed class ContentSafetyFailureDiagnosticsTests
 
         result.Decision.Should().Be(ContentSafetyDecision.ServiceUnavailable);
         result.FailureReason.Should().Be(reason);
-        var entry = logger.Entries.Should().ContainSingle().Subject;
+        (LogLevel Level, string Message, Exception? Exception, Dictionary<string, object?> Fields) entry = logger.Entries.Should().ContainSingle().Subject;
         entry.Level.Should().Be(LogLevel.Warning);
         entry.Exception.Should().BeNull("an SDK exception can embed the entire response body");
         entry.Fields["Stage"].Should().Be(ContentSafetyStage.AgentDefinition);
@@ -104,7 +104,7 @@ public sealed class ContentSafetyFailureDiagnosticsTests
             new ContentSafetyEvaluationContext(UserId: "startup-validator", CheckPromptShield: true), CancellationToken.None);
 
         result.FailureReason.Should().Be(ContentSafetyFailureReason.Transport);
-        var entry = logger.Entries.Should().ContainSingle().Subject;
+        (LogLevel Level, string Message, Exception? Exception, Dictionary<string, object?> Fields) entry = logger.Entries.Should().ContainSingle().Subject;
         entry.Fields["Operation"].Should().Be("PromptShield");
         entry.Fields["Status"].Should().BeNull();
         entry.Fields["HttpRequestError"].Should().Be(HttpRequestError.ConnectionError);
@@ -131,7 +131,7 @@ public sealed class ContentSafetyFailureDiagnosticsTests
         await service.WarmAsync(CancellationToken.None);
 
         handler.CallCount.Should().Be(2);
-        var entry = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        (LogLevel Level, string Message, Exception? Exception, Dictionary<string, object?> Fields) entry = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
         entry.Fields["Attempts"].Should().Be(2);
         entry.Fields["ExceptionType"].Should().Be("HttpRequestException");
         entry.Exception.Should().BeNull();

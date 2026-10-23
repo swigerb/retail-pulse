@@ -26,7 +26,8 @@ namespace RetailPulse.Tests.Guardrails.ContentSafety;
 
 public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
 {
-    [Theory]
+    [LinuxOpenSslTheory]
+    [Trait("Category", "LinuxOpenSslIntegration")]
     [InlineData(true, false, false)]
     [InlineData(true, true, false)]
     [InlineData(false, true, false)]
@@ -77,6 +78,7 @@ public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
                 });
                 return;
             }
+
             if (path == "/" && context.Request.Method == "GET")
             {
                 Interlocked.Increment(ref roots);
@@ -249,9 +251,12 @@ public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
                 logs.Should().Contain("Operation=PromptShield")
                     .And.Contain("FailureReason=Transport");
                 if (refused)
+                {
                     logs.Should().Contain("agent='general' field='SystemPrompt'")
                         .And.Contain("safety.content-safety-unavailable")
                         .And.Contain("connection failed before a response");
+                }
+
                 if (!persistent)
                     logs.Should().Contain($"with {(regulated ? 1 : 0)} violation(s)");
             }
@@ -321,6 +326,19 @@ public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
                 if (!string.IsNullOrWhiteSpace(text))
                     yield return (definition.Key, field, text);
             }
+        }
+    }
+}
+
+public sealed class LinuxOpenSslTheoryAttribute : TheoryAttribute
+{
+    public LinuxOpenSslTheoryAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "Linux/OpenSSL integration test: the child process requires SSL_CERT_FILE PEM trust. " +
+                "Windows Schannel and macOS native trust do not use this fixture's per-process trust file. " +
+                "Run ContentSafetyStartupHostTests on Linux (.NET 10), as required by the Linux CI job.";
         }
     }
 }

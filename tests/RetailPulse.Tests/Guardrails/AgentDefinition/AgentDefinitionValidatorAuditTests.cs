@@ -116,7 +116,7 @@ public class AgentDefinitionValidatorAuditTests
         const string body = "SYNTHETIC-PROMPT-BODY-NOT-FOR-LOGGING";
         AgentDefinition def = ValidatorTestHarness.MakeAgent("closed", d => d.SystemPrompt = body);
         var evaluator = new FakeContentSafetyEvaluator { DefaultResult = ContentSafetyResult.Unavailable(reason) };
-        var (validator, audit, _, logger) = ValidatorTestHarness.Build(
+        (AgentDefinitionValidator? validator, Api.Guardrails.InMemorySuspiciousRequestLog? audit, FakeContentSafetyEvaluator _, TestLogger<AgentDefinitionValidator>? logger) = ValidatorTestHarness.Build(
             ValidatorTestHarness.DefaultConfig(onUnavailable: ContentSafetyFailPolicy.FailClosed), evaluator);
 
         AgentDefinitionValidationException exception = (await FluentActions

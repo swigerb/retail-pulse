@@ -246,6 +246,28 @@ regulated refusal cases (2/4 host cases failed); skipping the definition whose
 effective key is `general` reduced the scan to 68 fields and failed all four host
 cases. Both mutations were removed before the final regression run.
 
+### Host-test platform prerequisite
+
+The four `ContentSafetyStartupHostTests` cases are explicitly categorized
+`LinuxOpenSslIntegration`. They require Linux, the .NET 10 SDK/runtime, OpenSSL
+certificate validation honoring `SSL_CERT_FILE`, and available loopback HTTP/TLS
+ports. Run the following from the repository root on Linux (including Linux CI
+or an appropriately configured WSL/Linux container checkout):
+
+```sh
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj --configuration Release --filter FullyQualifiedName~ContentSafetyStartupHostTests
+```
+
+The existing Ubuntu `Build & Test (.NET)` CI job runs these cases through the
+full suite; an unsupported-host skip is not a substitute for that Linux result.
+Windows Schannel and macOS native trust do not use this fixture's temporary PEM
+as their process-local trust root. On those platforms the four cases are
+**visibly skipped at discovery with a prerequisite reason**, not reported as
+passed and not allowed to fail later as misleading token timeouts. Portable
+evaluator, validator, fail-policy and diagnostic tests continue to run normally.
+No system/current-user trust store is modified, TLS verification is not disabled,
+and no production hook or transport configuration is introduced.
+
 **Remaining blocker.** Issue #337 remains open. A future, separately authorized
 bounded activation must collect these startup phase/status/error diagnostics
 at a pinned deployed revision to distinguish token, POST transport, SDK moderation,
