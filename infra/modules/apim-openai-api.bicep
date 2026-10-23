@@ -481,7 +481,7 @@ resource apiAppInsightsDiagnostics 'Microsoft.ApiManagement/service/apis/diagnos
     // #331: with gateway safety on, no request/response body or LLM message content may be captured
     // (prompts and completions are what the gateway inspects); metadata and token metrics still flow.
     verbosity: 'information'
-    logClientIp: true
+    logClientIp: !regulatedRetailMode
     frontend: {
       request: {
         body: {
@@ -524,7 +524,7 @@ resource apiAzureMonitorDiagnostics 'Microsoft.ApiManagement/service/apis/diagno
       samplingType: 'fixed'
       percentage: 100
     }
-    logClientIp: true
+    logClientIp: !regulatedRetailMode
     #disable-next-line BCP037
     largeLanguageModel: {
       logs: bodiesDisabled ? 'disabled' : 'enabled'

@@ -165,6 +165,72 @@ public sealed partial class CompiledArmDeploymentGraphTests : IDisposable
     }
 
     [Fact]
+    public void CompiledArmTemplate_DisablesClientIpLoggingOnlyInRegulatedMode()
+    {
+        JsonElement? compiled = TryCompileMainBicep();
+        if (compiled is null)
+        {
+            Environment.GetEnvironmentVariable("CI").Should().NotBe("true",
+                "CI must compile infra/main.bicep; a missing or unusable az/Bicep tool cannot silently skip the diagnostics proof");
+            return;
+        }
+
+        JsonElement template = compiled.Value.GetProperty("resources")
+            .GetProperty("apimOpenAiApi")
+            .GetProperty("properties")
+            .GetProperty("template");
+        JsonElement resources = template.GetProperty("resources");
+        template.GetProperty("parameters").GetProperty("regulatedRetailMode").GetProperty("defaultValue")
+            .GetBoolean().Should().BeFalse("normal mode remains the default");
+        template.GetProperty("variables").GetProperty("bodiesDisabled").GetString()
+            .Should().Contain("parameters('regulatedRetailMode')",
+                "regulated mode must continue to disable request-body and LLM-message capture");
+
+        foreach (string name in new[] { "apiAppInsightsDiagnostics", "apiAzureMonitorDiagnostics" })
+        {
+            JsonElement diagnostic = resources.GetProperty(name);
+            JsonElement properties = diagnostic.GetProperty("properties");
+            string expression = properties.GetProperty("logClientIp").GetString()!;
+            expression.Should().Be("[not(parameters('regulatedRetailMode'))]",
+                $"{name} must compile the regulated-mode toggle into the diagnostic property");
+            EvaluateClientIpLogging(expression, regulatedRetailMode: false).Should().BeTrue(
+                $"{name} must retain client IP logging in normal mode");
+            EvaluateClientIpLogging(expression, regulatedRetailMode: true).Should().BeFalse(
+                $"{name} must disable client IP logging in regulated mode");
+            properties.GetProperty("sampling").GetProperty("percentage").GetInt32().Should().Be(100);
+
+            if (name == "apiAppInsightsDiagnostics")
+            {
+                properties.GetProperty("loggerId").GetString().Should().Contain("appinsights-logger");
+                properties.GetProperty("metrics").GetBoolean().Should().BeTrue(
+                    "token metrics must remain routed to Application Insights");
+                properties.GetProperty("frontend").GetProperty("request").GetProperty("body").GetProperty("bytes")
+                    .GetString().Should().Contain("variables('bodiesDisabled')");
+                properties.GetProperty("backend").GetProperty("request").GetProperty("body").GetProperty("bytes")
+                    .GetString().Should().Contain("variables('bodiesDisabled')");
+            }
+            else
+            {
+                properties.GetProperty("loggerId").GetString().Should().Contain("azuremonitor");
+                properties.GetProperty("alwaysLog").GetString().Should().Be("allErrors");
+                properties.GetProperty("largeLanguageModel").GetProperty("logs").GetString()
+                    .Should().Contain("variables('bodiesDisabled')");
+                properties.GetProperty("largeLanguageModel").GetProperty("requests").GetProperty("messages")
+                    .GetString().Should().Be("all");
+                properties.GetProperty("largeLanguageModel").GetProperty("responses").GetProperty("messages")
+                    .GetString().Should().Be("all");
+            }
+        }
+    }
+
+    private static bool EvaluateClientIpLogging(string expression, bool regulatedRetailMode)
+    {
+        expression.Should().Be("[not(parameters('regulatedRetailMode'))]",
+            "only the compiled regulated-mode expression is supported by this focused contract");
+        return !regulatedRetailMode;
+    }
+
+    [Fact]
     public void CompiledArmTemplate_WiresGatewaySafetyRoleAndPolicyFragmentsBehindDisabledDefault()
     {
         JsonElement? compiled = TryCompileMainBicep();
