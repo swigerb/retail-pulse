@@ -12,13 +12,13 @@ namespace RetailPulse.Api.Guardrails.ContentSafety;
 /// <para>
 /// Warming the token alone was measurably not enough. ADR-016 primed the credential
 /// and the cold-start fail-open burst fell from four audit rows to one, but the
-/// survivor was a transport failure, "the connection failed before a response"
-/// (issue #273). With a warm token the first scan was still the call paying DNS,
-/// TCP and the TLS handshake inside its own scan budget, so the handshake is moved
-/// here too, off the scan's critical path.
+/// survivor was classified as a transport failure, "the connection failed before
+/// a response" (issue #273). Warming the pool can move DNS, TCP and TLS work off
+/// the scan's critical path, but that classification alone does not prove why
+/// an authenticated scan failed.
 /// </para>
 /// <para>
-/// One warm-up request covers both evaluator paths. The Prompt Shields raw path and
+/// The warm-up targets both evaluator paths. The Prompt Shields raw path and
 /// the SDK moderation path are deliberately registered against the same named
 /// <see cref="HttpClient"/>, so they share a single connection pool.
 /// </para>
@@ -127,7 +127,8 @@ internal sealed class ContentSafetyWarmUpService : IHostedService
         catch (Exception ex)
         {
             // Warm-up is best-effort. A failure here must never surface at startup.
-            _logger.LogWarning(ex, "Content Safety token warm-up failed unexpectedly.");
+            _logger.LogWarning("Content Safety token warm-up failed unexpectedly (ExceptionType={ExceptionType}).",
+                ex.GetType().Name);
         }
     }
 
@@ -140,7 +141,8 @@ internal sealed class ContentSafetyWarmUpService : IHostedService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Content Safety transport warm-up could not resolve the shared client.");
+            _logger.LogWarning("Content Safety transport warm-up could not resolve the shared client (ExceptionType={ExceptionType}).",
+                ex.GetType().Name);
             return;
         }
 
@@ -172,8 +174,9 @@ internal sealed class ContentSafetyWarmUpService : IHostedService
 
             try
             {
-                // Any response at all proves DNS, TCP and TLS completed and leaves a
-                // pooled connection behind for the first real scan. The status is
+                // Any response proves DNS, TCP and TLS completed for this request.
+                // The server may still close the connection or reject a later POST.
+                // This is not evidence that an authenticated safety check passed. The status is
                 // deliberately not inspected: this is a handshake, not a health check,
                 // so a 404 on the endpoint root serves the purpose as well as a 200.
                 using var request = new HttpRequestMessage(HttpMethod.Get, "/");
@@ -196,9 +199,9 @@ internal sealed class ContentSafetyWarmUpService : IHostedService
                 if (attempt == _maxTransportAttempts)
                 {
                     _logger.LogWarning(
-                        ex,
-                        "Content Safety transport warm-up did not establish a connection in {Attempts} attempt(s); the first scan may pay the TLS handshake.",
-                        attempt);
+                        "Content Safety transport warm-up did not establish a connection in {Attempts} attempt(s); " +
+                        "the first scan may pay the TLS handshake. ExceptionType={ExceptionType}, HttpRequestError={HttpRequestError}.",
+                        attempt, ex.GetType().Name, (ex as HttpRequestException)?.HttpRequestError);
                 }
             }
         }

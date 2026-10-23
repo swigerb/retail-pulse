@@ -11,7 +11,7 @@ namespace RetailPulse.Api.Guardrails.AgentDefinition;
 /// <remarks>
 /// The exception carries the full list of violations so an operator sees
 /// every offender in one shot. Raw prompt content is deliberately excluded —
-/// audit rows with a correlation id are the source of forensic detail.
+/// classified startup logs remain available even when the host cannot serve its audit feed.
 /// </remarks>
 public sealed class AgentDefinitionValidationException : InvalidOperationException
 {
@@ -36,7 +36,7 @@ public sealed class AgentDefinitionValidationException : InvalidOperationExcepti
         {
             $"Agent definition validation failed for {violations.Count} rule violation(s). " +
             "Configuration errors must fail at startup, not at first user query. " +
-            "See the /api/guardrails/log audit feed for correlation identifiers:",
+            "Review the startup logs and violations below; /api/guardrails/log is available only after successful startup:",
         };
 
         foreach (AgentDefinitionViolation v in violations
