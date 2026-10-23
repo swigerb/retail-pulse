@@ -142,7 +142,7 @@ const ASSISTANT_LOADING_AVATAR_STYLE: React.CSSProperties = {
   color: '#fff',
 };
 const SEND_BUTTON_STYLE: React.CSSProperties = {
-  background: 'linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-accent) 100%)',
+  background: 'linear-gradient(135deg, var(--retail-pulse-primary) 0%, var(--retail-pulse-accent) 100%)',
   color: '#ffffff',
 };
 const ASSISTANT_AVATAR_ICON = { children: 'R' } as const;

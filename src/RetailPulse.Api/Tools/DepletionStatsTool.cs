@@ -31,22 +31,14 @@ public class DepletionStatsTool
         }
         catch (Exception ex)
         {
-            // Log the actual failure but keep the fallback contract so the
-            // agent can still produce a coherent answer when MCP is offline.
-            _logger?.LogWarning(ex, "DepletionStatsTool failed for brand {Brand}/{Region}/{Period} — returning fallback", brand, region, period);
+            // Keep transport failures explicit so callers cannot mistake them for metrics.
+            _logger?.LogWarning(ex, "DepletionStatsTool failed for brand {Brand}/{Region}/{Period} — returning explicit error", brand, region, period);
             return JsonSerializer.Serialize(new
             {
                 brand,
                 region,
                 period,
-                metrics = new
-                {
-                    depletions_yoy = "+2.1%",
-                    sell_through_yoy = "-4.0%",
-                    inventory_weeks_on_hand = 8.5,
-                    status = "Overstocked"
-                },
-                sentiment_summary = "Data unavailable — MCP server not reachable."
+                error = "Depletion statistics unavailable — MCP server not reachable."
             });
         }
     }
