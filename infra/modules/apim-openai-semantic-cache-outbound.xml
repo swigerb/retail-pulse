@@ -4,6 +4,12 @@
         <choose>
             <when condition="@(((string)context.Variables[&quot;rp-cache-decision&quot;]) == &quot;eligible&quot; &amp;&amp; context.Response.StatusCode == 200 &amp;&amp; context.Variables.ContainsKey(&quot;rp-backend-start&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-safety-output-checked&quot;) &amp;&amp; ((string)context.Variables[&quot;rp-safety-output-checked&quot;]) == &quot;true&quot;)">
                 <llm-semantic-cache-store duration="{cache-ttl}" />
+            </when>
+        </choose>
+        <!-- A cache hit resumes immediately after store inside its branch, without re-evaluating that choose.
+             Keep evidence in a subsequent choose so the current request's backend marker always decides hit vs miss. -->
+        <choose>
+            <when condition="@(((string)context.Variables[&quot;rp-cache-decision&quot;]) == &quot;eligible&quot; &amp;&amp; context.Response.StatusCode == 200 &amp;&amp; context.Variables.ContainsKey(&quot;rp-backend-start&quot;) &amp;&amp; context.Variables.ContainsKey(&quot;rp-safety-output-checked&quot;) &amp;&amp; ((string)context.Variables[&quot;rp-safety-output-checked&quot;]) == &quot;true&quot;)">
                 <set-header name="x-rp-gw-cache" exists-action="override">
                     <value>miss</value>
                 </set-header>
@@ -12,6 +18,21 @@
                 <set-header name="x-rp-gw-cache" exists-action="override">
                     <value>hit</value>
                 </set-header>
+                <set-header name="apim-request-id" exists-action="override">
+                    <value>@(context.RequestId.ToString())</value>
+                </set-header>
+                <!-- Outbound safety ran before store on the original request, not on this cache hit.
+                     Omit replayed evidence rather than claim a fresh output check or stale safety latency. -->
+                <set-header name="x-rp-gw-safety" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-phase" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-decision" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-prompt-attack" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-category" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-severity" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-mode" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-latency-ms" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-output-checked" exists-action="delete" />
+                <set-header name="x-rp-gw-safety-output-reason" exists-action="delete" />
             </when>
             <when condition="@(((string)context.Variables[&quot;rp-cache-decision&quot;]) == &quot;eligible&quot;)">
                 <set-header name="x-rp-gw-cache" exists-action="override">
