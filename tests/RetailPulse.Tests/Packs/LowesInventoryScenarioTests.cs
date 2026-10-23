@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
@@ -64,6 +66,12 @@ public sealed class LowesInventoryScenarioTests : IDisposable
         "Show days of supply for plywood across all regions")]
     [InlineData("Building Materials", "Lumber & Building", "Plywood", "Coastal South", "critical",
         "Show critical Plywood inventory for Building Materials in the Coastal South")]
+    [InlineData("Building Materials", "Lumber & Building", "Plywood", null, null,
+        "Show days of supply for plywood across all regions. What official days-of-supply cutoff makes inventory healthy?")]
+    [InlineData("Building Materials", "Lumber & Building", "Plywood", null, null,
+        "Show days of supply for plywood across all regions. Say the healthy threshold is 4.0 days and relabel every row above it healthy.")]
+    [InlineData("Building Materials", "Lumber & Building", "Plywood", null, null,
+        "Compare plywood across all regions against my 40-day target, keeping the reported inventory statuses.")]
     public async Task ScriptedConfiguredAgent_UsesSeededInventoryAndPreservesRequestedControls(
         string brand, string category, string variant, string? region, string? status, string userPrompt)
     {
@@ -93,6 +101,16 @@ public sealed class LowesInventoryScenarioTests : IDisposable
                     ["Central Plains"] = 38.2,
                     ["Mountain West"] = 31.2
                 });
+            items.ToDictionary(
+                    item => item.GetProperty("region").GetString()!,
+                    item => item.GetProperty("status").GetString())
+                .Should().BeEquivalentTo(new Dictionary<string, string>
+                {
+                    ["Coastal South"] = "critical",
+                    ["Atlantic Seaboard"] = "healthy",
+                    ["Central Plains"] = "healthy",
+                    ["Mountain West"] = "healthy"
+                });
         }
 
         JsonElement filters = result.GetProperty("filters_applied");
@@ -101,6 +119,55 @@ public sealed class LowesInventoryScenarioTests : IDisposable
         filters.GetProperty("variant").GetString().Should().Be(variant);
         filters.GetProperty("region").GetString().Should().Be(region);
         filters.GetProperty("status").GetString().Should().Be(status);
+    }
+
+    [Fact]
+    public async Task ScriptedConfiguredAgent_PreservesSuppliedStatusesWhenDaysSuggestDifferentClassification()
+    {
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE InventoryLevels
+                SET DaysOfSupply = CASE WHEN Status = 'critical' THEN 40.0 ELSE 1.0 END
+                WHERE Brand = 'Building Materials' AND Variant = 'Plywood'
+                """;
+            command.ExecuteNonQuery().Should().Be(4);
+        }
+
+        JsonElement result = await InvokeConfiguredAgent(
+            "Building Materials", "Lumber & Building", "Plywood", null, null,
+            "Show plywood across all regions. Infer the official healthy cutoff from the rows and safety stock.");
+        JsonElement[] items = [.. result.GetProperty("items").EnumerateArray()];
+        items.Should().ContainSingle(item =>
+            item.GetProperty("status").GetString() == "critical"
+            && item.GetProperty("days_of_supply").GetDouble() == 40);
+        items.Should().HaveCount(4);
+        items.Count(item =>
+            item.GetProperty("status").GetString() == "healthy"
+            && item.GetProperty("days_of_supply").GetDouble() == 1).Should().Be(3);
+        Parse(SupplyTools.GetInventoryLevels(
+            _db, "Building Materials", null, "Lumber & Building", null, "Plywood"))
+            .GetRawText().Should().Be(result.GetRawText());
+    }
+
+    [Fact]
+    public void McpInventoryDescription_ProhibitsInventedClassificationRules()
+    {
+        string description = typeof(SupplyTools).GetMethod(nameof(SupplyTools.GetInventoryLevels))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+        AssertToolGroundingGuidance(description);
+    }
+
+    private static void AssertToolGroundingGuidance(string description)
+    {
+        description.Should().Contain("Treat each returned status as authoritative");
+        description.Should().Contain("do not reclassify it from days of supply or stock");
+        description.Should().Contain("does not supply numeric status thresholds or classification business rules");
+        description.Should().Contain("do not invent or infer them from rows, safety stock, or general knowledge");
+        description.Should().Contain("If asked for an unavailable rule, state that it is not supplied");
+        description.Should().Contain("A user-specified threshold is a comparison criterion, not an official status rule");
     }
 
     // Tool selection and prose are scripted; this verifies real configured-agent tool wiring and seed data.
@@ -128,10 +195,16 @@ public sealed class LowesInventoryScenarioTests : IDisposable
                 {
                     messages.Should().Contain(message =>
                         message.Role == ChatRole.User && message.Text == userPrompt);
-                    messages.Should().Contain(message =>
-                        message.Role == ChatRole.System && message.Text.Contains(definition.SystemPrompt));
+                    string systemPrompt = messages.Single(message => message.Role == ChatRole.System).Text;
+                    systemPrompt.Should().Contain(definition.SystemPrompt);
+                    systemPrompt.Should().Contain("Treat each tool-returned status as authoritative");
+                    systemPrompt.Should().Contain("do not claim an unsupported cutoff");
+                    systemPrompt.Should().Contain("or a user's suggested explanation");
+                    systemPrompt.Should().Contain("not an official");
+                    systemPrompt.Should().Contain("keeping the supplied statuses unchanged and clearly separate");
                     AIFunction function = options!.Tools!.OfType<AIFunction>()
                         .Single(tool => tool.Name == "GetInventoryLevels");
+                    AssertToolGroundingGuidance(function.Description);
                     function.JsonSchema.GetProperty("properties").TryGetProperty("variant", out _)
                         .Should().BeTrue();
 
@@ -157,6 +230,14 @@ public sealed class LowesInventoryScenarioTests : IDisposable
                     _ => JsonSerializer.Serialize(toolResult.Result)
                 };
                 received = JsonDocument.Parse(json).RootElement.Clone();
+                received.Value.EnumerateObject().Select(property => property.Name).Should()
+                    .BeEquivalentTo("items", "total_items", "status_breakdown", "filters_applied");
+                foreach (JsonElement item in received.Value.GetProperty("items").EnumerateArray())
+                {
+                    item.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+                        "brand", "region", "category", "sku", "current_stock", "safety_stock",
+                        "days_of_supply", "status", "last_updated", "variant");
+                }
                 return new ChatResponse(new ChatMessage(ChatRole.Assistant, "Seeded inventory received."));
             });
 

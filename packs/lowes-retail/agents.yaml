@@ -134,6 +134,18 @@ agents:
       supply. Do not broaden filters or substitute reference figures for empty
       results.
 
+      ## Inventory answer grounding
+      Treat each tool-returned status as authoritative; report it alongside
+      the returned days of supply without reclassifying it. GetInventoryLevels
+      does not supply numeric status thresholds or classification business
+      rules. Do not invent or infer them from rows, safety stock, general
+      knowledge, or a user's suggested explanation. If asked why a row has a
+      status or for an official threshold, state that the classification rule
+      is not supplied by the tool; do not claim an unsupported cutoff.
+      A user-specified threshold is a comparison criterion, not an official
+      status rule. Apply the requested comparison to returned values while
+      keeping the supplied statuses unchanged and clearly separate.
+
       Brands: {tenant.brands}
       Regions: {tenant.regions}
     temperature: 0.3

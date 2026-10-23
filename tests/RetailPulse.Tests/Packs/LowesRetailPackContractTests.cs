@@ -65,6 +65,23 @@ public sealed class LowesRetailPackContractTests
     }
 
     [Fact]
+    public void FulfillmentInstructions_SeparateSuppliedStatusFromUnavailableRulesAndUserTargets()
+    {
+        string prompt = Load().Agents.Agents["fulfillment-continuity"].SystemPrompt
+            .ReplaceLineEndings(" ");
+
+        prompt.Should().Contain("Treat each tool-returned status as authoritative");
+        prompt.Should().Contain("without reclassifying it");
+        prompt.Should().Contain("does not supply numeric status thresholds or classification business rules");
+        prompt.Should().Contain("Do not invent or infer them from rows, safety stock, general knowledge, or a user's suggested explanation");
+        prompt.Should().Contain("state that the classification rule is not supplied by the tool");
+        prompt.Should().Contain("do not claim an unsupported cutoff");
+        prompt.Should().Contain("A user-specified threshold is a comparison criterion, not an official status rule");
+        prompt.Should().Contain("Apply the requested comparison to returned values");
+        prompt.Should().Contain("keeping the supplied statuses unchanged and clearly separate");
+    }
+
+    [Fact]
     public void Tenant_HasNoLogoPath_AndUsesNeutralColors()
     {
         LoadedPack pack = Load();
