@@ -14,6 +14,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
 using RetailPulse.Api.Endpoints;
 using RetailPulse.Api.Security;
 
@@ -146,6 +147,27 @@ public sealed class McpGatewayApiTests
         {
             HttpResponseMessage res = await client.SendAsync(Req(HttpMethod.Get, path, "app"));
             res.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+    }
+
+    [Fact]
+    public async Task Inventory_ProxyPreservesVariantAndOtherFilters()
+    {
+        var handler = new StubHandler(_ => /*lang=json,strict*/ "{\"items\":[]}");
+        (WebApplication app, HttpClient client) = await StartAsync(handler, AllowList(V1Operations));
+        await using (app)
+        {
+            using HttpResponseMessage response = await client.SendAsync(Req(HttpMethod.Get,
+                "/api/supply/inventory?brand=Contract%20Catalog&category=Office%20Essentials"
+                + "&variant=Paper%20%26%20Toner&region=Great%20Lakes%20%26%20Plains&status=low", "app"));
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            Uri request = handler.Requests.Should().ContainSingle().Subject;
+            Dictionary<string, StringValues> query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(request.Query);
+            query["brand"].ToString().Should().Be("Contract Catalog");
+            query["category"].ToString().Should().Be("Office Essentials");
+            query["variant"].ToString().Should().Be("Paper & Toner");
+            query["region"].ToString().Should().Be("Great Lakes & Plains");
+            query["status"].ToString().Should().Be("low");
         }
     }
 

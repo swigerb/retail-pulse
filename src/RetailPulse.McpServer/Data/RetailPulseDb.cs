@@ -298,6 +298,7 @@ public class RetailPulseDb
                 Region TEXT NOT NULL COLLATE NOCASE,
                 Category TEXT NOT NULL COLLATE NOCASE,
                 SKU TEXT NOT NULL COLLATE NOCASE,
+                Variant TEXT NOT NULL COLLATE NOCASE,
                 CurrentStock INTEGER NOT NULL,
                 SafetyStock INTEGER NOT NULL,
                 DaysOfSupply REAL NOT NULL,
@@ -399,6 +400,13 @@ public class RetailPulseDb
             );
             """;
         cmd.ExecuteNonQuery();
+
+        cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('InventoryLevels') WHERE name = 'Variant'";
+        if (Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 0)
+        {
+            cmd.CommandText = "ALTER TABLE InventoryLevels ADD COLUMN Variant TEXT NOT NULL COLLATE NOCASE DEFAULT ''";
+            cmd.ExecuteNonQuery();
+        }
     }
 
     // ── Seeding ──────────────────────────────────────────────────────────
@@ -459,7 +467,8 @@ public class RetailPulseDb
     // Issue #108: v8 folds the pack's seed/scenario.yaml manifest into
     // the fingerprint so a scenario edit alone forces reseed. Upgrades
     // to v9 also reseed because promo ROI now stores multipliers.
-    private const int SchemaVersion = 9;
+    // v10 retains inventory variant identity; existing databases reseed after column migration.
+    private const int SchemaVersion = 10;
 
     private string ComputeTenantHash()
     {
@@ -3504,14 +3513,15 @@ public class RetailPulseDb
     {
         using SqliteCommand cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO InventoryLevels (Brand, Region, Category, SKU, CurrentStock, SafetyStock, DaysOfSupply, Status, LastUpdated)
-            VALUES (@brand, @region, @category, @sku, @current, @safety, @dos, @status, @updated)
+            INSERT INTO InventoryLevels (Brand, Region, Category, SKU, Variant, CurrentStock, SafetyStock, DaysOfSupply, Status, LastUpdated)
+            VALUES (@brand, @region, @category, @sku, @variant, @current, @safety, @dos, @status, @updated)
             """;
 
         SqliteParameter pBrand = cmd.Parameters.Add("@brand", SqliteType.Text);
         SqliteParameter pRegion = cmd.Parameters.Add("@region", SqliteType.Text);
         SqliteParameter pCategory = cmd.Parameters.Add("@category", SqliteType.Text);
         SqliteParameter pSku = cmd.Parameters.Add("@sku", SqliteType.Text);
+        SqliteParameter pVariant = cmd.Parameters.Add("@variant", SqliteType.Text);
         SqliteParameter pCurrent = cmd.Parameters.Add("@current", SqliteType.Integer);
         SqliteParameter pSafety = cmd.Parameters.Add("@safety", SqliteType.Integer);
         SqliteParameter pDos = cmd.Parameters.Add("@dos", SqliteType.Real);
@@ -3577,6 +3587,7 @@ public class RetailPulseDb
                     pRegion.Value = region;
                     pCategory.Value = brand.Category;
                     pSku.Value = skuId;
+                    pVariant.Value = variant;
                     pCurrent.Value = currentStock;
                     pSafety.Value = safetyStock;
                     pDos.Value = daysOfSupply;
@@ -3955,7 +3966,7 @@ public class RetailPulseDb
 
     // ── Supply Chain Query Methods ───────────────────────────────────────
 
-    public object GetInventoryLevels(string? brand, string? region, string? category, string? status)
+    public object GetInventoryLevels(string? brand, string? region, string? category, string? status, string? variant = null)
     {
         using SqliteConnection conn = OpenConnection();
         conn.Open();
@@ -3983,10 +3994,15 @@ public class RetailPulseDb
             filters.Add("Status = @status");
             cmd.Parameters.AddWithValue("@status", status.Trim().ToLowerInvariant());
         }
+        if (!string.IsNullOrWhiteSpace(variant))
+        {
+            filters.Add("Variant = @variant");
+            cmd.Parameters.AddWithValue("@variant", variant.Trim());
+        }
 
         string where = filters.Count > 0 ? $"WHERE {string.Join(" AND ", filters)}" : "";
         cmd.CommandText = $"""
-            SELECT Brand, Region, Category, SKU, CurrentStock, SafetyStock, DaysOfSupply, Status, LastUpdated
+            SELECT Brand, Region, Category, SKU, CurrentStock, SafetyStock, DaysOfSupply, Status, LastUpdated, Variant
             FROM InventoryLevels
             {where}
             ORDER BY
@@ -4013,7 +4029,8 @@ public class RetailPulseDb
                 safety_stock = reader.GetInt32(5),
                 days_of_supply = reader.GetDouble(6),
                 status = reader.GetString(7),
-                last_updated = reader.GetString(8)
+                last_updated = reader.GetString(8),
+                variant = reader.GetString(9)
             });
         }
 
@@ -4033,7 +4050,7 @@ public class RetailPulseDb
                 critical = statusCounts.GetValueOrDefault("critical", 0),
                 out_of_stock = statusCounts.GetValueOrDefault("out_of_stock", 0)
             },
-            filters_applied = new { brand, region, category, status }
+            filters_applied = new { brand, region, category, status, variant }
         };
     }
 

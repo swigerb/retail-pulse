@@ -98,6 +98,67 @@ obeys filters or thresholds, or synthesizes correct prose. Live-model acceptance
 is a separate later step: verify those choices and the disclosed comparison on
 both prompts without broadening empty results or treating missing data as a pass.
 
+### Staples regional inventory regression scope (issue #442)
+
+```bash
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
+  --filter "FullyQualifiedName~StaplesInventoryScenarioTests|FullyQualifiedName~StaplesPackContractTests|FullyQualifiedName~SupplyToolTests|FullyQualifiedName~McpGatewayApiTests|FullyQualifiedName~KrogerFreshnessScenarioTests|FullyQualifiedName~DefaultPackSeedGoldenTests|FullyQualifiedName~McpToolContractTests"
+```
+
+The recorded live failure on `main` at `25efbbc9` (2026-10-23, API revision
+`0000041`, MCP revision `0000031`) is **not a business acceptance pass**: the exact
+prompt `Show days of supply for Paper & Toner by region` returned HTTP 200, but
+five inventory queries used brand `Contract Catalog` and category `Paper & Toner`
+and returned no rows. Two reference-context figures in the honest partial reply
+were not complete, tool-backed regional inventory. The production default was
+restored; this source-only repair does not repeat live requests or supersede that
+evidence. Issues #342 and #321 remain outside this repair's acceptance scope.
+
+In the shipped pack, `Paper & Toner` is a **variant**, not a category:
+`Contract Catalog` / `Office Essentials` / `Paper & Toner`. Inventory seeding
+previously calculated variant names but discarded them. Inventory now retains
+`variant` on each SKU and accepts an optional exact, case-insensitive `variant`
+filter through the API AIFunction, API proxy, MCP REST endpoint and MCP tool.
+Existing brand/category/region/status semantics and unfiltered row counts remain
+unchanged; there is no alias, automatic category rewrite or empty-result fallback.
+Schema version 10 adds the column to older databases and triggers the existing
+full synthetic reseed policy once; as with previous schema-version upgrades,
+that reseed replaces prior mutations. Subsequent unchanged restarts preserve
+mutations. The existing seed still covers up to three variants per brand; a
+catalog variant without seeded inventory remains missing data.
+
+`StaplesInventoryScenarioTests` uses a **scripted `IChatClient`** with real
+`FunctionInvokingChatClient`, `AIFunctionFactory`, `AgentToolRegistry`,
+`ConfiguredSpecialistAgent`, execution pipeline and SQLite pack seed. An
+in-process HTTP handler bridges the real inventory HTTP tool to the data layer;
+it does not host the production MCP REST entrypoint. It checks the exact prompt's
+four regional rows, alternate Workspace Furniture/Task Seating/Pacific Rim and
+Contract Catalog/Breakroom/Atlantic Corridor filters, explicit status, and MCP
+tool parity. The original invalid category remains empty, including regional
+retries, as do conflicting and unknown filters. A database mutation must change
+the tool result delivered back to the scripted model and survive restart; a
+legacy-schema test proves migration/reseed and subsequent mutation preservation.
+The API proxy test separately checks forwarding/escaping of all five filters.
+Pack contract assertions inspect the actual loaded instructions for mapping,
+scope preservation, requested thresholds, current-snapshot/timeframe limitations,
+and explicit missing-data reporting without broadened retries or reference values.
+
+For this repair, the focused suite including
+`SeededGatewayToolDocumentBudgetTests` passed **94/94**. Temporarily removing the
+real SQL `Variant = @variant` predicate caused **7/8** inventory scenario cases
+to fail; restoring it returned the focused suite to green. An additional local
+smoke check ran the actual MCP entrypoint with an isolated temporary database
+and `staples-retail`: the REST query returned four Paper & Toner regional rows,
+and the alternate Task Seating/Pacific Rim query returned one row. This was
+local seeded REST evidence, not a production or live-model request.
+
+These checks prove seeded data availability and tool wiring, **not** external
+model tool selection, threshold application, correct prose/chart synthesis,
+browser rendering, or live production acceptance. Tool calls and final prose
+are scripted. A future separately authorized live check must establish complete
+tool-backed regional values and scope adherence; HTTP 200 alone is insufficient.
+No deployment, live retry, merge, sign-off or issue closure is part of this repair.
+
 ### Run Tests with Coverage (if configured)
 
 ```bash
