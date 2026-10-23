@@ -33,7 +33,7 @@ public sealed partial class SemanticCachePolicyRuntimeTests
     public void DisabledRender_ReportsPolicyDisabled_NotMissOrSuccess()
     {
         string bicep = Module("apim-openai-api.bicep");
-        Match fragment = Regex.Match(bicep, @"var semanticCacheOutboundFragment = semanticCachePolicyActive\s*\?[^\r\n]*\s*: '(?<disabled>[^']*)'");
+        Match fragment = MyRegex().Match(bicep);
         fragment.Success.Should().BeTrue("the inactive policy branch must report its configuration explicitly");
         XElement header = XDocument.Parse(fragment.Groups["disabled"].Value).Root!;
         ((string?)header.Attribute("name")).Should().Be("x-rp-gw-cache");
@@ -233,4 +233,6 @@ public sealed partial class SemanticCachePolicyRuntimeTests
 
     [GeneratedRegex("<set-variable name=\"rp-cache-partition\" value=\"\\{cache-partition\\}\"")]
     private static partial Regex PartitionRegex();
+    [GeneratedRegex(@"var semanticCacheOutboundFragment = semanticCachePolicyActive\s*\?[^\r\n]*\s*: '(?<disabled>[^']*)'")]
+    private static partial Regex MyRegex();
 }
