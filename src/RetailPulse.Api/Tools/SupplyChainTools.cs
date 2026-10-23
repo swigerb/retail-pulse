@@ -14,7 +14,7 @@ public class InventoryLevelsTool
         _logger = logger;
     }
 
-    [Description("Get current inventory levels by brand, region, category, variant, and status. Returns SKU-level stock, safety stock, days of supply, variant, and status.")]
+    [Description("Get current inventory levels by brand, region, category, variant, and status. Returns SKU-level stock, safety stock, days of supply, variant, and status. Treat each returned status as authoritative; do not reclassify it from days of supply or stock. This result does not supply numeric status thresholds or classification business rules; do not invent or infer them from rows, safety stock, or general knowledge. If asked for an unavailable rule, state that it is not supplied. A user-specified threshold is a comparison criterion, not an official status rule; keep it separate from the returned status.")]
     public async Task<string> GetInventoryLevels(
         [Description("Brand name to filter. Omit for all brands.")] string? brand = null,
         [Description("Region to filter. Omit for all regions.")] string? region = null,

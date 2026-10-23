@@ -8,7 +8,7 @@ namespace RetailPulse.McpServer.Tools;
 public static class SupplyTools
 {
     [McpServerTool(Name = "GetInventoryLevels")]
-    [Description("Get current inventory levels by brand, region, category, and variant. Returns SKU-level stock, safety stock, days of supply, variant, and status (healthy/low/critical/out_of_stock). Use for inventory health checks and stockout risk identification.")]
+    [Description("Get current inventory levels by brand, region, category, and variant. Returns SKU-level stock, safety stock, days of supply, variant, and status (healthy/low/critical/out_of_stock). Use for inventory health checks and stockout risk identification. Treat each returned status as authoritative; do not reclassify it from days of supply or stock. This result does not supply numeric status thresholds or classification business rules; do not invent or infer them from rows, safety stock, or general knowledge. If asked for an unavailable rule, state that it is not supplied. A user-specified threshold is a comparison criterion, not an official status rule; keep it separate from the returned status.")]
     public static object GetInventoryLevels(
         RetailPulseDb data,
         [Description("Brand name to filter (e.g. 'Sierra Gold Tequila', 'FreshMart'). Omit for all brands.")] string? brand = null,
