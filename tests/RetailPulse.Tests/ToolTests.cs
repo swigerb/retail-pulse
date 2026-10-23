@@ -74,7 +74,9 @@ public class ToolTests
         JsonElement root = doc.RootElement;
         root.GetProperty("brand").GetString().Should().Be("Sierra Gold Tequila");
         root.GetProperty("region").GetString().Should().Be("Northeast");
-        root.GetProperty("sentiment_summary").GetString().Should().Contain("MCP server not reachable");
+        root.GetProperty("error").GetString().Should().Contain("MCP server not reachable");
+        root.TryGetProperty("metrics", out _).Should().BeFalse(
+            "an unreachable server must not produce fabricated depletion or sell-through metrics");
     }
 
     [Fact]
@@ -86,8 +88,9 @@ public class ToolTests
         string result = await tool.GetDepletionStats("Summit Vodka", "National", "Q1");
 
         var doc = JsonDocument.Parse(result);
-        doc.RootElement.GetProperty("sentiment_summary").GetString()
+        doc.RootElement.GetProperty("error").GetString()
             .Should().Contain("MCP server not reachable");
+        doc.RootElement.TryGetProperty("metrics", out _).Should().BeFalse();
     }
 
     [Fact]

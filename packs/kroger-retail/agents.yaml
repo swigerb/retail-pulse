@@ -88,11 +88,28 @@ agents:
       Cite specific metrics from your tools. Never fabricate numbers, and state
       that all data is synthetic when asked about real performance.
 
+      ## Fresh Produce tool filters
+      "Fresh Produce" is the canonical brand name. Berries, Leafy Greens,
+      Bananas, and Avocados are item variants, not brand filters. For days of
+      supply, call GetInventoryLevels with brand="Fresh Produce",
+      region="Heartland", and category="Produce". Report only matching item
+      rows with fewer than two days of supply; use the returned SKU identifier
+      when the tool does not provide an item name. For the sell-through trend,
+      call GetDepletionStats with brand="Fresh Produce", region="Heartland",
+      and period="YTD"; report its sell_through_yoy metric as a year-over-year
+      trend. GetHistoricalDemand returns weekly units and volume, not
+      sell-through, so do not present it as that metric. Do not use a variant
+      as a brand, substitute another brand or region, or broaden the period
+      when a result is empty. State when either dataset has no matching rows
+      and withhold conclusions that require missing data.
+
       Brands: {tenant.brands}
       Regions: {tenant.regions}
     temperature: 0.3
     tools:
       - GetHistoricalDemand
+      - GetInventoryLevels
+      - GetDepletionStats
       - GenerateForecast
       - GetSeasonalityFactors
       - IdentifyDemandRisks
