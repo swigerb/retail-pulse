@@ -78,4 +78,48 @@ public sealed class KrogerRetailPackContractTests
         Load().Tenant.Brands.Select(b => b.Name)
             .Should().NotContain(n => n.Contains("Private Selection", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void FreshnessInstructions_PreserveRequestScope_AndLimitFixedFiltersToExactCuratedTask()
+    {
+        AgentDefinition definition = Load().Agents.Agents["freshness-substitutions"];
+        definition.Tools.Should().Contain(["GetInventoryLevels", "GetDepletionStats"]);
+
+        string prompt = definition.SystemPrompt;
+        const string curatedHeading = "## Exact curated scenario only";
+        prompt.Should().Contain(curatedHeading);
+        string general = prompt[..prompt.IndexOf(curatedHeading, StringComparison.Ordinal)];
+        string curated = prompt[prompt.IndexOf(curatedHeading, StringComparison.Ordinal)..];
+
+        // The loaded instructions, not scripted tool calls, protect request-scope guidance.
+        string normalized = string.Join(" ", general.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        normalized.Should().Contain("Preserve the user's brand, region, category, days-of-supply threshold, and supported period");
+        normalized.Should().Contain("never replace them with the curated example's filters");
+        normalized.Should().Contain("apply the requested threshold and comparison");
+        normalized.Should().Contain("GetDepletionStats with the requested brand, region, and supported period");
+        normalized.Should().Contain("If no period is specified, use the tool's YTD default and disclose that default");
+        normalized.Should().Contain("year-over-year comparison for the selected period, not a period the user requested");
+        normalized.Should().Contain("explain the limitation rather than silently changing scope");
+        normalized.Should().Contain("GetHistoricalDemand returns weekly units and volume, not sell-through");
+        normalized.Should().Contain("substitute another brand or region, or broaden the period when a result is empty");
+        normalized.Should().Contain("no matching rows or a tool returns an error");
+        normalized.Should().Contain("withhold conclusions that require missing data");
+        general.Should().NotContain("brand=\"Fresh Produce\"");
+        general.Should().NotContain("region=\"Heartland\"");
+        general.Should().NotContain("category=\"Produce\"");
+        general.Should().NotContain("days_of_supply < 2");
+        general.Should().NotContain("period=\"YTD\"");
+
+        string task = Load().StartingTasks.SelectMany(category => category.Tasks)
+            .Single(task => task.Name == "Produce days of supply").Prompt;
+        curated.Should().Contain($"\"{task}\"");
+        curated.Should().Contain("only to this starting task");
+        curated.Should().Contain("brand=\"Fresh Produce\", region=\"Heartland\"");
+        curated.Should().Contain("category=\"Produce\"");
+        curated.Should().Contain("days_of_supply < 2");
+        curated.Should().Contain("period=\"YTD\" because this task specifies no period");
+        string normalizedCurated = string.Join(" ", curated.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        normalizedCurated.Should().Contain("default YTD year-over-year sell-through comparison, not a user-requested timeframe");
+        normalizedCurated.Should().Contain("do not override any different brand, region, category, threshold, or period");
+    }
 }

@@ -72,6 +72,32 @@ dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
 dotnet test --logger "console;verbosity=detailed"
 ```
 
+### Kroger freshness regression scope
+
+```bash
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj \
+  --filter "FullyQualifiedName~KrogerFreshnessScenarioTests|FullyQualifiedName~KrogerRetailPackContractTests|FullyQualifiedName~ToolTests.DepletionStatsTool|FullyQualifiedName~PackHostStartupTests"
+```
+
+The pack contract test inspects the loaded freshness instructions: user filters
+and supported periods must be preserved, and fixed Fresh Produce/Heartland/
+Produce/<2 filters apply only to the exact curated starting task. That task
+does not specify a period; YTD is the depletion tool's disclosed default and
+`sell_through_yoy` is its year-over-year comparison, not a user-requested period.
+
+`KrogerFreshnessScenarioTests` uses a **scripted `IChatClient`**, real
+`AIFunctionFactory` tool invocation, the configured-agent pipeline, and the
+shipped synthetic seed through an in-process HTTP handler. It verifies prompt
+delivery, tool argument/result plumbing, and nonempty inventory/sell-through
+fixtures for the curated case and Dairy & Eggs/Desert Basin/Dairy/<7/Q1.
+Variant-as-brand requests remain empty; transport failures return explicit
+errors without metrics.
+
+These offline checks do **not** prove that an external model chooses the tools,
+obeys filters or thresholds, or synthesizes correct prose. Live-model acceptance
+is a separate later step: verify those choices and the disclosed comparison on
+both prompts without broadening empty results or treating missing data as a pass.
+
 ### Run Tests with Coverage (if configured)
 
 ```bash
