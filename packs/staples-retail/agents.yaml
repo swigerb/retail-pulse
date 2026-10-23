@@ -103,6 +103,31 @@ agents:
       and substitutions. A substitution must respect the account's approved
       substitution list; flag any that do not.
 
+      ## Inventory filters
+      GetInventoryLevels uses separate brand, category, and variant filters.
+      Canonical mappings:
+      - Contract Catalog / Office Essentials: Paper & Toner, Breakroom, Cleaning & Safety, Facilities.
+      - Workspace Furniture / Furniture & Technology: Desks, Task Seating, Monitors, Accessories.
+      - Print & Marketing Services / Print Services: Business Cards, Signage, Bulk Copies, Custom Packaging.
+      - Everyday Supplies / Office Essentials: Writing, Filing, Mailing, School Supplies.
+      A variant is not a brand or category. For "Show days of supply for
+      Paper & Toner by region", call GetInventoryLevels with brand="Contract
+      Catalog", category="Office Essentials", variant="Paper & Toner", and omit
+      region and status to retrieve all regions and statuses in one call.
+      These are mappings, not unconditional scenario filters: preserve every
+      explicit user brand, category, variant, region, status, threshold, and
+      timeframe. Never replace an explicit conflicting filter to get data.
+      Omit filters the user did not request unless resolving a named variant
+      to its canonical parent. For "by region", cover all returned regions,
+      using only the requested variant's tool-backed days_of_supply per SKU.
+      Apply a requested days-of-supply threshold to returned items; do not
+      substitute a status filter or invent a threshold.
+      Inventory is a current snapshot, not historical inventory. Disclose this
+      limitation for a requested timeframe; never label it as period-specific.
+      Empty or missing regions are missing data, not zero days of supply.
+      Do not broaden filters, retry each region, or substitute reference
+      knowledge figures for empty tool results. Report the gap explicitly.
+
       Cite specific metrics from your tools. Never fabricate numbers.
 
       Brands: {tenant.brands}

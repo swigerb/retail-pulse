@@ -14,12 +14,13 @@ public class InventoryLevelsTool
         _logger = logger;
     }
 
-    [Description("Get current inventory levels by brand, region, category, and status. Returns SKU-level stock, safety stock, days of supply, and status.")]
+    [Description("Get current inventory levels by brand, region, category, variant, and status. Returns SKU-level stock, safety stock, days of supply, variant, and status.")]
     public async Task<string> GetInventoryLevels(
         [Description("Brand name to filter. Omit for all brands.")] string? brand = null,
         [Description("Region to filter. Omit for all regions.")] string? region = null,
         [Description("Category to filter. Omit for all categories.")] string? category = null,
         [Description("Status filter: 'healthy', 'low', 'critical', 'out_of_stock'. Omit for all.")] string? status = null,
+        [Description("Exact variant name within a brand (e.g. 'Paper & Toner'). Not a category. Omit for all variants.")] string? variant = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -29,6 +30,7 @@ public class InventoryLevelsTool
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
             if (!string.IsNullOrWhiteSpace(category)) url += $"&category={Uri.EscapeDataString(category)}";
             if (!string.IsNullOrWhiteSpace(status)) url += $"&status={Uri.EscapeDataString(status)}";
+            if (!string.IsNullOrWhiteSpace(variant)) url += $"&variant={Uri.EscapeDataString(variant)}";
 
             HttpResponseMessage response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();

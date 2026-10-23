@@ -1,5 +1,7 @@
 using FluentAssertions;
+using RetailPulse.Api.Models;
 using RetailPulse.Api.Packs;
+using RetailPulse.Contracts;
 
 namespace RetailPulse.Tests.Packs;
 
@@ -77,6 +79,30 @@ public sealed class StaplesPackContractTests
         promptText.Should().NotContain(t => t.Contains("depletion", StringComparison.OrdinalIgnoreCase));
         pack.StartingTasks.SelectMany(c => c.Tasks).Select(t => t.Prompt)
             .Should().Contain(p => p.Contains("sell-through", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void InventoryInstructions_DistinguishVariants_AndPreserveUserScope()
+    {
+        LoadedPack pack = Load();
+        BrandConfig brand = pack.Tenant.Brands.Single(b => b.Name == "Contract Catalog");
+        brand.Category.Should().Be("Office Essentials");
+        brand.Variants.Should().Contain("Paper & Toner");
+        AgentDefinition definition = pack.Agents.Agents["fulfillment-ops"];
+        definition.Tools.Should().Contain("GetInventoryLevels");
+        string prompt = string.Join(" ", definition.SystemPrompt.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        prompt.Should().Contain("A variant is not a brand or category");
+        prompt.Should().Contain("brand=\"Contract Catalog\", category=\"Office Essentials\", variant=\"Paper & Toner\"");
+        prompt.Should().Contain("omit region and status");
+        prompt.Should().Contain("not unconditional scenario filters");
+        prompt.Should().Contain("preserve every explicit user brand, category, variant, region, status, threshold, and timeframe");
+        prompt.Should().Contain("Never replace an explicit conflicting filter");
+        prompt.Should().Contain("Apply a requested days-of-supply threshold");
+        prompt.Should().Contain("current snapshot, not historical inventory");
+        prompt.Should().Contain("Do not broaden filters, retry each region, or substitute reference knowledge figures");
+        pack.StartingTasks.SelectMany(c => c.Tasks)
+            .Single(t => t.Name == "Paper & toner days of supply").Prompt
+            .Should().Be("Show days of supply for Paper & Toner by region");
     }
 
     [Fact]

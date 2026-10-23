@@ -19,7 +19,7 @@ public static class SupplyEndpoints
         })
         .WithName("GetSupplyHealth").RequireAuthorization().RequireRateLimiting("relaxed");
 
-        app.MapGet("/api/supply/inventory", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? category = null, string? status = null) =>
+        app.MapGet("/api/supply/inventory", async (IHttpClientFactory httpFactory, CancellationToken ct, string? brand = null, string? region = null, string? category = null, string? status = null, string? variant = null) =>
         {
             HttpClient client = httpFactory.CreateClient("McpServer");
             string url = "/api/supply/inventory?";
@@ -27,6 +27,7 @@ public static class SupplyEndpoints
             if (!string.IsNullOrWhiteSpace(region)) url += $"&region={Uri.EscapeDataString(region)}";
             if (!string.IsNullOrWhiteSpace(category)) url += $"&category={Uri.EscapeDataString(category)}";
             if (!string.IsNullOrWhiteSpace(status)) url += $"&status={Uri.EscapeDataString(status)}";
+            if (!string.IsNullOrWhiteSpace(variant)) url += $"&variant={Uri.EscapeDataString(variant)}";
 
             HttpResponseMessage response = await client.GetAsync(url, ct);
             response.EnsureSuccessStatusCode();
