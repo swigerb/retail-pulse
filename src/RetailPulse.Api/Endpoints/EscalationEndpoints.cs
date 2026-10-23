@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using RetailPulse.Api.Escalation;
 using RetailPulse.Contracts.Routing;
 using ChatRequest = RetailPulse.Contracts.ChatRequest;
@@ -16,10 +17,16 @@ public static class EscalationEndpoints
     /// </summary>
     public static WebApplication MapEscalationEndpoints(this WebApplication app)
     {
-        app.MapPost("/api/escalate", async (ChatRequest request, EscalationOrchestrator escalation, IAgentRouter router, ILogger<Program> logger, CancellationToken ct) =>
+        app.MapPost("/api/escalate", async (ChatRequest request, IAgentRouter router, ILogger<Program> logger, CancellationToken ct, [FromServices] EscalationOrchestrator? escalation = null) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
                 return Results.BadRequest(new { error = "Field 'message' is required." });
+
+            if (escalation is null)
+            {
+                logger.LogWarning("Escalation requested but EscalationOrchestrator is not registered");
+                return Results.StatusCode(503);
+            }
 
             RoutingDecision decision = await router.RouteAsync(request.Message, request.History, request.User, null, ct);
             EscalationOrchestrator.EscalationResult result = await escalation.EscalateAsync(request, decision, ct);

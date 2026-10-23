@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using RetailPulse.Api.Scorecard;
 
 namespace RetailPulse.Api.Endpoints;
@@ -6,7 +7,7 @@ public static class ScorecardEndpoints
 {
     public static WebApplication MapScorecardEndpoints(this WebApplication app)
     {
-        app.MapPost("/api/scorecard", async (ScorecardRequest body, ScorecardOrchestrator? scorecard, CancellationToken ct) =>
+        app.MapPost("/api/scorecard", async (ScorecardRequest body, [FromServices] ScorecardOrchestrator? scorecard, CancellationToken ct) =>
         {
             if (scorecard is null)
                 return Results.StatusCode(503);
