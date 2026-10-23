@@ -300,8 +300,10 @@ using (ILoggerFactory validatorLoggerFactory = LoggerFactory.Create(lb =>
             // pipeline will construct its own copy against the same config.
             var evaluatorServices = new ServiceCollection();
             evaluatorServices.AddSingleton(guardrailsConfig);
+            // AddLogging alone has no sink; retain diagnostics even if startup is refused.
+            evaluatorServices.AddSingleton(validatorLoggerFactory);
             evaluatorServices.AddContentSafety(guardrailsConfig.ContentSafety);
-            evaluatorServices.AddLogging(lb => lb.AddConfiguration(builder.Configuration.GetSection("Logging")));
+            evaluatorServices.AddLogging();
 #pragma warning disable ASP0000 // Intentional startup-only mini-provider — outer DI graph is not finalized yet.
             evaluatorScope = evaluatorServices.BuildServiceProvider();
 #pragma warning restore ASP0000

@@ -430,11 +430,17 @@ public sealed class AgentDefinitionValidator
 
             case ContentSafetyDecision.ServiceUnavailable:
                 {
+                    string reason = BuildUnavailableReason(result.FailureReason, field, agentKey);
+                    _logger.LogWarning(
+                        "Content Safety unavailable for agent {AgentKey} field {Field}: " +
+                        "FailureReason={FailureReason}, LatencyMs={LatencyMs}, Policy={FailPolicy}.",
+                        agentKey, field, result.FailureReason, (int)result.Latency.TotalMilliseconds,
+                        _guardrails.ContentSafety.OnUnavailable);
                     if (_guardrails.ContentSafety.OnUnavailable == ContentSafetyFailPolicy.FailClosed)
                     {
                         violations.Add(new AgentDefinitionViolation(
                             agentKey, field, "safety.content-safety-unavailable",
-                            $"Content Safety unavailable and FailClosed policy is active; refusing {field}.",
+                            $"Content Safety unavailable and FailClosed policy is active; refusing {field}. {reason}",
                             AgentDefinitionDetectionTypes.ContentSafety,
                             Decision: result.Decision.ToString()));
                     }
@@ -454,7 +460,7 @@ public sealed class AgentDefinitionValidator
                             Decision: ContentSafetyDecision.ServiceUnavailable.ToString(),
                             Stage: ContentSafetyStage.AgentDefinition.ToString(),
                             Threshold: null,
-                            Reason: BuildUnavailableReason(result.FailureReason, field, agentKey),
+                            Reason: reason,
                             Subject: $"{field} on agent {agentKey}"),
                             cancellationToken).ConfigureAwait(false);
                     }

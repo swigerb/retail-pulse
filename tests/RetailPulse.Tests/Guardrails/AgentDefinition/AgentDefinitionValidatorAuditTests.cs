@@ -105,6 +105,37 @@ public class AgentDefinitionValidatorAuditTests
             && v.DetectionType == AgentDefinitionDetectionTypes.ContentSafety);
     }
 
+    [Theory]
+    [InlineData(ContentSafetyFailureReason.Transport, "connection failed before a response")]
+    [InlineData(ContentSafetyFailureReason.Authentication, "authentication was rejected")]
+    [InlineData(ContentSafetyFailureReason.Timeout, "timed out")]
+    [InlineData(ContentSafetyFailureReason.CircuitOpen, "circuit breaker was open")]
+    public async Task FailClosed_PreservesClassification_InExceptionAuditAndLogs(
+        ContentSafetyFailureReason reason, string expected)
+    {
+        const string body = "SYNTHETIC-PROMPT-BODY-NOT-FOR-LOGGING";
+        AgentDefinition def = ValidatorTestHarness.MakeAgent("closed", d => d.SystemPrompt = body);
+        var evaluator = new FakeContentSafetyEvaluator { DefaultResult = ContentSafetyResult.Unavailable(reason) };
+        (AgentDefinitionValidator? validator, Api.Guardrails.InMemorySuspiciousRequestLog? audit, FakeContentSafetyEvaluator _, TestLogger<AgentDefinitionValidator>? logger) = ValidatorTestHarness.Build(
+            ValidatorTestHarness.DefaultConfig(onUnavailable: ContentSafetyFailPolicy.FailClosed), evaluator);
+
+        AgentDefinitionValidationException exception = (await FluentActions
+            .Invoking(() => validator.ValidateAsync(ValidatorTestHarness.Configure(def)))
+            .Should().ThrowAsync<AgentDefinitionValidationException>()).Which;
+
+        exception.Message.Should().Contain(expected).And.NotContain(body);
+        IReadOnlyList<SuspiciousRequest> rows = await audit.GetRecentAsync(50);
+        rows.Should().NotBeEmpty().And.OnlyContain(row =>
+            row.Action == AgentDefinitionDetectionTypes.ActionBlocked
+            && row.Reason != null && row.Reason.Contains(expected)
+            && !row.Reason.Contains(body) && !row.RequestText.Contains(body));
+        logger.Entries.Should().Contain(entry =>
+            entry.Message.Contains("agent closed field SystemPrompt")
+            && entry.Message.Contains($"FailureReason={reason}")
+            && entry.Message.Contains("Policy=FailClosed"));
+        logger.Entries.Should().OnlyContain(entry => !entry.Message.Contains(body));
+    }
+
     [Fact]
     public async Task AuditRow_DoesNotLeak_RawPromptText()
     {

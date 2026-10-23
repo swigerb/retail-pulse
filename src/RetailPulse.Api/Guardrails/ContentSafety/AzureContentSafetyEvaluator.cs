@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure;
@@ -85,6 +86,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         activity?.SetTag("guardrails.contentsafety.stage", stage.ToString());
 
         long startTicks = Stopwatch.GetTimestamp();
+        string operation = "Token";
 
         // Acquire the managed-identity bearer on its own budget, separate from the
         // scan timeout. The first token fetch after start is unprimed and must
@@ -102,16 +104,13 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
         {
             throw;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            _logger.LogWarning("Content Safety token acquisition timed out at {Stage} (limit {TokenTimeoutMs}ms).",
-                stage, config.TokenTimeoutMs);
-            return Unavailable(activity, ContentSafetyFailureReason.Timeout, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Timeout, ex);
         }
         catch (AuthenticationFailedException ex)
         {
-            _logger.LogWarning(ex, "Content Safety managed-identity authentication failed at {Stage}.", stage);
-            return Unavailable(activity, ContentSafetyFailureReason.Authentication, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Authentication, ex);
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -126,6 +125,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
             if (context.CheckPromptShield && config.PromptShieldsEnabled)
             {
+                operation = "PromptShield";
                 PromptShieldResult shield = await CallPromptShieldAsync(text, stage, bearer, cts.Token).ConfigureAwait(false);
                 jailbreak = shield.UserPromptAttackDetected;
                 indirect = shield.DocumentAttackDetected;
@@ -146,6 +146,7 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
 
             foreach (string segment in SegmentForAnalysis(text))
             {
+                operation = "AnalyzeText";
                 AnalyzeTextResult analysis = await _client.AnalyzeTextAsync(
                     new AnalyzeTextOptions(segment),
                     cts.Token).ConfigureAwait(false);
@@ -176,29 +177,24 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
             // Caller cancelled — propagate.
             throw;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            _logger.LogWarning("Content Safety call timed out at {Stage} (limit {TimeoutMs}ms).",
-                stage, config.TimeoutMs);
-            return Unavailable(activity, ContentSafetyFailureReason.Timeout, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Timeout, ex);
         }
         catch (AuthenticationFailedException ex)
         {
             // The SDK moderation path fetches its token through the same
             // credential; a rejection here is an auth failure, not a transient
             // outage, and retrying it would be pointless.
-            _logger.LogWarning(ex, "Content Safety authentication failed at {Stage}.", stage);
-            return Unavailable(activity, ContentSafetyFailureReason.Authentication, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Authentication, ex);
         }
         catch (RequestFailedException ex) when (IsAuthFailure(ex))
         {
-            _logger.LogWarning(ex, "Content Safety rejected authentication at {Stage} (status {Status}).", stage, ex.Status);
-            return Unavailable(activity, ContentSafetyFailureReason.Authentication, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Authentication, ex);
         }
         catch (RequestFailedException ex) when (IsServiceUnavailable(ex))
         {
-            _logger.LogWarning(ex, "Content Safety service returned unavailable status at {Stage}.", stage);
-            return Unavailable(activity, ContentSafetyFailureReason.Transport, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Transport, ex);
         }
         catch (BrokenCircuitException ex)
         {
@@ -206,24 +202,41 @@ internal sealed class AzureContentSafetyEvaluator : IContentSafetyEvaluator
             // the sampling window recovers. We translate this to
             // ServiceUnavailable so the middleware's fail-open / fail-closed
             // policy decides the request outcome and the audit row is written.
-            _logger.LogWarning(ex, "Content Safety circuit breaker open at {Stage}.", stage);
-            return Unavailable(activity, ContentSafetyFailureReason.CircuitOpen, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.CircuitOpen, ex);
         }
         catch (TimeoutRejectedException ex)
         {
-            _logger.LogWarning(ex, "Content Safety Polly timeout rejected at {Stage} (limit {TimeoutMs}ms).",
-                stage, config.TimeoutMs);
-            return Unavailable(activity, ContentSafetyFailureReason.Timeout, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Timeout, ex);
         }
         catch (HttpRequestException ex) when (IsAuthStatus(ex.StatusCode))
         {
-            _logger.LogWarning(ex, "Content Safety rejected authentication at {Stage} (status {Status}).", stage, ex.StatusCode);
-            return Unavailable(activity, ContentSafetyFailureReason.Authentication, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Authentication, ex);
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "Content Safety transport error at {Stage}.", stage);
-            return Unavailable(activity, ContentSafetyFailureReason.Transport, startTicks);
+            return ReportUnavailable(ContentSafetyFailureReason.Transport, ex);
+        }
+
+        ContentSafetyResult ReportUnavailable(ContentSafetyFailureReason reason, Exception exception)
+        {
+            int? status = exception switch
+            {
+                RequestFailedException requestFailed => requestFailed.Status,
+                HttpRequestException { StatusCode: { } code } => (int)code,
+                _ => null,
+            };
+            // Exception messages (especially SDK failures) can contain response bodies.
+            _logger.LogWarning(
+                "Content Safety unavailable at {Stage}: Operation={Operation}, FailureReason={FailureReason}, " +
+                "ExceptionType={ExceptionType}, CauseType={CauseType}, Status={Status}, " +
+                "HttpRequestError={HttpRequestError}, SocketError={SocketError}, " +
+                "ElapsedMs={ElapsedMs}, ScanTimeoutMs={ScanTimeoutMs}, TokenTimeoutMs={TokenTimeoutMs}.",
+                stage, operation, reason, exception.GetType().Name, exception.GetBaseException().GetType().Name, status,
+                (exception as HttpRequestException)?.HttpRequestError,
+                (exception.GetBaseException() as SocketException)?.SocketErrorCode,
+                (int)Stopwatch.GetElapsedTime(startTicks).TotalMilliseconds,
+                Math.Max(200, config.TimeoutMs), Math.Max(200, config.TokenTimeoutMs));
+            return Unavailable(activity, reason, startTicks);
         }
     }
 
