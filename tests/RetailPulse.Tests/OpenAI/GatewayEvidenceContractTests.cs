@@ -61,6 +61,61 @@ public sealed partial class GatewayEvidenceContractTests
         };
 
     [Fact]
+    public async Task MixedOutputCoverage_SurvivesTransportAggregationAndJson()
+    {
+        GatewayEvidenceCollector.Scope scope = GatewayEvidenceCollector.Begin();
+        try
+        {
+            var headers = new Dictionary<string, string>
+            {
+                [GatewayEvidenceHeaders.Backend] = "retail-pulse-foundry-pool",
+                [GatewayEvidenceHeaders.BackendKind] = "pool",
+                [GatewayEvidenceHeaders.Cache] = "disabled",
+                [GatewayEvidenceHeaders.SafetyPhase] = "output",
+                [GatewayEvidenceHeaders.SafetyDecision] = "allow",
+                [GatewayEvidenceHeaders.SafetyOutputChecked] = "false",
+                [GatewayEvidenceHeaders.SafetyOutputReason] = "no-text",
+            };
+            var pipeline = ClientPipeline.Create(
+                new ClientPipelineOptions
+                {
+                    Transport = new HttpClientPipelineTransport(new HttpClient(new StubHandler(Respond(200, headers)))),
+                    RetryPolicy = new ClientRetryPolicy(0),
+                }, [], [new GatewayEvidencePolicy(GatewayMode.Apim)], []);
+            async Task Send()
+            {
+                PipelineMessage message = pipeline.CreateMessage();
+                message.Request.Uri = new Uri("https://example.test/x");
+                message.Request.Method = "POST";
+                await pipeline.SendAsync(message);
+            }
+
+            await Send();
+            headers[GatewayEvidenceHeaders.SafetyOutputChecked] = "true";
+            headers.Remove(GatewayEvidenceHeaders.SafetyOutputReason);
+            headers[GatewayEvidenceHeaders.Safety] = "passed";
+            await Send();
+            GatewayEvidence snapshot = scope.Snapshot();
+            snapshot.CallCount.Should().Be(2);
+            snapshot.Calls[0].GatewaySafety.Should().BeEquivalentTo(
+                new GatewaySafetyEvidence(GatewaySafetyPhase.Output, GatewaySafetyDecision.Allow, null, null, null, null, null, false, GatewayOutputCheckReason.NoText));
+            snapshot.Calls[1].GatewaySafety!.OutputChecked.Should().BeTrue();
+            snapshot.Calls.Should().OnlyContain(c => c.Cache == GatewayOutcome.Disabled && c.BackendKind == GatewayBackendKind.Pool
+                && c.Route == GatewayRouteState.Unknown);
+            using var json = JsonDocument.Parse(JsonSerializer.Serialize(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            JsonElement calls = json.RootElement.GetProperty("calls");
+            calls[0].GetProperty("gatewaySafety").GetProperty("outputCheckReason").GetString().Should().Be("no-text");
+            calls[0].GetProperty("cache").GetString().Should().Be("disabled");
+            calls[0].GetProperty("backendKind").GetString().Should().Be("pool");
+            calls[1].GetProperty("gatewaySafety").GetProperty("outputChecked").GetBoolean().Should().BeTrue();
+        }
+        finally
+        {
+            GatewayEvidenceCollector.End();
+        }
+    }
+
+    [Fact]
     public async Task ApimMode_WithHeaders_IsObserved()
     {
         GatewayEvidence e = await RunAsync(GatewayMode.Apim, Respond(200, new()
@@ -342,4 +397,3 @@ public sealed partial class GatewayEvidenceContractTests
     [System.Text.RegularExpressions.GeneratedRegex(@"\.WithGatewayEvidence\(\)")]
     private static partial System.Text.RegularExpressions.Regex MyRegex();
 }
-

@@ -7,6 +7,7 @@ namespace RetailPulse.Contracts.Gateway;
 /// gateway should have reported the field but it was absent or malformed;
 /// <see cref="NotApplicable"/> means the gateway explicitly said the decision does not
 /// apply. Neither may ever be rendered as success.
+/// <see cref="Disabled"/> is explicit evidence that the semantic-cache policy was not rendered.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<GatewayOutcome>))]
 public enum GatewayOutcome
@@ -20,6 +21,7 @@ public enum GatewayOutcome
     [JsonStringEnumMemberName("passed")] Passed,
     [JsonStringEnumMemberName("blocked")] Blocked,
     [JsonStringEnumMemberName("bypass")] Bypass,
+    [JsonStringEnumMemberName("disabled")] Disabled,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<GatewayRouteState>))]
@@ -77,6 +79,24 @@ public enum GatewaySafetyDecision
     [JsonStringEnumMemberName("allowed_on_safety_error")] AllowedOnSafetyError,
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<GatewayOutputCheckReason>))]
+public enum GatewayOutputCheckReason
+{
+    [JsonStringEnumMemberName("unknown")] Unknown = 0,
+    [JsonStringEnumMemberName("no-text")] NoText,
+    [JsonStringEnumMemberName("streaming")] Streaming,
+    [JsonStringEnumMemberName("backend-error")] BackendError,
+    [JsonStringEnumMemberName("unavailable")] Unavailable,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<GatewayBackendKind>))]
+public enum GatewayBackendKind
+{
+    [JsonStringEnumMemberName("unknown")] Unknown = 0,
+    [JsonStringEnumMemberName("pool")] Pool,
+    [JsonStringEnumMemberName("backend")] Backend,
+}
+
 /// <summary>
 /// Privacy-safe APIM content safety evidence (#331): phase, decision, prompt-attack flag, the
 /// highest harm category/severity actually reported, policy mode and latency. It never carries
@@ -91,7 +111,8 @@ public sealed record GatewaySafetyEvidence(
     int? Severity,
     string? Mode,
     long? LatencyMs,
-    bool? OutputChecked);
+    bool? OutputChecked,
+    GatewayOutputCheckReason OutputCheckReason = GatewayOutputCheckReason.Unknown);
 
 /// <summary>Kind of token-budget scope (#332). Never an identifier: counters and subscription ids are not exposed.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<GatewayBudgetScopeKind>))]
@@ -122,6 +143,7 @@ public sealed record GatewayBudgetEvidence(GatewayBudgetScopeKind ScopeKind, Gat
 /// Privacy-safe evidence of the decisions APIM made for one gateway call. Carries no
 /// subscription identifiers, secrets, prompts, completions, backend credentials, or
 /// exception text. <see cref="TransportError"/> is a fixed error class only.
+/// <see cref="BackendAlias"/> names the configured target, which may be a pool, not its selected member.
 /// </summary>
 public sealed record GatewayCallEvidence(
     string? GatewayRequestId,
@@ -140,7 +162,8 @@ public sealed record GatewayCallEvidence(
     string? TransportError = null,
     GatewayFailoverDemoEvidence? FailoverDemo = null,
     GatewaySafetyEvidence? GatewaySafety = null,
-    GatewayBudgetEvidence? Budget = null)
+    GatewayBudgetEvidence? Budget = null,
+    GatewayBackendKind BackendKind = GatewayBackendKind.Unknown)
 {
     /// <summary>True when the response carried no gateway evidence at all.</summary>
     [JsonIgnore]
@@ -149,7 +172,7 @@ public sealed record GatewayCallEvidence(
         && TokensConsumed is null && TokensRemaining is null && Quota == GatewayOutcome.Unknown
         && Cache == GatewayOutcome.Unknown && Safety == GatewayOutcome.Unknown
         && PolicyVersion is null && GatewayLatencyMs is null && BackendLatencyMs is null
-        && GatewaySafety is null && Budget is null;
+        && GatewaySafety is null && Budget is null && BackendKind == GatewayBackendKind.Unknown;
 
     public static GatewayCallEvidence Empty(GatewayEvidenceStatus status, int? statusCode = null, string? transportError = null) =>
         new(null, null, GatewayRouteState.Unknown, null, null, GatewayOutcome.Unknown, GatewayOutcome.Unknown,

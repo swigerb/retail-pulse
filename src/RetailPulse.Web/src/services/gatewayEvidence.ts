@@ -6,6 +6,7 @@ import type {
   GatewayCallEvidence,
   GatewayEvidence,
   GatewayOutcome,
+  GatewayOutputCheckReason,
   GatewayRouteState,
   GatewaySafetyDecision,
   GatewaySafetyEvidence,
@@ -14,14 +15,15 @@ import type {
 
 const OUTCOMES: readonly GatewayOutcome[] = [
   'unknown', 'not-applicable', 'allowed', 'throttled', 'hit', 'miss', 'passed', 'blocked',
-  'bypass',
+  'bypass', 'disabled',
 ];
 const ROUTES: readonly GatewayRouteState[] = ['unknown', 'primary', 'failover'];
 const STATUSES: readonly GatewayEvidenceStatus[] = ['unavailable', 'observed', 'bypassed', 'blocked', 'failed'];
 const TRANSPORT_ERRORS = ['timeout', 'canceled', 'network', 'other'];
 const SAFE_TOKEN = /^[A-Za-z0-9._:-]{1,64}$/;
 
-function outcome(v: unknown): GatewayOutcome {
+function outcome(v: unknown, allowDisabled = false): GatewayOutcome {
+  if (v === 'disabled' && !allowDisabled) return 'unknown';
   return typeof v === 'string' && (OUTCOMES as readonly string[]).includes(v)
     ? (v as GatewayOutcome)
     : 'unknown';
@@ -54,6 +56,7 @@ function normalizeDemo(v: unknown): GatewayCallEvidence['failoverDemo'] {
 const HARM_CATEGORIES = ['Hate', 'SelfHarm', 'Sexual', 'Violence'];
 const SAFETY_PHASES: readonly GatewaySafetyPhase[] = ['input', 'output'];
 const SAFETY_DECISIONS: readonly GatewaySafetyDecision[] = ['allow', 'block', 'allowed_on_safety_error'];
+const OUTPUT_REASONS: readonly GatewayOutputCheckReason[] = ['unknown', 'no-text', 'streaming', 'backend-error', 'unavailable'];
 
 function normalizeSafety(v: unknown): GatewaySafetyEvidence | null {
   if (!v || typeof v !== 'object') return null;
@@ -70,6 +73,8 @@ function normalizeSafety(v: unknown): GatewaySafetyEvidence | null {
     mode: d.mode === 'demo' || d.mode === 'regulated' ? d.mode : null,
     latencyMs: count(d.latencyMs),
     outputChecked: typeof d.outputChecked === 'boolean' ? d.outputChecked : null,
+    outputCheckReason: OUTPUT_REASONS.includes(d.outputCheckReason as GatewayOutputCheckReason)
+      ? d.outputCheckReason as GatewayOutputCheckReason : 'unknown',
   };
 }
 
@@ -96,6 +101,7 @@ function normalizeCall(raw: unknown): GatewayCallEvidence | null {
   return {
     gatewayRequestId: token(r.gatewayRequestId),
     backendAlias: token(r.backendAlias),
+    backendKind: r.backendKind === 'pool' || r.backendKind === 'backend' ? r.backendKind : 'unknown',
     route:
       typeof r.route === 'string' && (ROUTES as readonly string[]).includes(r.route)
         ? (r.route as GatewayRouteState)
@@ -103,7 +109,7 @@ function normalizeCall(raw: unknown): GatewayCallEvidence | null {
     tokensConsumed: count(r.tokensConsumed),
     tokensRemaining: count(r.tokensRemaining),
     quota: outcome(r.quota),
-    cache: outcome(r.cache),
+    cache: outcome(r.cache, true),
     safety: outcome(r.safety),
     policyVersion: token(r.policyVersion),
     gatewayLatencyMs: count(r.gatewayLatencyMs),

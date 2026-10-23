@@ -363,6 +363,49 @@ describe('ChatPanel', () => {
     expect(toggle).toHaveTextContent('Gateway details partial or unknown');
   });
 
+  it('discloses no-text tool stages and checked text without a false unchecked-output warning', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({ kind: 'complete', response: {
+      reply: 'Mixed text coverage.',
+      sessionId: 'sess-no-text',
+      spans: [],
+      gateway: gatewayEvidence({}, [
+        gatewayCall({ safety: 'unknown', gatewaySafety: { phase: 'output', decision: 'allow', outputChecked: false, outputCheckReason: 'no-text' } }),
+        gatewayCall(),
+      ]),
+    } });
+    renderPanel();
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'Check text coverage');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+    expect(await screen.findByText('Mixed text coverage.')).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Expand response information' });
+    expect(toggle).not.toHaveTextContent('Safety warning');
+    await user.click(toggle);
+    expect(screen.getByTestId('gateway-item-gatewaySafety')).toHaveTextContent('output text checked; 1 call had no output text (tool arguments not checked)');
+    expect(screen.getByTestId('gateway-item-safety')).not.toHaveTextContent('Passed');
+  });
+
+  it('keeps failure, throttling, safety, truncation and partial evidence independent', async () => {
+    const user = userEvent.setup();
+    sendMessageMock.mockResolvedValue({ kind: 'complete', response: {
+      reply: 'Mixed failures.',
+      sessionId: 'sess-mixed-failures',
+      spans: [],
+      gateway: gatewayEvidence({ status: 'failed', truncated: true, droppedCalls: 1, callCount: 3 }, [
+        gatewayCall({ quota: 'throttled', route: 'unknown', gatewaySafety: { phase: 'input', decision: 'allow', outputChecked: false } }),
+        gatewayCall({ status: 'failed', gatewaySafety: null }),
+      ]),
+    } });
+    renderPanel();
+    await user.type(screen.getByPlaceholderText(/Ask about retail performance/i), 'Check mixed failures');
+    await user.click(screen.getByRole('button', { name: /Send message/i }));
+    expect(await screen.findByText('Mixed failures.')).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Expand response information' });
+    for (const text of ['Gateway failed', 'Gateway throttled', 'Safety warning', 'Gateway evidence truncated', 'Gateway details partial or unknown']) {
+      expect(toggle).toHaveTextContent(text);
+    }
+  });
+
   it('exposes an Execution path selector defaulting to Auto', () => {
     renderPanel();
 

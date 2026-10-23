@@ -1156,7 +1156,8 @@ export type GatewayOutcome =
   | 'miss'
   | 'passed'
   | 'blocked'
-  | 'bypass';
+  | 'bypass'
+  | 'disabled';
 
 export type GatewayEvidenceStatus = 'unavailable' | 'observed' | 'bypassed' | 'blocked' | 'failed';
 
@@ -1170,6 +1171,7 @@ export interface GatewayFailoverDemoEvidence {
 
 export type GatewaySafetyPhase = 'unknown' | 'input' | 'output';
 export type GatewaySafetyDecision = 'unknown' | 'allow' | 'block' | 'allowed_on_safety_error';
+export type GatewayOutputCheckReason = 'unknown' | 'no-text' | 'streaming' | 'backend-error' | 'unavailable';
 
 /** APIM content safety evidence (#331). Metadata only; never prompt, completion, or matched text. */
 export interface GatewaySafetyEvidence {
@@ -1181,6 +1183,7 @@ export interface GatewaySafetyEvidence {
   mode?: string | null;
   latencyMs?: number | null;
   outputChecked?: boolean | null;
+  outputCheckReason?: GatewayOutputCheckReason;
 }
 
 export type GatewayBudgetScopeKind = 'store' | 'channel' | 'application' | 'b2b';
@@ -1197,6 +1200,8 @@ export interface GatewayBudgetEvidence {
 export interface GatewayCallEvidence {
   gatewayRequestId?: string | null;
   backendAlias?: string | null;
+  /** Whether the alias names a configured pool or a backend, not proof of selection. */
+  backendKind?: 'unknown' | 'pool' | 'backend';
   route: GatewayRouteState;
   tokensConsumed?: number | null;
   tokensRemaining?: number | null;

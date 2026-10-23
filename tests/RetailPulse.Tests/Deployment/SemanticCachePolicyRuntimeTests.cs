@@ -29,6 +29,20 @@ public sealed partial class SemanticCachePolicyRuntimeTests
 
     private static string Decision(XElement root) => Var(root, "rp-cache-decision");
 
+    [Fact]
+    public void DisabledRender_ReportsPolicyDisabled_NotMissOrSuccess()
+    {
+        string bicep = Module("apim-openai-api.bicep");
+        Match fragment = MyRegex().Match(bicep);
+        fragment.Success.Should().BeTrue("the inactive policy branch must report its configuration explicitly");
+        XElement header = XDocument.Parse(fragment.Groups["disabled"].Value).Root!;
+        ((string?)header.Attribute("name")).Should().Be("x-rp-gw-cache");
+        header.Element("value")!.Value.Should().Be("disabled");
+        bicep.Should().Contain("'{backend-kind}', poolEnabled ? 'pool' : 'backend'",
+            "a configured pool must not masquerade as its selected member");
+        Module("apim-openai-policy.xml").Should().Contain("<value>{backend-kind}</value>");
+    }
+
     // Applies the patterns from the rendered XML in the order the rendered decision expression references them.
     private static string Classify(XElement root, string prompt)
     {
@@ -219,4 +233,6 @@ public sealed partial class SemanticCachePolicyRuntimeTests
 
     [GeneratedRegex("<set-variable name=\"rp-cache-partition\" value=\"\\{cache-partition\\}\"")]
     private static partial Regex PartitionRegex();
+    [GeneratedRegex(@"var semanticCacheOutboundFragment = semanticCachePolicyActive\s*\?[^\r\n]*\s*: '(?<disabled>[^']*)'")]
+    private static partial Regex MyRegex();
 }

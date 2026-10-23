@@ -10,11 +10,11 @@
                 try {
                   var b = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
                   var ch = b == null ? null : b[&quot;choices&quot;] as JArray;
-                  if (ch == null) { return &quot;invalid&quot;; }
+                  if (ch == null || ch.Count == 0) { return &quot;invalid&quot;; }
                   var sb = new System.Text.StringBuilder();
                   foreach (var c in ch) {
                     var m = c[&quot;message&quot;];
-                    if (m == null) { continue; }
+                    if (!(m is JObject)) { return &quot;invalid&quot;; }
                     var content = m[&quot;content&quot;];
                     string ct = &quot;&quot;;
                     if (content != null &amp;&amp; content.Type != JTokenType.Null) {
@@ -111,6 +111,10 @@
                 } catch (Exception) { return &quot;invalid&quot;; }
             }" />
             <set-variable name="rp-safety-output-checked" value="@(((string)context.Variables[&quot;rp-out-result&quot;]).StartsWith(&quot;ok:&quot;) ? &quot;true&quot; : &quot;false&quot;)" />
+            <set-variable name="rp-safety-output-reason" value="@{
+                string st = (string)context.Variables[&quot;rp-cs-out-state&quot;];
+                return st == &quot;empty&quot; ? &quot;no-text&quot; : ((string)context.Variables[&quot;rp-safety-output-checked&quot;]) == &quot;true&quot; ? &quot;unknown&quot; : &quot;unavailable&quot;;
+            }" />
             <set-variable name="rp-out-decision" value="@{
                 string st = (string)context.Variables[&quot;rp-cs-out-state&quot;];
                 string a = (string)context.Variables[&quot;rp-out-result&quot;];
@@ -190,6 +194,9 @@
                         <set-header name="x-rp-gw-safety-output-checked" exists-action="override">
                             <value>@((string)context.Variables[&quot;rp-safety-output-checked&quot;])</value>
                         </set-header>
+                        <set-header name="x-rp-gw-safety-output-reason" exists-action="override">
+                            <value>@((string)context.Variables[&quot;rp-safety-output-reason&quot;])</value>
+                        </set-header>
                         <set-body>@((string)context.Variables[&quot;rp-safety-decision&quot;] == &quot;block&quot; ? &quot;{\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;gateway_safety_blocked\&quot;,\&quot;message\&quot;:\&quot;The response was blocked by gateway content safety.\&quot;}}&quot; : &quot;{\&quot;error\&quot;:{\&quot;code\&quot;:\&quot;gateway_safety_unavailable\&quot;,\&quot;message\&quot;:\&quot;Content safety could not be verified.\&quot;}}&quot;)</set-body>
                     </return-response>
                 </when>
@@ -198,6 +205,10 @@
         </choose>
         <choose>
             <when condition="@(context.Variables.ContainsKey(&quot;rp-safety-evaluated&quot;) &amp;&amp; ((string)context.Variables[&quot;rp-safety-evaluated&quot;]) == &quot;true&quot;)">
+            <set-variable name="rp-safety-output-reason" value="@{
+                if (context.Variables.ContainsKey(&quot;rp-safety-output-reason&quot;)) { return (string)context.Variables[&quot;rp-safety-output-reason&quot;]; }
+                return ((string)context.Variables[&quot;rp-safety-stream&quot;]) == &quot;true&quot; ? &quot;streaming&quot; : context.Response.StatusCode != 200 ? &quot;backend-error&quot; : &quot;unknown&quot;;
+            }" />
             <set-header name="x-rp-gw-safety-phase" exists-action="override">
                 <value>@((string)context.Variables[&quot;rp-safety-phase&quot;])</value>
             </set-header>
@@ -221,6 +232,9 @@
             </set-header>
             <set-header name="x-rp-gw-safety-output-checked" exists-action="override">
                 <value>@((string)context.Variables[&quot;rp-safety-output-checked&quot;])</value>
+            </set-header>
+            <set-header name="x-rp-gw-safety-output-reason" exists-action="override">
+                <value>@((string)context.Variables[&quot;rp-safety-output-reason&quot;])</value>
             </set-header>
             <choose>
                 <!-- "passed" is asserted only when the output was really evaluated and every decision allowed it. -->

@@ -65,32 +65,46 @@ function outcomeItem(
   label: string,
   calls: GatewayCallEvidence[],
   observed: boolean,
+  incomplete: boolean,
 ): GatewayRibbonItem {
   if (!observed) return { key, label, value: UNAVAILABLE, state: 'unavailable' };
   const vals = distinct(calls.map(c => c[key]));
   const known = vals.filter(v => v !== 'unknown' && v !== 'not-applicable');
+  const partial = vals.includes('unknown') || incomplete;
   if (known.length === 0) {
     const na = vals.includes('not-applicable');
-    return { key, label, value: na ? 'Not applicable' : UNKNOWN, state: na ? 'observed' : 'unknown' };
+    return { key, label, value: na ? `Not applicable${partial ? ' (partial)' : ''}` : UNKNOWN, state: na && !partial ? 'observed' : 'unknown' };
   }
-  const state: GatewayDisplayState = known.includes('blocked') ? 'blocked' : 'observed';
+  if (key === 'safety' && known.includes('passed') && partial && !known.includes('blocked')) {
+    return { key, label, value: 'Partial checks — not all calls reported', state: 'unknown' };
+  }
+  const state: GatewayDisplayState = known.includes('blocked') ? 'blocked' : partial ? 'unknown' : 'observed';
   const text = known.map(v => v.charAt(0).toUpperCase() + v.slice(1)).join(' / ');
-  return { key, label, value: vals.includes('unknown') ? `${text} (partial)` : text, state };
+  return { key, label, value: partial ? `${text} (partial)` : text, state };
 }
 
 /**
  * APIM-level content safety (#331). Only a fully verified allow (known phase, input and output
- * checked) is neutral; blocks are blocked; safety-error allows, unchecked output and partial or
- * missing detail are warnings/unknown and never success. Distinct from the legacy application safety item.
+ * checked) is neutral. No-text output is explicitly not applicable, not a checked output.
+ * Safety-error allows, unchecked text and missing detail are warnings/unknown, never success.
+ * The coarse safety header comes from this same gateway, not application-level safety.
  */
-function gatewaySafetyItem(calls: GatewayCallEvidence[]): GatewayRibbonItem {
+function gatewaySafetyItem(calls: GatewayCallEvidence[], incomplete = false): GatewayRibbonItem {
   const key = 'gatewaySafety';
   const label = 'Gateway safety';
   const found = calls.map(c => c.gatewaySafety).filter((x): x is NonNullable<typeof x> => !!x);
-  if (found.length === 0) return { key, label, value: 'Not reported', state: 'unknown' };
+  if (found.length === 0) {
+    const disabled = calls.length > 0 && !incomplete && calls.every(c => c.safety === 'not-applicable');
+    return { key, label, value: disabled ? 'Not applicable — gateway checks disabled' : 'Not reported', state: disabled ? 'neutral' : 'unknown' };
+  }
 
-  const blocked = found.find(f => f.decision === 'block');
+  const blockedCall = calls.find(c => c.gatewaySafety?.decision === 'block' && c.statusCode !== 503)
+    ?? calls.find(c => c.gatewaySafety?.decision === 'block');
+  const blocked = blockedCall?.gatewaySafety;
   if (blocked) {
+    if (blockedCall?.statusCode === 503) {
+      return { key, label, value: `Unavailable (${blocked.phase}; request stopped)`, state: 'blocked' };
+    }
     const detail = [
       blocked.phase,
       blocked.promptAttack ? 'prompt attack' : null,
@@ -98,17 +112,29 @@ function gatewaySafetyItem(calls: GatewayCallEvidence[]): GatewayRibbonItem {
     ].filter(Boolean).join(', ');
     return { key, label, value: `Blocked (${detail})`, state: 'blocked' };
   }
-  const partial = found.length < calls.length ? ' (partial: some calls not reported)' : '';
+  const partial = found.length < calls.length || incomplete ? ' (partial: some calls not reported)' : '';
   if (found.some(f => f.decision === 'allowed_on_safety_error')) {
     return { key, label, value: `Allowed on safety error — not verified${partial}`, state: 'warning' };
   }
-  if (found.some(f => f.outputChecked === false)) {
-    return { key, label, value: `Allowed — output not checked${partial}`, state: 'warning' };
+  const unchecked = found.filter(f => f.outputChecked === false && f.outputCheckReason !== 'no-text');
+  if (unchecked.length > 0) {
+    const reasons = distinct(unchecked.map(f => f.outputCheckReason === 'streaming'
+      ? 'streaming' : f.outputCheckReason === 'backend-error' ? 'backend error'
+        : f.outputCheckReason === 'unavailable' ? 'safety unavailable' : null));
+    const reason = reasons.length ? ` (${reasons.join(' / ')})` : '';
+    const checked = found.filter(f => f.outputChecked === true).length;
+    return { key, label, value: `Allowed — output not checked${reason}${checked ? `; ${checked} other call${checked === 1 ? '' : 's'} checked` : ''}${partial}`, state: 'warning' };
   }
   if (found.some(f => f.outputChecked == null)) {
     return { key, label, value: `Allowed — output check unknown${partial}`, state: 'warning' };
   }
   if (partial) return { key, label, value: `Allowed${partial}`, state: 'warning' };
+  const noText = found.filter(f => f.outputChecked === false && f.outputCheckReason === 'no-text').length;
+  if (noText > 0) return {
+    key, label,
+    value: `Input checked; ${found.some(f => f.outputChecked === true) ? 'output text checked; ' : ''}${noText} call${noText === 1 ? '' : 's'} had no output text (tool arguments not checked)`,
+    state: 'neutral',
+  };
   return { key, label, value: 'Allowed — input and output checked', state: 'neutral' };
 }
 
@@ -148,16 +174,17 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
   const calls = gateway?.calls ?? [];
   const status: GatewayEvidenceStatus | 'missing' = gateway ? gateway.status : 'missing';
   const hasCalls = calls.length > 0;
-  const observed = status !== 'missing' && status !== 'unavailable' && status !== 'bypassed' && hasCalls;
+  const observed = hasCalls && calls.some(c => c.status === 'observed' || c.status === 'blocked');
+  const incomplete = Boolean(gateway?.truncated) || (gateway?.callCount ?? 0) > calls.length;
 
   let state: GatewayDisplayState;
   if (status === 'missing' || status === 'unavailable') state = 'unavailable';
   else if (status === 'bypassed') state = 'bypassed';
   else if (status === 'failed') state = 'failed';
-  else if (status === 'blocked' || calls.some(c => c.status === 'blocked' || c.safety === 'blocked')) state = 'blocked';
+  else if (status === 'blocked' || calls.some(c => c.status === 'blocked' || c.safety === 'blocked' || c.gatewaySafety?.decision === 'block')) state = 'blocked';
   else if (calls.some(c => c.quota === 'throttled')) state = 'throttled';
   else if (!hasCalls) state = 'unknown';
-  else if (gatewaySafetyItem(calls).state === 'warning') state = 'warning';
+  else if (gatewaySafetyItem(calls, incomplete).state === 'warning') state = 'warning';
   else if (gateway?.truncated) state = 'truncated';
   else state = 'observed';
 
@@ -187,7 +214,8 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
   const backends = distinct(calls.map(c => c.backendAlias));
   const routes = distinct(calls.map(c => c.route));
   const failedOver = routes.includes('failover');
-  const incompleteRoute = Boolean(gateway?.truncated) || routes.length === 0 || routes.includes('unknown');
+  const incompleteRoute = incomplete || routes.length === 0 || routes.includes('unknown');
+  const poolTarget = hasCalls && calls.every(c => c.backendKind === 'pool');
   const routeLabel = (r: string) => (r === 'failover' ? 'Failover' : r === 'primary' ? 'Primary' : UNKNOWN);
   const demo = calls.map(c => c.failoverDemo).find(d => d);
   const demoText = demo
@@ -207,18 +235,29 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
   const ids = distinct(calls.map(c => c.gatewayRequestId));
   const policies = distinct(calls.map(c => c.policyVersion));
   const outcomeUnavailable = state === 'failed' && !hasCalls;
-  const cache = outcomeUnavailable ? placeholder('cache', 'Cache') : outcomeItem('cache', 'Cache', calls, true);
-  const safety = outcomeUnavailable ? placeholder('safety', 'Safety') : outcomeItem('safety', 'Safety', calls, true);
+  const cache = outcomeUnavailable ? placeholder('cache', 'Cache') : outcomeItem('cache', 'Cache', calls, true, incomplete);
+  const gatewaySafety = outcomeUnavailable ? placeholder('gatewaySafety', 'Gateway safety') : gatewaySafetyItem(calls, incomplete);
+  let safety = outcomeUnavailable ? placeholder('safety', 'Safety') : outcomeItem('safety', 'Safety', calls, true, incomplete);
+  if (gatewaySafety.state === 'blocked') {
+    safety = { key: 'safety', label: 'Safety', value: gatewaySafety.value, state: 'blocked' };
+  } else if (safety.state !== 'blocked' && gatewaySafety.state === 'warning') {
+    safety = { key: 'safety', label: 'Safety', value: 'Not fully verified', state: 'warning' };
+  } else if (safety.state !== 'blocked' && gatewaySafety.state === 'neutral'
+    && calls.some(c => c.gatewaySafety?.outputCheckReason === 'no-text')) {
+    safety = { key: 'safety', label: 'Safety', value: 'Text checks only', state: 'neutral' };
+  }
 
   const items: GatewayRibbonItem[] = [
     {
       key: 'route',
       label: 'Route',
-      value: failedOver
-        ? backends.length ? `${join(backends, '')} (Failover)` : 'Failover'
-        : incompleteRoute
-          ? backends.length ? `${join(backends, '')} (Partial)` : UNKNOWN
-          : backends.length ? `${join(backends, '')} (${routeLabel(routes[0])})` : routeLabel(routes[0]),
+      value: poolTarget
+        ? `${join(backends, UNKNOWN)} (Pool; selected backend not reported)`
+        : failedOver
+          ? backends.length ? `${join(backends, '')} (Failover)` : 'Failover'
+          : incompleteRoute
+            ? backends.length ? `${join(backends, '')} (Partial)` : UNKNOWN
+            : backends.length ? `${join(backends, '')} (${routeLabel(routes[0])})` : routeLabel(routes[0]),
       state: failedOver ? 'observed' : incompleteRoute ? 'unknown' : 'observed',
     },
     {
@@ -230,7 +269,7 @@ export function buildGatewayRibbon(gateway: GatewayEvidence | null | undefined):
     ...(budget ? [budget] : []),
     cache,
     safety,
-    outcomeUnavailable ? placeholder('gatewaySafety', 'Gateway safety') : gatewaySafetyItem(calls),
+    gatewaySafety,
     {
       key: 'failover',
       label: 'Failover',

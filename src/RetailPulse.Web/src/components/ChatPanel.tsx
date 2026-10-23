@@ -306,6 +306,9 @@ function ResponseDiagnostics({
       : gatewaySafety?.state === 'warning'
         ? { text: `Safety warning: ${gatewaySafety.value}`, className: styles.statusWarning }
         : null,
+    gatewayModel.state !== 'throttled' && gateway?.calls.some(call => call.quota === 'throttled')
+      ? { text: 'Gateway throttled', className: styles.statusWarning }
+      : null,
     gateway?.truncated
       ? { text: 'Gateway evidence truncated', className: styles.statusWarning }
       : null,

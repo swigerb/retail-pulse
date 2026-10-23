@@ -138,7 +138,8 @@ public sealed partial class GatewaySafetyPolicyContractTests
         Bicep.Should().Contain("var safetyInboundFragment = gatewaySafetyEnabled").And.Contain(": ''");
         Bicep.Should().Contain("var safetyOutboundFragment = gatewaySafetyEnabled");
         Bicep.Should().Contain("if (gatewaySafetyEnabled)");
-        foreach (string h in new[] { "phase", "decision", "prompt-attack", "category", "severity", "mode", "latency-ms", "output-checked" })
+        Bicep.Should().Contain("<value>not-applicable</value>", "disabled checks must be explicit, not inferred from missing evidence");
+        foreach (string h in new[] { "phase", "decision", "prompt-attack", "category", "severity", "mode", "latency-ms", "output-checked", "output-reason" })
         {
             BasePolicy.Should().Contain($"<set-header name=\"x-rp-gw-safety-{h}\" exists-action=\"delete\" />");
         }
