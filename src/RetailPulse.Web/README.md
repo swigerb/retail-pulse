@@ -14,6 +14,13 @@ See also:
 
 ## Feature flags / Navigation
 
+The RP logo and primary Send action keep the application blue gradient through
+`--retail-pulse-primary` / `--retail-pulse-accent` in `App.css`. Active pack themes
+override the separate `--brand-primary` / `--brand-accent` tokens for retailer
+chrome, highlights, and derived accent shades; they do not recolor application
+identity. `npm run test:dashboard-layout` also checks this separation in Chrome
+using the default, Kroger, Walgreens, Staples, and Lowes pack palettes.
+
 Retail Pulse keeps the default web navigation focused on **Chat**, **Real-Time Telemetry**, and **Observability**. Real-Time Telemetry is always visible and streams live agent spans, token totals, and cost estimates. Observability is enabled by default because it shows the AI Gateway via Azure APIM story: costs, token usage, and operational metrics.
 
 Secondary demo tabs are configuration-gated and hidden by default. To enable optional tabs locally, copy `.env.example` to `.env.local` and set the matching `VITE_FEATURE_*` flag to `true` or `1`.

@@ -10,7 +10,7 @@ export function BrandLogo({ size = 40, className, showWordmark = true }: Props) 
       <div style={{
         height: size,
         width: size,
-        background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-accent))',
+        background: 'linear-gradient(135deg, var(--retail-pulse-primary), var(--retail-pulse-accent))',
         borderRadius: '8px',
         display: 'flex',
         alignItems: 'center',
