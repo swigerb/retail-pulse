@@ -829,6 +829,26 @@ Generate a multi-brand portfolio scorecard. Convenes specialist agents to score 
 
 **Response (200):** Scorecard with per-brand scores from each specialist domain.
 
+Each dimension includes `status` (`available` or `unavailable`). `score` (1–10)
+and `weightedScore` are nullable: missing agents, timeouts, failures, malformed
+JSON, invalid/out-of-range scores, or missing/placeholder assessments yield
+`null`, not neutral 5 or zero. The `assessment` explains the unavailable state.
+A valid numeric score and nonempty assessment are required; this validation is
+not independent verification of the specialist's tool use or factual accuracy.
+
+Each brand includes `status` (`complete`, `partial`, or `unavailable`).
+`overallScore` is the existing weighted sum only when **all configured
+dimensions** are available; otherwise it is `null`. Partial results preserve
+available scores and original weights, without renormalizing or treating absent
+dimensions as poor performance. Action items may refer only to available
+dimensions. Only complete brands are cached for the existing 15-minute TTL.
+
+If any brand is incomplete, executive synthesis is skipped and an explicit
+incomplete-assessment notice replaces portfolio comparisons. `includeSummary:
+false` skips synthesis and returns an empty executive summary in all cases.
+HTTP 200 indicates the assessment request completed, **not** that every score is
+available. Client cancellation propagates instead of becoming a scored result.
+
 **Error:** `503` if ScorecardOrchestrator is not registered.
 
 ---

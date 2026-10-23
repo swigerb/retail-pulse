@@ -152,10 +152,10 @@ const DIMENSION_META: Record<string, { label: string; color: string }> = {
 
 export function BrandScoreCard({ brand, onWhyClick }: BrandScoreCardProps) {
   const styles = useStyles();
-  const scoreColor = getScoreColor(brand.healthScore);
+  const scoreColor = brand.healthScore === null ? '#94a3b8' : getScoreColor(brand.healthScore);
   const trend = getTrendArrow(brand.trend);
   const dimensionDetails = getBrandDimensionDetails(brand);
-  const band = getCompositeBand(brand.healthScore);
+  const band = brand.healthScore === null ? null : getCompositeBand(brand.healthScore);
 
   const radarData = dimensionDetails.map((detail) => ({
     dimension: DIMENSION_META[detail.key]?.label ?? detail.shortLabel,
@@ -170,18 +170,22 @@ export function BrandScoreCard({ brand, onWhyClick }: BrandScoreCardProps) {
       </div>
 
       <div className={styles.scoreBlock}>
-        <span className={styles.score} style={{ color: scoreColor }}>
-          {brand.healthScore}
+        <span className={styles.score} style={{ color: scoreColor, ...(brand.healthScore === null ? { fontSize: '24px', letterSpacing: 'normal' } : {}) }}>
+          {brand.healthScore ?? 'Unavailable'}
         </span>
-        <span className={styles.trend} style={{ color: trend.color }}>
+        {brand.healthScore !== null && <span className={styles.trend} style={{ color: trend.color }}>
           {trend.symbol}
-        </span>
+        </span>}
       </div>
 
       <div className={styles.explainer}>
         <div className={styles.explainerTitle}>What this score means</div>
         <p className={styles.explainerText}>
-          {brand.healthScore}/100 is a {band.label} score: {band.description}.
+          {band
+            ? `${brand.healthScore}/100 is a ${band.label} score: ${band.description}.`
+            : brand.status === 'partial'
+              ? 'Partial assessment — overall score unavailable.'
+              : 'Assessment unavailable. No measured business conclusion can be drawn.'}
         </p>
         <p className={styles.explainerText}>
           {formatCompositeCalculation(dimensionDetails, brand.healthScore)}
@@ -195,7 +199,7 @@ export function BrandScoreCard({ brand, onWhyClick }: BrandScoreCardProps) {
         </p>
       </div>
 
-      <div className={styles.radarWrap}>
+      {brand.healthScore !== null && <div className={styles.radarWrap}>
         <ResponsiveContainer width="100%" height="100%">
           <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
             <PolarGrid stroke="rgba(255,255,255,0.08)" />
@@ -218,7 +222,7 @@ export function BrandScoreCard({ brand, onWhyClick }: BrandScoreCardProps) {
             />
           </RadarChart>
         </ResponsiveContainer>
-      </div>
+      </div>}
 
       <div className={styles.dimensions}>
         {dimensionDetails.map((detail) => {
@@ -230,7 +234,7 @@ export function BrandScoreCard({ brand, onWhyClick }: BrandScoreCardProps) {
                 <div className={styles.dimBarTrack}>
                   <div
                     style={{
-                      width: `${detail.score}%`,
+                      width: `${detail.score ?? 0}%`,
                       height: '100%',
                       borderRadius: '3px',
                       backgroundColor: meta?.color ?? '#6366f1',
@@ -238,7 +242,7 @@ export function BrandScoreCard({ brand, onWhyClick }: BrandScoreCardProps) {
                     }}
                   />
                 </div>
-                <span className={styles.dimValue}>{Math.round(detail.score)}</span>
+                <span className={styles.dimValue}>{detail.score === null ? 'N/A' : Math.round(detail.score)}</span>
                 <WhyButton
                   size="small"
                   onClick={() => onWhyClick?.(detail.key)}
