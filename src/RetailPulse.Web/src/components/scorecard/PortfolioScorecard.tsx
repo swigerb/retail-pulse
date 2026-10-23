@@ -235,14 +235,22 @@ export function PortfolioScorecard({
                 </div>
 
                 <div className={styles.scoreRow}>
-                  <ScoreRing score={brand.healthScore} />
-                  <span className={styles.trendArrow} style={{ color: trend.color }}>
-                    {trend.symbol}
-                  </span>
+                  {brand.healthScore === null ? (
+                    <span role="status">
+                      {brand.status === 'partial' ? 'Partial assessment — overall score unavailable' : 'Assessment unavailable'}
+                    </span>
+                  ) : (
+                    <>
+                      <ScoreRing score={brand.healthScore} />
+                      <span className={styles.trendArrow} style={{ color: trend.color }}>
+                        {trend.symbol}
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 <div className={styles.pills}>
-                  {brand.topRisk && (
+                  {brand.healthScore !== null && brand.topRisk && (
                     <span
                       className={styles.pill}
                       style={{ backgroundColor: SCORECARD_COLORS.redBg, color: SCORECARD_COLORS.red }}
@@ -250,7 +258,7 @@ export function PortfolioScorecard({
                       ⚠ {brand.topRisk}
                     </span>
                   )}
-                  {brand.topOpportunity && (
+                  {brand.healthScore !== null && brand.topOpportunity && (
                     <span
                       className={styles.pill}
                       style={{ backgroundColor: SCORECARD_COLORS.greenBg, color: SCORECARD_COLORS.green }}

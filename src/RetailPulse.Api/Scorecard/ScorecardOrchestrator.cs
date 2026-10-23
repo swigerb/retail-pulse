@@ -23,9 +23,7 @@ public class ScorecardOrchestrator
     private readonly IReadOnlyList<ScorecardDimensionConfig> _scoringDimensionsConfig;
 
     // Specialist assessments make tool calls, so they need the same headroom the
-    // consensus council was given. At 12s every dimension timed out and the whole
-    // scorecard degraded to a flat neutral 5.0, which looked like a working feature
-    // reporting that every brand was mediocre.
+    // consensus council was given. A timeout is unavailable evidence, not a score.
     private static readonly TimeSpan _agentTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
@@ -78,19 +76,26 @@ public class ScorecardOrchestrator
 
     public record BrandScore(
         string Brand,
-        double OverallScore,
+        double? OverallScore,
         Dictionary<string, DimensionScore> Dimensions,
         string Summary,
         string[] ActionItems,
-        long DurationMs);
+        long DurationMs)
+    {
+        public string Status => Dimensions.Values.All(d => d.Score.HasValue) ? "complete"
+            : Dimensions.Values.Any(d => d.Score.HasValue) ? "partial" : "unavailable";
+    }
 
     public record DimensionScore(
         string Dimension,
-        double Score,
+        double? Score,
         double Weight,
-        double WeightedScore,
+        double? WeightedScore,
         string Assessment,
-        string AgentKey);
+        string AgentKey)
+    {
+        public string Status => Score.HasValue ? "available" : "unavailable";
+    }
 
     public record PortfolioScorecard(
         BrandScore[] Brands,
@@ -117,9 +122,10 @@ public class ScorecardOrchestrator
 
         // The summary is an extra model call. Callers that render per-brand cards and
         // discard it should not pay for it on every request.
-        string execSummary = includeSummary
-            ? await GenerateExecSummaryAsync(sorted, region, ct)
-            : string.Empty;
+        string execSummary = !includeSummary ? string.Empty
+            : sorted.Any(b => b.Status != "complete")
+                ? "Portfolio assessment is incomplete. Unavailable dimensions are not scored; compare complete brands only."
+                : await GenerateExecSummaryAsync(sorted, region, ct);
 
         string[] topActions = [.. sorted
             .SelectMany(b => b.ActionItems)
@@ -151,9 +157,8 @@ public class ScorecardOrchestrator
 
         BrandScore score = await ScoreBrandUncachedAsync(brand, region, ct);
 
-        // Only cache a genuinely grounded result. Caching a degraded all-neutral scorecard
-        // would pin the panel to "every brand is mediocre" for the whole TTL.
-        if (!IsDegraded(score))
+        // Do not pin missing assessments in the cache for the whole TTL.
+        if (score.Status == "complete")
         {
             _brandCache[cacheKey] = new CachedBrandScore(score, DateTime.UtcNow);
         }
@@ -161,12 +166,9 @@ public class ScorecardOrchestrator
         return score;
     }
 
-    /// <summary>A score is degraded when no dimension produced a real assessment.</summary>
-    private static bool IsDegraded(BrandScore score) =>
-        score.Dimensions.Values.All(d =>
-            d.Assessment.Contains("timed out", StringComparison.OrdinalIgnoreCase)
-            || d.Assessment.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
-            || d.Assessment.Contains("failed", StringComparison.OrdinalIgnoreCase));
+    private static DimensionScore Unavailable(
+        string dimension, double weight, string agentKey, string reason) =>
+        new(dimension, null, weight, null, reason, agentKey);
 
     private async Task<BrandScore> ScoreBrandUncachedAsync(
         string brand, string? region, CancellationToken ct)
@@ -180,8 +182,8 @@ public class ScorecardOrchestrator
         {
             if (!agentLookup.TryGetValue(dim.AgentKey, out ISpecialistAgent? agent))
             {
-                return new DimensionScore(dim.Dimension, 5.0, dim.Weight, 5.0 * dim.Weight,
-                    "Agent unavailable — defaulting to neutral score.", dim.AgentKey);
+                _logger.LogWarning("{Agent} unavailable scoring {Brand}/{Dim}", dim.AgentKey, brand, dim.Dimension);
+                return Unavailable(dim.Dimension, dim.Weight, dim.AgentKey, "Agent unavailable.");
             }
 
             try
@@ -212,15 +214,17 @@ public class ScorecardOrchestrator
             {
                 _logger.LogWarning("{Agent} timed out scoring {Brand}/{Dim}",
                     dim.AgentKey, brand, dim.Dimension);
-                return new DimensionScore(dim.Dimension, 5.0, dim.Weight, 5.0 * dim.Weight,
-                    "Assessment timed out — using neutral score.", dim.AgentKey);
+                return Unavailable(dim.Dimension, dim.Weight, dim.AgentKey, "Assessment timed out.");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "{Agent} failed scoring {Brand}/{Dim}",
                     dim.AgentKey, brand, dim.Dimension);
-                return new DimensionScore(dim.Dimension, 5.0, dim.Weight, 5.0 * dim.Weight,
-                    "Assessment failed — using neutral score.", dim.AgentKey);
+                return Unavailable(dim.Dimension, dim.Weight, dim.AgentKey, "Assessment failed.");
             }
         });
 
@@ -229,9 +233,15 @@ public class ScorecardOrchestrator
         foreach (DimensionScore? dim in dimResults)
             dimensions[dim.Dimension] = dim;
 
-        double overallScore = dimResults.Sum(d => d.WeightedScore);
+        double? overallScore = dimResults.All(d => d.Score.HasValue)
+            ? Math.Round(dimResults.Sum(d => d.WeightedScore!.Value), 1)
+            : null;
 
-        string summary = overallScore >= 7.5 ? $"{brand} is performing strongly across most dimensions."
+        string summary = overallScore is null
+            ? dimResults.Any(d => d.Score.HasValue)
+                ? $"{brand} has a partial assessment. Overall score unavailable because some dimensions could not be assessed."
+                : $"{brand} assessment unavailable. No specialist dimension could be assessed."
+            : overallScore >= 7.5 ? $"{brand} is performing strongly across most dimensions."
             : overallScore >= 5.0 ? $"{brand} shows mixed performance — opportunities for improvement exist."
             : $"{brand} needs attention — multiple dimensions are underperforming.";
 
@@ -241,7 +251,7 @@ public class ScorecardOrchestrator
             .Select(d => $"Improve {d.Dimension}: {d.Assessment}")
             .Take(3)];
 
-        return new BrandScore(brand, Math.Round(overallScore, 1), dimensions,
+        return new BrandScore(brand, overallScore, dimensions,
             summary, actionItems, sw.ElapsedMilliseconds);
     }
 
@@ -279,25 +289,34 @@ public class ScorecardOrchestrator
                 using var doc = JsonDocument.Parse(json);
                 JsonElement root = doc.RootElement;
 
-                double score = root.TryGetProperty("score", out JsonElement scoreEl)
-                    ? Math.Clamp(scoreEl.GetDouble(), 1.0, 10.0)
-                    : 5.0;
-
-                string assessment = root.TryGetProperty("assessment", out JsonElement assessEl)
-                    ? assessEl.GetString() ?? "No assessment provided."
-                    : "No assessment provided.";
-
-                return new DimensionScore(dimension, score, weight, score * weight, assessment, agentKey);
+                if (root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty("score", out JsonElement scoreEl)
+                    && scoreEl.ValueKind == JsonValueKind.Number
+                    && scoreEl.TryGetDouble(out double score)
+                    && double.IsFinite(score) && score is >= 1 and <= 10
+                    && root.TryGetProperty("assessment", out JsonElement assessEl)
+                    && assessEl.ValueKind == JsonValueKind.String
+                    && assessEl.GetString() is string assessment
+                    && !string.IsNullOrWhiteSpace(assessment)
+                    && !IsUnavailableAssessment(assessment))
+                {
+                    return new DimensionScore(dimension, score, weight, score * weight, assessment.Trim(), agentKey);
+                }
             }
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
             _logger.LogWarning(ex, "Failed to parse dimension score for {Dim}", dimension);
         }
 
-        return new DimensionScore(dimension, 5.0, weight, 5.0 * weight,
-            responseText[..Math.Min(200, responseText.Length)], agentKey);
+        _logger.LogWarning("No valid score and assessment returned for {Dim}", dimension);
+        return Unavailable(dimension, weight, agentKey, "No valid specialist score and assessment were returned.");
     }
+
+    private static bool IsUnavailableAssessment(string assessment) =>
+        new[] { "Agent unavailable", "Assessment timed out", "Assessment failed",
+            "No assessment provided", "No grounded specialist assessment", "No valid specialist score" }
+        .Any(prefix => assessment.TrimStart().StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
     private async Task<string> GenerateExecSummaryAsync(
         BrandScore[] brands, string? region, CancellationToken ct)
@@ -325,12 +344,20 @@ public class ScorecardOrchestrator
 
             var options = new ChatOptions { Temperature = (float)_synthesisDef.Temperature };
             Microsoft.Extensions.AI.ChatResponse response = await _chatClient.GetResponseAsync(messages, options, ct);
-            return response.Text ?? "Portfolio scorecard generated. See brand details below.";
+            if (!string.IsNullOrWhiteSpace(response.Text))
+                return response.Text;
+
+            _logger.LogWarning("Exec summary generation returned no text");
+            return "Executive summary unavailable. See individual brand assessments.";
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Exec summary generation failed");
-            return "Portfolio scorecard generated. See brand details below.";
+            return "Executive summary unavailable. See individual brand assessments.";
         }
     }
 }

@@ -8,7 +8,7 @@ import type {
   StockoutRisk,
   StorePerformance,
 } from '../types';
-import { dimensionKeyFromAgent, SCORECARD_DIMENSION_CONFIG, SCORECARD_DIMENSION_ORDER } from '../scorecardModel';
+import { dimensionKeyFromAgent, isGroundedAssessment, SCORECARD_DIMENSION_CONFIG, SCORECARD_DIMENSION_ORDER } from '../scorecardModel';
 
 /**
  * Financials and Store Operations reads.
@@ -184,16 +184,18 @@ export async function fetchStockoutRisks(): Promise<StockoutRisk[]> {
 
 interface WireDimension {
   readonly dimension?: string;
-  readonly score?: number;
+  readonly score?: number | null;
+  readonly status?: string;
   readonly weight?: number;
-  readonly weightedScore?: number;
+  readonly weightedScore?: number | null;
   readonly assessment?: string;
   readonly agentKey?: string;
 }
 
 interface WireBrandScore {
   readonly brand?: string;
-  readonly overallScore?: number;
+  readonly overallScore?: number | null;
+  readonly status?: string;
   readonly dimensions?: Record<string, WireDimension>;
   readonly summary?: string;
   readonly actionItems?: readonly string[];
@@ -211,7 +213,10 @@ function toDimensionDetails(wire: Record<string, WireDimension> | undefined): Pa
     const key = dimensionKeyFromAgent(entry?.agentKey);
     if (!key) continue;
     const config = SCORECARD_DIMENSION_CONFIG[key];
-    const score = Math.round((entry.score ?? 0) * 10);
+    const available = (entry.status === undefined || entry.status === 'available')
+      && typeof entry.score === 'number' && Number.isFinite(entry.score)
+      && entry.score >= 1 && entry.score <= 10 && isGroundedAssessment(entry.assessment);
+    const score = available && typeof entry.score === 'number' ? entry.score * 10 : null;
     const weight = entry.weight ?? config.weight;
     byKey[key] = {
       key,
@@ -219,8 +224,8 @@ function toDimensionDetails(wire: Record<string, WireDimension> | undefined): Pa
       shortLabel: config.shortLabel,
       score,
       weight,
-      weightedScore: (entry.weightedScore ?? ((entry.score ?? 0) * weight)) * 10,
-      assessment: entry.assessment,
+      weightedScore: score === null ? null : score * weight,
+      assessment: typeof entry.assessment === 'string' ? entry.assessment : undefined,
       agentKey: entry.agentKey ?? config.agentKey,
     };
   }
@@ -229,7 +234,8 @@ function toDimensionDetails(wire: Record<string, WireDimension> | undefined): Pa
 
 function toDimensions(details: Partial<Record<ScorecardDimensionKey, BrandScoreDimensionDetail>>): BrandScore['dimensions'] {
   return SCORECARD_DIMENSION_ORDER.reduce((acc, key) => {
-    acc[key] = Math.round(details[key]?.score ?? 0);
+    const score = details[key]?.score;
+    acc[key] = score == null ? null : Math.round(score);
     return acc;
   }, {} as BrandScore['dimensions']);
 }
@@ -238,7 +244,9 @@ export function toBrandScores(wire: WireScorecard | null): BrandScore[] {
   return (wire?.brands ?? []).map(b => {
     const dimensionDetails = toDimensionDetails(b.dimensions);
     const dims = toDimensions(dimensionDetails);
-    const entries = Object.values(dimensionDetails).map(d => [d.key, d.score] as const);
+    const entries = Object.values(dimensionDetails)
+      .filter((d): d is BrandScoreDimensionDetail & { score: number } => d.score !== null)
+      .map(d => [d.key, d.score] as const);
     // The orchestrator returns a summary and actions, not an explicit risk/opportunity
     // pair. Derive them from the weakest and strongest dimensions so the card reports
     // something traceable to the scores it is showing.
@@ -252,19 +260,27 @@ export function toBrandScores(wire: WireScorecard | null): BrandScore[] {
     );
     const actions = b.actionItems ?? [];
     // overallScore is reported 0-10; the panel's health score is 0-100.
-    const score = (b.overallScore ?? 0) * 10;
+    const complete = entries.length > 0
+      && Object.values(dimensionDetails).every(d => d.score !== null)
+      && (b.status === 'complete' || (b.status === undefined && entries.length === SCORECARD_DIMENSION_ORDER.length));
+    const score = complete && typeof b.overallScore === 'number'
+      && Number.isFinite(b.overallScore) && b.overallScore >= 1 && b.overallScore <= 10
+      ? Math.round(b.overallScore * 10) : null;
 
     return {
       brandName: b.brand ?? '',
-      healthScore: Math.round(score),
-      trend: score >= 70 ? 'up' : score >= 50 ? 'stable' : 'down',
+      healthScore: score,
+      status: score !== null ? 'complete' : entries.length > 0 ? 'partial' : 'unavailable',
+      trend: score === null ? 'stable' : score >= 70 ? 'up' : score >= 50 ? 'stable' : 'down',
       dimensions: dims,
       dimensionDetails,
-      summary: b.summary,
-      actionItems: [...actions],
+      summary: score !== null ? b.summary : entries.length > 0
+        ? 'Partial assessment — overall score unavailable.'
+        : 'Assessment unavailable. No specialist dimension could be assessed.',
+      actionItems: score === null ? [] : [...actions],
       durationMs: b.durationMs,
-      topRisk: actions[0] ?? `${weakest ? SCORECARD_DIMENSION_CONFIG[weakest[0]].shortLabel : 'Scorecard'} is the weakest dimension (${weakest?.[1] ?? 0})`,
-      topOpportunity: actions[1] ?? `Build on ${strongest ? SCORECARD_DIMENSION_CONFIG[strongest[0]].shortLabel : 'scorecard'} strength (${strongest?.[1] ?? 0})`,
+      topRisk: score === null ? '' : actions[0] ?? `${weakest ? SCORECARD_DIMENSION_CONFIG[weakest[0]].shortLabel : 'Scorecard'} is the weakest dimension (${weakest?.[1] ?? 0})`,
+      topOpportunity: score === null ? '' : actions[1] ?? `Build on ${strongest ? SCORECARD_DIMENSION_CONFIG[strongest[0]].shortLabel : 'scorecard'} strength (${strongest?.[1] ?? 0})`,
     } satisfies BrandScore;
   });
 }
@@ -314,7 +330,7 @@ export async function fetchScorecardBatched(
     accumulated.push(...scored);
     // Highest health first, so the ranking stays meaningful as batches arrive.
     onBatch(
-      [...accumulated].sort((a, b) => b.healthScore - a.healthScore),
+      [...accumulated].sort((a, b) => (b.healthScore ?? -1) - (a.healthScore ?? -1)),
       Date.now() - started,
     );
   }
