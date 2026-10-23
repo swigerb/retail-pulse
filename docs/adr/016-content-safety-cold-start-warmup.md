@@ -268,6 +268,37 @@ evaluator, validator, fail-policy and diagnostic tests continue to run normally.
 No system/current-user trust store is modified, TLS verification is not disabled,
 and no production hook or transport configuration is introduced.
 
+### Full-suite scheduling isolation
+
+At dev `7aea2cde3e0692cb10429e7e9f9ef978e3595b43`, the Ubuntu full-suite
+coverage [run 40012088543](https://github.com/swigerb/retail-pulse/actions/runs/40012088543/job/120614889483)
+failed the persistent-disconnect row: both root GET attempts timed out, the
+warm-up reported no connection, and the first shield POST timed out before
+the later controlled aborts / breaker behavior. The warm-up-success assertion
+correctly failed (4,161 passed, one failed, nine skipped).
+The separate, non-rerun [run 40012201531](https://github.com/swigerb/retail-pulse/actions/runs/40012201531/job/120615143587)
+passed all 4,162 tests with nine skips at the identical source SHA, also with
+coverage. That comparison establishes intermittent fixture behavior, not a
+production repair or permission to disregard the failed run.
+
+The fixture previously ran alongside unrelated xUnit collections, including
+other real-process host tests. Its HTTPS dependency runs inside the test
+process while the real API child enforces the existing short safety deadlines.
+`ContentSafetyStartupCollection` now uses xUnit's `DisableParallelization`
+boundary, so these four rows run serially and do not overlap any other
+collection in this test assembly. Merely putting the rows in one collection
+without disabling parallelization would not exclude unrelated collections.
+The rest of the suite keeps its existing parallel scheduling.
+
+This is test-scheduling isolation, not proof that the earlier failure was caused
+by thread-pool starvation, and it cannot eliminate machine-wide contention.
+All four Linux rows, root warm-up success, exact roster/window hashes, input cap,
+authentication, cancellation, fail-closed refusal and persistent-breaker checks
+remain intact. No product code, configured timeout, retry, trust handling or
+unsupported-platform skip changes. A targeted pass alone is insufficient:
+validate this boundary in the real Ubuntu full-suite coverage job, without
+retrying until green.
+
 **Remaining blocker.** Issue #337 remains open. A future, separately authorized
 bounded activation must collect these startup phase/status/error diagnostics
 at a pinned deployed revision to distinguish token, POST transport, SDK moderation,

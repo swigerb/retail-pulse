@@ -24,6 +24,7 @@ using Xunit.Abstractions;
 
 namespace RetailPulse.Tests.Guardrails.ContentSafety;
 
+[Collection("ContentSafetyStartup")]
 public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
 {
     [LinuxOpenSslTheory]
