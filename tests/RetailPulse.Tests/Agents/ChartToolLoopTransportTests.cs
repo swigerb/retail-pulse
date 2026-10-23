@@ -144,7 +144,7 @@ public sealed class ChartToolLoopTransportTests
             : await pipeline.ExecuteAsync(context);
 
         turns.Should().Be(explicitChart ? 3 : 2);
-        foreach (var observed in observedTurns)
+        foreach ((string[] Tools, string SystemPrompt, int Documents, int Chars) observed in observedTurns)
         {
             observed.Tools.Should().Contain(getPerformance.Name);
             observed.Tools.Contains(createChart.Name).Should().Be(explicitChart);
@@ -212,7 +212,7 @@ public sealed class ChartToolLoopTransportTests
         {
             MaximumIterationsPerRequest = 3
         };
-        Microsoft.Agents.AI.AgentResponse mafResponse = await MafAgentInvoker.RunAsync(
+        AgentResponse mafResponse = await MafAgentInvoker.RunAsync(
             functionClient, "transport-characterization",
             [new ChatMessage(ChatRole.User, ComparisonPrompt)],
             new ChatOptions { Tools = [createChart] }, null, CancellationToken.None);
