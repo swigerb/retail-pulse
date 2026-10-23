@@ -17,9 +17,11 @@ public sealed class ContentSafetyFailureDiagnosticsTests
     private const string _bearer = "synthetic-bearer-must-not-appear-in-logs";
 
     [Theory]
+    [InlineData("PromptShield", 400, ContentSafetyFailureReason.RequestRejected)]
     [InlineData("PromptShield", 403, ContentSafetyFailureReason.Authentication)]
     [InlineData("PromptShield", 503, ContentSafetyFailureReason.Transport)]
     [InlineData("AnalyzeText", 403, ContentSafetyFailureReason.Authentication)]
+    [InlineData("AnalyzeText", 400, ContentSafetyFailureReason.RequestRejected)]
     [InlineData("AnalyzeText", 503, ContentSafetyFailureReason.Transport)]
     public async Task HttpFailure_ReportsPhaseStatusAndBudgets_WithoutBodiesOrException(
         string operation, int status, ContentSafetyFailureReason reason)
