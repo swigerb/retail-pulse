@@ -216,11 +216,43 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
             "missing APIM tool fails", "renamed APIM tool fails", "case-changed APIM tool fails",
             "write-bound APIM tool fails", "case-changed operation path fails",
             "explicit inactive deployment fails", "missing definition linkage fails", "apiSource error fails",
-            "apiSource syncing is pending", "no apiSources fails",
+            "apiSource syncing permits graph verification", "no apiSources fails",
+            "apiSource initializing is pending", "apiSource deleting fails",
+            "missing linkState fails closed", "missing linkState.state fails closed",
+            "null linkState.state fails closed", "empty linkState.state fails closed",
+            "non-string linkState.state fails closed", "flat linkState fails closed",
+            "syncing with complete graph passes", "syncing with missing API is pending",
+            "syncing with missing versions is pending", "syncing with partial definitions is pending",
+            "syncing with unresolved environment is pending", "syncing with wrong endpoint fails",
+            "syncing with extra tool fails", "initializing with complete graph stays pending",
+            "error with complete graph fails", "deleting with complete graph fails",
+            "missing state with complete graph fails", "unknown state with complete graph fails",
+            "link error takes precedence over incomplete graph",
+            "link-state timestamp and catalog readiness are distinct",
         })
         {
             script.Should().Contain(probe);
         }
+    }
+
+    [Fact]
+    public void LiveVerifier_SeparatesContinuousLinkCatalogReadinessAndRuntimeEvidence()
+    {
+        string script = File.ReadAllText(Path.Combine(_repoRoot, "scripts", "Verify-ApiCenter.ps1"));
+        string docs = File.ReadAllText(Path.Combine(_repoRoot, "docs", "deployment-azd.md"));
+
+        script.Should().Contain("Test-ApiCenterSync $getApic $base $McpEndpoint $apimTools $sources $apimId",
+            "the live path must use the same link-and-graph checks as the offline tests");
+        script.Should().Contain("unsupported state for 2024-06-01-preview");
+        script.Should().Contain("linkState.state is missing or invalid");
+        script.Should().Contain("continuous one-way sync (catalog readiness checked separately)");
+        script.Should().Contain("not catalog freshness");
+        script.Should().Contain("not proof of freshness or authenticated MCP runtime health");
+        script.Should().NotContain("apiSource syncing is pending");
+        script.Should().NotContain("state = 'connected'");
+        docs.Should().Contain("initializing").And.Contain("syncing").And.Contain("error").And.Contain("deleting");
+        docs.Should().Contain("lastUpdatedOn").And.Contain("not a catalog-freshness watermark");
+        docs.Should().Contain("authenticated MCP").And.Contain("known APIM change");
     }
 
     private JsonElement? TryCompile()
