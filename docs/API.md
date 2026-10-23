@@ -690,6 +690,9 @@ Escalate a query through the legacy L1→L2→L3 escalation pipeline. Routes thr
 
 **Request Body:** Same as `POST /api/chat`
 
+**Error:** `503` when the active pack does not configure an escalation synthesis agent.
+The request is refused before routing or model execution.
+
 **Response (200):**
 
 ```json
@@ -807,6 +810,24 @@ Generate a multi-brand portfolio scorecard. Convenes specialist agents to score 
 
 ## Council
 
+Orchestration services are pack-dependent: council requires both `council-synthesis`
+and `council-vote`; scorecard requires `scorecard-synthesis`; legacy escalation
+requires council or scorecard synthesis. A pack without these definitions still
+starts normally, with the routes retained and their existing authorization enforced.
+No orchestration service is enabled implicitly to make startup succeed.
+
+The `PackHostStartupTests` regression matrix launches the actual API entrypoint
+with `default`, `kroger-retail`, `walgreens-retail`, `staples-retail`, and
+`lowes-retail` under Production Entra, Anonymous, and GitHub authentication, plus
+Development Entra. It checks endpoint materialization, pack identity, unauthorized
+requests, unavailable orchestration, and chat validation. Configuration, signing
+keys, and SQLite data are isolated; outbound dependencies point at a loopback
+trap and must receive zero calls. No Azure, OAuth, or model service is contacted.
+
+```bash
+dotnet test tests/RetailPulse.Tests/RetailPulse.Tests.csproj --filter FullyQualifiedName~PackHostStartupTests
+```
+
 ### POST /api/council/convene
 
 Convene the Portfolio Health Council — all specialist agents vote on brand health.
@@ -846,6 +867,16 @@ Convene the Portfolio Health Council — all specialist agents vote on brand hea
   ]
 }
 ```
+
+**Error:** `503` if the active pack does not configure the council.
+
+---
+
+### GET /api/council/history
+
+Returns recent verdicts, or an empty array when no council has run, including
+when the active pack does not configure a council. Requires authorization;
+Anonymous sessions are forbidden.
 
 ---
 
