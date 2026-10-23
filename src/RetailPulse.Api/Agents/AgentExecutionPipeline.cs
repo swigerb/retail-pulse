@@ -10,6 +10,7 @@ using RetailPulse.Api.Budget;
 using RetailPulse.Api.Hubs;
 using RetailPulse.Api.Middleware;
 using RetailPulse.Api.Telemetry;
+using RetailPulse.Api.Tools;
 using RetailPulse.Contracts;
 using ChatResponse = RetailPulse.Contracts.ChatResponse;
 
@@ -69,6 +70,12 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
     ];
 
     private static readonly JsonSerializerOptions _caseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
+
+    private const string _proseOnlyGuidance =
+        "\n\nThis request is prose-only; no chart will be delivered. "
+        + "Answer using the available data tools and return a prose comparison or summary. "
+        + "Do not call CreateChart. Do not generate chart JSON or claim a chart was created, "
+        + "displayed, attached, or available to view, even if earlier conversation turns mention charts.";
 
     // Matches raw function/tool call leakage patterns in model output:
     // "to=functions.ToolName" prefix (OpenAI-style), optionally followed by garbage text and JSON args
@@ -140,16 +147,22 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         IReadOnlyList<PrefetchEntry>? compactedPrefetch = CompactPrefetch(context.PrefetchedData);
         bool chartCompletePrefetch = IsChartCompletePrefetch(request.UserIntentMessage, compactedPrefetch);
+        bool isChartIntent = Charts.ChartRequestDetector.Detect(request.UserIntentMessage).IsExplicitChartRequest;
         var chatOptions = new ChatOptions
         {
             Temperature = context.Temperature,
             Tools = chartCompletePrefetch
                 ? []
-                : [.. _anonymousChatPolicy.ApplyToolFilter(context.Tools).Select(t => WrapWithBudget(t is AIFunction fn ? new TimedAIFunction(fn) : t))]
+                : [.. ApplyChartToolPolicy(_anonymousChatPolicy.ApplyToolFilter(context.Tools), isChartIntent)
+                    .Select(t => WrapWithBudget(t is AIFunction fn ? new TimedAIFunction(fn) : t))]
         };
         _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
         string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, compactedPrefetch);
+        if (!isChartIntent)
+        {
+            systemPrompt += _proseOnlyGuidance;
+        }
         if (chartCompletePrefetch)
         {
             systemPrompt += "\n\nThe server will render the requested chart deterministically from the pre-loaded data. "
@@ -161,7 +174,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
         using IDisposable budgetScope = RequestToolContext.Begin(
             sessionId,
-            isChartIntent: Charts.ChartRequestDetector.Detect(request.UserIntentMessage).IsExplicitChartRequest);
+            isChartIntent: isChartIntent);
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase
@@ -376,6 +389,12 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
             ? new BudgetedAIFunction(fn, _toolBudget, _budgetOptions, _logger)
             : tool;
 
+    private static IEnumerable<AITool> ApplyChartToolPolicy(IEnumerable<AITool> tools, bool isChartIntent) =>
+        isChartIntent
+            ? tools
+            : tools.Where(tool => !string.Equals(tool.Name, nameof(ChartDataTool.CreateChart),
+                StringComparison.OrdinalIgnoreCase));
+
     /// <summary>
     /// Runs pre-fetched tool results through the same compaction boundary before they are
     /// injected into the system prompt, so prefetch cannot smuggle an un-budgeted raw
@@ -474,7 +493,9 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
 
         // Wrap tools with instrumentation for real-time per-tool progress events
         var instrumentedToolMiddleware = new InstrumentedToolMiddleware(_hubContext);
-        IEnumerable<AITool> allowedTools = _anonymousChatPolicy.ApplyToolFilter(context.Tools);
+        bool isChartIntent = Charts.ChartRequestDetector.Detect(request.UserIntentMessage).IsExplicitChartRequest;
+        IEnumerable<AITool> allowedTools = ApplyChartToolPolicy(
+            _anonymousChatPolicy.ApplyToolFilter(context.Tools), isChartIntent);
         IReadOnlyList<AITool> instrumentedTools = instrumentedToolMiddleware.WrapTools(allowedTools, sessionId);
 
         IReadOnlyList<PrefetchEntry>? compactedPrefetch = CompactPrefetch(context.PrefetchedData);
@@ -487,6 +508,10 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         _anonymousChatPolicy.ApplyOutputCap(chatOptions);
 
         string systemPrompt = BuildSystemPromptWithPrefetch(context.SystemPrompt, compactedPrefetch);
+        if (!isChartIntent)
+        {
+            systemPrompt += _proseOnlyGuidance;
+        }
         if (chartCompletePrefetch)
         {
             systemPrompt += "\n\nThe server will render the requested chart deterministically from the pre-loaded data. "
@@ -498,7 +523,7 @@ public partial class AgentExecutionPipeline : IAgentExecutionPipeline
         using IDisposable toolTimingScope = ToolInvocationTimings.Begin();
         using IDisposable budgetScope = RequestToolContext.Begin(
             sessionId,
-            isChartIntent: Charts.ChartRequestDetector.Detect(request.UserIntentMessage).IsExplicitChartRequest);
+            isChartIntent: isChartIntent);
         using Activity? thoughtActivity = AgentTelemetry.StartAgentThought(context.AgentName, request.Message);
 
         // Emit progress: thinking phase

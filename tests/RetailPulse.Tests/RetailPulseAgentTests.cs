@@ -40,13 +40,15 @@ public class RetailPulseAgentTests
 
         response.Reply.Should().Be("done");
         capturedMessages.Should().NotBeNull();
-        capturedMessages.Select(m => m.Role).Should().ContainInOrder(
+        capturedMessages.Select(m => m.Role).Should().Equal(
             ChatRole.System,
             ChatRole.User,
             ChatRole.Assistant,
             ChatRole.User);
-        capturedMessages.Select(m => m.Text).Should().ContainInOrder(
-            "System prompt",
+        capturedMessages[0].Text.Should().StartWith("System prompt")
+            .And.Contain("This request is prose-only")
+            .And.Contain("Do not generate chart JSON or claim a chart was created");
+        capturedMessages.Skip(1).Select(m => m.Text).Should().Equal(
             "Which brands are growing fastest year-over-year?",
             "FreshMart and Harvest Table are leading growth.",
             "rank them by sell-through growth");

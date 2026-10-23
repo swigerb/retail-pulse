@@ -14,6 +14,44 @@ How Retail Pulse generates and displays data visualizations.
 
 No server-side image generation is involved — all rendering is client-side.
 
+### Prose-only requests and chart claims
+
+Chart delivery follows `ChartRequestDetector` and the curated manifests, not an
+assistant's prose or a successful `CreateChart` status alone. Under the issue #76
+Group A contract, prose-only requests intentionally suppress model-emitted charts.
+For example, `Compare Foundry Home vs Urban Living performance in the West Coast`
+is in `ProsePromptAcceptanceManifest`; it is not an implicit chart request.
+
+Issue #428 exposed a mismatch between tool availability and that delivery policy:
+the specialist could call `CreateChart` successfully and narrate its success before
+Group A removed the extracted chart. The source regression demonstrates that the
+actual `AIFunctionFactory` -> function-invocation loop -> MAF response -> chart
+extraction path preserves the artifact; suppression occurs during fulfillment.
+This is not evidence of a transport loss or a tool-budget truncation defect.
+
+Both pipeline modes now omit `CreateChart` from the offered tools for prose-only
+requests, retain their data tools, and tell the model to provide prose without
+chart JSON or chart-created/displayed/attached claims. The policy uses
+`ChatRequest.UserIntentMessage`, including the original user request on scoped
+plan steps, rather than a planner's chart instruction. Group A remains the
+defense against unsolicited charts; no prose chart exceptions or prose-rewriting
+heuristics were added. These controls prevent inappropriate chart tool execution
+and guide synthesis; they are not a deterministic guarantee about every sentence
+an external model may produce.
+
+`ChartToolLoopTransportTests` exercises both modes and scoped requests with real
+factory-created tools and the function-invocation client. Explicit chart requests
+retain the tool and serialize the exact chart values/date labels into
+`ChatResponse.Charts`, even when the gateway's cloned model request withholds the
+chart result. Every model turn remains within five non-empty tool documents and
+9,500 aggregate characters. Existing normalization, validation, deduplication,
+temporal-fidelity and chart-unavailable policies are unchanged.
+
+The executable regression uses synthetic chart/data fixtures, not a replay of
+withheld production tool payloads. This is source-only evidence, not a new browser
+or production acceptance claim, and does not replace issue #409's historical
+exact-prompt evidence.
+
 ---
 
 ## ChartSpec Model
