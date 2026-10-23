@@ -24,14 +24,12 @@
         </return-response>
       </when>
     </choose>
-    <!-- Belt and braces: only the four approved read-only operations may execute. -->
-    <choose>
-      <when condition="@(context.Operation != null &amp;&amp; context.Operation.Id != &quot;get_inventory&quot; &amp;&amp; context.Operation.Id != &quot;get_stockout_risk&quot; &amp;&amp; context.Operation.Id != &quot;get_supply_disruptions&quot; &amp;&amp; context.Operation.Id != &quot;get_demand_forecast&quot;)">
-        <return-response>
-          <set-status code="403" reason="Forbidden" />
-        </return-response>
-      </when>
-    </choose>
+    <!--
+      Do not authorize tools from context.Operation here. MCP transport operation identities and
+      backing REST operation ids are different namespaces, and APIM does not document them as an
+      authorization boundary. The MCP tool resources, GET-only backing API, and API-side app-only
+      route allow-list enforce the four-tool boundary.
+    -->
     <rate-limit-by-key calls="30" renewal-period="60" counter-key="@(context.Subscription.Id)" />
     <quota-by-key calls="2000" bandwidth="20480" renewal-period="86400" counter-key="@(context.Subscription.Id)" />
     <!-- Backend identity: the caller token is never forwarded; APIM presents its own managed identity token. -->
