@@ -14,9 +14,11 @@
     deployment ids, and verifies: production lifecycle, an Azure API Management environment, the APIM
     MCP runtime URI, and exactly the four approved tools (from the APIM ARM tool resources).
 
-    Synchronization is one-way (APIM -> API Center), eventually consistent, and may take up to
-    24 hours. Missing or partial synchronized data is PENDING (bounded retries, exit 3), never a
-    pass. Wrong data is a FAIL (exit 1).
+    Synchronization is continuous and one-way (APIM -> API Center). The apiSource can remain
+    'syncing'; this is not a catalog-readiness verdict. API changes may take up to 24 hours to
+    propagate. Missing or partial synchronized data is PENDING (bounded retries, exit 3), never a
+    pass. Wrong data or absent/unknown link states FAIL (exit 1). Metadata checks do not prove
+    catalog freshness or authenticated MCP runtime health.
 
     Exit codes: 0 = pass (or feature disabled), 1 = failures, 2 = skipped (not signed in / missing
     inputs), 3 = pending synchronization.
@@ -198,10 +200,38 @@ function Test-ApiSourceLink($Sources, [string]$ApimId) {
     $matches = @($Sources | Where-Object { $_.properties.azureApiManagementSource.resourceId -ieq $ApimId })
     if ($matches.Count -eq 0) { return [pscustomobject]@{ Status = 'Fail'; Message = "no apiSource is linked to APIM '$ApimId'" } }
     $linkState = $matches[0].properties.linkState
-    $state = if ($linkState -is [string]) { $linkState } else { [string]$linkState.state }
-    if ($state -in @('error', 'failed', 'deleting')) { return [pscustomobject]@{ Status = 'Fail'; Message = "APIM apiSource linkState is '$state'" } }
-    if ($state -in @('initializing', 'syncing', 'pending', 'creating', 'updating')) { return [pscustomobject]@{ Status = 'Pending'; Message = "APIM apiSource linkState is '$state'" } }
-    return [pscustomobject]@{ Status = 'Pass'; Message = "apiSource linked to APIM '$ApimId'" }
+    if ($linkState -is [string] -or $linkState.state -isnot [string] -or [string]::IsNullOrWhiteSpace($linkState.state)) {
+        return [pscustomobject]@{ Status = 'Fail'; Message = 'APIM apiSource linkState.state is missing or invalid; expected the nested ARM linkState object' }
+    }
+    $state = $linkState.state
+    $message = "APIM apiSource linkState is '$state'"
+    if ($linkState.lastUpdatedOn) { $message += "; link-state lastUpdatedOn '$($linkState.lastUpdatedOn)' (not catalog freshness)" }
+    if ($linkState.message) { $message += "; $($linkState.message)" }
+    # ApiSourceLinkState in 2024-06-01-preview has no connected/succeeded terminal state.
+    switch -CaseSensitive ($state) {
+        'syncing' { return [pscustomobject]@{ Status = 'Pass'; Message = "$message; continuous one-way sync (catalog readiness checked separately)" } }
+        'initializing' { return [pscustomobject]@{ Status = 'Pending'; Message = $message } }
+        { $_ -cin @('error', 'deleting') } { return [pscustomobject]@{ Status = 'Fail'; Message = $message } }
+        default { return [pscustomobject]@{ Status = 'Fail'; Message = "$message; unsupported state for 2024-06-01-preview" } }
+    }
+}
+
+function Test-ApiCenterSync {
+    param($Get, [string]$Base, [string]$ExpectedEndpoint, $ApimTools, $Sources, [string]$ApimId)
+    $link = Test-ApiSourceLink $Sources $ApimId
+    $graph = Test-McpSync $Get $Base $ExpectedEndpoint $ApimTools
+    $failures = @($graph.Failures)
+    $pending = @($graph.Pending)
+    if ($link.Status -eq 'Fail') { $failures += $link.Message }
+    if ($link.Status -eq 'Pending') { $pending += $link.Message }
+    return [pscustomobject]@{
+        Status = $(if ($failures.Count) { 'Fail' } elseif ($pending.Count) { 'Pending' } else { 'Pass' })
+        Failures = $failures
+        Pending = $pending
+        ApiName = $graph.ApiName
+        SourceLink = $link
+        Graph = $graph
+    }
 }
 
 if ($SelfTest) {
@@ -246,6 +276,10 @@ if ($SelfTest) {
     function Invoke-Sync($Store, $ApimTools, [string]$Endpoint = $ep) {
         $get = { param($p) if ($Store.ContainsKey($p)) { $Store[$p] } else { $null } }.GetNewClosure()
         return Test-McpSync $get $base $Endpoint $ApimTools
+    }
+    function Invoke-Verification($Store, $Sources, $ApimTools = $tools) {
+        $get = { param($p) if ($Store.ContainsKey($p)) { $Store[$p] } else { $null } }.GetNewClosure()
+        return Test-ApiCenterSync $get $base $ep $ApimTools $Sources $apimId
     }
     function Expect([string]$Name, [string]$Status, $r) {
         if ($r.Status -eq $Status) { Write-Host "[PASS] self-test: $Name" }
@@ -303,20 +337,58 @@ if ($SelfTest) {
     $unlinked["$base/workspaces/default/apis/rp-mcp-9f3a1c/deployments"].value[0].properties.definitionId = $null
     Expect 'missing definition linkage fails' 'Fail' (Invoke-Sync $unlinked $tools)
     $apimId = '/subscriptions/s/resourceGroups/rg/providers/Microsoft.ApiManagement/service/apim'
-    $link = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = $apimId }; linkState = [pscustomobject]@{ state = 'connected' } } })
+    function New-SourceLink($State = 'syncing') {
+        # Round-trip the ARM response shape, including an absent optional message.
+        return @"
+{"properties":{"azureApiManagementSource":{"resourceId":"$apimId"},"linkState":{"state":$(ConvertTo-Json -InputObject $State -Compress),"lastUpdatedOn":"2026-10-23T12:29:20.0746828Z"}}}
+"@ | ConvertFrom-Json
+    }
+    $link = @(New-SourceLink)
     $other = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = "$apimId-x" } } })
-    $errorLink = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = $apimId }; linkState = [pscustomobject]@{ state = 'error' } } })
-    $syncingLink = @([pscustomobject]@{ properties = [pscustomobject]@{ azureApiManagementSource = [pscustomobject]@{ resourceId = $apimId }; linkState = [pscustomobject]@{ state = 'syncing' } } })
+    $missingLinkState = New-SourceLink
+    $missingLinkState.properties.PSObject.Properties.Remove('linkState')
+    $missingState = New-SourceLink
+    $missingState.properties.linkState.PSObject.Properties.Remove('state')
+    $flatState = New-SourceLink
+    $flatState.properties.linkState = 'syncing'
     $cases = @(
-        @('apiSource linked to APIM passes', $link, 'Pass'),
+        @('apiSource syncing permits graph verification', $link, 'Pass'),
         @('apiSource for another APIM fails', $other, 'Fail'),
         @('no apiSources fails', @(), 'Fail'),
-        @('apiSource error fails', $errorLink, 'Fail'),
-        @('apiSource syncing is pending', $syncingLink, 'Pending')
+        @('apiSource initializing is pending', @(New-SourceLink 'initializing'), 'Pending'),
+        @('apiSource error fails', @(New-SourceLink 'error'), 'Fail'),
+        @('apiSource deleting fails', @(New-SourceLink 'deleting'), 'Fail'),
+        @('missing linkState fails closed', @($missingLinkState), 'Fail'),
+        @('missing linkState.state fails closed', @($missingState), 'Fail'),
+        @('null linkState.state fails closed', @(New-SourceLink $null), 'Fail'),
+        @('empty linkState.state fails closed', @(New-SourceLink ''), 'Fail'),
+        @('non-string linkState.state fails closed', @(New-SourceLink 7), 'Fail'),
+        @('flat linkState fails closed', @($flatState), 'Fail')
     )
     foreach ($c in $cases) {
         if ((Test-ApiSourceLink $c[1] $apimId).Status -eq $c[2]) { Write-Host "[PASS] self-test: $($c[0])" } else { Write-Host "[FAIL] self-test: $($c[0])"; $script:bad++ }
     }
+    foreach ($state in @('connected', 'succeeded', 'unknown', 'failed', 'pending', 'creating', 'updating')) {
+        Expect "unsupported apiSource state '$state' fails closed" 'Fail' (Test-ApiSourceLink @(New-SourceLink $state) $apimId)
+    }
+    $verified = Invoke-Verification (New-Store) $link
+    Expect 'syncing with complete graph passes' 'Pass' $verified
+    if ($verified.SourceLink.Message -like '*continuous one-way sync*' -and $verified.SourceLink.Message -like '*lastUpdatedOn*not catalog freshness*' -and $verified.Graph.ApiName -eq 'rp-mcp-9f3a1c') {
+        Write-Host '[PASS] self-test: link-state timestamp and catalog readiness are distinct'
+    }
+    else { Write-Host '[FAIL] self-test: link-state timestamp and catalog readiness are distinct'; $script:bad++ }
+    Expect 'syncing with missing API is pending' 'Pending' (Invoke-Verification (New-Store -Mcp $false) $link)
+    Expect 'syncing with missing versions is pending' 'Pending' (Invoke-Verification (New-Store -Versions $false) $link)
+    Expect 'syncing with partial definitions is pending' 'Pending' (Invoke-Verification (New-Store -Definitions $false) $link)
+    Expect 'syncing with unresolved environment is pending' 'Pending' (Invoke-Verification (New-Store -Env $false) $link)
+    Expect-Failure 'syncing with wrong endpoint fails' 'no deployment whose runtimeUri' (Invoke-Verification (New-Store -Endpoint 'https://other.example.net/mcp') $link)
+    Expect-Failure 'syncing with extra tool fails' 'APIM exposes 5 tool resources' (Invoke-Verification (New-Store) $link ($tools + [pscustomobject]@{ name = 'write_inventory' }))
+    Expect 'initializing with complete graph stays pending' 'Pending' (Invoke-Verification (New-Store) @(New-SourceLink 'initializing'))
+    Expect 'error with complete graph fails' 'Fail' (Invoke-Verification (New-Store) @(New-SourceLink 'error'))
+    Expect 'deleting with complete graph fails' 'Fail' (Invoke-Verification (New-Store) @(New-SourceLink 'deleting'))
+    Expect 'missing state with complete graph fails' 'Fail' (Invoke-Verification (New-Store) @($missingState))
+    Expect 'unknown state with complete graph fails' 'Fail' (Invoke-Verification (New-Store) @(New-SourceLink 'unknown'))
+    Expect 'link error takes precedence over incomplete graph' 'Fail' (Invoke-Verification (New-Store -Mcp $false) @(New-SourceLink 'error'))
     if ($script:bad -gt 0) { exit 1 }
     Write-Host 'Self-test passed.'
     exit 0
@@ -362,12 +434,7 @@ if ($center) {
 }
 
 $getApiSources = { param($p) Invoke-ArmGet $p '2024-06-01-preview' }
-$sources = @(Get-PagedList $getApiSources "$base/workspaces/default/apiSources")
 $apimId = "/subscriptions/$sub/resourceGroups/$ResourceGroup/providers/Microsoft.ApiManagement/service/$ApimName"
-$sourceLink = Test-ApiSourceLink $sources $apimId
-if ($sourceLink.Status -eq 'Fail') { Assert-Check $false $sourceLink.Message }
-elseif ($sourceLink.Status -eq 'Pending') { Write-Host "[PENDING] $($sourceLink.Message)"; $pending.Add($sourceLink.Message) }
-else { Assert-Check $true "default workspace has an apiSource linked to APIM '$ApimName' (one-way sync)" }
 
 $getApic = { param($p) Invoke-ArmGet $p '2024-03-01' }
 $getApim = { param($p) Invoke-ArmGet $p '2025-09-01-preview' }
@@ -379,7 +446,8 @@ foreach ($tool in $apimTools) {
 
 $sync = $null
 for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-    $sync = Test-McpSync $getApic $base $McpEndpoint $apimTools
+    $sources = @(Get-PagedList $getApiSources "$base/workspaces/default/apiSources")
+    $sync = Test-ApiCenterSync $getApic $base $McpEndpoint $apimTools $sources $apimId
     if ($sync.Status -ne 'Pending') { break }
     if ($attempt -lt $MaxAttempts) {
         Write-Host "[PENDING] attempt $attempt/${MaxAttempts}: $($sync.Pending -join '; ') - retrying in ${RetryDelaySeconds}s"
@@ -387,9 +455,11 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     }
 }
 foreach ($m in $sync.Failures) { Assert-Check $false $m }
-if ($sync.Status -eq 'Pass') {
-    Write-Host "[PASS] synchronized MCP API '$($sync.ApiName)': production lifecycle, Azure API Management environment, APIM runtime URI and exactly four approved tools verified"
+if ($sync.SourceLink.Status -eq 'Pass') { Assert-Check $true $sync.SourceLink.Message }
+if ($sync.Graph.Status -eq 'Pass') {
+    Write-Host "[PASS] synchronized MCP API '$($sync.ApiName)': production lifecycle, Azure API Management environment, APIM runtime URI metadata and exactly four approved tools verified"
 }
+Write-Host 'Note: ARM metadata is a catalog snapshot, not proof of freshness or authenticated MCP runtime health. Validate propagation of a known APIM change and run authenticated MCP probes separately.'
 Write-Host 'Note: copy the registry endpoint from the deployed API Center (portal); this script does not construct it.'
 
 if ($failures.Count -gt 0) {
@@ -400,8 +470,8 @@ if ($sync.Status -eq 'Pending') {
     foreach ($message in $sync.Pending) { $pending.Add($message) }
 }
 if ($pending.Count -gt 0) {
-    Write-Host "`n[PENDING] API Center synchronization is not ready: $($pending -join '; ')"
-    Write-Host 'APIM -> API Center synchronization is eventually consistent and may take up to 24 hours. Re-run later; this is not a pass.'
+    Write-Host "`n[PENDING] API Center link or synchronized catalog is not ready: $($pending -join '; ')"
+    Write-Host 'APIM API changes may take up to 24 hours to propagate; this is not a deadline for the continuous link to leave syncing. Investigate unresolved catalog gaps; this is not a pass.'
     exit 3
 }
 Write-Host "`nAll API Center checks passed."

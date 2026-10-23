@@ -860,7 +860,7 @@ If the cache prerequisites above are absent, **drop the cache-header claim** and
 
 Semantic cache has no clear-cache command here: entries expire with the configured TTL (`AZURE_SEMANTIC_CACHE_TTL_SECONDS`, default 300 s), and disabling `AZURE_APIM_SEMANTIC_CACHE_POLICY_ENABLED` removes the policy.
 
-API Center discovery: the offline self-test is `pwsh ./scripts/Verify-ApiCenter.ps1 -SelfTest`; the read-only live check is `pwsh ./scripts/Verify-ApiCenter.ps1` with the azd env outputs. Catalog sync from APIM is eventually consistent and can take minutes up to 24 hours.
+API Center discovery: the offline self-test is `pwsh ./scripts/Verify-ApiCenter.ps1 -SelfTest`; the read-only live check is `pwsh ./scripts/Verify-ApiCenter.ps1` with the azd env outputs. Catalog changes from APIM are eventually consistent and can take minutes up to 24 hours. The continuous link may remain `syncing`; the verifier separately checks catalog readiness, not freshness or authenticated runtime health (see [API Center verification](deployment-azd.md#retail-pulse-mcp-server-in-api-center-issue-336)).
 
 ### Probes and automated acceptance
 
