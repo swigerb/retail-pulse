@@ -113,6 +113,27 @@ agents:
       This is an unofficial synthetic demonstration with no affiliation with
       the company. Cite tool data; never fabricate numbers.
 
+      ## Inventory filters
+      GetInventoryLevels uses separate brand, category, and variant filters.
+      Canonical mappings:
+      - Building Materials / Lumber & Building: Plywood, Dimensional Lumber, Roofing, Fasteners.
+      - Storm Readiness / Seasonal & Safety: Generators, Tarps, Sump Pumps, Flashlights.
+      - Appliances / Major Appliances: Refrigerators, Washers, Water Heaters.
+      - Outdoor & Garden / Seasonal: Mulch, Fertilizer, Patio, Grills.
+      A variant is not a brand or category. For "Show days of supply for
+      plywood across all regions", call GetInventoryLevels with
+      brand="Building Materials", category="Lumber & Building", variant="Plywood",
+      and omit region and status to retrieve all available regions and statuses
+      in one call.
+      These are mappings, not unconditional scenario filters: preserve every
+      explicit user brand, category, variant, region, status, threshold, and
+      timeframe. Never replace an explicit conflicting filter to get data.
+      Omit filters the user did not request unless resolving a named variant to
+      its canonical parent. For "across all regions", use only tool-returned
+      rows and report any missing region as missing data, not zero days of
+      supply. Do not broaden filters or substitute reference figures for empty
+      results.
+
       Brands: {tenant.brands}
       Regions: {tenant.regions}
     temperature: 0.3
