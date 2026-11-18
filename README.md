@@ -8,7 +8,7 @@
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
-[![Aspire 13.4](https://img.shields.io/badge/Aspire-13.4-6C3BAA)](https://learn.microsoft.com/dotnet/aspire/)
+[![Aspire 17](https://img.shields.io/badge/Aspire-17-6C3BAA)](https://aspire.dev/)
 [![CI](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/swigerb/retail-pulse/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -65,7 +65,32 @@ The backend is .NET 10 on the Microsoft Agent Framework, orchestrated by .NET As
 
 The reasoning behind each choice is recorded in [`docs/adr/`](docs/adr).
 
-**Built with:** .NET 10, .NET Aspire 13.4, Microsoft Agent Framework 1.18, Microsoft.Extensions.AI, Model Context Protocol, React 19 + Vite, Azure Container Apps, Azure Static Web Apps, Azure Bot Framework, and Azure API Management.
+**Built with:** .NET 10, Aspire 17, Microsoft Agent Framework 1.28, Microsoft.Extensions.AI, Model Context Protocol, React 19 + Vite, Azure Container Apps, Azure Static Web Apps, Azure Bot Framework, and Azure API Management.
+
+### Dependency compatibility
+
+The backend remains on .NET 10. ASP.NET Core packages stay on the serviced 10.x
+line, Microsoft.OpenApi stays on 2.x, and the xUnit 2 suite uses the compatible
+4.x Visual Studio adapter without a test-framework migration. MessagePack stays
+on its serviced 2.x line until a separately validated major-version migration.
+Other libraries can use newer
+majors when their published assets support .NET 10.
+
+`Directory.Build.targets` preserves the telemetry package's intended logging
+generator replacement on .NET 10: only the replaced framework generator is
+removed, and `Microsoft.Gen.Logging` continues generating structured log methods.
+
+The AppHost uses standard `Microsoft.NET.Sdk`, explicit Aspire 17 packages,
+path-based `AddDotnetProject` resources, and the JavaScript hosting integration.
+Install the stable Aspire 17 CLI from the
+[official release](https://github.com/microsoft/aspire/releases/tag/v17.0.0);
+its runtime bundle is required for C# AppHosts.
+
+Local migration validation can use the exact-release-commit GitHub CI packages
+when the approved feed has not synchronized 17.0.0. Those unsigned Debug artifacts
+are development evidence only, not signed production package verification. Do not
+publish them, commit machine-specific feeds, or use them to populate the shared
+NuGet cache. Release acceptance still requires the signed published packages.
 
 ## Required vs Optional Azure Resources
 
@@ -94,7 +119,7 @@ Retail Pulse is designed to demo locally from a fresh clone without any optional
 | **Azure Files durable mount** | Cross-replica persistence of the SQLite stores (`memory.db`, `approvals.db`, `sessions.db`, `plans.db`, `audit.db`, `costs.db`, `alerts.db`). | Currently blocked by tenant governance policy (see [docs/deployment-azd.md](docs/deployment-azd.md)); the deployed demo runs with `RETAIL_PULSE_ALLOW_EPHEMERAL_STORAGE=true`. |
 
 > **Local demo (zero optional resources).** `dotnet build RetailPulse.slnx` succeeds with no
-> optional cloud resource configured. `dotnet run --project src/RetailPulse.AppHost`
+> optional cloud resource configured. `aspire run --apphost src/RetailPulse.AppHost`
 > then launches the full stack — see [Quick Start](#quick-start) for the
 > `OpenAI:Endpoint` requirement, the pre-built frontend prerequisite (`npm ci`
 > against the internal proxy), and the exact honest limits.
@@ -144,7 +169,8 @@ Retail Pulse is designed for industries using a Three-Tier distribution model (m
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- [Node.js 20+](https://nodejs.org/) — required for the frontend build. The AppHost launches `npm ci` + `npm run dev` for `src/RetailPulse.Web` on startup, so an unusable npm environment blocks the full-stack demo.
+- [Aspire 17 CLI](https://aspire.dev/get-started/install-cli/) with its runtime bundle
+- [Node.js 20+](https://nodejs.org/) — required for the frontend build. Install frontend dependencies explicitly with the proxy-routed `npm ci` step below. The AppHost launches `npm run dev` for `src/RetailPulse.Web` without implicitly installing packages, preserving the legacy hosting behavior.
 - An **Azure OpenAI endpoint** (or an OpenAI-compatible endpoint). The API requires both `OpenAI:Endpoint` and a valid deployment name (`OpenAI:Deployment`) to start.
 
 ### 1. Clone the repo
@@ -197,7 +223,7 @@ dotnet user-secrets set "OpenAI:ApiKey" "<your-api-key>" --project src/RetailPul
 cd src/RetailPulse.Web && npm ci && cd ../..
 
 # Start the full stack
-dotnet run --project src/RetailPulse.AppHost
+aspire run --apphost src/RetailPulse.AppHost
 ```
 
 ### 5. Enable the formatting hooks

@@ -1,17 +1,19 @@
+using Aspire.Hosting.Dotnet;
+
 IDistributedApplicationBuilder builder = DistributedApplication.CreateBuilder(args);
 
 // App Insights connection string — read from appsettings.json, flows to all services via environment variable
 string appInsightsCs = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"] ?? "";
 
-IResourceBuilder<ProjectResource> mcpServer = builder.AddProject<Projects.RetailPulse_McpServer>("mcpserver")
+IResourceBuilder<DotnetProjectResource> mcpServer = builder.AddDotnetProject("mcpserver", "../RetailPulse.McpServer/RetailPulse.McpServer.csproj")
     .WithEnvironment("APPLICATIONINSIGHTS_CONNECTION_STRING", appInsightsCs);
 
-IResourceBuilder<ProjectResource> api = builder.AddProject<Projects.RetailPulse_Api>("api")
+IResourceBuilder<DotnetProjectResource> api = builder.AddDotnetProject("api", "../RetailPulse.Api/RetailPulse.Api.csproj")
     .WithReference(mcpServer)
     .WaitFor(mcpServer)
     .WithEnvironment("APPLICATIONINSIGHTS_CONNECTION_STRING", appInsightsCs);
 
-IResourceBuilder<ProjectResource> teamsBot = builder.AddProject<Projects.RetailPulse_TeamsBot>("teamsbot")
+IResourceBuilder<DotnetProjectResource> teamsBot = builder.AddDotnetProject("teamsbot", "../RetailPulse.TeamsBot/RetailPulse.TeamsBot.csproj")
     .WithReference(api)
     .WaitFor(api)
     .WithEndpoint("http", e => { e.Port = 5300; e.IsProxied = false; })
@@ -20,7 +22,8 @@ IResourceBuilder<ProjectResource> teamsBot = builder.AddProject<Projects.RetailP
 // Frontend (Vite) — pass the API endpoint as an env var so vite.config.ts can
 // proxy /api and /hubs to whatever URL Aspire assigned the API. This avoids
 // hardcoding localhost:5100 inside the React project.
-builder.AddNpmApp("frontend", "../RetailPulse.Web", "dev")
+builder.AddJavaScriptApp("frontend", "../RetailPulse.Web", "dev")
+    .WithNpm(install: false)
     .WithHttpEndpoint(port: 5173, name: "frontend-http", isProxied: false)
     .WithEnvironment("API_URL", api.GetEndpoint("http"))
     .WithReference(api)
