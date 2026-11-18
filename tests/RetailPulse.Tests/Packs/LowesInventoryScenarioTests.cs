@@ -229,7 +229,7 @@ public sealed class LowesInventoryScenarioTests : IDisposable
                     JsonElement value when value.ValueKind == JsonValueKind.String => value.GetString()!,
                     _ => JsonSerializer.Serialize(toolResult.Result)
                 };
-                received = JsonDocument.Parse(json).RootElement.Clone();
+                received = JsonElement.Parse(json);
                 received.Value.EnumerateObject().Select(property => property.Name).Should()
                     .BeEquivalentTo("items", "total_items", "status_breakdown", "filters_applied");
                 foreach (JsonElement item in received.Value.GetProperty("items").EnumerateArray())

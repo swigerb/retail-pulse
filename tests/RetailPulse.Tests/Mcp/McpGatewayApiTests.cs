@@ -319,7 +319,7 @@ public sealed class McpGatewayApiTests
         {
             HttpResponseMessage res = await client.SendAsync(Req(HttpMethod.Get, $"/api/stores/stockout-risks?limit={limit}", "app"));
             res.StatusCode.Should().Be(HttpStatusCode.OK);
-            JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement.GetArrayLength().Should().Be(expected);
+            JsonElement.Parse(await res.Content.ReadAsStringAsync()).GetArrayLength().Should().Be(expected);
         }
     }
 
@@ -331,7 +331,7 @@ public sealed class McpGatewayApiTests
         await using (app)
         {
             HttpResponseMessage res = await client.SendAsync(Req(HttpMethod.Get, "/api/stores/stockout-risks", "app"));
-            JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement.GetArrayLength().Should().Be(20);
+            JsonElement.Parse(await res.Content.ReadAsStringAsync()).GetArrayLength().Should().Be(20);
         }
     }
 
@@ -344,11 +344,11 @@ public sealed class McpGatewayApiTests
         {
             HttpResponseMessage res = await client.SendAsync(Req(HttpMethod.Get, "/api/supply/inventory", "app"));
             res.StatusCode.Should().Be(HttpStatusCode.OK);
-            JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement
+            JsonElement.Parse(await res.Content.ReadAsStringAsync())
                 .GetProperty("items").GetArrayLength().Should().Be(50);
 
             HttpResponseMessage spa = await client.SendAsync(Req(HttpMethod.Get, "/api/supply/inventory", "delegated"));
-            JsonDocument.Parse(await spa.Content.ReadAsStringAsync()).RootElement
+            JsonElement.Parse(await spa.Content.ReadAsStringAsync())
                 .GetProperty("items").GetArrayLength().Should().Be(120, "delegated SPA callers are unaffected");
         }
     }
@@ -362,7 +362,7 @@ public sealed class McpGatewayApiTests
         await using (app)
         {
             HttpResponseMessage res = await client.SendAsync(Req(HttpMethod.Get, "/api/supply/inventory", "app"));
-            JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement
+            JsonElement.Parse(await res.Content.ReadAsStringAsync())
                 .GetProperty("items").GetArrayLength().Should().Be(5);
         }
     }

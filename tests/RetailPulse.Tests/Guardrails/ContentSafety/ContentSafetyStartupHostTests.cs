@@ -206,7 +206,7 @@ public sealed class ContentSafetyStartupHostTests(ITestOutputHelper testOutput)
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             Task exit = process.WaitForExitAsync();
-            Task completed = await Task.WhenAny(listening.Task, exit, Task.Delay(TimeSpan.FromSeconds(45)));
+            Task completed = await Task.WhenAny(listening.Task, exit).WaitAsync(TimeSpan.FromSeconds(45));
             bool refused = regulated && disconnect;
             if (refused)
             {

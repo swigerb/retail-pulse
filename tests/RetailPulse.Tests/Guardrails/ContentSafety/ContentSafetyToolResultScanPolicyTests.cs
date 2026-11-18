@@ -316,7 +316,7 @@ public class ContentSafetyToolResultScanPolicyTests
             .Subject;
 
         string json = await shield.Content!.ReadAsStringAsync(CancellationToken.None);
-        return JsonDocument.Parse(json).RootElement;
+        return JsonElement.Parse(json);
     }
 
     private static AzureContentSafetyEvaluator BuildEvaluator(CapturingHttpMessageHandler handler)

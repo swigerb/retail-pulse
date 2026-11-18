@@ -29,7 +29,7 @@ public class UpdateMetricsToolTests : IDisposable
     }
 
     private static string ToJson(object obj) => JsonSerializer.Serialize(obj);
-    private static JsonElement Parse(object obj) => JsonDocument.Parse(ToJson(obj)).RootElement;
+    private static JsonElement Parse(object obj) => JsonElement.Parse(ToJson(obj));
 
     [Fact]
     public void UpdateMetrics_CanUpdateSentimentValue_SocialCrisisScenario()

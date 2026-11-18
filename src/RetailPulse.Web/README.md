@@ -131,6 +131,12 @@ VS users need the Node.js workload installed locally.
 | `npm run test:provider-matrix` | Full provider-neutral auth matrix — config gate + Entra/GitHub/Anonymous builds + emitted-`index.html` meta assertions. |
 | `npm run test:provider-matrix:gate` | Fast config gate only (skips full builds). |
 
+Vitest uses jsdom's real, origin-scoped `localStorage` and `sessionStorage`.
+The shared test setup explicitly selects both because Node 26's Web Storage globals
+otherwise shadow jsdom (Node's `localStorage` is unavailable without a backing file).
+No backing file or storage mock is needed; the credential tests still enforce
+session-only persistence and forbid local-storage/cookie credentials.
+
 ## Reference
 
 - [Vite](https://vite.dev/) — build tool and dev server.

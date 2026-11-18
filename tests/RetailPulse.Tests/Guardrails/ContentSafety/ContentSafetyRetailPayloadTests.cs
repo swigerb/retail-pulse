@@ -149,7 +149,7 @@ public sealed class ContentSafetyRetailPayloadTests : IDisposable
             string requestBody = request.Content is null
                 ? "{}"
                 : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            string text = JsonDocument.Parse(requestBody).RootElement.GetProperty("text").GetString() ?? "";
+            string text = JsonElement.Parse(requestBody).GetProperty("text").GetString() ?? "";
             AnalyzedTexts.Add(text);
 
             object[] categories = text.Contains("Strip Center", StringComparison.OrdinalIgnoreCase)

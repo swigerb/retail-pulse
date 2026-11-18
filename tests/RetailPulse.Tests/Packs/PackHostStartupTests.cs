@@ -242,7 +242,7 @@ public sealed class PackHostStartupTests
                 host._process.BeginOutputReadLine();
                 host._process.BeginErrorReadLine();
                 Task exit = host._process.WaitForExitAsync();
-                Task completed = await Task.WhenAny(host._listening.Task, exit, Task.Delay(TimeSpan.FromSeconds(30)));
+                Task completed = await Task.WhenAny(host._listening.Task, exit).WaitAsync(TimeSpan.FromSeconds(30));
                 if (completed != host._listening.Task)
                     throw new InvalidOperationException($"API did not start for {pack}/{auth}:\n{string.Join('\n', host._output)}");
                 host.Address = await host._listening.Task;
