@@ -34,7 +34,7 @@ public class PromoToolTests : IDisposable
     }
 
     private static JsonElement Parse(object obj) =>
-        JsonDocument.Parse(JsonSerializer.Serialize(obj)).RootElement;
+        JsonElement.Parse(JsonSerializer.Serialize(obj));
 
     private SqliteConnection OpenWritableConnection()
     {

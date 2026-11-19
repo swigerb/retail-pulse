@@ -24,7 +24,7 @@ public sealed class ChartIntentTokenBudgetTests
         public override string Name { get; }
         public override string Description => "fake";
         public override JsonElement JsonSchema { get; } =
-            JsonDocument.Parse("""{"type":"object"}""").RootElement;
+            JsonElement.Parse("""{"type":"object"}""");
 
         public ByteFakeFunction(string name, int resultBytes)
         {

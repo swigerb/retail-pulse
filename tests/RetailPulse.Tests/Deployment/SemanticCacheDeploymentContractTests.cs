@@ -265,7 +265,7 @@ internal static class ArmExpression
             "or" => args.Any(a => (bool)a()!),
             "and" => args.All(a => (bool)a()!),
             "if" => (bool)args[0]()! ? args[1]() : args[2](),
-            "json" => JsonDocument.Parse((string)args[0]()!).RootElement.GetRawText(),
+            "json" => JsonElement.Parse((string)args[0]()!).GetRawText(),
             "string" => args[0]()?.ToString(),
             _ => throw new NotSupportedException($"ARM function '{fn}' is not supported by the test evaluator"),
         };

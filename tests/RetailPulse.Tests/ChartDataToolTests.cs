@@ -356,7 +356,7 @@ public class ChartDataToolTests
         string truncated = """{"type":"bar","title":"Depletion Veloc""";
 
         string toolOutput = await tool.CreateChart(truncated);
-        JsonDocument.Parse(toolOutput).RootElement.TryGetProperty("error", out _).Should().BeTrue(
+        JsonElement.Parse(toolOutput).TryGetProperty("error", out _).Should().BeTrue(
             "the payload is unrecoverable and must be a structured error");
 
         var response = new Microsoft.Extensions.AI.ChatResponse(

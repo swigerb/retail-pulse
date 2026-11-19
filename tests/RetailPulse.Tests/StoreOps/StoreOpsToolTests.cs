@@ -35,7 +35,7 @@ public class StoreOpsToolTests : IDisposable
     }
 
     private static JsonElement Parse(object obj) =>
-        JsonDocument.Parse(JsonSerializer.Serialize(obj)).RootElement;
+        JsonElement.Parse(JsonSerializer.Serialize(obj));
 
     #region get_store_performance
 

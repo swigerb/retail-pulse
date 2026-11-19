@@ -261,7 +261,7 @@ public sealed class KrogerFreshnessScenarioTests : IDisposable
             };
 
             string json = JsonSerializer.Serialize(result);
-            Results[uri.AbsolutePath] = JsonDocument.Parse(json).RootElement.Clone();
+            Results[uri.AbsolutePath] = JsonElement.Parse(json);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")

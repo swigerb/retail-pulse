@@ -55,7 +55,7 @@ public sealed partial class RegulatedRuntimeBehaviorTests
         ctx.Response.Body.Position = 0;
         string body = new StreamReader(ctx.Response.Body, Encoding.UTF8).ReadToEnd();
         body.Should().NotContain(FullId);
-        JsonDocument.Parse(body).RootElement.GetProperty("correlationId").GetString()
+        JsonElement.Parse(body).GetProperty("correlationId").GetString()
             .Should().Be(ClientIdentifierMasker.Mask(FullId));
     }
 

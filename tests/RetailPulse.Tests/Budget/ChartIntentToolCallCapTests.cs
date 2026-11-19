@@ -27,7 +27,7 @@ public sealed class ChartIntentToolCallCapTests
         public override string Name { get; }
         public override string Description => "fake";
         public override JsonElement JsonSchema { get; } =
-            JsonDocument.Parse("""{"type":"object","properties":{"brand":{"type":"string"}}}""").RootElement;
+            JsonElement.Parse("""{"type":"object","properties":{"brand":{"type":"string"}}}""");
 
         public CountingFunction(string name, Func<AIFunctionArguments, string> body)
         {

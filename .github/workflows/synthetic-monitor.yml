@@ -53,7 +53,7 @@ jobs:
             echo "::notice title=Synthetic monitor (issue #57) skipped::RETAIL_PULSE_SYNTHETIC_ENABLED is not 'true'. This is the expected state for any deployment that has not opted into the optional monitor. Nothing was executed, no live result was fabricated, and no credential was accessed."
           fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.gate.outputs.enabled == 'true'
 
       # Federation-only sign-in. `client-id` and `tenant-id` are plain
@@ -64,7 +64,7 @@ jobs:
       # audience.
       - name: Azure login (workload-identity federation)
         if: steps.gate.outputs.enabled == 'true'
-        uses: azure/login@v2
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.RETAIL_PULSE_SYNTHETIC_CLIENT_ID }}
           tenant-id: ${{ vars.RETAIL_PULSE_SYNTHETIC_TENANT_ID }}

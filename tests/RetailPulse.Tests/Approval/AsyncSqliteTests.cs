@@ -143,9 +143,7 @@ public class AsyncSqliteTests : IDisposable
         }
 
         var allTasks = Task.WhenAll(tasks);
-        Task completedInTime = await Task.WhenAny(allTasks, Task.Delay(TimeSpan.FromSeconds(10)));
-
-        completedInTime.Should().Be(allTasks, "concurrent read/write should not deadlock");
+        await allTasks.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     // ── Async Operations Complete Successfully ──────────────────────────

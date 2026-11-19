@@ -213,7 +213,7 @@ public sealed class StaplesInventoryScenarioTests : IDisposable
                     JsonElement value when value.ValueKind == JsonValueKind.String => value.GetString()!,
                     _ => JsonSerializer.Serialize(toolResult.Result)
                 };
-                received = JsonDocument.Parse(json).RootElement.Clone();
+                received = JsonElement.Parse(json);
                 return new ChatResponse(new ChatMessage(ChatRole.Assistant, "Seeded inventory received."));
             });
         using var functionClient = new FunctionInvokingChatClient(model.Object) { MaximumIterationsPerRequest = 3 };

@@ -5,8 +5,10 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Aspire -->
-    <PackageVersion Include="Aspire.Hosting.Azure.AppContainers" Version="13.5.4" />
-    <PackageVersion Include="Aspire.Hosting.NodeJs" Version="9.5.2" />
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="17.0.0" />
+    <PackageVersion Include="Aspire.Hosting.Azure.AppContainers" Version="17.0.0" />
+    <PackageVersion Include="Aspire.Hosting.Dotnet" Version="17.0.0" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="17.0.0" />
     <!-- Azure / AI -->
     <PackageVersion Include="Azure.AI.Agents.Persistent" Version="1.1.0" />
     <PackageVersion Include="Azure.AI.ContentSafety" Version="1.0.0" />
@@ -16,59 +18,59 @@
     <PackageVersion Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.6.0" />
     <PackageVersion Include="Azure.Search.Documents" Version="12.0.0" />
     <!-- Microsoft Agents Framework -->
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.22.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.Abstractions" Version="1.22.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.22.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.22.0" />
-    <PackageVersion Include="Microsoft.Agents.Authentication.Msal" Version="1.8.77" />
-    <PackageVersion Include="Microsoft.Agents.Builder" Version="1.8.77" />
-    <PackageVersion Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.8.77" />
-    <PackageVersion Include="Microsoft.Agents.Storage" Version="1.8.77" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.28.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Abstractions" Version="1.28.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.28.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.28.0" />
+    <PackageVersion Include="Microsoft.Agents.Authentication.Msal" Version="1.9.205" />
+    <PackageVersion Include="Microsoft.Agents.Builder" Version="1.9.205" />
+    <PackageVersion Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.9.205" />
+    <PackageVersion Include="Microsoft.Agents.Storage" Version="1.9.205" />
     <!-- API Versioning -->
     <PackageVersion Include="Asp.Versioning.Http" Version="10.2.3" />
     <!-- ASP.NET Core / Extensions -->
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Bcl.Memory" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.10.0" />
-    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.10.0" />
-    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.10.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Bcl.Memory" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="11.0.0" />
     <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
     <!-- MCP -->
-    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.4.0" />
     <!-- OpenTelemetry -->
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.0" />
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.19.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.19.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.19.0" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.21.0" />
     <!-- Serialization -->
-    <PackageVersion Include="System.Threading.RateLimiting" Version="10.0.12" />
+    <PackageVersion Include="System.Threading.RateLimiting" Version="11.0.0" />
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
     <!-- Load Testing -->
-    <PackageVersion Include="NBomber" Version="6.6.0" />
+    <PackageVersion Include="NBomber" Version="6.7.1" />
     <PackageVersion Include="NBomber.Http" Version="6.2.1" />
     <!-- Benchmarks -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <!-- Security pins (transitive — close known advisories; remove when parents ship fixed deps) -->
-    <!-- GHSA-v5pm-xwqc-g5wc: Microsoft.OpenApi <= 2.7.4 (via Microsoft.AspNetCore.OpenApi). Floor raised to 2.12.2 (latest 2.x); ASP.NET Core 10 OpenApi still targets the 2.x line — do not move to 3.x until Microsoft.AspNetCore.OpenApi consumes it. -->
-    <PackageVersion Include="Microsoft.OpenApi" Version="2.12.2" />
-    <!-- GHSA-hv8m-jj95-wg3x: MessagePack < 2.5.301 (via Aspire AppHost / NBomber). Floor pinned to 2.5.302 for Aspire 13.5.4 (StreamJsonRpc 2.x); MessagePack 3.x is a breaking major and unused by Aspire's current dependency graph. -->
-    <PackageVersion Include="MessagePack" Version="2.5.302" />
+    <!-- ASP.NET Core 10 OpenApi requires the 2.x line; 3.x requires a separate .NET 11 framework migration. -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.13.1" />
+    <!-- Keep the compatible serviced 2.x floor until a separately validated MessagePack 3 migration. -->
+    <PackageVersion Include="MessagePack" Version="2.5.307" />
     <!-- GHSA-2m69-gcr7-jv3q: SQLitePCLRaw.lib.e_sqlite3 <= 2.1.11 (via Microsoft.Data.Sqlite). Floor raised to 3.0.5 (latest 3.x patch). -->
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageVersion Include="SQLitePCLRaw.core" Version="3.0.5" />
     <PackageVersion Include="SQLitePCLRaw.provider.e_sqlite3" Version="3.0.5" />
     <!-- Test -->
-    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
+    <PackageVersion Include="coverlet.collector" Version="10.1.0" />
     <PackageVersion Include="FluentAssertions" Version="8.11.0" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
-    <PackageVersion Include="Moq" Version="4.20.72" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
+    <PackageVersion Include="Moq" Version="4.21.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
-    <!-- xunit.runner.visualstudio 4.x targets xunit.v3 only; staying on 3.1.5 until the codebase migrates to xunit.v3 (see PR #305 rationale). -->
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- The 4.0.1 VSTest adapter supports xUnit v1/v2/v3 and .NET 8+, without changing the xUnit 2 test framework. -->
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
   </ItemGroup>
 </Project>

@@ -34,7 +34,7 @@ public class PlanogramTests : IDisposable
     }
 
     private static JsonElement Parse(object obj) =>
-        JsonDocument.Parse(JsonSerializer.Serialize(obj)).RootElement;
+        JsonElement.Parse(JsonSerializer.Serialize(obj));
 
     #region Eye-Level Placement
 

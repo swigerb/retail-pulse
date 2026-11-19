@@ -264,7 +264,7 @@ public sealed class ApiCenterDeploymentContractTests : IDisposable
         }
 
         output.Should().NotContain("Error ", "main.bicep must compile");
-        return JsonDocument.Parse(File.ReadAllText(_compiledPath)).RootElement.Clone();
+        return JsonElement.Parse(File.ReadAllText(_compiledPath));
     }
 
     private static bool Run(string[] args, out string output)

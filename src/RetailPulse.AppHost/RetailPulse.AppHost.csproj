@@ -1,14 +1,10 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.5.4">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\RetailPulse.Api\RetailPulse.Api.csproj" />
-    <ProjectReference Include="..\RetailPulse.McpServer\RetailPulse.McpServer.csproj" />
-    <ProjectReference Include="..\RetailPulse.TeamsBot\RetailPulse.TeamsBot.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
     <PackageReference Include="Aspire.Hosting.Azure.AppContainers" />
-    <PackageReference Include="Aspire.Hosting.NodeJs" />
+    <PackageReference Include="Aspire.Hosting.Dotnet" />
+    <PackageReference Include="Aspire.Hosting.JavaScript" />
   </ItemGroup>
 
   <PropertyGroup>

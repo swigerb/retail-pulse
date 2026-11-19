@@ -14,7 +14,7 @@ concurrency:
 
 env:
   DOTNET_VERSION: '10.0.x'
-  NODE_VERSION: '20'
+  NODE_VERSION: '26'
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
@@ -48,19 +48,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/Directory.Packages.props') }}
           restore-keys: nuget-${{ runner.os }}-
+
+      - name: Install checksum-pinned Aspire 17 CLI bundle
+        run: bash scripts/install-aspire-ci.sh "$RUNNER_TEMP/aspire17"
 
       - name: Restore
         run: dotnet restore RetailPulse.slnx
@@ -119,21 +122,21 @@ jobs:
             --filter "FullyQualifiedName~ApiClientContractFixtureTests"
 
       - name: Upload eval harness report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: eval-harness-report
           path: tests/RetailPulse.Tests/bin/Release/net10.0/EvalArtifacts/eval-report-offline.json
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: test-results
           path: ./test-results/**/*.trx
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: coverage-report
@@ -152,7 +155,7 @@ jobs:
             -reporttypes:"Html;TextSummary"
 
       - name: Upload HTML coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: success()
         with:
           name: coverage-html
@@ -176,10 +179,10 @@ jobs:
       run:
         working-directory: src/RetailPulse.Web
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -220,10 +223,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -241,7 +244,7 @@ jobs:
           fi
 
       - name: Upload vulnerability report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: vulnerability-report
@@ -252,15 +255,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -301,7 +304,7 @@ jobs:
         run: ./scripts/Test-BackendAuthMatrix.ps1 -Configuration Release -NoRestore
 
       - name: Upload backend matrix TRX
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: backend-auth-matrix-trx
@@ -312,12 +315,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install checksum-pinned Aspire 17 CLI bundle
+        run: bash scripts/install-aspire-ci.sh "$RUNNER_TEMP/aspire17"
 
       - name: Restore
         run: dotnet restore RetailPulse.slnx
@@ -330,7 +336,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # az CLI ships pre-installed on ubuntu-latest; `az bicep install` grabs the
       # latest CLI-bundled Bicep compiler. Compile every module transitively via
@@ -344,7 +350,7 @@ jobs:
         run: az bicep build --file infra/main.bicep --outfile /tmp/main.compiled.json
 
       - name: Upload compiled ARM template
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: bicep-compiled
@@ -355,7 +361,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The verifier's offline self-test proves the BOM-safe byte decoder, the
       # missing-resource hard-FAIL semantics, and the "no `az rest` invocation
@@ -370,7 +376,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Offline regression fence for the OPTIONAL authenticated synthetic
       # monitor (issue #57). Proves the smoke set stays synchronised with

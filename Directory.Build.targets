@@ -1,0 +1,11 @@
+<Project>
+  <!-- Telemetry's replacement generator must also exclude the .NET 10 framework copy after package targets have run. -->
+  <Target Name="RemoveReplacedFrameworkLoggingGenerator"
+          BeforeTargets="CoreCompile"
+          Condition="'$(DisableMicrosoftExtensionsLoggingSourceGenerator)' == 'true'">
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)"
+                Condition="'%(Analyzer.Filename)' == 'Microsoft.Extensions.Logging.Generators'" />
+    </ItemGroup>
+  </Target>
+</Project>
