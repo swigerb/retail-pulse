@@ -51,7 +51,7 @@
     "vitest": "^4.1.11"
   },
   "overrides": {
-    "zod": "4.6.4",
+    "zod": "4.6.7",
     "tldts": "7.4.12",
     "tldts-core": "7.4.12",
     "@babel/parser": "7.29.8",
@@ -75,7 +75,7 @@
     "@rolldown/binding-win32-x64-msvc": "1.2.8",
     "@testing-library/dom": "10.4.1",
     "baseline-browser-mapping": "2.11.23",
-    "brace-expansion": "5.0.9",
+    "brace-expansion": "5.0.13",
     "browserslist": "4.28.9",
     "electron-to-chromium": "1.5.427",
     "lru-cache": "11.5.2",
