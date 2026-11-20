@@ -551,7 +551,7 @@ The CI pipeline runs on every push and PR to `main`:
 | Job | What it does |
 |-----|-------------|
 | **build** | Restore, build, test (.NET 10) with coverage |
-| **frontend** | `npm ci` (from the committed lockfile, via the internal package feed proxy), build, vitest |
+| **frontend** | `npm ci` (from the committed lockfile, via the internal package feed proxy), build, ESLint (zero warnings), vitest |
 | **security** | Check for vulnerable NuGet packages |
 | **provider-matrix** | Auth provider matrix: `npm ci` + frontend build/meta gate, and the backend Security + Deployment suites emitted to TRX with a conservative count gate (`scripts/Test-BackendAuthMatrix.ps1`) |
 | **lint** | Verify code style (`dotnet format --verify-no-changes`) |

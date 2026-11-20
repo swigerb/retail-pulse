@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { FluentProvider, teamsDarkTheme } from '@fluentui/react-components';
 import { TraceDashboard } from '../components/traces';
-import type { Trace } from '../types';
+import type { Trace, TraceSpanType } from '../types';
 
 function wrap(ui: React.ReactNode) {
   return <FluentProvider theme={teamsDarkTheme}>{ui}</FluentProvider>;
@@ -107,8 +107,8 @@ describe('TraceDashboard', () => {
       totalTokens: 1000,
       totalCostUsd: 0.005,
       spans: [
-        { id: 's1', name: 'GetDemand', type: 'tool_call' as any, startTime: '2026-05-15T01:39:53Z', durationMs: 2000 },
-        { id: 's2', name: 'GetSupply', type: 'tool_call' as any, startTime: '2026-05-15T01:39:55Z', durationMs: 3000 },
+        { id: 's1', name: 'GetDemand', type: 'tool_call' as TraceSpanType, startTime: '2026-05-15T01:39:53Z', durationMs: 2000 },
+        { id: 's2', name: 'GetSupply', type: 'tool_call' as TraceSpanType, startTime: '2026-05-15T01:39:55Z', durationMs: 3000 },
       ],
     };
 

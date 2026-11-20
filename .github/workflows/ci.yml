@@ -201,6 +201,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Lint
+        run: npm run lint -- --max-warnings=0
+
       - name: Test
         run: npx vitest run
 

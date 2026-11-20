@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Badge, Button, Tooltip, makeStyles } from '@fluentui/react-components';
 import { Checkmark24Regular } from '@fluentui/react-icons';
 import { fetchPendingApprovals } from '../services/approvalApi';
@@ -74,15 +74,14 @@ export function PendingApprovals({ pendingCount: externalCount, pendingApprovals
     return () => { cancelled = true; clearInterval(interval); };
   }, [externalCount, pendingApprovals]);
 
-  // Pulse when count increases
-  const prevCount = useCallback(() => count, [])(); // capture initial
+  const [initialCount] = useState(count);
   useEffect(() => {
-    if (count > 0 && count > prevCount) {
+    if (count > 0 && count > initialCount) {
       setPulsing(true);
       const timer = setTimeout(() => setPulsing(false), 4500);
       return () => clearTimeout(timer);
     }
-  }, [count, prevCount]);
+  }, [count, initialCount]);
 
   return (
     <Tooltip content={count > 0 ? `${count} pending approval${count !== 1 ? 's' : ''}` : 'No pending approvals'} relationship="label">

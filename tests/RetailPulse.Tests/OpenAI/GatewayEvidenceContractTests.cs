@@ -384,9 +384,10 @@ public sealed partial class GatewayEvidenceContractTests
     [Fact]
     public void ChatEndpoints_ApplyGatewayEvidence_ToChatAndStream()
     {
-        string dir = AppContext.BaseDirectory;
+        string? dir = AppContext.BaseDirectory;
         while (dir is not null && !File.Exists(Path.Combine(dir, "src", "RetailPulse.Api", "Endpoints", "ChatEndpoints.cs")))
-            dir = Path.GetDirectoryName(dir)!;
+            dir = Path.GetDirectoryName(dir);
+        Assert.NotNull(dir);
         string src = File.ReadAllText(Path.Combine(dir, "src", "RetailPulse.Api", "Endpoints", "ChatEndpoints.cs"));
 
         MyRegex().Count(src).Should().Be(2);

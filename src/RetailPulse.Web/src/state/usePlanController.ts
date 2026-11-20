@@ -400,7 +400,6 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
       disposeSpan();
     };
     // Intentionally empty — connection object identity is stable via ref.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Tracks plan ids for which a terminal-state reconciliation has already

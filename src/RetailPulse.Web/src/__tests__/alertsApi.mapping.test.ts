@@ -37,7 +37,8 @@ describe('alert wire mapping', () => {
   });
 
   it('falls back to a real timestamp when the server sends none', () => {
-    const { detectedAt: _omitted, ...noTime } = wire;
+    const noTime: Partial<typeof wire> = { ...wire };
+    delete noTime.detectedAt;
     expect(Number.isNaN(Date.parse(toAlert(noTime).firedAt))).toBe(false);
   });
 

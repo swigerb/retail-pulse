@@ -221,7 +221,7 @@ function formatCost(usd: number): string {
 
 export function TraceTimeline({ trace }: TraceTimelineProps) {
   const styles = useStyles();
-  const spans = trace.spans ?? [];
+  const spans = useMemo(() => trace.spans ?? [], [trace.spans]);
 
   const flatSpans = useMemo(() => flattenSpans(spans), [spans]);
 
