@@ -144,7 +144,7 @@ const useStyles = makeStyles({
 
 export default function VotingCard({ card, currentUserId, onVote }: VotingCardProps) {
   const styles = useStyles();
-  const votes = card.votes ?? [];
+  const votes = useMemo(() => card.votes ?? [], [card.votes]);
   const comments = card.comments ?? [];
 
   const userVote = useMemo(

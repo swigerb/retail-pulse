@@ -285,7 +285,11 @@ export function DemoTour({ open, onClose, onNavigate, onTelemetry }: DemoTourPro
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onClose(); return; }
-      if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); isLast ? onClose() : next(); }
+      if (e.key === 'ArrowRight' || e.key === 'Enter') {
+        e.preventDefault();
+        if (isLast) onClose();
+        else next();
+      }
       if (e.key === 'ArrowLeft') { e.preventDefault(); back(); }
     };
 

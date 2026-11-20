@@ -1,6 +1,5 @@
 import { makeStyles, Tooltip } from '@fluentui/react-components';
 import type { PiiRedactionType } from '../../types';
-import React from 'react';
 
 export interface PiiRedactionBadgeProps {
   redactionType: PiiRedactionType;
@@ -52,30 +51,4 @@ export function PiiRedactionBadge({ redactionType }: PiiRedactionBadgeProps) {
       </span>
     </Tooltip>
   );
-}
-
-/**
- * Parses message content and replaces [REDACTED:type] markers with PiiRedactionBadge components.
- * Returns an array of React nodes.
- */
-export function renderWithRedactions(content: string): (string | React.ReactElement)[] {
-  const regex = /\[REDACTED:(\w+)\]/g;
-  const parts: (string | React.ReactElement)[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(content.slice(lastIndex, match.index));
-    }
-    const type = match[1].toLowerCase() as PiiRedactionType;
-    parts.push(<PiiRedactionBadge key={`redact-${match.index}`} redactionType={type} />);
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex));
-  }
-
-  return parts;
 }

@@ -316,11 +316,7 @@ export function Dashboard() {
   // the /api/pack + /api/pack/starting-tasks fan-out resolves.
   const activePack = useActivePack();
   const packTheme = activePack.pack?.tenant.theme ?? null;
-  useEffect(() => applyPackTheme(packTheme), [
-    packTheme?.primaryColor,
-    packTheme?.accentColor,
-    packTheme?.fontFamily,
-  ]);
+  useEffect(() => applyPackTheme(packTheme), [packTheme]);
 
   // Plan controller (issue #96). Shared between ChatPanel (renders the plan
   // surface for a plan-first response) and the Plan History panel in the
@@ -774,7 +770,7 @@ export function Dashboard() {
       { view: 'portfolio', label: 'Portfolio', icon: <Star24Regular />, color: '#8b5cf6', enabled: alt && featureFlags.portfolio },
     ];
     return all.filter(i => i.enabled);
-  }, [capabilities.alternateViews, capabilities.observability]);
+  }, []);
 
   // Promote the active view out of the overflow so the operator can always see
   // which panel they are on — and click the same button to get back to chat.

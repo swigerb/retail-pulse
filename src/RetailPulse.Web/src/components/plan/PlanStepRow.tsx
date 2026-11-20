@@ -204,5 +204,3 @@ export function PlanStepRow({ step }: PlanStepRowProps) {
     </div>
   );
 }
-
-export const __test__ = { formatMs };

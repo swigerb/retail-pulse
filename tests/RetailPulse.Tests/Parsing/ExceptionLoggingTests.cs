@@ -81,7 +81,7 @@ public class ExceptionLoggingTests
             l => l.Log(
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("IntentClassification")),
+                It.Is<It.IsAnyType>((o, _) => o != null && (o.ToString() ?? string.Empty).Contains("IntentClassification")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.AtLeastOnce,
@@ -148,7 +148,7 @@ public class ExceptionLoggingTests
             l => l.Log(
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("ExtractionResult")),
+                It.Is<It.IsAnyType>((o, _) => o != null && (o.ToString() ?? string.Empty).Contains("ExtractionResult")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.AtLeastOnce,

@@ -207,9 +207,10 @@ public sealed class GatewayEvidenceTests
     [Fact]
     public void ApimPolicy_EmitsEvidenceHeadersAndStripsInboundSpoofing()
     {
-        string dir = AppContext.BaseDirectory;
+        string? dir = AppContext.BaseDirectory;
         while (dir is not null && !File.Exists(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml")))
-            dir = Path.GetDirectoryName(dir)!;
+            dir = Path.GetDirectoryName(dir);
+        Assert.NotNull(dir);
         string xml = File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml"));
 
         // Cache evidence (#339) is emitted only by the opt-in semantic-cache fragment, never by the base policy.
@@ -238,9 +239,10 @@ public sealed class GatewayEvidenceTests
     [Fact]
     public void ApimFailoverDemoFragment_OverridesDemoHeadersOnlyFromDemoPolicy()
     {
-        string dir = AppContext.BaseDirectory;
+        string? dir = AppContext.BaseDirectory;
         while (dir is not null && !File.Exists(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml")))
-            dir = Path.GetDirectoryName(dir)!;
+            dir = Path.GetDirectoryName(dir);
+        Assert.NotNull(dir);
         string demo = File.ReadAllText(Path.Combine(dir, "infra", "modules", "apim-openai-failover-demo-outbound.xml"));
 
         foreach (string name in new[] { GatewayEvidenceHeaders.FailoverDemo, GatewayEvidenceHeaders.PrimaryStatus, GatewayEvidenceHeaders.Attempts, GatewayEvidenceHeaders.Fallback })
@@ -251,9 +253,10 @@ public sealed class GatewayEvidenceTests
 
     private static string Policy()
     {
-        string dir = AppContext.BaseDirectory;
+        string? dir = AppContext.BaseDirectory;
         while (dir is not null && !File.Exists(Path.Combine(dir, "infra", "modules", "apim-openai-policy.xml")))
-            dir = Path.GetDirectoryName(dir)!;
+            dir = Path.GetDirectoryName(dir);
+        Assert.NotNull(dir);
         string modules = Path.Combine(dir, "infra", "modules");
         string policy = File.ReadAllText(Path.Combine(modules, "apim-openai-policy.xml"));
         string budget = File.ReadAllText(Path.Combine(modules, "apim-openai-budget-limit-normal.xml"));

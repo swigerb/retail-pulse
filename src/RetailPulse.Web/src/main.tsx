@@ -29,7 +29,6 @@ async function bootstrap() {
     await bootstrapAuthenticated(root)
   } catch (error) {
     // Never expose a protected surface on a bootstrap failure; show a safe, branded error screen.
-    // eslint-disable-next-line no-console
     console.error('Retail Pulse bootstrap failed:', error)
     root.render(
       <StrictMode>

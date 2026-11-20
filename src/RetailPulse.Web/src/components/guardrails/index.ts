@@ -9,5 +9,6 @@ export type { KnowledgeIngestionBlockProps } from './KnowledgeIngestionBlock';
 export { ContentSafetyStatusBadge } from './ContentSafetyStatusBadge';
 export type { ContentSafetyStatusBadgeProps } from './ContentSafetyStatusBadge';
 export { GuardrailsDashboard } from './GuardrailsDashboard';
-export { PiiRedactionBadge, renderWithRedactions } from './PiiRedactionBadge';
+export { PiiRedactionBadge } from './PiiRedactionBadge';
+export { renderWithRedactions } from './renderWithRedactions';
 export { GuardrailsConfig } from './GuardrailsConfig';

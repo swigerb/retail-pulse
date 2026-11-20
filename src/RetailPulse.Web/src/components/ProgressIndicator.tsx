@@ -1,5 +1,4 @@
 import { makeStyles } from '@fluentui/react-components';
-import type { ProgressEvent } from '../services/telemetryHub';
 
 export interface ProgressStep {
   phase: string;
@@ -70,18 +69,6 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
 });
-
-/**
- * Extracts a ProgressStep from a ProgressEvent when a tool_result phase arrives.
- */
-export function buildProgressStep(event: ProgressEvent & { durationMs?: number }): ProgressStep {
-  return {
-    phase: event.phase,
-    detail: event.detail,
-    durationMs: event.durationMs,
-    timestamp: event.timestamp,
-  };
-}
 
 export function ProgressIndicator({ currentPhase, completedSteps }: ProgressIndicatorProps) {
   const styles = useStyles();
